@@ -35,7 +35,9 @@ interface PiManagedInstallation {
 interface PiProviderInstallerModule {
     PI_BOOTSTRAP_VERSION: string;
     PiProviderInstaller: new (options: { version: string }) => {
-        ensureInstalled(runtime: PiProviderRuntimePaths): Promise<PiManagedInstallation>;
+        ensureInstalled(
+            runtime: PiProviderRuntimePaths,
+        ): Promise<PiManagedInstallation>;
     };
 }
 
@@ -50,113 +52,194 @@ export interface InstalledPiRuntime {
 
 export async function resolveInstalledPiRuntime(
     environment: NodeJS.ProcessEnv = process.env,
-    homeDirectory = homedir()
+    homeDirectory = homedir(),
 ): Promise<InstalledPiRuntime> {
-    const dataHome = environment.XDG_DATA_HOME
-        ?? (process.platform === "win32"
-            ? environment.LOCALAPPDATA ?? resolve(homeDirectory, "AppData", "Local")
+    const dataHome =
+        environment.XDG_DATA_HOME ??
+        (process.platform === "win32"
+            ? (environment.LOCALAPPDATA ??
+              resolve(homeDirectory, "AppData", "Local"))
             : resolve(homeDirectory, ".local", "share"));
-    const devshellHome = environment.PORTABLE_DEVSHELL_HOME ?? resolve(homeDirectory, ".devshell");
-    const agentStateDirectory = resolve(devshellHome, "control", "extensions", "state", "agent");
+    const devshellHome =
+        environment.PORTABLE_DEVSHELL_HOME ??
+        resolve(homeDirectory, ".devshell");
+    const agentStateDirectory = resolve(
+        devshellHome,
+        "control",
+        "extensions",
+        "state",
+        "agent",
+    );
     const registry = JSON.parse(
-        await readFile(resolve(agentStateDirectory, "providers.json"), "utf8")
+        await readFile(resolve(agentStateDirectory, "providers.json"), "utf8"),
     ) as {
         providers?: Record<string, PiProviderRegistryEntry>;
         schemaVersion?: unknown;
     };
-    const entry = registry.schemaVersion === 1 ? registry.providers?.[PI_PROVIDER_ID] : undefined;
+    const entry =
+        registry.schemaVersion === 1
+            ? registry.providers?.[PI_PROVIDER_ID]
+            : undefined;
     if (entry === undefined || entry.enabled !== true) {
-        throw new Error("The bundled Pi provider is not installed and enabled. Reinstall or enable the Agent Pi provider first.");
+        throw new Error(
+            "The bundled Pi provider is not installed and enabled. Reinstall or enable the Agent Pi provider first.",
+        );
     }
-    const selectedGeneration = readGeneration(entry.selectedGeneration ?? entry.lastKnownGoodGeneration);
+    const selectedGeneration = readGeneration(
+        entry.selectedGeneration ?? entry.lastKnownGoodGeneration,
+    );
     const providerDirectory = resolve(
         dataHome,
         "portable-devshell",
         "extension-data",
         "agent",
         "bundles",
-        selectedGeneration
+        selectedGeneration,
     );
     await assertPlainDirectory(providerDirectory, "Pi provider generation");
     const manifest = JSON.parse(
-        await readFile(resolve(providerDirectory, "devshell-agent-provider.json"), "utf8")
+        await readFile(
+            resolve(providerDirectory, "devshell-agent-provider.json"),
+            "utf8",
+        ),
     ) as PiProviderManifest;
-    if (manifest.id !== PI_PROVIDER_ID || typeof manifest.version !== "string" || manifest.version.length === 0) {
-        throw new Error("Selected Agent provider generation is not a valid Pi provider.");
+    if (
+        manifest.id !== PI_PROVIDER_ID ||
+        typeof manifest.version !== "string" ||
+        manifest.version.length === 0
+    ) {
+        throw new Error(
+            "Selected Agent provider generation is not a valid Pi provider.",
+        );
     }
 
-    const providerRuntimeDirectory = resolve(agentStateDirectory, "providers", PI_PROVIDER_ID);
+    const providerRuntimeDirectory = resolve(
+        agentStateDirectory,
+        "providers",
+        PI_PROVIDER_ID,
+    );
     const runtime: PiProviderRuntimePaths = {
         agentDirectory: agentStateDirectory,
         cacheDirectory: resolve(providerRuntimeDirectory, "cache"),
         installationDirectory: resolve(providerRuntimeDirectory, "install"),
-        prefixDirectory: resolve(providerRuntimeDirectory, "prefix", manifest.version),
+        prefixDirectory: resolve(
+            providerRuntimeDirectory,
+            "prefix",
+            manifest.version,
+        ),
         providerDirectory: providerRuntimeDirectory,
-        stateDirectory: resolve(providerRuntimeDirectory, "state")
+        stateDirectory: resolve(providerRuntimeDirectory, "state"),
     };
-    const installerEntrypoint = resolve(providerDirectory, "dist", "provider", "pi", "PiProviderInstaller.js");
+    const installerEntrypoint = resolve(
+        providerDirectory,
+        "dist",
+        "provider",
+        "pi",
+        "PiProviderInstaller.js",
+    );
     await assertPlainFile(installerEntrypoint, "Pi provider installer");
-    const installerModule = await import(pathToFileURL(installerEntrypoint).href) as Partial<PiProviderInstallerModule>;
-    if (typeof installerModule.PiProviderInstaller !== "function" || typeof installerModule.PI_BOOTSTRAP_VERSION !== "string") {
-        throw new Error("Installed Pi provider does not expose its bootstrap installer.");
+    const installerModule = (await import(
+        pathToFileURL(installerEntrypoint).href
+    )) as Partial<PiProviderInstallerModule>;
+    if (
+        typeof installerModule.PiProviderInstaller !== "function" ||
+        typeof installerModule.PI_BOOTSTRAP_VERSION !== "string"
+    ) {
+        throw new Error(
+            "Installed Pi provider does not expose its bootstrap installer.",
+        );
     }
     const installation = await new installerModule.PiProviderInstaller({
-        version: installerModule.PI_BOOTSTRAP_VERSION
+        version: installerModule.PI_BOOTSTRAP_VERSION,
     }).ensureInstalled(runtime);
     const piEntrypoint = await resolvePiCliEntrypoint(installation.packageRoot);
-    const extensionEntrypoint = resolve(providerDirectory, "dist", "provider", "pi", "extension", "index.js");
-    await assertPlainFile(extensionEntrypoint, "Pi DevShell extension entrypoint");
+    const extensionEntrypoint = resolve(
+        providerDirectory,
+        "dist",
+        "provider",
+        "pi",
+        "extension",
+        "index.js",
+    );
+    await assertPlainFile(
+        extensionEntrypoint,
+        "Pi DevShell extension entrypoint",
+    );
     return {
         devshellHome,
         extensionEntrypoint,
         installation,
         piEntrypoint,
         providerDirectory,
-        selectedGeneration
+        selectedGeneration,
     };
 }
 
 export async function launchInstalledPi(
     argv: readonly string[] = process.argv.slice(2),
     environment: NodeJS.ProcessEnv = process.env,
-    homeDirectory = homedir()
+    homeDirectory = homedir(),
 ): Promise<void> {
     const launchWorkspace = process.cwd();
     const runtime = await resolveInstalledPiRuntime(environment, homeDirectory);
     environment.PORTABLE_DEVSHELL_PI_WORKSPACE = launchWorkspace;
-    environment.PI_MANAGED_INSTALL_ROOT = runtime.installation.managedInstallRoot;
+    environment.PI_MANAGED_INSTALL_ROOT =
+        runtime.installation.managedInstallRoot;
 
     const forwarded = [...argv];
     if (
-        environment.DEVSHELL_PI_BUILTIN_TOOLS !== "1"
-        && !forwarded.includes("--no-builtin-tools")
-        && !forwarded.includes("-nbt")
+        environment.DEVSHELL_PI_BUILTIN_TOOLS !== "1" &&
+        !forwarded.includes("--no-builtin-tools") &&
+        !forwarded.includes("-nbt")
     ) {
         forwarded.unshift("--no-builtin-tools");
     }
     forwarded.unshift("--extension", runtime.extensionEntrypoint);
-    process.argv = [process.argv[0] ?? process.execPath, runtime.piEntrypoint, ...forwarded];
+    process.argv = [
+        process.argv[0] ?? process.execPath,
+        runtime.piEntrypoint,
+        ...forwarded,
+    ];
     await import(pathToFileURL(runtime.piEntrypoint).href);
 }
 
 async function resolvePiCliEntrypoint(packageRoot: string): Promise<string> {
-    const manifest = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8")) as {
+    const manifest = JSON.parse(
+        await readFile(resolve(packageRoot, "package.json"), "utf8"),
+    ) as {
         bin?: string | Record<string, unknown>;
     };
-    const candidate = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.pi;
+    const candidate =
+        typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.pi;
     if (typeof candidate !== "string" || candidate.length === 0) {
-        throw new Error("Managed Pi runtime does not expose a pi CLI entrypoint.");
+        throw new Error(
+            "Managed Pi runtime does not expose a pi CLI entrypoint.",
+        );
     }
-    const entrypoint = resolveContainedFile(packageRoot, candidate, "Pi CLI entrypoint");
+    const entrypoint = resolveContainedFile(
+        packageRoot,
+        candidate,
+        "Pi CLI entrypoint",
+    );
     await assertPlainFile(entrypoint, "Pi CLI entrypoint");
     return entrypoint;
 }
 
-function resolveContainedFile(root: string, candidate: string, label: string): string {
-    if (isAbsolute(candidate)) throw new Error(`${label} must be relative to its package root.`);
+function resolveContainedFile(
+    root: string,
+    candidate: string,
+    label: string,
+): string {
+    if (isAbsolute(candidate))
+        throw new Error(`${label} must be relative to its package root.`);
     const absolute = resolve(root, candidate);
     const child = relative(root, absolute);
-    if (child === "" || child === ".." || child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(child)) {
+    if (
+        child === "" ||
+        child === ".." ||
+        child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+        isAbsolute(child)
+    ) {
         throw new Error(`${label} escapes its package root.`);
     }
     return absolute;
@@ -169,12 +252,17 @@ function readGeneration(value: unknown): string {
     return value;
 }
 
-async function assertPlainDirectory(path: string, label: string): Promise<void> {
+async function assertPlainDirectory(
+    path: string,
+    label: string,
+): Promise<void> {
     const metadata = await lstat(path);
-    if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new Error(`${label} must be a plain directory.`);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory())
+        throw new Error(`${label} must be a plain directory.`);
 }
 
 async function assertPlainFile(path: string, label: string): Promise<void> {
     const metadata = await lstat(path);
-    if (metadata.isSymbolicLink() || !metadata.isFile()) throw new Error(`${label} must be a plain file.`);
+    if (metadata.isSymbolicLink() || !metadata.isFile())
+        throw new Error(`${label} must be a plain file.`);
 }

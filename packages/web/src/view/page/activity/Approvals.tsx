@@ -26,64 +26,90 @@ export function Approvals({
 }) {
     const state = store.state;
     const tools = toolApprovals(state);
-    const oauth = state.readModel.oauthApprovals.filter((item) => item.status === "pending");
+    const oauth = state.readModel.oauthApprovals.filter(
+        (item) => item.status === "pending",
+    );
     const [selection, setSelection] = useState<Selection>();
     const [failure, setFailure] = useState<string>();
-    const operation = selection === undefined
-        ? undefined
-        : `${selection.kind === "tool" ? "approval" : "oauth"}:${selection.approvalId}`;
+    const operation =
+        selection === undefined
+            ? undefined
+            : `${selection.kind === "tool" ? "approval" : "oauth"}:${selection.approvalId}`;
     const controlsDisabled = disabled || state.connection !== "online";
 
-    return <section>
-        <h2>Approvals</h2>
-        {tools.length + oauth.length === 0
-            ? <p className="empty">Nothing needs approval.</p>
-            : <div className="approval-list">
-                {tools.map((item) => <ToolApproval
+    return (
+        <section>
+            <h2>Approvals</h2>
+            {tools.length + oauth.length === 0 ? (
+                <p className="empty">Nothing needs approval.</p>
+            ) : (
+                <div className="approval-list">
+                    {tools.map((item) => (
+                        <ToolApproval
+                            disabled={controlsDisabled}
+                            item={item}
+                            key={item.approvalId}
+                            onDecide={(next) => {
+                                setFailure(undefined);
+                                setSelection(next);
+                            }}
+                        />
+                    ))}
+                    {oauth.map((item) => (
+                        <OAuthApproval
+                            disabled={controlsDisabled}
+                            item={item}
+                            key={item.approvalId}
+                            onDecide={(next) => {
+                                setFailure(undefined);
+                                setSelection(next);
+                            }}
+                        />
+                    ))}
+                </div>
+            )}
+            {selection === undefined ? null : (
+                <ConfirmationDialog
+                    actionLabel={
+                        selection.decision === "approve" ? "Approve" : "Deny"
+                    }
+                    busy={
+                        operation !== undefined &&
+                        state.operations[operation] !== undefined
+                    }
+                    description={`${selection.decision === "approve" ? "Approve" : "Deny"} ${selection.label}?`}
                     disabled={controlsDisabled}
-                    item={item}
-                    key={item.approvalId}
-                    onDecide={(next) => {
+                    error={failure}
+                    onCancel={() => {
                         setFailure(undefined);
-                        setSelection(next);
+                        setSelection(undefined);
                     }}
-                />)}
-                {oauth.map((item) => <OAuthApproval
-                    disabled={controlsDisabled}
-                    item={item}
-                    key={item.approvalId}
-                    onDecide={(next) => {
+                    onConfirm={() => {
                         setFailure(undefined);
-                        setSelection(next);
+                        const request =
+                            selection.kind === "tool"
+                                ? store.decideTool(
+                                      selection.instance!,
+                                      selection.approvalId,
+                                      selection.decision,
+                                  )
+                                : store.decideOAuth(
+                                      selection.approvalId,
+                                      selection.decision,
+                                  );
+                        void request.then((succeeded) => {
+                            if (succeeded) setSelection(undefined);
+                            else
+                                setFailure(
+                                    store.state.error ??
+                                        "Approval could not be recorded.",
+                                );
+                        });
                     }}
-                />)}
-            </div>}
-        {selection === undefined ? null : <ConfirmationDialog
-            actionLabel={selection.decision === "approve" ? "Approve" : "Deny"}
-            busy={operation !== undefined && state.operations[operation] !== undefined}
-            description={`${selection.decision === "approve" ? "Approve" : "Deny"} ${selection.label}?`}
-            disabled={controlsDisabled}
-            error={failure}
-            onCancel={() => {
-                setFailure(undefined);
-                setSelection(undefined);
-            }}
-            onConfirm={() => {
-                setFailure(undefined);
-                const request = selection.kind === "tool"
-                    ? store.decideTool(
-                          selection.instance!,
-                          selection.approvalId,
-                          selection.decision,
-                      )
-                    : store.decideOAuth(selection.approvalId, selection.decision);
-                void request.then((succeeded) => {
-                    if (succeeded) setSelection(undefined);
-                    else setFailure(store.state.error ?? "Approval could not be recorded.");
-                });
-            }}
-        />}
-    </section>;
+                />
+            )}
+        </section>
+    );
 }
 
 function ToolApproval({
@@ -95,29 +121,38 @@ function ToolApproval({
     item: ApprovalRequest;
     onDecide(selection: Selection): void;
 }) {
-    return <article className="card">
-        <div className="approval-heading">
-            <h3>{item.toolName}</h3>
-            <span className={`result approval-risk risk-${item.riskLevel}`}>{item.riskLevel} risk</span>
-        </div>
-        <p>{item.instance} · {item.workspace ?? "no workspace"} · {item.reason}</p>
-        <details>
-            <summary>Open details</summary>
-            <p>Risk: {item.riskLevel}; expires: {item.expiresAt}</p>
-            <p>Workspace: {item.workspace ?? "-"}</p>
-            <p>{item.inputSummary}</p>
-        </details>
-        <Decision
-            disabled={disabled}
-            item={{
-                approvalId: item.approvalId,
-                instance: item.instance,
-                kind: "tool",
-                label: `${item.toolName} on ${item.instance}${item.workspace === undefined ? "" : ` in workspace ${item.workspace}`} (risk ${item.riskLevel})`,
-            }}
-            onDecide={onDecide}
-        />
-    </article>;
+    return (
+        <article className="card">
+            <div className="approval-heading">
+                <h3>{item.toolName}</h3>
+                <span className={`result approval-risk risk-${item.riskLevel}`}>
+                    {item.riskLevel} risk
+                </span>
+            </div>
+            <p>
+                {item.instance} · {item.workspace ?? "no workspace"} ·{" "}
+                {item.reason}
+            </p>
+            <details>
+                <summary>Open details</summary>
+                <p>
+                    Risk: {item.riskLevel}; expires: {item.expiresAt}
+                </p>
+                <p>Workspace: {item.workspace ?? "-"}</p>
+                <p>{item.inputSummary}</p>
+            </details>
+            <Decision
+                disabled={disabled}
+                item={{
+                    approvalId: item.approvalId,
+                    instance: item.instance,
+                    kind: "tool",
+                    label: `${item.toolName} on ${item.instance}${item.workspace === undefined ? "" : ` in workspace ${item.workspace}`} (risk ${item.riskLevel})`,
+                }}
+                onDecide={onDecide}
+            />
+        </article>
+    );
 }
 
 function OAuthApproval({
@@ -129,24 +164,29 @@ function OAuthApproval({
     item: OAuthApprovalRequest;
     onDecide(selection: Selection): void;
 }) {
-    return <article className="card">
-        <h3>OAuth {item.kind}</h3>
-        <p>{item.clientName} · {item.requestedScopes.join(", ") || "no scopes"}</p>
-        <details>
-            <summary>Open details</summary>
-            <p>Redirects: {item.redirectUris.join(", ") || "none"}</p>
-            <p>Resources: {item.requestedResources.join(", ") || "none"}</p>
-        </details>
-        <Decision
-            disabled={disabled}
-            item={{
-                approvalId: item.approvalId,
-                kind: "oauth",
-                label: `OAuth ${item.kind} for ${item.clientName}; scopes=${item.requestedScopes.join(", ") || "none"}; resources=${item.requestedResources.join(", ") || "none"}; redirects=${item.redirectUris.join(", ") || "none"}`,
-            }}
-            onDecide={onDecide}
-        />
-    </article>;
+    return (
+        <article className="card">
+            <h3>OAuth {item.kind}</h3>
+            <p>
+                {item.clientName} ·{" "}
+                {item.requestedScopes.join(", ") || "no scopes"}
+            </p>
+            <details>
+                <summary>Open details</summary>
+                <p>Redirects: {item.redirectUris.join(", ") || "none"}</p>
+                <p>Resources: {item.requestedResources.join(", ") || "none"}</p>
+            </details>
+            <Decision
+                disabled={disabled}
+                item={{
+                    approvalId: item.approvalId,
+                    kind: "oauth",
+                    label: `OAuth ${item.kind} for ${item.clientName}; scopes=${item.requestedScopes.join(", ") || "none"}; resources=${item.requestedResources.join(", ") || "none"}; redirects=${item.redirectUris.join(", ") || "none"}`,
+                }}
+                onDecide={onDecide}
+            />
+        </article>
+    );
 }
 
 function Decision({
@@ -158,20 +198,22 @@ function Decision({
     item: Omit<Selection, "decision">;
     onDecide(selection: Selection): void;
 }) {
-    return <div className="actions">
-        <button
-            className="primary"
-            disabled={disabled}
-            onClick={() => onDecide({ ...item, decision: "approve" })}
-        >
-            Approve
-        </button>
-        <button
-            className="danger"
-            disabled={disabled}
-            onClick={() => onDecide({ ...item, decision: "deny" })}
-        >
-            Deny
-        </button>
-    </div>;
+    return (
+        <div className="actions">
+            <button
+                className="primary"
+                disabled={disabled}
+                onClick={() => onDecide({ ...item, decision: "approve" })}
+            >
+                Approve
+            </button>
+            <button
+                className="danger"
+                disabled={disabled}
+                onClick={() => onDecide({ ...item, decision: "deny" })}
+            >
+                Deny
+            </button>
+        </div>
+    );
 }

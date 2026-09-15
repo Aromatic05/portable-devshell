@@ -27,13 +27,21 @@ export function createInitialWebState(): WebState {
 export function webFailures(
     model: Readonly<ControlReadModelState>,
 ): Record<string, string> {
-    return Object.fromEntries(Object.values(model.failures).map((failure) => {
-        if (failure.key === "snapshot") {
-            return [`instance:${failure.instance ?? "-"}`, failure.error.message];
-        }
-        if (failure.key === "todo") {
-            return [`todos:${failure.instance ?? "-"}`, failure.error.message];
-        }
-        return [failure.id, failure.error.message];
-    }));
+    return Object.fromEntries(
+        Object.values(model.failures).map((failure) => {
+            if (failure.key === "snapshot") {
+                return [
+                    `instance:${failure.instance ?? "-"}`,
+                    failure.error.message,
+                ];
+            }
+            if (failure.key === "todo") {
+                return [
+                    `todos:${failure.instance ?? "-"}`,
+                    failure.error.message,
+                ];
+            }
+            return [failure.id, failure.error.message];
+        }),
+    );
 }

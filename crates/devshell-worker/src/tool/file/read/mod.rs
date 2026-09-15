@@ -123,7 +123,7 @@ impl FileReadTool {
             return self.read_metadata(call, &input.path);
         }
         let ordinal = self.state.next_snapshot_ordinal();
-        let (_, resolved) = resolve_existing(&call, &input.path, false)?;
+        let (_, resolved) = resolve_existing(call, &input.path, false)?;
         if !resolved
             .metadata()
             .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?
@@ -137,21 +137,21 @@ impl FileReadTool {
                 .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
             &call.cancellation,
         )?;
-        let resolved_view = resolve_view(&input, &resolved.canonical, &metadata);
+        let resolved_view = resolve_view(input, &resolved.canonical, &metadata);
 
         let output = match resolved_view {
             FileReadView::Outline => {
-                self.read_outline(&call, &resolved, &resolved.canonical, &metadata, ordinal)?
+                self.read_outline(call, &resolved, &resolved.canonical, &metadata, ordinal)?
             }
             FileReadView::Metadata => {
                 unreachable!("metadata view is handled before text resolution")
             }
             FileReadView::Content | FileReadView::Auto => self.read_content(
-                &call,
+                call,
                 &resolved,
                 &resolved.canonical,
                 &metadata,
-                &input,
+                input,
                 ordinal,
             )?,
         };

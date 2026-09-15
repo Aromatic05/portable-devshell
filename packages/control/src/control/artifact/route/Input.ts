@@ -4,65 +4,119 @@ import {
     type ArtifactShareInput,
     type ArtifactTransferStartInput,
     type ArtifactViewImageInput,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
-export function readArtifactViewImageInput(params?: JsonValue): ArtifactViewImageInput {
-    if (!isRecord(params)) throw invalid("artifact.viewImage requires parameters.");
+export function readArtifactViewImageInput(
+    params?: JsonValue,
+): ArtifactViewImageInput {
+    if (!isRecord(params))
+        throw invalid("artifact.viewImage requires parameters.");
     const instance = readOptionalString(params.instance, "instance");
     const handle = readOptionalString(params.handle, "handle");
     const path = readOptionalString(params.path, "path");
-    if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
+    if ((handle === undefined) === (path === undefined))
+        throw invalid("Exactly one of handle or path is required.");
     return handle === undefined
-        ? { ...(instance === undefined ? {} : { instance }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
+        ? {
+              ...(instance === undefined ? {} : { instance }),
+              path: path!,
+              workspace: readRequiredString(params.workspace, "workspace"),
+          }
         : { handle, ...(instance === undefined ? {} : { instance }) };
 }
 
 export function readArtifactImageRef(params?: JsonValue): string {
-    if (!isRecord(params)) throw invalid("artifact.readImage requires parameters.");
+    if (!isRecord(params))
+        throw invalid("artifact.readImage requires parameters.");
     return readRequiredString(params.imageRef, "imageRef");
 }
 
 export function readArtifactShareInput(params?: JsonValue): ArtifactShareInput {
-    if (!isRecord(params)) throw invalid("artifact.createShare requires parameters.");
-    const expiresInSeconds = readPositiveInteger(params.expiresInSeconds, "expiresInSeconds");
-    const maxDownloads = readPositiveInteger(params.maxDownloads, "maxDownloads");
+    if (!isRecord(params))
+        throw invalid("artifact.createShare requires parameters.");
+    const expiresInSeconds = readPositiveInteger(
+        params.expiresInSeconds,
+        "expiresInSeconds",
+    );
+    const maxDownloads = readPositiveInteger(
+        params.maxDownloads,
+        "maxDownloads",
+    );
     const instance = readOptionalString(params.instance, "instance");
     const handle = readOptionalString(params.handle, "handle");
     const path = readOptionalString(params.path, "path");
-    if ((handle === undefined) === (path === undefined)) throw invalid("Exactly one of handle or path is required.");
+    if ((handle === undefined) === (path === undefined))
+        throw invalid("Exactly one of handle or path is required.");
     return handle === undefined
-        ? { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), ...(instance === undefined ? {} : { instance }), ...(maxDownloads === undefined ? {} : { maxDownloads }), path: path!, workspace: readRequiredString(params.workspace, "workspace") }
-        : { ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }), handle, ...(instance === undefined ? {} : { instance }), ...(maxDownloads === undefined ? {} : { maxDownloads }) };
+        ? {
+              ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+              ...(instance === undefined ? {} : { instance }),
+              ...(maxDownloads === undefined ? {} : { maxDownloads }),
+              path: path!,
+              workspace: readRequiredString(params.workspace, "workspace"),
+          }
+        : {
+              ...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+              handle,
+              ...(instance === undefined ? {} : { instance }),
+              ...(maxDownloads === undefined ? {} : { maxDownloads }),
+          };
 }
 
-export function readArtifactTransferStartInput(params?: JsonValue): ArtifactTransferStartInput {
-    if (!isRecord(params)) throw invalid("artifact.startTransfer requires parameters.");
+export function readArtifactTransferStartInput(
+    params?: JsonValue,
+): ArtifactTransferStartInput {
+    if (!isRecord(params))
+        throw invalid("artifact.startTransfer requires parameters.");
     const instance = readOptionalString(params.instance, "instance");
     const handle = readOptionalString(params.handle, "handle");
     const sourcePath = readOptionalString(params.sourcePath, "sourcePath");
-    const sourceWorkspace = readOptionalString(params.sourceWorkspace, "sourceWorkspace");
-    const targetInstance = readRequiredString(params.targetInstance, "targetInstance");
+    const sourceWorkspace = readOptionalString(
+        params.sourceWorkspace,
+        "sourceWorkspace",
+    );
+    const targetInstance = readRequiredString(
+        params.targetInstance,
+        "targetInstance",
+    );
     const targetPath = readRequiredString(params.targetPath, "targetPath");
-    const targetWorkspace = readRequiredString(params.targetWorkspace, "targetWorkspace");
-    if ((handle === undefined) === (sourcePath === undefined)) throw invalid("Exactly one of handle or sourcePath is required.");
-    if (params.overwrite !== undefined && typeof params.overwrite !== "boolean") throw invalid("overwrite must be a boolean.");
+    const targetWorkspace = readRequiredString(
+        params.targetWorkspace,
+        "targetWorkspace",
+    );
+    if ((handle === undefined) === (sourcePath === undefined))
+        throw invalid("Exactly one of handle or sourcePath is required.");
+    if (params.overwrite !== undefined && typeof params.overwrite !== "boolean")
+        throw invalid("overwrite must be a boolean.");
     const common = {
         operation: "start" as const,
         ...(instance === undefined ? {} : { instance }),
-        ...(params.overwrite === undefined ? {} : { overwrite: params.overwrite }),
+        ...(params.overwrite === undefined
+            ? {}
+            : { overwrite: params.overwrite }),
         targetInstance,
         targetPath,
-        targetWorkspace
+        targetWorkspace,
     };
     return handle === undefined
-        ? { ...common, sourcePath: sourcePath!, sourceWorkspace: sourceWorkspace ?? readRequiredString(params.sourceWorkspace, "sourceWorkspace") }
+        ? {
+              ...common,
+              sourcePath: sourcePath!,
+              sourceWorkspace:
+                  sourceWorkspace ??
+                  readRequiredString(params.sourceWorkspace, "sourceWorkspace"),
+          }
         : { ...common, handle };
 }
 
 export function readDefaultInstance(params?: JsonValue): string {
-    if (!isRecord(params)) throw invalid("Artifact request requires a source instance.");
-    const explicit = readOptionalString(params.defaultInstance, "defaultInstance");
+    if (!isRecord(params))
+        throw invalid("Artifact request requires a source instance.");
+    const explicit = readOptionalString(
+        params.defaultInstance,
+        "defaultInstance",
+    );
     const source = readOptionalString(params.instance, "instance");
     if (explicit !== undefined) return explicit;
     if (source !== undefined) return source;
@@ -70,37 +124,56 @@ export function readDefaultInstance(params?: JsonValue): string {
 }
 
 export function readShareId(params?: JsonValue): string {
-    if (!isRecord(params)) throw invalid("Artifact share request requires shareId.");
+    if (!isRecord(params))
+        throw invalid("Artifact share request requires shareId.");
     return readRequiredString(params.shareId, "shareId");
 }
 
 export function readTransferId(params?: JsonValue): string {
-    if (!isRecord(params)) throw invalid("Artifact transfer request requires transferId.");
+    if (!isRecord(params))
+        throw invalid("Artifact transfer request requires transferId.");
     return readRequiredString(params.transferId, "transferId");
 }
 
-function readPositiveInteger(value: JsonValue | undefined, field: string): number | undefined {
+function readPositiveInteger(
+    value: JsonValue | undefined,
+    field: string,
+): number | undefined {
     if (value === undefined) return undefined;
-    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) throw invalid(`${field} must be a positive integer.`);
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1)
+        throw invalid(`${field} must be a positive integer.`);
     return value;
 }
 
-function readRequiredString(value: JsonValue | undefined, field: string): string {
+function readRequiredString(
+    value: JsonValue | undefined,
+    field: string,
+): string {
     const result = readOptionalString(value, field);
     if (result === undefined) throw invalid(`${field} is required.`);
     return result;
 }
 
-function readOptionalString(value: JsonValue | undefined, field: string): string | undefined {
+function readOptionalString(
+    value: JsonValue | undefined,
+    field: string,
+): string | undefined {
     if (value === undefined) return undefined;
-    if (typeof value !== "string" || value.length === 0) throw invalid(`${field} must be a non-empty string.`);
+    if (typeof value !== "string" || value.length === 0)
+        throw invalid(`${field} must be a non-empty string.`);
     return value;
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function invalid(message: string) {
-    return createError({ code: errorCodes.targetInvalid, message, retryable: false });
+    return createError({
+        code: errorCodes.targetInvalid,
+        message,
+        retryable: false,
+    });
 }

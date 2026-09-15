@@ -41,19 +41,36 @@ test("host payload TTL and active-count bounds release capacity on close", async
             workspace,
             accessContext(),
         ),
-        (error: unknown) => (error as { code?: string }).code === "artifact.invalidLease",
+        (error: unknown) =>
+            (error as { code?: string }).code === "artifact.invalidLease",
     );
 
     const competing = await Promise.allSettled([
-        store.openPath("./payload.txt", Date.now() + 60_000, workspace, accessContext()),
-        store.openPath("./payload.txt", Date.now() + 60_000, workspace, accessContext()),
+        store.openPath(
+            "./payload.txt",
+            Date.now() + 60_000,
+            workspace,
+            accessContext(),
+        ),
+        store.openPath(
+            "./payload.txt",
+            Date.now() + 60_000,
+            workspace,
+            accessContext(),
+        ),
     ]);
-    const admitted = competing.filter((result) => result.status === "fulfilled");
+    const admitted = competing.filter(
+        (result) => result.status === "fulfilled",
+    );
     const rejected = competing.filter((result) => result.status === "rejected");
     assert.equal(admitted.length, 1);
     assert.equal(rejected.length, 1);
-    assert.equal((rejected[0] as PromiseRejectedResult).reason.code, "artifact.quotaExceeded");
-    const first = (admitted[0] as PromiseFulfilledResult<{ payloadId: string }>).value;
+    assert.equal(
+        (rejected[0] as PromiseRejectedResult).reason.code,
+        "artifact.quotaExceeded",
+    );
+    const first = (admitted[0] as PromiseFulfilledResult<{ payloadId: string }>)
+        .value;
     await store.close(first.payloadId);
     const reopened = await store.openPath(
         "./payload.txt",
@@ -95,7 +112,8 @@ test("host receive active-count bound releases capacity on abort", async (t) => 
             targetPath: "./second.bin",
             workspace: root,
         }),
-        (error: unknown) => (error as { code?: string }).code === "artifact.quotaExceeded",
+        (error: unknown) =>
+            (error as { code?: string }).code === "artifact.quotaExceeded",
     );
     await store.abort(first.receiveId);
     const reopened = await store.begin({

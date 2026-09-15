@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { JsonValue, ToolCallAssociation, ToolCallContext } from "@portable-devshell/shared";
+import type {
+    JsonValue,
+    ToolCallAssociation,
+    ToolCallContext,
+} from "@portable-devshell/shared";
 
 const LIVE_INPUT_SUMMARY_MAX_LENGTH = 512;
 
@@ -30,7 +34,7 @@ export function createWorkerInstanceToolCallScope(
     toolName: string,
     input: JsonValue,
     context: ToolCallContext,
-    association?: ToolCallAssociation
+    association?: ToolCallAssociation,
 ): WorkerInstanceToolCallScope {
     const callId = randomUUID();
     const inputSummary = toInputSummary(input);
@@ -55,7 +59,7 @@ export function createWorkerInstanceToolCallScope(
         input,
         inputSummary,
         startedAt,
-        toolName
+        toolName,
     };
 }
 

@@ -3,7 +3,7 @@ import {
     createError,
     toControlError,
     withRequestTimeout,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import type {
@@ -16,80 +16,143 @@ import type { TuiCommandRecord } from "../../state/store/Model.js";
 export class TuiRuntimeExecutionOperations {
     #commandCounter = 0;
 
-    constructor(private readonly options: {
-        clients: TuiRuntimeOperationClients;
-        operationTimeoutMs: number;
-        session: TuiRuntimeOperationSession;
-        store: TuiAppStore;
-    }) {}
+    constructor(
+        private readonly options: {
+            clients: TuiRuntimeOperationClients;
+            operationTimeoutMs: number;
+            session: TuiRuntimeOperationSession;
+            store: TuiAppStore;
+        },
+    ) {}
 
-    async runInstanceAction(action: "refresh" | "restart" | "start" | "stop", instance: string): Promise<void> {
+    async runInstanceAction(
+        action: "refresh" | "restart" | "start" | "stop",
+        instance: string,
+    ): Promise<void> {
         switch (action) {
             case "refresh":
-                await this.#runCommand(`Refresh Status: ${instance}`, instance, async () => {
-                    await this.options.session.commands.refreshInstance(instance);
-                    await this.#refreshInstanceBestEffort(instance);
-                });
+                await this.#runCommand(
+                    `Refresh Status: ${instance}`,
+                    instance,
+                    async () => {
+                        await this.options.session.commands.refreshInstance(
+                            instance,
+                        );
+                        await this.#refreshInstanceBestEffort(instance);
+                    },
+                );
                 return;
             case "start":
                 await this.#startInstance(instance, "Start Worker");
                 return;
             case "restart":
-                await this.#runCommand(`Restart Worker: ${instance}`, instance, async (commandId) => {
-                    await this.options.session.commands.stopInstance(instance);
-                    await this.#startInstanceWithinCommand(instance, commandId);
-                });
+                await this.#runCommand(
+                    `Restart Worker: ${instance}`,
+                    instance,
+                    async (commandId) => {
+                        await this.options.session.commands.stopInstance(
+                            instance,
+                        );
+                        await this.#startInstanceWithinCommand(
+                            instance,
+                            commandId,
+                        );
+                    },
+                );
                 return;
             case "stop":
-                await this.#runCommand(`Stop Worker: ${instance}`, instance, async () => {
-                    await this.options.session.commands.stopInstance(instance);
-                    await this.#refreshInstanceBestEffort(instance);
-                });
+                await this.#runCommand(
+                    `Stop Worker: ${instance}`,
+                    instance,
+                    async () => {
+                        await this.options.session.commands.stopInstance(
+                            instance,
+                        );
+                        await this.#refreshInstanceBestEffort(instance);
+                    },
+                );
         }
     }
 
-    async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<void> {
+    async decideApproval(
+        instance: string,
+        approvalId: string,
+        decision: "approve" | "deny",
+    ): Promise<void> {
         await this.#runCommand(
             `${decision === "approve" ? "Approve" : "Deny"} Approval: ${approvalId}`,
             instance,
             async () => {
-                await this.options.session.commands.decideToolApproval(instance, approvalId, decision);
+                await this.options.session.commands.decideToolApproval(
+                    instance,
+                    approvalId,
+                    decision,
+                );
                 await this.#refreshInstanceBestEffort(instance);
-            }
+            },
         );
     }
 
-    async callTool(instance: string, toolName: string, input: string): Promise<boolean> {
-        return await this.#runCommand(`Call Tool: ${toolName}`, instance, async () => {
-            const parsed = JSON.parse(input) as JsonValue;
-            const workspace = this.#requireHomeDirectory(instance);
-            const feedback = await this.#request(
-                this.options.clients.tool.call(instance, toolName, parsed, workspace),
-                `tool.call:${toolName}`
-            ) as {
-                comment?: string[];
-                error?: { code: string; message: string; retryable: boolean };
-            };
-            if (feedback?.error !== undefined) {
-                throw createError(feedback.error);
-            }
-            if ((feedback?.comment?.length ?? 0) > 0) {
-                this.options.store.setScreenStatus("todo", feedback.comment!.join(" "));
-            }
-            await this.#refreshInstanceBestEffort(instance);
-        });
+    async callTool(
+        instance: string,
+        toolName: string,
+        input: string,
+    ): Promise<boolean> {
+        return await this.#runCommand(
+            `Call Tool: ${toolName}`,
+            instance,
+            async () => {
+                const parsed = JSON.parse(input) as JsonValue;
+                const workspace = this.#requireHomeDirectory(instance);
+                const feedback = (await this.#request(
+                    this.options.clients.tool.call(
+                        instance,
+                        toolName,
+                        parsed,
+                        workspace,
+                    ),
+                    `tool.call:${toolName}`,
+                )) as {
+                    comment?: string[];
+                    error?: {
+                        code: string;
+                        message: string;
+                        retryable: boolean;
+                    };
+                };
+                if (feedback?.error !== undefined) {
+                    throw createError(feedback.error);
+                }
+                if ((feedback?.comment?.length ?? 0) > 0) {
+                    this.options.store.setScreenStatus(
+                        "todo",
+                        feedback.comment!.join(" "),
+                    );
+                }
+                await this.#refreshInstanceBestEffort(instance);
+            },
+        );
     }
 
     async #startInstance(instance: string, title: string): Promise<void> {
-        await this.#runCommand(`${title}: ${instance}`, instance, async (commandId) => {
-            await this.#startInstanceWithinCommand(instance, commandId);
-        });
+        await this.#runCommand(
+            `${title}: ${instance}`,
+            instance,
+            async (commandId) => {
+                await this.#startInstanceWithinCommand(instance, commandId);
+            },
+        );
     }
 
-    async #startInstanceWithinCommand(instance: string, commandId: string): Promise<void> {
-        const entry = this.options.store.getState().instances.find((candidate) => candidate.name === instance);
+    async #startInstanceWithinCommand(
+        instance: string,
+        commandId: string,
+    ): Promise<void> {
+        const entry = this.options.store
+            .getState()
+            .instances.find((candidate) => candidate.name === instance);
         this.options.store.setRelayMetadata(commandId, {
-            provider: entry?.provider
+            provider: entry?.provider,
         });
         await this.options.session.commands.startInstance(instance, {
             onOutput: (chunk) =>
@@ -102,9 +165,15 @@ export class TuiRuntimeExecutionOperations {
     }
 
     #requireHomeDirectory(instance: string): string {
-        const home = this.options.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        const home = this.options.store
+            .getState()
+            .instances.find(
+                (candidate) => candidate.name === instance,
+            )?.homeDirectory;
         if (home !== undefined && home.length > 0) return home;
-        throw new Error(`Worker home directory is unavailable for ${instance}.`);
+        throw new Error(
+            `Worker home directory is unavailable for ${instance}.`,
+        );
     }
 
     async #refreshInstanceMetadataBestEffort(instance: string): Promise<void> {
@@ -139,19 +208,28 @@ export class TuiRuntimeExecutionOperations {
     async #runCommand(
         title: string,
         targetInstance: string,
-        operation: (commandId: string) => Promise<void>
+        operation: (commandId: string) => Promise<void>,
     ): Promise<boolean> {
         const commandId = `tui-command-${++this.#commandCounter}`;
         const startedAt = new Date().toISOString();
         const sourcePanel = this.options.store.getState().ui.selectedPage;
         const panelKey = `${sourcePanel}:${targetInstance}`;
-        const command = { commandId, sourcePanel, startedAt, targetInstance, title };
+        const command = {
+            commandId,
+            sourcePanel,
+            startedAt,
+            targetInstance,
+            title,
+        };
         this.options.store.upsertCommand({ ...command, status: "running" });
         this.options.store.setPanelError(panelKey, undefined);
         try {
             await operation(commandId);
             this.#completeCommand(command, "succeeded");
-            this.options.store.setScreenStatus(sourcePanel, `${title} completed.`);
+            this.options.store.setScreenStatus(
+                sourcePanel,
+                `${title} completed.`,
+            );
             return true;
         } catch (error) {
             const failure = toControlError(error);
@@ -164,13 +242,13 @@ export class TuiRuntimeExecutionOperations {
     #completeCommand(
         command: Omit<TuiCommandRecord, "completedAt" | "error" | "status">,
         status: "succeeded" | "failed",
-        error?: ControlError
+        error?: ControlError,
     ): void {
         this.options.store.upsertCommand({
             ...command,
             completedAt: new Date().toISOString(),
             ...(error === undefined ? {} : { error }),
-            status
+            status,
         });
     }
 }

@@ -1,27 +1,26 @@
-import type { ArtifactShareResult } from "../protocol/artifact/Share.js";
-import type { ArtifactTransferRecord } from "../protocol/artifact/Transfer.js";
-import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
 import type { ContextMessageRecord } from "../protocol/interaction/context/ContextMessage.js";
 import type { ConversationEntry } from "../protocol/interaction/context/Conversation.js";
-import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
 import { CONTROL_PROTOCOL_VERSION } from "../protocol/control/ControlProtocol.js";
 import type { InstanceEvent } from "../protocol/instance/activity/Event.js";
 import type { InstanceListEntry } from "../protocol/instance/activity/State.js";
 import type { InstanceLogEntry } from "../protocol/instance/activity/Log.js";
 import type { InstanceSnapshot } from "../protocol/instance/activity/State.js";
 import type { GoalSnapshot } from "../protocol/instance/task/Goal.js";
-import type { TodoReadInput, TodoReadResult } from "../protocol/instance/task/Todo.js";
+import type {
+    TodoReadInput,
+    TodoReadResult,
+} from "../protocol/instance/task/Todo.js";
 import type { OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
-import type { OperationalOverview } from "../protocol/control/Overview.js";
 import type { ApprovalRequest } from "../protocol/tool/Approval.js";
 import type { ToolCallRecord } from "../protocol/tool/Call.js";
-import type { JsonValue } from "../protocol/JsonValue.js";
-import type { ControlClients, ControlServiceStatus, McpRuntimeStatus } from "../client/ControlClients.js";
+import type { ControlClients } from "../client/ControlClients.js";
 import { withRequestTimeout } from "../client/connection/RequestTimeout.js";
-import type { InstanceEventStreamPort, InstanceStreamMessage } from "../client/connection/InstanceEventStream.js";
+import type {
+    InstanceEventStreamPort,
+    InstanceStreamMessage,
+} from "../client/connection/InstanceEventStream.js";
 import {
     createInitialControlReadModelState,
-    type ControlGlobalReadKey,
     type ControlInstanceReadKey,
     type ControlInstanceReadState,
     type ControlReadFailure,
@@ -62,8 +61,14 @@ const instanceKeys: readonly ControlInstanceReadKey[] = [
     "toolCalls",
     "comments",
 ];
-const heavyInstanceKeys = new Set<ControlInstanceReadKey>(["logs", "toolCalls", "comments"]);
-const initialInstanceKeys = instanceKeys.filter((key) => !heavyInstanceKeys.has(key));
+const heavyInstanceKeys = new Set<ControlInstanceReadKey>([
+    "logs",
+    "toolCalls",
+    "comments",
+]);
+const initialInstanceKeys = instanceKeys.filter(
+    (key) => !heavyInstanceKeys.has(key),
+);
 
 export class ControlReadModel {
     readonly #clients: ControlClients;
@@ -83,7 +88,10 @@ export class ControlReadModel {
     readonly #streams = new Map<string, InstanceEventStreamPort>();
     readonly #streamTokens = new Map<string, number>();
     readonly #streamRetries = new Map<string, ReturnType<typeof setTimeout>>();
-    readonly #streamStableTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    readonly #streamStableTimers = new Map<
+        string,
+        ReturnType<typeof setTimeout>
+    >();
     readonly #streamAttempts = new Map<string, number>();
     readonly #gapStreaks = new Map<string, number>();
     #epoch = 0;
@@ -96,7 +104,8 @@ export class ControlReadModel {
         this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
         this.#retryBaseMs = options.retryBaseMs ?? 1_000;
         this.#scheduleDelayMs = options.scheduleDelayMs ?? 100;
-        this.#stableAfterMs = options.stableAfterMs ?? Math.max(1_000, this.#retryBaseMs * 4);
+        this.#stableAfterMs =
+            options.stableAfterMs ?? Math.max(1_000, this.#retryBaseMs * 4);
     }
 
     get state(): Readonly<ControlReadModelState> {
@@ -112,7 +121,10 @@ export class ControlReadModel {
         const epoch = await this.#connect(options, false);
         await this.#hydrate(epoch);
         if (this.#current(epoch)) {
-            this.#replaceSubscriptions(this.#state.instances.map(({ name }) => name), epoch);
+            this.#replaceSubscriptions(
+                this.#state.instances.map(({ name }) => name),
+                epoch,
+            );
         }
     }
 
@@ -124,25 +136,43 @@ export class ControlReadModel {
         await this.#hydrate(this.#epoch);
     }
 
-    async #connect(options: ControlReadModelLoadOptions, subscribe: boolean): Promise<number> {
+    async #connect(
+        options: ControlReadModelLoadOptions,
+        subscribe: boolean,
+    ): Promise<number> {
         this.reset();
         this.#loadOptions = options;
         const epoch = this.#epoch;
-        const hello = await this.#request(this.#clients.service.hello(), "service.hello");
+        const hello = await this.#request(
+            this.#clients.service.hello(),
+            "service.hello",
+        );
         if (hello.protocolVersion !== CONTROL_PROTOCOL_VERSION) {
-            throw new Error(`Incompatible control protocol version: ${hello.protocolVersion}.`);
+            throw new Error(
+                `Incompatible control protocol version: ${hello.protocolVersion}.`,
+            );
         }
         const [service, instances] = await Promise.all([
             options.serviceStatus === false
-                ? this.#request(this.#clients.service.ping(), "service.ping").then(() => undefined)
-                : this.#request(this.#clients.service.status(), "service.status"),
+                ? this.#request(
+                      this.#clients.service.ping(),
+                      "service.ping",
+                  ).then(() => undefined)
+                : this.#request(
+                      this.#clients.service.status(),
+                      "service.status",
+                  ),
             this.#request(this.#clients.instance.list(), "instance.list"),
         ]);
         if (!this.#current(epoch)) return epoch;
         this.#state.service = service;
         this.#applyInstances(instances);
         this.#emit();
-        if (subscribe) this.#replaceSubscriptions(instances.map(({ name }) => name), epoch);
+        if (subscribe)
+            this.#replaceSubscriptions(
+                instances.map(({ name }) => name),
+                epoch,
+            );
         return epoch;
     }
 
@@ -154,26 +184,51 @@ export class ControlReadModel {
             this.refreshOverview(epoch),
             this.refreshContexts(epoch),
             this.refreshWebApplications(epoch),
-            options.config === true ? this.refreshConfig(epoch) : Promise.resolve(),
-            options.artifacts === true ? this.refreshArtifacts(epoch) : Promise.resolve(),
+            options.config === true
+                ? this.refreshConfig(epoch)
+                : Promise.resolve(),
+            options.artifacts === true
+                ? this.refreshArtifacts(epoch)
+                : Promise.resolve(),
             ...instances
-                .filter((instance) => instance.snapshot.status === "ready" || instance.snapshot.status === "running")
-                .map(async ({ name }) => await this.#refreshInstance(name, initialInstanceKeys, undefined, epoch)),
+                .filter(
+                    (instance) =>
+                        instance.snapshot.status === "ready" ||
+                        instance.snapshot.status === "running",
+                )
+                .map(
+                    async ({ name }) =>
+                        await this.#refreshInstance(
+                            name,
+                            initialInstanceKeys,
+                            undefined,
+                            epoch,
+                        ),
+                ),
         ]);
     }
 
     async refreshControl(): Promise<void> {
         const epoch = this.#epoch;
         const reads: Promise<unknown>[] = [
-            this.#readGlobal("instances", this.#clients.instance.list(), (value) => this.#applyInstances(value), epoch),
+            this.#readGlobal(
+                "instances",
+                this.#clients.instance.list(),
+                (value) => this.#applyInstances(value),
+                epoch,
+            ),
             this.refreshMcp(epoch),
             this.refreshContexts(epoch),
             this.refreshWebApplications(epoch),
         ];
-        if (this.#loadOptions.config === true) reads.push(this.refreshConfig(epoch));
+        if (this.#loadOptions.config === true)
+            reads.push(this.refreshConfig(epoch));
         await Promise.all(reads);
         if (this.#current(epoch)) {
-            this.#replaceSubscriptions(this.#state.instances.map(({ name }) => name), epoch);
+            this.#replaceSubscriptions(
+                this.#state.instances.map(({ name }) => name),
+                epoch,
+            );
         }
     }
 
@@ -185,7 +240,10 @@ export class ControlReadModel {
             epoch,
         );
         if (this.#current(epoch)) {
-            this.#replaceSubscriptions(this.#state.instances.map(({ name }) => name), epoch);
+            this.#replaceSubscriptions(
+                this.#state.instances.map(({ name }) => name),
+                epoch,
+            );
         }
     }
 
@@ -193,7 +251,9 @@ export class ControlReadModel {
         await this.#readGlobal(
             "config",
             this.#clients.config.get(),
-            (value) => { this.#state.configView = value; },
+            (value) => {
+                this.#state.configView = value;
+            },
             epoch,
             true,
         );
@@ -203,7 +263,9 @@ export class ControlReadModel {
         await this.#readGlobal(
             "mcp",
             this.#clients.mcp.status(),
-            (value) => { this.#state.mcpStatus = value; },
+            (value) => {
+                this.#state.mcpStatus = value;
+            },
             epoch,
         );
         if (!this.#current(epoch)) return;
@@ -212,7 +274,11 @@ export class ControlReadModel {
 
     async refreshOAuth(epoch = this.#epoch): Promise<void> {
         const status = this.#state.mcpStatus;
-        if (status?.authMode !== "oauth2" || status.oauthReady !== true || status.running !== true) {
+        if (
+            status?.authMode !== "oauth2" ||
+            status.oauthReady !== true ||
+            status.running !== true
+        ) {
             this.#state.oauthApprovals = [];
             this.#clearFailure("oauthApprovals");
             this.#emit();
@@ -221,7 +287,9 @@ export class ControlReadModel {
         await this.#readGlobal(
             "oauthApprovals",
             this.#clients.mcp.listApprovals(),
-            (value) => { this.#state.oauthApprovals = this.#filterOAuthApprovals(value); },
+            (value) => {
+                this.#state.oauthApprovals = this.#filterOAuthApprovals(value);
+            },
             epoch,
         );
     }
@@ -230,7 +298,9 @@ export class ControlReadModel {
         await this.#readGlobal(
             "overview",
             this.#clients.overview.get(),
-            (value) => { this.#state.overview = value; },
+            (value) => {
+                this.#state.overview = value;
+            },
             epoch,
             true,
         );
@@ -244,8 +314,10 @@ export class ControlReadModel {
                 "web.applications",
             );
             if (!this.#valid("webApplications", version, epoch)) return;
-            this.#state.webApplications = [...applications].sort((left, right) =>
-                left.title.localeCompare(right.title) || left.id.localeCompare(right.id)
+            this.#state.webApplications = [...applications].sort(
+                (left, right) =>
+                    left.title.localeCompare(right.title) ||
+                    left.id.localeCompare(right.id),
             );
             this.#clearFailure("webApplications");
             this.#emit();
@@ -275,8 +347,8 @@ export class ControlReadModel {
             this.#state.artifactShares = [...shares].sort(
                 (left, right) => right.expiresAtMs - left.expiresAtMs,
             );
-            this.#state.artifactTransfers = [...transfers].sort(
-                (left, right) => right.createdAt.localeCompare(left.createdAt),
+            this.#state.artifactTransfers = [...transfers].sort((left, right) =>
+                right.createdAt.localeCompare(left.createdAt),
             );
             this.#clearFailure("artifacts");
             this.#emit();
@@ -334,15 +406,20 @@ export class ControlReadModel {
         todoInput: TodoReadInput | undefined,
         epoch: number,
     ): Promise<number | undefined> {
-        await Promise.all(keys.map(async (key) => {
-            await this.#refreshInstanceKey(instance, key, todoInput, epoch);
-        }));
+        await Promise.all(
+            keys.map(async (key) => {
+                await this.#refreshInstanceKey(instance, key, todoInput, epoch);
+            }),
+        );
         return this.#current(epoch)
             ? this.#state.instanceState[instance]?.sequence
             : undefined;
     }
 
-    async readToolCallDetail(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+    async readToolCallDetail(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined> {
         const records = await this.#request(
             this.#clients.tool.listCalls(instance, {
                 callIds: [callId],
@@ -357,9 +434,11 @@ export class ControlReadModel {
     }
 
     async refreshAllInstanceLogs(): Promise<void> {
-        await Promise.all(this.#state.instances.map(async ({ name }) => {
-            await this.refreshInstance(name, ["logs"]);
-        }));
+        await Promise.all(
+            this.#state.instances.map(async ({ name }) => {
+                await this.refreshInstance(name, ["logs"]);
+            }),
+        );
     }
 
     ensureInstanceSubscription(instance: string): void {
@@ -369,7 +448,8 @@ export class ControlReadModel {
             this.#state.instances.some((entry) => entry.name === instance) &&
             !this.#streams.has(instance) &&
             !this.#streamRetries.has(instance)
-        ) void this.#startSubscription(instance, state.sequence, this.#epoch);
+        )
+            void this.#startSubscription(instance, state.sequence, this.#epoch);
     }
 
     applyAuthoritativeSnapshot(snapshot: InstanceSnapshot): void {
@@ -379,18 +459,21 @@ export class ControlReadModel {
         state.snapshot = snapshot;
         state.sequence = Math.max(state.sequence, snapshot.lastSeq, 1);
         this.#state.instances = this.#state.instances.map((entry) =>
-            entry.name === snapshot.name ? { ...entry, snapshot } : entry
+            entry.name === snapshot.name ? { ...entry, snapshot } : entry,
         );
         this.#clearFailure(this.failureKey(snapshot.name, "snapshot"));
         this.#emit();
     }
 
     recordToolDecision(instance: string, approvalId: string): void {
-        const ids = this.#decidedToolApprovals.get(instance) ?? new Set<string>();
+        const ids =
+            this.#decidedToolApprovals.get(instance) ?? new Set<string>();
         ids.add(approvalId);
         this.#decidedToolApprovals.set(instance, ids);
         const state = this.#instance(instance);
-        state.approvals = state.approvals.filter((approval) => approval.approvalId !== approvalId);
+        state.approvals = state.approvals.filter(
+            (approval) => approval.approvalId !== approvalId,
+        );
         this.#emit();
     }
 
@@ -402,17 +485,26 @@ export class ControlReadModel {
         this.#emit();
     }
 
-    mergeQueuedContextMessage(instance: string, message: ContextMessageRecord): void {
+    mergeQueuedContextMessage(
+        instance: string,
+        message: ContextMessageRecord,
+    ): void {
         const state = this.#instance(instance);
-        state.contextMessages = mergeContextMessage(state.contextMessages, message);
-        state.conversationEntries = mergeConversationEntry(state.conversationEntries, {
-            createdAt: message.createdAt,
-            ctxId: message.ctxId,
-            id: message.id,
-            kind: "comment",
-            status: message.status,
-            text: message.text,
-        });
+        state.contextMessages = mergeContextMessage(
+            state.contextMessages,
+            message,
+        );
+        state.conversationEntries = mergeConversationEntry(
+            state.conversationEntries,
+            {
+                createdAt: message.createdAt,
+                ctxId: message.ctxId,
+                id: message.id,
+                kind: "comment",
+                status: message.status,
+                text: message.text,
+            },
+        );
         this.#clearFailure(this.failureKey(instance, "comments"));
         this.#emit();
     }
@@ -437,7 +529,10 @@ export class ControlReadModel {
         this.#listeners.clear();
     }
 
-    failureKey(instance: string, key: ControlInstanceReadKey | "stream"): string {
+    failureKey(
+        instance: string,
+        key: ControlInstanceReadKey | "stream",
+    ): string {
         return `${key}:${instance}`;
     }
 
@@ -448,14 +543,18 @@ export class ControlReadModel {
         if (state.snapshot !== undefined) {
             state.snapshot = { ...state.snapshot, lastSeq: state.sequence };
         }
-        const keys = keysForEvent(event).filter((key) =>
-            !heavyInstanceKeys.has(key) || this.#isMaterialized(event.instanceName, key)
+        const keys = keysForEvent(event).filter(
+            (key) =>
+                !heavyInstanceKeys.has(key) ||
+                this.#isMaterialized(event.instanceName, key),
         );
-        if (keys.length > 0) this.#scheduleRefresh(event.instanceName, keys, epoch);
+        if (keys.length > 0)
+            this.#scheduleRefresh(event.instanceName, keys, epoch);
         if (
             event.type.startsWith("artifact.share") ||
             event.type.startsWith("artifact.transfer")
-        ) void this.refreshArtifacts(epoch);
+        )
+            void this.refreshArtifacts(epoch);
         this.#onEvent?.(event);
         this.#emit();
     }
@@ -465,7 +564,9 @@ export class ControlReadModel {
         keys: readonly ControlInstanceReadKey[],
         epoch: number,
     ): void {
-        const pending = this.#pendingKeys.get(instance) ?? new Set<ControlInstanceReadKey>();
+        const pending =
+            this.#pendingKeys.get(instance) ??
+            new Set<ControlInstanceReadKey>();
         for (const key of keys) pending.add(key);
         this.#pendingKeys.set(instance, pending);
         if (this.#refreshTimers.has(instance)) return;
@@ -474,7 +575,12 @@ export class ControlReadModel {
             const selected = [...(this.#pendingKeys.get(instance) ?? [])];
             this.#pendingKeys.delete(instance);
             if (selected.length > 0 && this.#current(epoch)) {
-                void this.#refreshInstance(instance, selected, undefined, epoch);
+                void this.#refreshInstance(
+                    instance,
+                    selected,
+                    undefined,
+                    epoch,
+                );
             }
         }, this.#scheduleDelayMs);
         this.#refreshTimers.set(instance, timer);
@@ -489,7 +595,10 @@ export class ControlReadModel {
         const versionKey = this.#instanceVersionKey(instance, key);
         const version = this.#nextVersion(versionKey);
         try {
-            const value = await this.#request(this.#readInstanceKey(instance, key, todoInput), `${key}:${instance}`);
+            const value = await this.#request(
+                this.#readInstanceKey(instance, key, todoInput),
+                `${key}:${instance}`,
+            );
             if (!this.#valid(versionKey, version, epoch)) return;
             this.#applyInstanceValue(instance, key, value);
             this.#clearFailure(this.failureKey(instance, key));
@@ -519,12 +628,22 @@ export class ControlReadModel {
         switch (key) {
             case "snapshot": {
                 const envelope = await this.#clients.runtime.refresh(instance);
-                return { sequence: envelope.lastSeq, snapshot: envelope.snapshot };
+                return {
+                    sequence: envelope.lastSeq,
+                    snapshot: envelope.snapshot,
+                };
             }
             case "logs":
-                return (await this.#clients.runtime.readLogs(instance, { limit: 100, maxDecodedBytes: 256 * 1024 })).slice(-100);
+                return (
+                    await this.#clients.runtime.readLogs(instance, {
+                        limit: 100,
+                        maxDecodedBytes: 256 * 1024,
+                    })
+                ).slice(-100);
             case "approvals":
-                return await this.#clients.tool.listApprovals(instance, { pendingOnly: true });
+                return await this.#clients.tool.listApprovals(instance, {
+                    pendingOnly: true,
+                });
             case "goals":
                 return (await this.#clients.goal.get(instance)).goals;
             case "todo":
@@ -538,30 +657,44 @@ export class ControlReadModel {
                 });
             case "comments": {
                 try {
-                    const conversationEntries = await this.#clients.conversation.list(instance, {
-                        limit: 400,
-                        maxBytes: 1024 * 1024,
-                    });
-                    const contextMessages = conversationEntries.flatMap((entry) =>
-                        entry.kind === "comment" && entry.status !== undefined
-                            ? [contextMessageFromConversationEntry(instance, entry)]
-                            : [],
+                    const conversationEntries =
+                        await this.#clients.conversation.list(instance, {
+                            limit: 400,
+                            maxBytes: 1024 * 1024,
+                        });
+                    const contextMessages = conversationEntries.flatMap(
+                        (entry) =>
+                            entry.kind === "comment" &&
+                            entry.status !== undefined
+                                ? [
+                                      contextMessageFromConversationEntry(
+                                          instance,
+                                          entry,
+                                      ),
+                                  ]
+                                : [],
                     );
-                    const callIds = [...new Set(contextMessages.flatMap((message) =>
-                        message.status === "delivered" && message.callId !== undefined
-                            ? [message.callId]
-                            : [],
-                    ))];
+                    const callIds = [
+                        ...new Set(
+                            contextMessages.flatMap((message) =>
+                                message.status === "delivered" &&
+                                message.callId !== undefined
+                                    ? [message.callId]
+                                    : [],
+                            ),
+                        ),
+                    ];
                     return {
-                        commentCalls: callIds.length === 0
-                            ? []
-                            : await this.#clients.tool.listCalls(instance, {
-                                callIds,
-                                includeInput: false,
-                                includeOutput: true,
-                                limit: 1_000,
-                                maxBytes: 512 * 1024,
-                            }),
+                        commentCalls:
+                            callIds.length === 0
+                                ? []
+                                : await this.#clients.tool.listCalls(instance, {
+                                      callIds,
+                                      includeInput: false,
+                                      includeOutput: true,
+                                      limit: 1_000,
+                                      maxBytes: 512 * 1024,
+                                  }),
                         conversationEntries,
                         contextMessages,
                         reportCalls: [],
@@ -570,13 +703,15 @@ export class ControlReadModel {
                     if (!methodNotFound(error)) throw error;
                 }
                 const [contextMessages, reportCalls] = await Promise.all([
-                    this.#clients.contextMessage.list(instance, {
-                        limit: 200,
-                        maxBytes: 256 * 1024,
-                    }).catch((error) => {
-                        if (methodNotFound(error)) return [];
-                        throw error;
-                    }),
+                    this.#clients.contextMessage
+                        .list(instance, {
+                            limit: 200,
+                            maxBytes: 256 * 1024,
+                        })
+                        .catch((error) => {
+                            if (methodNotFound(error)) return [];
+                            throw error;
+                        }),
                     this.#clients.tool.listCalls(instance, {
                         includeInput: true,
                         includeOutput: false,
@@ -585,22 +720,31 @@ export class ControlReadModel {
                         toolName: "todo_report",
                     }),
                 ]);
-                const callIds = [...new Set(contextMessages.flatMap((message) =>
-                    message.status === "delivered" && message.callId !== undefined
-                        ? [message.callId]
-                        : [],
-                ))];
+                const callIds = [
+                    ...new Set(
+                        contextMessages.flatMap((message) =>
+                            message.status === "delivered" &&
+                            message.callId !== undefined
+                                ? [message.callId]
+                                : [],
+                        ),
+                    ),
+                ];
                 return {
-                    commentCalls: callIds.length === 0
-                        ? []
-                        : await this.#clients.tool.listCalls(instance, {
-                            callIds,
-                            includeInput: false,
-                            includeOutput: true,
-                            limit: 1_000,
-                            maxBytes: 512 * 1024,
-                        }),
-                    conversationEntries: legacyConversationEntries(contextMessages, reportCalls),
+                    commentCalls:
+                        callIds.length === 0
+                            ? []
+                            : await this.#clients.tool.listCalls(instance, {
+                                  callIds,
+                                  includeInput: false,
+                                  includeOutput: true,
+                                  limit: 1_000,
+                                  maxBytes: 512 * 1024,
+                              }),
+                    conversationEntries: legacyConversationEntries(
+                        contextMessages,
+                        reportCalls,
+                    ),
                     contextMessages,
                     reportCalls,
                 };
@@ -616,17 +760,28 @@ export class ControlReadModel {
         const state = this.#instance(instance);
         switch (key) {
             case "snapshot": {
-                const read = value as { sequence: number; snapshot: InstanceSnapshot };
+                const read = value as {
+                    sequence: number;
+                    snapshot: InstanceSnapshot;
+                };
                 const snapshot = this.#resolveSnapshot(instance, read.snapshot);
                 state.snapshot = snapshot;
-                state.sequence = Math.max(state.sequence, read.sequence, snapshot.lastSeq, 1);
+                state.sequence = Math.max(
+                    state.sequence,
+                    read.sequence,
+                    snapshot.lastSeq,
+                    1,
+                );
                 return;
             }
             case "logs":
                 state.logs = value as InstanceLogEntry[];
                 return;
             case "approvals":
-                state.approvals = this.#filterToolApprovals(instance, value as ApprovalRequest[]);
+                state.approvals = this.#filterToolApprovals(
+                    instance,
+                    value as ApprovalRequest[],
+                );
                 return;
             case "goals":
                 state.goals = value as GoalSnapshot[];
@@ -659,7 +814,10 @@ export class ControlReadModel {
         }
     }
 
-    #resolveSnapshot(instance: string, snapshot: InstanceSnapshot): InstanceSnapshot {
+    #resolveSnapshot(
+        instance: string,
+        snapshot: InstanceSnapshot,
+    ): InstanceSnapshot {
         const fence = this.#authoritativeSnapshots.get(instance);
         if (fence === undefined) return snapshot;
         if (snapshot.lastSeq < fence.lastSeq) return fence;
@@ -681,9 +839,11 @@ export class ControlReadModel {
         this.#state.instances = instances.map((entry) => {
             const state = this.#instance(entry.name);
             const incoming = this.#resolveSnapshot(entry.name, entry.snapshot);
-            const snapshot = state.snapshot === undefined || incoming.lastSeq >= state.snapshot.lastSeq
-                ? incoming
-                : state.snapshot;
+            const snapshot =
+                state.snapshot === undefined ||
+                incoming.lastSeq >= state.snapshot.lastSeq
+                    ? incoming
+                    : state.snapshot;
             if (state.snapshot !== snapshot) {
                 state.snapshot = snapshot;
             }
@@ -726,7 +886,10 @@ export class ControlReadModel {
 
     #replaceSubscriptions(instances: readonly string[], epoch: number): void {
         const names = new Set(instances);
-        for (const name of new Set([...this.#streams.keys(), ...this.#streamRetries.keys()])) {
+        for (const name of new Set([
+            ...this.#streams.keys(),
+            ...this.#streamRetries.keys(),
+        ])) {
             if (!names.has(name)) this.#closeSubscription(name);
         }
         for (const name of instances) {
@@ -737,7 +900,11 @@ export class ControlReadModel {
         }
     }
 
-    async #startSubscription(instance: string, fromSeq: number, epoch: number): Promise<void> {
+    async #startSubscription(
+        instance: string,
+        fromSeq: number,
+        epoch: number,
+    ): Promise<void> {
         if (!this.#current(epoch)) return;
         const token = (this.#streamTokens.get(instance) ?? 0) + 1;
         this.#streamTokens.set(instance, token);
@@ -745,7 +912,9 @@ export class ControlReadModel {
         const request = this.#clients.runtime.subscribe(instance, fromSeq);
         let abandoned = false;
         void request.then(
-            (stream) => { if (abandoned) stream.close(); },
+            (stream) => {
+                if (abandoned) stream.close();
+            },
             () => undefined,
         );
         try {
@@ -753,7 +922,10 @@ export class ControlReadModel {
                 request,
                 `runtime.subscribe:${instance}`,
             );
-            if (!this.#current(epoch) || this.#streamTokens.get(instance) !== token) {
+            if (
+                !this.#current(epoch) ||
+                this.#streamTokens.get(instance) !== token
+            ) {
                 stream.close();
                 return;
             }
@@ -764,7 +936,11 @@ export class ControlReadModel {
             void this.#consume(instance, stream, fromSeq, epoch, token);
         } catch (error) {
             abandoned = true;
-            if (!this.#current(epoch) || this.#streamTokens.get(instance) !== token) return;
+            if (
+                !this.#current(epoch) ||
+                this.#streamTokens.get(instance) !== token
+            )
+                return;
             this.#setFailure(this.failureKey(instance, "stream"), error);
             this.#scheduleSubscription(instance, epoch);
         }
@@ -780,7 +956,8 @@ export class ControlReadModel {
         while (this.#currentStream(instance, stream, epoch, token)) {
             try {
                 const message = await stream.next();
-                if (!this.#currentStream(instance, stream, epoch, token)) return;
+                if (!this.#currentStream(instance, stream, epoch, token))
+                    return;
                 if (message.kind === "event") {
                     this.#markStable(instance);
                     this.#handleEvent(message.event, epoch);
@@ -823,7 +1000,9 @@ export class ControlReadModel {
         if (next === undefined || next <= fromSeq) {
             this.#setFailure(
                 this.failureKey(instance, "stream"),
-                new Error(`Subscription gap did not advance beyond sequence ${fromSeq}.`),
+                new Error(
+                    `Subscription gap did not advance beyond sequence ${fromSeq}.`,
+                ),
             );
             this.#scheduleSubscription(instance, epoch);
             return;
@@ -841,10 +1020,15 @@ export class ControlReadModel {
         this.#scheduleSubscription(instance, epoch);
     }
 
-    #markMaterialized(instance: string, keys: readonly ControlInstanceReadKey[]): void {
+    #markMaterialized(
+        instance: string,
+        keys: readonly ControlInstanceReadKey[],
+    ): void {
         const heavy = keys.filter((key) => heavyInstanceKeys.has(key));
         if (heavy.length === 0) return;
-        const materialized = this.#materializedKeys.get(instance) ?? new Set<ControlInstanceReadKey>();
+        const materialized =
+            this.#materializedKeys.get(instance) ??
+            new Set<ControlInstanceReadKey>();
         for (const key of heavy) materialized.add(key);
         this.#materializedKeys.set(instance, materialized);
     }
@@ -854,7 +1038,9 @@ export class ControlReadModel {
     }
 
     #materializedHeavyKeys(instance: string): ControlInstanceReadKey[] {
-        return [...(this.#materializedKeys.get(instance) ?? [])].filter((key) => heavyInstanceKeys.has(key));
+        return [...(this.#materializedKeys.get(instance) ?? [])].filter((key) =>
+            heavyInstanceKeys.has(key),
+        );
     }
 
     #scheduleSubscription(instance: string, epoch: number): void {
@@ -864,8 +1050,15 @@ export class ControlReadModel {
         const delay = Math.min(this.#retryBaseMs * 2 ** attempt, 30_000);
         const timer = setTimeout(() => {
             this.#streamRetries.delete(instance);
-            if (this.#current(epoch) && this.#state.instanceState[instance] !== undefined) {
-                void this.#startSubscription(instance, this.#instance(instance).sequence, epoch);
+            if (
+                this.#current(epoch) &&
+                this.#state.instanceState[instance] !== undefined
+            ) {
+                void this.#startSubscription(
+                    instance,
+                    this.#instance(instance).sequence,
+                    epoch,
+                );
             }
         }, delay);
         this.#streamRetries.set(instance, timer);
@@ -875,7 +1068,8 @@ export class ControlReadModel {
         this.#clearStable(instance);
         const timer = setTimeout(() => {
             this.#streamStableTimers.delete(instance);
-            if (this.#streams.get(instance) === stream) this.#markStable(instance);
+            if (this.#streams.get(instance) === stream)
+                this.#markStable(instance);
         }, this.#stableAfterMs);
         this.#streamStableTimers.set(instance, timer);
     }
@@ -887,7 +1081,11 @@ export class ControlReadModel {
     }
 
     #closeSubscription(instance: string, invalidate = true): void {
-        if (invalidate) this.#streamTokens.set(instance, (this.#streamTokens.get(instance) ?? 0) + 1);
+        if (invalidate)
+            this.#streamTokens.set(
+                instance,
+                (this.#streamTokens.get(instance) ?? 0) + 1,
+            );
         const stream = this.#streams.get(instance);
         this.#streams.delete(instance);
         stream?.close();
@@ -898,7 +1096,10 @@ export class ControlReadModel {
     }
 
     #closeSubscriptions(): void {
-        for (const name of new Set([...this.#streams.keys(), ...this.#streamRetries.keys()])) {
+        for (const name of new Set([
+            ...this.#streams.keys(),
+            ...this.#streamRetries.keys(),
+        ])) {
             this.#closeSubscription(name);
         }
         this.#streamTokens.clear();
@@ -918,34 +1119,52 @@ export class ControlReadModel {
         epoch: number,
         token: number,
     ): boolean {
-        return this.#current(epoch) &&
+        return (
+            this.#current(epoch) &&
             this.#streamTokens.get(instance) === token &&
-            this.#streams.get(instance) === stream;
+            this.#streams.get(instance) === stream
+        );
     }
 
-    #filterToolApprovals(instance: string, approvals: ApprovalRequest[]): ApprovalRequest[] {
+    #filterToolApprovals(
+        instance: string,
+        approvals: ApprovalRequest[],
+    ): ApprovalRequest[] {
         const ids = this.#decidedToolApprovals.get(instance);
         if (ids === undefined) return approvals;
         for (const id of [...ids]) {
-            const current = approvals.find((approval) => approval.approvalId === id);
-            if (current === undefined || current.status !== "pending") ids.delete(id);
+            const current = approvals.find(
+                (approval) => approval.approvalId === id,
+            );
+            if (current === undefined || current.status !== "pending")
+                ids.delete(id);
         }
         if (ids.size === 0) this.#decidedToolApprovals.delete(instance);
-        return approvals.filter((approval) => approval.status !== "pending" || !ids.has(approval.approvalId));
+        return approvals.filter(
+            (approval) =>
+                approval.status !== "pending" || !ids.has(approval.approvalId),
+        );
     }
 
-    #filterOAuthApprovals(approvals: OAuthApprovalRequest[]): OAuthApprovalRequest[] {
+    #filterOAuthApprovals(
+        approvals: OAuthApprovalRequest[],
+    ): OAuthApprovalRequest[] {
         for (const id of [...this.#decidedOAuthApprovals]) {
-            const current = approvals.find((approval) => approval.approvalId === id);
-            if (current === undefined || current.status !== "pending") this.#decidedOAuthApprovals.delete(id);
+            const current = approvals.find(
+                (approval) => approval.approvalId === id,
+            );
+            if (current === undefined || current.status !== "pending")
+                this.#decidedOAuthApprovals.delete(id);
         }
         return approvals.filter(
-            (approval) => approval.status !== "pending" || !this.#decidedOAuthApprovals.has(approval.approvalId),
+            (approval) =>
+                approval.status !== "pending" ||
+                !this.#decidedOAuthApprovals.has(approval.approvalId),
         );
     }
 
     #instance(name: string): ControlInstanceReadState {
-        return this.#state.instanceState[name] ??= {
+        return (this.#state.instanceState[name] ??= {
             approvals: [],
             commentCalls: [],
             conversationEntries: [],
@@ -955,12 +1174,14 @@ export class ControlReadModel {
             reportCalls: [],
             sequence: 1,
             toolCalls: [],
-        };
+        });
     }
 
     #setFailure(id: string, error: unknown): void {
         const separator = id.indexOf(":");
-        const key = (separator < 0 ? id : id.slice(0, separator)) as ControlReadFailure["key"];
+        const key = (
+            separator < 0 ? id : id.slice(0, separator)
+        ) as ControlReadFailure["key"];
         this.#state.failures[id] = {
             error: error instanceof Error ? error : new Error(String(error)),
             id,
@@ -1011,17 +1232,20 @@ function snapshotState(state: ControlReadModelState): ControlReadModelState {
         failures: { ...state.failures },
         instances: [...state.instances],
         instanceState: Object.fromEntries(
-            Object.entries(state.instanceState).map(([name, value]) => [name, {
-                ...value,
-                approvals: [...value.approvals],
-                commentCalls: [...value.commentCalls],
-                conversationEntries: [...value.conversationEntries],
-                contextMessages: [...value.contextMessages],
-                goals: [...value.goals],
-                logs: [...value.logs],
-                reportCalls: [...value.reportCalls],
-                toolCalls: [...value.toolCalls],
-            }]),
+            Object.entries(state.instanceState).map(([name, value]) => [
+                name,
+                {
+                    ...value,
+                    approvals: [...value.approvals],
+                    commentCalls: [...value.commentCalls],
+                    conversationEntries: [...value.conversationEntries],
+                    contextMessages: [...value.contextMessages],
+                    goals: [...value.goals],
+                    logs: [...value.logs],
+                    reportCalls: [...value.reportCalls],
+                    toolCalls: [...value.toolCalls],
+                },
+            ]),
         ),
         oauthApprovals: [...state.oauthApprovals],
         webApplications: [...state.webApplications],
@@ -1045,11 +1269,15 @@ function mergeContextMessage(
     incoming: ContextMessageRecord,
 ): ContextMessageRecord[] {
     const existing = current.find((message) => message.id === incoming.id);
-    const resolved = existing === undefined || statusRank(incoming.status) >= statusRank(existing.status)
-        ? incoming
-        : existing;
-    return [...current.filter((message) => message.id !== incoming.id), resolved]
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const resolved =
+        existing === undefined ||
+        statusRank(incoming.status) >= statusRank(existing.status)
+            ? incoming
+            : existing;
+    return [
+        ...current.filter((message) => message.id !== incoming.id),
+        resolved,
+    ].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 }
 
 function mergeContextMessageList(
@@ -1057,10 +1285,14 @@ function mergeContextMessageList(
     incoming: readonly ContextMessageRecord[],
 ): ContextMessageRecord[] {
     let result = [...current];
-    for (const message of incoming) result = mergeContextMessage(result, message);
+    for (const message of incoming)
+        result = mergeContextMessage(result, message);
     const incomingIds = new Set(incoming.map((message) => message.id));
     return result.filter(
-        (message) => incomingIds.has(message.id) || message.status === "pending" || message.status === "sent",
+        (message) =>
+            incomingIds.has(message.id) ||
+            message.status === "pending" ||
+            message.status === "sent",
     );
 }
 
@@ -1068,8 +1300,17 @@ function mergeConversationEntry(
     current: readonly ConversationEntry[],
     incoming: ConversationEntry,
 ): ConversationEntry[] {
-    return [...current.filter((entry) => !(entry.kind === incoming.kind && entry.id === incoming.id)), incoming]
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    return [
+        ...current.filter(
+            (entry) =>
+                !(entry.kind === incoming.kind && entry.id === incoming.id),
+        ),
+        incoming,
+    ].sort(
+        (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id),
+    );
 }
 
 function mergeConversationEntryList(
@@ -1077,15 +1318,23 @@ function mergeConversationEntryList(
     incoming: readonly ConversationEntry[],
 ): ConversationEntry[] {
     let result = [...current];
-    for (const entry of incoming) result = mergeConversationEntry(result, entry);
-    const incomingKeys = new Set(incoming.map((entry) => `${entry.kind}:${entry.id}`));
-    return result.filter((entry) =>
-        incomingKeys.has(`${entry.kind}:${entry.id}`) ||
-        (entry.kind === "comment" && (entry.status === "pending" || entry.status === "sent")),
+    for (const entry of incoming)
+        result = mergeConversationEntry(result, entry);
+    const incomingKeys = new Set(
+        incoming.map((entry) => `${entry.kind}:${entry.id}`),
+    );
+    return result.filter(
+        (entry) =>
+            incomingKeys.has(`${entry.kind}:${entry.id}`) ||
+            (entry.kind === "comment" &&
+                (entry.status === "pending" || entry.status === "sent")),
     );
 }
 
-function contextMessageFromConversationEntry(instance: string, entry: ConversationEntry): ContextMessageRecord {
+function contextMessageFromConversationEntry(
+    instance: string,
+    entry: ConversationEntry,
+): ContextMessageRecord {
     if (entry.kind !== "comment" || entry.status === undefined) {
         throw new Error("Conversation entry is not a Context Comment.");
     }
@@ -1093,7 +1342,9 @@ function contextMessageFromConversationEntry(instance: string, entry: Conversati
         ...(entry.callId === undefined ? {} : { callId: entry.callId }),
         createdAt: entry.createdAt,
         ctxId: entry.ctxId,
-        ...(entry.deliveredAt === undefined ? {} : { deliveredAt: entry.deliveredAt }),
+        ...(entry.deliveredAt === undefined
+            ? {}
+            : { deliveredAt: entry.deliveredAt }),
         ...(entry.error === undefined ? {} : { error: entry.error }),
         ...(entry.failedAt === undefined ? {} : { failedAt: entry.failedAt }),
         id: entry.id,
@@ -1111,9 +1362,13 @@ function legacyConversationEntries(
         ...(message.callId === undefined ? {} : { callId: message.callId }),
         createdAt: message.createdAt,
         ctxId: message.ctxId,
-        ...(message.deliveredAt === undefined ? {} : { deliveredAt: message.deliveredAt }),
+        ...(message.deliveredAt === undefined
+            ? {}
+            : { deliveredAt: message.deliveredAt }),
         ...(message.error === undefined ? {} : { error: message.error }),
-        ...(message.failedAt === undefined ? {} : { failedAt: message.failedAt }),
+        ...(message.failedAt === undefined
+            ? {}
+            : { failedAt: message.failedAt }),
         id: message.id,
         kind: "comment",
         status: message.status,
@@ -1126,33 +1381,46 @@ function legacyConversationEntries(
             typeof call.input !== "object" ||
             call.input === null ||
             Array.isArray(call.input)
-        ) return [];
+        )
+            return [];
         const message = call.input.message;
         if (typeof message !== "string" || message.length === 0) return [];
-        return [{
-            callId: call.callId,
-            createdAt: call.completedAt ?? call.startedAt,
-            ctxId: call.ctxId,
-            id: call.callId,
-            kind: "report",
-            text: message,
-        }];
+        return [
+            {
+                callId: call.callId,
+                createdAt: call.completedAt ?? call.startedAt,
+                ctxId: call.ctxId,
+                id: call.callId,
+                kind: "report",
+                text: message,
+            },
+        ];
     });
     return [...comments, ...reports].sort(
-        (left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+        (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.id.localeCompare(right.id),
     );
 }
 
 function statusRank(status: ContextMessageRecord["status"]): number {
     switch (status) {
-        case "pending": return 0;
-        case "sent": return 1;
-        case "delivered": return 2;
-        case "failed": return 2;
+        case "pending":
+            return 0;
+        case "sent":
+            return 1;
+        case "delivered":
+            return 2;
+        case "failed":
+            return 2;
     }
 }
 
 function methodNotFound(error: unknown): boolean {
-    return typeof error === "object" && error !== null &&
-        "code" in error && error.code === "control.methodNotFound";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "control.methodNotFound"
+    );
 }

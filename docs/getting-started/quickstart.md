@@ -167,9 +167,9 @@ environ_info(workspace=/absolute/path/on/worker)
 
 ```json
 {
-  "command": "cargo test",
-  "wait": "block",
-  "timeout": 600000
+    "command": "cargo test",
+    "wait": "block",
+    "timeout": 600000
 }
 ```
 
@@ -229,9 +229,9 @@ devshell config instance patch demo-local '<json-patch>'
 
 ## 下一步
 
-* [MCP](../concepts/mcp.md)
-* [Context](../concepts/context.md)
-* [Workspace](../concepts/workspace.md)
-* [OAuth 与公网暴露](../operations/oauth.md)
-* [客户端接入](clients.md)
-* [配置与运行目录](../operations/configuration.md)
+- [MCP](../concepts/mcp.md)
+- [Context](../concepts/context.md)
+- [Workspace](../concepts/workspace.md)
+- [OAuth 与公网暴露](../operations/oauth.md)
+- [客户端接入](clients.md)
+- [配置与运行目录](../operations/configuration.md)

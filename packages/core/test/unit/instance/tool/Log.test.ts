@@ -6,18 +6,30 @@ import test from "node:test";
 import { asInstanceName } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import { AuditDatabase } from "../../../../src/storage/audit/database/Database.ts";
-import { type InstanceLogEntry, LogStoreInstance } from "../../../../src/storage/log/Store.ts";
+import {
+    type InstanceLogEntry,
+    LogStoreInstance,
+} from "../../../../src/storage/log/Store.ts";
 import { WorkerInstanceToolLog } from "../../../../src/worker/instance/tool/record/Log.ts";
 
 test("WorkerInstanceToolLog chunks large streams without changing their content", async () => {
-    const appended: Array<{ context: unknown; message: string; stream: string }> = [];
+    const appended: Array<{
+        context: unknown;
+        message: string;
+        stream: string;
+    }> = [];
     const events: Array<{ data: unknown; type: string }> = [];
     const log = new WorkerInstanceToolLog({
         async appendEvent(type, data) {
             events.push({ data, type });
         },
         logStore: {
-            async append(stream: string, message: string, _at: string, context: unknown) {
+            async append(
+                stream: string,
+                message: string,
+                _at: string,
+                context: unknown,
+            ) {
                 appended.push({ context, message, stream });
                 return {};
             },
@@ -39,10 +51,15 @@ test("WorkerInstanceToolLog chunks large streams without changing their content"
     await log.append({ stderr: "", stdout }, wideContext);
 
     assert.equal(appended.length, 4);
-    assert.equal(appended.every((entry) => entry.stream === "stdout"), true);
+    assert.equal(
+        appended.every((entry) => entry.stream === "stdout"),
+        true,
+    );
     assert.equal(appended.map((entry) => entry.message).join(""), stdout);
     assert.equal(
-        appended.every((entry) => Buffer.byteLength(entry.message, "utf8") <= 768 * 1024),
+        appended.every(
+            (entry) => Buffer.byteLength(entry.message, "utf8") <= 768 * 1024,
+        ),
         true,
     );
     assert.deepEqual(appended[0]?.context, {
@@ -77,15 +94,25 @@ test("WorkerInstanceToolLog keeps bounded reads below one MiB of decoded stream 
             timestamp: (record) => record.at,
         });
         const store = new LogStoreInstance(asInstanceName("alpha"), durable);
-        const log = new WorkerInstanceToolLog({ appendEvent: async () => undefined, logStore: store });
+        const log = new WorkerInstanceToolLog({
+            appendEvent: async () => undefined,
+            logStore: store,
+        });
         await log.append(
             { stderr: "", stdout: "A".repeat(2 * 1024 * 1024) },
             { callId: "call-bounded-log", source: "mcp", toolName: "bash_run" },
         );
 
-        const bounded = await log.read({ fromSeq: 1, limit: 100, maxDecodedBytes: 1024 * 1024 });
+        const bounded = await log.read({
+            fromSeq: 1,
+            limit: 100,
+            maxDecodedBytes: 1024 * 1024,
+        });
         assert.equal(bounded.length, 4);
-        assert.equal(bounded.map((entry) => entry.message).join("").length, 1024 * 1024);
+        assert.equal(
+            bounded.map((entry) => entry.message).join("").length,
+            1024 * 1024,
+        );
         database.close();
     } finally {
         await rm(root, { force: true, recursive: true });

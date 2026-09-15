@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
     ControlLogger,
     ControlPidFile,
-    ControlSocketFile
+    ControlSocketFile,
 } from "@portable-devshell/shared";
 
 import { ControlServer } from "./Server.js";
@@ -26,14 +26,19 @@ export class ControlDaemon {
     #started = false;
 
     constructor(options: ControlDaemonOptions = {}) {
-        this.#logger = options.logger ?? new ControlLogger(options.homeDirectory);
-        this.#pidFile = options.pidFile ?? new ControlPidFile(options.homeDirectory);
-        this.#server = options.server ?? new ControlServer({
-            homeDirectory: options.homeDirectory,
-            startupDiagnostic: writeStartupDiagnostic,
-            xdgRuntimeDir: options.xdgRuntimeDir
-        });
-        this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
+        this.#logger =
+            options.logger ?? new ControlLogger(options.homeDirectory);
+        this.#pidFile =
+            options.pidFile ?? new ControlPidFile(options.homeDirectory);
+        this.#server =
+            options.server ??
+            new ControlServer({
+                homeDirectory: options.homeDirectory,
+                startupDiagnostic: writeStartupDiagnostic,
+                xdgRuntimeDir: options.xdgRuntimeDir,
+            });
+        this.#socketFile =
+            options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
     }
 
     async start(): Promise<void> {
@@ -66,16 +71,23 @@ export class ControlDaemon {
     async #stop(): Promise<void> {
         if (!this.#started) return;
         const failures: unknown[] = [];
-        await this.#logger.info("control server stopping").catch((error) => failures.push(error));
+        await this.#logger
+            .info("control server stopping")
+            .catch((error) => failures.push(error));
         try {
             await this.#server.stop();
             this.#started = false;
         } catch (error) {
             failures.push(error);
         }
-        await this.#logger.info("control server stopped").catch((error) => failures.push(error));
+        await this.#logger
+            .info("control server stopped")
+            .catch((error) => failures.push(error));
         if (failures.length > 0) {
-            throw new AggregateError(failures, "Control server failed to stop cleanly.");
+            throw new AggregateError(
+                failures,
+                "Control server failed to stop cleanly.",
+            );
         }
     }
 
@@ -83,7 +95,7 @@ export class ControlDaemon {
         const operation = this.#operationTail.then(factory, factory);
         this.#operationTail = operation.then(
             () => undefined,
-            () => undefined
+            () => undefined,
         );
         return await operation;
     }
@@ -101,7 +113,7 @@ async function main(): Promise<void> {
             (error) => {
                 console.error(error);
                 process.exit(1);
-            }
+            },
         );
     };
     process.once("SIGINT", stopAndExit);
@@ -122,7 +134,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 function renderStartupFailure(error: unknown): string {
-    if (error instanceof Error && typeof error.stack === "string" && error.stack.length > 0) {
+    if (
+        error instanceof Error &&
+        typeof error.stack === "string" &&
+        error.stack.length > 0
+    ) {
         return `control server failed to start\n${error.stack}`;
     }
     return `control server failed to start\n${String(error)}`;

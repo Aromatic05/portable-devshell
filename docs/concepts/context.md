@@ -31,18 +31,18 @@ instance 的 `[mcp].contextMode` 只决定 **MCP 边界如何找到 Context**，
 
 通用 MCP client 默认使用 `explicit`：
 
-* `environ_info` 创建或恢复 Context，并把 `ctxId` 暴露给调用方；
-* 后续需要 Context 的 model-facing 工具显式携带该 `ctxId`；
-* Context 仍由服务端校验 principal、状态和 instance attachment。
+- `environ_info` 创建或恢复 Context，并把 `ctxId` 暴露给调用方；
+- 后续需要 Context 的 model-facing 工具显式携带该 `ctxId`；
+- Context 仍由服务端校验 principal、状态和 instance attachment。
 
 ### `openai-session`
 
 ChatGPT endpoint 可以使用 `openai-session`：
 
-* model-facing tool schema 不暴露 `ctxId`；
-* 服务端从请求 metadata 的稳定 Host binding 解析内部 Context；
-* 同一个 external binding 始终映射到 portable-devshell 自己的 `ctxId`；
-* 如果没有可解析的 binding，会 fail closed，不退回一个隐式随机 Context。
+- model-facing tool schema 不暴露 `ctxId`；
+- 服务端从请求 metadata 的稳定 Host binding 解析内部 Context；
+- 同一个 external binding 始终映射到 portable-devshell 自己的 `ctxId`；
+- 如果没有可解析的 binding，会 fail closed，不退回一个隐式随机 Context。
 
 `ctxId` 在该模式仍然存在，只是变成内部状态。Workspace App 的 app-only 调用可以携带 `ctxId` 与隐藏 capability，因为那不是模型参数。
 
@@ -104,8 +104,8 @@ environment，并永久拒绝该 Context 后续 discovery、attach 和 routed to
 
 同一个 Context 在同一 instance 上重新调用 `environ_info` 可以切换 workspace，但存在活动工作时会被阻止。当前实现至少会拒绝：
 
-* 旧 workspace 上仍 active/blocked 的 Goal；
-* 旧 workspace 上仍有可自动恢复的未完成 Wait。
+- 旧 workspace 上仍 active/blocked 的 Goal；
+- 旧 workspace 上仍有可自动恢复的未完成 Wait。
 
 目的是避免一个仍待恢复的任务在 Context 已指向新项目后继续把模型唤回错误 workspace。
 
@@ -141,9 +141,9 @@ Context 还维护短生命周期的 execution/re-entry 状态，用来防止 Wor
 
 典型规则：
 
-* 当前 Context 正在执行 model tool call 时，resolved Wait 不立即重复唤醒模型；
-* 自动恢复需要先 claim，再重新验证 Goal/Todo/Wait 是否仍然有效；
-* 用户显式接管、暂停或中断时，会改变 re-entry ownership，而不是伪造一个新的 Context。
+- 当前 Context 正在执行 model tool call 时，resolved Wait 不立即重复唤醒模型；
+- 自动恢复需要先 claim，再重新验证 Goal/Todo/Wait 是否仍然有效；
+- 用户显式接管、暂停或中断时，会改变 re-entry ownership，而不是伪造一个新的 Context。
 
 完整状态机见 [Workspace](workspace.md)。
 
@@ -153,17 +153,17 @@ Context 还维护短生命周期的 execution/re-entry 状态，用来防止 Wor
 
 授权至少还依赖：
 
-* MCP endpoint 的 `none` / `token` / `oauth2` 认证；
-* request principal；
-* Workspace App 写操作使用的隐藏 capability；
-* instance/workspace attachment；
-* Worker tool capability / namespace 约束与 approval policy。
+- MCP endpoint 的 `none` / `token` / `oauth2` 认证；
+- request principal；
+- Workspace App 写操作使用的隐藏 capability；
+- instance/workspace attachment；
+- Worker tool capability / namespace 约束与 approval policy。
 
 不要把“知道一个 ctxId”理解成“拥有该 Context 的全部权限”。
 
 ## 相关文档
 
-* [Workspace](workspace.md)
-* [MCP](mcp.md)
-* [系统架构](architecture.md)
-* [配置与运行目录](../operations/configuration.md)
+- [Workspace](workspace.md)
+- [MCP](mcp.md)
+- [系统架构](architecture.md)
+- [配置与运行目录](../operations/configuration.md)

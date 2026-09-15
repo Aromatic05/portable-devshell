@@ -4,11 +4,12 @@ import { win32 } from "node:path";
 export function resolveInstallHome(
     environment = process.env,
     platform = process.platform,
-    systemHome = homedir()
+    systemHome = homedir(),
 ) {
-    const configured = platform === "win32"
-        ? resolveWindowsHome(environment)
-        : firstNonEmpty(environment.HOME);
+    const configured =
+        platform === "win32"
+            ? resolveWindowsHome(environment)
+            : firstNonEmpty(environment.HOME);
 
     if (configured !== undefined) {
         return configured;
@@ -35,5 +36,7 @@ function resolveWindowsHome(environment) {
 }
 
 function firstNonEmpty(...values) {
-    return values.find((value) => typeof value === "string" && value.length > 0);
+    return values.find(
+        (value) => typeof value === "string" && value.length > 0,
+    );
 }

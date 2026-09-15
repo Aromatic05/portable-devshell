@@ -7,8 +7,6 @@ import type { ArtifactService } from "../../../src/control/artifact/Service.ts";
 import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
 import { ControlRouteComposition } from "../../../src/composition/Route.ts";
 
-
-
 test("artifact.startTransfer accepts an explicit source instance", async () => {
     const calls: unknown[] = [];
     const artifactService = {
@@ -23,18 +21,21 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
                     target: { instance: "target-b", path: "/tmp/result.bin" },
                     transferId: "transfer-1",
                     transferredBytes: 0,
-                    updatedAt: "2026-07-13T00:00:00.000Z"
-                }
+                    updatedAt: "2026-07-13T00:00:00.000Z",
+                },
             };
-        }
+        },
     } as unknown as ArtifactService;
     const table = new ControlRouteComposition({
         artifact: artifactService,
         instances: new InstanceRegistry([]),
-        shutdown() {}
+        shutdown() {},
     });
     const snapshot = table.snapshot();
-    const handler = snapshot.destinations.get("@control")!.get("artifact")!.get("startTransfer")!;
+    const handler = snapshot.destinations
+        .get("@control")!
+        .get("artifact")!
+        .get("startTransfer")!;
 
     const result = await handler(
         {
@@ -46,13 +47,16 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
                 sourceWorkspace: "/source",
                 targetInstance: "target-b",
                 targetPath: "/tmp/result.bin",
-                targetWorkspace: "/tmp"
-            }
+                targetWorkspace: "/tmp",
+            },
         },
-        createContext("@control", "artifact")
+        createContext("@control", "artifact"),
     );
 
-    assert.equal((result as { transfer: { status: string } }).transfer.status, "queued");
+    assert.equal(
+        (result as { transfer: { status: string } }).transfer.status,
+        "queued",
+    );
     assert.deepEqual(calls, [
         {
             defaultInstance: "source-a",
@@ -63,14 +67,16 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
                 sourceWorkspace: "/source",
                 targetInstance: "target-b",
                 targetPath: "/tmp/result.bin",
-                targetWorkspace: "/tmp"
-            }
-        }
+                targetWorkspace: "/tmp",
+            },
+        },
     ]);
 });
 
-
-function createContext(destination: "@control" | string, module: string): PrefixRouteContext {
+function createContext(
+    destination: "@control" | string,
+    module: string,
+): PrefixRouteContext {
     return {
         afterReply() {},
         connectionId: "connection-1",
@@ -81,6 +87,6 @@ function createContext(destination: "@control" | string, module: string): Prefix
         },
         peer: "cli",
         requestId: "request-1",
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
     };
 }

@@ -1,12 +1,18 @@
-import type { InstanceContainerConfig, InstanceContainerMountConfig } from "@portable-devshell/shared";
+import type {
+    InstanceContainerConfig,
+    InstanceContainerMountConfig,
+} from "@portable-devshell/shared";
 
 import {
     type WorkerTransportContainerProvision,
-    type WorkerTransportContainerProvisionOperations
+    type WorkerTransportContainerProvisionOperations,
 } from "../Provision.js";
 import { workerTransportContainerEnvironmentArgs } from "../Environment.js";
 
-type ManagedContainerConfig = Extract<InstanceContainerConfig, { mode: "preset" | "dockerfile" | "existingImage" }>;
+type ManagedContainerConfig = Extract<
+    InstanceContainerConfig,
+    { mode: "preset" | "dockerfile" | "existingImage" }
+>;
 
 interface WorkerTransportContainerProvisionManagedOptions {
     config: ManagedContainerConfig;
@@ -27,24 +33,36 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
 
     async ensureReady(): Promise<void> {
         const image = await this.#resolveImage();
-        const status = await this.#operations.readContainerStatus(this.#config.containerName);
+        const status = await this.#operations.readContainerStatus(
+            this.#config.containerName,
+        );
 
         if (status === "missing") {
             await this.#operations.runProviderCommand(
                 "createContainer",
-                this.#buildCreateArgs(image)
+                this.#buildCreateArgs(image),
             );
-            await this.#operations.runProviderCommand("startContainer", ["start", this.#config.containerName]);
+            await this.#operations.runProviderCommand("startContainer", [
+                "start",
+                this.#config.containerName,
+            ]);
             return;
         }
 
         if (status !== "running") {
-            await this.#operations.runProviderCommand("startContainer", ["start", this.#config.containerName]);
+            await this.#operations.runProviderCommand("startContainer", [
+                "start",
+                this.#config.containerName,
+            ]);
         }
     }
 
     async isAvailable(): Promise<boolean> {
-        return (await this.#operations.readContainerStatus(this.#config.containerName)) === "running";
+        return (
+            (await this.#operations.readContainerStatus(
+                this.#config.containerName,
+            )) === "running"
+        );
     }
 
     async prepareRuntimeRetire(): Promise<boolean> {
@@ -57,35 +75,47 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
         await this.#operations.runProviderCommand(
             "stopContainer",
             ["stop", this.#config.containerName],
-            { allowNonZeroExit: true }
+            { allowNonZeroExit: true },
         );
     }
 
     async retire(): Promise<void> {
-        if ((await this.#operations.readContainerStatus(this.#config.containerName)) === "missing") {
+        if (
+            (await this.#operations.readContainerStatus(
+                this.#config.containerName,
+            )) === "missing"
+        ) {
             return;
         }
-        await this.#operations.runProviderCommand(
-            "removeContainer",
-            ["rm", "-f", this.#config.containerName]
-        );
+        await this.#operations.runProviderCommand("removeContainer", [
+            "rm",
+            "-f",
+            this.#config.containerName,
+        ]);
     }
 
     buildExecArgs(
         command: readonly string[],
-        environmentKeys: readonly string[] = []
+        environmentKeys: readonly string[] = [],
     ): string[] {
         return [
             "exec",
             "-i",
             ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.containerName,
-            ...command
+            ...command,
         ];
     }
 
     buildShellExecArgs(commandLine: string): string[] {
-        return ["exec", "-i", this.#config.containerName, "sh", "-lc", commandLine];
+        return [
+            "exec",
+            "-i",
+            this.#config.containerName,
+            "sh",
+            "-lc",
+            commandLine,
+        ];
     }
 
     async #resolveImage(): Promise<string> {
@@ -93,11 +123,12 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
             return this.#config.image;
         }
 
-        const tag = this.#config.build.tag ?? `${this.#config.containerName}:latest`;
+        const tag =
+            this.#config.build.tag ?? `${this.#config.containerName}:latest`;
         const result = await this.#operations.runProviderCommand(
             "inspectImage",
             ["image", "inspect", tag],
-            { allowNonZeroExit: true }
+            { allowNonZeroExit: true },
         );
 
         if (result.exitCode !== 0) {
@@ -122,19 +153,30 @@ export class WorkerTransportContainerProvisionManaged implements WorkerTransport
             "--name",
             this.#config.containerName,
             ...(this.#keepIdUserNamespace ? ["--userns=keep-id"] : []),
-            ...(this.#config.user === undefined ? [] : ["--user", this.#config.user]),
-            ...(this.#config.network === undefined ? [] : ["--network", this.#config.network]),
-            ...Object.entries(this.#config.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
-            ...this.#containerMounts().flatMap((mount) => ["-v", renderContainerMount(mount)]),
+            ...(this.#config.user === undefined
+                ? []
+                : ["--user", this.#config.user]),
+            ...(this.#config.network === undefined
+                ? []
+                : ["--network", this.#config.network]),
+            ...Object.entries(this.#config.env ?? {}).flatMap(
+                ([key, value]) => ["-e", `${key}=${value}`],
+            ),
+            ...this.#containerMounts().flatMap((mount) => [
+                "-v",
+                renderContainerMount(mount),
+            ]),
             image,
             "sh",
             "-lc",
-            "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"
+            "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done",
         ];
     }
 }
 
-export function renderContainerMount(mount: InstanceContainerMountConfig): string {
+export function renderContainerMount(
+    mount: InstanceContainerMountConfig,
+): string {
     const segments = [mount.source, mount.target, mount.mode];
 
     if (mount.selinux === "shared") {

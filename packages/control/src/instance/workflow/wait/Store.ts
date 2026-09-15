@@ -15,7 +15,11 @@ export class WaitStore {
     readonly #state: WaitState;
     #document?: WaitDocument;
 
-    constructor(options: { filePath: string; instanceName: string; state: WaitState }) {
+    constructor(options: {
+        filePath: string;
+        instanceName: string;
+        state: WaitState;
+    }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
@@ -26,17 +30,26 @@ export class WaitStore {
     }
 
     readRecord(waitId: string): WaitRecord | undefined {
-        const record = this.#current().waits.find((entry) => entry.waitId === waitId);
+        const record = this.#current().waits.find(
+            (entry) => entry.waitId === waitId,
+        );
         return record === undefined ? undefined : structuredClone(record);
     }
 
     list(taskId?: string): WaitRecord[] {
         return structuredClone(
-            this.#current().waits.filter((record) => taskId === undefined || record.taskId === taskId),
+            this.#current().waits.filter(
+                (record) => taskId === undefined || record.taskId === taskId,
+            ),
         );
     }
 
-    async transition(operation: (document: WaitDocument) => { document: WaitDocument; record: WaitRecord }): Promise<WaitRecord> {
+    async transition(
+        operation: (document: WaitDocument) => {
+            document: WaitDocument;
+            record: WaitRecord;
+        },
+    ): Promise<WaitRecord> {
         const next = operation(this.#current());
         await this.#writeAtomic(next.document);
         this.#document = next.document;
@@ -62,16 +75,26 @@ export class WaitStore {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
             const document = this.#state.migrateLoadedDocument(
-                this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown),
+                this.#state.normalizeDocument(
+                    JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown,
+                ),
             );
             const detachedAt = new Date().toISOString();
             return {
                 ...document,
                 waits: document.waits.map((record) => {
                     if (record.status === "waiting") {
-                        return { ...record, detachedAt, status: "detached", updatedAt: detachedAt };
+                        return {
+                            ...record,
+                            detachedAt,
+                            status: "detached",
+                            updatedAt: detachedAt,
+                        };
                     }
-                    if (record.status === "resolved" && record.detachedAt === undefined) {
+                    if (
+                        record.status === "resolved" &&
+                        record.detachedAt === undefined
+                    ) {
                         return { ...record, detachedAt, updatedAt: detachedAt };
                     }
                     return record;
@@ -107,7 +130,11 @@ export class WaitStore {
         }
         if (process.platform !== "win32") {
             const handle = await open(directory, "r");
-            try { await handle.sync(); } finally { await handle.close(); }
+            try {
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
         }
     }
 }

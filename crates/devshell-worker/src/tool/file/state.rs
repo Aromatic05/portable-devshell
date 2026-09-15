@@ -215,7 +215,7 @@ impl TextMetadata {
         let mut first = true;
         let mut scanned_lines = 0usize;
         loop {
-            if scanned_lines % 256 == 0 {
+            if scanned_lines.is_multiple_of(256) {
                 cancellation.check()?;
             }
             buffer.clear();
@@ -270,7 +270,7 @@ impl TextMetadata {
         let mut total_lines = 0usize;
         let mut first = true;
         loop {
-            if line_no % 256 == 0 {
+            if line_no.is_multiple_of(256) {
                 cancellation.check()?;
             }
             buffer.clear();
@@ -362,7 +362,7 @@ pub fn scan_text_lines(
     let mut line_ending = None;
     let mut last_byte = None;
     loop {
-        if scanned_lines % 256 == 0 {
+        if scanned_lines.is_multiple_of(256) {
             cancellation.check()?;
         }
         buffer.clear();

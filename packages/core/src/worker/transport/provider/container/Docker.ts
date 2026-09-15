@@ -18,7 +18,7 @@ export class WorkerTransportDriverDocker extends WorkerTransportDriverContainerB
             container: options.container,
             provider: "docker",
             spawnFunction: options.spawnFunction,
-            workerBinary: options.workerBinary
+            workerBinary: options.workerBinary,
         });
     }
 }

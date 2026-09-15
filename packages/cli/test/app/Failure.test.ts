@@ -8,7 +8,7 @@ test("renderCliError preserves diagnostic details and verbose cause chain", () =
         causeBody: {
             code: "core.providerFailed",
             message: "cause-fixture",
-            retryable: false
+            retryable: false,
         },
         code: "core.workerStartFailed",
         details: {
@@ -17,9 +17,9 @@ test("renderCliError preserves diagnostic details and verbose cause chain", () =
             exitCode: 197,
             operation: "operation-fixture",
             provider: "provider-fixture",
-            stderrTail: "stderr-fixture\n"
+            stderrTail: "stderr-fixture\n",
         },
-        message: "top-level-fixture"
+        message: "top-level-fixture",
     };
 
     const rendered = renderCliError(error);
@@ -30,7 +30,7 @@ test("renderCliError preserves diagnostic details and verbose cause chain", () =
         "command-fixture",
         "/cwd-fixture",
         "197",
-        "stderr-fixture"
+        "stderr-fixture",
     ]) {
         assert.equal(rendered.includes(value), true, value);
     }

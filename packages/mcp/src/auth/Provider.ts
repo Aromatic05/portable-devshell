@@ -12,7 +12,9 @@ export class McpAuthProviderToken {
         return this.authenticate(authorizationHeader) !== undefined;
     }
 
-    authenticate(authorizationHeader: string | undefined): AuthInfo | undefined {
+    authenticate(
+        authorizationHeader: string | undefined,
+    ): AuthInfo | undefined {
         if (authorizationHeader === undefined) {
             return undefined;
         }
@@ -30,7 +32,7 @@ export class McpAuthProviderToken {
         return {
             clientId: `token:${tokenDigest.toString("hex")}`,
             scopes: [],
-            token
+            token,
         };
     }
 }

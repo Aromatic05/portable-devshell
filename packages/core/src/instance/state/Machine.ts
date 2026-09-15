@@ -1,7 +1,15 @@
-import type { ConnectionState, DaemonState, InstanceName } from "@portable-devshell/shared";
+import type {
+    ConnectionState,
+    DaemonState,
+    InstanceName,
+} from "@portable-devshell/shared";
 
 import { createInstanceSnapshot, type InstanceSnapshot } from "./Snapshot.js";
-import { type InstanceRuntimeState, deriveRuntimeStatus, isReadyState } from "./Runtime.js";
+import {
+    type InstanceRuntimeState,
+    deriveRuntimeStatus,
+    isReadyState,
+} from "./Runtime.js";
 
 export interface InstanceStateUpdate {
     connectionState?: ConnectionState;
@@ -23,19 +31,28 @@ export class InstanceStateMachine {
             daemonState: "stopped",
             lastSeq: 0,
             ready: false,
-            status: "stopped"
+            status: "stopped",
         };
     }
 
     apply(update: InstanceStateUpdate): InstanceSnapshot {
         const daemonState = update.daemonState ?? this.#state.daemonState;
-        const connectionState = update.connectionState ?? this.#state.connectionState;
+        const connectionState =
+            update.connectionState ?? this.#state.connectionState;
         const lastSeq = update.lastSeq ?? this.#state.lastSeq;
-        const pid = Object.prototype.hasOwnProperty.call(update, "pid") ? update.pid : this.#state.pid;
-        const lastErrorCode = Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
+        const pid = Object.prototype.hasOwnProperty.call(update, "pid")
+            ? update.pid
+            : this.#state.pid;
+        const lastErrorCode = Object.prototype.hasOwnProperty.call(
+            update,
+            "lastErrorCode",
+        )
             ? update.lastErrorCode
             : this.#state.lastErrorCode;
-        const lastErrorMessage = Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
+        const lastErrorMessage = Object.prototype.hasOwnProperty.call(
+            update,
+            "lastErrorMessage",
+        )
             ? update.lastErrorMessage
             : this.#state.lastErrorMessage;
 
@@ -47,7 +64,7 @@ export class InstanceStateMachine {
             lastSeq,
             pid,
             ready: isReadyState(daemonState, connectionState),
-            status: deriveRuntimeStatus(daemonState, connectionState)
+            status: deriveRuntimeStatus(daemonState, connectionState),
         };
 
         return this.snapshot();
@@ -61,7 +78,7 @@ export class InstanceStateMachine {
             lastErrorMessage: this.#state.lastErrorMessage,
             lastSeq: this.#state.lastSeq,
             name: this.#name,
-            pid: this.#state.pid
+            pid: this.#state.pid,
         });
     }
 

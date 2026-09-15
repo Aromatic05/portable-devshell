@@ -18,7 +18,7 @@ const WINDOWS_ACL_SCRIPT = [
     "  $acl = [System.Security.AccessControl.FileSecurity]::new()",
     "  $inheritance = [System.Security.AccessControl.InheritanceFlags]::None",
     "} else {",
-    "  throw \"Unsupported ACL target kind: $kind\"",
+    '  throw "Unsupported ACL target kind: $kind"',
     "}",
     "$acl.SetOwner($identity.User)",
     "$acl.SetAccessRuleProtection($true, $false)",
@@ -64,7 +64,9 @@ async function secureDirectoryTree(path: string): Promise<void> {
     for (const entry of await readdir(path, { withFileTypes: true })) {
         const child = join(path, entry.name);
         if (entry.isSymbolicLink()) {
-            throw new Error(`OAuth storage must not contain symbolic links: ${child}`);
+            throw new Error(
+                `OAuth storage must not contain symbolic links: ${child}`,
+            );
         }
         if (entry.isDirectory()) {
             await secureDirectoryTree(child);
@@ -74,14 +76,25 @@ async function secureDirectoryTree(path: string): Promise<void> {
             await secureWindowsPath(child, "file");
             continue;
         }
-        throw new Error(`OAuth storage contains an unsupported filesystem entry: ${child}`);
+        throw new Error(
+            `OAuth storage contains an unsupported filesystem entry: ${child}`,
+        );
     }
 }
 
-async function secureWindowsPath(path: string, kind: "directory" | "file"): Promise<void> {
+async function secureWindowsPath(
+    path: string,
+    kind: "directory" | "file",
+): Promise<void> {
     await execFileAsync(
         "powershell.exe",
-        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_ACL_SCRIPT],
+        [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            WINDOWS_ACL_SCRIPT,
+        ],
         {
             env: {
                 ...process.env,

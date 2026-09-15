@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    renameSync,
+    statSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -83,13 +89,20 @@ export class ConversationStore {
         now?: () => number;
         retentionDays?: number;
     }) {
-        const maxBytes = options.maxBytes ?? defaultConversationStorageLimits.maxBytes;
-        const retentionDays = options.retentionDays ?? defaultConversationStorageLimits.retentionDays;
+        const maxBytes =
+            options.maxBytes ?? defaultConversationStorageLimits.maxBytes;
+        const retentionDays =
+            options.retentionDays ??
+            defaultConversationStorageLimits.retentionDays;
         if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
-            throw new TypeError("Conversation maxBytes must be a positive safe integer.");
+            throw new TypeError(
+                "Conversation maxBytes must be a positive safe integer.",
+            );
         }
         if (!Number.isSafeInteger(retentionDays) || retentionDays < 1) {
-            throw new TypeError("Conversation retentionDays must be a positive safe integer.");
+            throw new TypeError(
+                "Conversation retentionDays must be a positive safe integer.",
+            );
         }
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
@@ -117,13 +130,17 @@ export class ConversationStore {
 
     listComments(input: ContextMessageListInput = {}): ContextMessageRecord[] {
         this.#cleanup(this.#open());
-        const entries = this.#listRows(input, "comment").map((row) => toContextMessageRecord(row, this.#instanceName));
+        const entries = this.#listRows(input, "comment").map((row) =>
+            toContextMessageRecord(row, this.#instanceName),
+        );
         return applyByteBudget(entries, input.maxBytes);
     }
 
     pendingComments(ctxId?: string): ContextMessageRecord[] {
         const database = this.#open();
-        const rows = database.prepare(`
+        const rows = database
+            .prepare(
+                `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -141,40 +158,60 @@ export class ConversationStore {
               AND status IN ('pending', 'sent')
               ${ctxId === undefined ? "" : "AND ctx_id = ?"}
             ORDER BY created_at ASC, seq ASC
-        `).all(...(ctxId === undefined ? [] : [ctxId])) as unknown as ConversationRow[];
-        return rows.map((row) => toContextMessageRecord(row, this.#instanceName));
+        `,
+            )
+            .all(
+                ...(ctxId === undefined ? [] : [ctxId]),
+            ) as unknown as ConversationRow[];
+        return rows.map((row) =>
+            toContextMessageRecord(row, this.#instanceName),
+        );
     }
 
     insertComment(record: ContextMessageRecord): void {
         const database = this.#open();
         database.exec("BEGIN IMMEDIATE");
         try {
-            database.prepare(`
+            database
+                .prepare(
+                    `
                 INSERT INTO conversation_entries(
                     kind, id, ctx_id, created_at, text, status, call_id, delivered_at, failed_at, error
                 ) VALUES ('comment', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-                record.id,
+            `,
+                )
+                .run(
+                    record.id,
+                    record.ctxId,
+                    record.createdAt,
+                    record.text,
+                    record.status,
+                    record.callId ?? null,
+                    record.deliveredAt ?? null,
+                    record.failedAt ?? null,
+                    record.error ?? null,
+                );
+            const state = this.#readControlStateFromDatabase(
+                database,
                 record.ctxId,
-                record.createdAt,
-                record.text,
-                record.status,
-                record.callId ?? null,
-                record.deliveredAt ?? null,
-                record.failedAt ?? null,
-                record.error ?? null,
             );
-            const state = this.#readControlStateFromDatabase(database, record.ctxId);
-            if (record.status === "delivered") applyDeliveredControls(state, [record]);
-            else if (record.status === "pending" || record.status === "sent") applyQueuedControl(state, record);
+            if (record.status === "delivered")
+                applyDeliveredControls(state, [record]);
+            else if (record.status === "pending" || record.status === "sent")
+                applyQueuedControl(state, record);
             this.#writeControlStateInDatabase(database, record.ctxId, state);
             database.exec("COMMIT");
         } catch (error) {
             database.exec("ROLLBACK");
             throw error;
         }
-        this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "comment", record.id);
-        this.#cleanup(database, record.status === "delivered" || record.status === "failed");
+        this.#payloadBytes =
+            this.#trackedPayloadBytes() +
+            this.#readEntryPayloadBytes(database, "comment", record.id);
+        this.#cleanup(
+            database,
+            record.status === "delivered" || record.status === "failed",
+        );
     }
 
     readControlState(ctxId: string): ConversationControlState {
@@ -194,12 +231,16 @@ export class ConversationStore {
     }
 
     clearAllControlStates(): void {
-        this.#open().prepare(
-            "DELETE FROM conversation_metadata WHERE key LIKE ?"
-        ).run(`${CONTROL_STATE_METADATA_PREFIX}%`);
+        this.#open()
+            .prepare("DELETE FROM conversation_metadata WHERE key LIKE ?")
+            .run(`${CONTROL_STATE_METADATA_PREFIX}%`);
     }
 
-    deliverComments(ctxId: string, callId: string, deliveredAt: string): ContextMessageRecord[] {
+    deliverComments(
+        ctxId: string,
+        callId: string,
+        deliveredAt: string,
+    ): ContextMessageRecord[] {
         const database = this.#open();
         let pending: ContextMessageRecord[] = [];
         let beforePayloadBytes = 0;
@@ -211,7 +252,9 @@ export class ConversationStore {
                 return [];
             }
             beforePayloadBytes = pending.reduce(
-                (total, record) => total + this.#readEntryPayloadBytes(database, "comment", record.id),
+                (total, record) =>
+                    total +
+                    this.#readEntryPayloadBytes(database, "comment", record.id),
                 0,
             );
             const update = database.prepare(`
@@ -219,7 +262,8 @@ export class ConversationStore {
                 SET status = 'delivered', call_id = ?, delivered_at = ?, failed_at = NULL, error = NULL
                 WHERE kind = 'comment' AND id = ?
             `);
-            for (const record of pending) update.run(callId, deliveredAt, record.id);
+            for (const record of pending)
+                update.run(callId, deliveredAt, record.id);
             const state = this.#readControlStateFromDatabase(database, ctxId);
             applyDeliveredControls(state, pending);
             this.#writeControlStateInDatabase(database, ctxId, state);
@@ -229,10 +273,15 @@ export class ConversationStore {
             throw error;
         }
         const afterPayloadBytes = pending.reduce(
-            (total, record) => total + this.#readEntryPayloadBytes(database, "comment", record.id),
+            (total, record) =>
+                total +
+                this.#readEntryPayloadBytes(database, "comment", record.id),
             0,
         );
-        this.#payloadBytes = this.#trackedPayloadBytes() + afterPayloadBytes - beforePayloadBytes;
+        this.#payloadBytes =
+            this.#trackedPayloadBytes() +
+            afterPayloadBytes -
+            beforePayloadBytes;
         this.#cleanup(database, true);
         return pending.map((record) => ({
             ...record,
@@ -244,12 +293,19 @@ export class ConversationStore {
         }));
     }
 
-    failComments(ids: ReadonlySet<string>, error: string, failedAt: string): void {
+    failComments(
+        ids: ReadonlySet<string>,
+        error: string,
+        failedAt: string,
+    ): void {
         if (ids.size === 0) return;
         const database = this.#open();
-        const failedRecords = this.listComments().filter((record) => ids.has(record.id));
+        const failedRecords = this.listComments().filter((record) =>
+            ids.has(record.id),
+        );
         const beforePayloadBytes = [...ids].reduce(
-            (total, id) => total + this.#readEntryPayloadBytes(database, "comment", id),
+            (total, id) =>
+                total + this.#readEntryPayloadBytes(database, "comment", id),
             0,
         );
         database.exec("BEGIN IMMEDIATE");
@@ -260,12 +316,23 @@ export class ConversationStore {
                 WHERE kind = 'comment' AND id = ?
             `);
             for (const id of ids) update.run(failedAt, error, id);
-            for (const ctxId of new Set(failedRecords.map((record) => record.ctxId))) {
-                const state = this.#readControlStateFromDatabase(database, ctxId);
-                if (state.stoppedByCommentId !== undefined && ids.has(state.stoppedByCommentId)) {
+            for (const ctxId of new Set(
+                failedRecords.map((record) => record.ctxId),
+            )) {
+                const state = this.#readControlStateFromDatabase(
+                    database,
+                    ctxId,
+                );
+                if (
+                    state.stoppedByCommentId !== undefined &&
+                    ids.has(state.stoppedByCommentId)
+                ) {
                     state.stoppedByCommentId = undefined;
                 }
-                if (state.pendingResumeCommentId !== undefined && ids.has(state.pendingResumeCommentId)) {
+                if (
+                    state.pendingResumeCommentId !== undefined &&
+                    ids.has(state.pendingResumeCommentId)
+                ) {
                     state.pendingResumeCommentId = undefined;
                 }
                 this.#writeControlStateInDatabase(database, ctxId, state);
@@ -276,10 +343,14 @@ export class ConversationStore {
             throw cause;
         }
         const afterPayloadBytes = [...ids].reduce(
-            (total, id) => total + this.#readEntryPayloadBytes(database, "comment", id),
+            (total, id) =>
+                total + this.#readEntryPayloadBytes(database, "comment", id),
             0,
         );
-        this.#payloadBytes = this.#trackedPayloadBytes() + afterPayloadBytes - beforePayloadBytes;
+        this.#payloadBytes =
+            this.#trackedPayloadBytes() +
+            afterPayloadBytes -
+            beforePayloadBytes;
         this.#cleanup(database, true);
     }
 
@@ -294,14 +365,27 @@ export class ConversationStore {
         database.exec("BEGIN IMMEDIATE");
         let changes = 0;
         try {
-            const result = database.prepare(`
+            const result = database
+                .prepare(
+                    `
                 INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, call_id)
                 VALUES ('report', ?, ?, ?, ?, ?)
                 ON CONFLICT(kind, id) DO NOTHING
-            `).run(input.callId, input.ctxId, input.createdAt, input.text, input.callId);
+            `,
+                )
+                .run(
+                    input.callId,
+                    input.ctxId,
+                    input.createdAt,
+                    input.text,
+                    input.callId,
+                );
             changes = Number(result.changes);
             if (input.replyCommentId !== undefined) {
-                const state = this.#readControlStateFromDatabase(database, input.ctxId);
+                const state = this.#readControlStateFromDatabase(
+                    database,
+                    input.ctxId,
+                );
                 if (state.pendingReplyCommentId === input.replyCommentId) {
                     state.pendingReplyCommentId = undefined;
                     state.pendingPushCommentId = undefined;
@@ -315,7 +399,9 @@ export class ConversationStore {
             throw error;
         }
         if (changes > 0) {
-            this.#payloadBytes = this.#trackedPayloadBytes() + this.#readEntryPayloadBytes(database, "report", input.callId);
+            this.#payloadBytes =
+                this.#trackedPayloadBytes() +
+                this.#readEntryPayloadBytes(database, "report", input.callId);
         }
         this.#cleanup(database, true);
     }
@@ -323,14 +409,18 @@ export class ConversationStore {
     stats(): ConversationStoreStats {
         const database = this.#open();
         this.#cleanup(database);
-        const row = database.prepare(`
+        const row = database
+            .prepare(
+                `
             SELECT
                 COUNT(*) AS entries,
                 COALESCE(SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END), 0) AS comments,
                 COALESCE(SUM(CASE WHEN kind = 'report' THEN 1 ELSE 0 END), 0) AS reports,
                 COALESCE(SUM(CASE WHEN kind = 'comment' AND status IN ('pending', 'sent') THEN 1 ELSE 0 END), 0) AS protectedComments
             FROM conversation_entries
-        `).get() as {
+        `,
+            )
+            .get() as {
             comments: number;
             entries: number;
             protectedComments: number;
@@ -339,7 +429,8 @@ export class ConversationStore {
         return {
             comments: row.comments,
             entries: row.entries,
-            fileBytes: fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`),
+            fileBytes:
+                fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`),
             maxBytes: this.#maxBytes,
             payloadBytes: this.#trackedPayloadBytes(),
             protectedComments: row.protectedComments,
@@ -372,22 +463,42 @@ export class ConversationStore {
             parameters.push(input.ctxId);
         }
         if (input.before !== undefined) {
-            const boundary = database.prepare(`
+            const boundary = database
+                .prepare(
+                    `
                 SELECT created_at AS createdAt, id, kind, seq
                 FROM conversation_entries
                 WHERE id = ? ${kind === undefined ? "" : "AND kind = ?"}
                 ORDER BY created_at ASC, seq ASC
                 LIMIT 1
-            `).get(input.before, ...(kind === undefined ? [] : [kind])) as
-                | { createdAt: string; id: string; kind: ConversationEntryKind; seq: number }
+            `,
+                )
+                .get(input.before, ...(kind === undefined ? [] : [kind])) as
+                | {
+                      createdAt: string;
+                      id: string;
+                      kind: ConversationEntryKind;
+                      seq: number;
+                  }
                 | undefined;
             if (boundary !== undefined) {
-                predicates.push("(created_at < ? OR (created_at = ? AND seq < ?))");
-                parameters.push(boundary.createdAt, boundary.createdAt, boundary.seq);
+                predicates.push(
+                    "(created_at < ? OR (created_at = ? AND seq < ?))",
+                );
+                parameters.push(
+                    boundary.createdAt,
+                    boundary.createdAt,
+                    boundary.seq,
+                );
             }
         }
-        const limit = input.limit === undefined ? undefined : Math.max(1, Math.trunc(input.limit));
-        const rows = database.prepare(`
+        const limit =
+            input.limit === undefined
+                ? undefined
+                : Math.max(1, Math.trunc(input.limit));
+        const rows = database
+            .prepare(
+                `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -404,7 +515,11 @@ export class ConversationStore {
             ${predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`}
             ORDER BY created_at DESC, seq DESC
             ${limit === undefined ? "" : "LIMIT ?"}
-        `).all(...(limit === undefined ? parameters : [...parameters, limit])) as unknown as ConversationRow[];
+        `,
+            )
+            .all(
+                ...(limit === undefined ? parameters : [...parameters, limit]),
+            ) as unknown as ConversationRow[];
         return rows.reverse();
     }
 
@@ -412,7 +527,8 @@ export class ConversationStore {
         if (this.#database !== undefined) return this.#database;
         mkdirSync(dirname(this.#filePath), { recursive: true });
         const require = createRequire(import.meta.url);
-        const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+        const { DatabaseSync } =
+            require("node:sqlite") as typeof import("node:sqlite");
         const database = new DatabaseSync(this.#filePath, { timeout: 5_000 });
         try {
             const userVersion = assertSqliteSchemaVersionSupported(database, {
@@ -438,13 +554,16 @@ export class ConversationStore {
 
     #initializeSchema(database: DatabaseSync, userVersion: number): void {
         if (userVersion === CONVERSATION_DATABASE_SCHEMA_VERSION) {
-            const present = database.prepare(
-                "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'conversation_entries'"
-            ).get() !== undefined;
+            const present =
+                database
+                    .prepare(
+                        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'conversation_entries'",
+                    )
+                    .get() !== undefined;
             if (!present) {
                 throw new Error(
                     `Conversation database schema version ${CONVERSATION_DATABASE_SCHEMA_VERSION} is inconsistent: ` +
-                    "conversation_entries is missing. Refusing to modify the database."
+                        "conversation_entries is missing. Refusing to modify the database.",
                 );
             }
             return;
@@ -487,9 +606,14 @@ export class ConversationStore {
     #cleanup(database: DatabaseSync, forceRetention = false): void {
         const now = this.#now();
         let removed = false;
-        if (forceRetention || now - this.#lastRetentionCleanupAt >= RETENTION_CLEANUP_INTERVAL_MS) {
+        if (
+            forceRetention ||
+            now - this.#lastRetentionCleanupAt >= RETENTION_CLEANUP_INTERVAL_MS
+        ) {
             const cutoff = new Date(now - this.#retentionMs).toISOString();
-            const expired = database.prepare(`
+            const expired = database
+                .prepare(
+                    `
                 SELECT COUNT(*) AS entries, COALESCE(SUM(${conversationPayloadBytesSql()}), 0) AS payloadBytes
                 FROM conversation_entries
                 WHERE
@@ -499,9 +623,16 @@ export class ConversationStore {
                         AND status IN ('delivered', 'failed')
                         AND COALESCE(delivered_at, failed_at, created_at) < ?
                     )
-            `).get(cutoff, cutoff) as { entries: number; payloadBytes: number };
+            `,
+                )
+                .get(cutoff, cutoff) as {
+                entries: number;
+                payloadBytes: number;
+            };
             if (expired.entries > 0) {
-                database.prepare(`
+                database
+                    .prepare(
+                        `
                     DELETE FROM conversation_entries
                     WHERE
                         (kind = 'report' AND created_at < ?)
@@ -510,15 +641,22 @@ export class ConversationStore {
                             AND status IN ('delivered', 'failed')
                             AND COALESCE(delivered_at, failed_at, created_at) < ?
                         )
-                `).run(cutoff, cutoff);
-                this.#payloadBytes = Math.max(0, this.#trackedPayloadBytes() - expired.payloadBytes);
+                `,
+                    )
+                    .run(cutoff, cutoff);
+                this.#payloadBytes = Math.max(
+                    0,
+                    this.#trackedPayloadBytes() - expired.payloadBytes,
+                );
                 removed = true;
             }
             this.#lastRetentionCleanupAt = now;
         }
 
         while (this.#trackedPayloadBytes() > this.#maxBytes) {
-            const candidates = database.prepare(`
+            const candidates = database
+                .prepare(
+                    `
                 SELECT seq, ${conversationPayloadBytesSql()} AS payloadBytes
                 FROM conversation_entries
                 WHERE kind = 'report' OR (kind = 'comment' AND status IN ('delivered', 'failed'))
@@ -529,9 +667,13 @@ export class ConversationStore {
                     END ASC,
                     seq ASC
                 LIMIT 256
-            `).all() as Array<{ payloadBytes: number; seq: number }>;
+            `,
+                )
+                .all() as Array<{ payloadBytes: number; seq: number }>;
             if (candidates.length === 0) break;
-            const remove = database.prepare("DELETE FROM conversation_entries WHERE seq = ?");
+            const remove = database.prepare(
+                "DELETE FROM conversation_entries WHERE seq = ?",
+            );
             let payloadBytes = this.#trackedPayloadBytes();
             database.exec("BEGIN IMMEDIATE");
             try {
@@ -550,40 +692,57 @@ export class ConversationStore {
         }
 
         if (removed && this.#trackedPayloadBytes() <= this.#maxBytes) {
-            const fileBytes = fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
+            const fileBytes =
+                fileSize(this.#filePath) + fileSize(`${this.#filePath}-wal`);
             if (fileBytes > this.#maxBytes) {
                 database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-                if (fileSize(this.#filePath) > this.#maxBytes) database.exec("VACUUM");
+                if (fileSize(this.#filePath) > this.#maxBytes)
+                    database.exec("VACUUM");
             }
         }
     }
 
     #readPayloadBytes(database: DatabaseSync): number {
-        const row = database.prepare(`
+        const row = database
+            .prepare(
+                `
             SELECT COALESCE(SUM(${conversationPayloadBytesSql()}), 0) AS payloadBytes
             FROM conversation_entries
-        `).get() as { payloadBytes: number };
+        `,
+            )
+            .get() as { payloadBytes: number };
         return row.payloadBytes;
     }
 
-    #readEntryPayloadBytes(database: DatabaseSync, kind: ConversationEntryKind, id: string): number {
-        const row = database.prepare(`
+    #readEntryPayloadBytes(
+        database: DatabaseSync,
+        kind: ConversationEntryKind,
+        id: string,
+    ): number {
+        const row = database
+            .prepare(
+                `
             SELECT ${conversationPayloadBytesSql()} AS payloadBytes
             FROM conversation_entries
             WHERE kind = ? AND id = ?
-        `).get(kind, id) as { payloadBytes: number } | undefined;
+        `,
+            )
+            .get(kind, id) as { payloadBytes: number } | undefined;
         return row?.payloadBytes ?? 0;
     }
 
     #trackedPayloadBytes(): number {
         if (this.#payloadBytes === undefined) {
-            throw new Error("Conversation payload accounting is not initialized.");
+            throw new Error(
+                "Conversation payload accounting is not initialized.",
+            );
         }
         return this.#payloadBytes;
     }
 
     #migrateLegacyComments(): void {
-        if (this.#readMetadata(LEGACY_COMMENT_MIGRATION_KEY) === "complete") return;
+        if (this.#readMetadata(LEGACY_COMMENT_MIGRATION_KEY) === "complete")
+            return;
         const database = this.#database!;
         const messages = this.#readLegacyComments();
         database.exec("BEGIN IMMEDIATE");
@@ -607,13 +766,20 @@ export class ConversationStore {
                     record.error ?? null,
                 );
             }
-            this.#writeMetadataInDatabase(database, LEGACY_COMMENT_MIGRATION_KEY, "complete");
+            this.#writeMetadataInDatabase(
+                database,
+                LEGACY_COMMENT_MIGRATION_KEY,
+                "complete",
+            );
             database.exec("COMMIT");
         } catch (error) {
             database.exec("ROLLBACK");
             throw error;
         }
-        if (this.#legacyContextMessagesFile !== undefined && existsSync(this.#legacyContextMessagesFile)) {
+        if (
+            this.#legacyContextMessagesFile !== undefined &&
+            existsSync(this.#legacyContextMessagesFile)
+        ) {
             const backup = migrationBackupPath(this.#legacyContextMessagesFile);
             renameSync(this.#legacyContextMessagesFile, backup);
         }
@@ -629,9 +795,9 @@ export class ConversationStore {
     }
 
     #readMetadata(key: string): string | undefined {
-        const row = this.#open().prepare(
-            "SELECT value FROM conversation_metadata WHERE key = ?"
-        ).get(key) as { value: string } | undefined;
+        const row = this.#open()
+            .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+            .get(key) as { value: string } | undefined;
         return row?.value;
     }
 
@@ -639,17 +805,29 @@ export class ConversationStore {
         this.#writeMetadataInDatabase(this.#open(), key, value);
     }
 
-    #writeMetadataInDatabase(database: DatabaseSync, key: string, value: string): void {
-        database.prepare(`
+    #writeMetadataInDatabase(
+        database: DatabaseSync,
+        key: string,
+        value: string,
+    ): void {
+        database
+            .prepare(
+                `
             INSERT INTO conversation_metadata(key, value) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        `).run(key, value);
+        `,
+            )
+            .run(key, value);
     }
 
-    #readControlStateFromDatabase(database: DatabaseSync, ctxId: string): ConversationControlState {
-        const row = database.prepare(
-            "SELECT value FROM conversation_metadata WHERE key = ?"
-        ).get(controlStateMetadataKey(ctxId)) as { value: string } | undefined;
+    #readControlStateFromDatabase(
+        database: DatabaseSync,
+        ctxId: string,
+    ): ConversationControlState {
+        const row = database
+            .prepare("SELECT value FROM conversation_metadata WHERE key = ?")
+            .get(controlStateMetadataKey(ctxId)) as
+            { value: string } | undefined;
         if (row === undefined) return {};
         return normalizeControlState(JSON.parse(row.value) as unknown);
     }
@@ -662,16 +840,25 @@ export class ConversationStore {
         const normalized = normalizeControlState(state);
         const key = controlStateMetadataKey(ctxId);
         if (Object.keys(normalized).length === 0) {
-            database.prepare("DELETE FROM conversation_metadata WHERE key = ?").run(key);
+            database
+                .prepare("DELETE FROM conversation_metadata WHERE key = ?")
+                .run(key);
             return;
         }
-        this.#writeMetadataInDatabase(database, key, JSON.stringify(normalized));
+        this.#writeMetadataInDatabase(
+            database,
+            key,
+            JSON.stringify(normalized),
+        );
     }
 
     #migrateControlState(): void {
-        if (this.#readMetadata(CONTROL_STATE_MIGRATION_KEY) === "complete") return;
+        if (this.#readMetadata(CONTROL_STATE_MIGRATION_KEY) === "complete")
+            return;
         const database = this.#database!;
-        const rows = database.prepare(`
+        const rows = database
+            .prepare(
+                `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -686,24 +873,29 @@ export class ConversationStore {
                 text
             FROM conversation_entries
             ORDER BY seq ASC
-        `).all() as unknown as ConversationRow[];
+        `,
+            )
+            .all() as unknown as ConversationRow[];
         const states = deriveControlStatesFromHistory(rows);
         database.exec("BEGIN IMMEDIATE");
         try {
-            database.prepare(
-                "DELETE FROM conversation_metadata WHERE key LIKE ?"
-            ).run(`${CONTROL_STATE_METADATA_PREFIX}%`);
+            database
+                .prepare("DELETE FROM conversation_metadata WHERE key LIKE ?")
+                .run(`${CONTROL_STATE_METADATA_PREFIX}%`);
             for (const [ctxId, state] of states) {
                 this.#writeControlStateInDatabase(database, ctxId, state);
             }
-            this.#writeMetadataInDatabase(database, CONTROL_STATE_MIGRATION_KEY, "complete");
+            this.#writeMetadataInDatabase(
+                database,
+                CONTROL_STATE_MIGRATION_KEY,
+                "complete",
+            );
             database.exec("COMMIT");
         } catch (error) {
             database.exec("ROLLBACK");
             throw error;
         }
     }
-
 }
 
 function controlStateMetadataKey(ctxId: string): string {
@@ -716,15 +908,28 @@ function normalizeControlState(value: unknown): ConversationControlState {
     }
     const state = value as Record<string, unknown>;
     const remaining = state.pushToolCallsRemaining;
-    if (remaining !== undefined && (!Number.isSafeInteger(remaining) || (remaining as number) < 0)) {
+    if (
+        remaining !== undefined &&
+        (!Number.isSafeInteger(remaining) || (remaining as number) < 0)
+    ) {
         throw new Error("conversation control push budget is invalid");
     }
     return {
-        ...(typeof state.pendingPushCommentId === "string" ? { pendingPushCommentId: state.pendingPushCommentId } : {}),
-        ...(typeof state.pendingReplyCommentId === "string" ? { pendingReplyCommentId: state.pendingReplyCommentId } : {}),
-        ...(typeof state.pendingResumeCommentId === "string" ? { pendingResumeCommentId: state.pendingResumeCommentId } : {}),
-        ...(remaining === undefined ? {} : { pushToolCallsRemaining: remaining as number }),
-        ...(typeof state.stoppedByCommentId === "string" ? { stoppedByCommentId: state.stoppedByCommentId } : {}),
+        ...(typeof state.pendingPushCommentId === "string"
+            ? { pendingPushCommentId: state.pendingPushCommentId }
+            : {}),
+        ...(typeof state.pendingReplyCommentId === "string"
+            ? { pendingReplyCommentId: state.pendingReplyCommentId }
+            : {}),
+        ...(typeof state.pendingResumeCommentId === "string"
+            ? { pendingResumeCommentId: state.pendingResumeCommentId }
+            : {}),
+        ...(remaining === undefined
+            ? {}
+            : { pushToolCallsRemaining: remaining as number }),
+        ...(typeof state.stoppedByCommentId === "string"
+            ? { stoppedByCommentId: state.stoppedByCommentId }
+            : {}),
     };
 }
 
@@ -761,12 +966,18 @@ function deriveControlStatesFromHistory(
     return states;
 }
 
-function applyQueuedControl(state: ConversationControlState, record: ContextMessageRecord): void {
+function applyQueuedControl(
+    state: ConversationControlState,
+    record: ContextMessageRecord,
+): void {
     const directive = parseContextMessageDirective(record.text).directive;
     if (directive === "stop") {
         state.stoppedByCommentId ??= record.id;
         state.pendingResumeCommentId = undefined;
-    } else if (directive === "resume" && state.stoppedByCommentId !== undefined) {
+    } else if (
+        directive === "resume" &&
+        state.stoppedByCommentId !== undefined
+    ) {
         state.pendingResumeCommentId = record.id;
     }
 }
@@ -790,7 +1001,8 @@ function applyDeliveredControls(
             case "push":
                 state.pendingReplyCommentId = record.id;
                 state.pendingPushCommentId = record.id;
-                state.pushToolCallsRemaining ??= CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+                state.pushToolCallsRemaining ??=
+                    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
                 break;
             default:
                 state.pendingReplyCommentId = record.id;
@@ -814,7 +1026,10 @@ function toConversationEntry(row: ConversationRow): ConversationEntry {
     };
 }
 
-function toContextMessageRecord(row: ConversationRow, instance: string): ContextMessageRecord {
+function toContextMessageRecord(
+    row: ConversationRow,
+    instance: string,
+): ContextMessageRecord {
     if (row.kind !== "comment" || row.status === null) {
         throw new Error("Conversation row is not a Context Comment.");
     }
@@ -837,7 +1052,9 @@ function applyByteBudget<T>(records: T[], maxBytes: number | undefined): T[] {
     const accepted: T[] = [];
     let bytes = 2;
     for (const record of [...records].reverse()) {
-        const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8") + (accepted.length === 0 ? 0 : 1);
+        const recordBytes =
+            Buffer.byteLength(JSON.stringify(record), "utf8") +
+            (accepted.length === 0 ? 0 : 1);
         if (bytes + recordBytes > maxBytes) break;
         accepted.unshift(record);
         bytes += recordBytes;
@@ -877,5 +1094,7 @@ function migrationBackupPath(source: string): string {
         const candidate = `${base}.${index}`;
         if (!existsSync(candidate)) return candidate;
     }
-    throw new Error(`Unable to allocate a migration backup path for ${source}.`);
+    throw new Error(
+        `Unable to allocate a migration backup path for ${source}.`,
+    );
 }

@@ -4,35 +4,52 @@ import {
     type BeforeAgentStartEvent,
     type BeforeAgentStartEventResult,
     getAgentDir,
-    type SessionStartEvent
+    type SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
     expandDevshellPiPromptTemplate,
     transformDevshellPiSkillInput,
     type DevshellPiContextFile,
-    type DevshellPiWorkspaceResources
+    type DevshellPiWorkspaceResources,
 } from "./workspace-resources.js";
 import type { DevshellPiTarget } from "./DevshellPiTarget.js";
 
 interface StandalonePiResourcesApiLike {
     on(
         event: "before_agent_start",
-        handler: (event: BeforeAgentStartEvent) => BeforeAgentStartEventResult | Promise<BeforeAgentStartEventResult | void> | void
+        handler: (
+            event: BeforeAgentStartEvent,
+        ) =>
+            | BeforeAgentStartEventResult
+            | Promise<BeforeAgentStartEventResult | void>
+            | void,
     ): void;
-    on(event: "session_start", handler: (event: SessionStartEvent) => Promise<void> | void): void;
+    on(
+        event: "session_start",
+        handler: (event: SessionStartEvent) => Promise<void> | void,
+    ): void;
     getCommands(): Array<{
         name: string;
         source: "extension" | "prompt" | "skill";
         sourceInfo: { scope?: string };
     }>;
-    registerCommand(name: string, options: {
-        description?: string;
-        handler: (args: string) => Promise<void> | void;
-    }): void;
-    sendUserMessage(content: string, options?: { expandPromptTemplates?: boolean }): void;
+    registerCommand(
+        name: string,
+        options: {
+            description?: string;
+            handler: (args: string) => Promise<void> | void;
+        },
+    ): void;
+    sendUserMessage(
+        content: string,
+        options?: { expandPromptTemplates?: boolean },
+    ): void;
 }
 
-export function appendDevshellRemoteWorkspacePrompt(basePrompt: string, target: DevshellPiTarget): string {
+export function appendDevshellRemoteWorkspacePrompt(
+    basePrompt: string,
+    target: DevshellPiTarget,
+): string {
     const remoteWorkspace = `${target.instance}:${target.workspace}`;
     const devshellPrompt = [
         "portable-devshell execution environment:",
@@ -40,28 +57,36 @@ export function appendDevshellRemoteWorkspacePrompt(basePrompt: string, target: 
         "- The local Pi process cwd is the launch workspace used for Pi session identity; it may differ from the real project workspace.",
         "- Use the provided devshell tools for every project filesystem, shell, process, and artifact operation.",
         "- Do not attempt to access the project with local Node.js filesystem/process APIs.",
-        "- Tool results come directly from devshell attached to the real project workspace."
+        "- Tool results come directly from devshell attached to the real project workspace.",
     ].join("\n");
-    return basePrompt.length === 0 ? devshellPrompt : `${basePrompt}\n\n${devshellPrompt}`;
+    return basePrompt.length === 0
+        ? devshellPrompt
+        : `${basePrompt}\n\n${devshellPrompt}`;
 }
 
 export function replacePiProjectContext(
     systemPrompt: string,
     localContextFiles: readonly DevshellPiContextFile[],
     remoteContextFiles: readonly DevshellPiContextFile[],
-    agentDir = getAgentDir()
+    agentDir = getAgentDir(),
 ): string {
     const resolvedAgentDir = resolve(agentDir);
-    const userContextFiles = localContextFiles.filter((file) => resolve(dirname(file.path)) === resolvedAgentDir);
+    const userContextFiles = localContextFiles.filter(
+        (file) => resolve(dirname(file.path)) === resolvedAgentDir,
+    );
     const previousBlock = renderPiProjectContext(localContextFiles);
-    const replacementBlock = renderPiProjectContext([...userContextFiles, ...remoteContextFiles]);
+    const replacementBlock = renderPiProjectContext([
+        ...userContextFiles,
+        ...remoteContextFiles,
+    ]);
     if (previousBlock.length > 0 && systemPrompt.includes(previousBlock)) {
         return systemPrompt.replace(previousBlock, replacementBlock);
     }
     if (remoteContextFiles.length === 0) return systemPrompt;
     const currentWorkingDirectory = "\nCurrent working directory:";
     const markerIndex = systemPrompt.lastIndexOf(currentWorkingDirectory);
-    if (markerIndex < 0) return `${systemPrompt}${renderPiProjectContext(remoteContextFiles)}`;
+    if (markerIndex < 0)
+        return `${systemPrompt}${renderPiProjectContext(remoteContextFiles)}`;
     return `${systemPrompt.slice(0, markerIndex)}${renderPiProjectContext(remoteContextFiles)}${systemPrompt.slice(markerIndex)}`;
 }
 
@@ -69,21 +94,29 @@ export function attachStandaloneWorkspaceResources(
     pi: StandalonePiResourcesApiLike,
     target: DevshellPiTarget,
     resources: DevshellPiWorkspaceResources,
-    setActiveSkillNames: (names: ReadonlySet<string>) => void
+    setActiveSkillNames: (names: ReadonlySet<string>) => void,
 ): void {
     pi.on("session_start", () => {
         const protectedCommandNames = new Set(
-            pi.getCommands()
-                .filter((command) => command.source === "extension" || command.sourceInfo.scope !== "project")
-                .map((command) => command.name)
+            pi
+                .getCommands()
+                .filter(
+                    (command) =>
+                        command.source === "extension" ||
+                        command.sourceInfo.scope !== "project",
+                )
+                .map((command) => command.name),
         );
         for (const prompt of resources.prompts) {
             if (protectedCommandNames.has(prompt.name)) continue;
             pi.registerCommand(prompt.name, {
                 description: prompt.description,
                 handler: (args) => {
-                    pi.sendUserMessage(expandDevshellPiPromptTemplate(prompt, args), { expandPromptTemplates: false });
-                }
+                    pi.sendUserMessage(
+                        expandDevshellPiPromptTemplate(prompt, args),
+                        { expandPromptTemplates: false },
+                    );
+                },
             });
         }
         const activeRemoteSkillNames = new Set<string>();
@@ -97,12 +130,14 @@ export function attachStandaloneWorkspaceResources(
                     const transformed = transformDevshellPiSkillInput([skill], {
                         source: "interactive",
                         text: `/${commandName}${args.length === 0 ? "" : ` ${args}`}`,
-                        type: "input"
+                        type: "input",
                     });
                     if (transformed?.action === "transform") {
-                        pi.sendUserMessage(transformed.text, { expandPromptTemplates: false });
+                        pi.sendUserMessage(transformed.text, {
+                            expandPromptTemplates: false,
+                        });
                     }
-                }
+                },
             });
         }
         setActiveSkillNames(activeRemoteSkillNames);
@@ -112,16 +147,19 @@ export function attachStandaloneWorkspaceResources(
             replacePiProjectContext(
                 event.systemPrompt,
                 event.systemPromptOptions.contextFiles ?? [],
-                resources.contextFiles
+                resources.contextFiles,
             ),
-            target
-        )
+            target,
+        ),
     }));
 }
 
-function renderPiProjectContext(contextFiles: readonly DevshellPiContextFile[]): string {
+function renderPiProjectContext(
+    contextFiles: readonly DevshellPiContextFile[],
+): string {
     if (contextFiles.length === 0) return "";
-    let block = "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
+    let block =
+        "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
     for (const file of contextFiles) {
         block += `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>\n\n`;
     }

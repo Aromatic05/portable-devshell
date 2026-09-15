@@ -1,11 +1,20 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
-import type { WebClients, WebRuntimeStream } from "../../src/app/transport/Client.js";
+import type {
+    WebClients,
+    WebRuntimeStream,
+} from "../../src/app/transport/Client.js";
 import type { WebSession } from "../../src/app/session/Session.js";
 import { App } from "../../src/app/App.js";
 
@@ -33,25 +42,35 @@ afterEach(() => {
 describe("authenticated application shell", () => {
     it("renders discovered Extension applications as Web-domain navigation without invoking them", async () => {
         const clients = fakeClients();
-        clients.web.applications = vi.fn(async () => [{
-            extensionId: "agent",
-            id: "agent",
-            title: "Agent",
-        }]);
-        const session = fakeSession({ authMode: "none", check: false, establish: true });
+        clients.web.applications = vi.fn(async () => [
+            {
+                extensionId: "agent",
+                id: "agent",
+                title: "Agent",
+            },
+        ]);
+        const session = fakeSession({
+            authMode: "none",
+            check: false,
+            establish: true,
+        });
 
         render(<App createClients={() => clients} session={session} />);
 
-        fireEvent.click(await screen.findByRole("button", { name: "Switch page, current Overview" }));
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Switch page, current Overview",
+            }),
+        );
         const link = await screen.findByRole("menuitem", { name: "Agent" });
         expect(link).toHaveAttribute("href", "./extensions/agent/");
         expect(clients.web.applications).toHaveBeenCalledOnce();
     });
 
     it("keeps the default browser session stable across React renders", async () => {
-        const request = vi.fn<typeof fetch>().mockResolvedValue(
-            new Response(null, { status: 204 }),
-        );
+        const request = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(new Response(null, { status: 204 }));
         vi.stubGlobal("fetch", request);
         const createClients = vi.fn(fakeClients);
 
@@ -65,7 +84,11 @@ describe("authenticated application shell", () => {
     });
 
     it("boots auth=none anonymously before creating clients", async () => {
-        const session = fakeSession({ authMode: "none", check: false, establish: true });
+        const session = fakeSession({
+            authMode: "none",
+            check: false,
+            establish: true,
+        });
         const createClients = vi.fn(fakeClients);
 
         render(<App createClients={createClients} session={session} />);
@@ -81,24 +104,36 @@ describe("authenticated application shell", () => {
         const session = fakeSession({ authMode: "token", check: false });
         render(<App createClients={fakeClients} session={session} />);
 
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
         expect(session.establish).not.toHaveBeenCalled();
     });
 
     it("preserves the entered token when sign-in is rejected", async () => {
-        const session = fakeSession({ authMode: "token", check: false, establish: false });
+        const session = fakeSession({
+            authMode: "token",
+            check: false,
+            establish: false,
+        });
         render(<App createClients={fakeClients} session={session} />);
 
         const token = await screen.findByLabelText("Access token");
         fireEvent.change(token, { target: { value: "secret-token" } });
         fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-        expect(await screen.findByRole("alert")).toHaveTextContent("Sign-in was not accepted.");
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Sign-in was not accepted.",
+        );
         expect(token).toHaveValue("secret-token");
     });
 
     it("redirects to the OAuth start endpoint when auth=oauth2", async () => {
-        const session = fakeSession({ authMode: "oauth2", check: false, establish: false });
+        const session = fakeSession({
+            authMode: "oauth2",
+            check: false,
+            establish: false,
+        });
         render(<App createClients={fakeClients} session={session} />);
 
         await waitFor(() => expect(session.startOAuth).toHaveBeenCalledOnce());
@@ -140,18 +175,26 @@ describe("authenticated application shell", () => {
         const clients = fakeClients();
         const close = vi.fn();
         clients.close = close;
-        clients.service.hello = vi.fn()
+        clients.service.hello = vi
+            .fn()
             .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
+            .mockResolvedValue({
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            });
         const createClients = vi.fn(() => clients);
 
         render(<App createClients={createClients} session={session} />);
         await screen.findByRole("button", { name: "Reconnect" });
         session.check.mockResolvedValue(false);
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-        await waitFor(() => expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2));
+        await waitFor(() =>
+            expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2),
+        );
 
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
         expect(close).toHaveBeenCalledOnce();
         expect(session.check.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
@@ -160,15 +203,26 @@ describe("authenticated application shell", () => {
         let releaseCheck!: (available: boolean) => void;
         const session = fakeSession({ check: true });
         const clients = fakeClients();
-        clients.service.hello = vi.fn()
+        clients.service.hello = vi
+            .fn()
             .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
+            .mockResolvedValue({
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            });
         render(<App createClients={() => clients} session={session} />);
 
         await screen.findByRole("button", { name: "Reconnect" });
-        session.check.mockImplementation(async () => await new Promise<boolean>((resolve) => { releaseCheck = resolve; }));
+        session.check.mockImplementation(
+            async () =>
+                await new Promise<boolean>((resolve) => {
+                    releaseCheck = resolve;
+                }),
+        );
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-        expect(screen.getByRole("button", { name: "Reconnecting…" })).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: "Reconnecting…" }),
+        ).toBeDisabled();
         fireEvent.click(screen.getByRole("button", { name: "Reconnecting…" }));
         releaseCheck(true);
 
@@ -179,17 +233,24 @@ describe("authenticated application shell", () => {
         let resolveFirstCheck!: (available: boolean) => void;
         const first: WebSession = {
             authMode: async () => "token",
-            check: async () => await new Promise<boolean>((resolve) => { resolveFirstCheck = resolve; }),
+            check: async () =>
+                await new Promise<boolean>((resolve) => {
+                    resolveFirstCheck = resolve;
+                }),
             establish: async () => false,
             logout: async () => undefined,
             startOAuth: () => undefined,
         };
         const second = fakeSession({ check: false, establish: false });
         const createClients = vi.fn(fakeClients);
-        const view = render(<App createClients={createClients} session={first} />);
+        const view = render(
+            <App createClients={createClients} session={first} />,
+        );
 
         view.rerender(<App createClients={createClients} session={second} />);
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
         resolveFirstCheck(true);
         await Promise.resolve();
 
@@ -200,13 +261,18 @@ describe("authenticated application shell", () => {
         let resolveCheck!: (available: boolean) => void;
         const session: WebSession = {
             authMode: async () => "token",
-            check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
+            check: async () =>
+                await new Promise<boolean>((resolve) => {
+                    resolveCheck = resolve;
+                }),
             establish: async () => false,
             logout: async () => undefined,
             startOAuth: () => undefined,
         };
         const createClients = vi.fn(fakeClients);
-        const view = render(<App createClients={createClients} session={session} />);
+        const view = render(
+            <App createClients={createClients} session={session} />,
+        );
 
         view.unmount();
         resolveCheck(true);
@@ -218,28 +284,49 @@ describe("authenticated application shell", () => {
     it("makes logout single-flight while the session revocation is pending", async () => {
         let releaseLogout!: () => void;
         const session = fakeSession({ check: true });
-        session.logout.mockImplementation(async () => await new Promise<void>((resolve) => { releaseLogout = resolve; }));
+        session.logout.mockImplementation(
+            async () =>
+                await new Promise<void>((resolve) => {
+                    releaseLogout = resolve;
+                }),
+        );
         render(<App createClients={fakeClients} session={session} />);
 
         const logout = await screen.findByRole("button", { name: "Log out" });
         fireEvent.click(logout);
-        expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
+        expect(
+            screen.getByRole("button", { name: "Logging out…" }),
+        ).toBeDisabled();
         fireEvent.click(screen.getByRole("button", { name: "Logging out…" }));
         releaseLogout();
 
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
         expect(session.logout).toHaveBeenCalledOnce();
     });
 
     it("disables runtime actions while logout is pending", async () => {
         let releaseLogout!: () => void;
         const session = fakeSession({ check: true });
-        session.logout.mockImplementation(async () => await new Promise<void>((resolve) => {
-            releaseLogout = resolve;
-        }));
+        session.logout.mockImplementation(
+            async () =>
+                await new Promise<void>((resolve) => {
+                    releaseLogout = resolve;
+                }),
+        );
         render(<App createClients={fakeClients} session={session} />);
-        fireEvent.click(await screen.findByRole("button", { name: "Switch page, current Overview" }));
-        fireEvent.click(within(screen.getByRole("menu", { name: "Pages" })).getByRole("menuitem", { name: /Instances/ }));
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Switch page, current Overview",
+            }),
+        );
+        fireEvent.click(
+            within(screen.getByRole("menu", { name: "Pages" })).getByRole(
+                "menuitem",
+                { name: /Instances/ },
+            ),
+        );
         fireEvent.click(await screen.findByText("demo"));
         const stop = await screen.findByRole("button", { name: "Stop" });
         expect(stop).toBeEnabled();
@@ -248,26 +335,38 @@ describe("authenticated application shell", () => {
 
         expect(stop).toBeDisabled();
         releaseLogout();
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
     });
 
     it("shows a failed logout without leaving the application", async () => {
         const session = fakeSession({ check: true });
-        session.logout.mockRejectedValue(new Error("Session revocation failed"));
+        session.logout.mockRejectedValue(
+            new Error("Session revocation failed"),
+        );
         render(<App createClients={fakeClients} session={session} />);
 
         fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
 
-        expect(await screen.findByText("Session revocation failed")).toHaveAttribute("role", "alert");
-        expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+        expect(
+            await screen.findByText("Session revocation failed"),
+        ).toHaveAttribute("role", "alert");
+        expect(
+            screen.getByRole("button", { name: "Log out" }),
+        ).toBeInTheDocument();
     });
 
     it("shows a session verification error when reconnect checking fails", async () => {
         const session = fakeSession({ check: true });
         const clients = fakeClients();
-        clients.service.hello = vi.fn()
+        clients.service.hello = vi
+            .fn()
             .mockRejectedValueOnce(new Error("Control offline"))
-            .mockResolvedValue({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
+            .mockResolvedValue({
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            });
         render(<App createClients={() => clients} session={session} />);
 
         await screen.findByRole("button", { name: "Reconnect" });
@@ -278,7 +377,9 @@ describe("authenticated application shell", () => {
         session.check.mockResolvedValue(true);
         fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
 
-        await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+        await waitFor(() =>
+            expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+        );
     });
 
     it("clears the ready store before bootstrapping a replacement session", async () => {
@@ -289,20 +390,29 @@ describe("authenticated application shell", () => {
         const initial = fakeSession({ check: true });
         const replacement: WebSession = {
             authMode: async () => "token",
-            check: async () => await new Promise<boolean>((resolve) => { resolveCheck = resolve; }),
+            check: async () =>
+                await new Promise<boolean>((resolve) => {
+                    resolveCheck = resolve;
+                }),
             establish: async () => false,
             logout: async () => undefined,
             startOAuth: () => undefined,
         };
         const createClients = vi.fn(() => initialClients);
-        const view = render(<App createClients={createClients} session={initial} />);
+        const view = render(
+            <App createClients={createClients} session={initial} />,
+        );
 
         await screen.findByRole("button", { name: "Log out" });
-        view.rerender(<App createClients={createClients} session={replacement} />);
+        view.rerender(
+            <App createClients={createClients} session={replacement} />,
+        );
 
         expect(close).toHaveBeenCalledOnce();
         resolveCheck(false);
-        expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("button", { name: "Sign in" }),
+        ).toBeInTheDocument();
     });
 
     it("exposes direct primary navigation while retaining the responsive Page Switcher", async () => {
@@ -316,66 +426,122 @@ describe("authenticated application shell", () => {
         await screen.findByRole("heading", { name: "Overview" });
 
         expect(document.querySelector(".app > aside")).toBeNull();
-        const primary = screen.getByRole("navigation", { name: "Primary navigation" });
-        fireEvent.click(within(primary).getByRole("button", { name: "Instances" }));
+        const primary = screen.getByRole("navigation", {
+            name: "Primary navigation",
+        });
+        fireEvent.click(
+            within(primary).getByRole("button", { name: "Instances" }),
+        );
         expect(window.location.hash).toBe("#/instances");
-        expect(await screen.findByRole("heading", { name: "Instances" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("heading", { name: "Instances" }),
+        ).toBeInTheDocument();
 
         window.location.hash = "#/overview";
         await screen.findByRole("heading", { name: "Overview" });
-        fireEvent.click(screen.getByRole("button", { name: "Switch page, current Overview" }));
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Switch page, current Overview",
+            }),
+        );
         const menu = screen.getByRole("menu", { name: "Pages" });
-        fireEvent.click(within(menu).getByRole("menuitem", { name: /Instances/ }));
+        fireEvent.click(
+            within(menu).getByRole("menuitem", { name: /Instances/ }),
+        );
         expect(window.location.hash).toBe("#/instances");
         fireEvent.click(await screen.findByText("demo"));
-        expect(await screen.findByRole("heading", { name: "demo", level: 3 })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("heading", { name: "demo", level: 3 }),
+        ).toBeInTheDocument();
     });
 
     it("uses Overview summary links as bookmarkable navigation", async () => {
         window.location.hash = "#/overview";
-        render(<App createClients={fakeClients} session={fakeSession({ check: true })} />);
+        render(
+            <App
+                createClients={fakeClients}
+                session={fakeSession({ check: true })}
+            />,
+        );
 
-        const activity = await screen.findByRole("link", { name: "Recent tool calls" });
+        const activity = await screen.findByRole("link", {
+            name: "Recent tool calls",
+        });
         expect(activity).toHaveAttribute("href", "#/audit");
         fireEvent.click(activity);
-        expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
+        expect(
+            await screen.findByRole("heading", { name: "Audit" }),
+        ).toBeInTheDocument();
         expect(window.location.hash).toBe("#/audit");
     });
 
     it("links each Overview activity directly to its Tool Call", async () => {
         const clients = fakeClients();
         clients.overview.get = vi.fn(async () => ({
-            activity: [{
-                callId: "call-direct",
-                completedAt: "2026-09-14T10:00:01Z",
-                instance: asInstanceName("demo"),
-                startedAt: "2026-09-14T10:00:00Z",
-                status: "completed" as const,
-                toolName: "file_read",
-            }],
+            activity: [
+                {
+                    callId: "call-direct",
+                    completedAt: "2026-09-14T10:00:01Z",
+                    instance: asInstanceName("demo"),
+                    startedAt: "2026-09-14T10:00:00Z",
+                    status: "completed" as const,
+                    toolName: "file_read",
+                },
+            ],
             alerts: [],
             controller: { pid: 1, uptimeSeconds: 1 },
-            counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 },
+            counts: {
+                activeTodos: 0,
+                failedCalls24h: 0,
+                instancesAttention: 0,
+                instancesCritical: 0,
+                instancesReady: 1,
+                instancesTotal: 1,
+                pendingApprovals: 0,
+            },
             generatedAt: "2026-09-14T10:00:02Z",
             health: "healthy" as const,
             instances: [],
             todos: [],
         }));
         window.location.hash = "#/overview";
-        render(<App createClients={() => clients} session={fakeSession({ check: true })} />);
+        render(
+            <App
+                createClients={() => clients}
+                session={fakeSession({ check: true })}
+            />,
+        );
 
-        const activity = await screen.findByRole("link", { name: /demo.*file_read.*completed/u });
-        expect(activity).toHaveAttribute("href", "#/audit/instance/demo/call/call-direct");
+        const activity = await screen.findByRole("link", {
+            name: /demo.*file_read.*completed/u,
+        });
+        expect(activity).toHaveAttribute(
+            "href",
+            "#/audit/instance/demo/call/call-direct",
+        );
     });
 
     it("lets the user dismiss stale global errors", async () => {
         const clients = fakeClients();
-        clients.service.hello = vi.fn(async () => { throw new Error("Control offline"); });
-        render(<App createClients={() => clients} session={fakeSession({ check: true })} />);
+        clients.service.hello = vi.fn(async () => {
+            throw new Error("Control offline");
+        });
+        render(
+            <App
+                createClients={() => clients}
+                session={fakeSession({ check: true })}
+            />,
+        );
 
-        expect(await screen.findByRole("alert")).toHaveTextContent("Control offline");
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Control offline",
+        );
         fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
-        await waitFor(() => expect(screen.queryByText("Control offline")).not.toBeInTheDocument());
+        await waitFor(() =>
+            expect(
+                screen.queryByText("Control offline"),
+            ).not.toBeInTheDocument(),
+        );
     });
 });
 
@@ -413,8 +579,18 @@ function fakeClients(): WebClients {
         config: {} as WebClients["config"],
         conversation: {
             list: async () => [],
-            preferences: async () => ({ orderByWorkspace: {}, titles: {}, version: 1, workspaceOrder: [] }),
-            updatePreferences: async () => ({ orderByWorkspace: {}, titles: {}, version: 1, workspaceOrder: [] }),
+            preferences: async () => ({
+                orderByWorkspace: {},
+                titles: {},
+                version: 1,
+                workspaceOrder: [],
+            }),
+            updatePreferences: async () => ({
+                orderByWorkspace: {},
+                titles: {},
+                version: 1,
+                workspaceOrder: [],
+            }),
         },
         reverse: {} as WebClients["reverse"],
         terminal: {} as WebClients["terminal"],
@@ -431,7 +607,24 @@ function fakeClients(): WebClients {
             list: async () => [{ mcpEnabled: true, name: "demo", snapshot }],
         } as WebClients["instance"],
         overview: {
-            get: async () => ({ activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy", instances: [], todos: [] }),
+            get: async () => ({
+                activity: [],
+                alerts: [],
+                controller: { pid: 1, uptimeSeconds: 1 },
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: 0,
+                    instancesAttention: 0,
+                    instancesCritical: 0,
+                    instancesReady: 1,
+                    instancesTotal: 1,
+                    pendingApprovals: 0,
+                },
+                generatedAt: "2026-07-31T00:00:00Z",
+                health: "healthy",
+                instances: [],
+                todos: [],
+            }),
         },
         runtime: {
             snapshot: async () => ({ lastSeq: 1, snapshot }),
@@ -464,11 +657,19 @@ function fakeClients(): WebClients {
         todo: {
             get: async () => ({
                 lastSeq: 1,
-                todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
+                todo: {
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 0 },
+                },
             }),
         },
         mcp: {
-            status: async () => ({ authMode: "none", oauthReady: false, running: true }),
+            status: async () => ({
+                authMode: "none",
+                oauthReady: false,
+                running: true,
+            }),
             listApprovals: async () => [],
             decideApproval: async () => {
                 throw new Error("Not used.");
@@ -482,25 +683,56 @@ function fakeClients(): WebClients {
 
 function RouteProbe() {
     const [route, navigate] = useHashRoute();
-    return <>
-        <output>{webRouteHref(route)}</output>
-        <button onClick={() => navigate(pageRoute("todos"))}>Todos</button>
-    </>;
+    return (
+        <>
+            <output>{webRouteHref(route)}</output>
+            <button onClick={() => navigate(pageRoute("todos"))}>Todos</button>
+        </>
+    );
 }
 
 describe("hash routing", () => {
     it("round-trips Messages and Audit hierarchy through bookmarkable URLs", () => {
         const routes: WebRoute[] = [
             { page: "messages", view: "contexts" },
-            { page: "messages", view: "thread", instance: "dev/main", ctxId: "ctx alpha" },
+            {
+                page: "messages",
+                view: "thread",
+                instance: "dev/main",
+                ctxId: "ctx alpha",
+            },
             { page: "audit", view: "timeline", scope: { kind: "all" } },
-            { page: "audit", view: "timeline", scope: { kind: "instance", instance: "dev/main" } },
-            { page: "audit", view: "timeline", scope: { kind: "context", instance: "dev/main", ctxId: "ctx alpha" } },
-            { page: "audit", view: "call", instance: "dev/main", ctxId: "ctx alpha", callId: "call/1" },
-            { page: "audit", view: "call", instance: "dev/main", callId: "call/2" },
+            {
+                page: "audit",
+                view: "timeline",
+                scope: { kind: "instance", instance: "dev/main" },
+            },
+            {
+                page: "audit",
+                view: "timeline",
+                scope: {
+                    kind: "context",
+                    instance: "dev/main",
+                    ctxId: "ctx alpha",
+                },
+            },
+            {
+                page: "audit",
+                view: "call",
+                instance: "dev/main",
+                ctxId: "ctx alpha",
+                callId: "call/1",
+            },
+            {
+                page: "audit",
+                view: "call",
+                instance: "dev/main",
+                callId: "call/2",
+            },
         ];
 
-        for (const route of routes) expect(readHashRoute(webRouteHref(route))).toEqual(route);
+        for (const route of routes)
+            expect(readHashRoute(webRouteHref(route))).toEqual(route);
     });
 
     it("maps the legacy activity URL onto Audit without keeping activity as a page", () => {
@@ -518,7 +750,9 @@ describe("hash routing", () => {
 
         window.location.hash = "#/audit/context/demo/ctx-a";
         fireEvent(window, new HashChangeEvent("hashchange"));
-        expect(screen.getByText("#/audit/context/demo/ctx-a")).toBeInTheDocument();
+        expect(
+            screen.getByText("#/audit/context/demo/ctx-a"),
+        ).toBeInTheDocument();
         window.location.hash = "#/messages/demo/ctx-a";
         fireEvent(window, new PopStateEvent("popstate"));
         expect(screen.getByText("#/messages/demo/ctx-a")).toBeInTheDocument();

@@ -10,21 +10,21 @@ const validTool = {
         additionalProperties: false,
         properties: { command: { type: "string" } },
         required: ["command"],
-        type: "object"
+        type: "object",
     },
     name: "bash_run",
     outputSchema: {
         properties: { exitCode: { type: "integer" } },
-        type: "object"
+        type: "object",
     },
-    requiredCapabilities: ["execute"]
+    requiredCapabilities: ["execute"],
 };
 
 test("tool schema accepts a valid tool definition", () => {
     assert.deepEqual(toolSchema.parse(validTool), validTool);
     assert.deepEqual(toolSchema.safeParse(validTool), {
         data: validTool,
-        success: true
+        success: true,
     });
 });
 
@@ -39,7 +39,7 @@ test("tool schema rejects malformed fields and capability lists", () => {
         { ...validTool, inputSchema: [] },
         { ...validTool, requiredCapabilities: "execute" },
         { ...validTool, requiredCapabilities: ["admin"] },
-        { ...validTool, requiredCapabilities: ["read", "read"] }
+        { ...validTool, requiredCapabilities: ["read", "read"] },
     ];
 
     for (const value of cases) {
@@ -58,13 +58,21 @@ test("tool schema requires group to equal the namespace before the first undersc
         /namespace_operation/iu,
     );
     assert.throws(
-        () => toolSchema.parse({ ...validTool, group: "shell", name: "bash_run" }),
+        () =>
+            toolSchema.parse({
+                ...validTool,
+                group: "shell",
+                name: "bash_run",
+            }),
         /tool\.group.*namespace bash/iu,
     );
 });
 
 test("tool schema safeParse returns the parsing error without throwing", () => {
-    const result = toolSchema.safeParse({ ...validTool, requiredCapabilities: ["invalid"] });
+    const result = toolSchema.safeParse({
+        ...validTool,
+        requiredCapabilities: ["invalid"],
+    });
 
     assert.equal(result.success, false);
 });

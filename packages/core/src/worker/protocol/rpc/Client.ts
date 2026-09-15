@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import { WorkerRpcError } from "./Message.js";
-import type { WorkerRpcRequestContext, WorkerRpcRequestEnvelope } from "./Message.js";
+import type {
+    WorkerRpcRequestContext,
+    WorkerRpcRequestEnvelope,
+} from "./Message.js";
 import { WorkerRpcBridge } from "./connection/Bridge.js";
 
 export class WorkerRpcClient {
@@ -20,7 +23,7 @@ export class WorkerRpcClient {
         params: JsonValue = {},
         context?: WorkerRpcRequestContext,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
         const operationId = context?.operationId ?? randomUUID();
         const request: WorkerRpcRequestEnvelope = {
@@ -31,22 +34,34 @@ export class WorkerRpcClient {
             context: {
                 ...context,
                 ctxId: context?.ctxId ?? this.#ctxId,
-                operationId
-            }
+                operationId,
+            },
         };
         let lastSequence = 0;
-        const unsubscribe = onProgress === undefined
-            ? undefined
-            : this.#bridge.onNotification((notification) => {
-                const progress = readToolProgress(notification, operationId);
-                if (progress === undefined || progress.sequence <= lastSequence) return;
-                lastSequence = progress.sequence;
-                try {
-                    onProgress(progress.value);
-                } catch (error) {
-                    console.warn(error instanceof Error ? error : new Error(String(error)));
-                }
-            });
+        const unsubscribe =
+            onProgress === undefined
+                ? undefined
+                : this.#bridge.onNotification((notification) => {
+                      const progress = readToolProgress(
+                          notification,
+                          operationId,
+                      );
+                      if (
+                          progress === undefined ||
+                          progress.sequence <= lastSequence
+                      )
+                          return;
+                      lastSequence = progress.sequence;
+                      try {
+                          onProgress(progress.value);
+                      } catch (error) {
+                          console.warn(
+                              error instanceof Error
+                                  ? error
+                                  : new Error(String(error)),
+                          );
+                      }
+                  });
         let response;
         try {
             response = await this.#bridge.request(request, signal);
@@ -64,14 +79,22 @@ export class WorkerRpcClient {
 
 function readToolProgress(
     notification: { method: string; params: JsonValue },
-    operationId: string
+    operationId: string,
 ): { sequence: number; value: JsonValue } | undefined {
     if (notification.method !== "tool.progress") return undefined;
-    if (typeof notification.params !== "object" || notification.params === null || Array.isArray(notification.params)) {
+    if (
+        typeof notification.params !== "object" ||
+        notification.params === null ||
+        Array.isArray(notification.params)
+    ) {
         return undefined;
     }
     const params = notification.params as Record<string, JsonValue>;
-    if (params.operationId !== operationId || typeof params.sequence !== "number" || !Number.isSafeInteger(params.sequence)) {
+    if (
+        params.operationId !== operationId ||
+        typeof params.sequence !== "number" ||
+        !Number.isSafeInteger(params.sequence)
+    ) {
         return undefined;
     }
     return { sequence: params.sequence, value: params.value ?? null };

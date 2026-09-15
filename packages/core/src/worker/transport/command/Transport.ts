@@ -1,9 +1,16 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 
-import type { CommandDiagnostic, CommandResult } from "@portable-devshell/shared";
+import type {
+    CommandDiagnostic,
+    CommandResult,
+} from "@portable-devshell/shared";
 
 import type { WorkerRpcProcess } from "../../protocol/rpc/Process.js";
-import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "./Model.js";
+import type {
+    WorkerCommandName,
+    WorkerCommandOptions,
+    WorkerRpcOptions,
+} from "./Model.js";
 
 export type WorkerCommandResult = CommandResult;
 
@@ -25,13 +32,19 @@ export interface WorkerCommandTransport {
     runWorkerCommand(
         command: WorkerCommandName,
         options: WorkerCommandOptions,
-        interactiveSession?: WorkerCommandInteractiveSession
+        interactiveSession?: WorkerCommandInteractiveSession,
     ): Promise<WorkerCommandResult>;
     spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess>;
-    installWorker(interactiveSession?: WorkerCommandInteractiveSession): Promise<void>;
+    installWorker(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<void>;
 }
 
-export type SpawnFunction = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+export type SpawnFunction = (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions,
+) => ChildProcess;
 
 export { createCommandContext, createProviderError } from "../process/Error.js";
 export { waitForCommandResult } from "../process/Result.js";

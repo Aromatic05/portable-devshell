@@ -13,7 +13,9 @@ export interface OpenCodeProviderInstallation {
     version: string;
 }
 
-export type OpenCodePackageResolver = (specifier: string) => string | Promise<string>;
+export type OpenCodePackageResolver = (
+    specifier: string,
+) => string | Promise<string>;
 
 export interface OpenCodeProviderInstallerOptions {
     packageName?: string;
@@ -34,7 +36,9 @@ export class OpenCodeProviderInstaller {
         this.#version = options.version;
     }
 
-    async ensureInstalled(_runtime: AgentProviderRuntimePaths): Promise<OpenCodeProviderInstallation> {
+    async ensureInstalled(
+        _runtime: AgentProviderRuntimePaths,
+    ): Promise<OpenCodeProviderInstallation> {
         if (this.#resolved !== undefined) return await this.#resolved;
         const resolving = this.#resolveInstallation().finally(() => {
             if (this.#resolved === resolving) this.#resolved = undefined;
@@ -46,46 +50,74 @@ export class OpenCodeProviderInstaller {
     }
 
     async #resolveInstallation(): Promise<OpenCodeProviderInstallation> {
-        const manifestPath = toFilesystemPath(await this.#resolver(`${this.#packageName}/package.json`));
+        const manifestPath = toFilesystemPath(
+            await this.#resolver(`${this.#packageName}/package.json`),
+        );
         const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
             bin?: string | Record<string, string>;
             name?: unknown;
             optionalDependencies?: Record<string, string>;
             version?: unknown;
         };
-        if (manifest.name !== this.#packageName || manifest.version !== this.#version) {
+        if (
+            manifest.name !== this.#packageName ||
+            manifest.version !== this.#version
+        ) {
             throw new Error(
-                `Bundled OpenCode version mismatch: expected ${this.#packageName}@${this.#version}, `
-                + `found ${String(manifest.name)}@${String(manifest.version)}.`
+                `Bundled OpenCode version mismatch: expected ${this.#packageName}@${this.#version}, ` +
+                    `found ${String(manifest.name)}@${String(manifest.version)}.`,
             );
         }
 
         const optionalDependencies = manifest.optionalDependencies ?? {};
-        if (Object.keys(optionalDependencies).some((name) => name.startsWith("opencode-"))) {
+        if (
+            Object.keys(optionalDependencies).some((name) =>
+                name.startsWith("opencode-"),
+            )
+        ) {
             const requireFromPackage = createRequire(manifestPath);
             for (const candidate of platformPackageCandidates()) {
                 if (optionalDependencies[candidate] !== this.#version) continue;
                 let candidateManifest: string;
                 try {
-                    candidateManifest = requireFromPackage.resolve(`${candidate}/package.json`);
+                    candidateManifest = requireFromPackage.resolve(
+                        `${candidate}/package.json`,
+                    );
                 } catch {
                     continue;
                 }
-                const candidatePackage = JSON.parse(await readFile(candidateManifest, "utf8")) as {
+                const candidatePackage = JSON.parse(
+                    await readFile(candidateManifest, "utf8"),
+                ) as {
                     name?: unknown;
                     version?: unknown;
                 };
-                if (candidatePackage.name !== candidate || candidatePackage.version !== this.#version) continue;
-                const command = resolve(dirname(candidateManifest), "bin", process.platform === "win32" ? "opencode.exe" : "opencode");
+                if (
+                    candidatePackage.name !== candidate ||
+                    candidatePackage.version !== this.#version
+                )
+                    continue;
+                const command = resolve(
+                    dirname(candidateManifest),
+                    "bin",
+                    process.platform === "win32" ? "opencode.exe" : "opencode",
+                );
                 await assertPlainFile(command);
                 return { command, version: this.#version };
             }
-            throw new Error(`Bundled OpenCode does not contain a compatible private runtime for ${process.platform}/${process.arch}.`);
+            throw new Error(
+                `Bundled OpenCode does not contain a compatible private runtime for ${process.platform}/${process.arch}.`,
+            );
         }
 
-        const bin = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.opencode;
+        const bin =
+            typeof manifest.bin === "string"
+                ? manifest.bin
+                : manifest.bin?.opencode;
         if (typeof bin !== "string" || bin.length === 0) {
-            throw new Error("Bundled OpenCode package does not expose an opencode executable.");
+            throw new Error(
+                "Bundled OpenCode package does not expose an opencode executable.",
+            );
         }
         const command = resolve(dirname(manifestPath), bin);
         await assertPlainFile(command);
@@ -102,25 +134,37 @@ function toFilesystemPath(value: string): string {
 }
 
 function platformPackageCandidates(): string[] {
-    const platform = process.platform === "win32" ? "windows" : process.platform;
+    const platform =
+        process.platform === "win32" ? "windows" : process.platform;
     const base = `opencode-${platform}-${process.arch}`;
     if (process.arch !== "x64") {
-        return process.platform === "linux" && isMusl() ? [`${base}-musl`, base] : [base];
+        return process.platform === "linux" && isMusl()
+            ? [`${base}-musl`, base]
+            : [base];
     }
     if (process.platform === "linux" && isMusl()) {
-        return [`${base}-baseline-musl`, `${base}-musl`, `${base}-baseline`, base];
+        return [
+            `${base}-baseline-musl`,
+            `${base}-musl`,
+            `${base}-baseline`,
+            base,
+        ];
     }
     return [`${base}-baseline`, base];
 }
 
 function isMusl(): boolean {
     if (process.platform !== "linux") return false;
-    const report = process.report?.getReport() as { header?: { glibcVersionRuntime?: unknown } } | undefined;
+    const report = process.report?.getReport() as
+        { header?: { glibcVersionRuntime?: unknown } } | undefined;
     const header = report?.header;
     return typeof header?.glibcVersionRuntime !== "string";
 }
 
 async function assertPlainFile(path: string): Promise<void> {
     const metadata = await stat(path);
-    if (!metadata.isFile()) throw new Error(`Bundled OpenCode executable is not a plain file: ${path}`);
+    if (!metadata.isFile())
+        throw new Error(
+            `Bundled OpenCode executable is not a plain file: ${path}`,
+        );
 }

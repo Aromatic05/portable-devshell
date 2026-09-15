@@ -17,10 +17,22 @@ export class McpOAuthRegistrationLimiter {
     readonly #windowMs: number;
 
     constructor(options: McpOAuthRegistrationLimiterOptions = {}) {
-        this.#maxKeys = positiveInteger(options.maxKeys, defaultMaxKeys, "maxKeys");
-        this.#maxRequests = positiveInteger(options.maxRequests, defaultMaxRequests, "maxRequests");
+        this.#maxKeys = positiveInteger(
+            options.maxKeys,
+            defaultMaxKeys,
+            "maxKeys",
+        );
+        this.#maxRequests = positiveInteger(
+            options.maxRequests,
+            defaultMaxRequests,
+            "maxRequests",
+        );
         this.#now = options.now ?? Date.now;
-        this.#windowMs = positiveInteger(options.windowMs, defaultWindowMs, "windowMs");
+        this.#windowMs = positiveInteger(
+            options.windowMs,
+            defaultWindowMs,
+            "windowMs",
+        );
     }
 
     accept(key: string): boolean {
@@ -72,7 +84,11 @@ export class McpOAuthRegistrationLimiter {
     }
 }
 
-function positiveInteger(value: number | undefined, fallback: number, name: string): number {
+function positiveInteger(
+    value: number | undefined,
+    fallback: number,
+    name: string,
+): number {
     const resolved = value ?? fallback;
     if (!Number.isSafeInteger(resolved) || resolved <= 0) {
         throw new Error(`${name} must be a positive integer.`);

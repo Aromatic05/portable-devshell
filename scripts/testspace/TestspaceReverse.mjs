@@ -15,7 +15,8 @@ export async function startTestspaceReverse(options) {
         runtimeDirectory,
         workerPath,
     } = options;
-    const createDeviceCode = options.createDeviceCode ?? defaultCreateDeviceCode;
+    const createDeviceCode =
+        options.createDeviceCode ?? defaultCreateDeviceCode;
     const runWorker = options.runWorker ?? defaultRunWorker;
     const waitReady = options.waitReady ?? defaultWaitReady;
 
@@ -86,15 +87,15 @@ export function stopTestspaceReverse(options) {
 }
 
 export async function readTestspaceReverseStatus(options) {
-    const {
-        instanceName = TESTSPACE_REVERSE_INSTANCE,
-        runtimeDirectory,
-    } = options;
+    const { instanceName = TESTSPACE_REVERSE_INSTANCE, runtimeDirectory } =
+        options;
     const readSnapshot = options.readSnapshot ?? defaultReadSnapshot;
     try {
         const snapshot = await readSnapshot({ instanceName, runtimeDirectory });
         return {
-            connected: snapshot.ready === true && snapshot.reverse?.transport !== undefined,
+            connected:
+                snapshot.ready === true &&
+                snapshot.reverse?.transport !== undefined,
             generation: snapshot.reverse?.generation,
             ready: snapshot.ready === true,
             transport: snapshot.reverse?.transport,
@@ -121,17 +122,29 @@ function defaultRunWorker({ args, environment, workerPath }) {
 }
 
 async function defaultCreateDeviceCode({ instanceName, runtimeDirectory }) {
-    return await withTestspaceControlConnection(runtimeDirectory, async (shared, connection) => {
-        const reverse = shared.controlClientModule(connection, "reverse");
-        return await reverse.request("createCode", { instance: instanceName });
-    });
+    return await withTestspaceControlConnection(
+        runtimeDirectory,
+        async (shared, connection) => {
+            const reverse = shared.controlClientModule(connection, "reverse");
+            return await reverse.request("createCode", {
+                instance: instanceName,
+            });
+        },
+    );
 }
 
 async function defaultReadSnapshot({ instanceName, runtimeDirectory }) {
-    return await withTestspaceControlConnection(runtimeDirectory, async (_shared, connection) => {
-        const response = await connection.request(instanceName, "runtime", "snapshot");
-        return response.snapshot;
-    });
+    return await withTestspaceControlConnection(
+        runtimeDirectory,
+        async (_shared, connection) => {
+            const response = await connection.request(
+                instanceName,
+                "runtime",
+                "snapshot",
+            );
+            return response.snapshot;
+        },
+    );
 }
 
 async function defaultWaitReady({ instanceName, runtimeDirectory }) {
@@ -139,8 +152,14 @@ async function defaultWaitReady({ instanceName, runtimeDirectory }) {
     let lastSnapshot;
     while (Date.now() < deadline) {
         try {
-            lastSnapshot = await defaultReadSnapshot({ instanceName, runtimeDirectory });
-            if (lastSnapshot.ready === true && lastSnapshot.reverse?.transport === "wss") {
+            lastSnapshot = await defaultReadSnapshot({
+                instanceName,
+                runtimeDirectory,
+            });
+            if (
+                lastSnapshot.ready === true &&
+                lastSnapshot.reverse?.transport === "wss"
+            ) {
                 return;
             }
         } catch {
@@ -153,7 +172,10 @@ async function defaultWaitReady({ instanceName, runtimeDirectory }) {
     );
 }
 
-export async function withTestspaceControlConnection(runtimeDirectory, operation) {
+export async function withTestspaceControlConnection(
+    runtimeDirectory,
+    operation,
+) {
     const shared = await import("../../packages/shared/dist/index.js");
     const connection = new shared.ClientConnection({
         connectChannel: (signal) =>
@@ -161,7 +183,8 @@ export async function withTestspaceControlConnection(runtimeDirectory, operation
                 shared.resolveControlSocketPath(runtimeDirectory),
                 { signal },
             ),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => shared.createError(error),
         mode: "persistent",
         peer: "cli",

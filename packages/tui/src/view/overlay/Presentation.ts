@@ -1,4 +1,7 @@
-import type { ApprovalRequest, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ApprovalRequest,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 import stringWidth from "string-width";
 
 import type { TuiConfirmationOverlay } from "../../state/Overlay.js";
@@ -89,12 +92,7 @@ export function projectTuiApprovalActions(
             rows + wrappedRows(`${label}: ${value}`, innerWidth),
         0,
     );
-    const y =
-        frame.y +
-        1 +
-        wrappedRows("Approval", innerWidth) +
-        fieldRows +
-        1;
+    const y = frame.y + 1 + wrappedRows("Approval", innerWidth) + fieldRows + 1;
     let x = frame.x + 2;
     return tuiApprovalActions.map((action) => {
         const width = stringWidth(tuiApprovalActionText(action));

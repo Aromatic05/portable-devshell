@@ -12,38 +12,46 @@ interface PiResourceSet<T extends PiScopedResource, D = unknown> {
 
 export function mergeManagedPiProjectSkills<T extends PiScopedResource, D>(
     current: { diagnostics: D[]; skills: T[] },
-    remote: readonly T[]
+    remote: readonly T[],
 ): { diagnostics: D[]; remoteSkillNames: Set<string>; skills: T[] } {
-    const merged = replaceProjectResources({
-        diagnostics: current.diagnostics,
-        resources: current.skills
-    }, remote);
+    const merged = replaceProjectResources(
+        {
+            diagnostics: current.diagnostics,
+            resources: current.skills,
+        },
+        remote,
+    );
     return {
         diagnostics: merged.diagnostics,
         remoteSkillNames: merged.remoteNames,
-        skills: merged.resources
+        skills: merged.resources,
     };
 }
 
 export function mergeManagedPiProjectPrompts<T extends PiScopedResource, D>(
     current: { diagnostics: D[]; prompts: T[] },
-    remote: readonly T[]
+    remote: readonly T[],
 ): { diagnostics: D[]; prompts: T[] } {
-    const merged = replaceProjectResources({
-        diagnostics: current.diagnostics,
-        resources: current.prompts
-    }, remote);
+    const merged = replaceProjectResources(
+        {
+            diagnostics: current.diagnostics,
+            resources: current.prompts,
+        },
+        remote,
+    );
     return {
         diagnostics: merged.diagnostics,
-        prompts: merged.resources
+        prompts: merged.resources,
     };
 }
 
 function replaceProjectResources<T extends PiScopedResource, D>(
     current: PiResourceSet<T, D>,
-    remote: readonly T[]
+    remote: readonly T[],
 ): PiResourceSet<T, D> & { remoteNames: Set<string> } {
-    const resources = current.resources.filter((resource) => resource.sourceInfo?.scope !== "project");
+    const resources = current.resources.filter(
+        (resource) => resource.sourceInfo?.scope !== "project",
+    );
     const names = new Set(resources.map((resource) => resource.name));
     const remoteNames = new Set<string>();
     for (const resource of remote) {

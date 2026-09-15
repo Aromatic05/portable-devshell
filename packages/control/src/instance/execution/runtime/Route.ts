@@ -1,6 +1,10 @@
 import type { WorkerInstance } from "@portable-devshell/core";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ActiveTodoSummary, JsonValue, PrefixRouteModuleDefinition } from "@portable-devshell/shared";
+import type {
+    ActiveTodoSummary,
+    JsonValue,
+    PrefixRouteModuleDefinition,
+} from "@portable-devshell/shared";
 import { routeModule } from "../../../server/Route.js";
 import { RuntimeInteractiveSession } from "./InteractiveSession.js";
 import type { RuntimeSubscriptionManager } from "./Subscription.js";
@@ -11,7 +15,12 @@ export interface RuntimeRouteInstancePort {
     todoSummaries(): ActiveTodoSummary[];
     worker: Pick<
         WorkerInstance,
-        "readLogs" | "refreshStatus" | "snapshot" | "startInteractive" | "stop" | "subscribe"
+        | "readLogs"
+        | "refreshStatus"
+        | "snapshot"
+        | "startInteractive"
+        | "stop"
+        | "subscribe"
     >;
 }
 
@@ -24,16 +33,28 @@ export interface RuntimeRouteOwnershipPort {
 export function createRuntimeRouteModule(
     instance: RuntimeRouteInstancePort,
     ownership: RuntimeRouteOwnershipPort,
-    subscriptions: RuntimeSubscriptionManager
+    subscriptions: RuntimeSubscriptionManager,
 ): PrefixRouteModuleDefinition {
     return routeModule("runtime", {
         snapshot: () => {
-            const snapshot = withTodoSummaries(instance.worker.snapshot(), instance.todoSummaries());
-            return { lastSeq: snapshot.lastSeq, snapshot } as unknown as JsonValue;
+            const snapshot = withTodoSummaries(
+                instance.worker.snapshot(),
+                instance.todoSummaries(),
+            );
+            return {
+                lastSeq: snapshot.lastSeq,
+                snapshot,
+            } as unknown as JsonValue;
         },
         refresh: async () => {
-            const snapshot = withTodoSummaries(await instance.worker.refreshStatus(), instance.todoSummaries());
-            return { lastSeq: snapshot.lastSeq, snapshot } as unknown as JsonValue;
+            const snapshot = withTodoSummaries(
+                await instance.worker.refreshStatus(),
+                instance.todoSummaries(),
+            );
+            return {
+                lastSeq: snapshot.lastSeq,
+                snapshot,
+            } as unknown as JsonValue;
         },
         start: async (request, context) => {
             if (!instance.enabled) {
@@ -41,7 +62,7 @@ export function createRuntimeRouteModule(
                     code: errorCodes.instanceConflict,
                     details: { instance: instance.name, operation: "start" },
                     message: `Instance ${instance.name} is disabled.`,
-                    retryable: false
+                    retryable: false,
                 });
             }
             const relay = new RuntimeInteractiveSession();
@@ -49,14 +70,16 @@ export function createRuntimeRouteModule(
                 { accepted: true },
                 {
                     onClose: () => relay.closeInput(),
-                    onEvent: (event) => relay.accept(event)
-                }
+                    onEvent: (event) => relay.accept(event),
+                },
             );
-            relay.bindOutput(async (chunk) => await stream.emit("output", { chunk }));
+            relay.bindOutput(
+                async (chunk) => await stream.emit("output", { chunk }),
+            );
             try {
                 const result = withTodoSummaries(
                     await instance.worker.startInteractive(relay),
-                    instance.todoSummaries()
+                    instance.todoSummaries(),
                 );
                 ownership.markOwned(instance.name);
                 await stream.complete(result as unknown as JsonValue);
@@ -68,7 +91,7 @@ export function createRuntimeRouteModule(
         stop: async () => {
             const result = withTodoSummaries(
                 await instance.worker.stop(),
-                instance.todoSummaries()
+                instance.todoSummaries(),
             );
             ownership.clearOwned(instance.name);
             if (!instance.enabled) {
@@ -88,18 +111,21 @@ export function createRuntimeRouteModule(
                 context,
                 instance.name,
                 instance.worker,
-                readRuntimeSubscriptionFromSeq(request.payload)
+                readRuntimeSubscriptionFromSeq(request.payload),
             );
             return undefined;
-        }
+        },
     });
 }
 
 function withTodoSummaries<T extends { lastSeq: number }>(
     snapshot: T,
-    activeTodos: ActiveTodoSummary[]
+    activeTodos: ActiveTodoSummary[],
 ): T & { activeTodos?: ActiveTodoSummary[] } {
-    return { ...snapshot, ...(activeTodos.length === 0 ? {} : { activeTodos }) };
+    return {
+        ...snapshot,
+        ...(activeTodos.length === 0 ? {} : { activeTodos }),
+    };
 }
 
 const MAX_LOG_READ_LIMIT = 100;
@@ -108,23 +134,46 @@ const MAX_LOG_RESPONSE_BYTES = 1024 * 1024;
 
 const LOG_TRUNCATION_MARKER = "\n[log output truncated]\n";
 
-export function readRuntimeLogQuery(payload?: JsonValue): { fromSeq?: number; limit?: number; maxDecodedBytes: number } {
-    const limit = isRecord(payload) && typeof payload.limit === "number" && Number.isInteger(payload.limit)
-        ? Math.min(Math.max(payload.limit, 1), MAX_LOG_READ_LIMIT)
-        : MAX_LOG_READ_LIMIT;
-    const requestedBytes = isRecord(payload) && typeof payload.maxDecodedBytes === "number" && Number.isSafeInteger(payload.maxDecodedBytes)
-        ? payload.maxDecodedBytes
-        : MAX_LOG_RESPONSE_BYTES;
+export function readRuntimeLogQuery(payload?: JsonValue): {
+    fromSeq?: number;
+    limit?: number;
+    maxDecodedBytes: number;
+} {
+    const limit =
+        isRecord(payload) &&
+        typeof payload.limit === "number" &&
+        Number.isInteger(payload.limit)
+            ? Math.min(Math.max(payload.limit, 1), MAX_LOG_READ_LIMIT)
+            : MAX_LOG_READ_LIMIT;
+    const requestedBytes =
+        isRecord(payload) &&
+        typeof payload.maxDecodedBytes === "number" &&
+        Number.isSafeInteger(payload.maxDecodedBytes)
+            ? payload.maxDecodedBytes
+            : MAX_LOG_RESPONSE_BYTES;
     return {
-        fromSeq: isRecord(payload) && typeof payload.fromSeq === "number" ? payload.fromSeq : undefined,
+        fromSeq:
+            isRecord(payload) && typeof payload.fromSeq === "number"
+                ? payload.fromSeq
+                : undefined,
         limit,
-        maxDecodedBytes: Math.min(Math.max(requestedBytes, 1), MAX_LOG_RESPONSE_BYTES)
+        maxDecodedBytes: Math.min(
+            Math.max(requestedBytes, 1),
+            MAX_LOG_RESPONSE_BYTES,
+        ),
     };
 }
 
 export function readRuntimeSubscriptionFromSeq(payload?: JsonValue): number {
-    if (!isRecord(payload) || typeof payload.fromSeq !== "number" || !Number.isSafeInteger(payload.fromSeq) || payload.fromSeq < 0) {
-        throw invalid("runtime.subscribe requires a non-negative integer fromSeq.");
+    if (
+        !isRecord(payload) ||
+        typeof payload.fromSeq !== "number" ||
+        !Number.isSafeInteger(payload.fromSeq) ||
+        payload.fromSeq < 0
+    ) {
+        throw invalid(
+            "runtime.subscribe requires a non-negative integer fromSeq.",
+        );
     }
     return payload.fromSeq;
 }
@@ -139,7 +188,10 @@ export function limitRuntimeLogResponse<TLog extends { message: string }>(
     for (const log of candidates) {
         const separatorBytes = response.length === 0 ? 0 : 1;
         const logBytes = Buffer.byteLength(JSON.stringify(log), "utf8");
-        if (responseBytes + separatorBytes + logBytes <= MAX_LOG_RESPONSE_BYTES) {
+        if (
+            responseBytes + separatorBytes + logBytes <=
+            MAX_LOG_RESPONSE_BYTES
+        ) {
             if (preserveNewest) response.unshift(log);
             else response.push(log);
             responseBytes += separatorBytes + logBytes;
@@ -147,9 +199,17 @@ export function limitRuntimeLogResponse<TLog extends { message: string }>(
         }
         const compact = {
             ...log,
-            message: truncateLogMessage(log, MAX_LOG_RESPONSE_BYTES - responseBytes - separatorBytes)
+            message: truncateLogMessage(
+                log,
+                MAX_LOG_RESPONSE_BYTES - responseBytes - separatorBytes,
+            ),
         };
-        if (responseBytes + separatorBytes + Buffer.byteLength(JSON.stringify(compact), "utf8") <= MAX_LOG_RESPONSE_BYTES) {
+        if (
+            responseBytes +
+                separatorBytes +
+                Buffer.byteLength(JSON.stringify(compact), "utf8") <=
+            MAX_LOG_RESPONSE_BYTES
+        ) {
             if (preserveNewest) response.unshift(compact);
             else response.push(compact);
         }
@@ -158,8 +218,16 @@ export function limitRuntimeLogResponse<TLog extends { message: string }>(
     return response;
 }
 
-function truncateLogMessage<TLog extends { message: string }>(log: TLog, availableBytes: number): string {
-    if (Buffer.byteLength(JSON.stringify({ ...log, message: LOG_TRUNCATION_MARKER }), "utf8") > availableBytes) {
+function truncateLogMessage<TLog extends { message: string }>(
+    log: TLog,
+    availableBytes: number,
+): string {
+    if (
+        Buffer.byteLength(
+            JSON.stringify({ ...log, message: LOG_TRUNCATION_MARKER }),
+            "utf8",
+        ) > availableBytes
+    ) {
         return LOG_TRUNCATION_MARKER;
     }
     let start = 0;
@@ -167,7 +235,10 @@ function truncateLogMessage<TLog extends { message: string }>(log: TLog, availab
     while (start < end) {
         const middle = Math.floor((start + end) / 2);
         const message = `${LOG_TRUNCATION_MARKER}${log.message.slice(middle)}`;
-        if (Buffer.byteLength(JSON.stringify({ ...log, message }), "utf8") <= availableBytes) {
+        if (
+            Buffer.byteLength(JSON.stringify({ ...log, message }), "utf8") <=
+            availableBytes
+        ) {
             end = middle;
         } else {
             start = middle + 1;
@@ -176,10 +247,16 @@ function truncateLogMessage<TLog extends { message: string }>(log: TLog, availab
     return `${LOG_TRUNCATION_MARKER}${log.message.slice(start)}`;
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function invalid(message: string) {
-    return createError({ code: errorCodes.targetInvalid, message, retryable: false });
+    return createError({
+        code: errorCodes.targetInvalid,
+        message,
+        retryable: false,
+    });
 }

@@ -1,7 +1,8 @@
 import { readdirSync, rmSync, type Dirent } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export function cleanupStaleAtomicStateTemps(
     filePath: string,
@@ -11,7 +12,10 @@ export function cleanupStaleAtomicStateTemps(
     const prefix = `${basename(filePath)}.tmp.`;
     let entries: Dirent[];
     try {
-        entries = readdirSync(directory, { withFileTypes: true, encoding: "utf8" });
+        entries = readdirSync(directory, {
+            withFileTypes: true,
+            encoding: "utf8",
+        });
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
         return;

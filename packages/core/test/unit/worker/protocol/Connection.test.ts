@@ -7,7 +7,7 @@ import {
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     WorkerRpcInboundConnector,
-    WorkerRpcProcessConnector
+    WorkerRpcProcessConnector,
 } from "@portable-devshell/core/testing";
 
 class MemoryChannel implements Channel {
@@ -116,7 +116,10 @@ test("offline inbound connector returns a typed retryable reverse transport erro
     const connector = new WorkerRpcInboundConnector();
 
     await assert.rejects(connector.connect(), (error: unknown) => {
-        assert.equal(readField(error, "code"), errorCodes.reverseTransportUnavailable);
+        assert.equal(
+            readField(error, "code"),
+            errorCodes.reverseTransportUnavailable,
+        );
         assert.equal(readField(error, "retryable"), true);
         return true;
     });
@@ -127,7 +130,7 @@ function request(id: string, method: string): Uint8Array {
         id,
         method,
         params: {},
-        type: "request"
+        type: "request",
     });
 }
 
@@ -141,22 +144,32 @@ test("WorkerRpcProcessConnector aborts immediately and kills a late process", as
     let releaseSpawn!: () => void;
     let signalSpawnStarted!: () => void;
     let killCount = 0;
-    const spawnGate = new Promise<void>((resolve) => { releaseSpawn = resolve; });
-    const spawnStarted = new Promise<void>((resolve) => { signalSpawnStarted = resolve; });
+    const spawnGate = new Promise<void>((resolve) => {
+        releaseSpawn = resolve;
+    });
+    const spawnStarted = new Promise<void>((resolve) => {
+        signalSpawnStarted = resolve;
+    });
     const process = {
         exit: new Promise(() => undefined),
         stdin: new PassThrough(),
         stdout: new PassThrough(),
         stderr: new PassThrough(),
-        kill() { killCount += 1; return true; },
-    };
-    const connector = new WorkerRpcProcessConnector({
-        async spawnWorkerRpc() {
-            signalSpawnStarted();
-            await spawnGate;
-            return process;
+        kill() {
+            killCount += 1;
+            return true;
         },
-    } as never, { instanceName: "late-process" });
+    };
+    const connector = new WorkerRpcProcessConnector(
+        {
+            async spawnWorkerRpc() {
+                signalSpawnStarted();
+                await spawnGate;
+                return process;
+            },
+        } as never,
+        { instanceName: "late-process" },
+    );
     const controller = new AbortController();
     const reason = new Error("spawn cancelled");
     const connecting = connector.connect(controller.signal);
@@ -178,7 +191,8 @@ test("Worker RPC codec rejects invalid UTF-8", () => {
     ]);
     assert.throws(
         () => decodeWorkerRpcMessage(payload),
-        (error: unknown) => (error as { code?: string }).code === "protocol.invalidJson",
+        (error: unknown) =>
+            (error as { code?: string }).code === "protocol.invalidJson",
     );
 });
 
@@ -188,7 +202,10 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
         return await Promise.race([
             promise,
             new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(() => reject(new Error("operation did not settle")), 250);
+                timer = setTimeout(
+                    () => reject(new Error("operation did not settle")),
+                    250,
+                );
             }),
         ]);
     } finally {
@@ -199,7 +216,8 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 async function waitUntil(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error("Timed out waiting for condition.");
+        if (Date.now() >= deadline)
+            throw new Error("Timed out waiting for condition.");
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
 }

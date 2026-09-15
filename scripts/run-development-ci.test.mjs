@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { hasDevTagGateProof, runDevTagGate, writeDevTagGateProof } from "./run-dev-tag-gate.mjs";
+import {
+    hasDevTagGateProof,
+    runDevTagGate,
+    writeDevTagGateProof,
+} from "./run-dev-tag-gate.mjs";
 import {
     createCommonCiSteps,
     createDevelopmentCiSteps,
@@ -71,11 +75,16 @@ test("common CI owns source correctness without rebuilding release assets", () =
     ]);
     assert.equal(names.includes("Build native Worker"), false);
     assert.equal(names.includes("Package native application"), false);
-    assert.equal(steps.find((step) => step.name === "Package tests")?.env?.CI, "false");
+    assert.equal(
+        steps.find((step) => step.name === "Package tests")?.env?.CI,
+        "false",
+    );
 });
 
 test("Unix target CI proves the native deliverable without rerunning common correctness", () => {
-    const names = createTargetCiSteps("darwin-x64", "darwin").map((step) => step.name);
+    const names = createTargetCiSteps("darwin-x64", "darwin").map(
+        (step) => step.name,
+    );
     assert.deepEqual(names, [
         "Build",
         "Build native Worker",
@@ -88,7 +97,12 @@ test("Unix target CI proves the native deliverable without rerunning common corr
         "Unix release installer smoke",
         "Agent package smoke",
     ]);
-    for (const commonOnly of ["Lint", "Typecheck", "Rust workspace tests", "Package tests"]) {
+    for (const commonOnly of [
+        "Lint",
+        "Typecheck",
+        "Rust workspace tests",
+        "Package tests",
+    ]) {
         assert.equal(names.includes(commonOnly), false);
     }
 });
@@ -102,7 +116,10 @@ test("macOS platform contract retains OS-sensitive package Rust and tmux behavio
         "Prepare test Worker",
         "Package tests",
     ]);
-    assert.equal(steps.find((step) => step.name === "Package tests")?.env?.CI, "false");
+    assert.equal(
+        steps.find((step) => step.name === "Package tests")?.env?.CI,
+        "false",
+    );
 });
 
 test("Linux x64 target CI runs final integration without repeating unit gates", () => {
@@ -117,13 +134,19 @@ test("Linux x64 target CI runs final integration without repeating unit gates", 
         "ci-artifacts/portable-devshell-agent-linux-x64.dsext",
         "ci-artifacts/portable-devshell-agent-provider-pi-linux-x64.dsprovider",
         "ci-artifacts/portable-devshell-agent-provider-opencode-linux-x64.dsprovider",
-        "ci-artifacts/devshell-worker-linux-x64"
+        "ci-artifacts/devshell-worker-linux-x64",
     ]);
     const integration = steps.at(-1);
     assert.equal(integration.command, "bash");
     assert.deepEqual(integration.args.slice(0, 1), ["-lc"]);
-    assert.match(integration.args[1], /run-final-acceptance\.mjs --integration-only/u);
-    assert.equal(integration.env.PORTABLE_DEVSHELL_TEST_WORKER_PATH, "ci-artifacts/devshell-worker-linux-x64");
+    assert.match(
+        integration.args[1],
+        /run-final-acceptance\.mjs --integration-only/u,
+    );
+    assert.equal(
+        integration.env.PORTABLE_DEVSHELL_TEST_WORKER_PATH,
+        "ci-artifacts/devshell-worker-linux-x64",
+    );
 });
 
 test("Windows x64 target CI includes installer contract and real release smoke", () => {
@@ -133,7 +156,9 @@ test("Windows x64 target CI includes installer contract and real release smoke",
     const previous = process.env.PORTABLE_DEVSHELL_PNPM_CLI;
     process.env.PORTABLE_DEVSHELL_PNPM_CLI = pnpmCli;
     try {
-        const names = createTargetCiSteps("windows-x64", "win32").map((step) => step.name);
+        const names = createTargetCiSteps("windows-x64", "win32").map(
+            (step) => step.name,
+        );
         assert.deepEqual(names, [
             "Build",
             "Build native Worker",
@@ -156,7 +181,11 @@ test("development CI entrypoint executes the canonical target plan", () => {
     const invoked = [];
     const result = runDevelopmentCi("linux-x64", {
         execute(step) {
-            invoked.push({ args: step.args, command: step.command, name: step.name });
+            invoked.push({
+                args: step.args,
+                command: step.command,
+                name: step.name,
+            });
             return { status: 0 };
         },
         log() {},
@@ -178,7 +207,11 @@ test("local dev tag gate reproduces the complete Linux x64 development gate", ()
     const invoked = [];
     const result = runDevTagGate({
         execute(step) {
-            invoked.push({ args: step.args, command: step.command, name: step.name });
+            invoked.push({
+                args: step.args,
+                command: step.command,
+                name: step.name,
+            });
             return { status: 0 };
         },
         isWorktreeClean: () => true,
@@ -212,7 +245,10 @@ test("dev tag gate proof is bound to the exact full commit SHA", () => {
     try {
         assert.equal(hasDevTagGateProof(first, directory), false);
         writeDevTagGateProof(first, directory);
-        assert.equal(readFileSync(join(directory, first), "utf8"), `${first}\n`);
+        assert.equal(
+            readFileSync(join(directory, first), "utf8"),
+            `${first}\n`,
+        );
         assert.equal(hasDevTagGateProof(first, directory), true);
         assert.equal(hasDevTagGateProof(second, directory), false);
     } finally {

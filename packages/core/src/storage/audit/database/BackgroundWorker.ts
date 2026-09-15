@@ -42,44 +42,48 @@ export function startAuditPayloadBackfill(
     filePath: string,
     highWater: number,
     onComplete: (payloadBytes: number) => void,
-    onFailure: () => void
+    onFailure: () => void,
 ): AuditBackgroundTask {
     return startAuditWorker(
         { filePath, highWater, operation: "payloadBackfill" },
         (message) => {
-            if (!Number.isSafeInteger(message.payloadBytes) || message.payloadBytes! < 0) {
+            if (
+                !Number.isSafeInteger(message.payloadBytes) ||
+                message.payloadBytes! < 0
+            ) {
                 onFailure();
                 return;
             }
             onComplete(message.payloadBytes!);
         },
-        onFailure
+        onFailure,
     );
 }
 
 export function startAuditWalCheckpoint(
     filePath: string,
     onComplete: (checkpointComplete: boolean) => void,
-    onFailure: () => void
+    onFailure: () => void,
 ): AuditBackgroundTask {
     return startAuditWorker(
         { filePath, operation: "walCheckpoint" },
-        (message) => typeof message.checkpointComplete === "boolean"
-            ? onComplete(message.checkpointComplete)
-            : onFailure(),
-        onFailure
+        (message) =>
+            typeof message.checkpointComplete === "boolean"
+                ? onComplete(message.checkpointComplete)
+                : onFailure(),
+        onFailure,
     );
 }
 
 function startAuditWorker(
     workerData: Record<string, number | string>,
     onMessage: (message: AuditWorkerResult) => void,
-    onFailure: () => void
+    onFailure: () => void,
 ): AuditBackgroundTask {
     const worker = new Worker(workerSource, {
         eval: true,
         execArgv: ["--no-warnings"],
-        workerData
+        workerData,
     });
     let settled = false;
     const fail = (): void => {
@@ -106,6 +110,6 @@ function startAuditWorker(
             if (settled) return;
             settled = true;
             void worker.terminate();
-        }
+        },
     };
 }

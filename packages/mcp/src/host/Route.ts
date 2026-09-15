@@ -10,7 +10,11 @@ export class McpHostRouteMatcher {
         const trimmed = pathname.trim();
         const segments = trimmed.split("/");
 
-        if (segments.length !== 3 || segments[0] !== "" || segments[2] !== "mcp") {
+        if (
+            segments.length !== 3 ||
+            segments[0] !== "" ||
+            segments[2] !== "mcp"
+        ) {
             return undefined;
         }
 

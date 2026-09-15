@@ -1,12 +1,19 @@
-import { createError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type InstanceContainerConfig,
+} from "@portable-devshell/shared";
 
 import {
     type WorkerTransportContainerProvision,
-    type WorkerTransportContainerProvisionOperations
+    type WorkerTransportContainerProvisionOperations,
 } from "../Provision.js";
 import { workerTransportContainerEnvironmentArgs } from "../Environment.js";
 
-type ExistingStoppedContainerConfig = Extract<InstanceContainerConfig, { mode: "existingStoppedContainer" }>;
+type ExistingStoppedContainerConfig = Extract<
+    InstanceContainerConfig,
+    { mode: "existingStoppedContainer" }
+>;
 
 interface WorkerTransportContainerProvisionExistingStoppedOptions {
     config: ExistingStoppedContainerConfig;
@@ -19,13 +26,17 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
     #adopted = false;
     #startedForRuntimeRetire = false;
 
-    constructor(options: WorkerTransportContainerProvisionExistingStoppedOptions) {
+    constructor(
+        options: WorkerTransportContainerProvisionExistingStoppedOptions,
+    ) {
         this.#config = options.config;
         this.#operations = options.operations;
     }
 
     async ensureReady(operation: string): Promise<void> {
-        const status = await this.#operations.readContainerStatus(this.#config.containerName);
+        const status = await this.#operations.readContainerStatus(
+            this.#config.containerName,
+        );
 
         if (status === "missing") {
             throw this.#missingContainerError();
@@ -38,12 +49,17 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
             return;
         }
 
-        await this.#operations.runProviderCommand("startContainer", ["start", this.#config.containerName]);
+        await this.#operations.runProviderCommand("startContainer", [
+            "start",
+            this.#config.containerName,
+        ]);
         this.#adopted = operation !== "status";
     }
 
     async isAvailable(): Promise<boolean> {
-        const status = await this.#operations.readContainerStatus(this.#config.containerName);
+        const status = await this.#operations.readContainerStatus(
+            this.#config.containerName,
+        );
         if (status === "running" && !this.#adopted) {
             throw this.#runningContainerUnsupportedError();
         }
@@ -51,13 +67,15 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
     }
 
     async prepareRuntimeRetire(): Promise<boolean> {
-        const status = await this.#operations.readContainerStatus(this.#config.containerName);
+        const status = await this.#operations.readContainerStatus(
+            this.#config.containerName,
+        );
         if (status === "missing") return false;
         if (status === "running") return true;
-        await this.#operations.runProviderCommand(
-            "startContainerForRetire",
-            ["start", this.#config.containerName]
-        );
+        await this.#operations.runProviderCommand("startContainerForRetire", [
+            "start",
+            this.#config.containerName,
+        ]);
         this.#startedForRuntimeRetire = true;
         return true;
     }
@@ -67,7 +85,7 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
         try {
             await this.#operations.runProviderCommand(
                 "stopContainerAfterRetire",
-                ["stop", this.#config.containerName]
+                ["stop", this.#config.containerName],
             );
         } finally {
             this.#startedForRuntimeRetire = false;
@@ -82,7 +100,7 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
         await this.#operations.runProviderCommand(
             "stopContainer",
             ["stop", this.#config.containerName],
-            { allowNonZeroExit: true }
+            { allowNonZeroExit: true },
         );
         this.#adopted = false;
     }
@@ -91,19 +109,26 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
 
     buildExecArgs(
         command: readonly string[],
-        environmentKeys: readonly string[] = []
+        environmentKeys: readonly string[] = [],
     ): string[] {
         return [
             "exec",
             "-i",
             ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.containerName,
-            ...command
+            ...command,
         ];
     }
 
     buildShellExecArgs(commandLine: string): string[] {
-        return ["exec", "-i", this.#config.containerName, "sh", "-lc", commandLine];
+        return [
+            "exec",
+            "-i",
+            this.#config.containerName,
+            "sh",
+            "-lc",
+            commandLine,
+        ];
     }
 
     #missingContainerError() {
@@ -112,10 +137,10 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
             details: {
                 containerName: this.#config.containerName,
                 mode: "existingStoppedContainer",
-                provider: this.#operations.provider
+                provider: this.#operations.provider,
             },
             message: `Configured container ${this.#config.containerName} does not exist.`,
-            retryable: false
+            retryable: false,
         });
     }
 
@@ -126,10 +151,10 @@ export class WorkerTransportContainerProvisionExistingStopped implements WorkerT
                 containerName: this.#config.containerName,
                 mode: "existingStoppedContainer",
                 provider: this.#operations.provider,
-                unsupportedMode: "runningContainer"
+                unsupportedMode: "runningContainer",
             },
             message: `Container ${this.#config.containerName} is already running. Running container attach is not a supported instance mode.`,
-            retryable: false
+            retryable: false,
         });
     }
 }

@@ -7,7 +7,7 @@ import type {
     HttpHost,
     McpOAuthAccessRevocation,
     McpOAuthAccessTokenVerification,
-    McpOAuthProtectedResource
+    McpOAuthProtectedResource,
 } from "@portable-devshell/mcp";
 import type { ControlWebOAuth2Config } from "@portable-devshell/shared";
 
@@ -75,17 +75,27 @@ export class ControlWebOAuthFlow {
         return new URL(this.#resourceUrl.href);
     }
 
-    onAccessRevoked(listener: (revocation: McpOAuthAccessRevocation) => void): () => void {
+    onAccessRevoked(
+        listener: (revocation: McpOAuthAccessRevocation) => void,
+    ): () => void {
         return this.#protectedResource.onAccessRevoked(listener);
     }
 
-    async verifyAccessToken(token: string): Promise<McpOAuthAccessTokenVerification> {
-        return await this.#protectedResource.verifyAccessToken(this.resourceUrl, token);
+    async verifyAccessToken(
+        token: string,
+    ): Promise<McpOAuthAccessTokenVerification> {
+        return await this.#protectedResource.verifyAccessToken(
+            this.resourceUrl,
+            token,
+        );
     }
 
     async warmup(): Promise<void> {
         await this.#loadClientState();
-        this.#protectedResource.registerResource(this.resourceUrl, this.#providerConfig());
+        this.#protectedResource.registerResource(
+            this.resourceUrl,
+            this.#providerConfig(),
+        );
         if (this.#ownsProvider) {
             await this.#protectedResource.warmup();
         }
@@ -93,15 +103,40 @@ export class ControlWebOAuthFlow {
 
     install(http: HttpHost): () => void {
         const metadataPath = `/.well-known/oauth-protected-resource${this.#basePath}`;
-        const removeMetadata = http.registerRawRoute("get", metadataPath, (_request, response) => {
-            writeJson(response, 200, this.#protectedResource.protectedResourceMetadata(this.resourceUrl, this.#providerConfig()));
-        });
-        const removeStart = http.registerRawRoute("get", `${this.#basePath}/oauth/start`, (request, response) => {
-            void this.#start(request, response).catch(() => writeJson(response, 500, { error: "OAuth start failed" }));
-        });
-        const removeCallback = http.registerRawRoute("get", `${this.#basePath}/oauth/callback`, (request, response) => {
-            void this.#callback(request, response).catch(() => writeJson(response, 500, { error: "OAuth callback failed" }));
-        });
+        const removeMetadata = http.registerRawRoute(
+            "get",
+            metadataPath,
+            (_request, response) => {
+                writeJson(
+                    response,
+                    200,
+                    this.#protectedResource.protectedResourceMetadata(
+                        this.resourceUrl,
+                        this.#providerConfig(),
+                    ),
+                );
+            },
+        );
+        const removeStart = http.registerRawRoute(
+            "get",
+            `${this.#basePath}/oauth/start`,
+            (request, response) => {
+                void this.#start(request, response).catch(() =>
+                    writeJson(response, 500, { error: "OAuth start failed" }),
+                );
+            },
+        );
+        const removeCallback = http.registerRawRoute(
+            "get",
+            `${this.#basePath}/oauth/callback`,
+            (request, response) => {
+                void this.#callback(request, response).catch(() =>
+                    writeJson(response, 500, {
+                        error: "OAuth callback failed",
+                    }),
+                );
+            },
+        );
         if (this.#installProvider) {
             http.installOAuth(this.#protectedResource);
         }
@@ -112,19 +147,27 @@ export class ControlWebOAuthFlow {
         };
     }
 
-    async #start(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    async #start(
+        request: IncomingMessage,
+        response: ServerResponse,
+    ): Promise<void> {
         const endpoints = await this.#discover();
         const clientId = await this.#ensureClient(endpoints);
         const state = randomBytes(24).toString("base64url");
         const verifier = randomBytes(32).toString("base64url");
-        const challenge = createHash("sha256").update(verifier).digest("base64url");
+        const challenge = createHash("sha256")
+            .update(verifier)
+            .digest("base64url");
         const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-        const returnTo = safeReturnTo(requestUrl.searchParams.get("returnTo"), this.#basePath);
+        const returnTo = safeReturnTo(
+            requestUrl.searchParams.get("returnTo"),
+            this.#basePath,
+        );
         this.#prunePending();
         this.#pending.set(state, {
             createdAt: this.#now(),
             ...(returnTo === undefined ? {} : { returnTo }),
-            verifier
+            verifier,
         });
 
         const authorizationUrl = new URL(endpoints.authorizationEndpoint);
@@ -137,21 +180,37 @@ export class ControlWebOAuthFlow {
         authorizationUrl.searchParams.set("scope", this.#scope());
         authorizationUrl.searchParams.set("state", state);
 
-        response.setHeader("Set-Cookie", this.#stateCookie(state, STATE_TTL_SECONDS));
+        response.setHeader(
+            "Set-Cookie",
+            this.#stateCookie(state, STATE_TTL_SECONDS),
+        );
         response.statusCode = 302;
         response.setHeader("Location", authorizationUrl.href);
         response.setHeader("Cache-Control", "no-store");
         response.end();
     }
 
-    async #callback(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    async #callback(
+        request: IncomingMessage,
+        response: ServerResponse,
+    ): Promise<void> {
         const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
         const code = requestUrl.searchParams.get("code");
         const state = requestUrl.searchParams.get("state");
-        const stateCookie = readCookie(request.headers.cookie, STATE_COOKIE_NAME);
+        const stateCookie = readCookie(
+            request.headers.cookie,
+            STATE_COOKIE_NAME,
+        );
         const pending = state === null ? undefined : this.#pending.get(state);
-        if (code === null || state === null || stateCookie !== state || pending === undefined) {
-            writeJson(response, 400, { error: "OAuth state validation failed" });
+        if (
+            code === null ||
+            state === null ||
+            stateCookie !== state ||
+            pending === undefined
+        ) {
+            writeJson(response, 400, {
+                error: "OAuth state validation failed",
+            });
             return;
         }
         this.#pending.delete(state);
@@ -163,33 +222,46 @@ export class ControlWebOAuthFlow {
                 code,
                 code_verifier: pending.verifier,
                 grant_type: "authorization_code",
-                redirect_uri: this.#redirectUri
+                redirect_uri: this.#redirectUri,
             }),
             headers: { "content-type": "application/x-www-form-urlencoded" },
-            method: "POST"
+            method: "POST",
         });
         if (!tokenResponse.ok) {
             writeJson(response, 401, { error: "OAuth token exchange failed" });
             return;
         }
-        const tokens = (await tokenResponse.json()) as { access_token?: unknown };
+        const tokens = (await tokenResponse.json()) as {
+            access_token?: unknown;
+        };
         if (typeof tokens.access_token !== "string") {
-            writeJson(response, 401, { error: "OAuth token exchange returned no access token" });
+            writeJson(response, 401, {
+                error: "OAuth token exchange returned no access token",
+            });
             return;
         }
         try {
-            await this.#protectedResource.verifyAccessToken(this.resourceUrl, tokens.access_token);
+            await this.#protectedResource.verifyAccessToken(
+                this.resourceUrl,
+                tokens.access_token,
+            );
         } catch {
-            writeJson(response, 401, { error: "OAuth access token is not valid for this resource" });
+            writeJson(response, 401, {
+                error: "OAuth access token is not valid for this resource",
+            });
             return;
         }
 
         response.setHeader("Set-Cookie", [
             this.#sessions.createSessionCookie(),
-            this.#stateCookie("", 0)
+            this.#stateCookie("", 0),
         ]);
         response.statusCode = 302;
-        response.setHeader("Location", pending.returnTo ?? `${stripTrailingSlash(this.#resourceUrl.href)}/`);
+        response.setHeader(
+            "Location",
+            pending.returnTo ??
+                `${stripTrailingSlash(this.#resourceUrl.href)}/`,
+        );
         response.setHeader("Cache-Control", "no-store");
         response.end();
     }
@@ -199,14 +271,16 @@ export class ControlWebOAuthFlow {
     }
 
     #scope(): string {
-        return ["openid", "offline_access", ...this.#config.requiredScopes].join(" ").trim();
+        return ["openid", "offline_access", ...this.#config.requiredScopes]
+            .join(" ")
+            .trim();
     }
 
     #providerConfig() {
         return {
             documentationUrl: this.#config.documentationUrl,
             requiredScopes: [...this.#config.requiredScopes],
-            resourceName: this.#config.resourceName
+            resourceName: this.#config.resourceName,
         };
     }
 
@@ -214,10 +288,15 @@ export class ControlWebOAuthFlow {
         if (this.#endpoints !== undefined) {
             return this.#endpoints;
         }
-        const metadataUrl = new URL("/.well-known/openid-configuration", this.#protectedResource.issuerUrl);
+        const metadataUrl = new URL(
+            "/.well-known/openid-configuration",
+            this.#protectedResource.issuerUrl,
+        );
         const metadataResponse = await fetch(metadataUrl);
         if (!metadataResponse.ok) {
-            throw new Error("Unable to read OAuth authorization server metadata.");
+            throw new Error(
+                "Unable to read OAuth authorization server metadata.",
+            );
         }
         const metadata = (await metadataResponse.json()) as {
             authorization_endpoint?: unknown;
@@ -229,12 +308,14 @@ export class ControlWebOAuthFlow {
             typeof metadata.registration_endpoint !== "string" ||
             typeof metadata.token_endpoint !== "string"
         ) {
-            throw new Error("OAuth authorization server metadata is incomplete.");
+            throw new Error(
+                "OAuth authorization server metadata is incomplete.",
+            );
         }
         this.#endpoints = {
             authorizationEndpoint: metadata.authorization_endpoint,
             registrationEndpoint: metadata.registration_endpoint,
-            tokenEndpoint: metadata.token_endpoint
+            tokenEndpoint: metadata.token_endpoint,
         };
         return this.#endpoints;
     }
@@ -243,23 +324,30 @@ export class ControlWebOAuthFlow {
         if (this.#clientId !== undefined) {
             return this.#clientId;
         }
-        const registrationResponse = await fetch(endpoints.registrationEndpoint, {
-            body: JSON.stringify({
-                grant_types: ["authorization_code", "refresh_token"],
-                redirect_uris: [this.#redirectUri],
-                response_types: ["code"],
-                scope: this.#scope(),
-                token_endpoint_auth_method: "none"
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST"
-        });
+        const registrationResponse = await fetch(
+            endpoints.registrationEndpoint,
+            {
+                body: JSON.stringify({
+                    grant_types: ["authorization_code", "refresh_token"],
+                    redirect_uris: [this.#redirectUri],
+                    response_types: ["code"],
+                    scope: this.#scope(),
+                    token_endpoint_auth_method: "none",
+                }),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            },
+        );
         if (registrationResponse.status !== 201) {
             throw new Error("Unable to register the Web OAuth client.");
         }
-        const client = (await registrationResponse.json()) as { client_id?: unknown };
+        const client = (await registrationResponse.json()) as {
+            client_id?: unknown;
+        };
         if (typeof client.client_id !== "string") {
-            throw new Error("OAuth client registration returned no client identifier.");
+            throw new Error(
+                "OAuth client registration returned no client identifier.",
+            );
         }
         this.#clientId = client.client_id;
         await this.#persistClientState();
@@ -269,7 +357,9 @@ export class ControlWebOAuthFlow {
     async #loadClientState(): Promise<void> {
         if (this.#clientStateFile === undefined) return;
         try {
-            const value = JSON.parse(await readFile(this.#clientStateFile, "utf8")) as {
+            const value = JSON.parse(
+                await readFile(this.#clientStateFile, "utf8"),
+            ) as {
                 clientId?: unknown;
                 issuer?: unknown;
                 redirectUri?: unknown;
@@ -289,23 +379,28 @@ export class ControlWebOAuthFlow {
     }
 
     async #persistClientState(): Promise<void> {
-        if (this.#clientStateFile === undefined || this.#clientId === undefined) return;
+        if (this.#clientStateFile === undefined || this.#clientId === undefined)
+            return;
         const directory = dirname(this.#clientStateFile);
         await mkdir(directory, { mode: 0o700, recursive: true });
         if (process.platform !== "win32") await chmod(directory, 0o700);
         const temporary = `${this.#clientStateFile}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
         const file = await open(temporary, "wx", 0o600);
         try {
-            await file.writeFile(JSON.stringify({
-                clientId: this.#clientId,
-                issuer: this.#protectedResource.issuerUrl.href,
-                redirectUri: this.#redirectUri,
-                scope: this.#scope()
-            }), "utf8");
+            await file.writeFile(
+                JSON.stringify({
+                    clientId: this.#clientId,
+                    issuer: this.#protectedResource.issuerUrl.href,
+                    redirectUri: this.#redirectUri,
+                    scope: this.#scope(),
+                }),
+                "utf8",
+            );
             await file.sync();
             await file.close();
             await rename(temporary, this.#clientStateFile);
-            if (process.platform !== "win32") await chmod(this.#clientStateFile, 0o600);
+            if (process.platform !== "win32")
+                await chmod(this.#clientStateFile, 0o600);
         } catch (error) {
             await file.close().catch(() => undefined);
             await rm(temporary, { force: true }).catch(() => undefined);
@@ -329,18 +424,25 @@ export class ControlWebOAuthFlow {
             "HttpOnly",
             "SameSite=Lax",
             `Max-Age=${maxAgeSeconds}`,
-            ...(this.#secureCookie ? ["Secure"] : [])
+            ...(this.#secureCookie ? ["Secure"] : []),
         ].join("; ");
     }
 }
 
 function isMissingFile(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }
 
 function normalizeBasePath(value: string): string {
     if (!value.startsWith("/") || value === "/") {
-        throw new Error("Control web basePath must be an absolute non-root path.");
+        throw new Error(
+            "Control web basePath must be an absolute non-root path.",
+        );
     }
     return value.replace(/\/+$/u, "");
 }
@@ -349,15 +451,31 @@ function stripTrailingSlash(value: string): string {
     return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-function safeReturnTo(value: string | null, basePath: string): string | undefined {
-    if (value === null || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+function safeReturnTo(
+    value: string | null,
+    basePath: string,
+): string | undefined {
+    if (
+        value === null ||
+        !value.startsWith("/") ||
+        value.startsWith("//") ||
+        value.includes("\\")
+    )
+        return undefined;
     const target = new URL(value, "http://localhost");
     if (target.origin !== "http://localhost") return undefined;
-    if (target.pathname !== basePath && !target.pathname.startsWith(`${basePath}/`)) return undefined;
+    if (
+        target.pathname !== basePath &&
+        !target.pathname.startsWith(`${basePath}/`)
+    )
+        return undefined;
     return `${target.pathname}${target.search}${target.hash}`;
 }
 
-function readCookie(header: string | undefined, name: string): string | undefined {
+function readCookie(
+    header: string | undefined,
+    name: string,
+): string | undefined {
     if (header === undefined) {
         return undefined;
     }
@@ -375,7 +493,11 @@ function readCookie(header: string | undefined, name: string): string | undefine
     return undefined;
 }
 
-function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
+function writeJson(
+    response: ServerResponse,
+    statusCode: number,
+    body: unknown,
+): void {
     if (response.headersSent) {
         response.end();
         return;

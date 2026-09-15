@@ -5,19 +5,23 @@ export type PiAgentMessageCommand = "followUp" | "prompt" | "steer";
 export async function deliverPiAgentMessage(
     session: PiSessionLike,
     command: PiAgentMessageCommand,
-    message: string
+    message: string,
 ): Promise<void> {
     if (command === "followUp") {
         await session.followUp(message);
         return;
     }
-    await acceptPiPrompt(session, message, session.isStreaming ? "steer" : undefined);
+    await acceptPiPrompt(
+        session,
+        message,
+        session.isStreaming ? "steer" : undefined,
+    );
 }
 
 async function acceptPiPrompt(
     session: PiSessionLike,
     message: string,
-    streamingBehavior?: "steer"
+    streamingBehavior?: "steer",
 ): Promise<void> {
     let accepted = false;
     let resolveAccepted = () => {};
@@ -32,7 +36,7 @@ async function acceptPiPrompt(
             if (!success) return;
             accepted = true;
             resolveAccepted();
-        }
+        },
     });
     void run.catch((error: unknown) => {
         if (!accepted) rejectAccepted(error);

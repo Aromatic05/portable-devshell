@@ -3,11 +3,7 @@ import type { JsonValue } from "../../JsonValue.js";
 export type WaitKind = "approval" | "question" | "tmux";
 
 export type WaitStatus =
-    | "waiting"
-    | "detached"
-    | "resolved"
-    | "consumed"
-    | "cancelled";
+    "waiting" | "detached" | "resolved" | "consumed" | "cancelled";
 
 export interface WaitCreateInput {
     automaticRecovery?: boolean;

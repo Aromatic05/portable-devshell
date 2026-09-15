@@ -8,12 +8,12 @@ import { AgentProviderRuntimePaths } from "../../src/builtin/provider/AgentProvi
 import { parseAgentWorkerTarget } from "../../src/builtin/worker/AgentWorkerTarget.ts";
 import {
     OPENCODE_PROVIDER_VERSION,
-    OpenCodeAgentProvider
+    OpenCodeAgentProvider,
 } from "../../src/provider/opencode/OpenCodeAgentProvider.ts";
 import {
     OPENCODE_PACKAGE_NAME,
     OPENCODE_RUNTIME_VERSION,
-    OpenCodeProviderInstaller
+    OpenCodeProviderInstaller,
 } from "../../src/provider/opencode/OpenCodeProviderInstaller.ts";
 
 const SYSTEM_OPENCODE = "/usr/bin/opencode";
@@ -21,24 +21,35 @@ const SYSTEM_OPENCODE = "/usr/bin/opencode";
 test("OpenCode provider resolves only its bundled absolute command and never PATH opencode", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-opencode-provider-"));
     try {
-        const packageRoot = join(root, "provider", "node_modules", OPENCODE_PACKAGE_NAME);
+        const packageRoot = join(
+            root,
+            "provider",
+            "node_modules",
+            OPENCODE_PACKAGE_NAME,
+        );
         const command = join(packageRoot, "bin", "opencode.exe");
         await mkdir(join(packageRoot, "bin"), { recursive: true });
-        await writeFile(join(packageRoot, "package.json"), JSON.stringify({
-            bin: { opencode: "./bin/opencode.exe" },
-            name: OPENCODE_PACKAGE_NAME,
-            version: OPENCODE_RUNTIME_VERSION
-        }), "utf8");
+        await writeFile(
+            join(packageRoot, "package.json"),
+            JSON.stringify({
+                bin: { opencode: "./bin/opencode.exe" },
+                name: OPENCODE_PACKAGE_NAME,
+                version: OPENCODE_RUNTIME_VERSION,
+            }),
+            "utf8",
+        );
         await writeFile(command, "private opencode\n", "utf8");
         const installer = new OpenCodeProviderInstaller({
             resolver: async () => join(packageRoot, "package.json"),
-            version: OPENCODE_RUNTIME_VERSION
+            version: OPENCODE_RUNTIME_VERSION,
         });
-        const installation = await installer.ensureInstalled(new AgentProviderRuntimePaths({
-            provider: "opencode",
-            rootDirectory: root,
-            version: OPENCODE_PROVIDER_VERSION
-        }));
+        const installation = await installer.ensureInstalled(
+            new AgentProviderRuntimePaths({
+                provider: "opencode",
+                rootDirectory: root,
+                version: OPENCODE_PROVIDER_VERSION,
+            }),
+        );
 
         assert.equal(installation.command, command);
         assert.equal(installation.command === SYSTEM_OPENCODE, false);
@@ -54,34 +65,63 @@ test("OpenCode provider gives its runtime factory private state and the canonica
         const runtime = new AgentProviderRuntimePaths({
             provider: "opencode",
             rootDirectory: root,
-            version: OPENCODE_PROVIDER_VERSION
+            version: OPENCODE_PROVIDER_VERSION,
         });
         const target = parseAgentWorkerTarget("worker-a:/repo");
         const tools = {
             closed: new Promise<void>(() => undefined),
-            modelTools: [{ description: "Run a shell command", inputSchema: { type: "object" }, name: "bash_run" }],
+            modelTools: [
+                {
+                    description: "Run a shell command",
+                    inputSchema: { type: "object" },
+                    name: "bash_run",
+                },
+            ],
             target,
-            tools: [{ description: "Run a shell command", inputSchema: { type: "object" }, name: "bash_run" }],
-            async callTool() { return null; },
-            async close() {}
+            tools: [
+                {
+                    description: "Run a shell command",
+                    inputSchema: { type: "object" },
+                    name: "bash_run",
+                },
+            ],
+            async callTool() {
+                return null;
+            },
+            async close() {},
         };
         let captured: Record<string, unknown> | undefined;
-        const handle = { closed: new Promise<void>(() => undefined), async prompt() {}, async stop() {} };
+        const handle = {
+            closed: new Promise<void>(() => undefined),
+            async prompt() {},
+            async stop() {},
+        };
         const provider = new OpenCodeAgentProvider({
-            installer: { async ensureInstalled() { return { command: "/private/opencode", version: OPENCODE_RUNTIME_VERSION }; } },
+            installer: {
+                async ensureInstalled() {
+                    return {
+                        command: "/private/opencode",
+                        version: OPENCODE_RUNTIME_VERSION,
+                    };
+                },
+            },
             runtimeFactory: {
                 async start(options) {
                     captured = options as unknown as Record<string, unknown>;
                     return handle;
-                }
-            }
+                },
+            },
         });
         const returned = await provider.start({
             agentId: "ag-opencode",
-            processes: { async start() { throw new Error("unused"); } },
+            processes: {
+                async start() {
+                    throw new Error("unused");
+                },
+            },
             runtime,
             target,
-            tools
+            tools,
         });
 
         assert.equal(returned, handle);

@@ -64,11 +64,11 @@ ChatGPT 中的远程 MCP 现在属于自定义 **App** 能力，并可通过 Plu
 
 ### 前提
 
-* 账号/组织允许 developer mode 或自定义 MCP App；
-* portable-devshell endpoint 对 ChatGPT 可达；
-* write/execute 类工具的计划和 workspace policy允许完整 MCP；
-* 推荐使用 portable-devshell OAuth；
-* instance 已就绪，tool scan 可以读取 endpoint 的 catalog。
+- 账号/组织允许 developer mode 或自定义 MCP App；
+- portable-devshell endpoint 对 ChatGPT 可达；
+- write/execute 类工具的计划和 workspace policy允许完整 MCP；
+- 推荐使用 portable-devshell OAuth；
+- instance 已就绪，tool scan 可以读取 endpoint 的 catalog。
 
 ChatGPT 不能直接访问普通 `127.0.0.1`。有两种网络方案：
 

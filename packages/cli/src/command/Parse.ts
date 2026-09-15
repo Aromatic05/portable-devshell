@@ -4,7 +4,10 @@ import { parseConfigCommand } from "./control/Parse.js";
 import { parseOAuthCommand } from "./control/OAuth.js";
 import { parseContextCommand } from "./context/Lifecycle.js";
 import { parseDebugCommand } from "./context/Debug.js";
-import { parseExtensionCliCommand, parseExtensionCommand } from "./extension/Command.js";
+import {
+    parseExtensionCliCommand,
+    parseExtensionCommand,
+} from "./extension/Command.js";
 import { parseInstanceCommand, parseWatchCommand } from "./instance/Parse.js";
 import { parseTodoCommand } from "./instance/Todo.js";
 import { parseApprovalCommand, parseToolCommand } from "./instance/Tool.js";
@@ -18,9 +21,24 @@ export type CliParsedCommand =
     | { draft: JsonValue; kind: "config.validate" }
     | { request: JsonValue; kind: "config.update" }
     | { kind: "approval.list"; instance: string }
-    | { approvalId: string; decision: "approve" | "deny"; instance: string; kind: "approval.decide"; policyPatch?: JsonValue; reason?: string; remember?: boolean }
+    | {
+          approvalId: string;
+          decision: "approve" | "deny";
+          instance: string;
+          kind: "approval.decide";
+          policyPatch?: JsonValue;
+          reason?: string;
+          remember?: boolean;
+      }
     | { approvalId: string; instance: string; kind: "approval.show" }
-    | { after?: string; before?: string; callId?: string; instance: string; kind: "tool.calls"; limit?: number }
+    | {
+          after?: string;
+          before?: string;
+          callId?: string;
+          instance: string;
+          kind: "tool.calls";
+          limit?: number;
+      }
     | { kind: "oauth.status" }
     | { kind: "oauth.list" }
     | { approvalId: string; decision: "approve" | "deny"; kind: "oauth.decide" }
@@ -31,7 +49,13 @@ export type CliParsedCommand =
     | { ctxId: string; kind: "context.renew" }
     | { kind: "debug.targets" }
     | { kind: "debug.list" }
-    | { ctxId: string; file: string; kind: "debug.load"; target: string; toolName?: string }
+    | {
+          ctxId: string;
+          file: string;
+          kind: "debug.load";
+          target: string;
+          toolName?: string;
+      }
     | { kind: "debug.release"; patchId: string }
     | { kind: "debug.unload"; patchId: string }
     | { instance: string; kind: "todo.delete"; taskId: string }
@@ -50,7 +74,13 @@ export type CliParsedCommand =
     | { kind: "extension.install"; source: string }
     | { extensionId: string; kind: "extension.remove"; purge: boolean }
     | { args: string[]; commandId: string; kind: "cli.command" }
-    | { input: JsonValue; instance: string; kind: "instance.call"; toolName: string; workspace: string }
+    | {
+          input: JsonValue;
+          instance: string;
+          kind: "instance.call";
+          toolName: string;
+          workspace: string;
+      }
     | { kind: "instance.create" }
     | { instance: string; kind: "instance.delete" }
     | { instance: string; kind: "instance.enable" }
@@ -75,39 +105,89 @@ export class CliParser {
         const trailing = trailingHelp(argv);
         if (trailing !== undefined) return trailing;
         switch (argv[0]) {
-            case "--version": case "-V": return expectNoExtra(argv, { kind: "version" });
-            case "help": case "--help": case "-h": return expectNoExtra(argv, { kind: "help" });
-            case "start": return expectNoExtra(argv, { kind: "control.start" });
-            case "restart": return expectNoExtra(argv, { kind: "control.restart" });
-            case "stop": return expectNoExtra(argv, { kind: "control.stop" });
-            case "status": return expectNoExtra(argv, { kind: "control.status" });
-            case "logs": return expectNoExtra(argv, { kind: "control.logs" });
-            case "overview": return expectNoExtra(argv, { kind: "overview" });
-            case "config": return parseConfigCommand(argv.slice(1));
-            case "approval": return parseApprovalCommand(argv.slice(1));
-            case "tool": return parseToolCommand(argv.slice(1));
-            case "todo": return parseTodoCommand(argv.slice(1));
-            case "oauth": return parseOAuthCommand(argv.slice(1));
-            case "context": return parseContextCommand(argv.slice(1));
-            case "debug": return parseDebugCommand(argv.slice(1));
-            case "tui": return expectNoExtra(argv, { kind: "tui" });
-            case "extension": return parseExtensionCommand(argv.slice(1));
-            case "instance": return parseInstanceCommand(argv.slice(1));
-            case "watch": return parseWatchCommand(argv.slice(1));
-            default: return parseExtensionCliCommand(argv);
+            case "--version":
+            case "-V":
+                return expectNoExtra(argv, { kind: "version" });
+            case "help":
+            case "--help":
+            case "-h":
+                return expectNoExtra(argv, { kind: "help" });
+            case "start":
+                return expectNoExtra(argv, { kind: "control.start" });
+            case "restart":
+                return expectNoExtra(argv, { kind: "control.restart" });
+            case "stop":
+                return expectNoExtra(argv, { kind: "control.stop" });
+            case "status":
+                return expectNoExtra(argv, { kind: "control.status" });
+            case "logs":
+                return expectNoExtra(argv, { kind: "control.logs" });
+            case "overview":
+                return expectNoExtra(argv, { kind: "overview" });
+            case "config":
+                return parseConfigCommand(argv.slice(1));
+            case "approval":
+                return parseApprovalCommand(argv.slice(1));
+            case "tool":
+                return parseToolCommand(argv.slice(1));
+            case "todo":
+                return parseTodoCommand(argv.slice(1));
+            case "oauth":
+                return parseOAuthCommand(argv.slice(1));
+            case "context":
+                return parseContextCommand(argv.slice(1));
+            case "debug":
+                return parseDebugCommand(argv.slice(1));
+            case "tui":
+                return expectNoExtra(argv, { kind: "tui" });
+            case "extension":
+                return parseExtensionCommand(argv.slice(1));
+            case "instance":
+                return parseInstanceCommand(argv.slice(1));
+            case "watch":
+                return parseWatchCommand(argv.slice(1));
+            default:
+                return parseExtensionCliCommand(argv);
         }
     }
 }
 
 function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
-    const last=argv.at(-1); if(argv.length<2||(last!=="--help"&&last!=="-h")) return undefined;
-    switch(argv[0]) {
-        case "extension": return {kind:"extension.help"};
-        case "instance": return {kind:"instance.help"};
-        case "watch": return {kind:"watch.help"};
-        case "config": case "approval": case "oauth": case "context": case "debug": case "tool": case "todo": return {kind:"help",topic:argv[0]};
-        case "start": case "restart": case "stop": case "status": case "logs": case "overview": case "tui": return {kind:"help"};
-        default: return undefined;
+    const last = argv.at(-1);
+    if (argv.length < 2 || (last !== "--help" && last !== "-h"))
+        return undefined;
+    switch (argv[0]) {
+        case "extension":
+            return { kind: "extension.help" };
+        case "instance":
+            return { kind: "instance.help" };
+        case "watch":
+            return { kind: "watch.help" };
+        case "config":
+        case "approval":
+        case "oauth":
+        case "context":
+        case "debug":
+        case "tool":
+        case "todo":
+            return { kind: "help", topic: argv[0] };
+        case "start":
+        case "restart":
+        case "stop":
+        case "status":
+        case "logs":
+        case "overview":
+        case "tui":
+            return { kind: "help" };
+        default:
+            return undefined;
     }
 }
-function expectNoExtra<T extends CliParsedCommand>(argv:readonly string[],value:T):T { if(argv.length!==1) throw CliRenderError.usage(`Unexpected arguments for ${argv[0]}`); return value; }
+function expectNoExtra<T extends CliParsedCommand>(
+    argv: readonly string[],
+    value: T,
+): T {
+    if (argv.length !== 1)
+        throw CliRenderError.usage(`Unexpected arguments for ${argv[0]}`);
+    return value;
+}

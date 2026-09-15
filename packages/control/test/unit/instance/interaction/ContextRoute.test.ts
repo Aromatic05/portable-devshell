@@ -8,7 +8,9 @@ import { createContextMessageRouteModule } from "../../../../src/instance/contex
 test("contextMessage.queue persists independently of Context lifecycle authority", async () => {
     const calls: string[] = [];
     const service = {
-        async list() { return []; },
+        async list() {
+            return [];
+        },
         async queue(input: { ctxId: string; text: string }) {
             calls.push(`queue:${input.ctxId}:${input.text}`);
             return {
@@ -22,16 +24,34 @@ test("contextMessage.queue persists independently of Context lifecycle authority
         },
     };
     const module = createContextMessageRouteModule(service);
-    const queue = module.operations.find((operation) => operation.name === "queue");
-    if (queue === undefined) throw new Error("contextMessage.queue operation is missing");
-    const routeContext = { connectionId: "conn", peer: "cli", requestId: "req" } as PrefixRouteContext;
+    const queue = module.operations.find(
+        (operation) => operation.name === "queue",
+    );
+    if (queue === undefined)
+        throw new Error("contextMessage.queue operation is missing");
+    const routeContext = {
+        connectionId: "conn",
+        peer: "cli",
+        requestId: "req",
+    } as PrefixRouteContext;
 
     const disabled = await queue.handle(
-        { id: "1", name: "queue", payload: { ctxId: "ctx-disabled", text: "still writable" } },
+        {
+            id: "1",
+            name: "queue",
+            payload: { ctxId: "ctx-disabled", text: "still writable" },
+        },
         routeContext,
     );
     const missing = await queue.handle(
-        { id: "2", name: "queue", payload: { ctxId: "ctx-history-only", text: "history remains writable" } },
+        {
+            id: "2",
+            name: "queue",
+            payload: {
+                ctxId: "ctx-history-only",
+                text: "history remains writable",
+            },
+        },
         routeContext,
     );
 

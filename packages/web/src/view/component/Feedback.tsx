@@ -1,14 +1,27 @@
-export function PartialFailures({ failures }: { failures: Record<string, string> }) {
+export function PartialFailures({
+    failures,
+}: {
+    failures: Record<string, string>;
+}) {
     const entries = Object.entries(failures).sort(([left], [right]) =>
-        left.localeCompare(right)
+        left.localeCompare(right),
     );
     if (entries.length === 0) return null;
-    return <details className="partial" role="status">
-        <summary>{entries.length} data source{entries.length === 1 ? "" : "s"} could not be refreshed. Other data remains available.</summary>
-        <ul>
-            {entries.map(([key, error]) => <li key={key}><strong>{label(key)}</strong>: {error}</li>)}
-        </ul>
-    </details>;
+    return (
+        <details className="partial" role="status">
+            <summary>
+                {entries.length} data source{entries.length === 1 ? "" : "s"}{" "}
+                could not be refreshed. Other data remains available.
+            </summary>
+            <ul>
+                {entries.map(([key, error]) => (
+                    <li key={key}>
+                        <strong>{label(key)}</strong>: {error}
+                    </li>
+                ))}
+            </ul>
+        </details>
+    );
 }
 
 function label(key: string): string {

@@ -5,13 +5,13 @@ import {
     type JsonValue,
     type ReverseEnrollmentRequest,
     type ReverseRpcLane,
-    type ReverseUpstreamBatch
+    type ReverseUpstreamBatch,
 } from "@portable-devshell/shared";
 
 import { ReverseCredentialStore } from "../credential/Store.js";
 import type {
     ReverseInstanceLookupPort,
-    ReverseInstancePort
+    ReverseInstancePort,
 } from "../Port.js";
 import { ReverseRpcSseChannel } from "./SseChannel.js";
 
@@ -49,24 +49,29 @@ export class ReverseConnectionService {
     }
 
     async enroll(body: ReverseEnrollmentRequest): Promise<JsonValue> {
-        const credential = await this.#credentialStore.consumeDeviceCode(body.deviceCode);
+        const credential = await this.#credentialStore.consumeDeviceCode(
+            body.deviceCode,
+        );
         const descriptor = this.#requireReverseInstance(credential.instance);
         await descriptor.worker.setReverseEnrollmentState("enrolled");
         this.disconnect(descriptor.name);
         return {
             controllerUrl: this.#publicBaseUrl,
             deviceToken: credential.deviceToken,
-            instance: descriptor.name
+            instance: descriptor.name,
         };
     }
 
     async authenticate(
         instance: string,
         generation: number,
-        token: string
+        token: string,
     ): Promise<ReverseConnectionIdentity> {
         this.#assertRunning();
-        const authenticated = await this.#credentialStore.authenticate(instance, token);
+        const authenticated = await this.#credentialStore.authenticate(
+            instance,
+            token,
+        );
         if (!authenticated) {
             throw invalidDeviceToken(instance);
         }
@@ -74,7 +79,7 @@ export class ReverseConnectionService {
         return {
             credentialToken: token,
             descriptor: this.#requireReverseInstance(instance),
-            generation
+            generation,
         };
     }
 
@@ -82,7 +87,7 @@ export class ReverseConnectionService {
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
         channel: Channel,
-        lane?: ReverseRpcLane
+        lane?: ReverseRpcLane,
     ): Promise<void> {
         try {
             await this.#exclusive(identity.descriptor.name, async () => {
@@ -92,29 +97,38 @@ export class ReverseConnectionService {
                     return;
                 }
                 let active: ActiveReverseConnection | undefined;
-                const authenticated = await this.#credentialStore.withAuthenticatedToken(
-                    identity.descriptor.name,
-                    identity.credentialToken,
-                    async () => {
-                        this.#assertRunning(channel);
-                        active = this.#prepareActivation(identity, transport, channel);
-                    }
-                );
+                const authenticated =
+                    await this.#credentialStore.withAuthenticatedToken(
+                        identity.descriptor.name,
+                        identity.credentialToken,
+                        async () => {
+                            this.#assertRunning(channel);
+                            active = this.#prepareActivation(
+                                identity,
+                                transport,
+                                channel,
+                            );
+                        },
+                    );
                 if (!authenticated || active === undefined) {
                     throw invalidDeviceToken(identity.descriptor.name);
                 }
 
                 try {
-                    await identity.descriptor.worker.acceptReverseChannel(channel, {
-                        generation: identity.generation,
-                        lane: "control",
-                        transport
-                    });
+                    await identity.descriptor.worker.acceptReverseChannel(
+                        channel,
+                        {
+                            generation: identity.generation,
+                            lane: "control",
+                            transport,
+                        },
+                    );
                     if (this.#active.get(identity.descriptor.name) !== active) {
                         throw createError({
                             code: errorCodes.reverseConnectionSuperseded,
-                            message: "Reverse connection was superseded during activation.",
-                            retryable: true
+                            message:
+                                "Reverse connection was superseded during activation.",
+                            retryable: true,
                         });
                     }
                 } catch (error) {
@@ -133,39 +147,45 @@ export class ReverseConnectionService {
     async #activateBulk(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
-        channel: Channel
+        channel: Channel,
     ): Promise<void> {
         if (transport !== "wss") {
             throw createError({
                 code: errorCodes.reverseTransportUnavailable,
                 message: "Reverse bulk lane requires WSS.",
-                retryable: false
+                retryable: false,
             });
         }
         const active = this.#active.get(identity.descriptor.name);
-        if (active === undefined || active.transport !== "wss" || active.generation !== identity.generation) {
+        if (
+            active === undefined ||
+            active.transport !== "wss" ||
+            active.generation !== identity.generation
+        ) {
             throw createError({
                 code: errorCodes.reverseGenerationInvalid,
                 details: {
                     generation: identity.generation,
                     instance: identity.descriptor.name,
-                    previousGeneration: active?.generation ?? 0
+                    previousGeneration: active?.generation ?? 0,
                 },
-                message: "Reverse bulk lane must join the active WSS generation.",
-                retryable: true
+                message:
+                    "Reverse bulk lane must join the active WSS generation.",
+                retryable: true,
             });
         }
-        const authenticated = await this.#credentialStore.withAuthenticatedToken(
-            identity.descriptor.name,
-            identity.credentialToken,
-            async () => this.#assertRunning(channel)
-        );
+        const authenticated =
+            await this.#credentialStore.withAuthenticatedToken(
+                identity.descriptor.name,
+                identity.credentialToken,
+                async () => this.#assertRunning(channel),
+            );
         if (!authenticated) throw invalidDeviceToken(identity.descriptor.name);
 
         await identity.descriptor.worker.acceptReverseChannel(channel, {
             generation: identity.generation,
             lane: "bulk",
-            transport
+            transport,
         });
         const previous = active.bulkChannel;
         active.bulkChannel = channel;
@@ -178,12 +198,12 @@ export class ReverseConnectionService {
     #prepareActivation(
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
-        channel: Channel
+        channel: Channel,
     ): ActiveReverseConnection {
         const previous = this.#active.get(identity.descriptor.name);
         const previousGeneration = Math.max(
             previous?.generation ?? 0,
-            identity.descriptor.worker.snapshot().reverse?.generation ?? 0
+            identity.descriptor.worker.snapshot().reverse?.generation ?? 0,
         );
 
         if (
@@ -196,17 +216,17 @@ export class ReverseConnectionService {
                 details: {
                     generation: identity.generation,
                     instance: identity.descriptor.name,
-                    previousGeneration
+                    previousGeneration,
                 },
                 message: `Connection generation must be greater than ${previousGeneration}.`,
-                retryable: true
+                retryable: true,
             });
         }
 
         const active: ActiveReverseConnection = {
             channel,
             generation: identity.generation,
-            transport
+            transport,
         };
         previous?.bulkChannel?.close();
         this.#active.set(identity.descriptor.name, active);
@@ -220,13 +240,14 @@ export class ReverseConnectionService {
 
     acceptUpstream(
         identity: ReverseConnectionIdentity,
-        batch: ReverseUpstreamBatch
+        batch: ReverseUpstreamBatch,
     ): JsonValue {
         if (batch.generation !== identity.generation) {
             throw createError({
                 code: errorCodes.reverseGenerationInvalid,
-                message: "Upstream generation does not match request generation.",
-                retryable: true
+                message:
+                    "Upstream generation does not match request generation.",
+                retryable: true,
             });
         }
 
@@ -240,18 +261,21 @@ export class ReverseConnectionService {
             throw createError({
                 code: errorCodes.reverseConnectionSuperseded,
                 message: "SSE connection is not the active generation.",
-                retryable: true
+                retryable: true,
             });
         }
 
         let acceptedThrough = active.channel.acceptedUpstreamSeq;
         for (const frame of batch.frames) {
-            acceptedThrough = active.channel.acceptUpstream(frame.seq, frame.frame);
+            acceptedThrough = active.channel.acceptUpstream(
+                frame.seq,
+                frame.frame,
+            );
         }
 
         return {
             acceptedThrough,
-            generation: identity.generation
+            generation: identity.generation,
         };
     }
 
@@ -282,7 +306,7 @@ export class ReverseConnectionService {
         throw createError({
             code: errorCodes.reverseTransportUnavailable,
             message: "Reverse connection service is stopping.",
-            retryable: true
+            retryable: true,
         });
     }
 
@@ -293,7 +317,7 @@ export class ReverseConnectionService {
                 code: errorCodes.instanceMissing,
                 details: { instance },
                 message: `Instance ${instance} was not found.`,
-                retryable: false
+                retryable: false,
             });
         }
         if (
@@ -304,7 +328,7 @@ export class ReverseConnectionService {
                 code: errorCodes.reverseInstanceNotReverse,
                 details: { instance },
                 message: `Instance ${instance} is not configured for reverse connections.`,
-                retryable: false
+                retryable: false,
             });
         }
         return descriptor;
@@ -312,18 +336,21 @@ export class ReverseConnectionService {
 
     async #exclusive<T>(
         instance: string,
-        operation: () => Promise<T>
+        operation: () => Promise<T>,
     ): Promise<T> {
-        const previous = this.#activationQueues.get(instance) ?? Promise.resolve();
+        const previous =
+            this.#activationQueues.get(instance) ?? Promise.resolve();
         const next = previous.then(operation, operation);
-        const tracked = next.then(
-            () => undefined,
-            () => undefined
-        ).finally(() => {
-            if (this.#activationQueues.get(instance) === tracked) {
-                this.#activationQueues.delete(instance);
-            }
-        });
+        const tracked = next
+            .then(
+                () => undefined,
+                () => undefined,
+            )
+            .finally(() => {
+                if (this.#activationQueues.get(instance) === tracked) {
+                    this.#activationQueues.delete(instance);
+                }
+            });
         this.#activationQueues.set(instance, tracked);
         return await next;
     }
@@ -334,6 +361,6 @@ function invalidDeviceToken(instance: string): Error {
         code: errorCodes.reverseDeviceTokenInvalid,
         details: { instance },
         message: "Device token is invalid or revoked.",
-        retryable: false
+        retryable: false,
     });
 }

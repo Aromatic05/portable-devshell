@@ -13,7 +13,10 @@ export interface CliClientRuntimeTerminalRelay {
     output: { write(chunk: string): void };
 }
 
-export type CliClientRuntime = Omit<ControlClients["runtime"], "start" | "subscribe"> & {
+export type CliClientRuntime = Omit<
+    ControlClients["runtime"],
+    "start" | "subscribe"
+> & {
     start(
         instance: string,
         relay?: CliClientRuntimeTerminalRelay,
@@ -42,9 +45,8 @@ async function startInteractive(
     instance: string,
     relay?: CliClientRuntimeTerminalRelay,
 ): Promise<InstanceSnapshot> {
-    const restoreTerminal = relay === undefined
-        ? () => undefined
-        : enableRawRelayMode(relay.input);
+    const restoreTerminal =
+        relay === undefined ? () => undefined : enableRawRelayMode(relay.input);
     let cleanupInput: () => void = () => undefined;
     let relayFailure: Promise<never> | undefined;
     let stream: ClientStream | undefined;
@@ -150,8 +152,10 @@ function isRawModeCapable(
     isTTY?: boolean;
     setRawMode(mode: boolean): void;
 } {
-    return typeof input === "object" &&
+    return (
+        typeof input === "object" &&
         input !== null &&
         "setRawMode" in input &&
-        typeof input.setRawMode === "function";
+        typeof input.setRawMode === "function"
+    );
 }

@@ -14,10 +14,13 @@ test("Extension processes capability refuses undeclared access before spawning",
         spawn() {
             spawns += 1;
             throw new Error("must not spawn");
-        }
+        },
     });
 
-    await assert.rejects(capability.start({ command: process.execPath }), /did not declare the processes capability/u);
+    await assert.rejects(
+        capability.start({ command: process.execPath }),
+        /did not declare the processes capability/u,
+    );
     assert.equal(spawns, 0);
 });
 
@@ -25,18 +28,21 @@ test("Extension managed process owns structured messages, stderr, and exit lifet
     const capability = new ExtensionProcessCapabilityControl({
         allowed: true,
         extensionId: "example",
-        generation: "g1"
+        generation: "g1",
     });
     const managed = await capability.start({
-        args: ["-e", [
-            "process.stderr.write('ready\\n');",
-            "process.on('message', (message) => {",
-            "  if (message?.stop) process.exit(0);",
-            "  process.send?.({ echoed: message });",
-            "});"
-        ].join("\n")],
+        args: [
+            "-e",
+            [
+                "process.stderr.write('ready\\n');",
+                "process.on('message', (message) => {",
+                "  if (message?.stop) process.exit(0);",
+                "  process.send?.({ echoed: message });",
+                "});",
+            ].join("\n"),
+        ],
         command: process.execPath,
-        messages: true
+        messages: true,
     });
     const stderr = new Promise<string>((resolve) => {
         const remove = managed.onStderr((chunk) => {
@@ -63,11 +69,11 @@ test("Extension process generation cleanup terminates open processes and fences 
     const capability = new ExtensionProcessCapabilityControl({
         allowed: true,
         extensionId: "example",
-        generation: "g1"
+        generation: "g1",
     });
     const managed = await capability.start({
         args: ["-e", "setInterval(() => {}, 10_000);"],
-        command: process.execPath
+        command: process.execPath,
     });
 
     await capability.closeAll();
@@ -75,7 +81,7 @@ test("Extension process generation cleanup terminates open processes and fences 
     assert.equal(exit.signal, "SIGTERM");
     await assert.rejects(
         capability.start({ command: process.execPath }),
-        /processes capability is closed/u
+        /processes capability is closed/u,
     );
 });
 
@@ -83,12 +89,12 @@ test("Extension managed message process is reclaimed when its IPC channel discon
     const capability = new ExtensionProcessCapabilityControl({
         allowed: true,
         extensionId: "example",
-        generation: "g1"
+        generation: "g1",
     });
     const managed = await capability.start({
         args: ["-e", "process.disconnect(); setInterval(() => {}, 10_000);"],
         command: process.execPath,
-        messages: true
+        messages: true,
     });
 
     const exit = await managed.closed;

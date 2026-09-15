@@ -1,4 +1,8 @@
-import type { ArtifactPayloadDescriptor, ControlInstanceAlertsConfig, JsonValue } from "@portable-devshell/shared";
+import type {
+    ArtifactPayloadDescriptor,
+    ControlInstanceAlertsConfig,
+    JsonValue,
+} from "@portable-devshell/shared";
 
 import { WorkerRpcClient } from "./rpc/Client.js";
 
@@ -185,41 +189,70 @@ export class WorkerProtocolClient {
     }
 
     async ping(): Promise<WorkerPingResult> {
-        return asObjectResult<WorkerPingResult>(await this.#rpcClient.request("worker.ping", {}));
+        return asObjectResult<WorkerPingResult>(
+            await this.#rpcClient.request("worker.ping", {}),
+        );
     }
 
-    async handshake(params: WorkerHandshakeParams): Promise<WorkerHandshakeResult> {
+    async handshake(
+        params: WorkerHandshakeParams,
+    ): Promise<WorkerHandshakeResult> {
         return asObjectResult<WorkerHandshakeResult>(
-            await this.#rpcClient.request("worker.handshake", params as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "worker.handshake",
+                params as unknown as JsonValue,
+            ),
         );
     }
 
     async listTools(): Promise<WorkerToolsListResult> {
-        return asObjectResult<WorkerToolsListResult>(await this.#rpcClient.request("tools.list", {}));
+        return asObjectResult<WorkerToolsListResult>(
+            await this.#rpcClient.request("tools.list", {}),
+        );
     }
 
-    async prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult> {
+    async prepareWorkspace(
+        workspace: string,
+    ): Promise<WorkerWorkspacePrepareResult> {
         return asObjectResult<WorkerWorkspacePrepareResult>(
-            await this.#rpcClient.request("workspace.prepare", { workspace })
+            await this.#rpcClient.request("workspace.prepare", { workspace }),
         );
     }
 
     async touchTemporaryDirectory(temporaryDirectory: string): Promise<void> {
-        await this.#rpcClient.request("workspace.touchTemporary", { temporaryDirectory });
+        await this.#rpcClient.request("workspace.touchTemporary", {
+            temporaryDirectory,
+        });
     }
 
-    async readAlerts(workspace: string, config: ControlInstanceAlertsConfig | undefined): Promise<WorkerAlertsReadResult> {
+    async readAlerts(
+        workspace: string,
+        config: ControlInstanceAlertsConfig | undefined,
+    ): Promise<WorkerAlertsReadResult> {
         return asObjectResult<WorkerAlertsReadResult>(
-            await this.#rpcClient.request("alerts.read", { config, workspace } as unknown as JsonValue)
+            await this.#rpcClient.request("alerts.read", {
+                config,
+                workspace,
+            } as unknown as JsonValue),
         );
     }
 
-    async configureAlerts(config: ControlInstanceAlertsConfig | undefined): Promise<void> {
-        await this.#rpcClient.request("alerts.configure", { config } as unknown as JsonValue);
+    async configureAlerts(
+        config: ControlInstanceAlertsConfig | undefined,
+    ): Promise<void> {
+        await this.#rpcClient.request("alerts.configure", {
+            config,
+        } as unknown as JsonValue);
     }
 
-    async touchAlerts(workspace: string, config: ControlInstanceAlertsConfig | undefined): Promise<void> {
-        await this.#rpcClient.request("alerts.touch", { config, workspace } as unknown as JsonValue);
+    async touchAlerts(
+        workspace: string,
+        config: ControlInstanceAlertsConfig | undefined,
+    ): Promise<void> {
+        await this.#rpcClient.request("alerts.touch", {
+            config,
+            workspace,
+        } as unknown as JsonValue);
     }
 
     async releaseAlerts(workspace: string): Promise<void> {
@@ -230,31 +263,60 @@ export class WorkerProtocolClient {
         await this.#rpcClient.request("tool.session.close", { sessionId });
     }
 
-    async writeCommandSessionOutput(input: WorkerCommandSessionOutputInput): Promise<void> {
-        await this.#rpcClient.request("devshell.command.output", input as unknown as JsonValue);
+    async writeCommandSessionOutput(
+        input: WorkerCommandSessionOutputInput,
+    ): Promise<void> {
+        await this.#rpcClient.request(
+            "devshell.command.output",
+            input as unknown as JsonValue,
+        );
     }
 
-    async completeCommandSession(input: WorkerCommandSessionCompleteInput): Promise<void> {
-        await this.#rpcClient.request("devshell.command.complete", input as unknown as JsonValue);
+    async completeCommandSession(
+        input: WorkerCommandSessionCompleteInput,
+    ): Promise<void> {
+        await this.#rpcClient.request(
+            "devshell.command.complete",
+            input as unknown as JsonValue,
+        );
     }
 
     async prepareExtensionResource(
-        input: WorkerExtensionResourcePrepareInput
+        input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult> {
         return asObjectResult<WorkerExtensionResourcePrepareResult>(
-            await this.#rpcClient.request("extension.resource.prepare", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "extension.resource.prepare",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
-    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
+    async openArtifactPayload(
+        input: WorkerArtifactPayloadOpenInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadOpenResult> {
         return asObjectResult<WorkerArtifactPayloadOpenResult>(
-            await this.#rpcClient.request("artifact.payload.open", input as unknown as JsonValue, undefined, signal)
+            await this.#rpcClient.request(
+                "artifact.payload.open",
+                input as unknown as JsonValue,
+                undefined,
+                signal,
+            ),
         );
     }
 
-    async readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
+    async readArtifactPayload(
+        input: WorkerArtifactPayloadReadInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadReadResult> {
         return asObjectResult<WorkerArtifactPayloadReadResult>(
-            await this.#rpcClient.request("artifact.payload.read", input as unknown as JsonValue, undefined, signal)
+            await this.#rpcClient.request(
+                "artifact.payload.read",
+                input as unknown as JsonValue,
+                undefined,
+                signal,
+            ),
         );
     }
 
@@ -262,21 +324,41 @@ export class WorkerProtocolClient {
         await this.#rpcClient.request("artifact.payload.close", { payloadId });
     }
 
-    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
+    async beginArtifactReceive(
+        input: WorkerArtifactReceiveBeginInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveBeginResult> {
         return asObjectResult<WorkerArtifactReceiveBeginResult>(
-            await this.#rpcClient.request("artifact.receive.begin", input as unknown as JsonValue, undefined, signal)
+            await this.#rpcClient.request(
+                "artifact.receive.begin",
+                input as unknown as JsonValue,
+                undefined,
+                signal,
+            ),
         );
     }
 
-    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
+    async writeArtifactReceive(
+        input: WorkerArtifactReceiveWriteInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveWriteResult> {
         return asObjectResult<WorkerArtifactReceiveWriteResult>(
-            await this.#rpcClient.request("artifact.receive.write", input as unknown as JsonValue, undefined, signal)
+            await this.#rpcClient.request(
+                "artifact.receive.write",
+                input as unknown as JsonValue,
+                undefined,
+                signal,
+            ),
         );
     }
 
-    async finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
+    async finishArtifactReceive(
+        receiveId: string,
+    ): Promise<WorkerArtifactReceiveFinishResult> {
         return asObjectResult<WorkerArtifactReceiveFinishResult>(
-            await this.#rpcClient.request("artifact.receive.finish", { receiveId })
+            await this.#rpcClient.request("artifact.receive.finish", {
+                receiveId,
+            }),
         );
     }
 
@@ -286,27 +368,39 @@ export class WorkerProtocolClient {
 
     async openArtifactDirectReceive(
         input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         return asObjectResult<WorkerArtifactDirectReceiveOpenResult>(
-            await this.#rpcClient.request("artifact.receive.direct.open", input as unknown as JsonValue, undefined, signal)
+            await this.#rpcClient.request(
+                "artifact.receive.direct.open",
+                input as unknown as JsonValue,
+                undefined,
+                signal,
+            ),
         );
     }
 
     async closeArtifactDirectReceive(receiverId: string): Promise<void> {
-        await this.#rpcClient.request("artifact.receive.direct.close", { receiverId });
+        await this.#rpcClient.request("artifact.receive.direct.close", {
+            receiverId,
+        });
     }
 
     async pushArtifactPayloadDirect(
-        input: WorkerArtifactDirectPushInput
+        input: WorkerArtifactDirectPushInput,
     ): Promise<WorkerArtifactDirectPushResult> {
         return asObjectResult<WorkerArtifactDirectPushResult>(
-            await this.#rpcClient.request("artifact.payload.direct.push", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "artifact.payload.direct.push",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
     async stop(): Promise<WorkerStopResult> {
-        return asObjectResult<WorkerStopResult>(await this.#rpcClient.request("worker.stop", {}));
+        return asObjectResult<WorkerStopResult>(
+            await this.#rpcClient.request("worker.stop", {}),
+        );
     }
 }
 

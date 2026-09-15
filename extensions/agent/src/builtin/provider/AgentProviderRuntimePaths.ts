@@ -27,11 +27,21 @@ export class AgentProviderRuntimePaths {
         assertPathSegment(options.version, "version");
 
         if (options.rootDirectory.length === 0) {
-            throw new TypeError("Agent provider runtime root must not be empty.");
+            throw new TypeError(
+                "Agent provider runtime root must not be empty.",
+            );
         }
         this.agentDirectory = options.rootDirectory;
-        this.providerDirectory = join(this.agentDirectory, "providers", options.provider);
-        this.prefixDirectory = join(this.providerDirectory, "prefix", options.version);
+        this.providerDirectory = join(
+            this.agentDirectory,
+            "providers",
+            options.provider,
+        );
+        this.prefixDirectory = join(
+            this.providerDirectory,
+            "prefix",
+            options.version,
+        );
         this.installationDirectory = join(this.providerDirectory, "install");
         this.stateDirectory = join(this.providerDirectory, "state");
         this.cacheDirectory = join(this.providerDirectory, "cache");
@@ -46,6 +56,8 @@ function assertPathSegment(value: string, label: string): void {
         value.includes("/") ||
         value.includes("\\")
     ) {
-        throw new TypeError(`Agent provider ${label} must be one path segment.`);
+        throw new TypeError(
+            `Agent provider ${label} must be one path segment.`,
+        );
     }
 }

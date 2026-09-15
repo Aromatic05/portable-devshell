@@ -24,9 +24,18 @@ export class ControlPathHome {
         this.artifactsDir = join(this.controlHomeDir, "artifacts");
         this.configFile = join(this.controlHomeDir, "config.toml");
         this.contextsFile = join(this.controlHomeDir, "contexts.json");
-        this.conversationPreferencesFile = join(this.controlHomeDir, "conversation-preferences.json");
-        this.toolProvenanceFile = join(this.controlHomeDir, "tool-call-provenance.jsonl");
-        this.workspaceAppLeasesFile = join(this.controlHomeDir, "workspace-app-leases.json");
+        this.conversationPreferencesFile = join(
+            this.controlHomeDir,
+            "conversation-preferences.json",
+        );
+        this.toolProvenanceFile = join(
+            this.controlHomeDir,
+            "tool-call-provenance.jsonl",
+        );
+        this.workspaceAppLeasesFile = join(
+            this.controlHomeDir,
+            "workspace-app-leases.json",
+        );
         this.instancesDir = join(this.controlHomeDir, "instances");
         this.oauthDir = join(this.controlHomeDir, "oauth");
         this.reverseDir = join(this.controlHomeDir, "reverse");
@@ -48,10 +57,18 @@ export class ControlPathRuntime {
     constructor(
         xdgRuntimeDir: string | undefined = undefined,
         platform = process.platform,
-        environment: NodeJS.ProcessEnv = process.env
+        environment: NodeJS.ProcessEnv = process.env,
     ) {
-        this.runtimeDir = resolveControlRuntimeDirectory(xdgRuntimeDir, platform, environment);
-        this.socketFile = resolveControlSocketPath(xdgRuntimeDir, platform, environment);
+        this.runtimeDir = resolveControlRuntimeDirectory(
+            xdgRuntimeDir,
+            platform,
+            environment,
+        );
+        this.socketFile = resolveControlSocketPath(
+            xdgRuntimeDir,
+            platform,
+            environment,
+        );
     }
 }
 
@@ -70,9 +87,13 @@ export class ControlSocketFile implements ControlSocketFilePort {
     constructor(
         xdgRuntimeDir: string | undefined = undefined,
         platform = process.platform,
-        environment: NodeJS.ProcessEnv = process.env
+        environment: NodeJS.ProcessEnv = process.env,
     ) {
-        const paths = new ControlPathRuntime(xdgRuntimeDir, platform, environment);
+        const paths = new ControlPathRuntime(
+            xdgRuntimeDir,
+            platform,
+            environment,
+        );
         this.runtimeDir = paths.runtimeDir;
         this.path = paths.socketFile;
         this.#platform = platform;
@@ -81,7 +102,7 @@ export class ControlSocketFile implements ControlSocketFilePort {
     async ensureRuntimeDir(): Promise<void> {
         await mkdir(this.runtimeDir, {
             ...(this.#platform === "win32" ? {} : { mode: 0o700 }),
-            recursive: true
+            recursive: true,
         });
         if (this.#platform !== "win32") {
             await chmod(this.runtimeDir, 0o700);
@@ -96,24 +117,29 @@ export class ControlSocketFile implements ControlSocketFilePort {
 export function resolveControlRuntimeDirectory(
     xdgRuntimeDir: string | undefined = undefined,
     platform = process.platform,
-    environment: NodeJS.ProcessEnv = process.env
+    environment: NodeJS.ProcessEnv = process.env,
 ): string {
     if (platform === "win32") {
-        const base = xdgRuntimeDir
-            ?? environment.LOCALAPPDATA
-            ?? environment.TEMP
-            ?? environment.TMP
-            ?? tmpdir();
+        const base =
+            xdgRuntimeDir ??
+            environment.LOCALAPPDATA ??
+            environment.TEMP ??
+            environment.TMP ??
+            tmpdir();
         return win32.join(base, runtimeDirectoryName, "runtime");
     }
     const explicit = xdgRuntimeDir ?? environment.XDG_RUNTIME_DIR;
-    const candidate = explicit !== undefined && explicit.length > 0
-        ? posix.join(explicit, runtimeDirectoryName)
-        : posix.join(
-            process.platform === "win32" ? "/tmp" : tmpdir(),
-            `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`
-        );
-    if (Buffer.byteLength(posix.join(candidate, "control.sock"), "utf8") <= conservativeUnixSocketPathBytes) {
+    const candidate =
+        explicit !== undefined && explicit.length > 0
+            ? posix.join(explicit, runtimeDirectoryName)
+            : posix.join(
+                  process.platform === "win32" ? "/tmp" : tmpdir(),
+                  `${runtimeDirectoryName}-${resolveUnixUserIdentity(environment)}`,
+              );
+    if (
+        Buffer.byteLength(posix.join(candidate, "control.sock"), "utf8") <=
+        conservativeUnixSocketPathBytes
+    ) {
         return candidate;
     }
     return shortUnixRuntimeDirectory(candidate, environment);
@@ -122,11 +148,18 @@ export function resolveControlRuntimeDirectory(
 export function resolveControlSocketPath(
     xdgRuntimeDir: string | undefined = undefined,
     platform = process.platform,
-    environment: NodeJS.ProcessEnv = process.env
+    environment: NodeJS.ProcessEnv = process.env,
 ): string {
     return platform === "win32"
         ? `${windowsPipePrefix}${normalizeIdentity(environment.USERNAME ?? environment.USER ?? "user")}`
-        : posix.join(resolveControlRuntimeDirectory(xdgRuntimeDir, platform, environment), "control.sock");
+        : posix.join(
+              resolveControlRuntimeDirectory(
+                  xdgRuntimeDir,
+                  platform,
+                  environment,
+              ),
+              "control.sock",
+          );
 }
 
 export function isWindowsNamedPipePath(path: string): boolean {
@@ -135,20 +168,26 @@ export function isWindowsNamedPipePath(path: string): boolean {
 
 export async function removeControlIpcEndpoint(
     path: string,
-    unlinkFunction: (path: string) => Promise<unknown> = unlink
+    unlinkFunction: (path: string) => Promise<unknown> = unlink,
 ): Promise<void> {
     if (!isWindowsNamedPipePath(path)) {
         await unlinkFunction(path).catch(() => undefined);
     }
 }
 
-function shortUnixRuntimeDirectory(candidate: string, environment: NodeJS.ProcessEnv): string {
+function shortUnixRuntimeDirectory(
+    candidate: string,
+    environment: NodeJS.ProcessEnv,
+): string {
     const identity = resolveUnixUserIdentity(environment);
     const digest = createHash("sha256")
         .update(`${identity}\0${candidate}`)
         .digest("hex")
         .slice(0, 16);
-    return posix.join("/tmp", `pds-control-${normalizeIdentity(identity).slice(0, 16)}-${digest}`);
+    return posix.join(
+        "/tmp",
+        `pds-control-${normalizeIdentity(identity).slice(0, 16)}-${digest}`,
+    );
 }
 
 function resolveUnixUserIdentity(environment: NodeJS.ProcessEnv): string {

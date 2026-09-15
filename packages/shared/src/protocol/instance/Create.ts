@@ -100,7 +100,7 @@ export interface InstanceCreateSchema {
             "dockerfile",
             "compose",
             "existingImage",
-            "existingStoppedContainer"
+            "existingStoppedContainer",
         ];
         presets: readonly InstanceContainerPresetSchema[];
     };

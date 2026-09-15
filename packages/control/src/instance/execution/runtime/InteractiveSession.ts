@@ -1,5 +1,10 @@
 import type { WorkerCommandInteractiveSession } from "@portable-devshell/core";
-import { createError, errorCodes, type JsonValue, type PrefixRouteEvent } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type JsonValue,
+    type PrefixRouteEvent,
+} from "@portable-devshell/shared";
 
 export class RuntimeInteractiveSession implements WorkerCommandInteractiveSession {
     readonly #queue: Buffer[] = [];
@@ -23,14 +28,17 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
             throw createError({
                 code: errorCodes.envelopeInvalid,
                 message: `Interactive runtime does not accept ${event.name}.`,
-                retryable: false
+                retryable: false,
             });
         }
-        if (!isRecord(event.payload) || typeof event.payload.data !== "string") {
+        if (
+            !isRecord(event.payload) ||
+            typeof event.payload.data !== "string"
+        ) {
             throw createError({
                 code: errorCodes.targetInvalid,
                 message: "runtime.input requires base64 data.",
-                retryable: false
+                retryable: false,
             });
         }
         this.#push(Buffer.from(event.payload.data, "base64"));
@@ -44,7 +52,9 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
         if (this.#closed) {
             return undefined;
         }
-        return await new Promise<Buffer | undefined>((resolve) => this.#waiters.push(resolve));
+        return await new Promise<Buffer | undefined>((resolve) =>
+            this.#waiters.push(resolve),
+        );
     }
 
     async writeOutput(chunk: string): Promise<void> {
@@ -77,6 +87,8 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
     }
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

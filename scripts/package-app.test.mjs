@@ -10,7 +10,7 @@ test("application packaging rejects a target other than the native host", () => 
     const host = `${process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux"}-${process.arch === "arm64" ? "arm64" : "x64"}`;
     const target = host === "linux-x64" ? "linux-arm64" : "linux-x64";
     const result = spawnSync(process.execPath, [script, "--target", target], {
-        encoding: "utf8"
+        encoding: "utf8",
     });
 
     assert.notEqual(result.status, 0);

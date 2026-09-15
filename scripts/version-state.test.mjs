@@ -12,28 +12,42 @@ async function createRepository(version, releaseTag) {
     const root = await createTestTempDirectory("version");
     await mkdir(join(root, "crates/devshell-worker"), { recursive: true });
     await mkdir(join(root, "scripts"), { recursive: true });
-    await writeFile(join(root, "package.json"), `${JSON.stringify({ name: "portable-devshell", version }, null, 4)}\n`);
-    await writeFile(join(root, "crates/devshell-worker/Cargo.toml"), `[package]\nname = "devshell-worker"\nversion = "${version}"\nedition = "2024"\n`);
-    await writeFile(join(root, "Cargo.lock"), `[[package]]\nname = "devshell-worker"\nversion = "${version}"\n`);
+    await writeFile(
+        join(root, "package.json"),
+        `${JSON.stringify({ name: "portable-devshell", version }, null, 4)}\n`,
+    );
+    await writeFile(
+        join(root, "crates/devshell-worker/Cargo.toml"),
+        `[package]\nname = "devshell-worker"\nversion = "${version}"\nedition = "2024"\n`,
+    );
+    await writeFile(
+        join(root, "Cargo.lock"),
+        `[[package]]\nname = "devshell-worker"\nversion = "${version}"\n`,
+    );
     await writeFile(
         join(root, "scripts/install-local.test.mjs"),
-        `const CURRENT_DEVELOPMENT_VERSION = "${version}"; // version-state:current-development\n`
+        `const CURRENT_DEVELOPMENT_VERSION = "${version}"; // version-state:current-development\n`,
     );
     execFileSync("git", ["init", "-q"], { cwd: root });
     const hooksPath = join(root, ".git-hooks-empty");
     await mkdir(hooksPath);
     execFileSync("git", ["config", "core.hooksPath", hooksPath], { cwd: root });
-    execFileSync("git", ["config", "user.email", "version-test@example.invalid"], { cwd: root });
+    execFileSync(
+        "git",
+        ["config", "user.email", "version-test@example.invalid"],
+        { cwd: root },
+    );
     execFileSync("git", ["config", "user.name", "Version Test"], { cwd: root });
     execFileSync("git", ["add", "."], { cwd: root });
     execFileSync("git", ["commit", "-qm", "fixture"], { cwd: root });
-    if (releaseTag !== undefined) execFileSync("git", ["tag", releaseTag], { cwd: root });
+    if (releaseTag !== undefined)
+        execFileSync("git", ["tag", releaseTag], { cwd: root });
     return root;
 }
 
 function run(root, ...args) {
     return spawnSync(process.execPath, [script, ...args, "--root", root], {
-        encoding: "utf8"
+        encoding: "utf8",
     });
 }
 
@@ -57,10 +71,29 @@ test("set keeps app and worker versions synchronized", async () => {
     const root = await createRepository("0.4.2", "v0.4.1");
     try {
         assert.equal(run(root, "set", "0.4.3").status, 0);
-        assert.equal(JSON.parse(await readFile(join(root, "package.json"), "utf8")).version, "0.4.3");
-        assert.match(await readFile(join(root, "crates/devshell-worker/Cargo.toml"), "utf8"), /version = "0\.4\.3"/u);
-        assert.match(await readFile(join(root, "Cargo.lock"), "utf8"), /version = "0\.4\.3"/u);
-        assert.match(await readFile(join(root, "scripts/install-local.test.mjs"), "utf8"), /CURRENT_DEVELOPMENT_VERSION = "0\.4\.3"/u);
+        assert.equal(
+            JSON.parse(await readFile(join(root, "package.json"), "utf8"))
+                .version,
+            "0.4.3",
+        );
+        assert.match(
+            await readFile(
+                join(root, "crates/devshell-worker/Cargo.toml"),
+                "utf8",
+            ),
+            /version = "0\.4\.3"/u,
+        );
+        assert.match(
+            await readFile(join(root, "Cargo.lock"), "utf8"),
+            /version = "0\.4\.3"/u,
+        );
+        assert.match(
+            await readFile(
+                join(root, "scripts/install-local.test.mjs"),
+                "utf8",
+            ),
+            /CURRENT_DEVELOPMENT_VERSION = "0\.4\.3"/u,
+        );
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -70,7 +103,11 @@ test("version checks accept a CRLF Cargo lockfile", async () => {
     const root = await createRepository("0.4.2", "v0.4.1");
     try {
         const lockPath = join(root, "Cargo.lock");
-        await writeFile(lockPath, (await readFile(lockPath, "utf8")).replaceAll("\n", "\r\n"), "utf8");
+        await writeFile(
+            lockPath,
+            (await readFile(lockPath, "utf8")).replaceAll("\n", "\r\n"),
+            "utf8",
+        );
         assert.equal(run(root, "check-development").status, 0);
     } finally {
         await rm(root, { force: true, recursive: true });
@@ -83,9 +120,17 @@ test("release check requires an exact tag and post-release advance bumps one pat
         assert.equal(run(root, "check-release", "v0.4.2").status, 0);
         assert.equal(run(root, "check-release", "v0.4.3").status, 1);
         assert.equal(run(root, "advance-after-release", "v0.4.2").status, 0);
-        assert.equal(JSON.parse(await readFile(resolve(root, "package.json"), "utf8")).version, "0.4.3");
+        assert.equal(
+            JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
+                .version,
+            "0.4.3",
+        );
         assert.equal(run(root, "advance-after-release", "v0.4.2").status, 0);
-        assert.equal(JSON.parse(await readFile(resolve(root, "package.json"), "utf8")).version, "0.4.3");
+        assert.equal(
+            JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
+                .version,
+            "0.4.3",
+        );
     } finally {
         await rm(root, { force: true, recursive: true });
     }

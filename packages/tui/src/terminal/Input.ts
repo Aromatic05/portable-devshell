@@ -49,12 +49,21 @@ export type TuiTerminalInputAction =
     | { type: "source.toggle" }
     | { data: string; type: "paste" }
     | { direction: "pageUp" | "pageDown" | "top" | "bottom"; type: "scroll" }
-    | { button: number; kind: "press" | "release"; type: "mouse"; x: number; y: number };
+    | {
+          button: number;
+          kind: "press" | "release";
+          type: "mouse";
+          x: number;
+          y: number;
+      };
 
 const ESCAPE = "\u001B";
 const FOCUS_LEAVE = "\u001D";
 const SOURCE_TOGGLE = "\u0014";
-const SCROLL_SEQUENCES = new Map<string, Extract<TuiTerminalInputAction, { type: "scroll" }>["direction"]>([
+const SCROLL_SEQUENCES = new Map<
+    string,
+    Extract<TuiTerminalInputAction, { type: "scroll" }>["direction"]
+>([
     [`${ESCAPE}[5;2~`, "pageUp"],
     [`${ESCAPE}[6;2~`, "pageDown"],
     [`${ESCAPE}[1;2H`, "top"],
@@ -94,7 +103,9 @@ export function projectTuiTerminalInputFrame(
     return { data: frame.data, type: "data" };
 }
 
-function projectFrames(frames: readonly TuiInputFrame[]): TuiTerminalInputAction[] {
+function projectFrames(
+    frames: readonly TuiInputFrame[],
+): TuiTerminalInputAction[] {
     const actions: TuiTerminalInputAction[] = [];
     for (const frame of frames) {
         appendAction(actions, projectTuiTerminalInputFrame(frame));

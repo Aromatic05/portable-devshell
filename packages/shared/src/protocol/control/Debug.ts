@@ -3,7 +3,14 @@ export interface DebugInvocationSummary {
     invocationId: string;
     label?: string;
     method: string;
-    outcome: "aborted" | "continued" | "faulted" | "holding" | "released" | "returned" | "thrown";
+    outcome:
+        | "aborted"
+        | "continued"
+        | "faulted"
+        | "holding"
+        | "released"
+        | "returned"
+        | "thrown";
     startedAt: string;
 }
 

@@ -1,56 +1,82 @@
-import type { InstanceSnapshot, OperationalHealth, OperationalOverviewActivity, OperationalOverviewAlert, OperationalOverviewSystem, OperationalOverviewTodo, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    InstanceSnapshot,
+    OperationalHealth,
+    OperationalOverviewActivity,
+    OperationalOverviewAlert,
+    OperationalOverviewSystem,
+    OperationalOverviewTodo,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
 const errorSummaryLimit = 240;
 
 export function createSnapshotAlerts(
     instanceName: InstanceSnapshot["name"],
-    snapshot: InstanceSnapshot
+    snapshot: InstanceSnapshot,
 ): OperationalOverviewAlert[] {
     if (isCriticalSnapshot(snapshot)) {
-        return [{
-            detail: summarize(snapshot.lastErrorMessage) ?? describeSnapshot(snapshot),
-            id: `instance.failed:${instanceName}`,
-            instance: instanceName,
-            kind: "instance.failed",
-            severity: "critical",
-            title: "Instance failed"
-        }];
+        return [
+            {
+                detail:
+                    summarize(snapshot.lastErrorMessage) ??
+                    describeSnapshot(snapshot),
+                id: `instance.failed:${instanceName}`,
+                instance: instanceName,
+                kind: "instance.failed",
+                severity: "critical",
+                title: "Instance failed",
+            },
+        ];
     }
     if (isAttentionSnapshot(snapshot)) {
-        return [{
-            detail: summarize(snapshot.lastErrorMessage) ?? describeSnapshot(snapshot),
-            id: `instance.attention:${instanceName}`,
-            instance: instanceName,
-            kind: "instance.attention",
-            severity: "attention",
-            title: "Instance needs attention"
-        }];
+        return [
+            {
+                detail:
+                    summarize(snapshot.lastErrorMessage) ??
+                    describeSnapshot(snapshot),
+                id: `instance.attention:${instanceName}`,
+                instance: instanceName,
+                kind: "instance.attention",
+                severity: "attention",
+                title: "Instance needs attention",
+            },
+        ];
     }
     return [];
 }
 
 export function createTodoAlerts(
     instance: OperationalOverviewTodo["instance"],
-    todos: readonly OperationalOverviewTodo[]
+    todos: readonly OperationalOverviewTodo[],
 ): OperationalOverviewAlert[] {
     return todos.flatMap((todo) => {
         if (todo.status !== "blocked" && todo.status !== "failed") {
             return [];
         }
-        return [{
-            detail: todo.currentItem ?? `${todo.completed}/${todo.total} items completed.`,
-            id: `todo.${todo.status}:${instance}:${todo.taskId}`,
-            instance,
-            kind: todo.status === "failed" ? "todo.failed" as const : "todo.blocked" as const,
-            severity: todo.status === "failed" ? "critical" as const : "attention" as const,
-            title: `${todo.status === "failed" ? "Failed" : "Blocked"} task: ${todo.title}`
-        }];
+        return [
+            {
+                detail:
+                    todo.currentItem ??
+                    `${todo.completed}/${todo.total} items completed.`,
+                id: `todo.${todo.status}:${instance}:${todo.taskId}`,
+                instance,
+                kind:
+                    todo.status === "failed"
+                        ? ("todo.failed" as const)
+                        : ("todo.blocked" as const),
+                severity:
+                    todo.status === "failed"
+                        ? ("critical" as const)
+                        : ("attention" as const),
+                title: `${todo.status === "failed" ? "Failed" : "Blocked"} task: ${todo.title}`,
+            },
+        ];
     });
 }
 
 export function createRecentFailureAlert(
     instance: InstanceSnapshot["name"],
-    summary: { count: number; latest?: ToolCallRecord }
+    summary: { count: number; latest?: ToolCallRecord },
 ): { alert?: OperationalOverviewAlert; count: number } {
     if (summary.count === 0) {
         return { count: 0 };
@@ -63,31 +89,33 @@ export function createRecentFailureAlert(
             instance,
             kind: "activity.failed",
             severity: "attention",
-            title: "Recent tool failures"
+            title: "Recent tool failures",
         },
-        count: summary.count
+        count: summary.count,
     };
 }
 
 export function toOperationalActivity(
-    record: ToolCallRecord
+    record: ToolCallRecord,
 ): OperationalOverviewActivity {
     const errorSummary = summarize(record.error);
     return {
         callId: record.callId,
-        ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+        ...(record.completedAt === undefined
+            ? {}
+            : { completedAt: record.completedAt }),
         ...(errorSummary === undefined ? {} : { errorSummary }),
         instance: record.instance,
         source: record.source,
         startedAt: record.startedAt,
         status: record.status,
-        toolName: record.toolName
+        toolName: record.toolName,
     };
 }
 
 export function selectOperationalActivity(
     records: readonly ToolCallRecord[],
-    limit: number
+    limit: number,
 ): OperationalOverviewActivity[] {
     return [...records]
         .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
@@ -98,43 +126,52 @@ export function selectOperationalActivity(
 export function createCollectionFailure(
     instance: OperationalOverviewAlert["instance"],
     subject: string,
-    error: unknown
+    error: unknown,
 ): OperationalOverviewAlert {
     return {
-        detail: summarize(error instanceof Error ? error.message : String(error)) ?? "Unknown collection failure.",
+        detail:
+            summarize(error instanceof Error ? error.message : String(error)) ??
+            "Unknown collection failure.",
         id: `overview.partial:${instance ?? "control"}:${subject}`,
         ...(instance === undefined ? {} : { instance }),
         kind: "overview.partial",
         severity: "attention",
-        title: `Could not read ${subject}`
+        title: `Could not read ${subject}`,
     };
 }
 
 export function isCriticalSnapshot(snapshot: InstanceSnapshot): boolean {
-    return snapshot.status === "failed" ||
+    return (
+        snapshot.status === "failed" ||
         snapshot.connectionState === "failed" ||
-        snapshot.daemonState === "failed";
+        snapshot.daemonState === "failed"
+    );
 }
 
 export function isAttentionSnapshot(snapshot: InstanceSnapshot): boolean {
-    return !snapshot.ready &&
+    return (
+        !snapshot.ready &&
         !isCriticalSnapshot(snapshot) &&
         !(
             snapshot.status === "stopped" &&
             snapshot.connectionState === "disconnected" &&
             snapshot.daemonState === "stopped"
-        );
+        )
+    );
 }
 
-export function sortOperationalAlerts(alerts: OperationalOverviewAlert[]): void {
+export function sortOperationalAlerts(
+    alerts: OperationalOverviewAlert[],
+): void {
     alerts.sort((left, right) => {
-        const severity = severityRank(right.severity) - severityRank(left.severity);
+        const severity =
+            severityRank(right.severity) - severityRank(left.severity);
         return severity === 0 ? left.id.localeCompare(right.id) : severity;
     });
 }
 
 export function readOperationalHealth(
-    alerts: readonly OperationalOverviewAlert[]
+    alerts: readonly OperationalOverviewAlert[],
 ): OperationalHealth {
     if (alerts.some((alert) => alert.severity === "critical")) {
         return "critical";
@@ -195,21 +232,22 @@ export interface OperationalOverviewSystemSample {
 }
 
 export function createOperationalOverviewSystemCollection(
-    sample: OperationalOverviewSystemSample
+    sample: OperationalOverviewSystemSample,
 ): OperationalOverviewSystemCollection {
     const cpu = normalizeCpuTimes(sample.cpu);
-    const previousCpu = sample.previousCpu === undefined
-        ? undefined
-        : normalizeCpuTimes(sample.previousCpu);
+    const previousCpu =
+        sample.previousCpu === undefined
+            ? undefined
+            : normalizeCpuTimes(sample.previousCpu);
     const cpuPercent = calculateCpuPercent(previousCpu, cpu);
     const memoryTotalBytes = normalizeBytes(sample.totalMemoryBytes);
     const memoryAvailableBytes = Math.min(
         memoryTotalBytes,
-        normalizeBytes(sample.freeMemoryBytes)
+        normalizeBytes(sample.freeMemoryBytes),
     );
     const memoryPercent = usedPercent(
         memoryTotalBytes - memoryAvailableBytes,
-        memoryTotalBytes
+        memoryTotalBytes,
     );
     const system: OperationalOverviewSystem = {
         cpuCount: Math.max(1, Math.floor(sample.cpuCount)),
@@ -218,7 +256,7 @@ export function createOperationalOverviewSystemCollection(
         load1m: normalizeLoad(sample.load1m),
         memoryAvailableBytes,
         memoryPercent,
-        memoryTotalBytes
+        memoryTotalBytes,
     };
     const alerts: OperationalOverviewAlert[] = [];
 
@@ -226,16 +264,16 @@ export function createOperationalOverviewSystemCollection(
         const diskTotalBytes = normalizeBytes(sample.disk.totalBytes);
         const diskAvailableBytes = Math.min(
             diskTotalBytes,
-            normalizeBytes(sample.disk.availableBytes)
+            normalizeBytes(sample.disk.availableBytes),
         );
         const diskPercent = usedPercent(
             diskTotalBytes - diskAvailableBytes,
-            diskTotalBytes
+            diskTotalBytes,
         );
         Object.assign(system, {
             diskAvailableBytes,
             diskPercent,
-            diskTotalBytes
+            diskTotalBytes,
         });
         const diskAlert = resourceAlert({
             attentionPercent: diskAttentionPercent,
@@ -244,7 +282,7 @@ export function createOperationalOverviewSystemCollection(
             id: "controller.diskPressure",
             kind: "controller.diskPressure",
             percent: diskPercent,
-            title: "Controller disk pressure"
+            title: "Controller disk pressure",
         });
         if (diskAlert !== undefined) alerts.push(diskAlert);
     }
@@ -256,7 +294,7 @@ export function createOperationalOverviewSystemCollection(
         id: "controller.memoryPressure",
         kind: "controller.memoryPressure",
         percent: memoryPercent,
-        title: "Controller memory pressure"
+        title: "Controller memory pressure",
     });
     if (memoryAlert !== undefined) alerts.push(memoryAlert);
 
@@ -265,22 +303,22 @@ export function createOperationalOverviewSystemCollection(
 
 function calculateCpuPercent(
     previous: OperationalOverviewCpuTimes | undefined,
-    current: OperationalOverviewCpuTimes
+    current: OperationalOverviewCpuTimes,
 ): number | undefined {
-    const total = previous === undefined
-        ? current.total
-        : current.total - previous.total;
-    const idle = previous === undefined
-        ? current.idle
-        : current.idle - previous.idle;
+    const total =
+        previous === undefined ? current.total : current.total - previous.total;
+    const idle =
+        previous === undefined ? current.idle : current.idle - previous.idle;
     if (total <= 0 || idle < 0 || idle > total) return undefined;
-    return roundPercent((total - idle) * 100 / total);
+    return roundPercent(((total - idle) * 100) / total);
 }
 
-function normalizeCpuTimes(value: OperationalOverviewCpuTimes): OperationalOverviewCpuTimes {
+function normalizeCpuTimes(
+    value: OperationalOverviewCpuTimes,
+): OperationalOverviewCpuTimes {
     return {
         idle: normalizeBytes(value.idle),
-        total: normalizeBytes(value.total)
+        total: normalizeBytes(value.total),
     };
 }
 
@@ -295,7 +333,7 @@ function normalizeLoad(value: number): number | undefined {
 }
 
 function usedPercent(used: number, total: number): number {
-    return total <= 0 ? 0 : roundPercent(used * 100 / total);
+    return total <= 0 ? 0 : roundPercent((used * 100) / total);
 }
 
 function roundPercent(value: number): number {
@@ -316,7 +354,8 @@ function resourceAlert(input: {
         detail: `${input.percent}% used; ${input.detail}`,
         id: input.id,
         kind: input.kind,
-        severity: input.percent >= input.criticalPercent ? "critical" : "attention",
-        title: input.title
+        severity:
+            input.percent >= input.criticalPercent ? "critical" : "attention",
+        title: input.title,
     };
 }

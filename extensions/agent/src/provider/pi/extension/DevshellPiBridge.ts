@@ -4,13 +4,13 @@ import type {
     InputEvent,
     InputEventResult,
     SessionStartEvent,
-    SessionShutdownEvent
+    SessionShutdownEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "@portable-devshell/shared";
 
 import {
     prepareAgentModelToolInput,
-    projectAgentModelToolResult
+    projectAgentModelToolResult,
 } from "../../../builtin/provider/AgentToolProjection.js";
 import type { AgentModelToolDefinition } from "../../../builtin/provider/AgentToolSession.js";
 import {
@@ -19,7 +19,7 @@ import {
     type PiThemeLike,
     type PiToolRenderContextLike,
     type PiToolRenderResultLike,
-    type PiToolRenderResultOptionsLike
+    type PiToolRenderResultOptionsLike,
 } from "./renderer.js";
 import { attachStandaloneWorkspaceResources } from "./standalone-resources.js";
 import type { DevshellPiTarget } from "./DevshellPiTarget.js";
@@ -27,28 +27,50 @@ import {
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput,
     type DevshellPiContextFile,
-    type DevshellPiWorkspaceResources
+    type DevshellPiWorkspaceResources,
 } from "./workspace-resources.js";
 
 export interface PiExtensionApiLike {
     on(
         event: "before_agent_start",
-        handler: (event: BeforeAgentStartEvent) => BeforeAgentStartEventResult | Promise<BeforeAgentStartEventResult | void> | void
+        handler: (
+            event: BeforeAgentStartEvent,
+        ) =>
+            | BeforeAgentStartEventResult
+            | Promise<BeforeAgentStartEventResult | void>
+            | void,
     ): void;
-    on(event: "input", handler: (event: InputEvent) => InputEventResult | Promise<InputEventResult | void> | void): void;
-    on(event: "session_start", handler: (event: SessionStartEvent) => Promise<void> | void): void;
-    on(event: "session_shutdown", handler: (event: SessionShutdownEvent) => Promise<void> | void): void;
+    on(
+        event: "input",
+        handler: (
+            event: InputEvent,
+        ) => InputEventResult | Promise<InputEventResult | void> | void,
+    ): void;
+    on(
+        event: "session_start",
+        handler: (event: SessionStartEvent) => Promise<void> | void,
+    ): void;
+    on(
+        event: "session_shutdown",
+        handler: (event: SessionShutdownEvent) => Promise<void> | void,
+    ): void;
     getCommands(): Array<{
         name: string;
         source: "extension" | "prompt" | "skill";
         sourceInfo: { scope?: string };
     }>;
-    registerCommand(name: string, options: {
-        description?: string;
-        handler: (args: string) => Promise<void> | void;
-    }): void;
+    registerCommand(
+        name: string,
+        options: {
+            description?: string;
+            handler: (args: string) => Promise<void> | void;
+        },
+    ): void;
     registerTool(tool: PiToolLike): void;
-    sendUserMessage(content: string, options?: { expandPromptTemplates?: boolean }): void;
+    sendUserMessage(
+        content: string,
+        options?: { expandPromptTemplates?: boolean },
+    ): void;
 }
 
 export interface PiToolLike {
@@ -60,7 +82,7 @@ export interface PiToolLike {
         onUpdate?: (result: {
             content: Array<{ text: string; type: "text" }>;
             details: JsonValue;
-        }) => void
+        }) => void,
     ): Promise<{
         content: Array<{ text: string; type: "text" }>;
         details: JsonValue;
@@ -71,12 +93,16 @@ export interface PiToolLike {
     promptGuidelines?: string[];
     promptSnippet?: string;
     renderShell?: "default" | "self";
-    renderCall?(args: unknown, theme: PiThemeLike, context: PiToolRenderContextLike): unknown;
+    renderCall?(
+        args: unknown,
+        theme: PiThemeLike,
+        context: PiToolRenderContextLike,
+    ): unknown;
     renderResult?(
         result: PiToolRenderResultLike,
         options: PiToolRenderResultOptionsLike,
         theme: PiThemeLike,
-        context: PiToolRenderContextLike
+        context: PiToolRenderContextLike,
     ): unknown;
 }
 
@@ -89,7 +115,7 @@ export interface DevshellPiToolSession {
         input: JsonValue,
         operationId: string,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue>;
     close(): Promise<void> | void;
 }
@@ -110,7 +136,10 @@ export interface DevshellPiExtensionOptions {
 
 export interface DevshellPiWorkspaceBridge {
     close(): Promise<void>;
-    extension(pi: PiExtensionApiLike, options?: DevshellPiExtensionAttachOptions): Promise<void>;
+    extension(
+        pi: PiExtensionApiLike,
+        options?: DevshellPiExtensionAttachOptions,
+    ): Promise<void>;
     loadContextFiles(): Promise<DevshellPiContextFile[]>;
     loadResources(): Promise<DevshellPiWorkspaceResources>;
     refreshResources(): Promise<DevshellPiWorkspaceResources>;
@@ -119,7 +148,7 @@ export interface DevshellPiWorkspaceBridge {
 
 export function createDevshellPiExtension(
     session: DevshellPiToolSession,
-    options: DevshellPiExtensionOptions = {}
+    options: DevshellPiExtensionOptions = {},
 ): (pi: PiExtensionApiLike) => Promise<void> {
     return async (pi) => {
         const bridge = createDevshellPiWorkspaceBridge(session);
@@ -136,7 +165,7 @@ export function createDevshellPiExtension(
 }
 
 export function createDevshellPiWorkspaceBridge(
-    session: DevshellPiToolSession
+    session: DevshellPiToolSession,
 ): DevshellPiWorkspaceBridge {
     let closed = false;
     const catalog = [...session.modelTools];
@@ -151,11 +180,12 @@ export function createDevshellPiWorkspaceBridge(
         const loaded = await loadDevshellPiWorkspaceResources(
             session.target,
             toolNames,
-            async (toolName, input, operationId) => await session.callTool(
-                toolName,
-                input,
-                `pi-resource-generation-${generation}-${operationId}`
-            )
+            async (toolName, input, operationId) =>
+                await session.callTool(
+                    toolName,
+                    input,
+                    `pi-resource-generation-${generation}-${operationId}`,
+                ),
         );
         if (resources === undefined) {
             resources = loaded;
@@ -190,17 +220,24 @@ export function createDevshellPiWorkspaceBridge(
             }
             const loaded = await loadResources();
             if (attachOptions.standaloneResources === true) {
-                attachStandaloneWorkspaceResources(pi, session.target, loaded, (names) => {
-                    activeSkillNames = names;
-                });
+                attachStandaloneWorkspaceResources(
+                    pi,
+                    session.target,
+                    loaded,
+                    (names) => {
+                        activeSkillNames = names;
+                    },
+                );
             }
             pi.on("input", (event) => {
                 const active = activeSkillNames;
                 return transformDevshellPiSkillInput(
                     active === undefined
                         ? loaded.skills
-                        : loaded.skills.filter((skill) => active.has(skill.resource.name)),
-                    event
+                        : loaded.skills.filter((skill) =>
+                              active.has(skill.resource.name),
+                          ),
+                    event,
                 );
             });
         },
@@ -209,11 +246,14 @@ export function createDevshellPiWorkspaceBridge(
         refreshResources: fetchResources,
         setActiveSkillNames: (names) => {
             activeSkillNames = new Set(names);
-        }
+        },
     };
 }
 
-function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolSession): PiToolLike {
+function toPiTool(
+    definition: DevshellPiToolDefinition,
+    session: DevshellPiToolSession,
+): PiToolLike {
     const prompt = piPromptMetadata(definition.name);
     return {
         description: definition.description,
@@ -225,46 +265,80 @@ function toPiTool(definition: DevshellPiToolDefinition, session: DevshellPiToolS
                 input,
                 toolCallId,
                 signal,
-                onUpdate === undefined ? undefined : (progress) => {
-                    onUpdate({
-                        content: [{ text: projectAgentModelToolResult(definition.name, progress), type: "text" }],
-                        details: progress
-                    });
-                }
+                onUpdate === undefined
+                    ? undefined
+                    : (progress) => {
+                          onUpdate({
+                              content: [
+                                  {
+                                      text: projectAgentModelToolResult(
+                                          definition.name,
+                                          progress,
+                                      ),
+                                      type: "text",
+                                  },
+                              ],
+                              details: progress,
+                          });
+                      },
             );
             signal?.throwIfAborted();
             return {
-                content: [{ text: projectAgentModelToolResult(definition.name, result), type: "text" }],
-                details: result
+                content: [
+                    {
+                        text: projectAgentModelToolResult(
+                            definition.name,
+                            result,
+                        ),
+                        type: "text",
+                    },
+                ],
+                details: result,
             };
         },
         label: definition.name,
         name: definition.name,
         parameters: definition.inputSchema,
         ...prompt,
-        ...(definition.name === "file_edit" ? { renderShell: "self" as const } : {}),
+        ...(definition.name === "file_edit"
+            ? { renderShell: "self" as const }
+            : {}),
         renderCall(args, theme, context) {
             return renderPiToolCall(definition.name, args, theme, context);
         },
         renderResult(result, options, theme, context) {
-            return renderPiToolResult(definition.name, result, options, theme, context);
-        }
+            return renderPiToolResult(
+                definition.name,
+                result,
+                options,
+                theme,
+                context,
+            );
+        },
     };
 }
 
-export function piPromptMetadata(toolName: string): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
+export function piPromptMetadata(
+    toolName: string,
+): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
     switch (toolName) {
         case "file_read":
-            return { promptSnippet: "Read file contents, outlines, or metadata from the devshell workspace" };
+            return {
+                promptSnippet:
+                    "Read file contents, outlines, or metadata from the devshell workspace",
+            };
         case "file_grep":
-            return { promptSnippet: "Search file contents in the devshell workspace" };
+            return {
+                promptSnippet: "Search file contents in the devshell workspace",
+            };
         case "file_edit":
             return {
-                promptSnippet: "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
+                promptSnippet:
+                    "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
                 promptGuidelines: [
                     "Before file_edit modifies an existing file, use file_read or file_grep on that file in the current context; file_edit rejects unseen existing files.",
-                    "Prefer devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Common apply_patch aliases such as '*** Update File:' and '*** Add File:' are accepted for compatibility."
-                ]
+                    "Prefer devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Common apply_patch aliases such as '*** Update File:' and '*** Add File:' are accepted for compatibility.",
+                ],
             };
         default:
             return {};

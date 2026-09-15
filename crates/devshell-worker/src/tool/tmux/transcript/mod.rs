@@ -187,44 +187,42 @@ impl TranscriptCursor {
         mut consume: impl FnMut(String),
     ) -> Result<(), ToolError> {
         let mut records = 0_usize;
-        loop {
+        if max_records.is_some_and(|limit| records >= limit) {
+            return Ok(());
+        }
+        let segment = self.read_segment(self.offset)?;
+        if segment.start > self.offset {
+            self.warn_rotated(pane_id, warnings, segment.start);
+            self.offset = segment.start;
+        }
+        if segment.bytes.is_empty() {
+            return Ok(());
+        }
+
+        let mut position = 0_usize;
+        while position < segment.bytes.len() {
             if max_records.is_some_and(|limit| records >= limit) {
                 return Ok(());
             }
-            let segment = self.read_segment(self.offset)?;
-            if segment.start > self.offset {
-                self.warn_rotated(pane_id, warnings, segment.start);
-                self.offset = segment.start;
+            let remaining = &segment.bytes[position..];
+            let newline = remaining.iter().position(|byte| *byte == b'\n');
+            let count = match newline {
+                Some(index) => index + 1,
+                None if terminal => remaining.len(),
+                None => return Ok(()),
+            };
+            let bytes = &remaining[..count];
+            self.offset = segment.start + (position + count) as u64;
+            position += count;
+            let (record, truncated) = render_terminal_record(bytes);
+            if truncated {
+                warn_record_truncated(pane_id, warnings);
             }
-            if segment.bytes.is_empty() {
-                return Ok(());
-            }
-
-            let mut position = 0_usize;
-            while position < segment.bytes.len() {
-                if max_records.is_some_and(|limit| records >= limit) {
-                    return Ok(());
-                }
-                let remaining = &segment.bytes[position..];
-                let newline = remaining.iter().position(|byte| *byte == b'\n');
-                let count = match newline {
-                    Some(index) => index + 1,
-                    None if terminal => remaining.len(),
-                    None => return Ok(()),
-                };
-                let bytes = &remaining[..count];
-                self.offset = segment.start + (position + count) as u64;
-                position += count;
-                let (record, truncated) = render_terminal_record(bytes);
-                if truncated {
-                    warn_record_truncated(pane_id, warnings);
-                }
-                consume(record);
-                records += 1;
-            }
-
-            return Ok(());
+            consume(record);
+            records += 1;
         }
+
+        Ok(())
     }
 
     fn read_segment(&self, offset: u64) -> Result<TranscriptSegment, ToolError> {

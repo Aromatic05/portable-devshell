@@ -5,7 +5,10 @@ import type {
 import { workspaceFolderName } from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../../component/content/Box.js";
-import { selectTuiLogs, type TuiAppState } from "../../../../state/store/Model.js";
+import {
+    selectTuiLogs,
+    type TuiAppState,
+} from "../../../../state/store/Model.js";
 import {
     auditInputSummary,
     auditOutputSummary,
@@ -71,7 +74,10 @@ function callBox(
             formatField("Operation", call.requestId ?? "-"),
             {
                 id: "input",
-                text: formatField("Input", auditInputSummary(call.input, call.inputSummary)),
+                text: formatField(
+                    "Input",
+                    auditInputSummary(call.input, call.inputSummary),
+                ),
             },
             {
                 id: "output",

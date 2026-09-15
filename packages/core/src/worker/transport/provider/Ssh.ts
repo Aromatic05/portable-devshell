@@ -3,7 +3,11 @@ import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ControlError, createError, errorCodes } from "@portable-devshell/shared";
+import {
+    ControlError,
+    createError,
+    errorCodes,
+} from "@portable-devshell/shared";
 import { parseArgsStringToArgv } from "string-argv";
 
 import { WorkerBinary } from "../Binary.js";
@@ -13,14 +17,21 @@ import {
     type WorkerCommandInteractiveSession,
     type SpawnFunction,
     type ProviderCommandContext,
-    type WorkerCommandTransport
+    type WorkerCommandTransport,
 } from "../command/Transport.js";
-import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../command/Model.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../protocol/rpc/Process.js";
+import type {
+    WorkerCommandName,
+    WorkerCommandOptions,
+    WorkerRpcOptions,
+} from "../command/Model.js";
+import {
+    createWorkerRpcProcess,
+    type WorkerRpcProcess,
+} from "../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
-    workerTargetProbeCommandLine
+    workerTargetProbeCommandLine,
 } from "../../provision/target/Probe.js";
 import { WorkerTransportProcessRunner } from "../process/Runner.js";
 
@@ -28,7 +39,7 @@ const SSH_NON_INTERACTIVE_ARGS = [
     "-oBatchMode=yes",
     "-oNumberOfPasswordPrompts=0",
     "-oKbdInteractiveAuthentication=no",
-    "-oPasswordAuthentication=no"
+    "-oPasswordAuthentication=no",
 ] as const;
 const SSH_INTERACTIVE_HINT =
     "portable-devshell: ssh command requires interactive authentication or host confirmation; non-interactive control commands fail fast.";
@@ -44,7 +55,10 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     readonly #workerBinary: WorkerBinary;
     readonly #installer: WorkerInstallerRemote;
     readonly #process: WorkerTransportProcessRunner;
-    readonly #controlPath = join(tmpdir(), `pds-ssh-${randomUUID().slice(0, 8)}`);
+    readonly #controlPath = join(
+        tmpdir(),
+        `pds-ssh-${randomUUID().slice(0, 8)}`,
+    );
     #controlSocketEnabled = false;
 
     constructor(options: WorkerTransportDriverSshOptions) {
@@ -52,95 +66,154 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         this.#workerBinary = options.workerBinary ?? new WorkerBinary();
         this.#process = new WorkerTransportProcessRunner(options.spawnFunction);
         this.#installer = new WorkerInstallerRemote({
-            createContext: (operation, command) => this.#createShellContext(operation, command),
+            createContext: (operation, command) =>
+                this.#createShellContext(operation, command),
             probeTarget: () => this.#probeTarget(),
-            spawnShell: (commandLine, stdio, context) => this.#spawnRemoteShell(commandLine, stdio, context),
+            spawnShell: (commandLine, stdio, context) =>
+                this.#spawnRemoteShell(commandLine, stdio, context),
             createProviderError: this.#process.createError,
         });
     }
 
-    async installWorker(interactiveSession?: WorkerCommandInteractiveSession): Promise<void> {
-        const installCommand = new WorkerBinary(await this.#resolveExecutable(interactiveSession)).buildInstallCommand();
-        const commandLine = [installCommand.command, ...installCommand.args].map(shellEscape).join(" ");
+    async installWorker(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<void> {
+        const installCommand = new WorkerBinary(
+            await this.#resolveExecutable(interactiveSession),
+        ).buildInstallCommand();
+        const commandLine = [installCommand.command, ...installCommand.args]
+            .map(shellEscape)
+            .join(" ");
         const context = this.#createRemoteShellContext(
             "installWorker",
-            commandLine
+            commandLine,
         );
         const result = this.#decorateCommandResult(
             await this.#process.wait(
-                this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context),
-                context
-            )
+                this.#spawnRemoteShell(
+                    commandLine,
+                    ["ignore", "pipe", "pipe"],
+                    context,
+                ),
+                context,
+            ),
         );
 
         if (result.exitCode !== 0) {
-            throw this.#process.createError(context, new Error(result.stderr || result.stdout || "worker install check failed"), {
-                errorCode: errorCodes.coreWorkerProvisionFailed,
-                result
-            });
+            throw this.#process.createError(
+                context,
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "worker install check failed",
+                ),
+                {
+                    errorCode: errorCodes.coreWorkerProvisionFailed,
+                    result,
+                },
+            );
         }
     }
 
     async runWorkerCommand(
         command: WorkerCommandName,
         options: WorkerCommandOptions,
-        interactiveSession?: WorkerCommandInteractiveSession
+        interactiveSession?: WorkerCommandInteractiveSession,
     ) {
         if (interactiveSession !== undefined) {
-            await this.#ensureInteractiveControlConnection(command, options.instanceName, interactiveSession);
+            await this.#ensureInteractiveControlConnection(
+                command,
+                options.instanceName,
+                interactiveSession,
+            );
         }
 
         const executable = await this.#resolveExecutable(interactiveSession);
         const workerCommand = new WorkerBinary(executable).buildCommand(
             command,
             options.instanceName,
-            options.extraArgs
+            options.extraArgs,
         );
-        const commandLine = [workerCommand.command, ...workerCommand.args].map(shellEscape).join(" ");
-        const environmentFile = await this.#prepareRemoteEnvironment(options.env);
-        const remoteCommandLine = this.#withRemoteEnvironment(commandLine, environmentFile);
+        const commandLine = [workerCommand.command, ...workerCommand.args]
+            .map(shellEscape)
+            .join(" ");
+        const environmentFile = await this.#prepareRemoteEnvironment(
+            options.env,
+        );
+        const remoteCommandLine = this.#withRemoteEnvironment(
+            commandLine,
+            environmentFile,
+        );
         const context = this.#createRemoteShellContext(
             command,
             remoteCommandLine,
             {
-                instance: options.instanceName
-            }
+                instance: options.instanceName,
+            },
         );
         let child;
         try {
-            child = this.#spawnRemoteShell(remoteCommandLine, ["ignore", "pipe", "pipe"], context);
+            child = this.#spawnRemoteShell(
+                remoteCommandLine,
+                ["ignore", "pipe", "pipe"],
+                context,
+            );
         } catch (error) {
-            await this.#removeRemoteEnvironmentFile(environmentFile).catch(() => undefined);
+            await this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
             throw error;
         }
         try {
-            const result = this.#decorateCommandResult(await this.#process.wait(child, context));
+            const result = this.#decorateCommandResult(
+                await this.#process.wait(child, context),
+            );
             if (result.exitCode !== 0) {
-                await this.#removeRemoteEnvironmentFile(environmentFile).catch(() => undefined);
+                await this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                    () => undefined,
+                );
             }
             return result;
         } catch (error) {
-            await this.#removeRemoteEnvironmentFile(environmentFile).catch(() => undefined);
+            await this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
             throw error;
         }
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         const executable = await this.#resolveExecutable();
-        const workerCommand = new WorkerBinary(executable).buildCommand("rpc", options.instanceName);
-        const commandLine = [workerCommand.command, ...workerCommand.args].map(shellEscape).join(" ");
-        const environmentFile = await this.#prepareRemoteEnvironment(options.env);
-        const remoteCommandLine = this.#withRemoteEnvironment(commandLine, environmentFile);
+        const workerCommand = new WorkerBinary(executable).buildCommand(
+            "rpc",
+            options.instanceName,
+        );
+        const commandLine = [workerCommand.command, ...workerCommand.args]
+            .map(shellEscape)
+            .join(" ");
+        const environmentFile = await this.#prepareRemoteEnvironment(
+            options.env,
+        );
+        const remoteCommandLine = this.#withRemoteEnvironment(
+            commandLine,
+            environmentFile,
+        );
         const context = this.#createRemoteShellContext(
             "spawnWorkerRpc",
             remoteCommandLine,
-            { instance: options.instanceName }
+            { instance: options.instanceName },
         );
         let child;
         try {
-            child = this.#spawnRemoteShell(remoteCommandLine, ["pipe", "pipe", "pipe"], context);
+            child = this.#spawnRemoteShell(
+                remoteCommandLine,
+                ["pipe", "pipe", "pipe"],
+                context,
+            );
         } catch (error) {
-            await this.#removeRemoteEnvironmentFile(environmentFile).catch(() => undefined);
+            await this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
             throw error;
         }
         const rpcProcess = createWorkerRpcProcess(child);
@@ -148,24 +221,39 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             ...rpcProcess,
             exit: rpcProcess.exit.finally(async () => {
                 await this.#removeRemoteEnvironmentFile(environmentFile);
-            })
+            }),
         };
     }
 
-    async #resolveExecutable(interactiveSession?: WorkerCommandInteractiveSession): Promise<string> {
+    async #resolveExecutable(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<string> {
         if (interactiveSession !== undefined) {
-            await this.#ensureInteractiveControlConnection("resolveExecutable", undefined, interactiveSession);
+            await this.#ensureInteractiveControlConnection(
+                "resolveExecutable",
+                undefined,
+                interactiveSession,
+            );
         }
 
         return await this.#installer.ensure(this.#workerBinary.executable);
     }
 
     async #probeTarget() {
-        const context = this.#createRemoteShellContext("probeTarget", workerTargetProbeCommandLine);
-        const child = this.#spawnRemoteShell(workerTargetProbeCommandLine, ["ignore", "pipe", "pipe"], context);
+        const context = this.#createRemoteShellContext(
+            "probeTarget",
+            workerTargetProbeCommandLine,
+        );
+        const child = this.#spawnRemoteShell(
+            workerTargetProbeCommandLine,
+            ["ignore", "pipe", "pipe"],
+            context,
+        );
 
         try {
-            const result = this.#decorateCommandResult(await this.#process.wait(child, context));
+            const result = this.#decorateCommandResult(
+                await this.#process.wait(child, context),
+            );
 
             if (result.exitCode !== 0) {
                 throw createWorkerTargetProbeFailedError(context, { result });
@@ -184,42 +272,61 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     #spawnRemoteShell(
         _commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
-        context: ProviderCommandContext
+        context: ProviderCommandContext,
     ) {
         return this.#process.spawn(
             context,
             { stdio },
-            context.operation === "spawnWorkerRpc" ? errorCodes.coreWorkerRpcSpawnFailed : errorCodes.coreProviderFailed
+            context.operation === "spawnWorkerRpc"
+                ? errorCodes.coreWorkerRpcSpawnFailed
+                : errorCodes.coreProviderFailed,
         );
     }
 
-    async #prepareRemoteEnvironment(env: NodeJS.ProcessEnv | undefined): Promise<string | undefined> {
+    async #prepareRemoteEnvironment(
+        env: NodeJS.ProcessEnv | undefined,
+    ): Promise<string | undefined> {
         const entries = Object.entries(env ?? {})
-            .filter((entry): entry is [string, string] =>
-                entry[1] !== undefined && !isInternalWorkerEnvironmentKey(entry[0])
+            .filter(
+                (entry): entry is [string, string] =>
+                    entry[1] !== undefined &&
+                    !isInternalWorkerEnvironmentKey(entry[0]),
             )
             .sort(([left], [right]) => left.localeCompare(right));
         if (entries.length === 0) {
             return undefined;
         }
         for (const [key, value] of entries) {
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || value.includes("\0")) {
+            if (
+                !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ||
+                value.includes("\0")
+            ) {
                 throw createError({
                     code: errorCodes.coreProviderFailed,
                     details: { environmentKey: key, provider: "ssh" },
                     message: `SSH instance environment key ${key} cannot be represented safely.`,
-                    retryable: false
+                    retryable: false,
                 });
             }
         }
 
         const environmentFile = `/tmp/portable-devshell-env-${randomUUID()}.sh`;
         const commandLine = `umask 077; cat > ${shellEscape(environmentFile)}`;
-        const context = this.#createRemoteShellContext("prepareEnvironment", commandLine);
-        const child = this.#spawnRemoteShell(commandLine, ["pipe", "pipe", "pipe"], context);
+        const context = this.#createRemoteShellContext(
+            "prepareEnvironment",
+            commandLine,
+        );
+        const child = this.#spawnRemoteShell(
+            commandLine,
+            ["pipe", "pipe", "pipe"],
+            context,
+        );
         if (child.stdin === null) {
             child.kill();
-            throw this.#process.createError(context, new Error("ssh environment upload stdin is unavailable"));
+            throw this.#process.createError(
+                context,
+                new Error("ssh environment upload stdin is unavailable"),
+            );
         }
         const contents = `${entries.map(([key, value]) => `${key}=${shellEscape(value)}`).join("\n")}\n`;
         try {
@@ -235,39 +342,61 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             child.kill();
             throw this.#process.createError(context, error);
         }
-        const result = this.#decorateCommandResult(await this.#process.wait(child, context));
+        const result = this.#decorateCommandResult(
+            await this.#process.wait(child, context),
+        );
         if (result.exitCode !== 0) {
             throw this.#process.createError(
                 context,
-                new Error(result.stderr || result.stdout || "ssh environment upload failed"),
-                { result }
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "ssh environment upload failed",
+                ),
+                { result },
             );
         }
         return environmentFile;
     }
 
-    async #removeRemoteEnvironmentFile(environmentFile: string | undefined): Promise<void> {
+    async #removeRemoteEnvironmentFile(
+        environmentFile: string | undefined,
+    ): Promise<void> {
         if (environmentFile === undefined) {
             return;
         }
         const commandLine = `rm -f ${shellEscape(environmentFile)}`;
-        const context = this.#createRemoteShellContext("cleanupEnvironment", commandLine);
+        const context = this.#createRemoteShellContext(
+            "cleanupEnvironment",
+            commandLine,
+        );
         const result = this.#decorateCommandResult(
             await this.#process.wait(
-                this.#spawnRemoteShell(commandLine, ["ignore", "pipe", "pipe"], context),
-                context
-            )
+                this.#spawnRemoteShell(
+                    commandLine,
+                    ["ignore", "pipe", "pipe"],
+                    context,
+                ),
+                context,
+            ),
         );
         if (result.exitCode !== 0) {
             throw this.#process.createError(
                 context,
-                new Error(result.stderr || result.stdout || "ssh environment cleanup failed"),
-                { result }
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "ssh environment cleanup failed",
+                ),
+                { result },
             );
         }
     }
 
-    #withRemoteEnvironment(commandLine: string, environmentFile: string | undefined): string {
+    #withRemoteEnvironment(
+        commandLine: string,
+        environmentFile: string | undefined,
+    ): string {
         if (environmentFile === undefined) {
             return commandLine;
         }
@@ -279,27 +408,32 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             "set +a",
             `rm -f "$env_file"`,
             "trap - EXIT HUP INT TERM",
-            `exec ${commandLine}`
+            `exec ${commandLine}`,
         ].join("; ");
     }
 
     #createRemoteShellContext(
         operation: string,
         commandLine: string,
-        options: { cwd?: string; instance?: string } = {}
+        options: { cwd?: string; instance?: string } = {},
     ): ProviderCommandContext {
         return createCommandContext({
             command: this.#buildRemoteShellCommand(commandLine),
             cwd: options.cwd,
             instance: options.instance,
             operation,
-            provider: "ssh"
+            provider: "ssh",
         });
     }
 
-    #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
+    #createShellContext(
+        operation: string,
+        command: readonly string[],
+    ): ProviderCommandContext {
         const commandLine =
-            command[0] === "sh" && command[1] === "-lc" && typeof command[2] === "string"
+            command[0] === "sh" &&
+            command[1] === "-lc" &&
+            typeof command[2] === "string"
                 ? command[2]
                 : command.map(shellEscape).join(" ");
         return this.#createRemoteShellContext(operation, commandLine);
@@ -309,31 +443,45 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         return [
             this.#sshCommand[0],
             ...SSH_NON_INTERACTIVE_ARGS,
-            ...(this.#controlSocketEnabled ? this.#buildControlSocketArgs() : []),
+            ...(this.#controlSocketEnabled
+                ? this.#buildControlSocketArgs()
+                : []),
             ...this.#sshCommand.slice(1),
             "--",
             "sh",
             "-lc",
-            shellEscape(commandLine)
+            shellEscape(commandLine),
         ];
     }
 
-    #decorateCommandResult<T extends { details?: ProviderCommandContext | Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>(
-        result: T
-    ): T {
-        const stderr = this.#appendInteractiveHint(result.exitCode, result.stderr);
+    #decorateCommandResult<
+        T extends {
+            details?: ProviderCommandContext | Record<string, unknown>;
+            exitCode: number | null;
+            stderr: string;
+            stdout: string;
+        },
+    >(result: T): T {
+        const stderr = this.#appendInteractiveHint(
+            result.exitCode,
+            result.stderr,
+        );
         if (stderr === result.stderr) {
             return result;
         }
 
         const details = result.details;
-        if (details !== undefined && "stderrTail" in details && typeof details.stderrTail === "string") {
+        if (
+            details !== undefined &&
+            "stderrTail" in details &&
+            typeof details.stderrTail === "string"
+        ) {
             details.stderrTail = stderr;
         }
 
         return {
             ...result,
-            stderr
+            stderr,
         };
     }
 
@@ -354,13 +502,15 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             return stderr;
         }
 
-        return stderr.includes(SSH_INTERACTIVE_HINT) ? stderr : `${stderr}${stderr.endsWith("\n") || stderr.length === 0 ? "" : "\n"}${SSH_INTERACTIVE_HINT}\n`;
+        return stderr.includes(SSH_INTERACTIVE_HINT)
+            ? stderr
+            : `${stderr}${stderr.endsWith("\n") || stderr.length === 0 ? "" : "\n"}${SSH_INTERACTIVE_HINT}\n`;
     }
 
     async #ensureInteractiveControlConnection(
         operation: string,
         instance: string | undefined,
-        interactiveSession: WorkerCommandInteractiveSession
+        interactiveSession: WorkerCommandInteractiveSession,
     ): Promise<void> {
         if (this.#controlSocketEnabled) {
             return;
@@ -371,24 +521,42 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             command: this.#buildInteractiveRemoteShellCommand(commandLine),
             instance,
             operation,
-            provider: "ssh"
+            provider: "ssh",
         });
-        const result = await this.#runInteractiveRemoteShell(commandLine, context, interactiveSession);
+        const result = await this.#runInteractiveRemoteShell(
+            commandLine,
+            context,
+            interactiveSession,
+        );
 
         if (result.exitCode !== 0) {
-            throw this.#process.createError(context, new Error(result.stderr || result.stdout || "ssh interactive authentication failed"), {
-                result
-            });
+            throw this.#process.createError(
+                context,
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "ssh interactive authentication failed",
+                ),
+                {
+                    result,
+                },
+            );
         }
 
         this.#controlSocketEnabled = true;
     }
 
     #buildControlSocketArgs(): string[] {
-        return [`-oControlPath=${this.#controlPath}`, "-oControlMaster=auto", "-oControlPersist=600"];
+        return [
+            `-oControlPath=${this.#controlPath}`,
+            "-oControlMaster=auto",
+            "-oControlPersist=600",
+        ];
     }
 
-    #buildInteractiveRemoteShellCommand(commandLine: string): [string, ...string[]] {
+    #buildInteractiveRemoteShellCommand(
+        commandLine: string,
+    ): [string, ...string[]] {
         const sshCommand = [
             this.#sshCommand[0],
             ...this.#buildControlSocketArgs(),
@@ -396,19 +564,24 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             "--",
             "sh",
             "-lc",
-            commandLine
+            commandLine,
         ];
 
-        return ["script", "-qefc", sshCommand.map(shellEscape).join(" "), "/dev/null"];
+        return [
+            "script",
+            "-qefc",
+            sshCommand.map(shellEscape).join(" "),
+            "/dev/null",
+        ];
     }
 
     async #runInteractiveRemoteShell(
         commandLine: string,
         context: ProviderCommandContext,
-        interactiveSession: WorkerCommandInteractiveSession
+        interactiveSession: WorkerCommandInteractiveSession,
     ) {
         const child = this.#process.spawn(context, {
-            stdio: ["pipe", "pipe", "pipe"]
+            stdio: ["pipe", "pipe", "pipe"],
         });
 
         let outputFlush = Promise.resolve();
@@ -426,7 +599,11 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         });
 
         const exitSignal = once(child, "close").then(() => undefined);
-        const inputPump = this.#pumpInteractiveInput(child.stdin, interactiveSession, exitSignal);
+        const inputPump = this.#pumpInteractiveInput(
+            child.stdin,
+            interactiveSession,
+            exitSignal,
+        );
         const result = await this.#process.wait(child, context);
 
         await inputPump;
@@ -438,14 +615,17 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
     async #pumpInteractiveInput(
         stdin: NodeJS.WritableStream | null,
         interactiveSession: WorkerCommandInteractiveSession,
-        exitSignal: Promise<undefined>
+        exitSignal: Promise<undefined>,
     ): Promise<void> {
         if (stdin === null) {
             return;
         }
 
         for (;;) {
-            const chunk = await Promise.race([interactiveSession.readInput(), exitSignal]);
+            const chunk = await Promise.race([
+                interactiveSession.readInput(),
+                exitSignal,
+            ]);
             if (chunk === undefined) {
                 stdin.end();
                 return;
@@ -461,13 +641,17 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
 }
 
 function isInternalWorkerEnvironmentKey(key: string): boolean {
-    return key === "DEVSHELL_WORKER_INTERNAL_INSTANCE"
-        || key === "DEVSHELL_WORKER_INTERNAL_WORKSPACE"
-        || key === "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
+    return (
+        key === "DEVSHELL_WORKER_INTERNAL_INSTANCE" ||
+        key === "DEVSHELL_WORKER_INTERNAL_WORKSPACE" ||
+        key === "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"
+    );
 }
 
 function parseSshCommand(command: string): [string, ...string[]] {
-    const parsed = parseArgsStringToArgv(command).filter((entry) => entry.length > 0);
+    const parsed = parseArgsStringToArgv(command).filter(
+        (entry) => entry.length > 0,
+    );
     if (parsed.length === 0) {
         throw new Error("ssh.command must not be empty");
     }

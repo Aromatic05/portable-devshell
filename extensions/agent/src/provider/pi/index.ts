@@ -3,12 +3,12 @@ export {
     PI_PROVIDER_VERSION,
     PiAgentProvider,
     type PiAgentProviderOptions,
-    type PiProviderInstallerLike
+    type PiProviderInstallerLike,
 } from "./PiAgentProvider.js";
 export {
     PiAgentProcessFactory,
     type PiAgentProcessStartOptions,
-    type PiAgentRuntimeFactory
+    type PiAgentRuntimeFactory,
 } from "./PiAgentProcess.js";
 export {
     PI_BOOTSTRAP_VERSION,
@@ -16,10 +16,12 @@ export {
     PiProviderInstaller,
     type PiProviderInstallation,
     type PiProviderInstallerOptions,
-    type PiProviderPackageResolver
+    type PiProviderPackageResolver,
 } from "./PiProviderInstaller.js";
 
-export async function createAgentProvider(): Promise<import("../../builtin/provider/AgentProvider.js").AgentProvider> {
+export async function createAgentProvider(): Promise<
+    import("../../builtin/provider/AgentProvider.js").AgentProvider
+> {
     const { PiAgentProvider } = await import("./PiAgentProvider.js");
     return new PiAgentProvider();
 }

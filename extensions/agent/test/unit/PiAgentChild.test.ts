@@ -25,7 +25,11 @@ function nextMessage(child: ChildProcess): Promise<PiChildMessage> {
         };
         const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
             cleanup();
-            reject(new Error(`Pi provider child exited before replying (code=${String(code)}, signal=${String(signal)}).`));
+            reject(
+                new Error(
+                    `Pi provider child exited before replying (code=${String(code)}, signal=${String(signal)}).`,
+                ),
+            );
         };
         child.once("message", onMessage);
         child.once("error", onError);
@@ -33,11 +37,17 @@ function nextMessage(child: ChildProcess): Promise<PiChildMessage> {
     });
 }
 
-function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+function waitForExit(
+    child: ChildProcess,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             child.kill("SIGKILL");
-            reject(new Error("Pi provider child did not exit after parent IPC disconnect."));
+            reject(
+                new Error(
+                    "Pi provider child did not exit after parent IPC disconnect.",
+                ),
+            );
         }, 5_000);
         child.once("exit", (code, signal) => {
             clearTimeout(timeout);
@@ -51,28 +61,37 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; signal
 }
 
 test("Pi provider child exits when its parent IPC channel disconnects", async () => {
-    const stateDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-child-disconnect-"));
-    const childPath = fileURLToPath(new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url));
-    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const stateDirectory = await mkdtemp(
+        join(tmpdir(), "devshell-pi-child-disconnect-"),
+    );
+    const childPath = fileURLToPath(
+        new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url),
+    );
+    const workspaceLoader = new URL(
+        "../RegisterWorkspacePackages.mjs",
+        import.meta.url,
+    ).href;
     const child = fork(childPath, [], {
         cwd: process.cwd(),
         env: {
             ...process.env,
             PI_CODING_AGENT_DIR: stateDirectory,
-            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH
+            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH,
         },
         execArgv: ["--import", "tsx", "--import", workspaceLoader],
-        stdio: ["ignore", "ignore", "ignore", "ipc"]
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
 
     try {
         const ready = nextMessage(child);
         child.send({
             agentDirectory: stateDirectory,
-            entrypoint: fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+            entrypoint: fileURLToPath(
+                import.meta.resolve("@earendil-works/pi-coding-agent"),
+            ),
             managedInstallRoot: join(stateDirectory, "managed-pi"),
             type: "init",
-            webBasePath: "/agent/"
+            webBasePath: "/agent/",
         });
         const readyMessage = await ready;
         assert.equal(readyMessage.type, "ready");
@@ -82,24 +101,32 @@ test("Pi provider child exits when its parent IPC channel disconnects", async ()
         const exit = await waitForExit(child);
         assert.deepEqual(exit, { code: 0, signal: null });
     } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        if (child.exitCode === null && child.signalCode === null)
+            child.kill("SIGKILL");
         await rm(stateDirectory, { force: true, recursive: true });
     }
 });
 
 test("Pi provider child exits when owner heartbeat stops while IPC remains connected", async () => {
-    const stateDirectory = await mkdtemp(join(tmpdir(), "devshell-pi-child-heartbeat-"));
-    const childPath = fileURLToPath(new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url));
-    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const stateDirectory = await mkdtemp(
+        join(tmpdir(), "devshell-pi-child-heartbeat-"),
+    );
+    const childPath = fileURLToPath(
+        new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url),
+    );
+    const workspaceLoader = new URL(
+        "../RegisterWorkspacePackages.mjs",
+        import.meta.url,
+    ).href;
     const child = fork(childPath, ["150"], {
         cwd: process.cwd(),
         env: {
             ...process.env,
             PI_CODING_AGENT_DIR: stateDirectory,
-            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH
+            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH,
         },
         execArgv: ["--import", "tsx", "--import", workspaceLoader],
-        stdio: ["ignore", "ignore", "ignore", "ipc"]
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
     });
 
     try {
@@ -107,7 +134,8 @@ test("Pi provider child exits when owner heartbeat stops while IPC remains conne
         assert.deepEqual(exit, { code: 0, signal: null });
         assert.equal(child.connected, false);
     } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        if (child.exitCode === null && child.signalCode === null)
+            child.kill("SIGKILL");
         await rm(stateDirectory, { force: true, recursive: true });
     }
 });

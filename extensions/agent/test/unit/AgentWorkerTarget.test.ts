@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
     parseAgentWorkerTarget,
-    renderAgentWorkerTarget
+    renderAgentWorkerTarget,
 } from "../../src/builtin/worker/AgentWorkerTarget.ts";
 
 test("Agent target binds one Worker instance to its remote workspace", () => {
@@ -11,7 +11,10 @@ test("Agent target binds one Worker instance to its remote workspace", () => {
 
     assert.equal(target.instance, "worker-instance");
     assert.equal(target.workspace, "/home/user/project");
-    assert.equal(renderAgentWorkerTarget(target), "worker-instance:/home/user/project");
+    assert.equal(
+        renderAgentWorkerTarget(target),
+        "worker-instance:/home/user/project",
+    );
 });
 
 test("Agent target preserves colons inside the remote workspace", () => {
@@ -22,7 +25,14 @@ test("Agent target preserves colons inside the remote workspace", () => {
 });
 
 test("Agent target rejects malformed instance/workspace pairs", () => {
-    for (const value of ["", "worker-only", ":/repo", "worker:", "bad worker:/repo", " worker:/repo"]) {
+    for (const value of [
+        "",
+        "worker-only",
+        ":/repo",
+        "worker:",
+        "bad worker:/repo",
+        " worker:/repo",
+    ]) {
         assert.throws(() => parseAgentWorkerTarget(value), TypeError);
     }
 });

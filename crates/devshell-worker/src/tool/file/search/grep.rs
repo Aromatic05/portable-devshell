@@ -329,10 +329,10 @@ fn next_page_file(
     continuation: &mut GrepContinuation,
     state: &FileToolState,
 ) -> Result<Option<MatchedFile>, ToolError> {
-    if let Some(pending) = continuation.pending.take() {
-        if let Some(matched) = refresh_pending_file(call, continuation, pending, state)? {
-            return Ok(Some(matched));
-        }
+    if let Some(pending) = continuation.pending.take()
+        && let Some(matched) = refresh_pending_file(call, continuation, pending, state)?
+    {
+        return Ok(Some(matched));
     }
     next_matched_file(call, continuation, state)
 }

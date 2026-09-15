@@ -1,7 +1,7 @@
 import type {
     JsonValue,
     OperationalOverview,
-    PrefixRouteModuleDefinition
+    PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../server/Route.js";
@@ -11,9 +11,9 @@ export interface OperationalOverviewPort {
 }
 
 export function createOperationalOverviewRouteModule(
-    overview: OperationalOverviewPort
+    overview: OperationalOverviewPort,
 ): PrefixRouteModuleDefinition {
     return routeModule("overview", {
-        get: async () => await overview.read() as unknown as JsonValue
+        get: async () => (await overview.read()) as unknown as JsonValue,
     });
 }

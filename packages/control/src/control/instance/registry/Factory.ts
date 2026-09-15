@@ -11,7 +11,9 @@ export class InstanceRegistryFactory {
 
     build(config: ControlConfig): InstanceRegistry {
         return new InstanceRegistry(
-            config.instances.filter((instance) => instance.enabled).map((instance) => this.#mapper.map(instance))
+            config.instances
+                .filter((instance) => instance.enabled)
+                .map((instance) => this.#mapper.map(instance)),
         );
     }
 }

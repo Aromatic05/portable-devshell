@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { errorCodes, type Channel, type JsonValue } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type Channel,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerRpcBridge,
@@ -10,7 +14,7 @@ import {
     encodeWorkerRpcMessage,
     type WorkerRpcConnector,
     type WorkerRpcRequestEnvelope,
-    type WorkerRpcResponseEnvelope
+    type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 
 class DeferredConnector implements WorkerRpcConnector {
@@ -34,7 +38,11 @@ class MemoryChannel implements Channel {
 
     async send(frame: Uint8Array): Promise<void> {
         if (this.sendError !== undefined) throw this.sendError;
-        this.sent.push(decodeWorkerRpcMessage(frame) as unknown as WorkerRpcRequestEnvelope);
+        this.sent.push(
+            decodeWorkerRpcMessage(
+                frame,
+            ) as unknown as WorkerRpcRequestEnvelope,
+        );
     }
 
     onFrame(listener: (frame: Uint8Array) => void): () => void {
@@ -78,7 +86,7 @@ test("WorkerRpcBridge reports current channel activation after pending replay", 
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "connected-listener" }
+        rpcOptions: { instanceName: "connected-listener" },
     });
     const activations: number[] = [];
     bridge.onConnected(() => activations.push(activations.length + 1));
@@ -101,7 +109,7 @@ test("WorkerRpcBridge delivers typed notifications without consuming pending res
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "notification-test" }
+        rpcOptions: { instanceName: "notification-test" },
     });
     const notifications: Array<{ method: string; params: JsonValue }> = [];
     bridge.onNotification((notification) => notifications.push(notification));
@@ -110,20 +118,22 @@ test("WorkerRpcBridge delivers typed notifications without consuming pending res
         id: "pending-request",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await waitUntil(() => channel.sent.length === 1);
     channel.publish({
         type: "notification",
         method: "terminal.output",
-        params: { terminalId: "remote-1", seq: 1, data: "hello" }
+        params: { terminalId: "remote-1", seq: 1, data: "hello" },
     });
 
-    assert.deepEqual(notifications, [{
-        type: "notification",
-        method: "terminal.output",
-        params: { terminalId: "remote-1", seq: 1, data: "hello" }
-    }]);
+    assert.deepEqual(notifications, [
+        {
+            type: "notification",
+            method: "terminal.output",
+            params: { terminalId: "remote-1", seq: 1, data: "hello" },
+        },
+    ]);
     channel.respond("pending-request", { pong: true });
     assert.deepEqual(successResult(await pending), { pong: true });
     assert.equal(bridge.connected, true);
@@ -136,16 +146,26 @@ test("WorkerRpcBridge ignores notifications from a superseded reverse channel", 
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "notification-generation" }
+        rpcOptions: { instanceName: "notification-generation" },
     });
     const notifications: string[] = [];
-    bridge.onNotification((notification) => notifications.push(notification.method));
+    bridge.onNotification((notification) =>
+        notifications.push(notification.method),
+    );
     await bridge.connect();
 
     const second = new MemoryChannel();
     await bridge.replaceChannel(second);
-    first.publish({ type: "notification", method: "terminal.stale", params: {} });
-    second.publish({ type: "notification", method: "terminal.current", params: {} });
+    first.publish({
+        type: "notification",
+        method: "terminal.stale",
+        params: {},
+    });
+    second.publish({
+        type: "notification",
+        method: "terminal.current",
+        params: {},
+    });
 
     assert.deepEqual(notifications, ["terminal.current"]);
 });
@@ -157,7 +177,7 @@ test("reverse RPC bridge replays pending request with the original request id af
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "reverse-test" }
+        rpcOptions: { instanceName: "reverse-test" },
     });
     const client = new WorkerRpcClient(bridge);
 
@@ -193,11 +213,11 @@ test("closing an RPC bridge while connecting cannot resurrect the channel", asyn
             signalConnectStarted();
             await connectGate;
             return channel;
-        }
+        },
     };
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "closing-connect" }
+        rpcOptions: { instanceName: "closing-connect" },
     });
 
     const connecting = bridge.connect();
@@ -230,18 +250,18 @@ test("reverse channel replacement takes over a stalled connector request", async
             signalConnectStarted();
             await connectGate;
             return stale;
-        }
+        },
     };
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "connecting-handoff" }
+        rpcOptions: { instanceName: "connecting-handoff" },
     });
 
     const request = bridge.request({
         id: "handoff-request",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await connectStarted;
     const replacement = new MemoryChannel();
@@ -264,14 +284,14 @@ test("WorkerRpcBridge rejects a pending request when the initial send fails", as
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "send-failure" }
+        rpcOptions: { instanceName: "send-failure" },
     });
 
     const request = bridge.request({
         id: "request-send-failure",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
 
     await assert.rejects(withTimeout(request), /send failed|disconnected/iu);
@@ -285,7 +305,7 @@ test("WorkerRpcBridge rejects an oversized encoded request without disconnecting
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "oversized-request" }
+        rpcOptions: { instanceName: "oversized-request" },
     });
     await bridge.connect();
 
@@ -295,12 +315,15 @@ test("WorkerRpcBridge rejects an oversized encoded request without disconnecting
             id: "request-too-large",
             method: "file_edit",
             params: { changes: oversized },
-            type: "request"
+            type: "request",
         }),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.protocolFrameTooLarge);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.protocolFrameTooLarge,
+            );
             return true;
-        }
+        },
     );
 
     assert.equal(bridge.connected, true);
@@ -314,18 +337,21 @@ test("WorkerRpcBridge rejects duplicate pending request ids without losing the f
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "duplicate-request" }
+        rpcOptions: { instanceName: "duplicate-request" },
     });
     const request = {
         id: "duplicate-id",
         method: "worker.ping",
         params: {},
-        type: "request" as const
+        type: "request" as const,
     };
 
     const first = bridge.request(request);
     await waitUntil(() => channel.sent.length === 1);
-    await assert.rejects(bridge.request(request), /Duplicate Worker RPC request id/iu);
+    await assert.rejects(
+        bridge.request(request),
+        /Duplicate Worker RPC request id/iu,
+    );
     channel.respond(request.id, { pong: true });
 
     assert.deepEqual(successResult(await first), { pong: true });
@@ -338,13 +364,13 @@ test("WorkerRpcBridge replays pending work even when the previous channel close 
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "close-failure-replay" }
+        rpcOptions: { instanceName: "close-failure-replay" },
     });
     const pending = bridge.request({
         id: "replay-after-close-failure",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await waitUntil(() => first.sent.length === 1);
     first.closeError = new Error("close failed");
@@ -371,16 +397,19 @@ test("WorkerRpcBridge replays cancellation until the worker acknowledges it", as
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "cancel-replay" }
+        rpcOptions: { instanceName: "cancel-replay" },
     });
     const controller = new AbortController();
-    const pending = bridge.request({
-        context: { ctxId: "ctx-cancel-replay" },
-        id: "cancelled-call",
-        method: "bash_run",
-        params: {},
-        type: "request"
-    }, controller.signal);
+    const pending = bridge.request(
+        {
+            context: { ctxId: "ctx-cancel-replay" },
+            id: "cancelled-call",
+            method: "bash_run",
+            params: {},
+            type: "request",
+        },
+        controller.signal,
+    );
     await waitUntil(() => first.sent.length === 1);
 
     controller.abort(new Error("user cancelled"));
@@ -407,16 +436,19 @@ test("WorkerRpcBridge expires an unacknowledged cancellation", async (t) => {
         cancellationRetentionMs: 10,
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "cancel-expiry" }
+        rpcOptions: { instanceName: "cancel-expiry" },
     });
     const controller = new AbortController();
-    const pending = bridge.request({
-        context: { ctxId: "ctx-cancel-expiry" },
-        id: "expired-cancelled-call",
-        method: "bash_run",
-        params: {},
-        type: "request"
-    }, controller.signal);
+    const pending = bridge.request(
+        {
+            context: { ctxId: "ctx-cancel-expiry" },
+            id: "expired-cancelled-call",
+            method: "bash_run",
+            params: {},
+            type: "request",
+        },
+        controller.signal,
+    );
     await waitUntil(() => first.sent.length === 1);
 
     controller.abort(new Error("user cancelled"));
@@ -436,13 +468,13 @@ test("WorkerRpcBridge disconnects a replacement channel when replay fails", asyn
     const bridge = new WorkerRpcBridge({
         connector,
         preservePendingOnDisconnect: true,
-        rpcOptions: { instanceName: "replay-failure" }
+        rpcOptions: { instanceName: "replay-failure" },
     });
     const pending = bridge.request({
         id: "replay-failure-request",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await waitUntil(() => first.sent.length === 1);
     first.disconnect();
@@ -466,16 +498,19 @@ test("WorkerRpcBridge observes aborts that race with listener registration", asy
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "abort-race" }
+        rpcOptions: { instanceName: "abort-race" },
     });
     const signal = new RegistrationRaceAbortSignal();
 
-    const request = bridge.request({
-        id: "request-abort-race",
-        method: "bash_run",
-        params: {},
-        type: "request"
-    }, signal as unknown as AbortSignal);
+    const request = bridge.request(
+        {
+            id: "request-abort-race",
+            method: "bash_run",
+            params: {},
+            type: "request",
+        },
+        signal as unknown as AbortSignal,
+    );
 
     await assert.rejects(withTimeout(request), /cancel/iu);
     assert.equal(channel.sent.length, 0);
@@ -487,7 +522,7 @@ test("WorkerRpcBridge isolates disconnect listener failures", async () => {
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "disconnect-listeners" }
+        rpcOptions: { instanceName: "disconnect-listeners" },
     });
     const warnings: unknown[] = [];
     const originalWarn = console.warn;
@@ -517,20 +552,20 @@ test("WorkerRpcBridge rejects malformed success responses", async () => {
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "malformed-success" }
+        rpcOptions: { instanceName: "malformed-success" },
     });
     const pending = bridge.request({
         id: "malformed-success-response",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await waitUntil(() => channel.sent.length === 1);
 
     channel.publish({
         id: "malformed-success-response",
         ok: true,
-        type: "response"
+        type: "response",
     });
 
     await assert.rejects(pending, /invalid response payload|disconnected/iu);
@@ -543,13 +578,13 @@ test("WorkerRpcBridge rejects malformed failure responses", async () => {
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
-        rpcOptions: { instanceName: "malformed-failure" }
+        rpcOptions: { instanceName: "malformed-failure" },
     });
     const pending = bridge.request({
         id: "malformed-failure-response",
         method: "worker.ping",
         params: {},
-        type: "request"
+        type: "request",
     });
     await waitUntil(() => channel.sent.length === 1);
 
@@ -557,7 +592,7 @@ test("WorkerRpcBridge rejects malformed failure responses", async () => {
         error: { code: "worker.failed", message: "failed" },
         id: "malformed-failure-response",
         ok: false,
-        type: "response"
+        type: "response",
     });
 
     await assert.rejects(pending, /invalid response payload|disconnected/iu);
@@ -588,8 +623,11 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
         return await Promise.race([
             promise,
             new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(() => reject(new Error("request did not settle")), 250);
-            })
+                timer = setTimeout(
+                    () => reject(new Error("request did not settle")),
+                    250,
+                );
+            }),
         ]);
     } finally {
         if (timer !== undefined) clearTimeout(timer);

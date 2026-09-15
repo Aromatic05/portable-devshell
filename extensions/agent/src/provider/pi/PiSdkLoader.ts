@@ -35,7 +35,7 @@ export interface PiModelRuntimeLike {
             notify(event: unknown): void;
             prompt(prompt: PiAuthPromptLike): Promise<string>;
             signal?: AbortSignal;
-        }
+        },
     ): Promise<unknown>;
     logout(providerId: string): Promise<void>;
 }
@@ -64,10 +64,13 @@ export interface PiSessionLike {
     abort(): Promise<void>;
     dispose(): void;
     followUp(text: string): Promise<void>;
-    prompt(text: string, options?: {
-        preflightResult?: (success: boolean) => void;
-        streamingBehavior?: "steer" | "followUp";
-    }): Promise<void>;
+    prompt(
+        text: string,
+        options?: {
+            preflightResult?: (success: boolean) => void;
+            streamingBehavior?: "steer" | "followUp";
+        },
+    ): Promise<void>;
     reload(): Promise<void>;
     waitForIdle(): Promise<void>;
     setModel?(model: PiModelLike): Promise<void>;
@@ -107,7 +110,9 @@ export class PiSdkLoader {
     async load(entrypoint: string): Promise<PiSdkModule> {
         const loaded = await this.#importer(pathToFileURL(entrypoint).href);
         if (!isPiSdkModule(loaded)) {
-            throw new Error("Bundled Pi package does not expose the expected SDK surface.");
+            throw new Error(
+                "Bundled Pi package does not expose the expected SDK surface.",
+            );
         }
         return loaded;
     }
@@ -123,16 +128,39 @@ function isPiSdkModule(value: unknown): value is PiSdkModule {
     if (typeof candidate.createAgentSession !== "function") return false;
     if (typeof candidate.getAgentDir !== "function") return false;
     if (typeof candidate.DefaultResourceLoader !== "function") return false;
-    if (typeof candidate.ModelRuntime !== "function" && (typeof candidate.ModelRuntime !== "object" || candidate.ModelRuntime === null)) {
+    if (
+        typeof candidate.ModelRuntime !== "function" &&
+        (typeof candidate.ModelRuntime !== "object" ||
+            candidate.ModelRuntime === null)
+    ) {
         return false;
     }
-    if (typeof (candidate.ModelRuntime as { create?: unknown }).create !== "function") return false;
-    if (typeof candidate.SettingsManager !== "function" && (typeof candidate.SettingsManager !== "object" || candidate.SettingsManager === null)) {
+    if (
+        typeof (candidate.ModelRuntime as { create?: unknown }).create !==
+        "function"
+    )
+        return false;
+    if (
+        typeof candidate.SettingsManager !== "function" &&
+        (typeof candidate.SettingsManager !== "object" ||
+            candidate.SettingsManager === null)
+    ) {
         return false;
     }
-    if (typeof (candidate.SettingsManager as { create?: unknown }).create !== "function") return false;
-    if (typeof candidate.SessionManager !== "function" && (typeof candidate.SessionManager !== "object" || candidate.SessionManager === null)) {
+    if (
+        typeof (candidate.SettingsManager as { create?: unknown }).create !==
+        "function"
+    )
+        return false;
+    if (
+        typeof candidate.SessionManager !== "function" &&
+        (typeof candidate.SessionManager !== "object" ||
+            candidate.SessionManager === null)
+    ) {
         return false;
     }
-    return typeof (candidate.SessionManager as { create?: unknown }).create === "function";
+    return (
+        typeof (candidate.SessionManager as { create?: unknown }).create ===
+        "function"
+    );
 }

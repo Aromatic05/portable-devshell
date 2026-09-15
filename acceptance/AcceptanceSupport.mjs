@@ -9,34 +9,51 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-export const sourceLoader = resolve(repoRoot, "packages", "mcp", "test", "RegisterWorkspacePackages.mjs");
-export const cliEntry = resolve(repoRoot, "packages", "cli", "src", "CliMain.ts");
+export const sourceLoader = resolve(
+    repoRoot,
+    "packages",
+    "mcp",
+    "test",
+    "RegisterWorkspacePackages.mjs",
+);
+export const cliEntry = resolve(
+    repoRoot,
+    "packages",
+    "cli",
+    "src",
+    "CliMain.ts",
+);
 
 export function resolvePreparedWorker() {
     const configured = process.env.PORTABLE_DEVSHELL_TEST_WORKER_PATH;
     const targetDirectory = process.env.CARGO_TARGET_DIR;
-    const path = configured && configured.length > 0
-        ? resolve(repoRoot, configured)
-        : resolve(
-            targetDirectory && targetDirectory.length > 0
-                ? resolve(repoRoot, targetDirectory)
-                : resolve(repoRoot, "target"),
-            "debug",
-            `devshell-worker${process.platform === "win32" ? ".exe" : ""}`
-        );
+    const path =
+        configured && configured.length > 0
+            ? resolve(repoRoot, configured)
+            : resolve(
+                  targetDirectory && targetDirectory.length > 0
+                      ? resolve(repoRoot, targetDirectory)
+                      : resolve(repoRoot, "target"),
+                  "debug",
+                  `devshell-worker${process.platform === "win32" ? ".exe" : ""}`,
+              );
     if (!existsSync(path)) {
         throw new Error(
             `missing prepared worker: ${path}\n` +
-            "run `pnpm test:prepare` first or set PORTABLE_DEVSHELL_TEST_WORKER_PATH"
+                "run `pnpm test:prepare` first or set PORTABLE_DEVSHELL_TEST_WORKER_PATH",
         );
     }
     return path;
 }
 
-export function workerEnvironmentName(platform = process.platform, arch = process.arch) {
+export function workerEnvironmentName(
+    platform = process.platform,
+    arch = process.arch,
+) {
     const os = { darwin: "DARWIN", linux: "LINUX", win32: "WINDOWS" }[platform];
     const cpu = { arm64: "ARM64", x64: "X64" }[arch];
-    if (!os || !cpu) throw new Error(`unsupported acceptance host: ${platform}-${arch}`);
+    if (!os || !cpu)
+        throw new Error(`unsupported acceptance host: ${platform}-${arch}`);
     return `PORTABLE_DEVSHELL_WORKER_${os}_${cpu}_PATH`;
 }
 
@@ -46,11 +63,17 @@ export async function createAcceptanceFixture() {
     const runtime = join(root, "runtime");
     const workspace = join(root, "workspace");
     await Promise.all([
-        mkdir(join(home, ".devshell", "control", "instances"), { recursive: true }),
+        mkdir(join(home, ".devshell", "control", "instances"), {
+            recursive: true,
+        }),
         mkdir(runtime, { recursive: true }),
-        mkdir(workspace, { recursive: true })
+        mkdir(workspace, { recursive: true }),
     ]);
-    await writeFile(join(workspace, "README.md"), "portable-devshell acceptance workspace\n", "utf8");
+    await writeFile(
+        join(workspace, "README.md"),
+        "portable-devshell acceptance workspace\n",
+        "utf8",
+    );
     const port = await reservePort();
     let webPort = await reservePort();
     while (webPort === port) {
@@ -74,7 +97,7 @@ export async function createAcceptanceFixture() {
         `listenPort = ${webPort}`,
         `publicBaseUrl = "http://127.0.0.1:${webPort}"`,
         'auth = "none"',
-        ""
+        "",
     ].join("\n");
     const instanceConfig = [
         "version = 3",
@@ -91,10 +114,18 @@ export async function createAcceptanceFixture() {
         "",
         "[logs]",
         "eventBufferSize = 50",
-        ""
+        "",
     ].join("\n");
-    await writeFile(join(home, ".devshell", "control", "config.toml"), globalConfig, "utf8");
-    await writeFile(join(home, ".devshell", "control", "instances", "aromatic-pc.toml"), instanceConfig, "utf8");
+    await writeFile(
+        join(home, ".devshell", "control", "config.toml"),
+        globalConfig,
+        "utf8",
+    );
+    await writeFile(
+        join(home, ".devshell", "control", "instances", "aromatic-pc.toml"),
+        instanceConfig,
+        "utf8",
+    );
 
     const worker = resolvePreparedWorker();
     const env = {
@@ -104,8 +135,10 @@ export async function createAcceptanceFixture() {
         PORTABLE_DEVSHELL_HOME: join(home, ".devshell"),
         USERPROFILE: home,
         XDG_RUNTIME_DIR: runtime,
-        ...(process.platform === "win32" ? { USERNAME: `portable-devshell-${process.pid}` } : {}),
-        [workerEnvironmentName()]: worker
+        ...(process.platform === "win32"
+            ? { USERNAME: `portable-devshell-${process.pid}` }
+            : {}),
+        [workerEnvironmentName()]: worker,
     };
     return {
         env,
@@ -117,25 +150,38 @@ export async function createAcceptanceFixture() {
         worker,
         workspace,
         async cleanup() {
-            runCli(["instance", "stop", "aromatic-pc"], env, { allowFailure: true });
+            runCli(["instance", "stop", "aromatic-pc"], env, {
+                allowFailure: true,
+            });
             runCli(["stop"], env, { allowFailure: true });
             await rm(root, { force: true, recursive: true });
-        }
+        },
     };
 }
 
 export function runCli(args, env, options = {}) {
-    const result = spawnSync(process.execPath, ["--import", "tsx", "--import", pathToFileURL(sourceLoader).href, cliEntry, ...args], {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env,
-        timeout: options.timeoutMs ?? 30_000,
-        windowsHide: true
-    });
+    const result = spawnSync(
+        process.execPath,
+        [
+            "--import",
+            "tsx",
+            "--import",
+            pathToFileURL(sourceLoader).href,
+            cliEntry,
+            ...args,
+        ],
+        {
+            cwd: repoRoot,
+            encoding: "utf8",
+            env,
+            timeout: options.timeoutMs ?? 30_000,
+            windowsHide: true,
+        },
+    );
     if (!options.allowFailure && result.status !== 0) {
         throw new Error(
             `devshell ${args.join(" ")} failed with ${String(result.status)}\n` +
-            `${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
+                `${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
         );
     }
     return result;
@@ -146,16 +192,23 @@ export function commandAvailable(command, args = []) {
         cwd: repoRoot,
         env: process.env,
         stdio: "ignore",
-        windowsHide: true
+        windowsHide: true,
     });
     return result.status === 0;
 }
 
 export function runCommand(command, args, options = {}) {
     const windowsPnpm = process.platform === "win32" && command === "pnpm";
-    const executable = windowsPnpm ? process.env.ComSpec ?? "cmd.exe" : command;
+    const executable = windowsPnpm
+        ? (process.env.ComSpec ?? "cmd.exe")
+        : command;
     const commandArgs = windowsPnpm
-        ? ["/d", "/s", "/c", ["pnpm", ...args].map(quoteWindowsCommandArgument).join(" ")]
+        ? [
+              "/d",
+              "/s",
+              "/c",
+              ["pnpm", ...args].map(quoteWindowsCommandArgument).join(" "),
+          ]
         : args;
     const result = spawnSync(executable, commandArgs, {
         cwd: options.cwd ?? repoRoot,
@@ -163,12 +216,12 @@ export function runCommand(command, args, options = {}) {
         env: options.env ?? process.env,
         stdio: options.inherit ? "inherit" : "pipe",
         timeout: options.timeoutMs,
-        windowsHide: true
+        windowsHide: true,
     });
     if (result.status !== 0) {
         throw new Error(
             `${command} ${args.join(" ")} failed with ${String(result.status)}\n` +
-            `${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
+                `${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
         );
     }
     return result;
@@ -186,22 +239,34 @@ export function assertOutput(result, pattern, label) {
 export function readAuditCollections(path) {
     const require = createRequire(import.meta.url);
     const originalEmitWarning = process.emitWarning;
-    process.emitWarning = ((warning, ...args) => {
-        if (String(warning instanceof Error ? warning.message : warning).includes("SQLite")) return;
+    process.emitWarning = (warning, ...args) => {
+        if (
+            String(
+                warning instanceof Error ? warning.message : warning,
+            ).includes("SQLite")
+        )
+            return;
         Reflect.apply(originalEmitWarning, process, [warning, ...args]);
-    });
+    };
     const { DatabaseSync } = require("node:sqlite");
     process.emitWarning = originalEmitWarning;
     const database = new DatabaseSync(path, { readOnly: true });
     try {
-        return database.prepare("SELECT collection, payload FROM audit_records ORDER BY id ASC").all();
+        return database
+            .prepare(
+                "SELECT collection, payload FROM audit_records ORDER BY id ASC",
+            )
+            .all();
     } finally {
         database.close();
     }
 }
 
 export async function assertControlLog(home) {
-    const log = await readFile(join(home, ".devshell", "control", "logs", "control.log"), "utf8");
+    const log = await readFile(
+        join(home, ".devshell", "control", "logs", "control.log"),
+        "utf8",
+    );
     assert.match(log, /control server started/u);
 }
 
@@ -213,8 +278,11 @@ async function reservePort() {
     });
     const address = server.address();
     await new Promise((resolvePromise, rejectPromise) => {
-        server.close((error) => error ? rejectPromise(error) : resolvePromise());
+        server.close((error) =>
+            error ? rejectPromise(error) : resolvePromise(),
+        );
     });
-    if (!address || typeof address === "string") throw new Error("failed to reserve acceptance TCP port");
+    if (!address || typeof address === "string")
+        throw new Error("failed to reserve acceptance TCP port");
     return address.port;
 }

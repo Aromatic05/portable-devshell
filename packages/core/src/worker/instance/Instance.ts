@@ -10,12 +10,16 @@ import {
     type ToolCallRecord,
     type ReverseEnrollmentState,
     type ReverseRpcLane,
-    type ReverseTransport
+    type ReverseTransport,
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../../approval/Manager.js";
 import type { AuditDatabase } from "../../storage/audit/database/Database.js";
-import type { InstanceEventInput, InstanceEventStreamGap, InstanceEventStreamSlice } from "../../instance/EventBuffer.js";
+import type {
+    InstanceEventInput,
+    InstanceEventStreamGap,
+    InstanceEventStreamSlice,
+} from "../../instance/EventBuffer.js";
 import type { LogQuery } from "../../storage/log/Query.js";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 import type { WorkerCommandClient } from "../transport/command/Client.js";
@@ -25,7 +29,7 @@ import {
     type WorkerCommandSessionClose,
     type WorkerCommandSessionCompletion,
     type WorkerCommandSessionOpen,
-    type WorkerCommandSessionOutput
+    type WorkerCommandSessionOutput,
 } from "../protocol/CommandSession.js";
 import type {
     WorkerArtifactDirectPushInput,
@@ -44,7 +48,7 @@ import type {
     WorkerExtensionResourcePrepareInput,
     WorkerExtensionResourcePrepareResult,
     WorkerHandshakeResult,
-    WorkerProtocolClient
+    WorkerProtocolClient,
 } from "../protocol/Client.js";
 import type { WorkerRpcBridge } from "../protocol/rpc/connection/Bridge.js";
 import type { Channel } from "@portable-devshell/shared";
@@ -57,7 +61,7 @@ import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
-    WorkerTerminalOpenInput
+    WorkerTerminalOpenInput,
 } from "../protocol/Terminal.js";
 import type { WorkerRpcError } from "../protocol/rpc/Message.js";
 import { WorkerHandle } from "./capability/Handle.js";
@@ -86,7 +90,9 @@ interface WorkerInstanceDependencies {
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
     terminalClient: WorkerTerminalClient;
-    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
+    toolCallAssociationProvider?: (
+        context: ToolCallContext,
+    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
@@ -118,43 +124,45 @@ export class WorkerInstance {
             catalog: dependencies.catalog,
             isReady: () => this.snapshot().ready,
             protocolClient: dependencies.protocolClient,
-            toolInvoker: dependencies.toolInvoker
+            toolInvoker: dependencies.toolInvoker,
         });
         this.#state = new WorkerInstanceState({
             config: this.#config,
             eventBuffer: dependencies.eventBuffer,
-            stateMachine: dependencies.stateMachine
+            stateMachine: dependencies.stateMachine,
         });
         this.#connection = new WorkerInstanceConnection({
             appendEvent: (type, data) => this.#state.appendEvent(type, data),
-            applyStateUpdate: (update) => this.#state.apply(update, this.#connection.snapshotReverse()),
+            applyStateUpdate: (update) =>
+                this.#state.apply(update, this.#connection.snapshotReverse()),
             catalog: this.#catalog,
             config: this.#config,
             protocolClient: dependencies.protocolClient,
             rpcBridge: dependencies.rpcBridge,
-            snapshot: () => this.snapshot()
+            snapshot: () => this.snapshot(),
         });
         this.#commandSessions = new WorkerCommandSessionBridge(
             dependencies.rpcBridge,
-            dependencies.protocolClient
+            dependencies.protocolClient,
         );
         this.#terminalClient = dependencies.terminalClient;
         this.#lifecycle = new WorkerInstanceLifecycle({
             appendEvent: (type) => this.#state.appendEvent(type),
-            applyStateUpdate: (update) => this.#state.apply(update, this.#connection.snapshotReverse()),
+            applyStateUpdate: (update) =>
+                this.#state.apply(update, this.#connection.snapshotReverse()),
             commandClient: dependencies.commandClient,
             config: this.#config,
-            connection: this.#connection
+            connection: this.#connection,
         });
         this.#artifact = new WorkerInstanceArtifact({
             assertReady: () => this.#assertReady(),
-            protocolClient: dependencies.protocolClient
+            protocolClient: dependencies.protocolClient,
         });
         this.#audit = new WorkerInstanceAudit({
             appendEvent: (type, data) => this.#state.appendEvent(type, data),
             auditDatabase: dependencies.auditDatabase,
             isReady: () => this.snapshot().ready,
-            protocolClient: dependencies.protocolClient
+            protocolClient: dependencies.protocolClient,
         });
         this.#tool = new WorkerInstanceTool({
             approvalManager: this.#approvalManager,
@@ -162,10 +170,11 @@ export class WorkerInstance {
             assertReady: () => this.#assertReady(),
             instanceName: this.#config.name,
             logStore: dependencies.logStore,
-            toolCallAssociationProvider: dependencies.toolCallAssociationProvider,
+            toolCallAssociationProvider:
+                dependencies.toolCallAssociationProvider,
             toolCallHistory: dependencies.toolCallHistory,
             toolCallScheduler: dependencies.toolCallScheduler,
-            toolInvoker: dependencies.toolInvoker
+            toolInvoker: dependencies.toolInvoker,
         });
         this.#toolInvoker = dependencies.toolInvoker;
     }
@@ -190,30 +199,47 @@ export class WorkerInstance {
         await this.#lifecycle.retireRuntime();
     }
 
-    async setReverseEnrollmentState(enrollmentState: ReverseEnrollmentState): Promise<InstanceSnapshot> {
-        return await this.#connection.setReverseEnrollmentState(enrollmentState);
+    async setReverseEnrollmentState(
+        enrollmentState: ReverseEnrollmentState,
+    ): Promise<InstanceSnapshot> {
+        return await this.#connection.setReverseEnrollmentState(
+            enrollmentState,
+        );
     }
 
     async acceptReverseChannel(
         channel: Channel,
-        input: { connectedAt?: string; generation: number; lane?: ReverseRpcLane; transport: ReverseTransport }
+        input: {
+            connectedAt?: string;
+            generation: number;
+            lane?: ReverseRpcLane;
+            transport: ReverseTransport;
+        },
     ): Promise<InstanceSnapshot> {
         return await this.#connection.acceptReverseChannel(channel, input);
     }
 
-
-    async openTerminal(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor> {
+    async openTerminal(
+        input: WorkerTerminalOpenInput,
+    ): Promise<WorkerTerminalDescriptor> {
         return await this.#terminalClient.open(input);
     }
 
-    async prepareWorkspace(workspace: string): Promise<Awaited<ReturnType<WorkerProtocolClient["prepareWorkspace"]>>> {
+    async prepareWorkspace(
+        workspace: string,
+    ): Promise<Awaited<ReturnType<WorkerProtocolClient["prepareWorkspace"]>>> {
         this.#assertReady();
         return await this.#protocolClient.prepareWorkspace(workspace);
     }
 
-    async readAlerts(workspace: string): Promise<Awaited<ReturnType<WorkerProtocolClient["readAlerts"]>>> {
+    async readAlerts(
+        workspace: string,
+    ): Promise<Awaited<ReturnType<WorkerProtocolClient["readAlerts"]>>> {
         this.#assertReady();
-        return await this.#protocolClient.readAlerts(workspace, this.#config.alerts);
+        return await this.#protocolClient.readAlerts(
+            workspace,
+            this.#config.alerts,
+        );
     }
 
     async touchAlerts(workspace: string): Promise<void> {
@@ -240,18 +266,20 @@ export class WorkerInstance {
     }
 
     async writeTerminal(
-        input: WorkerTerminalIdentity & { data: string }
+        input: WorkerTerminalIdentity & { data: string },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
         return await this.#terminalClient.write(input);
     }
 
     async resizeTerminal(
-        input: WorkerTerminalIdentity & { cols: number; rows: number }
+        input: WorkerTerminalIdentity & { cols: number; rows: number },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
         return await this.#terminalClient.resize(input);
     }
 
-    async killTerminal(input: WorkerTerminalIdentity): Promise<WorkerTerminalDescriptor> {
+    async killTerminal(
+        input: WorkerTerminalIdentity,
+    ): Promise<WorkerTerminalDescriptor> {
         return await this.#terminalClient.kill(input);
     }
 
@@ -260,7 +288,7 @@ export class WorkerInstance {
     }
 
     onTerminalNotification(
-        listener: (notification: WorkerTerminalNotification) => void
+        listener: (notification: WorkerTerminalNotification) => void,
     ): () => void {
         return this.#terminalClient.onNotification(listener);
     }
@@ -273,23 +301,34 @@ export class WorkerInstance {
         return this.#terminalClient.onDisconnected(listener);
     }
 
-    onCommandSessionOpen(listener: (request: WorkerCommandSessionOpen) => void): () => void {
+    onCommandSessionOpen(
+        listener: (request: WorkerCommandSessionOpen) => void,
+    ): () => void {
         return this.#commandSessions.onOpen(listener);
     }
 
-    onCommandSessionClose(listener: (request: WorkerCommandSessionClose) => void): () => void {
+    onCommandSessionClose(
+        listener: (request: WorkerCommandSessionClose) => void,
+    ): () => void {
         return this.#commandSessions.onClose(listener);
     }
 
-    async writeCommandSessionOutput(output: WorkerCommandSessionOutput): Promise<void> {
+    async writeCommandSessionOutput(
+        output: WorkerCommandSessionOutput,
+    ): Promise<void> {
         await this.#commandSessions.output(output);
     }
 
-    async completeCommandSession(completion: WorkerCommandSessionCompletion): Promise<void> {
+    async completeCommandSession(
+        completion: WorkerCommandSessionCompletion,
+    ): Promise<void> {
         await this.#commandSessions.complete(completion);
     }
 
-    async appendControlEvent(type: InstanceEventInput["type"], data?: JsonValue) {
+    async appendControlEvent(
+        type: InstanceEventInput["type"],
+        data?: JsonValue,
+    ) {
         return await this.#state.appendEvent(type, data);
     }
 
@@ -301,11 +340,17 @@ export class WorkerInstance {
         return this.#catalog.hasSchema();
     }
 
-    async openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
+    async openArtifactPayload(
+        input: WorkerArtifactPayloadOpenInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadOpenResult> {
         return await this.#artifact.openPayload(input, signal);
     }
 
-    async readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
+    async readArtifactPayload(
+        input: WorkerArtifactPayloadReadInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadReadResult> {
         return await this.#artifact.readPayload(input, signal);
     }
 
@@ -314,21 +359,29 @@ export class WorkerInstance {
     }
 
     async prepareExtensionResource(
-        input: WorkerExtensionResourcePrepareInput
+        input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult> {
         this.#assertReady();
         return await this.#protocolClient.prepareExtensionResource(input);
     }
 
-    async beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
+    async beginArtifactReceive(
+        input: WorkerArtifactReceiveBeginInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveBeginResult> {
         return await this.#artifact.beginReceive(input, signal);
     }
 
-    async writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
+    async writeArtifactReceive(
+        input: WorkerArtifactReceiveWriteInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveWriteResult> {
         return await this.#artifact.writeReceive(input, signal);
     }
 
-    async finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
+    async finishArtifactReceive(
+        receiveId: string,
+    ): Promise<WorkerArtifactReceiveFinishResult> {
         return await this.#artifact.finishReceive(receiveId);
     }
 
@@ -338,7 +391,7 @@ export class WorkerInstance {
 
     async openArtifactDirectReceive(
         input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         return await this.#artifact.openDirectReceive(input, signal);
     }
@@ -348,7 +401,7 @@ export class WorkerInstance {
     }
 
     async pushArtifactPayloadDirect(
-        input: WorkerArtifactDirectPushInput
+        input: WorkerArtifactDirectPushInput,
     ): Promise<WorkerArtifactDirectPushResult> {
         return await this.#artifact.pushPayloadDirect(input);
     }
@@ -357,7 +410,9 @@ export class WorkerInstance {
         return await this.#lifecycle.start();
     }
 
-    async startInteractive(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
+    async startInteractive(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<InstanceSnapshot> {
         return await this.#lifecycle.startInteractive(interactiveSession);
     }
 
@@ -384,12 +439,24 @@ export class WorkerInstance {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {
-        return await this.#tool.call(toolName, input, context, signal, transformResult, invocationInput, onProgress, recording);
+        return await this.#tool.call(
+            toolName,
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
+            onProgress,
+            recording,
+        );
     }
 
     async invokeToolInternal(
@@ -402,16 +469,25 @@ export class WorkerInstance {
         return await this.#toolInvoker.invoke(toolName, input, context, signal);
     }
 
-    async observeTmuxTask(taskId: string, context: ToolCallContext, signal?: AbortSignal): Promise<JsonValue> {
+    async observeTmuxTask(
+        taskId: string,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
         this.#assertReady();
-        const listed = await this.#toolInvoker.invoke("tmux_manage", { command: "list" }, context, signal);
+        const listed = await this.#toolInvoker.invoke(
+            "tmux_manage",
+            { command: "list" },
+            context,
+            signal,
+        );
         const active = findTmuxTask(listed, taskId);
         if (active !== undefined) return { task: active };
         return await this.#toolInvoker.invoke(
             "tmux_read",
             { task: taskId, line: 0, consumeOutput: false },
             context,
-            signal
+            signal,
         );
     }
 
@@ -420,9 +496,15 @@ export class WorkerInstance {
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T> {
-        return await this.#tool.auditToolCall(toolName, input, context, operation, signal);
+        return await this.#tool.auditToolCall(
+            toolName,
+            input,
+            context,
+            operation,
+            signal,
+        );
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
@@ -439,12 +521,21 @@ export class WorkerInstance {
 
     async decideApproval(
         approvalId: string,
-        input: { decision: ApprovalDecision["decision"]; decidedBy: ApprovalDecision["decidedBy"]; policyPatch?: JsonValue; reason?: string; remember?: boolean }
+        input: {
+            decision: ApprovalDecision["decision"];
+            decidedBy: ApprovalDecision["decidedBy"];
+            policyPatch?: JsonValue;
+            reason?: string;
+            remember?: boolean;
+        },
     ): Promise<ApprovalRequest> {
         return await this.#tool.decideApproval(approvalId, input);
     }
 
-    async cancelApproval(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+    async cancelApproval(
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest> {
         return await this.#tool.cancelApproval(approvalId, reason);
     }
 
@@ -492,7 +583,10 @@ export class WorkerInstance {
         await this.#audit.releaseToolSession(sessionId);
     }
 
-    async appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
+    async appendMcpToolCalled(
+        toolName: string,
+        context: { requestId?: string; ctxId?: string },
+    ): Promise<void> {
         await this.#audit.appendMcpToolCalled(toolName, context);
     }
 
@@ -525,19 +619,29 @@ export class WorkerInstance {
             code: errorCodes.coreInstanceNotReady,
             message: `Instance ${this.#config.name} is not ready.`,
             retryable: false,
-            details: { instanceName: this.#config.name }
+            details: { instanceName: this.#config.name },
         });
     }
 }
 
-function findTmuxTask(result: JsonValue, taskId: string): Record<string, JsonValue> | undefined {
-    if (typeof result !== "object" || result === null || Array.isArray(result) || !Array.isArray(result.panes)) {
+function findTmuxTask(
+    result: JsonValue,
+    taskId: string,
+): Record<string, JsonValue> | undefined {
+    if (
+        typeof result !== "object" ||
+        result === null ||
+        Array.isArray(result) ||
+        !Array.isArray(result.panes)
+    ) {
         return undefined;
     }
     for (const pane of result.panes) {
-        if (typeof pane !== "object" || pane === null || Array.isArray(pane)) continue;
+        if (typeof pane !== "object" || pane === null || Array.isArray(pane))
+            continue;
         const task = pane.task;
-        if (typeof task !== "object" || task === null || Array.isArray(task)) continue;
+        if (typeof task !== "object" || task === null || Array.isArray(task))
+            continue;
         if (task.id === taskId) return task;
     }
     return undefined;

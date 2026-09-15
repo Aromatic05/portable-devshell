@@ -4,40 +4,40 @@
 
 ## 从这里开始
 
-* [安装与升级](getting-started/installation.md)：Release 安装、源码安装、升级、PATH 和卸载。
-* [快速开始](getting-started/quickstart.md)：启动 Control、创建 instance、验证 worker 与 MCP。
-* [客户端接入](getting-started/clients.md)：Codex、Claude Code、ChatGPT 等 MCP Host 的接入边界。
+- [安装与升级](getting-started/installation.md)：Release 安装、源码安装、升级、PATH 和卸载。
+- [快速开始](getting-started/quickstart.md)：启动 Control、创建 instance、验证 worker 与 MCP。
+- [客户端接入](getting-started/clients.md)：Codex、Claude Code、ChatGPT 等 MCP Host 的接入边界。
 
 ## 核心概念
 
-* [系统架构](concepts/architecture.md)：Control、Core、Worker、provider 与 HTTP host 的职责边界。
-* [MCP](concepts/mcp.md)：endpoint、transport、认证、工具 catalog、兼容策略和长调用 transport。
-* [Context](concepts/context.md)：内部 Context、external binding、workspace attachment 与生命周期。
-* [Workspace](concepts/workspace.md)：MCP App、Goal、Todo、Wait、Approval 和模型 re-entry。
+- [系统架构](concepts/architecture.md)：Control、Core、Worker、provider 与 HTTP host 的职责边界。
+- [MCP](concepts/mcp.md)：endpoint、transport、认证、工具 catalog、兼容策略和长调用 transport。
+- [Context](concepts/context.md)：内部 Context、external binding、workspace attachment 与生命周期。
+- [Workspace](concepts/workspace.md)：MCP App、Goal、Todo、Wait、Approval 和模型 re-entry。
 
 ## 工具
 
-* [文件工具](tools/file.md)：读取视图、搜索、隐式快照和有序 change set 编辑。
-* [tmux 工具](tools/tmux.md)：managed task、persistent pane、阻塞等待和 durable handoff。
-* [Artifact](tools/artifacts.md)：Artifact 读取、图片、分享与跨实例传输。
-* [运行时 Debug Patch](tools/debug.md)：本地 owner-only、Context-scoped、可回滚运行时补丁。
-* [Agent Skills](tools/skills.md)：project / managed / global 三层 catalog 与 lazy loading。
+- [文件工具](tools/file.md)：读取视图、搜索、隐式快照和有序 change set 编辑。
+- [tmux 工具](tools/tmux.md)：managed task、persistent pane、阻塞等待和 durable handoff。
+- [Artifact](tools/artifacts.md)：Artifact 读取、图片、分享与跨实例传输。
+- [运行时 Debug Patch](tools/debug.md)：本地 owner-only、Context-scoped、可回滚运行时补丁。
+- [Agent Skills](tools/skills.md)：project / managed / global 三层 catalog 与 lazy loading。
 
 ## 运维与部署
 
-* [Control 管理面](operations/control-plane.md)：CLI/TUI/Web、overview、watch、audit、Todo 与 instance 管理。
-* [配置与运行目录](operations/configuration.md)：Control/instance 配置、路径、CLI 管理面和 worker target。
-* [安全、审批与 Secret 扫描](operations/security.md)：tool approval、workspace security 和本机 secret preflight。
-* [OAuth 与公网暴露](operations/oauth.md)：OAuth 资源服务器、审批和代理要求。
-* [ChatGPT 公网隧道](operations/chatgpt-tunnels.md)：FRP / Nginx / Cloudflare Tunnel 示例。
-* [Reverse Worker](operations/reverse-connections.md)：反向注册、WSS、SSE+POST 回退与重连。
-* [Windows](operations/windows.md)：Windows client/worker 能力和平台差异。
+- [Control 管理面](operations/control-plane.md)：CLI/TUI/Web、overview、watch、audit、Todo 与 instance 管理。
+- [配置与运行目录](operations/configuration.md)：Control/instance 配置、路径、CLI 管理面和 worker target。
+- [安全、审批与 Secret 扫描](operations/security.md)：tool approval、workspace security 和本机 secret preflight。
+- [OAuth 与公网暴露](operations/oauth.md)：OAuth 资源服务器、审批和代理要求。
+- [ChatGPT 公网隧道](operations/chatgpt-tunnels.md)：FRP / Nginx / Cloudflare Tunnel 示例。
+- [Reverse Worker](operations/reverse-connections.md)：反向注册、WSS、SSE+POST 回退与重连。
+- [Windows](operations/windows.md)：Windows client/worker 能力和平台差异。
 
 ## 开发与验收
 
-* [Testspace](development/testspace.md)：完整本地 DevShell + MCP connector 测试环境。
-* [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
-* [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
+- [Testspace](development/testspace.md)：完整本地 DevShell + MCP connector 测试环境。
+- [验收与发布门禁](development/acceptance.md)：测试入口、发布前检查与 CI 约束。
+- [Extension 架构与 ABI 设计](development/extension-design.md)：Capability、Extension Point、generation ownership，以及各 domain 的 public Extension API 边界。
 
 ## 文档约定
 

@@ -3,7 +3,10 @@ import { mkdir, open, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ContextMessageQueueInput, ContextMessageRecord } from "@portable-devshell/shared";
+import type {
+    ContextMessageQueueInput,
+    ContextMessageRecord,
+} from "@portable-devshell/shared";
 import { cleanupStaleAtomicStateTemps } from "../AtomicState.js";
 
 export class ContextMessageStore {
@@ -12,7 +15,11 @@ export class ContextMessageStore {
     readonly #state: ContextMessageState;
     #document?: ContextMessageDocument;
 
-    constructor(options: { filePath: string; instanceName: string; state: ContextMessageState }) {
+    constructor(options: {
+        filePath: string;
+        instanceName: string;
+        state: ContextMessageState;
+    }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
@@ -24,21 +31,28 @@ export class ContextMessageStore {
 
     list(ctxId?: string): ContextMessageRecord[] {
         return structuredClone(
-            this.#current().messages.filter((message) => ctxId === undefined || message.ctxId === ctxId),
+            this.#current().messages.filter(
+                (message) => ctxId === undefined || message.ctxId === ctxId,
+            ),
         );
     }
 
     pending(ctxId?: string): ContextMessageRecord[] {
         return structuredClone(
-            this.#current().messages.filter((message) =>
-                (message.status === "pending" || message.status === "sent") &&
-                (ctxId === undefined || message.ctxId === ctxId)
+            this.#current().messages.filter(
+                (message) =>
+                    (message.status === "pending" ||
+                        message.status === "sent") &&
+                    (ctxId === undefined || message.ctxId === ctxId),
             ),
         );
     }
 
     async transition<T>(
-        operation: (document: ContextMessageDocument) => { document: ContextMessageDocument; result: T },
+        operation: (document: ContextMessageDocument) => {
+            document: ContextMessageDocument;
+            result: T;
+        },
     ): Promise<T> {
         const next = operation(this.#current());
         await this.#writeAtomic(next.document);
@@ -46,13 +60,17 @@ export class ContextMessageStore {
         return structuredClone(next.result);
     }
 
-    async update(operation: (document: ContextMessageDocument) => ContextMessageDocument): Promise<void> {
+    async update(
+        operation: (document: ContextMessageDocument) => ContextMessageDocument,
+    ): Promise<void> {
         const next = operation(this.#current());
         await this.#writeAtomic(next);
         this.#document = next;
     }
 
-    async write(document: ContextMessageDocument): Promise<ContextMessageDocument> {
+    async write(
+        document: ContextMessageDocument,
+    ): Promise<ContextMessageDocument> {
         const normalized = this.#state.normalizeDocument(document);
         await this.#writeAtomic(normalized);
         this.#document = normalized;
@@ -70,14 +88,16 @@ export class ContextMessageStore {
     #load(): ContextMessageDocument {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
-            return this.#state.normalizeDocument(JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown);
+            return this.#state.normalizeDocument(
+                JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown,
+            );
         } catch (error) {
             throw createError({
                 cause: error,
                 code: errorCodes.targetInvalid,
                 details: { filePath: this.#filePath },
                 message: `Context message state for ${this.#instanceName} is invalid.`,
-                retryable: false
+                retryable: false,
             });
         }
     }
@@ -101,7 +121,11 @@ export class ContextMessageStore {
         }
         if (process.platform !== "win32") {
             const handle = await open(directory, "r");
-            try { await handle.sync(); } finally { await handle.close(); }
+            try {
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
         }
     }
 }

@@ -11,7 +11,10 @@ import {
 } from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
-import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/frame";
+import {
+    decodeFrame,
+    encodeFrame,
+} from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 
 import {
@@ -20,7 +23,7 @@ import {
     ReverseConnectionGateway,
     ReverseCredentialService,
     ReverseCredentialStore,
-    TodoService
+    TodoService,
 } from "../../src/testing.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
@@ -31,17 +34,17 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
-        rpcConnector: connector
+        rpcConnector: connector,
     });
     const todo = new TodoService({
         appendEvent: async () => undefined,
         filePath: join(home, "todo.json"),
-        instanceName: "reverse-test"
+        instanceName: "reverse-test",
     });
     const goal = new GoalService({
         appendEvent: async () => undefined,
         filePath: join(home, "goals.json"),
-        instanceName: "reverse-test"
+        instanceName: "reverse-test",
     });
     const registry = new InstanceRegistry([
         {
@@ -52,22 +55,28 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
-            conversation: { close() {}, async list() { return []; }, async recordReport() {} },
+            conversation: {
+                close() {},
+                async list() {
+                    return [];
+                },
+                async recordReport() {},
+            },
             goal,
             todo,
-            worker
-        }
+            worker,
+        },
     ]);
     const credentialStore = new ReverseCredentialStore(home);
     const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
-        publicBaseUrl: "http://127.0.0.1/base"
+        publicBaseUrl: "http://127.0.0.1/base",
     });
     const gateway = new ReverseConnectionGateway({
         credentialStore,
         instanceRegistry: registry,
-        publicBaseUrl: "http://127.0.0.1/base"
+        publicBaseUrl: "http://127.0.0.1/base",
     });
     gateway.install(server);
     await server.start();
@@ -78,29 +87,41 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         assert.notEqual(address, null);
         const port = (address as { port: number }).port;
         const code = await credentialStore.createDeviceCode("reverse-test");
-        const enrollmentResponse = await fetch(`http://127.0.0.1:${port}/base/reverse/v1/enroll`, {
-            body: JSON.stringify({
-                arch: "x64",
-                deviceCode: code.deviceCode,
-                os: "test",
-                workerVersion: "test"
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST"
-        });
+        const enrollmentResponse = await fetch(
+            `http://127.0.0.1:${port}/base/reverse/v1/enroll`,
+            {
+                body: JSON.stringify({
+                    arch: "x64",
+                    deviceCode: code.deviceCode,
+                    os: "test",
+                    workerVersion: "test",
+                }),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            },
+        );
         assert.equal(enrollmentResponse.status, 200);
-        const enrollment = (await enrollmentResponse.json()) as { deviceToken: string };
+        const enrollment = (await enrollmentResponse.json()) as {
+            deviceToken: string;
+        };
 
         const first = connectWorker(port, enrollment.deviceToken, 1);
         await first.opened;
         await Promise.race([
             waitUntil(
                 () => worker.snapshot().ready === true,
-                () => JSON.stringify({ snapshot: worker.snapshot(), methods: first.methods, errors: first.errors })
+                () =>
+                    JSON.stringify({
+                        snapshot: worker.snapshot(),
+                        methods: first.methods,
+                        errors: first.errors,
+                    }),
             ),
             first.closed.then(({ code, reason }) => {
-                throw new Error(`First reverse websocket closed during handshake: ${code} ${reason}`);
-            })
+                throw new Error(
+                    `First reverse websocket closed during handshake: ${code} ${reason}`,
+                );
+            }),
         ]);
         assert.equal(worker.snapshot().reverse?.transport, "wss");
         assert.equal(worker.snapshot().reverse?.generation, 1);
@@ -116,8 +137,10 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         const second = connectWorker(port, enrollment.deviceToken, 2);
         await second.opened;
         await waitUntil(
-            () => worker.snapshot().reverse?.generation === 2 && worker.snapshot().ready === true,
-            () => JSON.stringify(worker.snapshot())
+            () =>
+                worker.snapshot().reverse?.generation === 2 &&
+                worker.snapshot().ready === true,
+            () => JSON.stringify(worker.snapshot()),
         );
         await firstClosed;
         await bulkClosed;
@@ -126,18 +149,32 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         const reverseControl = new ReverseCredentialService({
             credentialStore,
             instanceRegistry: registry,
-            publicBaseUrl: "http://127.0.0.1/base"
+            publicBaseUrl: "http://127.0.0.1/base",
         });
-        reverseControl.setDisconnectHandler((instance) => gateway.disconnect(instance));
+        reverseControl.setDisconnectHandler((instance) =>
+            gateway.disconnect(instance),
+        );
         const secondClosed = second.closed;
         const rotated = await reverseControl.rotateDeviceToken("reverse-test");
         assert.notEqual(rotated.deviceToken, enrollment.deviceToken);
-        assert.equal(await credentialStore.authenticate("reverse-test", enrollment.deviceToken), false);
-        assert.equal(await credentialStore.authenticate("reverse-test", rotated.deviceToken), true);
+        assert.equal(
+            await credentialStore.authenticate(
+                "reverse-test",
+                enrollment.deviceToken,
+            ),
+            false,
+        );
+        assert.equal(
+            await credentialStore.authenticate(
+                "reverse-test",
+                rotated.deviceToken,
+            ),
+            true,
+        );
         await secondClosed;
         await waitUntil(
             () => worker.snapshot().reverse?.availability === "offline",
-            () => JSON.stringify(worker.snapshot())
+            () => JSON.stringify(worker.snapshot()),
         );
     } finally {
         gateway.stop();
@@ -152,7 +189,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
-        rpcConnector: connector
+        rpcConnector: connector,
     });
     const registry = new InstanceRegistry([
         {
@@ -163,30 +200,36 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             name: "reverse-test",
             provider: "reverse",
             reverseConnector: connector,
-            conversation: { close() {}, async list() { return []; }, async recordReport() {} },
+            conversation: {
+                close() {},
+                async list() {
+                    return [];
+                },
+                async recordReport() {},
+            },
             goal: new GoalService({
                 appendEvent: async () => undefined,
                 filePath: join(home, "goals.json"),
-                instanceName: "reverse-test"
+                instanceName: "reverse-test",
             }),
             todo: new TodoService({
                 appendEvent: async () => undefined,
                 filePath: join(home, "todo.json"),
-                instanceName: "reverse-test"
+                instanceName: "reverse-test",
             }),
-            worker
-        }
+            worker,
+        },
     ]);
     const credentialStore = new ReverseCredentialStore(home);
     const server = new HttpHost({
         listenHost: "127.0.0.1",
         listenPort: 0,
-        publicBaseUrl: "http://127.0.0.1/base"
+        publicBaseUrl: "http://127.0.0.1/base",
     });
     const gateway = new ReverseConnectionGateway({
         credentialStore,
         instanceRegistry: registry,
-        publicBaseUrl: "http://127.0.0.1/base"
+        publicBaseUrl: "http://127.0.0.1/base",
     });
     gateway.install(server);
     await server.start();
@@ -197,26 +240,34 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         assert.notEqual(address, null);
         const port = (address as { port: number }).port;
         const code = await credentialStore.createDeviceCode("reverse-test");
-        const enrollmentResponse = await fetch(`http://127.0.0.1:${port}/base/reverse/v1/enroll`, {
-            body: JSON.stringify({
-                arch: "x64",
-                deviceCode: code.deviceCode,
-                os: "test",
-                workerVersion: "test"
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST"
-        });
+        const enrollmentResponse = await fetch(
+            `http://127.0.0.1:${port}/base/reverse/v1/enroll`,
+            {
+                body: JSON.stringify({
+                    arch: "x64",
+                    deviceCode: code.deviceCode,
+                    os: "test",
+                    workerVersion: "test",
+                }),
+                headers: { "content-type": "application/json" },
+                method: "POST",
+            },
+        );
         assert.equal(enrollmentResponse.status, 200);
-        const enrollment = (await enrollmentResponse.json()) as { deviceToken: string };
+        const enrollment = (await enrollmentResponse.json()) as {
+            deviceToken: string;
+        };
         const headers = {
             Authorization: `Bearer ${enrollment.deviceToken}`,
             "X-Devshell-Generation": "1",
-            "X-Devshell-Instance": "reverse-test"
+            "X-Devshell-Instance": "reverse-test",
         };
-        const sseResponse = await fetch(`http://127.0.0.1:${port}/base/reverse/v1/events`, {
-            headers
-        });
+        const sseResponse = await fetch(
+            `http://127.0.0.1:${port}/base/reverse/v1/events`,
+            {
+                headers,
+            },
+        );
         assert.equal(sseResponse.status, 200);
         assert.ok(sseResponse.body);
         const reader = sseResponse.body.getReader();
@@ -239,55 +290,77 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 if (dataLine === undefined) {
                     continue;
                 }
-                const request = decodeWorkerRpcMessage(decodeFrame(Buffer.from(dataLine.slice(5).trim(), "base64"))) as Record<
-                    string,
-                    JsonValue
-                >;
+                const request = decodeWorkerRpcMessage(
+                    decodeFrame(
+                        Buffer.from(dataLine.slice(5).trim(), "base64"),
+                    ),
+                ) as Record<string, JsonValue>;
                 const method = String(request.method);
                 methods.push(method);
                 upstreamSeq += 1;
                 const body = {
                     frames: [
                         {
-                            frame: encodeFrame(encodeWorkerRpcMessage({
-                                id: String(request.id),
-                                ok: true,
-                                result: responseFor(method),
-                                type: "response"
-                            })).toString("base64"),
-                            seq: upstreamSeq
-                        }
+                            frame: encodeFrame(
+                                encodeWorkerRpcMessage({
+                                    id: String(request.id),
+                                    ok: true,
+                                    result: responseFor(method),
+                                    type: "response",
+                                }),
+                            ).toString("base64"),
+                            seq: upstreamSeq,
+                        },
                     ],
-                    generation: 1
+                    generation: 1,
                 };
-                const upload = await fetch(`http://127.0.0.1:${port}/base/reverse/v1/frames`, {
-                    body: JSON.stringify(body),
-                    headers: { ...headers, "content-type": "application/json" },
-                    method: "POST"
-                });
+                const upload = await fetch(
+                    `http://127.0.0.1:${port}/base/reverse/v1/frames`,
+                    {
+                        body: JSON.stringify(body),
+                        headers: {
+                            ...headers,
+                            "content-type": "application/json",
+                        },
+                        method: "POST",
+                    },
+                );
                 assert.equal(upload.status, 200);
                 if (upstreamSeq === 1) {
-                    const duplicate = await fetch(`http://127.0.0.1:${port}/base/reverse/v1/frames`, {
-                        body: JSON.stringify(body),
-                        headers: { ...headers, "content-type": "application/json" },
-                        method: "POST"
-                    });
+                    const duplicate = await fetch(
+                        `http://127.0.0.1:${port}/base/reverse/v1/frames`,
+                        {
+                            body: JSON.stringify(body),
+                            headers: {
+                                ...headers,
+                                "content-type": "application/json",
+                            },
+                            method: "POST",
+                        },
+                    );
                     assert.equal(duplicate.status, 200);
-                    assert.deepEqual(await duplicate.json(), { acceptedThrough: 1, generation: 1 });
+                    assert.deepEqual(await duplicate.json(), {
+                        acceptedThrough: 1,
+                        generation: 1,
+                    });
                 }
             }
         }
 
         await waitUntil(
             () => worker.snapshot().ready === true,
-            () => JSON.stringify({ methods, snapshot: worker.snapshot() })
+            () => JSON.stringify({ methods, snapshot: worker.snapshot() }),
         );
-        assert.deepEqual(methods, ["worker.ping", "worker.handshake", "tools.list"]);
+        assert.deepEqual(methods, [
+            "worker.ping",
+            "worker.handshake",
+            "tools.list",
+        ]);
         assert.equal(worker.snapshot().reverse?.transport, "sse");
         await reader.cancel();
         await waitUntil(
             () => worker.snapshot().reverse?.availability === "offline",
-            () => JSON.stringify(worker.snapshot())
+            () => JSON.stringify(worker.snapshot()),
         );
     } finally {
         gateway.stop();
@@ -299,7 +372,7 @@ function connectWorker(
     port: number,
     token: string,
     generation: number,
-    lane?: "control" | "bulk"
+    lane?: "control" | "bulk",
 ): {
     closed: Promise<{ code: number; reason: string }>;
     errors: string[];
@@ -309,40 +382,53 @@ function connectWorker(
 } {
     const methods: string[] = [];
     const errors: string[] = [];
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/base/reverse/v1/connect`, "devshell-worker-rpc.v1", {
-        headers: {
-            Authorization: `Bearer ${token}`,
-            "X-Devshell-Generation": String(generation),
-            "X-Devshell-Instance": "reverse-test",
-            ...(lane === undefined ? {} : { "X-Devshell-Rpc-Lane": lane })
-        }
-    });
+    const socket = new WebSocket(
+        `ws://127.0.0.1:${port}/base/reverse/v1/connect`,
+        "devshell-worker-rpc.v1",
+        {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "X-Devshell-Generation": String(generation),
+                "X-Devshell-Instance": "reverse-test",
+                ...(lane === undefined ? {} : { "X-Devshell-Rpc-Lane": lane }),
+            },
+        },
+    );
     socket.on("message", (data, isBinary) => {
         assert.equal(isBinary, true);
-        const request = decodeWorkerRpcMessage(decodeFrame(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer))) as Record<
-            string,
-            JsonValue
-        >;
+        const request = decodeWorkerRpcMessage(
+            decodeFrame(
+                Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer),
+            ),
+        ) as Record<string, JsonValue>;
         const id = String(request.id);
         const method = String(request.method);
         methods.push(method);
-        socket.send(encodeFrame(encodeWorkerRpcMessage({
-            id,
-            ok: true,
-            result: responseFor(method),
-            type: "response"
-        })));
+        socket.send(
+            encodeFrame(
+                encodeWorkerRpcMessage({
+                    id,
+                    ok: true,
+                    result: responseFor(method),
+                    type: "response",
+                }),
+            ),
+        );
     });
     socket.on("error", (error) => errors.push(error.message));
     return {
-        closed: new Promise((resolve) => socket.once("close", (code, reason) => resolve({ code, reason: reason.toString() }))),
+        closed: new Promise((resolve) =>
+            socket.once("close", (code, reason) =>
+                resolve({ code, reason: reason.toString() }),
+            ),
+        ),
         errors,
         methods,
         opened: new Promise((resolve, reject) => {
             socket.once("open", () => resolve());
             socket.once("error", reject);
         }),
-        socket
+        socket,
     };
 }
 
@@ -357,7 +443,7 @@ function responseFor(method: string): JsonValue {
                 platform: { arch: "x64", os: "test" },
                 protocolVersion: 2,
                 workerVersion: "test",
-                workspace: "/workspace"
+                workspace: "/workspace",
             };
         case "tools.list":
             return { tools: [] };
@@ -367,7 +453,10 @@ function responseFor(method: string): JsonValue {
             throw new Error(`Unexpected worker method: ${method}`);
     }
 }
-async function waitUntil(predicate: () => boolean, describe: () => string = () => "condition was not reached"): Promise<void> {
+async function waitUntil(
+    predicate: () => boolean,
+    describe: () => string = () => "condition was not reached",
+): Promise<void> {
     for (let attempt = 0; attempt < 200; attempt += 1) {
         if (predicate()) {
             return;

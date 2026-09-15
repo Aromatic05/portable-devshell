@@ -1,6 +1,13 @@
-import type { JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import type {
+    JsonValue,
+    ToolCallContext,
+    ToolDefinition,
+} from "@portable-devshell/shared";
 
-import type { WorkerProtocolClient, WorkerWorkspacePrepareResult } from "../../protocol/Client.js";
+import type {
+    WorkerProtocolClient,
+    WorkerWorkspacePrepareResult,
+} from "../../protocol/Client.js";
 import type { WorkerToolCatalog } from "../../tool/Catalog.js";
 import type { WorkerToolInvoker } from "../../tool/Invoker.js";
 
@@ -40,7 +47,9 @@ export class WorkerHandle {
         return this.#catalog.listTools();
     }
 
-    async prepareWorkspace(workspace: string): Promise<WorkerWorkspacePrepareResult> {
+    async prepareWorkspace(
+        workspace: string,
+    ): Promise<WorkerWorkspacePrepareResult> {
         this.#assertReady();
         return await this.#protocolClient.prepareWorkspace(workspace);
     }
@@ -50,14 +59,22 @@ export class WorkerHandle {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
         this.#assertReady();
-        return await this.#toolInvoker.invoke(toolName, input, context, signal, onProgress);
+        return await this.#toolInvoker.invoke(
+            toolName,
+            input,
+            context,
+            signal,
+            onProgress,
+        );
     }
 
     async releaseToolSession(sessionId: string): Promise<void> {
         if (!this.#isReady()) return;
-        await this.#protocolClient.closeToolSession(sessionId).catch(() => undefined);
+        await this.#protocolClient
+            .closeToolSession(sessionId)
+            .catch(() => undefined);
     }
 }

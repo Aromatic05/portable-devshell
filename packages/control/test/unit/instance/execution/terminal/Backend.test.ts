@@ -69,9 +69,14 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         return {
             ...(this.attachExit === undefined ? {} : { exit: this.attachExit }),
             replay,
-            session: this.attachExit === undefined
-                ? this.descriptor()
-                : { ...this.descriptor(), state: "exited", version: this.version + 1 },
+            session:
+                this.attachExit === undefined
+                    ? this.descriptor()
+                    : {
+                          ...this.descriptor(),
+                          state: "exited",
+                          version: this.version + 1,
+                      },
         };
     }
 
@@ -132,7 +137,11 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
 test("worker terminal backend replays, fences async operations, and resumes after reconnect", async () => {
     const worker = new FakeWorkerTerminal();
     const backend = new WorkerTerminalBackend({ worker });
-    const opened = await backend.open({ cols: 80, rows: 24, workspace: "/workspace" });
+    const opened = await backend.open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
     const process = "process" in opened ? opened.process : opened;
     const output: string[] = [];
     process.onData((data) => output.push(data));
@@ -215,7 +224,11 @@ test("worker terminal backend preserves an exit received before listeners are re
     worker.latestSeq = 0;
     worker.attachExit = { exitCode: 7, signal: 0 };
     const backend = new WorkerTerminalBackend({ worker });
-    const opened = await backend.open({ cols: 80, rows: 24, workspace: "/workspace" });
+    const opened = await backend.open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
     const process = "process" in opened ? opened.process : opened;
     const exits: Array<{ exitCode: number; signal: number }> = [];
 

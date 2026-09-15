@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InstanceRegistryFactory, McpEndpointFactory, McpRuntimeFactory, createDefaultControlConfig } from "../../../../src/testing.ts";
+import {
+    InstanceRegistryFactory,
+    McpEndpointFactory,
+    McpRuntimeFactory,
+    createDefaultControlConfig,
+} from "../../../../src/testing.ts";
 import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 import { createTestInstanceDescriptor } from "../../../support/ControlFixtures.ts";
 
@@ -20,7 +25,7 @@ test("disabled instances are skipped and registry does not auto start workers", 
             mcp: { enabled: true },
             name: "demo-disabled",
             provider: "local",
-        })
+        }),
     );
     config.mcp.enabled = true;
 
@@ -34,12 +39,14 @@ test("disabled instances are skipped and registry does not auto start workers", 
 test("mcp endpoint path is generated and wiring only builds host configuration", () => {
     const config = createDefaultControlConfig();
     config.mcp.enabled = true;
-    config.instances.push(normalizeConfigInstanceDraft({
-        enabled: true,
-        mcp: { enabled: true },
-        name: "demo-local",
-        provider: "local",
-    }));
+    config.instances.push(
+        normalizeConfigInstanceDraft({
+            enabled: true,
+            mcp: { enabled: true },
+            name: "demo-local",
+            provider: "local",
+        }),
+    );
 
     const registry = new InstanceRegistryFactory().build(config);
     const descriptor = registry.get("demo-local");
@@ -52,7 +59,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
         name: "demo-local",
         path: "/demo-local/mcp",
         worker: descriptor.worker,
-        workspaceEnabled: true
+        workspaceEnabled: true,
     });
 
     const host = new McpRuntimeFactory().wire(config, registry);
@@ -66,12 +73,14 @@ test("MCP runtime is absent while global MCP remains disabled", () => {
     const config = createDefaultControlConfig();
     config.mcp.enabled = false;
     config.web.enabled = true;
-    config.instances.push(normalizeConfigInstanceDraft({
-        enabled: true,
-        mcp: { enabled: true },
-        name: "demo-local",
-        provider: "local",
-    }));
+    config.instances.push(
+        normalizeConfigInstanceDraft({
+            enabled: true,
+            mcp: { enabled: true },
+            name: "demo-local",
+            provider: "local",
+        }),
+    );
     const registry = new InstanceRegistryFactory().build(config);
     const mapped: string[] = [];
     const factory = new McpRuntimeFactory({
@@ -79,8 +88,8 @@ test("MCP runtime is absent while global MCP remains disabled", () => {
             map(descriptor: Parameters<McpEndpointFactory["map"]>[0]) {
                 mapped.push(descriptor.name);
                 return new McpEndpointFactory().map(descriptor);
-            }
-        } as never
+            },
+        } as never,
     });
 
     const host = factory.wire(config, registry);
@@ -91,32 +100,49 @@ test("MCP runtime is absent while global MCP remains disabled", () => {
 
 test("stopOwned only stops workers started by this control and keeps failed ownership", async () => {
     const stopped: string[] = [];
-    const registry = new (await import("../../../../src/control/instance/registry/Registry.js")).InstanceRegistry([
-        createTestInstanceDescriptor({
-            async stop() {
-                stopped.push("owned-ok");
-            }
-        } as never, { name: "owned-ok" }),
-        createTestInstanceDescriptor({
-            async stop() {
-                stopped.push("owned-fail");
-                throw new Error("stop failed");
-            }
-        } as never, { name: "owned-fail" }),
-        createTestInstanceDescriptor({
-            async stop() {
-                stopped.push("unowned");
-            }
-        } as never, { name: "unowned" })
+    const registry = new (
+        await import("../../../../src/control/instance/registry/Registry.js")
+    ).InstanceRegistry([
+        createTestInstanceDescriptor(
+            {
+                async stop() {
+                    stopped.push("owned-ok");
+                },
+            } as never,
+            { name: "owned-ok" },
+        ),
+        createTestInstanceDescriptor(
+            {
+                async stop() {
+                    stopped.push("owned-fail");
+                    throw new Error("stop failed");
+                },
+            } as never,
+            { name: "owned-fail" },
+        ),
+        createTestInstanceDescriptor(
+            {
+                async stop() {
+                    stopped.push("unowned");
+                },
+            } as never,
+            { name: "unowned" },
+        ),
     ]);
 
     registry.markOwned("owned-ok");
     registry.markOwned("owned-fail");
 
-    await assert.rejects(registry.stopOwned(), /Failed to stop 1 worker instance/u);
+    await assert.rejects(
+        registry.stopOwned(),
+        /Failed to stop 1 worker instance/u,
+    );
     assert.deepEqual(stopped, ["owned-ok", "owned-fail"]);
 
     stopped.length = 0;
-    await assert.rejects(registry.stopOwned(), /Failed to stop 1 worker instance/u);
+    await assert.rejects(
+        registry.stopOwned(),
+        /Failed to stop 1 worker instance/u,
+    );
     assert.deepEqual(stopped, ["owned-fail"]);
 });

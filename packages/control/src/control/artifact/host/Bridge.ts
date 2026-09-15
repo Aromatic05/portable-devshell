@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import type {
     WorkerArtifactPayloadOpenInput,
-    WorkerArtifactReceiveBeginInput
+    WorkerArtifactReceiveBeginInput,
 } from "@portable-devshell/core";
 import { createError } from "@portable-devshell/shared";
 
@@ -12,7 +12,7 @@ import { ArtifactHostPayloadStore } from "./storage/PayloadStore.js";
 import { ArtifactHostReceiveStore } from "./storage/ReceiveStore.js";
 import type {
     ArtifactHostAccessContext,
-    ArtifactHostBridgeOptions
+    ArtifactHostBridgeOptions,
 } from "./Model.js";
 
 export class ArtifactHostBridge {
@@ -22,11 +22,11 @@ export class ArtifactHostBridge {
     constructor(options: ArtifactHostBridgeOptions) {
         this.#payloads = new ArtifactHostPayloadStore({
             homeDirectory: options.homeDirectory,
-            root: join(options.storageDir, "payloads")
+            root: join(options.storageDir, "payloads"),
         });
         this.#receives = new ArtifactHostReceiveStore({
             downloadDirectory: join(options.homeDirectory, "Download"),
-            root: join(options.storageDir, "receives")
+            root: join(options.storageDir, "receives"),
         });
     }
 
@@ -37,41 +37,50 @@ export class ArtifactHostBridge {
 
     endpointFor(context: ArtifactHostAccessContext): ArtifactServiceEndpoint {
         return {
-            abortArtifactReceive: async (receiveId) => await this.#receives.abort(receiveId),
-            appendControlEvent: async (type, data) => await context.appendControlEvent(type, data),
-            beginArtifactReceive: async (input: WorkerArtifactReceiveBeginInput) =>
-                await this.#receives.begin(input),
-            closeArtifactPayload: async (payloadId) => await this.#payloads.close(payloadId),
-            finishArtifactReceive: async (receiveId) => await this.#receives.finish(receiveId),
-            openArtifactPayload: async (input: WorkerArtifactPayloadOpenInput) => {
+            abortArtifactReceive: async (receiveId) =>
+                await this.#receives.abort(receiveId),
+            appendControlEvent: async (type, data) =>
+                await context.appendControlEvent(type, data),
+            beginArtifactReceive: async (
+                input: WorkerArtifactReceiveBeginInput,
+            ) => await this.#receives.begin(input),
+            closeArtifactPayload: async (payloadId) =>
+                await this.#payloads.close(payloadId),
+            finishArtifactReceive: async (receiveId) =>
+                await this.#receives.finish(receiveId),
+            openArtifactPayload: async (
+                input: WorkerArtifactPayloadOpenInput,
+            ) => {
                 if ("handle" in input && input.handle !== undefined) {
                     throw createError({
                         code: "artifact.hostHandleUnsupported",
-                        message: "Artifact handles cannot use the host pseudo-instance.",
-                        retryable: false
+                        message:
+                            "Artifact handles cannot use the host pseudo-instance.",
+                        retryable: false,
                     });
                 }
                 if (!("path" in input) || input.path === undefined) {
                     throw createError({
                         code: "artifact.hostPathDenied",
                         message: "Host source requires a filesystem path.",
-                        retryable: false
+                        retryable: false,
                     });
                 }
                 return await this.#payloads.openPath(
                     input.path,
                     input.expiresAtMs,
                     input.workspace,
-                    context
+                    context,
                 );
             },
             readArtifactPayload: async (input) =>
                 await this.#payloads.read(
                     input.payloadId,
                     input.offsetBytes,
-                    input.maxBytes
+                    input.maxBytes,
                 ),
-            writeArtifactReceive: async (input) => await this.#receives.write(input)
+            writeArtifactReceive: async (input) =>
+                await this.#receives.write(input),
         };
     }
 
@@ -80,4 +89,7 @@ export class ArtifactHostBridge {
     }
 }
 
-export type { ArtifactHostAccessContext, ArtifactHostBridgeOptions } from "./Model.js";
+export type {
+    ArtifactHostAccessContext,
+    ArtifactHostBridgeOptions,
+} from "./Model.js";

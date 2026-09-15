@@ -10,17 +10,19 @@ import {
     ControlGlobalTomlDocument,
     ControlInstanceTomlDocument,
     ControlConfigTomlCodec,
-    createDefaultControlConfig
+    createDefaultControlConfig,
 } from "../../../../src/testing.ts";
 import {
     ControlPathHome,
     normalizeConfigGlobalDraft,
     normalizeConfigInstanceDraft,
-    parseConfigInstanceDraft
+    parseConfigInstanceDraft,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
-const fixturesDir = fileURLToPath(new URL("../../../fixtures/", import.meta.url));
+const fixturesDir = fileURLToPath(
+    new URL("../../../fixtures/", import.meta.url),
+);
 const toml = new ControlConfigTomlCodec();
 const globalDocument = new ControlGlobalTomlDocument();
 const instanceDocument = new ControlInstanceTomlDocument();
@@ -35,7 +37,10 @@ test("readOrCreate persists a private control config", async () => {
         await access(paths.configFile);
         if (process.platform !== "win32") {
             assert.equal((await stat(paths.configFile)).mode & 0o777, 0o600);
-            assert.equal((await stat(paths.controlHomeDir)).mode & 0o777, 0o700);
+            assert.equal(
+                (await stat(paths.controlHomeDir)).mode & 0o777,
+                0o700,
+            );
         }
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
@@ -47,14 +52,28 @@ test("valid global and instance documents are assembled into canonical config", 
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
-        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig()));
+        await writeFileWithParents(
+            paths.configFile,
+            await readFixture("config-valid.toml"),
+        );
+        await writeFileWithParents(
+            paths.instanceConfigFile("demo-local"),
+            encodeInstance(createInstanceConfig()),
+        );
 
-        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
+        const config = await new ControlConfigStore().readOrCreate(
+            homeDirectory,
+        );
         const instance = config.instances[0];
         assert.equal(instance?.name, "demo-local");
         assert.equal(instance?.mcp.path, "/demo-local/mcp");
-        assert.deepEqual(instance?.extensions.model, ["artifact", "instance", "mcp", "secret", "skill"]);
+        assert.deepEqual(instance?.extensions.model, [
+            "artifact",
+            "instance",
+            "mcp",
+            "secret",
+            "skill",
+        ]);
         assert.equal(instance?.logs?.maxBytes, 33_554_432);
         assert.equal(instance?.approvalPolicy?.rules?.[0]?.source, "mcp");
         assert.equal(instance?.security.mode, "workspace");
@@ -67,13 +86,13 @@ test("instance TOML preserves MCP context selection mode", () => {
     const instance = normalizeConfigInstanceDraft({
         mcp: { contextMode: "openai-session" },
         name: "chatgpt-local",
-        provider: "local"
+        provider: "local",
     });
     const encoded = toml.encode(instanceDocument.encode(instance));
     assert.match(encoded, /contextMode = "openai-session"/u);
     assert.equal(
         instanceDocument.decode(toml.decode(encoded)).mcp?.contextMode,
-        "openai-session"
+        "openai-session",
     );
 });
 
@@ -81,13 +100,13 @@ test("instance TOML preserves Workspace feature enablement", () => {
     const instance = normalizeConfigInstanceDraft({
         name: "workspace-local",
         provider: "local",
-        workspace: { enabled: false }
+        workspace: { enabled: false },
     });
     const encoded = toml.encode(instanceDocument.encode(instance));
     assert.match(encoded, /\[workspace\][\s\S]*enabled = false/u);
     assert.equal(
         instanceDocument.decode(toml.decode(encoded)).workspace?.enabled,
-        false
+        false,
     );
 });
 
@@ -97,26 +116,40 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, [
-            "version = 1",
-            "[control]",
-            'logLevel = "info"',
-            "[mcp]",
-            "enabled = true",
-            'listenHost = "127.0.0.1"',
-            "listenPort = 17890",
-            "[mcp.auth]",
-            'mode = "token"',
-            `token = "${token}"`,
-            "[web]",
-            "enabled = true"
-        ].join("\n"));
-        await writeFileWithParents(paths.instanceConfigFile("demo-local"), encodeInstance(createInstanceConfig()));
+        await writeFileWithParents(
+            paths.configFile,
+            [
+                "version = 1",
+                "[control]",
+                'logLevel = "info"',
+                "[mcp]",
+                "enabled = true",
+                'listenHost = "127.0.0.1"',
+                "listenPort = 17890",
+                "[mcp.auth]",
+                'mode = "token"',
+                `token = "${token}"`,
+                "[web]",
+                "enabled = true",
+            ].join("\n"),
+        );
+        await writeFileWithParents(
+            paths.instanceConfigFile("demo-local"),
+            encodeInstance(createInstanceConfig()),
+        );
 
-        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-        assert.deepEqual(config.instances[0]?.mcp.auth, { mode: "token", token });
+        const config = await new ControlConfigStore().readOrCreate(
+            homeDirectory,
+        );
+        assert.deepEqual(config.instances[0]?.mcp.auth, {
+            mode: "token",
+            token,
+        });
         const global = await readFile(paths.configFile, "utf8");
-        const instance = await readFile(paths.instanceConfigFile("demo-local"), "utf8");
+        const instance = await readFile(
+            paths.instanceConfigFile("demo-local"),
+            "utf8",
+        );
         assert.match(global, /^version = 2$/mu);
         assert.doesNotMatch(global, /\[mcp\.auth\]/u);
         assert.match(instance, /auth = "token"/u);
@@ -130,7 +163,10 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        await writeFileWithParents(
+            paths.configFile,
+            await readFixture("config-valid.toml"),
+        );
         await writeFileWithParents(
             paths.instanceConfigFile("legacy-default"),
             toml.encode({
@@ -139,14 +175,21 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
                     enabled: true,
                     tools: {
                         capabilities: ["read", "write", "execute"],
-                        groups: ["file", "bash", "artifact", "tmux", "todo", "instance"]
-                    }
+                        groups: [
+                            "file",
+                            "bash",
+                            "artifact",
+                            "tmux",
+                            "todo",
+                            "instance",
+                        ],
+                    },
                 },
                 name: "legacy-default",
                 provider: "local",
                 version: 2,
-                workspace: "/tmp/legacy-default"
-            })
+                workspace: "/tmp/legacy-default",
+            }),
         );
         await writeFileWithParents(
             paths.instanceConfigFile("custom-policy"),
@@ -154,33 +197,54 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
                 enabled: true,
                 mcp: {
                     enabled: true,
-                    tools: { capabilities: ["read"], groups: ["file", "context", "todo"] }
+                    tools: {
+                        capabilities: ["read"],
+                        groups: ["file", "context", "todo"],
+                    },
                 },
                 name: "custom-policy",
                 provider: "local",
                 version: 2,
-                workspace: "/tmp/custom-policy"
-            })
+                workspace: "/tmp/custom-policy",
+            }),
         );
 
-        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-        assert.deepEqual(
-            config.instances.find((instance) => instance.name === "legacy-default")?.extensions.model,
-            ["artifact", "instance", "mcp", "secret", "skill"]
+        const config = await new ControlConfigStore().readOrCreate(
+            homeDirectory,
         );
         assert.deepEqual(
-            config.instances.find((instance) => instance.name === "custom-policy")?.extensions.model,
-            ["artifact", "instance", "mcp", "secret", "skill"]
+            config.instances.find(
+                (instance) => instance.name === "legacy-default",
+            )?.extensions.model,
+            ["artifact", "instance", "mcp", "secret", "skill"],
         );
-        const migratedDefault = await readFile(paths.instanceConfigFile("legacy-default"), "utf8");
-        const migratedCustom = await readFile(paths.instanceConfigFile("custom-policy"), "utf8");
+        assert.deepEqual(
+            config.instances.find(
+                (instance) => instance.name === "custom-policy",
+            )?.extensions.model,
+            ["artifact", "instance", "mcp", "secret", "skill"],
+        );
+        const migratedDefault = await readFile(
+            paths.instanceConfigFile("legacy-default"),
+            "utf8",
+        );
+        const migratedCustom = await readFile(
+            paths.instanceConfigFile("custom-policy"),
+            "utf8",
+        );
         for (const source of [migratedDefault, migratedCustom]) {
             assert.match(source, /^version = 4$/mu);
             assert.doesNotMatch(source, /^workspace\s*=/mu);
             assert.match(source, /\[workspace\][\s\S]*enabled = true/u);
-            assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u);
+            assert.doesNotMatch(
+                source,
+                /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u,
+            );
             assert.match(source, /\[extensions\]/u);
-            assert.match(source, /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u);
+            assert.match(
+                source,
+                /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u,
+            );
         }
         assert.deepEqual(config.instances[0]!.workspace, { enabled: true });
         assert.deepEqual(config.instances[1]!.workspace, { enabled: true });
@@ -194,7 +258,10 @@ test("version 3 MCP tool policy is retired into the version 4 model Extension al
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, await readFixture("config-valid.toml"));
+        await writeFileWithParents(
+            paths.configFile,
+            await readFixture("config-valid.toml"),
+        );
         await writeFileWithParents(
             paths.instanceConfigFile("canonical-groups"),
             toml.encode({
@@ -203,23 +270,46 @@ test("version 3 MCP tool policy is retired into the version 4 model Extension al
                     enabled: true,
                     tools: {
                         capabilities: ["read"],
-                        groups: ["file", "environment", "environ", "interaction", "file"]
-                    }
+                        groups: [
+                            "file",
+                            "environment",
+                            "environ",
+                            "interaction",
+                            "file",
+                        ],
+                    },
                 },
                 name: "canonical-groups",
                 provider: "local",
-                version: 3
-            })
+                version: 3,
+            }),
         );
 
-        const config = await new ControlConfigStore().readOrCreate(homeDirectory);
-        assert.deepEqual(config.instances[0]?.extensions.model, ["artifact", "instance", "mcp", "secret", "skill"]);
+        const config = await new ControlConfigStore().readOrCreate(
+            homeDirectory,
+        );
+        assert.deepEqual(config.instances[0]?.extensions.model, [
+            "artifact",
+            "instance",
+            "mcp",
+            "secret",
+            "skill",
+        ]);
 
-        const source = await readFile(paths.instanceConfigFile("canonical-groups"), "utf8");
+        const source = await readFile(
+            paths.instanceConfigFile("canonical-groups"),
+            "utf8",
+        );
         assert.match(source, /^version = 4$/mu);
         assert.match(source, /\[extensions\]/u);
-        assert.match(source, /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u);
-        assert.doesNotMatch(source, /\[mcp\.tools\]|groups\s*=|capabilities\s*=|environment|environ|interaction/u);
+        assert.match(
+            source,
+            /model\s*=\s*\[\s*"artifact",\s*"instance",\s*"mcp",\s*"secret",\s*"skill"\s*\]/u,
+        );
+        assert.doesNotMatch(
+            source,
+            /\[mcp\.tools\]|groups\s*=|capabilities\s*=|environment|environ|interaction/u,
+        );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -228,30 +318,38 @@ test("version 3 MCP tool policy is retired into the version 4 model Extension al
 test("global TOML round-trips the independent WebUI enable switch", () => {
     const config = normalizeConfigGlobalDraft({
         mcp: { enabled: false },
-        web: { enabled: true }
+        web: { enabled: true },
     });
 
     const encoded = toml.encode(globalDocument.encode(config));
     assert.match(encoded, /\[web\]\nauth = "none"\nenabled = true/u);
-    assert.equal(globalDocument.decode(toml.decode(encoded)).web?.enabled, true);
+    assert.equal(
+        globalDocument.decode(toml.decode(encoded)).web?.enabled,
+        true,
+    );
 });
 
 test("global TOML keeps direct artifact transfer opt-in", () => {
-    assert.equal(normalizeConfigGlobalDraft({}).control.artifactDirectTransfer, false);
+    assert.equal(
+        normalizeConfigGlobalDraft({}).control.artifactDirectTransfer,
+        false,
+    );
 
     const config = normalizeConfigGlobalDraft({
-        control: { artifactDirectTransfer: true }
+        control: { artifactDirectTransfer: true },
     });
     const encoded = toml.encode(globalDocument.encode(config));
     assert.match(encoded, /\[control\]\nartifactDirectTransfer = true/u);
-    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    const decoded = normalizeConfigGlobalDraft(
+        globalDocument.decode(toml.decode(encoded)),
+    );
     assert.equal(decoded.control.artifactDirectTransfer, true);
 });
 
 test("global TOML round-trips web token auth without leaking other modes", () => {
     const token = "a".repeat(48);
     const config = normalizeConfigGlobalDraft({
-        web: { auth: "token", enabled: true, token }
+        web: { auth: "token", enabled: true, token },
     });
 
     const encoded = toml.encode(globalDocument.encode(config));
@@ -259,7 +357,9 @@ test("global TOML round-trips web token auth without leaking other modes", () =>
     assert.match(encoded, new RegExp(`token = "${token}"`, "u"));
     assert.doesNotMatch(encoded, /\[web\.oauth2\]/u);
 
-    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    const decoded = normalizeConfigGlobalDraft(
+        globalDocument.decode(toml.decode(encoded)),
+    );
     assert.deepEqual(decoded.web.auth, { mode: "token", token });
 });
 
@@ -271,9 +371,9 @@ test("global TOML round-trips web oauth2 auth with a flat web.oauth2 table", () 
             oauth2: {
                 documentationUrl: "https://docs.example.com/web",
                 requiredScopes: ["web", "admin"],
-                resourceName: "aromatic-web"
-            }
-        }
+                resourceName: "aromatic-web",
+            },
+        },
     });
 
     const encoded = toml.encode(globalDocument.encode(config));
@@ -282,14 +382,16 @@ test("global TOML round-trips web oauth2 auth with a flat web.oauth2 table", () 
     assert.match(encoded, /resourceName = "aromatic-web"/u);
     assert.doesNotMatch(encoded, /token = /u);
 
-    const decoded = normalizeConfigGlobalDraft(globalDocument.decode(toml.decode(encoded)));
+    const decoded = normalizeConfigGlobalDraft(
+        globalDocument.decode(toml.decode(encoded)),
+    );
     assert.deepEqual(decoded.web.auth, {
         mode: "oauth2",
         oauth2: {
             documentationUrl: "https://docs.example.com/web",
             requiredScopes: ["web", "admin"],
-            resourceName: "aromatic-web"
-        }
+            resourceName: "aromatic-web",
+        },
     });
 });
 
@@ -298,7 +400,13 @@ test("instance alerts survive Control config persistence", async () => {
     const alerts = {
         intervalMs: 2_000,
         maxUncommittedChanges: 7,
-        scripts: [{ command: ["check-workspace", "--json"], id: "workspace", timeoutMs: 3_000 }],
+        scripts: [
+            {
+                command: ["check-workspace", "--json"],
+                id: "workspace",
+                timeoutMs: 3_000,
+            },
+        ],
         workerMemoryBytes: 536_870_912,
     };
     const config = createDefaultControlConfig();
@@ -316,14 +424,17 @@ test("instance alerts survive Control config persistence", async () => {
 });
 
 test("global TOML decode rejects web token residual alongside auth=none", () => {
-    assert.throws(
-        () =>
-            globalDocument.decode(toml.decode([
-                "version = 2",
-                "[web]",
-                'auth = "none"',
-                `token = "${"a".repeat(48)}"`
-            ].join("\n")))
+    assert.throws(() =>
+        globalDocument.decode(
+            toml.decode(
+                [
+                    "version = 2",
+                    "[web]",
+                    'auth = "none"',
+                    `token = "${"a".repeat(48)}"`,
+                ].join("\n"),
+            ),
+        ),
     );
 });
 
@@ -332,14 +443,37 @@ test("invalid TOML field type is reported with file and structural path", async 
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, await readFixture("config-invalid.toml"));
+        await writeFileWithParents(
+            paths.configFile,
+            await readFixture("config-invalid.toml"),
+        );
 
-        await assert.rejects(new ControlConfigStore().readOrCreate(homeDirectory), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "control.configParseFailed");
-            assert.equal((error as { details?: { configFile?: string; fieldPath?: string } }).details?.configFile, paths.configFile);
-            assert.equal((error as { details?: { fieldPath?: string } }).details?.fieldPath, "mcp.listenPort");
-            return true;
-        });
+        await assert.rejects(
+            new ControlConfigStore().readOrCreate(homeDirectory),
+            (error: unknown) => {
+                assert.equal(
+                    (error as { code?: string }).code,
+                    "control.configParseFailed",
+                );
+                assert.equal(
+                    (
+                        error as {
+                            details?: {
+                                configFile?: string;
+                                fieldPath?: string;
+                            };
+                        }
+                    ).details?.configFile,
+                    paths.configFile,
+                );
+                assert.equal(
+                    (error as { details?: { fieldPath?: string } }).details
+                        ?.fieldPath,
+                    "mcp.listenPort",
+                );
+                return true;
+            },
+        );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
@@ -350,43 +484,56 @@ test("explicitly exposed MCP without auth remains a valid user choice", async ()
 
     try {
         const paths = new ControlPathHome(homeDirectory);
-        await writeFileWithParents(paths.configFile, await readFixture("config-public-no-auth.toml"));
-        await assert.doesNotReject(new ControlConfigStore().readOrCreate(homeDirectory));
+        await writeFileWithParents(
+            paths.configFile,
+            await readFixture("config-public-no-auth.toml"),
+        );
+        await assert.doesNotReject(
+            new ControlConfigStore().readOrCreate(homeDirectory),
+        );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
 
 test("OAuth2 document structure rejects unsupported external-provider fields", () => {
-    assert.throws(
-        () => globalDocument.decode(toml.decode([
-            "version = 1",
-            "[control]",
-            'logLevel = "info"',
-            "[mcp]",
-            "enabled = true",
-            'listenHost = "127.0.0.1"',
-            "listenPort = 17890",
-            "[mcp.auth]",
-            'mode = "oauth2"'
-        ].join("\n")))
+    assert.throws(() =>
+        globalDocument.decode(
+            toml.decode(
+                [
+                    "version = 1",
+                    "[control]",
+                    'logLevel = "info"',
+                    "[mcp]",
+                    "enabled = true",
+                    'listenHost = "127.0.0.1"',
+                    "listenPort = 17890",
+                    "[mcp.auth]",
+                    'mode = "oauth2"',
+                ].join("\n"),
+            ),
+        ),
     );
 
-    assert.throws(
-        () => globalDocument.decode(toml.decode([
-            "version = 1",
-            "[control]",
-            'logLevel = "info"',
-            "[mcp]",
-            "enabled = true",
-            'listenHost = "127.0.0.1"',
-            "listenPort = 17890",
-            "[mcp.auth]",
-            'mode = "oauth2"',
-            "[mcp.auth.oauth2]",
-            'issuer = "http://127.0.0.1:9000"',
-            'resourceName = "aromatic"'
-        ].join("\n")))
+    assert.throws(() =>
+        globalDocument.decode(
+            toml.decode(
+                [
+                    "version = 1",
+                    "[control]",
+                    'logLevel = "info"',
+                    "[mcp]",
+                    "enabled = true",
+                    'listenHost = "127.0.0.1"',
+                    "listenPort = 17890",
+                    "[mcp.auth]",
+                    'mode = "oauth2"',
+                    "[mcp.auth.oauth2]",
+                    'issuer = "http://127.0.0.1:9000"',
+                    'resourceName = "aromatic"',
+                ].join("\n"),
+            ),
+        ),
     );
 });
 
@@ -394,81 +541,107 @@ test("instance name and audit limits are semantic validation rules", () => {
     const validator = new ControlConfigValidator();
     const invalidName = normalizeConfigInstanceDraft({
         name: "invalidname",
-        provider: "local"
+        provider: "local",
     });
-    assert.throws(
-        () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidName] })
+    assert.throws(() =>
+        validator.validate({
+            ...createDefaultControlConfig(),
+            instances: [invalidName],
+        }),
     );
 
     const invalidLogs = createInstanceConfig();
     invalidLogs.logs!.maxBytes = 0;
-    assert.throws(
-        () => validator.validate({ ...createDefaultControlConfig(), instances: [invalidLogs] })
+    assert.throws(() =>
+        validator.validate({
+            ...createDefaultControlConfig(),
+            instances: [invalidLogs],
+        }),
     );
 });
 
 test("instance alert limits are rejected by Control before reaching a worker", () => {
     const validator = new ControlConfigValidator();
-    const validateAlerts = (alerts: NonNullable<ReturnType<typeof createInstanceConfig>["alerts"]>) =>
+    const validateAlerts = (
+        alerts: NonNullable<ReturnType<typeof createInstanceConfig>["alerts"]>,
+    ) =>
         validator.validate({
             ...createDefaultControlConfig(),
             instances: [{ ...createInstanceConfig(), alerts }],
         });
 
     assert.throws(() => validateAlerts({ intervalMs: 999 }));
-    assert.throws(() => validateAlerts({ scripts: [{ command: ["check"], id: "check", timeoutMs: 0 }] }));
+    assert.throws(() =>
+        validateAlerts({
+            scripts: [{ command: ["check"], id: "check", timeoutMs: 0 }],
+        }),
+    );
     assert.throws(() => validateAlerts({ maxUncommittedChanges: -1 }));
     assert.throws(() => validateAlerts({ workerMemoryBytes: -1 }));
 });
 
 test("unknown and legacy instance fields are rejected instead of silently ignored", () => {
-    assert.throws(
-        () => instanceDocument.decode(toml.decode([
-            "version = 2",
-            'name = "demo-local"',
-            "enabled = true",
-            'provider = "local"',
-            'workspace = "/tmp/demo"',
-            "[mcp]",
-            "enabled = true",
-            "[mcp.tools]",
-            'groups = ["file"]',
-            'capabilities = ["read", "write"]',
-            "[tools.fileEdit]",
-            'mode = "patch"'
-        ].join("\n")))
+    assert.throws(() =>
+        instanceDocument.decode(
+            toml.decode(
+                [
+                    "version = 2",
+                    'name = "demo-local"',
+                    "enabled = true",
+                    'provider = "local"',
+                    'workspace = "/tmp/demo"',
+                    "[mcp]",
+                    "enabled = true",
+                    "[mcp.tools]",
+                    'groups = ["file"]',
+                    'capabilities = ["read", "write"]',
+                    "[tools.fileEdit]",
+                    'mode = "patch"',
+                ].join("\n"),
+            ),
+        ),
     );
 
-    assert.throws(
-        () => instanceDocument.decode(toml.decode([
-            "version = 2",
-            'name = "demo-ssh"',
-            "enabled = true",
-            'provider = "ssh"',
-            'workspace = "/srv/workspace"',
-            'host = "demo"'
-        ].join("\n")))
+    assert.throws(() =>
+        instanceDocument.decode(
+            toml.decode(
+                [
+                    "version = 2",
+                    'name = "demo-ssh"',
+                    "enabled = true",
+                    'provider = "ssh"',
+                    'workspace = "/srv/workspace"',
+                    'host = "demo"',
+                ].join("\n"),
+            ),
+        ),
     );
 });
 
 test("version 3 instance documents reject persistent workspace authority", () => {
-    assert.throws(
-        () => instanceDocument.decode(toml.decode([
-            "version = 3",
-            'name = "demo-local"',
-            "enabled = true",
-            'provider = "local"',
-            'workspace = "/tmp/demo"'
-        ].join("\n")))
+    assert.throws(() =>
+        instanceDocument.decode(
+            toml.decode(
+                [
+                    "version = 3",
+                    'name = "demo-local"',
+                    "enabled = true",
+                    'provider = "local"',
+                    'workspace = "/tmp/demo"',
+                ].join("\n"),
+            ),
+        ),
     );
 });
 
 test("SSH instance normalization requires ssh.command", () => {
-    assert.throws(
-        () => normalizeConfigInstanceDraft(parseConfigInstanceDraft({
-            name: "demo-ssh",
-            provider: "ssh"
-        }))
+    assert.throws(() =>
+        normalizeConfigInstanceDraft(
+            parseConfigInstanceDraft({
+                name: "demo-ssh",
+                provider: "ssh",
+            }),
+        ),
     );
 });
 
@@ -476,13 +649,18 @@ async function readFixture(name: string): Promise<string> {
     return await readFile(join(fixturesDir, name), "utf8");
 }
 
-async function writeFileWithParents(path: string, source: string): Promise<void> {
+async function writeFileWithParents(
+    path: string,
+    source: string,
+): Promise<void> {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, source, "utf8");
 }
 
-function encodeInstance(instance: ReturnType<typeof createInstanceConfig>): string {
+function encodeInstance(
+    instance: ReturnType<typeof createInstanceConfig>,
+): string {
     return toml.encode(instanceDocument.encode(instance));
 }
 
@@ -495,21 +673,21 @@ function createInstanceConfig() {
                     decision: "deny",
                     match: "exact",
                     source: "mcp",
-                    toolName: "bash_run"
-                }
-            ]
+                    toolName: "bash_run",
+                },
+            ],
         },
         env: { DEMO: "1" },
         logs: {
             eventBufferSize: 50,
             maxBytes: 33_554_432,
-            retentionDays: 14
+            retentionDays: 14,
         },
         mcp: {
-            enabled: true
+            enabled: true,
         },
         name: "demo-local",
         provider: "local",
-        security: { mode: "workspace" }
+        security: { mode: "workspace" },
     });
 }

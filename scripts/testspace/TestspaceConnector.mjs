@@ -1,7 +1,23 @@
-import { appendFile, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+    appendFile,
+    readFile,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
+import {
+    Client,
+    StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 
-export const SAFE_ACTIONS = ["bash_run", "file_read", "todo_read", "todo_write", "tmux_run"];
+export const SAFE_ACTIONS = [
+    "bash_run",
+    "file_read",
+    "todo_read",
+    "todo_write",
+    "tmux_run",
+];
 const TODO_TITLE = "testspace connector activity";
 const MAX_LOG_BYTES = 8 * 1024 * 1024;
 
@@ -20,11 +36,13 @@ export function createSafeAction(name, { ctxId, iteration, revision = 0 }) {
             return {
                 arguments: {
                     ctxId,
-                    files: [{
-                        path: "./README.md",
-                        selector: "1-40",
-                        view: "content",
-                    }],
+                    files: [
+                        {
+                            path: "./README.md",
+                            selector: "1-40",
+                            view: "content",
+                        },
+                    ],
                 },
                 name,
             };
@@ -107,11 +125,17 @@ export async function runConnectorLoop(options) {
 
     await updateHealth({});
     try {
-        while (options.maxIterations === undefined || iteration < options.maxIterations) {
+        while (
+            options.maxIterations === undefined ||
+            iteration < options.maxIterations
+        ) {
             if (await stopRequested(options.stopFile)) break;
             try {
                 if (client === undefined || ctxId === undefined) {
-                    ({ client, ctxId, toolNames } = await connectClient(options.endpoint, options.workspace));
+                    ({ client, ctxId, toolNames } = await connectClient(
+                        options.endpoint,
+                        options.workspace,
+                    ));
                     const connectedAt = new Date().toISOString();
                     await updateHealth({
                         lastConnectedAt: connectedAt,
@@ -132,11 +156,13 @@ export async function runConnectorLoop(options) {
                         event: "conversation.started",
                         messages: [
                             {
-                                content: "Use only the provided harmless tools inside the isolated testspace workspace.",
+                                content:
+                                    "Use only the provided harmless tools inside the isolated testspace workspace.",
                                 role: "system",
                             },
                             {
-                                content: "Generate varied DevShell activity so a human can inspect TUI and Web behavior.",
+                                content:
+                                    "Generate varied DevShell activity so a human can inspect TUI and Web behavior.",
                                 role: "user",
                             },
                         ],
@@ -159,13 +185,24 @@ export async function runConnectorLoop(options) {
                 }
 
                 iteration += 1;
-                const available = SAFE_ACTIONS.filter((name) => toolNames.has(name));
-                if (available.length === 0) throw new Error("no safe tools are exposed by the endpoint");
-                const selected = available[Math.floor(random() * available.length)];
-                const revision = selected === "todo_write"
-                    ? await readTodoRevision(client, ctxId)
-                    : 0;
-                const call = createSafeAction(selected, { ctxId, iteration, revision });
+                const available = SAFE_ACTIONS.filter((name) =>
+                    toolNames.has(name),
+                );
+                if (available.length === 0)
+                    throw new Error(
+                        "no safe tools are exposed by the endpoint",
+                    );
+                const selected =
+                    available[Math.floor(random() * available.length)];
+                const revision =
+                    selected === "todo_write"
+                        ? await readTodoRevision(client, ctxId)
+                        : 0;
+                const call = createSafeAction(selected, {
+                    ctxId,
+                    iteration,
+                    revision,
+                });
                 const toolCallId = `testspace-${process.pid}-${iteration}`;
 
                 await log(options.logFile, {
@@ -198,7 +235,10 @@ export async function runConnectorLoop(options) {
                 });
             } catch (error) {
                 const errorAt = new Date().toISOString();
-                const message = error instanceof Error ? error.stack ?? error.message : String(error);
+                const message =
+                    error instanceof Error
+                        ? (error.stack ?? error.message)
+                        : String(error);
                 await log(options.logFile, {
                     at: errorAt,
                     error: message,
@@ -215,7 +255,10 @@ export async function runConnectorLoop(options) {
                 toolNames = new Set();
             }
 
-            if (options.maxIterations === undefined || iteration < options.maxIterations) {
+            if (
+                options.maxIterations === undefined ||
+                iteration < options.maxIterations
+            ) {
                 await delay(options.intervalMs);
             }
         }
@@ -239,10 +282,16 @@ export async function readTestspaceConnectorHealth(path) {
 }
 
 async function connect(endpoint, workspace) {
-    const client = new Client({ name: "testspace-gpt-connector", version: "0.0.0" });
+    const client = new Client({
+        name: "testspace-gpt-connector",
+        version: "0.0.0",
+    });
     await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
     const listed = await client.listTools();
-    const environment = await client.callTool({ arguments: { workspace }, name: "environ_info" });
+    const environment = await client.callTool({
+        arguments: { workspace },
+        name: "environ_info",
+    });
     const ctxId = environment.structuredContent?.ctxId;
     if (typeof ctxId !== "string" || ctxId.length === 0) {
         await client.close();
@@ -296,7 +345,7 @@ async function stopRequested(path) {
 function createRandom(seed) {
     let state = Number(seed) >>> 0;
     return () => {
-        state += 0x6D2B79F5;
+        state += 0x6d2b79f5;
         let value = state;
         value = Math.imul(value ^ (value >>> 15), value | 1);
         value ^= value + Math.imul(value ^ (value >>> 7), value | 61);

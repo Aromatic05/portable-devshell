@@ -1,4 +1,7 @@
-import type { McpContextEnvironment, McpContextRecord } from "@portable-devshell/shared";
+import type {
+    McpContextEnvironment,
+    McpContextRecord,
+} from "@portable-devshell/shared";
 
 export type { McpContextRecord } from "@portable-devshell/shared";
 
@@ -42,7 +45,8 @@ export interface McpContextRemoteInstanceHandle {
     instance: string;
 }
 
-export type McpContextAutomaticReentryMode = "automatic" | "user_owned" | "paused";
+export type McpContextAutomaticReentryMode =
+    "automatic" | "user_owned" | "paused";
 
 export interface McpContextStoredRecord extends McpContextRecord {
     executionEpoch?: number;
@@ -57,7 +61,8 @@ export interface McpContextStoredRecord extends McpContextRecord {
     automaticReentrySuppressedAt?: string;
     automaticReentrySuppressionReason?: string;
     automaticReentrySourceId?: string;
-    automaticReentrySourceKind?: "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait";
+    automaticReentrySourceKind?:
+        "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait";
     externalBindings?: McpContextExternalBinding[];
     maskedInstances?: string[];
     remoteInstanceHandles?: McpContextRemoteInstanceHandle[];

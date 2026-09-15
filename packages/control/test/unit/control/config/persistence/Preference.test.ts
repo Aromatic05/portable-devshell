@@ -14,57 +14,71 @@ test("ConversationPreferenceStore persists titles and ordering across reopen", a
         orderByWorkspace: {},
         titles: {},
         version: 1,
-        workspaceOrder: []
+        workspaceOrder: [],
     });
     await first.update({
         orderByWorkspace: {
-            "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"]
+            "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
         titles: {
-            "alpha\u0000ctx-a": "Audit regression"
+            "alpha\u0000ctx-a": "Audit regression",
         },
-        workspaceOrder: ["/work/portable-devshell", "/work/efilinux"]
+        workspaceOrder: ["/work/portable-devshell", "/work/efilinux"],
     });
 
     const reopened = new ConversationPreferenceStore(filePath);
     assert.deepEqual(await reopened.read(), {
         orderByWorkspace: {
-            "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"]
+            "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
         titles: {
-            "alpha\u0000ctx-a": "Audit regression"
+            "alpha\u0000ctx-a": "Audit regression",
         },
         version: 1,
-        workspaceOrder: ["/work/portable-devshell", "/work/efilinux"]
+        workspaceOrder: ["/work/portable-devshell", "/work/efilinux"],
     });
 });
 
 test("ConversationPreferenceStore applies incremental patches without clobbering unrelated browser changes", async () => {
-    const root = await createTestTempDirectory("conversation-preferences-merge");
-    const store = new ConversationPreferenceStore(join(root, "conversation-preferences.json"));
+    const root = await createTestTempDirectory(
+        "conversation-preferences-merge",
+    );
+    const store = new ConversationPreferenceStore(
+        join(root, "conversation-preferences.json"),
+    );
 
     await store.update({
         orderByWorkspace: { "/work/a": ["alpha\u0000ctx-a"] },
         titles: { "alpha\u0000ctx-a": "A" },
-        workspaceOrder: ["/work/a"]
+        workspaceOrder: ["/work/a"],
     });
     await store.update({ titles: { "alpha\u0000ctx-b": "B" } });
-    await store.update({ orderByWorkspace: { "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"] } });
+    await store.update({
+        orderByWorkspace: {
+            "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
+        },
+    });
 
     assert.deepEqual(await store.read(), {
-        orderByWorkspace: { "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"] },
+        orderByWorkspace: {
+            "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
+        },
         titles: {
             "alpha\u0000ctx-a": "A",
-            "alpha\u0000ctx-b": "B"
+            "alpha\u0000ctx-b": "B",
         },
         version: 1,
-        workspaceOrder: ["/work/a"]
+        workspaceOrder: ["/work/a"],
     });
 });
 
 test("ConversationPreferenceStore imports only preference fields that are still missing on the server", async () => {
-    const root = await createTestTempDirectory("conversation-preferences-initialize");
-    const store = new ConversationPreferenceStore(join(root, "conversation-preferences.json"));
+    const root = await createTestTempDirectory(
+        "conversation-preferences-initialize",
+    );
+    const store = new ConversationPreferenceStore(
+        join(root, "conversation-preferences.json"),
+    );
     await store.update({
         orderByWorkspace: { "/work/a": ["alpha\u0000ctx-server"] },
         workspaceOrder: ["/work/a"],

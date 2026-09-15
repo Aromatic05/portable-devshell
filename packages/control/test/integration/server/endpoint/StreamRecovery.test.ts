@@ -9,7 +9,7 @@ import {
     ClientConnection,
     createError,
     SocketChannel,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
@@ -26,9 +26,14 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     const worker = new FakeWorker("alpha");
     worker.emit("instance.started");
     const registry = new InstanceRegistry([
-        createTestInstanceDescriptor(worker as unknown as WorkerInstance, { name: "alpha" })
+        createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
+            name: "alpha",
+        }),
     ]);
-    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({
+        instances: registry,
+        shutdown() {},
+    });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
@@ -45,14 +50,14 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
-        { fromSeq: 1 }
+        { fromSeq: 1 },
     );
     t.after(() => opened.stream.close());
     assert.equal(opened.acknowledgement.replyTo === undefined, false);
     assert.notEqual(opened.stream.id, opened.acknowledgement.replyTo);
     assert.deepEqual(opened.acknowledgement.payload, {
         events: [worker.events[0]],
-        lastSeq: 1
+        lastSeq: 1,
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
@@ -68,7 +73,7 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
         instance: "alpha",
         latestSeq: 3,
         oldestAvailableSeq: 4,
-        requestedFromSeq: 3
+        requestedFromSeq: 3,
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
@@ -85,9 +90,14 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
     worker.emit("toolCall.completed", {});
     worker.dropBefore(2);
     const registry = new InstanceRegistry([
-        createTestInstanceDescriptor(worker as unknown as WorkerInstance, { name: "alpha" })
+        createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
+            name: "alpha",
+        }),
     ]);
-    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({
+        instances: registry,
+        shutdown() {},
+    });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
@@ -104,7 +114,7 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
-        { fromSeq: 1 }
+        { fromSeq: 1 },
     );
     assert.equal(reply.error?.code, "stream.gap");
     assert.equal(reply.error?.retryable, true);
@@ -112,17 +122,19 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
         instance: "alpha",
         latestSeq: 2,
         oldestAvailableSeq: 2,
-        requestedFromSeq: 1
+        requestedFromSeq: 1,
     });
 });
 
 async function connect(socketPath: string): Promise<ClientConnection> {
     const connection = new ClientConnection({
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "cli"
+        peer: "cli",
     });
     await connection.request("@control", "service", "hello", {
         clientKind: "cli",
@@ -134,7 +146,13 @@ async function connect(socketPath: string): Promise<ClientConnection> {
 
 class FakeWorker {
     readonly #name: string;
-    #events: Array<{ at: string; data?: JsonValue; instanceName: string; seq: number; type: string }> = [];
+    #events: Array<{
+        at: string;
+        data?: JsonValue;
+        instanceName: string;
+        seq: number;
+        type: string;
+    }> = [];
     #lastSeq = 0;
 
     constructor(name: string) {
@@ -152,7 +170,7 @@ class FakeWorker {
             lastSeq: this.#lastSeq,
             name: asInstanceName(this.#name),
             ready: true,
-            status: "ready"
+            status: "ready",
         };
     }
 
@@ -164,7 +182,7 @@ class FakeWorker {
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events" as const,
-            lastSeq: this.#lastSeq
+            lastSeq: this.#lastSeq,
         };
     }
 
@@ -174,7 +192,7 @@ class FakeWorker {
             ...(data === undefined ? {} : { data }),
             instanceName: this.#name,
             seq: ++this.#lastSeq,
-            type
+            type,
         };
         this.#events.push(event);
     }

@@ -10,7 +10,7 @@ import { AgentProviderRuntimePaths } from "../../src/builtin/provider/AgentProvi
 import { OPENCODE_PROVIDER_VERSION } from "../../src/provider/opencode/OpenCodeAgentProvider.ts";
 import {
     OPENCODE_RUNTIME_VERSION,
-    OpenCodeProviderInstaller
+    OpenCodeProviderInstaller,
 } from "../../src/provider/opencode/OpenCodeProviderInstaller.ts";
 import type { OpenCodeChildMessage } from "../../src/provider/opencode/OpenCodeProcessProtocol.ts";
 
@@ -19,22 +19,41 @@ test("OpenCode provider child completes ACP lifecycle using only the private bun
     const runtimePaths = new AgentProviderRuntimePaths({
         provider: "opencode",
         rootDirectory: root,
-        version: OPENCODE_PROVIDER_VERSION
+        version: OPENCODE_PROVIDER_VERSION,
     });
-    const installation = await new OpenCodeProviderInstaller({ version: OPENCODE_RUNTIME_VERSION })
-        .ensureInstalled(runtimePaths);
-    assert.notEqual(installation.command, process.platform === "win32" ? "C:\\Windows\\opencode.exe" : "/usr/bin/opencode");
+    const installation = await new OpenCodeProviderInstaller({
+        version: OPENCODE_RUNTIME_VERSION,
+    }).ensureInstalled(runtimePaths);
+    assert.notEqual(
+        installation.command,
+        process.platform === "win32"
+            ? "C:\\Windows\\opencode.exe"
+            : "/usr/bin/opencode",
+    );
 
-    const childPath = fileURLToPath(new URL("../../src/provider/opencode/OpenCodeAgentChild.ts", import.meta.url));
-    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const childPath = fileURLToPath(
+        new URL(
+            "../../src/provider/opencode/OpenCodeAgentChild.ts",
+            import.meta.url,
+        ),
+    );
+    const workspaceLoader = new URL(
+        "../RegisterWorkspacePackages.mjs",
+        import.meta.url,
+    ).href;
     const child = fork(childPath, ["10000"], {
         cwd: process.cwd(),
-        env: { ...process.env, TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH },
+        env: {
+            ...process.env,
+            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH,
+        },
         execArgv: ["--import", "tsx", "--import", workspaceLoader],
-        stdio: ["ignore", "ignore", "pipe", "ipc"]
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
     let stderr = "";
-    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+    child.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+    });
 
     try {
         child.send({
@@ -43,39 +62,78 @@ test("OpenCode provider child completes ACP lifecycle using only the private bun
             localCwd: join(root, "cwd"),
             modelTools: [],
             stateDirectory: runtimePaths.stateDirectory,
-            type: "init"
+            type: "init",
         });
-        const ready = await nextMessage(child, (message) => message.type === "ready" && message.id === "init-real");
-        assert.deepEqual(ready, { id: "init-real", ok: true, type: "ready" }, stderr);
+        const ready = await nextMessage(
+            child,
+            (message) => message.type === "ready" && message.id === "init-real",
+        );
+        assert.deepEqual(
+            ready,
+            { id: "init-real", ok: true, type: "ready" },
+            stderr,
+        );
 
         child.send({ command: "wait", id: "wait-real", type: "command" });
-        const idle = await nextMessage(child, (message) => message.type === "result" && message.id === "wait-real");
-        assert.deepEqual(idle, { id: "wait-real", ok: true, type: "result" }, stderr);
+        const idle = await nextMessage(
+            child,
+            (message) =>
+                message.type === "result" && message.id === "wait-real",
+        );
+        assert.deepEqual(
+            idle,
+            { id: "wait-real", ok: true, type: "result" },
+            stderr,
+        );
 
         child.send({ command: "stop", id: "stop-real", type: "command" });
-        const stopped = await nextMessage(child, (message) => message.type === "result" && message.id === "stop-real");
-        assert.deepEqual(stopped, { id: "stop-real", ok: true, type: "result" }, stderr);
+        const stopped = await nextMessage(
+            child,
+            (message) =>
+                message.type === "result" && message.id === "stop-real",
+        );
+        assert.deepEqual(
+            stopped,
+            { id: "stop-real", ok: true, type: "result" },
+            stderr,
+        );
         child.disconnect();
         await waitForExit(child);
     } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        if (child.exitCode === null && child.signalCode === null)
+            child.kill("SIGKILL");
         await rm(root, { force: true, recursive: true });
     }
 });
 
 test("OpenCode provider child accepts a new prompt after the previous ACP turn becomes idle", async () => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-opencode-child-turns-"));
+    const root = await mkdtemp(
+        join(tmpdir(), "devshell-opencode-child-turns-"),
+    );
     const command = await writeFakeAcpAgent(root);
-    const childPath = fileURLToPath(new URL("../../src/provider/opencode/OpenCodeAgentChild.ts", import.meta.url));
-    const workspaceLoader = new URL("../RegisterWorkspacePackages.mjs", import.meta.url).href;
+    const childPath = fileURLToPath(
+        new URL(
+            "../../src/provider/opencode/OpenCodeAgentChild.ts",
+            import.meta.url,
+        ),
+    );
+    const workspaceLoader = new URL(
+        "../RegisterWorkspacePackages.mjs",
+        import.meta.url,
+    ).href;
     const child = fork(childPath, ["10000"], {
         cwd: process.cwd(),
-        env: { ...process.env, TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH },
+        env: {
+            ...process.env,
+            TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH,
+        },
         execArgv: ["--import", "tsx", "--import", workspaceLoader],
-        stdio: ["ignore", "ignore", "pipe", "ipc"]
+        stdio: ["ignore", "ignore", "pipe", "ipc"],
     });
     let stderr = "";
-    child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+    child.stderr?.on("data", (chunk) => {
+        stderr += String(chunk);
+    });
 
     try {
         child.send({
@@ -84,31 +142,72 @@ test("OpenCode provider child accepts a new prompt after the previous ACP turn b
             localCwd: join(root, "cwd"),
             modelTools: [],
             stateDirectory: join(root, "state"),
-            type: "init"
+            type: "init",
         });
-        const ready = await nextMessage(child, (message) => message.type === "ready" && message.id === "init-turns");
-        assert.deepEqual(ready, { id: "init-turns", ok: true, type: "ready" }, stderr);
+        const ready = await nextMessage(
+            child,
+            (message) =>
+                message.type === "ready" && message.id === "init-turns",
+        );
+        assert.deepEqual(
+            ready,
+            { id: "init-turns", ok: true, type: "ready" },
+            stderr,
+        );
 
         for (const turn of ["first", "second"]) {
-            child.send({ command: "prompt", id: `prompt-${turn}`, message: turn, type: "command" });
+            child.send({
+                command: "prompt",
+                id: `prompt-${turn}`,
+                message: turn,
+                type: "command",
+            });
             const prompted = await nextMessage(
                 child,
-                (message) => message.type === "result" && message.id === `prompt-${turn}`
+                (message) =>
+                    message.type === "result" &&
+                    message.id === `prompt-${turn}`,
             );
-            assert.deepEqual(prompted, { id: `prompt-${turn}`, ok: true, type: "result" }, stderr);
+            assert.deepEqual(
+                prompted,
+                { id: `prompt-${turn}`, ok: true, type: "result" },
+                stderr,
+            );
 
-            child.send({ command: "wait", id: `wait-${turn}`, type: "command" });
-            const idle = await nextMessage(child, (message) => message.type === "result" && message.id === `wait-${turn}`);
-            assert.deepEqual(idle, { id: `wait-${turn}`, ok: true, type: "result" }, stderr);
+            child.send({
+                command: "wait",
+                id: `wait-${turn}`,
+                type: "command",
+            });
+            const idle = await nextMessage(
+                child,
+                (message) =>
+                    message.type === "result" && message.id === `wait-${turn}`,
+            );
+            assert.deepEqual(
+                idle,
+                { id: `wait-${turn}`, ok: true, type: "result" },
+                stderr,
+            );
         }
 
-        assert.deepEqual((await readFile(join(root, "prompts.log"), "utf8")).trim().split("\n"), ["first", "second"]);
+        assert.deepEqual(
+            (await readFile(join(root, "prompts.log"), "utf8"))
+                .trim()
+                .split("\n"),
+            ["first", "second"],
+        );
         child.send({ command: "stop", id: "stop-turns", type: "command" });
-        await nextMessage(child, (message) => message.type === "result" && message.id === "stop-turns");
+        await nextMessage(
+            child,
+            (message) =>
+                message.type === "result" && message.id === "stop-turns",
+        );
         child.disconnect();
         await waitForExit(child);
     } finally {
-        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        if (child.exitCode === null && child.signalCode === null)
+            child.kill("SIGKILL");
         await rm(root, { force: true, recursive: true });
     }
 });
@@ -117,7 +216,9 @@ async function writeFakeAcpAgent(root: string): Promise<string> {
     const command = join(root, "fake-opencode-acp.mjs");
     const sdk = import.meta.resolve("@agentclientprotocol/sdk");
     const logPath = join(root, "prompts.log");
-    await writeFile(command, `#!/usr/bin/env node
+    await writeFile(
+        command,
+        `#!/usr/bin/env node
 import { appendFile } from "node:fs/promises";
 import { Readable, Writable } from "node:stream";
 import * as acp from ${JSON.stringify(sdk)};
@@ -137,19 +238,25 @@ acp.agent({ name: "fake-opencode" })
     })
     .onNotification(acp.methods.agent.session.cancel, () => {})
     .connect(stream);
-`, "utf8");
+`,
+        "utf8",
+    );
     await chmod(command, 0o755);
     return command;
 }
 
 function nextMessage(
     child: ChildProcess,
-    predicate: (message: OpenCodeChildMessage) => boolean
+    predicate: (message: OpenCodeChildMessage) => boolean,
 ): Promise<OpenCodeChildMessage> {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             cleanup();
-            reject(new Error("Timed out waiting for OpenCode provider child message."));
+            reject(
+                new Error(
+                    "Timed out waiting for OpenCode provider child message.",
+                ),
+            );
         }, 30_000);
         const cleanup = () => {
             clearTimeout(timeout);
@@ -164,7 +271,11 @@ function nextMessage(
         };
         const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
             cleanup();
-            reject(new Error(`OpenCode provider child exited early (${String(code)}/${String(signal)}).`));
+            reject(
+                new Error(
+                    `OpenCode provider child exited early (${String(code)}/${String(signal)}).`,
+                ),
+            );
         };
         child.on("message", onMessage);
         child.once("exit", onExit);
@@ -172,13 +283,24 @@ function nextMessage(
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
-    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    if (child.exitCode !== null || child.signalCode !== null)
+        return Promise.resolve();
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             child.kill("SIGKILL");
-            reject(new Error("OpenCode provider child did not exit after IPC disconnect."));
+            reject(
+                new Error(
+                    "OpenCode provider child did not exit after IPC disconnect.",
+                ),
+            );
         }, 5_000);
-        child.once("exit", () => { clearTimeout(timeout); resolve(); });
-        child.once("error", (error) => { clearTimeout(timeout); reject(error); });
+        child.once("exit", () => {
+            clearTimeout(timeout);
+            resolve();
+        });
+        child.once("error", (error) => {
+            clearTimeout(timeout);
+            reject(error);
+        });
     });
 }

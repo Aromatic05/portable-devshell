@@ -12,7 +12,8 @@ export interface WebSession {
 
 export class BrowserWebSession implements WebSession {
     constructor(
-        private readonly request: typeof fetch = (input, init) => globalThis.fetch(input, init),
+        private readonly request: typeof fetch = (input, init) =>
+            globalThis.fetch(input, init),
         private readonly path = sessionPath(),
         private readonly oauthPath = oauthStartPath(),
         private readonly navigate: (url: string) => void = (url) => {
@@ -31,7 +32,11 @@ export class BrowserWebSession implements WebSession {
         }
         try {
             const body = (await response.json()) as { auth?: unknown };
-            if (body.auth === "oauth2" || body.auth === "none" || body.auth === "token") {
+            if (
+                body.auth === "oauth2" ||
+                body.auth === "none" ||
+                body.auth === "token"
+            ) {
                 return body.auth;
             }
         } catch {
@@ -115,13 +120,28 @@ export function oauthStartPath(location: Location = window.location): string {
     return webRoutePath(location.pathname, "/oauth/start");
 }
 
-export function webReturnTo(location: Location = window.location): string | undefined {
+export function webReturnTo(
+    location: Location = window.location,
+): string | undefined {
     const raw = new URLSearchParams(location.search).get("returnTo");
-    if (raw === null || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return undefined;
-    const basePath = webRoutePath(location.pathname, "/session").slice(0, -"/session".length);
+    if (
+        raw === null ||
+        !raw.startsWith("/") ||
+        raw.startsWith("//") ||
+        raw.includes("\\")
+    )
+        return undefined;
+    const basePath = webRoutePath(location.pathname, "/session").slice(
+        0,
+        -"/session".length,
+    );
     const target = new URL(raw, "http://localhost");
     if (target.origin !== "http://localhost") return undefined;
-    if (target.pathname !== basePath && !target.pathname.startsWith(`${basePath}/`)) return undefined;
+    if (
+        target.pathname !== basePath &&
+        !target.pathname.startsWith(`${basePath}/`)
+    )
+        return undefined;
     return `${target.pathname}${target.search}${target.hash}`;
 }
 

@@ -1,10 +1,40 @@
 import { randomUUID } from "node:crypto";
-import { createError, errorCodes, isArtifactTransferTerminal, recoverArtifactTransferStatus, toControlErrorBody } from "@portable-devshell/shared";
-import type { ArtifactEventType, ArtifactTransferCancelInput, ArtifactTransferFailure, ArtifactTransferLookupInput, ArtifactTransferRecord, ArtifactTransferResult, ArtifactTransferStartInput, JsonValue } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    isArtifactTransferTerminal,
+    recoverArtifactTransferStatus,
+    toControlErrorBody,
+} from "@portable-devshell/shared";
+import type {
+    ArtifactEventType,
+    ArtifactTransferCancelInput,
+    ArtifactTransferFailure,
+    ArtifactTransferLookupInput,
+    ArtifactTransferRecord,
+    ArtifactTransferResult,
+    ArtifactTransferStartInput,
+    JsonValue,
+} from "@portable-devshell/shared";
 import { ArtifactRecordStore } from "../RecordStore.js";
-import { readSourceInstance, readTransferPayloadSourceInput, sourceTypeFromPayload, validateTransferStart } from "../Source.js";
-import { ARTIFACT_RECORD_VERSION, ARTIFACT_TRANSFER_PAYLOAD_TTL_MS, DEFAULT_ARTIFACT_CHUNK_BYTES, requireArtifactEndpoint } from "../Service.js";
-import type { ArtifactServiceEndpoint, ArtifactServiceOptions, ArtifactServiceSchedule, StoredArtifactTransfer } from "../Service.js";
+import {
+    readSourceInstance,
+    readTransferPayloadSourceInput,
+    sourceTypeFromPayload,
+    validateTransferStart,
+} from "../Source.js";
+import {
+    ARTIFACT_RECORD_VERSION,
+    ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
+    DEFAULT_ARTIFACT_CHUNK_BYTES,
+    requireArtifactEndpoint,
+} from "../Service.js";
+import type {
+    ArtifactServiceEndpoint,
+    ArtifactServiceOptions,
+    ArtifactServiceSchedule,
+    StoredArtifactTransfer,
+} from "../Service.js";
 import type { WorkerArtifactPayloadReadResult } from "@portable-devshell/core";
 
 export interface ArtifactTransferServiceOptions {
@@ -32,7 +62,9 @@ export class ArtifactTransferService {
     constructor(options: ArtifactTransferServiceOptions) {
         const chunkBytes = options.chunkBytes ?? DEFAULT_ARTIFACT_CHUNK_BYTES;
         if (!Number.isInteger(chunkBytes) || chunkBytes <= 0) {
-            throw new TypeError("Artifact chunkBytes must be a positive integer.");
+            throw new TypeError(
+                "Artifact chunkBytes must be a positive integer.",
+            );
         }
 
         this.#recordStore = options.recordStore;
@@ -53,7 +85,7 @@ export class ArtifactTransferService {
                 await this.#recordStore.persistTransfer(transfer);
             },
             resolveEndpoint: options.resolveEndpoint,
-            schedule: options.schedule ?? ((task) => queueMicrotask(task))
+            schedule: options.schedule ?? ((task) => queueMicrotask(task)),
         });
     }
 
@@ -68,7 +100,9 @@ export class ArtifactTransferService {
         this.#initialized = true;
         try {
             for (const transfer of this.#transfers.values()) {
-                const recovered = recoverArtifactTransferStatus(transfer.record.status);
+                const recovered = recoverArtifactTransferStatus(
+                    transfer.record.status,
+                );
                 if (recovered === "queued") {
                     this.#scheduleTransfer(transfer.record.transferId);
                     continue;
@@ -83,14 +117,15 @@ export class ArtifactTransferService {
                     transfer.record.updatedAt = transfer.record.completedAt;
                     transfer.record.failure = {
                         code: errorCodes.artifactTransferInterrupted,
-                        message: "Artifact transfer was interrupted by control restart.",
-                        retryable: true
+                        message:
+                            "Artifact transfer was interrupted by control restart.",
+                        retryable: true,
                     };
                 });
                 await this.#transferExecutor.cleanupResources(transfer);
                 await this.#emitTransferEvent(
                     transfer,
-                    "artifact.transferInterrupted"
+                    "artifact.transferInterrupted",
                 );
                 await this.#finalizeTerminal(transfer.record);
             }
@@ -123,14 +158,15 @@ export class ArtifactTransferService {
                 transfer.record.updatedAt = now;
                 transfer.record.failure = {
                     code: errorCodes.artifactTransferInterrupted,
-                    message: "Artifact transfer was interrupted by control shutdown.",
-                    retryable: true
+                    message:
+                        "Artifact transfer was interrupted by control shutdown.",
+                    retryable: true,
                 };
             });
             await this.#transferExecutor.cleanupResources(transfer);
             await this.#emitTransferEvent(
                 transfer,
-                "artifact.transferInterrupted"
+                "artifact.transferInterrupted",
             );
             await this.#finalizeTerminal(transfer.record);
         }
@@ -138,20 +174,23 @@ export class ArtifactTransferService {
 
     async startTransfer(
         input: ArtifactTransferStartInput,
-        defaultInstance: string
+        defaultInstance: string,
     ): Promise<ArtifactTransferResult> {
         this.#assertInitialized();
         validateTransferStart(input);
-        const sourceInstance = readSourceInstance(input.instance, defaultInstance);
+        const sourceInstance = readSourceInstance(
+            input.instance,
+            defaultInstance,
+        );
         requireArtifactEndpoint(
             this.#resolveEndpoint,
             sourceInstance,
-            defaultInstance
+            defaultInstance,
         );
         requireArtifactEndpoint(
             this.#resolveEndpoint,
             input.targetInstance,
-            defaultInstance
+            defaultInstance,
         );
 
         const now = new Date().toISOString();
@@ -161,24 +200,24 @@ export class ArtifactTransferService {
             createdAt: now,
             source: {
                 ...sourceInput,
-                instance: sourceInstance
+                instance: sourceInstance,
             },
             status: "queued",
             target: {
                 instance: input.targetInstance,
                 path: input.targetPath,
-                workspace: input.targetWorkspace
+                workspace: input.targetWorkspace,
             },
             transferId,
             transferredBytes: 0,
-            updatedAt: now
+            updatedAt: now,
         };
         const stored: StoredArtifactTransfer = {
             cancelRequested: false,
             defaultInstance,
             record,
             request: { ...input },
-            version: ARTIFACT_RECORD_VERSION
+            version: ARTIFACT_RECORD_VERSION,
         };
 
         await this.#recordStore.persistTransfer(stored);
@@ -186,7 +225,7 @@ export class ArtifactTransferService {
         this.#scheduleTransfer(transferId);
         return {
             operation: "start",
-            transfer: structuredClone(record)
+            transfer: structuredClone(record),
         };
     }
 
@@ -203,19 +242,20 @@ export class ArtifactTransferService {
         this.#assertInitialized();
         return [...this.#transfers.values()]
             .map((transfer) => structuredClone(transfer.record))
-            .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+            .sort((left, right) =>
+                right.createdAt.localeCompare(left.createdAt),
+            );
     }
 
     async retireInstance(instance: string): Promise<void> {
         this.#assertInitialized();
         const transferIds = [...this.#transfers.values()]
-            .filter((transfer) =>
-                !isArtifactTransferTerminal(transfer.record.status) &&
-                (
-                    transfer.defaultInstance === instance ||
-                    transfer.record.source.instance === instance ||
-                    transfer.record.target.instance === instance
-                )
+            .filter(
+                (transfer) =>
+                    !isArtifactTransferTerminal(transfer.record.status) &&
+                    (transfer.defaultInstance === instance ||
+                        transfer.record.source.instance === instance ||
+                        transfer.record.target.instance === instance),
             )
             .map((transfer) => transfer.record.transferId);
         for (const transferId of transferIds) {
@@ -225,16 +265,16 @@ export class ArtifactTransferService {
     }
 
     async lookupTransfer(
-        input: ArtifactTransferLookupInput
+        input: ArtifactTransferLookupInput,
     ): Promise<ArtifactTransferResult> {
         return {
             operation: "status",
-            transfer: this.getTransfer(input.transferId)
+            transfer: this.getTransfer(input.transferId),
         };
     }
 
     async cancelTransfer(
-        input: ArtifactTransferCancelInput | string
+        input: ArtifactTransferCancelInput | string,
     ): Promise<ArtifactTransferResult> {
         this.#assertInitialized();
         const transferId = typeof input === "string" ? input : input.transferId;
@@ -245,7 +285,7 @@ export class ArtifactTransferService {
         if (isArtifactTransferTerminal(transfer.record.status)) {
             return {
                 operation: "cancel",
-                transfer: structuredClone(transfer.record)
+                transfer: structuredClone(transfer.record),
             };
         }
 
@@ -259,7 +299,7 @@ export class ArtifactTransferService {
             });
             await this.#emitTransferEvent(
                 transfer,
-                "artifact.transferCancelled"
+                "artifact.transferCancelled",
             );
             await this.#finalizeTerminal(transfer.record);
         } else {
@@ -273,7 +313,7 @@ export class ArtifactTransferService {
 
         return {
             operation: "cancel",
-            transfer: structuredClone(transfer.record)
+            transfer: structuredClone(transfer.record),
         };
     }
 
@@ -292,7 +332,11 @@ export class ArtifactTransferService {
 
     async #waitForTerminalOrRemoval(transferId: string): Promise<void> {
         const current = this.#transfers.get(transferId);
-        if (current === undefined || isArtifactTransferTerminal(current.record.status)) return;
+        if (
+            current === undefined ||
+            isArtifactTransferTerminal(current.record.status)
+        )
+            return;
         await new Promise<void>((resolve) => {
             const waiters = this.#transferWaiters.get(transferId) ?? new Set();
             waiters.add(() => resolve());
@@ -306,15 +350,15 @@ export class ArtifactTransferService {
 
     async #emitTransferEvent(
         transfer: StoredArtifactTransfer,
-        type: ArtifactEventType
+        type: ArtifactEventType,
     ): Promise<void> {
         const sourceEndpoint = this.#resolveEndpoint(
             transfer.record.source.instance,
-            transfer.defaultInstance
+            transfer.defaultInstance,
         );
         const targetEndpoint = this.#resolveEndpoint(
             transfer.record.target.instance,
-            transfer.defaultInstance
+            transfer.defaultInstance,
         );
         const data = toJsonValue(transfer.record);
 
@@ -344,19 +388,26 @@ export class ArtifactTransferService {
 
     async #compactTerminalHistory(): Promise<void> {
         const terminal = [...this.#transfers.values()]
-            .filter((transfer) => isArtifactTransferTerminal(transfer.record.status))
+            .filter((transfer) =>
+                isArtifactTransferTerminal(transfer.record.status),
+            )
             .sort((left, right) => {
                 const leftAt = left.record.completedAt ?? left.record.updatedAt;
-                const rightAt = right.record.completedAt ?? right.record.updatedAt;
+                const rightAt =
+                    right.record.completedAt ?? right.record.updatedAt;
                 const terminalAt = leftAt.localeCompare(rightAt);
                 return terminalAt === 0
-                    ? left.record.createdAt.localeCompare(right.record.createdAt)
+                    ? left.record.createdAt.localeCompare(
+                          right.record.createdAt,
+                      )
                     : terminalAt;
             });
         while (terminal.length > this.#terminalHistoryLimit) {
             const transfer = terminal.shift()!;
             try {
-                await this.#recordStore.deleteTransfer(transfer.record.transferId);
+                await this.#recordStore.deleteTransfer(
+                    transfer.record.transferId,
+                );
             } catch {
                 return;
             }
@@ -366,7 +417,7 @@ export class ArtifactTransferService {
 
     async #mutateAndPersist(
         transfer: StoredArtifactTransfer,
-        mutate: () => void
+        mutate: () => void,
     ): Promise<void> {
         const previous = structuredClone(transfer);
         mutate();
@@ -387,7 +438,7 @@ export class ArtifactTransferService {
 
 function restoreStoredTransfer(
     target: StoredArtifactTransfer,
-    previous: StoredArtifactTransfer
+    previous: StoredArtifactTransfer,
 ): void {
     target.cancelRequested = previous.cancelRequested;
     target.defaultInstance = previous.defaultInstance;
@@ -403,7 +454,7 @@ function restoreStoredTransfer(
 async function emitToEndpoint(
     endpoint: ArtifactServiceEndpoint,
     type: ArtifactEventType,
-    data?: JsonValue
+    data?: JsonValue,
 ): Promise<void> {
     await endpoint.appendControlEvent(type, data).catch(() => undefined);
 }
@@ -413,7 +464,7 @@ function transferNotFound(transferId: string) {
         code: errorCodes.artifactTransferNotFound,
         message: "Artifact transfer was not found.",
         retryable: false,
-        details: { transferId }
+        details: { transferId },
     });
 }
 
@@ -424,12 +475,18 @@ function toJsonValue(value: unknown): JsonValue {
 interface ArtifactTransferExecutorOptions {
     chunkBytes: number;
     directTransfer: boolean;
-    emitTransferEvent: (transfer: StoredArtifactTransfer, type: ArtifactEventType) => Promise<void>;
+    emitTransferEvent: (
+        transfer: StoredArtifactTransfer,
+        type: ArtifactEventType,
+    ) => Promise<void>;
     getTransfer: (transferId: string) => StoredArtifactTransfer | undefined;
     isRunActive: (generation: number) => boolean;
     onTerminal: (record: ArtifactTransferRecord) => Promise<void>;
     persistTransfer: (transfer: StoredArtifactTransfer) => Promise<void>;
-    resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
+    resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => ArtifactServiceEndpoint | undefined;
     schedule: ArtifactServiceSchedule;
 }
 
@@ -482,7 +539,10 @@ export class ArtifactTransferExecutor {
         await Promise.all([...this.#commitBarriers]);
     }
 
-    cancel(transferId: string, reason = "Artifact transfer was cancelled."): void {
+    cancel(
+        transferId: string,
+        reason = "Artifact transfer was cancelled.",
+    ): void {
         this.#controllers.get(transferId)?.abort(reason);
     }
 
@@ -493,10 +553,18 @@ export class ArtifactTransferExecutor {
     }
 
     async cleanupResources(transfer: StoredArtifactTransfer): Promise<void> {
-        const sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance, transfer.defaultInstance);
-        const targetEndpoint = this.#resolveEndpoint(transfer.record.target.instance, transfer.defaultInstance);
+        const sourceEndpoint = this.#resolveEndpoint(
+            transfer.record.source.instance,
+            transfer.defaultInstance,
+        );
+        const targetEndpoint = this.#resolveEndpoint(
+            transfer.record.target.instance,
+            transfer.defaultInstance,
+        );
         if (transfer.receiveId !== undefined && targetEndpoint !== undefined) {
-            await targetEndpoint.abortArtifactReceive(transfer.receiveId).catch(() => undefined);
+            await targetEndpoint
+                .abortArtifactReceive(transfer.receiveId)
+                .catch(() => undefined);
             transfer.receiveId = undefined;
         }
         await this.#closePayload(transfer, sourceEndpoint);
@@ -504,7 +572,10 @@ export class ArtifactTransferExecutor {
     }
 
     async #run(transferId: string, generation: number): Promise<void> {
-        if (!this.#isRunActive(generation) || this.#runningTransfers.has(transferId)) {
+        if (
+            !this.#isRunActive(generation) ||
+            this.#runningTransfers.has(transferId)
+        ) {
             return;
         }
         const transfer = this.#getTransfer(transferId);
@@ -521,8 +592,16 @@ export class ArtifactTransferExecutor {
         let resolveCommitBarrier: (() => void) | undefined;
         try {
             this.#throwIfCancelled(transfer);
-            sourceEndpoint = requireArtifactEndpoint(this.#resolveEndpoint, transfer.record.source.instance, transfer.defaultInstance);
-            targetEndpoint = requireArtifactEndpoint(this.#resolveEndpoint, transfer.record.target.instance, transfer.defaultInstance);
+            sourceEndpoint = requireArtifactEndpoint(
+                this.#resolveEndpoint,
+                transfer.record.source.instance,
+                transfer.defaultInstance,
+            );
+            targetEndpoint = requireArtifactEndpoint(
+                this.#resolveEndpoint,
+                transfer.record.target.instance,
+                transfer.defaultInstance,
+            );
             const startedAt = new Date().toISOString();
             transfer.record.status = "preparing";
             transfer.record.startedAt = startedAt;
@@ -531,27 +610,37 @@ export class ArtifactTransferExecutor {
             this.#assertRunActive(generation);
             await this.#emitTransferEvent(transfer, "artifact.transferStarted");
 
-            const sourceInput = readTransferPayloadSourceInput(transfer.request);
-            const opened = await sourceEndpoint.openArtifactPayload({
-                ...sourceInput,
-                expiresAtMs: Date.now() + ARTIFACT_TRANSFER_PAYLOAD_TTL_MS
-            }, signal);
+            const sourceInput = readTransferPayloadSourceInput(
+                transfer.request,
+            );
+            const opened = await sourceEndpoint.openArtifactPayload(
+                {
+                    ...sourceInput,
+                    expiresAtMs: Date.now() + ARTIFACT_TRANSFER_PAYLOAD_TTL_MS,
+                },
+                signal,
+            );
             transfer.payloadId = opened.payloadId;
             this.#assertRunActive(generation);
             transfer.record.payload = opened.descriptor;
             transfer.record.totalBytes = opened.descriptor.payloadBytes;
-            transfer.record.source.type = sourceTypeFromPayload(opened.descriptor);
+            transfer.record.source.type = sourceTypeFromPayload(
+                opened.descriptor,
+            );
             transfer.record.updatedAt = new Date().toISOString();
             await this.#persistTransfer(transfer);
             this.#assertRunActive(generation);
             this.#throwIfCancelled(transfer);
 
-            const receive = await targetEndpoint.beginArtifactReceive({
-                descriptor: opened.descriptor,
-                overwrite: transfer.request.overwrite ?? false,
-                targetPath: transfer.request.targetPath,
-                workspace: transfer.request.targetWorkspace
-            }, signal);
+            const receive = await targetEndpoint.beginArtifactReceive(
+                {
+                    descriptor: opened.descriptor,
+                    overwrite: transfer.request.overwrite ?? false,
+                    targetPath: transfer.request.targetPath,
+                    workspace: transfer.request.targetWorkspace,
+                },
+                signal,
+            );
             transfer.receiveId = receive.receiveId;
             this.#assertRunActive(generation);
             transfer.record.status = "transferring";
@@ -564,36 +653,55 @@ export class ArtifactTransferExecutor {
             let directComplete = false;
             if (
                 this.#directTransfer &&
-                transfer.record.source.instance !== transfer.record.target.instance &&
+                transfer.record.source.instance !==
+                    transfer.record.target.instance &&
                 sourceEndpoint.pushArtifactPayloadDirect !== undefined &&
                 targetEndpoint.openArtifactDirectReceive !== undefined &&
                 targetEndpoint.closeArtifactDirectReceive !== undefined
             ) {
                 let receiverId: string | undefined;
                 try {
-                    const direct = await targetEndpoint.openArtifactDirectReceive({
-                        expiresAtMs: Date.now() + 5 * 60_000,
-                        receiveId
-                    }, signal);
+                    const direct =
+                        await targetEndpoint.openArtifactDirectReceive(
+                            {
+                                expiresAtMs: Date.now() + 5 * 60_000,
+                                receiveId,
+                            },
+                            signal,
+                        );
                     receiverId = direct.receiverId;
-                    if (direct.urls.length === 0 || direct.nextOffsetBytes !== offsetBytes) {
-                        throw new Error("Artifact direct receiver returned invalid state.");
+                    if (
+                        direct.urls.length === 0 ||
+                        direct.nextOffsetBytes !== offsetBytes
+                    ) {
+                        throw new Error(
+                            "Artifact direct receiver returned invalid state.",
+                        );
                     }
                     while (offsetBytes < opened.descriptor.payloadBytes) {
                         this.#throwIfCancelled(transfer);
-                        const pushed = await sourceEndpoint.pushArtifactPayloadDirect({
-                            maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
-                            offsetBytes,
-                            payloadId: opened.payloadId,
-                            urls: direct.urls
-                        });
+                        const pushed =
+                            await sourceEndpoint.pushArtifactPayloadDirect({
+                                maxBytes: Math.min(
+                                    this.#chunkBytes,
+                                    opened.descriptor.payloadBytes -
+                                        offsetBytes,
+                                ),
+                                offsetBytes,
+                                payloadId: opened.payloadId,
+                                urls: direct.urls,
+                            });
                         this.#assertRunActive(generation);
                         if (
                             pushed.pushedBytes <= 0 ||
-                            pushed.nextOffsetBytes !== offsetBytes + pushed.pushedBytes ||
-                            pushed.nextOffsetBytes > opened.descriptor.payloadBytes
+                            pushed.nextOffsetBytes !==
+                                offsetBytes + pushed.pushedBytes ||
+                            pushed.nextOffsetBytes >
+                                opened.descriptor.payloadBytes
                         ) {
-                            throw new Error("Artifact direct transfer returned an invalid offset.");
+                            throw new Error(
+                                "Artifact direct transfer returned an invalid offset.",
+                            );
                         }
                         offsetBytes = pushed.nextOffsetBytes;
                         await this.#recordProgress(transfer, offsetBytes);
@@ -604,16 +712,21 @@ export class ArtifactTransferExecutor {
                     this.#throwIfCancelled(transfer);
                     this.#assertRunActive(generation);
                     if (receiverId !== undefined) {
-                        await targetEndpoint.closeArtifactDirectReceive(receiverId).catch(() => undefined);
+                        await targetEndpoint
+                            .closeArtifactDirectReceive(receiverId)
+                            .catch(() => undefined);
                         receiverId = undefined;
                     }
                     await targetEndpoint.abortArtifactReceive(receiveId);
-                    const restarted = await targetEndpoint.beginArtifactReceive({
-                        descriptor: opened.descriptor,
-                        overwrite: transfer.request.overwrite ?? false,
-                        targetPath: transfer.request.targetPath,
-                        workspace: transfer.request.targetWorkspace
-                    }, signal);
+                    const restarted = await targetEndpoint.beginArtifactReceive(
+                        {
+                            descriptor: opened.descriptor,
+                            overwrite: transfer.request.overwrite ?? false,
+                            targetPath: transfer.request.targetPath,
+                            workspace: transfer.request.targetWorkspace,
+                        },
+                        signal,
+                    );
                     receiveId = restarted.receiveId;
                     transfer.receiveId = receiveId;
                     offsetBytes = restarted.nextOffsetBytes;
@@ -621,7 +734,9 @@ export class ArtifactTransferExecutor {
                     this.#assertRunActive(generation);
                 } finally {
                     if (receiverId !== undefined) {
-                        await targetEndpoint.closeArtifactDirectReceive(receiverId).catch(() => undefined);
+                        await targetEndpoint
+                            .closeArtifactDirectReceive(receiverId)
+                            .catch(() => undefined);
                     }
                 }
             }
@@ -629,29 +744,46 @@ export class ArtifactTransferExecutor {
             if (!directComplete) {
                 while (offsetBytes < opened.descriptor.payloadBytes) {
                     this.#throwIfCancelled(transfer);
-                    const chunk = await sourceEndpoint.readArtifactPayload({
-                        maxBytes: Math.min(this.#chunkBytes, opened.descriptor.payloadBytes - offsetBytes),
-                        offsetBytes,
-                        payloadId: opened.payloadId
-                    }, signal);
+                    const chunk = await sourceEndpoint.readArtifactPayload(
+                        {
+                            maxBytes: Math.min(
+                                this.#chunkBytes,
+                                opened.descriptor.payloadBytes - offsetBytes,
+                            ),
+                            offsetBytes,
+                            payloadId: opened.payloadId,
+                        },
+                        signal,
+                    );
                     this.#assertRunActive(generation);
-                    validatePayloadChunk(chunk, offsetBytes, opened.descriptor.payloadBytes);
-                    const written = await targetEndpoint.writeArtifactReceive({
-                        content: chunk.content,
+                    validatePayloadChunk(
+                        chunk,
                         offsetBytes,
-                        receiveId
-                    }, signal);
+                        opened.descriptor.payloadBytes,
+                    );
+                    const written = await targetEndpoint.writeArtifactReceive(
+                        {
+                            content: chunk.content,
+                            offsetBytes,
+                            receiveId,
+                        },
+                        signal,
+                    );
                     this.#assertRunActive(generation);
-                    if (written.nextOffsetBytes !== offsetBytes + chunk.returnedBytes) {
+                    if (
+                        written.nextOffsetBytes !==
+                        offsetBytes + chunk.returnedBytes
+                    ) {
                         throw createError({
                             code: errorCodes.artifactPayloadInvalid,
-                            message: "Artifact receiver returned an unexpected offset.",
+                            message:
+                                "Artifact receiver returned an unexpected offset.",
                             retryable: true,
                             details: {
                                 actual: written.nextOffsetBytes,
                                 expected: offsetBytes + chunk.returnedBytes,
-                                transferId
-                            }
+                                transferId,
+                            },
                         });
                     }
                     offsetBytes = written.nextOffsetBytes;
@@ -672,16 +804,18 @@ export class ArtifactTransferExecutor {
                 resolveCommitBarrier = resolve;
             });
             this.#commitBarriers.add(commitBarrier);
-            const finished = await targetEndpoint.finishArtifactReceive(receiveId);
+            const finished =
+                await targetEndpoint.finishArtifactReceive(receiveId);
             if (
                 finished.bytes !== opened.descriptor.payloadBytes ||
                 finished.blake3 !== opened.descriptor.payloadBlake3
             ) {
                 throw createError({
                     code: errorCodes.artifactPayloadInvalid,
-                    message: "Artifact receiver verification result does not match the source payload.",
+                    message:
+                        "Artifact receiver verification result does not match the source payload.",
                     retryable: false,
-                    details: { transferId }
+                    details: { transferId },
                 });
             }
             await this.#closePayload(transfer, sourceEndpoint);
@@ -692,14 +826,25 @@ export class ArtifactTransferExecutor {
             transfer.record.updatedAt = transfer.record.completedAt;
             transfer.record.transferredBytes = opened.descriptor.payloadBytes;
             await this.#persistTransfer(transfer);
-            await this.#emitTransferEvent(transfer, "artifact.transferCompleted");
+            await this.#emitTransferEvent(
+                transfer,
+                "artifact.transferCompleted",
+            );
             await this.#onTerminal(transfer.record);
         } catch (error) {
-            if (!this.#isRunActive(generation) || error instanceof ArtifactServiceStoppedError) {
+            if (
+                !this.#isRunActive(generation) ||
+                error instanceof ArtifactServiceStoppedError
+            ) {
                 await this.cleanupResources(transfer);
                 return;
             }
-            await this.#handleFailure(transfer, error, sourceEndpoint, targetEndpoint);
+            await this.#handleFailure(
+                transfer,
+                error,
+                sourceEndpoint,
+                targetEndpoint,
+            );
         } finally {
             await this.#closePayload(transfer, sourceEndpoint);
             this.#runningTransfers.delete(transferId);
@@ -711,7 +856,10 @@ export class ArtifactTransferExecutor {
         }
     }
 
-    async #recordProgress(transfer: StoredArtifactTransfer, offsetBytes: number): Promise<void> {
+    async #recordProgress(
+        transfer: StoredArtifactTransfer,
+        offsetBytes: number,
+    ): Promise<void> {
         transfer.record.transferredBytes = offsetBytes;
         transfer.record.updatedAt = new Date().toISOString();
         await this.#persistTransfer(transfer);
@@ -722,20 +870,28 @@ export class ArtifactTransferExecutor {
         transfer: StoredArtifactTransfer,
         error: unknown,
         sourceEndpoint?: ArtifactServiceEndpoint,
-        targetEndpoint?: ArtifactServiceEndpoint
+        targetEndpoint?: ArtifactServiceEndpoint,
     ): Promise<void> {
         if (transfer.receiveId !== undefined && targetEndpoint !== undefined) {
-            await targetEndpoint.abortArtifactReceive(transfer.receiveId).catch(() => undefined);
+            await targetEndpoint
+                .abortArtifactReceive(transfer.receiveId)
+                .catch(() => undefined);
             transfer.receiveId = undefined;
         }
         const now = new Date().toISOString();
-        if (error instanceof ArtifactTransferCancelledError || transfer.cancelRequested) {
+        if (
+            error instanceof ArtifactTransferCancelledError ||
+            transfer.cancelRequested
+        ) {
             transfer.record.status = "cancelled";
             transfer.record.completedAt = now;
             transfer.record.updatedAt = now;
             transfer.record.failure = undefined;
             await this.#persistTransfer(transfer);
-            await this.#emitTransferEvent(transfer, "artifact.transferCancelled");
+            await this.#emitTransferEvent(
+                transfer,
+                "artifact.transferCancelled",
+            );
         } else {
             transfer.record.status = "failed";
             transfer.record.completedAt = now;
@@ -750,7 +906,7 @@ export class ArtifactTransferExecutor {
 
     async #closePayload(
         transfer: StoredArtifactTransfer,
-        sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance)
+        sourceEndpoint = this.#resolveEndpoint(transfer.record.source.instance),
     ): Promise<void> {
         if (transfer.payloadId === undefined || sourceEndpoint === undefined) {
             return;
@@ -766,7 +922,10 @@ export class ArtifactTransferExecutor {
     }
 
     #throwIfCancelled(transfer: StoredArtifactTransfer): void {
-        if (transfer.cancelRequested || transfer.record.status === "cancelling") {
+        if (
+            transfer.cancelRequested ||
+            transfer.record.status === "cancelling"
+        ) {
             throw new ArtifactTransferCancelledError();
         }
     }
@@ -776,13 +935,12 @@ export class ArtifactTransferExecutor {
             throw new ArtifactServiceStoppedError();
         }
     }
-
 }
 
 function validatePayloadChunk(
     chunk: WorkerArtifactPayloadReadResult,
     expectedOffset: number,
-    totalBytes: number
+    totalBytes: number,
 ): void {
     if (
         chunk.offsetBytes !== expectedOffset ||
@@ -793,7 +951,7 @@ function validatePayloadChunk(
         throw createError({
             code: errorCodes.artifactPayloadInvalid,
             message: "Artifact source returned an invalid payload chunk.",
-            retryable: true
+            retryable: true,
         });
     }
 }
@@ -804,12 +962,12 @@ function failureFromError(error: unknown): ArtifactTransferFailure {
         return {
             code: body.code,
             message: body.message,
-            retryable: body.retryable
+            retryable: body.retryable,
         };
     }
     return {
         code: errorCodes.coreProviderFailed,
         message: error instanceof Error ? error.message : String(error),
-        retryable: true
+        retryable: true,
     };
 }

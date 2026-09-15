@@ -272,7 +272,6 @@ export class WorkerInstallerRemote {
 
         return homeDirectory;
     }
-
 }
 
 function buildInspectScript(

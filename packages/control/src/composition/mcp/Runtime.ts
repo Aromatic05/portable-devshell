@@ -2,7 +2,7 @@ import {
     McpHost,
     resolvePortableDevshellApplicationVersion,
     type McpInstanceGateway,
-    type McpToolProvenanceRecorder
+    type McpToolProvenanceRecorder,
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
 
@@ -13,7 +13,10 @@ export class McpRuntimeFactory {
     readonly #mapper: McpEndpointFactory;
     readonly #serverVersion?: string;
 
-    constructor(options?: { mapper?: McpEndpointFactory; serverVersion?: string }) {
+    constructor(options?: {
+        mapper?: McpEndpointFactory;
+        serverVersion?: string;
+    }) {
         this.#mapper = options?.mapper ?? new McpEndpointFactory();
         this.#serverVersion = options?.serverVersion;
     }
@@ -27,7 +30,7 @@ export class McpRuntimeFactory {
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
             workspaceAppLeaseFile?: string;
-        }
+        },
     ): McpHost | undefined {
         if (!config.mcp.enabled) {
             return undefined;
@@ -38,22 +41,36 @@ export class McpRuntimeFactory {
                   .list()
                   .filter((descriptor) => descriptor.mcpEnabled)
                   .map((descriptor) => {
-                      const instance = config.instances.find((entry) => entry.name === descriptor.name);
-                      if (instance === undefined) throw new Error(`Missing config for MCP instance ${descriptor.name}.`);
-                      return this.#mapper.map(descriptor, options?.gateway, instance.mcp.auth, instance.workspace.enabled);
+                      const instance = config.instances.find(
+                          (entry) => entry.name === descriptor.name,
+                      );
+                      if (instance === undefined)
+                          throw new Error(
+                              `Missing config for MCP instance ${descriptor.name}.`,
+                          );
+                      return this.#mapper.map(
+                          descriptor,
+                          options?.gateway,
+                          instance.mcp.auth,
+                          instance.workspace.enabled,
+                      );
                   })
             : [];
 
         return new McpHost({
-            ...(options?.contextFile === undefined ? {} : { contextFile: options.contextFile }),
+            ...(options?.contextFile === undefined
+                ? {}
+                : { contextFile: options.contextFile }),
             instances: endpoints,
             listenHost: config.mcp.listenHost,
             listenPort: config.mcp.listenPort,
             publicBaseUrl: config.mcp.publicBaseUrl,
-            serverVersion: this.#serverVersion ?? resolvePortableDevshellApplicationVersion(),
+            serverVersion:
+                this.#serverVersion ??
+                resolvePortableDevshellApplicationVersion(),
             storageDir: options?.storageDir,
             toolProvenance: options?.toolProvenance,
-            workspaceAppLeaseFile: options?.workspaceAppLeaseFile
+            workspaceAppLeaseFile: options?.workspaceAppLeaseFile,
         });
     }
 }

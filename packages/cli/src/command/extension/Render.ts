@@ -1,4 +1,7 @@
-import type { CliCommandDescriptor, ExtensionRuntimeRecord } from "@portable-devshell/shared";
+import type {
+    CliCommandDescriptor,
+    ExtensionRuntimeRecord,
+} from "@portable-devshell/shared";
 
 export function renderExtensionUsage(): string {
     return [
@@ -12,11 +15,13 @@ export function renderExtensionUsage(): string {
         "  devshell extension disable <extensionId>",
         "  devshell extension reload <extensionId>",
         "",
-        "Installed Extension commands use `devshell <extension-id> [args...]`."
+        "Installed Extension commands use `devshell <extension-id> [args...]`.",
     ].join("\n");
 }
 
-export function renderExtensionCommandUsage(command: CliCommandDescriptor): string {
+export function renderExtensionCommandUsage(
+    command: CliCommandDescriptor,
+): string {
     return [
         command.title,
         "",
@@ -28,11 +33,17 @@ export function renderExtensionCommandUsage(command: CliCommandDescriptor): stri
     ].join("\n");
 }
 
-export function renderExtensionList(records: readonly ExtensionRuntimeRecord[]): string {
+export function renderExtensionList(
+    records: readonly ExtensionRuntimeRecord[],
+): string {
     if (records.length === 0) return "no extensions\n";
-    return `${records.map((record) => [
-        record.id,
-        record.version ?? "-",
-        record.enabled ? record.state : "disabled",
-    ].join("\t")).join("\n")}\n`;
+    return `${records
+        .map((record) =>
+            [
+                record.id,
+                record.version ?? "-",
+                record.enabled ? record.state : "disabled",
+            ].join("\t"),
+        )
+        .join("\n")}\n`;
 }

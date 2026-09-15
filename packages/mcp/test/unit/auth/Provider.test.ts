@@ -5,7 +5,7 @@ import test from "node:test";
 import {
     McpAuthMiddleware,
     McpAuthProviderNone,
-    McpAuthProviderToken
+    McpAuthProviderToken,
 } from "@portable-devshell/mcp/testing";
 
 test("none auth provider always authorizes", () => {
@@ -20,19 +20,24 @@ test("token auth provider accepts a single case-insensitive Bearer credential an
     assert.deepEqual(provider.authenticate(`Bearer ${token}`), {
         clientId: expectedClientId,
         scopes: [],
-        token
+        token,
     });
     assert.deepEqual(provider.authenticate(`bearer ${token}`), {
         clientId: expectedClientId,
         scopes: [],
-        token
+        token,
     });
     assert.equal(provider.authorize(`BEARER ${token}`), true);
-    assert.equal(provider.authorize("Bearer attacker-selected-token-value-0000"), false);
+    assert.equal(
+        provider.authorize("Bearer attacker-selected-token-value-0000"),
+        false,
+    );
 });
 
 test("token auth provider rejects missing, empty, wrong-scheme, and multi-token headers", () => {
-    const provider = new McpAuthProviderToken("secret-token-secret-token-secret-token");
+    const provider = new McpAuthProviderToken(
+        "secret-token-secret-token-secret-token",
+    );
 
     for (const header of [
         undefined,
@@ -41,7 +46,7 @@ test("token auth provider rejects missing, empty, wrong-scheme, and multi-token 
         "Bearer ",
         "Basic secret-token",
         "Bearer first second",
-        "Bearer first\tsecond"
+        "Bearer first\tsecond",
     ]) {
         assert.equal(provider.authenticate(header), undefined);
         assert.equal(provider.authorize(header), false);
@@ -51,11 +56,18 @@ test("token auth provider rejects missing, empty, wrong-scheme, and multi-token 
 test("auth middleware bypasses disabled auth without writing a response", () => {
     const middleware = new McpAuthMiddleware();
 
-    for (const config of [undefined, { enabled: false, provider: "none" } as const]) {
+    for (const config of [
+        undefined,
+        { enabled: false, provider: "none" } as const,
+    ]) {
         const response = createResponseDouble();
         assert.equal(
-            middleware.authorize({ headers: {} } as never, response as never, config),
-            true
+            middleware.authorize(
+                { headers: {} } as never,
+                response as never,
+                config,
+            ),
+            true,
         );
         assert.equal(response.statusCode, undefined);
         assert.equal(response.body, "");
@@ -73,10 +85,10 @@ test("auth middleware returns a JSON 401 for an invalid token", () => {
             {
                 enabled: true,
                 provider: "token",
-                token: "secret-token-secret-token-secret-token"
-            }
+                token: "secret-token-secret-token-secret-token",
+            },
         ),
-        false
+        false,
     );
     assert.equal(response.statusCode, 401);
     assert.deepEqual(response.headers, { "content-type": "application/json" });
@@ -91,9 +103,9 @@ test("auth middleware returns a JSON 501 for an unsupported enabled provider", (
         middleware.authorize(
             { headers: {} } as never,
             response as never,
-            { enabled: true, provider: "oauth" } as never
+            { enabled: true, provider: "oauth" } as never,
         ),
-        false
+        false,
     );
     assert.equal(response.statusCode, 501);
     assert.deepEqual(response.headers, { "content-type": "application/json" });
@@ -113,6 +125,6 @@ function createResponseDouble() {
         end(body?: string) {
             this.body = body ?? "";
             return this;
-        }
+        },
     };
 }

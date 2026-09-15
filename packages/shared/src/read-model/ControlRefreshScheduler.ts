@@ -37,7 +37,8 @@ export class ControlRefreshScheduler {
     }
 
     start(): void {
-        if (this.#oauthTimer === undefined && this.#overviewTimer === undefined) this.#generation += 1;
+        if (this.#oauthTimer === undefined && this.#overviewTimer === undefined)
+            this.#generation += 1;
         if (this.#oauthTimer === undefined && this.#oauthIntervalMs > 0) {
             this.#oauthTimer = setInterval(() => {
                 if (this.#shouldRefreshOAuth()) this.#background("oauth");
@@ -53,8 +54,10 @@ export class ControlRefreshScheduler {
     stop(): void {
         this.#generation += 1;
         if (this.#oauthTimer !== undefined) clearInterval(this.#oauthTimer);
-        if (this.#overviewTimer !== undefined) clearInterval(this.#overviewTimer);
-        if (this.#overviewDebounce !== undefined) clearTimeout(this.#overviewDebounce);
+        if (this.#overviewTimer !== undefined)
+            clearInterval(this.#overviewTimer);
+        if (this.#overviewDebounce !== undefined)
+            clearTimeout(this.#overviewDebounce);
         this.#oauthTimer = undefined;
         this.#overviewTimer = undefined;
         this.#overviewDebounce = undefined;
@@ -62,7 +65,8 @@ export class ControlRefreshScheduler {
     }
 
     scheduleOverview(delayMs: number): void {
-        if (this.#overviewDebounce !== undefined) clearTimeout(this.#overviewDebounce);
+        if (this.#overviewDebounce !== undefined)
+            clearTimeout(this.#overviewDebounce);
         this.#overviewDebounce = setTimeout(() => {
             this.#overviewDebounce = undefined;
             if (this.#shouldRefreshOverview()) this.#background("overview");
@@ -77,18 +81,26 @@ export class ControlRefreshScheduler {
         const active = this.#requests.get(kind);
         if (active !== undefined) return await active;
         const generation = this.#generation;
-        const request = (kind === "oauth"
-            ? this.#model.refreshOAuth()
-            : this.#model.refreshOverview()
-        ).then(
-            () => { if (generation === this.#generation) this.#onSuccess?.(kind); },
-            (error: unknown) => {
-                if (generation === this.#generation) this.#onFailure?.(kind, error);
-                throw error;
-            },
-        ).finally(() => {
-            if (this.#requests.get(kind) === request) this.#requests.delete(kind);
-        });
+        const request = (
+            kind === "oauth"
+                ? this.#model.refreshOAuth()
+                : this.#model.refreshOverview()
+        )
+            .then(
+                () => {
+                    if (generation === this.#generation)
+                        this.#onSuccess?.(kind);
+                },
+                (error: unknown) => {
+                    if (generation === this.#generation)
+                        this.#onFailure?.(kind, error);
+                    throw error;
+                },
+            )
+            .finally(() => {
+                if (this.#requests.get(kind) === request)
+                    this.#requests.delete(kind);
+            });
         this.#requests.set(kind, request);
         return await request;
     }

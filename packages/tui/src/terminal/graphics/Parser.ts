@@ -7,11 +7,11 @@ export type TuiTerminalOutputToken =
 type TuiTerminalGraphicStart =
     | { incomplete: true; index: number; payloadOffset: number }
     | {
-        incomplete: false;
-        index: number;
-        payloadOffset: number;
-        protocol: TuiTerminalGraphicProtocol;
-    };
+          incomplete: false;
+          index: number;
+          payloadOffset: number;
+          protocol: TuiTerminalGraphicProtocol;
+      };
 
 const ESCAPE = "\u001B";
 const KITTY_PREFIX = `${ESCAPE}_G`;
@@ -60,9 +60,15 @@ export class TuiTerminalGraphicsParser {
                 this.#buffer = this.#buffer.slice(start.index);
             }
 
-            const terminator = findTerminator(this.#buffer, start.payloadOffset - start.index);
+            const terminator = findTerminator(
+                this.#buffer,
+                start.payloadOffset - start.index,
+            );
             if (terminator === undefined) {
-                if (Buffer.byteLength(this.#buffer, "utf8") > MAX_GRAPHIC_SEQUENCE_BYTES) {
+                if (
+                    Buffer.byteLength(this.#buffer, "utf8") >
+                    MAX_GRAPHIC_SEQUENCE_BYTES
+                ) {
                     appendText(tokens, this.#buffer);
                     this.#buffer = "";
                 }
@@ -70,7 +76,11 @@ export class TuiTerminalGraphicsParser {
             }
 
             const sequence = this.#buffer.slice(0, terminator.end);
-            tokens.push({ data: sequence, protocol: start.protocol, type: "graphic" });
+            tokens.push({
+                data: sequence,
+                protocol: start.protocol,
+                type: "graphic",
+            });
             this.#buffer = this.#buffer.slice(terminator.end);
         }
 
@@ -107,42 +117,59 @@ function findGraphicStart(value: string): TuiTerminalGraphicStart | undefined {
         kittyIndex === -1
             ? undefined
             : {
-                incomplete: false,
-                index: kittyIndex,
-                payloadOffset: kittyIndex + KITTY_PREFIX.length,
-                protocol: "kitty" as const
-            },
-        sixel
-    ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== undefined);
+                  incomplete: false,
+                  index: kittyIndex,
+                  payloadOffset: kittyIndex + KITTY_PREFIX.length,
+                  protocol: "kitty" as const,
+              },
+        sixel,
+    ].filter(
+        (candidate): candidate is NonNullable<typeof candidate> =>
+            candidate !== undefined,
+    );
 
     return candidates.sort((left, right) => left.index - right.index)[0];
 }
 
-function findSixelStart(value: string, index: number): TuiTerminalGraphicStart | {
-    incomplete: false;
-    index: number;
-    payloadOffset: number;
-    protocol?: undefined;
-} {
-    for (let cursor = index + DCS_PREFIX.length; cursor < value.length; cursor += 1) {
+function findSixelStart(
+    value: string,
+    index: number,
+):
+    | TuiTerminalGraphicStart
+    | {
+          incomplete: false;
+          index: number;
+          payloadOffset: number;
+          protocol?: undefined;
+      } {
+    for (
+        let cursor = index + DCS_PREFIX.length;
+        cursor < value.length;
+        cursor += 1
+    ) {
         const code = value.charCodeAt(cursor);
         if (code >= 0x40 && code <= 0x7e) {
             return {
                 incomplete: false,
                 index,
                 payloadOffset: cursor + 1,
-                ...(value[cursor] === "q" ? { protocol: "sixel" as const } : {})
+                ...(value[cursor] === "q"
+                    ? { protocol: "sixel" as const }
+                    : {}),
             };
         }
     }
     return {
         incomplete: true,
         index,
-        payloadOffset: value.length
+        payloadOffset: value.length,
     };
 }
 
-function findTerminator(value: string, offset: number): { end: number } | undefined {
+function findTerminator(
+    value: string,
+    offset: number,
+): { end: number } | undefined {
     const sevenBit = value.indexOf(STRING_TERMINATOR, offset);
     const eightBit = value.indexOf("\u009C", offset);
     if (sevenBit === -1 && eightBit === -1) {

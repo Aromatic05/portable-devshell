@@ -5,7 +5,7 @@ import {
     type ControlErrorBody,
     type ControlErrorInit,
     type ErrorCode,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 export interface WorkerRpcRequestContext {
@@ -27,7 +27,10 @@ export interface WorkerRpcRequestEnvelope {
 
 export type WorkerRpcErrorBody = ControlErrorBody;
 
-export interface WorkerRpcNotificationEnvelope extends Record<string, JsonValue> {
+export interface WorkerRpcNotificationEnvelope extends Record<
+    string,
+    JsonValue
+> {
     type: "notification";
     method: string;
     params: JsonValue;
@@ -47,7 +50,8 @@ export interface WorkerRpcFailureEnvelope {
     error: WorkerRpcErrorBody;
 }
 
-export type WorkerRpcResponseEnvelope = WorkerRpcSuccessEnvelope | WorkerRpcFailureEnvelope;
+export type WorkerRpcResponseEnvelope =
+    WorkerRpcSuccessEnvelope | WorkerRpcFailureEnvelope;
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
@@ -63,12 +67,18 @@ export function decodeWorkerRpcMessage(frame: Uint8Array): JsonValue {
     try {
         return JSON.parse(decoder.decode(frame)) as JsonValue;
     } catch (error) {
-        throw invalidJson(`Worker RPC frame is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+        throw invalidJson(
+            `Worker RPC frame is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        );
     }
 }
 
 function invalidJson(message: string): Error {
-    return createError({ code: "protocol.invalidJson" as ErrorCode, message, retryable: false });
+    return createError({
+        code: "protocol.invalidJson" as ErrorCode,
+        message,
+        retryable: false,
+    });
 }
 
 export const workerRpcDisconnectedErrorCode = "core.workerRpcDisconnected";
@@ -85,7 +95,7 @@ export class WorkerRpcError extends ControlError {
             cause,
             message: "Tool call was cancelled by the client.",
             retryable: true,
-            details
+            details,
         });
     }
 
@@ -95,7 +105,7 @@ export class WorkerRpcError extends ControlError {
             cause,
             message: "Worker RPC bridge disconnected.",
             retryable: false,
-            details
+            details,
         });
     }
 }

@@ -9,14 +9,8 @@ import {
 } from "@portable-devshell/shared";
 
 import { CliRenderError } from "../app/Failure.js";
-import {
-    createCliRuntimeAdapter,
-    type CliClientRuntime,
-} from "./Runtime.js";
-import {
-    createCliCommandAdapter,
-    type CliClientCommand
-} from "./Command.js";
+import { createCliRuntimeAdapter, type CliClientRuntime } from "./Runtime.js";
+import { createCliCommandAdapter, type CliClientCommand } from "./Command.js";
 
 export interface CliClientOptions extends ControlClientChannelOptions {}
 
@@ -34,7 +28,8 @@ export type CliClients = Omit<ControlClients, "cli" | "runtime" | "todo"> & {
 
 export function createCliClients(options: CliClientOptions = {}): CliClients {
     const connection = new ClientConnection({
-        connectChannel: (signal) => connectControlClientChannel(options, signal),
+        connectChannel: (signal) =>
+            connectControlClientChannel(options, signal),
         mode: "persistent",
         peer: "cli",
         mapError: toClientError,
@@ -115,7 +110,8 @@ export class CliClientEventStream {
         if (message.kind === "gap") {
             throw createError({
                 code: errorCodes.streamGap,
-                message: "Requested event sequence is no longer available. Pull a fresh snapshot.",
+                message:
+                    "Requested event sequence is no longer available. Pull a fresh snapshot.",
                 retryable: true,
                 details: gapDetails(message),
             });
@@ -134,9 +130,17 @@ export class CliClientEventStream {
 function gapDetails(
     message: Extract<InstanceStreamMessage, { kind: "gap" }>,
 ): JsonValue {
-    return message.details ?? {
-        ...(message.fromSeq === undefined ? {} : { fromSeq: message.fromSeq }),
-        ...(message.lastSeq === undefined ? {} : { lastSeq: message.lastSeq }),
-        ...(message.nextSeq === undefined ? {} : { nextSeq: message.nextSeq }),
-    };
+    return (
+        message.details ?? {
+            ...(message.fromSeq === undefined
+                ? {}
+                : { fromSeq: message.fromSeq }),
+            ...(message.lastSeq === undefined
+                ? {}
+                : { lastSeq: message.lastSeq }),
+            ...(message.nextSeq === undefined
+                ? {}
+                : { nextSeq: message.nextSeq }),
+        }
+    );
 }

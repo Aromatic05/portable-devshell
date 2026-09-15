@@ -12,7 +12,10 @@ test("isCliEntrypoint compares the module URL with the platform-native argv path
     const moduleUrl = pathToFileURL(argvPath).href;
 
     assert.equal(isCliEntrypoint(moduleUrl, argvPath), true);
-    assert.equal(isCliEntrypoint("file:///different-entry.js", argvPath), false);
+    assert.equal(
+        isCliEntrypoint("file:///different-entry.js", argvPath),
+        false,
+    );
     assert.equal(isCliEntrypoint(moduleUrl, undefined), false);
 });
 
@@ -25,9 +28,15 @@ test(
 
         try {
             await symlink(process.execPath, commandPath);
-            assert.equal(isCliEntrypoint(pathToFileURL(process.execPath).href, commandPath), true);
+            assert.equal(
+                isCliEntrypoint(
+                    pathToFileURL(process.execPath).href,
+                    commandPath,
+                ),
+                true,
+            );
         } finally {
             await rm(directory, { force: true, recursive: true });
         }
-    }
+    },
 );

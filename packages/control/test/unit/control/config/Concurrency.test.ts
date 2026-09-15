@@ -7,7 +7,7 @@ import {
     ControlConfigMutationLock,
     InstanceCreateCoordinator,
     InstanceRegistryFactory,
-    createDefaultControlConfig
+    createDefaultControlConfig,
 } from "../../../../src/testing.ts";
 
 test("instance creation and endpoint updates share one configuration mutation boundary", async () => {
@@ -31,7 +31,7 @@ test("instance creation and endpoint updates share one configuration mutation bo
                 await firstWriteReleased;
             }
             config = next;
-        }
+        },
     };
     const common = {
         configStore,
@@ -41,15 +41,15 @@ test("instance creation and endpoint updates share one configuration mutation bo
         mutationRunner: mutations,
         setConfig: (next: ControlConfig) => {
             config = next;
-        }
+        },
     };
     const editor = new ConfigEditorCoordinator({
         ...common,
-        runtimePreflight: { async assertAvailable() {} }
+        runtimePreflight: { async assertAvailable() {} },
     });
     const creator = new InstanceCreateCoordinator({
         ...common,
-        getMcpHost: () => undefined
+        getMcpHost: () => undefined,
     });
 
     const endpointUpdate = editor.updateWebConfig({
@@ -57,8 +57,8 @@ test("instance creation and endpoint updates share one configuration mutation bo
             enabled: true,
             listenHost: "127.0.0.1",
             listenPort: 17910,
-            publicBaseUrl: "http://127.0.0.1:17910"
-        }
+            publicBaseUrl: "http://127.0.0.1:17910",
+        },
     });
     await firstWriteObserved;
     const instanceCreate = creator.createInstance({
@@ -73,6 +73,9 @@ test("instance creation and endpoint updates share one configuration mutation bo
 
     assert.equal(config.web.listenPort, 17910);
     assert.equal(config.web.enabled, true);
-    assert.deepEqual(config.instances.map((instance) => instance.name), ["concurrent-local"]);
+    assert.deepEqual(
+        config.instances.map((instance) => instance.name),
+        ["concurrent-local"],
+    );
     assert.equal(writeCount, 2);
 });

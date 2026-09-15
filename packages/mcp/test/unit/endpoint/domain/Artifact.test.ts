@@ -2,23 +2,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
-import { McpContextRegistry, McpEndpointWorker, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import {
+    McpContextRegistry,
+    McpEndpointWorker,
+    type McpInstanceGateway,
+} from "@portable-devshell/mcp/testing";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;
-const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-artifact-test" });
+const contextRegistry = new McpContextRegistry({
+    idFactory: () => "ctx-artifact-test",
+});
 const activeContext = await contextRegistry.create({
     instance: "main-pc",
     principal: "local",
-    workspace: "/workspace"
+    workspace: "/workspace",
 });
-const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
+const withContext = <T extends Record<string, unknown>>(
+    input: T,
+): T & { ctxId: string } => ({
     ...input,
-    ctxId: activeContext.ctxId
+    ctxId: activeContext.ctxId,
 });
 
 const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64"
+    "base64",
 );
 
 test("artifact fixed MCP surface contains image primitive but no read or management operations", () => {
@@ -33,15 +41,19 @@ test("artifact fixed MCP surface contains image primitive but no read or managem
                 imageRef: `${blake3}.png`,
                 mediaType: "image/png",
                 name: "pixel.png",
-                source: { instance: "main-pc", path: "./pixel.png", type: "file" }
+                source: {
+                    instance: "main-pc",
+                    path: "./pixel.png",
+                    type: "file",
+                },
             };
-        }
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker(false, true)
+        worker: createWorker(false, true),
     });
     const names = endpoint.listTools().map((tool) => tool.name);
     assert.equal(names.includes("artifact_read"), false);
@@ -54,25 +66,28 @@ test("remote artifact path operations request an instance workspace attachment",
     const gateway = createGateway({
         async viewArtifactImage() {
             throw new Error("unexpected");
-        }
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker(false, true)
+        worker: createWorker(false, true),
     });
 
     await assert.rejects(
         endpoint.callTool(
             "artifact_viewImage",
             withContext({ instance: "remote-server", path: "./dist" }),
-            context
+            context,
         ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "mcp.contextWorkspaceRequired");
+            assert.equal(
+                (error as { code?: string }).code,
+                "mcp.contextWorkspaceRequired",
+            );
             return true;
-        }
+        },
     );
 });
 
@@ -82,20 +97,34 @@ function createWorker(ready: boolean, hasSchema: boolean) {
             _toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
-            operation: (callId: string) => Promise<T>
-        ): Promise<T> { return await operation("call-test"); },
+            operation: (callId: string) => Promise<T>,
+        ): Promise<T> {
+            return await operation("call-test");
+        },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callTool() { return {}; },
-        async readAlerts() { return { advice: [] }; },
-        hasToolSchemaCache() { return hasSchema; },
-        listTools() { return []; },
-        snapshot() { return { ready }; }
+        async callTool() {
+            return {};
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
+        hasToolSchemaCache() {
+            return hasSchema;
+        },
+        listTools() {
+            return [];
+        },
+        snapshot() {
+            return { ready };
+        },
     };
 }
 
-function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGateway {
+function createGateway(
+    overrides: Partial<McpInstanceGateway>,
+): McpInstanceGateway {
     return {
         ...overrides,
         async appendMcpToolCalled() {},
@@ -106,36 +135,71 @@ function createGateway(overrides: Partial<McpInstanceGateway>): McpInstanceGatew
             input: JsonValue,
             context: ToolCallContext,
             operation: (callId: string) => Promise<T>,
-            signal?: AbortSignal
+            signal?: AbortSignal,
         ): Promise<T> {
             if (overrides.auditToolCall !== undefined) {
-                return await overrides.auditToolCall(instance, toolName, input, context, operation, signal);
+                return await overrides.auditToolCall(
+                    instance,
+                    toolName,
+                    input,
+                    context,
+                    operation,
+                    signal,
+                );
             }
             return await operation("call-test");
         },
-        async callTool() { return {}; },
-        environment() { return undefined; },
-        async listInstances() { return []; },
-        listTools() { return []; },
+        async callTool() {
+            return {};
+        },
+        environment() {
+            return undefined;
+        },
+        async listInstances() {
+            return [];
+        },
+        listTools() {
+            return [];
+        },
         async prepareWorkspace(_instance, workspace) {
             return {
                 projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
                 projectMemoryDirectory: `${workspace}/.devshell`,
                 projectMemoryPresent: true,
                 temporaryDirectory: "/tmp/mcp-artifact",
-                workspace
+                workspace,
             };
         },
-        async readAlerts() { return { advice: [] }; },
+        async readAlerts() {
+            return { advice: [] };
+        },
         async releaseAlerts(instance, workspace) {
             await overrides.releaseAlerts?.(instance, workspace);
         },
-        async readTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
-        async connectInstance(instance) { return { instance }; },
-        async statusInstance(instance) { return { instance }; },
-        async stopInstance(instance) { return { instance }; },
+        async readTodo() {
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+            };
+        },
+        async connectInstance(instance) {
+            return { instance };
+        },
+        async statusInstance(instance) {
+            return { instance };
+        },
+        async stopInstance(instance) {
+            return { instance };
+        },
         async touchAlerts() {},
         async touchTemporaryDirectory() {},
-        async writeTodo() { return { items: [], revision: 0, summary: { completed: 0, total: 0 } }; },
+        async writeTodo() {
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+            };
+        },
     };
 }

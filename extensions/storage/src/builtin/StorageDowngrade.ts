@@ -44,14 +44,21 @@ export interface ConversationDowngradeResult {
     toVersion: 0;
 }
 
-export function inspectStorageDatabase(filePath: string): StorageDatabaseInspection {
+export function inspectStorageDatabase(
+    filePath: string,
+): StorageDatabaseInspection {
     const source = resolve(filePath);
     requireSourceFile(source);
     const database = openReadOnlyDatabase(source);
     try {
         const tables = new Set(
-            (database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>)
-                .map((row) => row.name),
+            (
+                database
+                    .prepare(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'",
+                    )
+                    .all() as Array<{ name: string }>
+            ).map((row) => row.name),
         );
         return {
             filePath: source,
@@ -74,7 +81,8 @@ export function downgradeAuditDatabase(options: {
     toVersion: number;
 }): AuditDowngradeResult {
     options.signal?.throwIfAborted();
-    if (options.toVersion !== 1) throw new TypeError("Audit downgrade currently supports only --to 1.");
+    if (options.toVersion !== 1)
+        throw new TypeError("Audit downgrade currently supports only --to 1.");
     const source = resolve(options.source);
     const output = resolve(options.output);
     requireSeparateOutput(source, output);
@@ -87,7 +95,11 @@ export function downgradeAuditDatabase(options: {
     try {
         fromVersion = readUserVersion(input);
         if (fromVersion < 1 || fromVersion > SUPPORTED_AUDIT_SOURCE_VERSION) {
-            throw unsupportedSourceVersion("Audit", fromVersion, SUPPORTED_AUDIT_SOURCE_VERSION);
+            throw unsupportedSourceVersion(
+                "Audit",
+                fromVersion,
+                SUPPORTED_AUDIT_SOURCE_VERSION,
+            );
         }
         const temp = temporaryOutputPath(output);
         mkdirSync(dirname(output), { recursive: true });
@@ -138,7 +150,14 @@ export function downgradeAuditDatabase(options: {
     } finally {
         input.close();
     }
-    return { fromVersion, kind: "audit", output, records: recordCount, source, toVersion: 1 };
+    return {
+        fromVersion,
+        kind: "audit",
+        output,
+        records: recordCount,
+        source,
+        toVersion: 1,
+    };
 }
 
 export function downgradeConversationDatabase(options: {
@@ -149,7 +168,10 @@ export function downgradeConversationDatabase(options: {
     toVersion: number;
 }): ConversationDowngradeResult {
     options.signal?.throwIfAborted();
-    if (options.toVersion !== 0) throw new TypeError("Conversation downgrade currently supports only --to 0 (legacy JSON).");
+    if (options.toVersion !== 0)
+        throw new TypeError(
+            "Conversation downgrade currently supports only --to 0 (legacy JSON).",
+        );
     const source = resolve(options.source);
     const output = resolve(options.output);
     requireSeparateOutput(source, output);
@@ -160,10 +182,17 @@ export function downgradeConversationDatabase(options: {
     try {
         const fromVersion = readUserVersion(input);
         if (fromVersion !== SUPPORTED_CONVERSATION_SOURCE_VERSION) {
-            throw unsupportedSourceVersion("Conversation", fromVersion, SUPPORTED_CONVERSATION_SOURCE_VERSION);
+            throw unsupportedSourceVersion(
+                "Conversation",
+                fromVersion,
+                SUPPORTED_CONVERSATION_SOURCE_VERSION,
+            );
         }
         const instance = options.instance ?? inferInstanceName(source);
-        const comments = (input.prepare(`
+        const comments = (
+            input
+                .prepare(
+                    `
             SELECT
                 call_id AS callId,
                 created_at AS createdAt,
@@ -177,23 +206,31 @@ export function downgradeConversationDatabase(options: {
             FROM conversation_entries
             WHERE kind = 'comment'
             ORDER BY created_at ASC, seq ASC
-        `).all() as Array<{
-            callId: string | null;
-            createdAt: string;
-            ctxId: string;
-            deliveredAt: string | null;
-            error: string | null;
-            failedAt: string | null;
-            id: string;
-            status: string | null;
-            text: string;
-        }>).map((row) => {
-            if (row.status === null) throw new Error(`Conversation Comment ${row.id} has no status.`);
+        `,
+                )
+                .all() as Array<{
+                callId: string | null;
+                createdAt: string;
+                ctxId: string;
+                deliveredAt: string | null;
+                error: string | null;
+                failedAt: string | null;
+                id: string;
+                status: string | null;
+                text: string;
+            }>
+        ).map((row) => {
+            if (row.status === null)
+                throw new Error(
+                    `Conversation Comment ${row.id} has no status.`,
+                );
             return {
                 ...(row.callId === null ? {} : { callId: row.callId }),
                 createdAt: row.createdAt,
                 ctxId: row.ctxId,
-                ...(row.deliveredAt === null ? {} : { deliveredAt: row.deliveredAt }),
+                ...(row.deliveredAt === null
+                    ? {}
+                    : { deliveredAt: row.deliveredAt }),
                 ...(row.error === null ? {} : { error: row.error }),
                 ...(row.failedAt === null ? {} : { failedAt: row.failedAt }),
                 id: row.id,
@@ -202,13 +239,23 @@ export function downgradeConversationDatabase(options: {
                 text: row.text,
             };
         });
-        const reports = Number((input.prepare(
-            "SELECT COUNT(*) AS count FROM conversation_entries WHERE kind = 'report'",
-        ).get() as { count: number }).count);
+        const reports = Number(
+            (
+                input
+                    .prepare(
+                        "SELECT COUNT(*) AS count FROM conversation_entries WHERE kind = 'report'",
+                    )
+                    .get() as { count: number }
+            ).count,
+        );
         const temp = temporaryOutputPath(output);
         mkdirSync(dirname(output), { recursive: true });
         try {
-            writeFileSync(temp, `${JSON.stringify({ messages: comments, version: 1 })}\n`, { flag: "wx", mode: 0o600 });
+            writeFileSync(
+                temp,
+                `${JSON.stringify({ messages: comments, version: 1 })}\n`,
+                { flag: "wx", mode: 0o600 },
+            );
             finalizeAtomicOutput(temp, output);
         } catch (error) {
             rmSync(temp, { force: true });
@@ -238,67 +285,108 @@ interface AuditRow {
     payload: string;
 }
 
-function readAuditRows(database: DatabaseSync, version: number): Iterable<AuditRow> {
+function readAuditRows(
+    database: DatabaseSync,
+    version: number,
+): Iterable<AuditRow> {
     if (version === 1) {
-        return database.prepare(`
+        return database
+            .prepare(
+                `
             SELECT id, collection, occurred_at_ms AS occurredAtMs, payload,
                    NULL AS body, NULL AS bodyCodec
             FROM audit_records
             ORDER BY id ASC
-        `).iterate() as Iterable<AuditRow>;
+        `,
+            )
+            .iterate() as Iterable<AuditRow>;
     }
-    return database.prepare(`
+    return database
+        .prepare(
+            `
         SELECT id, collection, occurred_at_ms AS occurredAtMs, payload,
                body, body_codec AS bodyCodec
         FROM audit_records
         ORDER BY id ASC
-    `).iterate() as Iterable<AuditRow>;
+    `,
+        )
+        .iterate() as Iterable<AuditRow>;
 }
 
 function decodeAuditPayload(row: AuditRow): string {
     if (row.body === null) return row.payload;
     if (row.collection !== "logs") {
-        throw new Error(`Audit row ${row.id} has a body outside the logs collection.`);
+        throw new Error(
+            `Audit row ${row.id} has a body outside the logs collection.`,
+        );
     }
     let message: Buffer;
     if (row.bodyCodec === "identity") message = Buffer.from(row.body);
     else if (row.bodyCodec === "zstd") message = zstdDecompressSync(row.body);
-    else throw new Error(`Audit row ${row.id} uses unsupported body codec ${String(row.bodyCodec)}.`);
+    else
+        throw new Error(
+            `Audit row ${row.id} uses unsupported body codec ${String(row.bodyCodec)}.`,
+        );
     const metadata = JSON.parse(row.payload) as unknown;
-    if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    if (
+        typeof metadata !== "object" ||
+        metadata === null ||
+        Array.isArray(metadata)
+    ) {
         throw new Error(`Audit row ${row.id} log metadata must be an object.`);
     }
-    return JSON.stringify({ ...(metadata as Record<string, unknown>), message: message.toString("utf8") });
+    return JSON.stringify({
+        ...(metadata as Record<string, unknown>),
+        message: message.toString("utf8"),
+    });
 }
 
 function inferInstanceName(source: string): string {
     if (basename(dirname(source)) !== "control-worker") {
-        throw new TypeError("Conversation downgrade requires --instance when the database is not inside <instance>/control-worker/.");
+        throw new TypeError(
+            "Conversation downgrade requires --instance when the database is not inside <instance>/control-worker/.",
+        );
     }
     const instance = basename(dirname(dirname(source)));
-    if (instance.length === 0) throw new TypeError("Unable to infer the instance name; pass --instance explicitly.");
+    if (instance.length === 0)
+        throw new TypeError(
+            "Unable to infer the instance name; pass --instance explicitly.",
+        );
     return instance;
 }
 
 function openReadOnlyDatabase(filePath: string): DatabaseSync {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     return new DatabaseSync(filePath, { readOnly: true, timeout: 5_000 });
 }
 
 function openWritableDatabase(filePath: string): DatabaseSync {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     return new DatabaseSync(filePath, { timeout: 5_000 });
 }
 
 function readUserVersion(database: DatabaseSync): number {
-    return Number(Object.values(database.prepare("PRAGMA user_version").get() as Record<string, number>)[0] ?? 0);
+    return Number(
+        Object.values(
+            database.prepare("PRAGMA user_version").get() as Record<
+                string,
+                number
+            >,
+        )[0] ?? 0,
+    );
 }
 
 function assertQuickCheck(database: DatabaseSync, label: string): void {
-    const row = database.prepare("PRAGMA quick_check").get() as Record<string, string>;
-    if (String(Object.values(row)[0] ?? "") !== "ok") throw new Error(`${label} failed PRAGMA quick_check.`);
+    const row = database.prepare("PRAGMA quick_check").get() as Record<
+        string,
+        string
+    >;
+    if (String(Object.values(row)[0] ?? "") !== "ok")
+        throw new Error(`${label} failed PRAGMA quick_check.`);
 }
 
 function requireSourceFile(filePath: string): void {
@@ -308,17 +396,27 @@ function requireSourceFile(filePath: string): void {
 }
 
 function requireOutputAbsent(filePath: string): void {
-    if (existsSync(filePath)) throw new TypeError(`Refusing to overwrite existing downgrade output: ${filePath}`);
+    if (existsSync(filePath))
+        throw new TypeError(
+            `Refusing to overwrite existing downgrade output: ${filePath}`,
+        );
 }
 
 function requireSeparateOutput(source: string, output: string): void {
-    if (source === output) throw new TypeError("Downgrade is non-destructive and requires an output path different from the source.");
+    if (source === output)
+        throw new TypeError(
+            "Downgrade is non-destructive and requires an output path different from the source.",
+        );
 }
 
-function unsupportedSourceVersion(label: string, actual: number, supported: number): Error {
+function unsupportedSourceVersion(
+    label: string,
+    actual: number,
+    supported: number,
+): Error {
     return new Error(
         `${label} database schema version ${actual} is not supported by this Storage Extension (maximum ${supported}). ` +
-        "Upgrade portable-devshell and the Storage Extension before converting this database. The source was not modified.",
+            "Upgrade portable-devshell and the Storage Extension before converting this database. The source was not modified.",
     );
 }
 

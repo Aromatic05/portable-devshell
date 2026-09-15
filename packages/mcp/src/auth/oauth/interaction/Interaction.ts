@@ -1,13 +1,9 @@
-import express, {
-    type Express,
-    type Request,
-    type Response
-} from "express";
+import express, { type Express, type Request, type Response } from "express";
 import Provider from "oidc-provider";
 
 import {
     McpOAuthApprovalService,
-    type OAuthApprovalInput
+    type OAuthApprovalInput,
 } from "./Approval.js";
 
 type ProviderGrant = InstanceType<Provider["Grant"]>;
@@ -52,10 +48,10 @@ export class McpOAuthInteraction {
             `${this.#basePath}/oauth/approvals/:approvalId`,
             async (request, response) => {
                 const approval = await this.#approvals.get(
-                    request.params.approvalId
+                    request.params.approvalId,
                 );
                 response.json({ status: approval?.status ?? "missing" });
-            }
+            },
         );
         app.get(this.interactionRoute, async (request, response) => {
             await this.#renderInteraction(request, response);
@@ -65,7 +61,7 @@ export class McpOAuthInteraction {
             parseForm,
             async (request, response) => {
                 await this.#submitInteraction(request, response);
-            }
+            },
         );
     }
 
@@ -85,16 +81,16 @@ export class McpOAuthInteraction {
                 return `<li><strong>${escapeHtml(indicator)}</strong><ul>${entries}</ul></li>`;
             })
             .join("");
-        const title = input.promptName === "login"
-            ? "Sign In"
-            : "Authorize";
-        const action = input.promptName === "login"
-            ? "Continue as aromatic"
-            : "Approve access";
+        const title = input.promptName === "login" ? "Sign In" : "Authorize";
+        const action =
+            input.promptName === "login"
+                ? "Continue as aromatic"
+                : "Approve access";
         const waiting = input.approvalStatus === "pending";
-        const approvedAction = input.approvalKind === "registration"
-            ? "window.location.reload();"
-            : "form.submit();";
+        const approvedAction =
+            input.approvalKind === "registration"
+                ? "window.location.reload();"
+                : "form.submit();";
         const approvalPath = `${this.#basePath}/oauth/approvals/${input.approvalId}`;
 
         return `<!doctype html>
@@ -148,7 +144,7 @@ export class McpOAuthInteraction {
 
     async #renderInteraction(
         request: Request,
-        response: Response
+        response: Response,
     ): Promise<void> {
         const provider = this.#provider();
         const details = await provider.interactionDetails(request, response);
@@ -164,51 +160,59 @@ export class McpOAuthInteraction {
         const approval = await this.#approvals.requestAuthorization(
             String(details.uid),
             authorizationTransactionId(details),
-            toAuthorizationApprovalInput(details)
+            toAuthorizationApprovalInput(details),
         );
         if (approval.status === "denied" || approval.status === "expired") {
             await this.#finishDeniedInteraction(
                 provider,
                 request,
                 response,
-                approval.status
+                approval.status,
             );
             return;
         }
 
-        response.status(200).type("html").send(this.renderPage({
-            accountId: this.#accountId,
-            approvalId: approval.approvalId,
-            approvalKind: approval.kind,
-            approvalStatus: approval.status,
-            clientName: readClientName(
-                details.params.client_id,
-                details.params.client_name
-            ),
-            promptName,
-            requiredScopes: readStringArray(
-                details.prompt.details.missingOIDCScope
-            ),
-            requestedResources: readRequestedResources(
-                details.prompt.details.missingResourceScopes
-            )
-        }));
+        response
+            .status(200)
+            .type("html")
+            .send(
+                this.renderPage({
+                    accountId: this.#accountId,
+                    approvalId: approval.approvalId,
+                    approvalKind: approval.kind,
+                    approvalStatus: approval.status,
+                    clientName: readClientName(
+                        details.params.client_id,
+                        details.params.client_name,
+                    ),
+                    promptName,
+                    requiredScopes: readStringArray(
+                        details.prompt.details.missingOIDCScope,
+                    ),
+                    requestedResources: readRequestedResources(
+                        details.prompt.details.missingResourceScopes,
+                    ),
+                }),
+            );
     }
 
     async #submitInteraction(
         request: Request,
-        response: Response
+        response: Response,
     ): Promise<void> {
         const provider = this.#provider();
-        const interaction = await provider.interactionDetails(request, response);
+        const interaction = await provider.interactionDetails(
+            request,
+            response,
+        );
         const {
             prompt: { details, name },
             grantId,
             params,
-            session
+            session,
         } = interaction;
         const approval = await this.#approvals.getAuthorization(
-            String(interaction.uid)
+            String(interaction.uid),
         );
 
         if (approval?.status !== "approved") {
@@ -223,7 +227,7 @@ export class McpOAuthInteraction {
                 provider,
                 request,
                 response,
-                approval?.status ?? "missing"
+                approval?.status ?? "missing",
             );
             return;
         }
@@ -233,7 +237,7 @@ export class McpOAuthInteraction {
                 request,
                 response,
                 { login: { accountId: this.#accountId } },
-                { mergeWithLastSubmission: false }
+                { mergeWithLastSubmission: false },
             );
             return;
         }
@@ -252,12 +256,12 @@ export class McpOAuthInteraction {
         if (grant === undefined) {
             grant = new provider.Grant({
                 accountId: session?.accountId ?? this.#accountId,
-                clientId: String(params.client_id)
+                clientId: String(params.client_id),
             });
         }
         if (details.missingOIDCScope) {
             grant.addOIDCScope(
-                readStringArray(details.missingOIDCScope).join(" ")
+                readStringArray(details.missingOIDCScope).join(" "),
             );
         }
         if (details.missingOIDCClaims) {
@@ -265,11 +269,11 @@ export class McpOAuthInteraction {
         }
         if (details.missingResourceScopes) {
             for (const [indicator, scopes] of Object.entries(
-                details.missingResourceScopes
+                details.missingResourceScopes,
             )) {
                 grant.addResourceScope(
                     indicator,
-                    readStringArray(scopes).join(" ")
+                    readStringArray(scopes).join(" "),
                 );
             }
         }
@@ -278,7 +282,7 @@ export class McpOAuthInteraction {
             request,
             response,
             { consent: { grantId: await grant.save() } },
-            { mergeWithLastSubmission: true }
+            { mergeWithLastSubmission: true },
         );
         await this.#approvals.completeAuthorization(String(interaction.uid));
     }
@@ -287,35 +291,38 @@ export class McpOAuthInteraction {
         provider: Provider,
         request: Request,
         response: Response,
-        status: "denied" | "expired" | "missing"
+        status: "denied" | "expired" | "missing",
     ): Promise<void> {
         await provider.interactionFinished(
             request,
             response,
             {
                 error: "access_denied",
-                error_description: status === "expired"
-                    ? "Administrator approval expired."
-                    : "Administrator approval was denied."
+                error_description:
+                    status === "expired"
+                        ? "Administrator approval expired."
+                        : "Administrator approval was denied.",
             },
-            { mergeWithLastSubmission: false }
+            { mergeWithLastSubmission: false },
         );
     }
 }
 
-
 function authorizationTransactionId(
-    details: Awaited<ReturnType<Provider["interactionDetails"]>>
+    details: Awaited<ReturnType<Provider["interactionDetails"]>>,
 ): string {
-    const clientId = typeof details.params.client_id === "string"
-        ? details.params.client_id
-        : "unknown-client";
-    const codeChallenge = typeof details.params.code_challenge === "string"
-        ? details.params.code_challenge
-        : undefined;
-    const state = typeof details.params.state === "string"
-        ? details.params.state
-        : undefined;
+    const clientId =
+        typeof details.params.client_id === "string"
+            ? details.params.client_id
+            : "unknown-client";
+    const codeChallenge =
+        typeof details.params.code_challenge === "string"
+            ? details.params.code_challenge
+            : undefined;
+    const state =
+        typeof details.params.state === "string"
+            ? details.params.state
+            : undefined;
     const transactionNonce = codeChallenge ?? state;
     if (transactionNonce === undefined) {
         return String(details.uid);
@@ -324,27 +331,31 @@ function authorizationTransactionId(
 }
 
 function toAuthorizationApprovalInput(
-    details: Awaited<ReturnType<Provider["interactionDetails"]>>
+    details: Awaited<ReturnType<Provider["interactionDetails"]>>,
 ): OAuthApprovalInput {
     return {
-        clientId: typeof details.params.client_id === "string"
-            ? details.params.client_id
-            : "unknown-client",
+        clientId:
+            typeof details.params.client_id === "string"
+                ? details.params.client_id
+                : "unknown-client",
         clientName: readClientName(
             details.params.client_id,
-            details.params.client_name
+            details.params.client_name,
         ),
-        redirectUris: typeof details.params.redirect_uri === "string"
-            ? [details.params.redirect_uri]
-            : [],
-        requestedResources: typeof details.params.resource === "string"
-            ? [details.params.resource]
-            : [],
-        requestedScopes: typeof details.params.scope === "string"
-            ? details.params.scope
-                .split(/\s+/u)
-                .filter((scope) => scope.length > 0)
-            : []
+        redirectUris:
+            typeof details.params.redirect_uri === "string"
+                ? [details.params.redirect_uri]
+                : [],
+        requestedResources:
+            typeof details.params.resource === "string"
+                ? [details.params.resource]
+                : [],
+        requestedScopes:
+            typeof details.params.scope === "string"
+                ? details.params.scope
+                      .split(/\s+/u)
+                      .filter((scope) => scope.length > 0)
+                : [],
     };
 }
 
@@ -359,7 +370,7 @@ function readClientName(clientId: unknown, clientName: unknown): string {
 }
 
 function readRequestedResources(
-    resources: unknown
+    resources: unknown,
 ): Array<{ indicator: string; scopes: string[] }> {
     if (
         typeof resources !== "object" ||
@@ -371,7 +382,7 @@ function readRequestedResources(
     return Object.entries(resources)
         .map(([indicator, scopes]) => ({
             indicator,
-            scopes: readStringArray(scopes)
+            scopes: readStringArray(scopes),
         }))
         .filter(({ scopes }) => scopes.length > 0);
 }

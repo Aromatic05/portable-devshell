@@ -16,14 +16,19 @@ export async function ensureConnectorProcesses(targets, options) {
         for (const target of targets) {
             const existingPid = await options.readPid(target);
             const running = options.isProcessAlive(existingPid);
-            const health = running && options.readHealth !== undefined
-                ? await options.readHealth(target)
-                : undefined;
-            const reusable = running && (
-                options.readHealth === undefined || connectorHealthIsUsable(health)
-            );
+            const health =
+                running && options.readHealth !== undefined
+                    ? await options.readHealth(target)
+                    : undefined;
+            const reusable =
+                running &&
+                (options.readHealth === undefined ||
+                    connectorHealthIsUsable(health));
             if (reusable) {
-                result[target.instance] = { pid: existingPid, restarted: false };
+                result[target.instance] = {
+                    pid: existingPid,
+                    restarted: false,
+                };
                 continue;
             }
             const pid = running
@@ -34,10 +39,16 @@ export async function ensureConnectorProcesses(targets, options) {
         }
         return result;
     } catch (error) {
-        const rollbackFailures = await rollbackChangedConnectors(changed, options);
+        const rollbackFailures = await rollbackChangedConnectors(
+            changed,
+            options,
+        );
         if (rollbackFailures.length > 0) {
             throw new AggregateError(
-                [error instanceof Error ? error : new Error(String(error)), ...rollbackFailures],
+                [
+                    error instanceof Error ? error : new Error(String(error)),
+                    ...rollbackFailures,
+                ],
                 "Testspace connector startup failed and rollback was incomplete.",
             );
         }
@@ -47,19 +58,23 @@ export async function ensureConnectorProcesses(targets, options) {
 
 export async function waitForConnectorReady(target, pid, options) {
     const timeoutMs = options.timeoutMs ?? 5_000;
-    const delay = options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    const delay =
+        options.delay ??
+        ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     const deadline = Date.now() + timeoutMs;
     let lastHealth;
     while (Date.now() <= deadline) {
         if (!options.isProcessAlive(pid)) {
-            throw new Error(`Testspace activity connector for ${target.instance} exited during startup.`);
+            throw new Error(
+                `Testspace activity connector for ${target.instance} exited during startup.`,
+            );
         }
         lastHealth = await options.readHealth(target);
         if (connectorHealthIsUsable(lastHealth)) return lastHealth;
         if (connectorHealthIsFailed(lastHealth)) {
             throw new Error(
                 lastHealth?.lastError ||
-                `Testspace activity connector for ${target.instance} is ${lastHealth?.status ?? "unhealthy"}.`,
+                    `Testspace activity connector for ${target.instance} is ${lastHealth?.status ?? "unhealthy"}.`,
             );
         }
         await delay(25);
@@ -89,11 +104,16 @@ export function stopWorkerProcesses(targets) {
         try {
             result[target.instance] = target.stop();
         } catch (error) {
-            failures.push(error instanceof Error ? error : new Error(String(error)));
+            failures.push(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
     if (failures.length > 0) {
-        throw new AggregateError(failures, "Failed to stop all Testspace Worker processes.");
+        throw new AggregateError(
+            failures,
+            "Failed to stop all Testspace Worker processes.",
+        );
     }
     return result;
 }
@@ -103,14 +123,18 @@ function connectorHealthIsUsable(health) {
 }
 
 function connectorHealthIsFailed(health) {
-    return health?.status === "degraded" ||
+    return (
+        health?.status === "degraded" ||
         health?.status === "error" ||
-        health?.status === "unreadable";
+        health?.status === "unreadable"
+    );
 }
 
 function requireRestartConnector(options) {
     if (options.restartConnector !== undefined) return options.restartConnector;
-    throw new Error("restartConnector is required to replace an unhealthy running connector.");
+    throw new Error(
+        "restartConnector is required to replace an unhealthy running connector.",
+    );
 }
 
 async function rollbackChangedConnectors(changed, options) {
@@ -120,7 +144,9 @@ async function rollbackChangedConnectors(changed, options) {
         try {
             await options.rollbackConnector(target, pid);
         } catch (error) {
-            failures.push(error instanceof Error ? error : new Error(String(error)));
+            failures.push(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
     return failures;

@@ -4,727 +4,1342 @@ import test from "node:test";
 
 import { chromium, type Browser } from "playwright";
 
-import { workspaceAppHtml, workspaceAppVersion } from "@portable-devshell/mcp/testing";
+import {
+    workspaceAppHtml,
+    workspaceAppVersion,
+} from "@portable-devshell/mcp/testing";
 import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
 const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
 
-test("Workspace App watches live state and keeps human-action authorization hidden", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace App watches live state and keeps human-action authorization hidden",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    const browserFailures: string[] = [];
-    page.on("console", (message) => {
-        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
-
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Continue the task?", { exact: true }).waitFor({ state: "visible" });
-    assert.deepEqual(await page.evaluate("window.__workspaceAppInfo"), {
-        name: "portable-devshell-workspace",
-        version: workspaceAppVersion,
-    });
-    assert.equal(await app.locator("html").getAttribute("data-theme"), "dark");
-    assert.equal(
-        await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
-        "rgb(12, 34, 56)"
-    );
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        iframe?.contentWindow?.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/host-context-changed",
-            params: { theme: "light", styles: { variables: { "--color-text-primary": "rgb(65, 43, 21)" } } }
-        }, "*");
-    });
-    await page.waitForFunction(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        return iframe?.contentDocument?.documentElement.getAttribute("data-theme") === "light";
-    });
-    assert.equal(
-        await app.locator("html").evaluate((element) => element.style.getPropertyValue("--color-text-primary")),
-        "rgb(65, 43, 21)"
-    );
-    await app.getByText("Question", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Goal", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("1/2 steps", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Verify Workspace UI", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("Implement Goal runtime", { exact: true }).count(), 0);
-    assert.equal(await app.getByText("workspace_ask", { exact: true }).count(), 0);
-    assert.equal(await app.getByText("workspace_goal", { exact: true }).count(), 0);
-    assert.equal(await app.getByText(/event ·/u).count(), 0);
-    assert.match(await app.locator(".card").first().innerText(), /Continue the task\?/u);
-    assert.equal(await app.getByRole("button", { name: "Stop Goal", exact: true }).count(), 1);
-    assert.equal(await app.getByRole("button", { name: "Send", exact: true }).count(), 1);
-    const choice = app.locator('[data-question-choice="wait-question"]');
-    await choice.first().waitFor({ state: "visible" });
-    assert.equal(await choice.count(), 3);
-    const choiceListSize = await app.locator(".choice-list").evaluate((element) => ({
-        clientHeight: element.clientHeight,
-        overflowY: getComputedStyle(element).overflowY,
-        scrollHeight: element.scrollHeight,
-    }));
-    assert.equal(choiceListSize.scrollHeight, choiceListSize.clientHeight);
-    assert.notEqual(choiceListSize.overflowY, "auto");
-    assert.notEqual(choiceListSize.overflowY, "scroll");
-    assert.equal(await choice.first().evaluate((element) => element.tagName), "BUTTON");
-    assert.equal(await choice.first().evaluate((element) => getComputedStyle(element).borderRadius), "0px");
-    assert.equal(await app.getByRole("button", { name: "Continue", exact: true }).count(), 1);
-    const bodyHeight = await app.locator("body").evaluate((element) => element.scrollHeight);
-    assert.equal(bodyHeight <= 520, true, `Workspace height ${bodyHeight}px exceeds compact limit`);
-    await app.getByRole("button", { name: "Show 9 more", exact: true }).click();
-    assert.equal(await choice.count(), 12);
-    assert.equal(await app.getByText("Activity", { exact: true }).count(), 0);
-    assert.equal(await app.getByText("Background", { exact: true }).count(), 0);
-    await page.waitForFunction("(window.__modelContextUpdates || []).length >= 2");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-
-    await choice.first().click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_answer')");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-
-    await app.getByText("Approval", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Approval required", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("High risk", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("git push origin v0.6.7", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Publishing a release changes the remote repository.", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("approval.decision", { exact: false }).count(), 0);
-    await app.getByRole("button", { name: "Approve", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval')");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-
-    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Waiting for task to finish", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("tmux_run", { exact: true }).count(), 0);
-    assert.equal(await app.getByText("task-browser", { exact: true }).count(), 0);
-    await app.getByText("Stop waiting", { exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')");
-    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_stop')");
-    await page.waitForFunction(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
-    });
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Pause task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'pause')");
-    await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await app.getByText("Running", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Cancel task", exact: true }).click();
-    await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')"),
-        false,
-    );
-    await app.getByRole("button", { name: "Confirm cancel", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')");
-    await app.getByText("Task · v0.6 feature train", { exact: true }).waitFor({ state: "detached" });
-    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
-
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        iframe?.contentWindow?.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/tool-cancelled",
-            params: { reason: "test cancellation" }
-        }, "*");
-    });
-    assert.equal(await page.evaluate("window.__emitWorkspaceQuestionAfterCancellation()"), true);
-    await app.getByText("Question after cancellation?", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("(window.__workspaceCancelledRequests || []).length"), 0);
-
-    const calls = await page.evaluate("window.__workspaceCalls || []") as Array<{
-        arguments?: Record<string, unknown>;
-        name?: string;
-    }>;
-    const snapshotCall = calls.find((call) => call.name === "workspace_snapshot");
-    const watchCall = calls.find((call) => call.name === "workspace_watch");
-    const answerCall = calls.find((call) => call.name === "workspace_answer");
-    const approvalCall = calls.find((call) => call.name === "workspace_approval");
-    const goalStopCall = calls.find((call) => call.name === "workspace_stop");
-    const interruptCall = calls.find((call) => call.name === "workspace_interrupt");
-    const taskPauseCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "pause");
-    const taskResumeCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "resume");
-    const taskCancelCall = calls.find((call) => call.name === "workspace_task" && call.arguments?.action === "cancel");
-
-    assert.equal(snapshotCall?.arguments?.token, "browser-secret-token");
-    assert.equal(watchCall?.arguments?.token, "browser-secret-token");
-    assert.equal(answerCall?.arguments?.token, "browser-secret-token");
-    assert.equal(answerCall?.arguments?.ctxId, "ctx-browser");
-    assert.equal(answerCall?.arguments?.waitId, "wait-question");
-    assert.equal(approvalCall?.arguments?.token, "browser-secret-token");
-    assert.equal(approvalCall?.arguments?.decision, "approve");
-    assert.equal(goalStopCall?.arguments?.token, "browser-secret-token");
-    assert.equal(goalStopCall?.arguments?.ctxId, "ctx-browser");
-    assert.equal(goalStopCall?.arguments?.goalId, "goal-browser");
-    assert.equal(goalStopCall?.arguments?.revision, 1);
-    assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
-    assert.equal(interruptCall?.arguments?.waitId, "wait-background");
-    assert.equal(taskPauseCall?.arguments?.taskId, "task-plan");
-    assert.equal(taskPauseCall?.arguments?.revision, 1);
-    assert.equal(taskPauseCall?.arguments?.token, "browser-secret-token");
-    assert.equal(taskResumeCall?.arguments?.taskId, "task-plan");
-    assert.equal(taskResumeCall?.arguments?.revision, 2);
-    assert.equal(taskResumeCall?.arguments?.token, "browser-secret-token");
-    assert.equal(taskCancelCall?.arguments?.taskId, "task-plan");
-    assert.equal(taskCancelCall?.arguments?.revision, 3);
-    assert.equal(taskCancelCall?.arguments?.token, "browser-secret-token");
-    assert.deepEqual(browserFailures, []);
-});
-
-test("Workspace blocked Goal shows its reason and can be resumed by the user", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:420px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalBlocked: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceApprovalPending = false;
-        state.__workspaceGoalBlocked = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Blocked", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Waiting for user decision", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')");
-    const resumeCall = await page.evaluate(
-        "(window.__workspaceCalls || []).find(call => call.name === 'workspace_resume')",
-    ) as { arguments?: Record<string, unknown> } | undefined;
-    assert.equal(resumeCall?.arguments?.goalId, "goal-browser");
-    assert.equal(resumeCall?.arguments?.revision, 1);
-    assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
-    await page.waitForTimeout(100);
-    const explicitClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
-    const continuationCalls = await page.evaluate((claimId) =>
-        ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
-        explicitClaimId,
-    ) as Array<{ arguments?: Record<string, unknown> }>;
-    assert.deepEqual(continuationCalls.map((call) => call.arguments?.action), ["claim", "validate", "attempt", "report"]);
-    assert.equal(continuationCalls[0]?.arguments?.intent, "goal-resume");
-    assert.equal(continuationCalls[0]?.arguments?.sourceId, "goal-browser");
-    assert.equal(continuationCalls.every((call) => call.arguments?.token === "browser-secret-token"), true);
-    await app.getByText("Active", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 0);
-});
-
-test("Workspace fences an ambiguous user-initiated Goal resume before Host dispatch replay", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:420px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __ambiguousNextModelMessage: boolean;
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalBlocked: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__ambiguousNextModelMessage = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceGoalBlocked = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceWaitInterrupted = true;
-    });
-    const mount = async () => await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    await mount();
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3");
-    await page.waitForTimeout(100);
-    const ambiguousClaimId = await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId") as string;
-    assert.deepEqual(
-        await page.evaluate((claimId) =>
-            ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId)
-                .map((call) => call.arguments?.action),
-            ambiguousClaimId,
-        ),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(await page.evaluate("window.__workspaceReentryReports.at(-1).outcome"), "uncertain");
-
-    await mount();
-    await app.getByText("Active", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__workspaceReentryReports.filter(report => report.outcome === 'uncertain').length"), 1);
-    assert.equal(
-        await page.evaluate((claimId) =>
-            ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments?.action === "attempt" && call.arguments?.claimId === claimId).length,
-            ambiguousClaimId,
-        ),
-        1,
-    );
-});
-
-test("Workspace user can pause an active Goal without triggering model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-        state.__workspaceGoalDueNow = false;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Pause Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_pause')");
-    await app.getByText("Paused", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByRole("button", { name: "Resume Goal", exact: true }).count(), 1);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(await page.evaluate("window.__workspaceReentryMode"), "paused");
-});
-
-test("Workspace Goal requests one model continuation after inactivity", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    const browserFailures: string[] = [];
-    page.on("console", (message) => {
-        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 4");
-    const continuationText = await page.evaluate(
-        "window.__modelMessages[0].content[0].text",
-    ) as string;
-    assert.equal(
-        continuationText,
-        "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.",
-    );
-    assert.doesNotMatch(continuationText, /Verify Workspace UI|Current task item/u);
-    const goalContinuationContext = await page.evaluate(`
-        (window.__modelContextUpdates || [])
-            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
-            .filter(state => state && state.continuation && state.continuation.kind === "goal")
-            .at(-1).continuation
-    `) as {
-        attempt: number;
-        currentItem: { id: string; text: string };
-        nextItem: { id: string; kind: string; text: string };
-        orderedItems: Array<{ id: string }>;
-    };
-    assert.equal(goalContinuationContext.attempt, 1);
-    assert.equal(goalContinuationContext.currentItem.id, "verify");
-    assert.equal(goalContinuationContext.currentItem.text, "Verify Workspace UI");
-    assert.equal(goalContinuationContext.nextItem.id, "finish-goal");
-    assert.equal(goalContinuationContext.nextItem.kind, "goal-terminal");
-    assert.equal(goalContinuationContext.nextItem.text, "Complete the Goal.");
-    assert.deepEqual(goalContinuationContext.orderedItems.map((item) => item.id), ["implement", "verify", "finish-goal"]);
-    const automaticClaimId = await page.evaluate("window.__workspaceReentryReports.at(-1).claimId") as string;
-    const continuationCalls = await page.evaluate((claimId) =>
-        ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
-        automaticClaimId,
-    ) as Array<{ arguments?: Record<string, unknown> }>;
-    assert.equal(continuationCalls[0]?.arguments?.action, "claim");
-    assert.equal(continuationCalls[0]?.arguments?.intent, "automatic");
-    assert.equal(continuationCalls[1]?.arguments?.action, "validate");
-    assert.equal(continuationCalls[2]?.arguments?.action, "attempt");
-    assert.equal(continuationCalls[3]?.arguments?.action, "report");
-    assert.equal(continuationCalls[3]?.arguments?.outcome, "accepted");
-    assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 1);
-    assert.deepEqual(browserFailures, []);
-});
-
-
-test("Workspace Goal continuation prompt preserves escalating enforcement around one boundary-crossing contract", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const cases = [
-        { count: 0, expected: "Finish the current Goal item shown in the Workspace context.", forbidden: "Wake attempt" },
-        { count: 1, expected: "Wake attempt 2. The previous continuation produced no verifiable execution progress.", forbidden: "Wake attempt 3." },
-        { count: 2, expected: "Wake attempt 3. Repeated continuation attempts have not produced verifiable execution progress.", forbidden: "Wake attempt 4." },
-        { count: 3, expected: "Wake attempt 4. You have repeatedly failed to advance an actionable Goal.", forbidden: "Critical execution failure" },
-        { count: 4, expected: "Wake attempt 5. Critical execution failure: the Goal remains actionable after repeated continuation attempts without verifiable progress.", forbidden: "Wake attempt 4." },
-    ];
-    for (const item of cases) {
         const page = await browser.newPage();
-        await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
+        const browserFailures: string[] = [];
+        page.on("console", (message) => {
+            if (message.type() === "error")
+                browserFailures.push(`console: ${message.text()}`);
+        });
+        page.on("pageerror", (error) =>
+            browserFailures.push(`pageerror: ${error.message}`),
+        );
+
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
         await page.evaluate(BRIDGE_SCRIPT);
-        await page.evaluate((count) => {
+
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Continue the task?", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.deepEqual(await page.evaluate("window.__workspaceAppInfo"), {
+            name: "portable-devshell-workspace",
+            version: workspaceAppVersion,
+        });
+        assert.equal(
+            await app.locator("html").getAttribute("data-theme"),
+            "dark",
+        );
+        assert.equal(
+            await app
+                .locator("html")
+                .evaluate((element) =>
+                    element.style.getPropertyValue("--color-text-primary"),
+                ),
+            "rgb(12, 34, 56)",
+        );
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            iframe?.contentWindow?.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/host-context-changed",
+                    params: {
+                        theme: "light",
+                        styles: {
+                            variables: {
+                                "--color-text-primary": "rgb(65, 43, 21)",
+                            },
+                        },
+                    },
+                },
+                "*",
+            );
+        });
+        await page.waitForFunction(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            return (
+                iframe?.contentDocument?.documentElement.getAttribute(
+                    "data-theme",
+                ) === "light"
+            );
+        });
+        assert.equal(
+            await app
+                .locator("html")
+                .evaluate((element) =>
+                    element.style.getPropertyValue("--color-text-primary"),
+                ),
+            "rgb(65, 43, 21)",
+        );
+        await app
+            .getByText("Question", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Goal", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Ship Workspace Goal mode", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("1/2 steps", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Verify Workspace UI", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app
+                .getByText("Implement Goal runtime", { exact: true })
+                .count(),
+            0,
+        );
+        assert.equal(
+            await app.getByText("workspace_ask", { exact: true }).count(),
+            0,
+        );
+        assert.equal(
+            await app.getByText("workspace_goal", { exact: true }).count(),
+            0,
+        );
+        assert.equal(await app.getByText(/event ·/u).count(), 0);
+        assert.match(
+            await app.locator(".card").first().innerText(),
+            /Continue the task\?/u,
+        );
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Stop Goal", exact: true })
+                .count(),
+            1,
+        );
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Send", exact: true })
+                .count(),
+            1,
+        );
+        const choice = app.locator('[data-question-choice="wait-question"]');
+        await choice.first().waitFor({ state: "visible" });
+        assert.equal(await choice.count(), 3);
+        const choiceListSize = await app
+            .locator(".choice-list")
+            .evaluate((element) => ({
+                clientHeight: element.clientHeight,
+                overflowY: getComputedStyle(element).overflowY,
+                scrollHeight: element.scrollHeight,
+            }));
+        assert.equal(choiceListSize.scrollHeight, choiceListSize.clientHeight);
+        assert.notEqual(choiceListSize.overflowY, "auto");
+        assert.notEqual(choiceListSize.overflowY, "scroll");
+        assert.equal(
+            await choice.first().evaluate((element) => element.tagName),
+            "BUTTON",
+        );
+        assert.equal(
+            await choice
+                .first()
+                .evaluate((element) => getComputedStyle(element).borderRadius),
+            "0px",
+        );
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Continue", exact: true })
+                .count(),
+            1,
+        );
+        const bodyHeight = await app
+            .locator("body")
+            .evaluate((element) => element.scrollHeight);
+        assert.equal(
+            bodyHeight <= 520,
+            true,
+            `Workspace height ${bodyHeight}px exceeds compact limit`,
+        );
+        await app
+            .getByRole("button", { name: "Show 9 more", exact: true })
+            .click();
+        assert.equal(await choice.count(), 12);
+        assert.equal(
+            await app.getByText("Activity", { exact: true }).count(),
+            0,
+        );
+        assert.equal(
+            await app.getByText("Background", { exact: true }).count(),
+            0,
+        );
+        await page.waitForFunction(
+            "(window.__modelContextUpdates || []).length >= 2",
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+
+        await choice.first().click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_answer')",
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+
+        await app
+            .getByText("Approval", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Approval required", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("High risk", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("git push origin v0.6.7", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Publishing a release changes the remote repository.", {
+                exact: true,
+            })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app.getByText("approval.decision", { exact: false }).count(),
+            0,
+        );
+        await app.getByRole("button", { name: "Approve", exact: true }).click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_approval')",
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+
+        await app
+            .getByText("Background task", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Waiting for task to finish", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app.getByText("tmux_run", { exact: true }).count(),
+            0,
+        );
+        assert.equal(
+            await app.getByText("task-browser", { exact: true }).count(),
+            0,
+        );
+        await app.getByText("Stop waiting", { exact: true }).click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')",
+        );
+        assert.equal(
+            await app.getByText("No blocking event.", { exact: true }).count(),
+            0,
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        await app
+            .getByRole("button", { name: "Stop Goal", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_stop')",
+        );
+        await page.waitForFunction(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            return !iframe?.contentDocument?.body.textContent?.includes(
+                "Ship Workspace Goal mode",
+            );
+        });
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        await app
+            .getByText("Task · v0.6 feature train", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Pause task", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'pause')",
+        );
+        await app
+            .getByText("Paused", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Resume task", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')",
+        );
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await app
+            .getByText("Running", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Cancel task", exact: true })
+            .click();
+        await app
+            .getByRole("button", { name: "Confirm cancel", exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')",
+            ),
+            false,
+        );
+        await app
+            .getByRole("button", { name: "Confirm cancel", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'cancel')",
+        );
+        await app
+            .getByText("Task · v0.6 feature train", { exact: true })
+            .waitFor({ state: "detached" });
+        await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
+
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            iframe?.contentWindow?.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-cancelled",
+                    params: { reason: "test cancellation" },
+                },
+                "*",
+            );
+        });
+        assert.equal(
+            await page.evaluate(
+                "window.__emitWorkspaceQuestionAfterCancellation()",
+            ),
+            true,
+        );
+        await app
+            .getByText("Question after cancellation?", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCancelledRequests || []).length",
+            ),
+            0,
+        );
+
+        const calls = (await page.evaluate(
+            "window.__workspaceCalls || []",
+        )) as Array<{
+            arguments?: Record<string, unknown>;
+            name?: string;
+        }>;
+        const snapshotCall = calls.find(
+            (call) => call.name === "workspace_snapshot",
+        );
+        const watchCall = calls.find((call) => call.name === "workspace_watch");
+        const answerCall = calls.find(
+            (call) => call.name === "workspace_answer",
+        );
+        const approvalCall = calls.find(
+            (call) => call.name === "workspace_approval",
+        );
+        const goalStopCall = calls.find(
+            (call) => call.name === "workspace_stop",
+        );
+        const interruptCall = calls.find(
+            (call) => call.name === "workspace_interrupt",
+        );
+        const taskPauseCall = calls.find(
+            (call) =>
+                call.name === "workspace_task" &&
+                call.arguments?.action === "pause",
+        );
+        const taskResumeCall = calls.find(
+            (call) =>
+                call.name === "workspace_task" &&
+                call.arguments?.action === "resume",
+        );
+        const taskCancelCall = calls.find(
+            (call) =>
+                call.name === "workspace_task" &&
+                call.arguments?.action === "cancel",
+        );
+
+        assert.equal(snapshotCall?.arguments?.token, "browser-secret-token");
+        assert.equal(watchCall?.arguments?.token, "browser-secret-token");
+        assert.equal(answerCall?.arguments?.token, "browser-secret-token");
+        assert.equal(answerCall?.arguments?.ctxId, "ctx-browser");
+        assert.equal(answerCall?.arguments?.waitId, "wait-question");
+        assert.equal(approvalCall?.arguments?.token, "browser-secret-token");
+        assert.equal(approvalCall?.arguments?.decision, "approve");
+        assert.equal(goalStopCall?.arguments?.token, "browser-secret-token");
+        assert.equal(goalStopCall?.arguments?.ctxId, "ctx-browser");
+        assert.equal(goalStopCall?.arguments?.goalId, "goal-browser");
+        assert.equal(goalStopCall?.arguments?.revision, 1);
+        assert.equal(interruptCall?.arguments?.token, "browser-secret-token");
+        assert.equal(interruptCall?.arguments?.waitId, "wait-background");
+        assert.equal(taskPauseCall?.arguments?.taskId, "task-plan");
+        assert.equal(taskPauseCall?.arguments?.revision, 1);
+        assert.equal(taskPauseCall?.arguments?.token, "browser-secret-token");
+        assert.equal(taskResumeCall?.arguments?.taskId, "task-plan");
+        assert.equal(taskResumeCall?.arguments?.revision, 2);
+        assert.equal(taskResumeCall?.arguments?.token, "browser-secret-token");
+        assert.equal(taskCancelCall?.arguments?.taskId, "task-plan");
+        assert.equal(taskCancelCall?.arguments?.revision, 3);
+        assert.equal(taskCancelCall?.arguments?.token, "browser-secret-token");
+        assert.deepEqual(browserFailures, []);
+    },
+);
+
+test(
+    "Workspace blocked Goal shows its reason and can be resumed by the user",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
             const state = window as typeof window & {
                 __workspaceApprovalPending: boolean;
-                __workspaceGoalContinuationCount: number;
+                __workspaceGoalBlocked: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceApprovalPending = false;
+            state.__workspaceGoalBlocked = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Blocked", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Waiting for user decision", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Resume Goal", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')",
+        );
+        const resumeCall = (await page.evaluate(
+            "(window.__workspaceCalls || []).find(call => call.name === 'workspace_resume')",
+        )) as { arguments?: Record<string, unknown> } | undefined;
+        assert.equal(resumeCall?.arguments?.goalId, "goal-browser");
+        assert.equal(resumeCall?.arguments?.revision, 1);
+        assert.equal(resumeCall?.arguments?.token, "browser-secret-token");
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3",
+        );
+        await page.waitForTimeout(100);
+        const explicitClaimId = (await page.evaluate(
+            "(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId",
+        )) as string;
+        const continuationCalls = (await page.evaluate(
+            (claimId) =>
+                (
+                    (
+                        window as typeof window & {
+                            __workspaceCalls?: Array<{
+                                arguments?: Record<string, unknown>;
+                                name?: string;
+                            }>;
+                        }
+                    ).__workspaceCalls || []
+                ).filter(
+                    (call) =>
+                        call.name === "workspace_reentry" &&
+                        call.arguments?.claimId === claimId,
+                ),
+            explicitClaimId,
+        )) as Array<{ arguments?: Record<string, unknown> }>;
+        assert.deepEqual(
+            continuationCalls.map((call) => call.arguments?.action),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(continuationCalls[0]?.arguments?.intent, "goal-resume");
+        assert.equal(continuationCalls[0]?.arguments?.sourceId, "goal-browser");
+        assert.equal(
+            continuationCalls.every(
+                (call) => call.arguments?.token === "browser-secret-token",
+            ),
+            true,
+        );
+        await app
+            .getByText("Active", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Resume Goal", exact: true })
+                .count(),
+            0,
+        );
+    },
+);
+
+test(
+    "Workspace fences an ambiguous user-initiated Goal resume before Host dispatch replay",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __ambiguousNextModelMessage: boolean;
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalBlocked: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__ambiguousNextModelMessage = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceGoalBlocked = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceWaitInterrupted = true;
+        });
+        const mount = async () =>
+            await page.evaluate((html) => {
+                const iframe =
+                    document.querySelector<HTMLIFrameElement>("#workspace");
+                if (iframe === null)
+                    throw new Error("Workspace iframe is missing.");
+                iframe.srcdoc = html;
+            }, workspaceAppHtml);
+
+        await mount();
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Resume Goal", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 3",
+        );
+        await page.waitForTimeout(100);
+        const ambiguousClaimId = (await page.evaluate(
+            "(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'goal-resume')?.arguments.claimId",
+        )) as string;
+        assert.deepEqual(
+            await page.evaluate(
+                (claimId) =>
+                    (
+                        (
+                            window as typeof window & {
+                                __workspaceCalls?: Array<{
+                                    arguments?: Record<string, unknown>;
+                                    name?: string;
+                                }>;
+                            }
+                        ).__workspaceCalls || []
+                    )
+                        .filter(
+                            (call) =>
+                                call.name === "workspace_reentry" &&
+                                call.arguments?.claimId === claimId,
+                        )
+                        .map((call) => call.arguments?.action),
+                ambiguousClaimId,
+            ),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(
+            await page.evaluate(
+                "window.__workspaceReentryReports.at(-1).outcome",
+            ),
+            "uncertain",
+        );
+
+        await mount();
+        await app
+            .getByText("Active", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+        assert.equal(
+            await page.evaluate(
+                "window.__workspaceReentryReports.filter(report => report.outcome === 'uncertain').length",
+            ),
+            1,
+        );
+        assert.equal(
+            await page.evaluate(
+                (claimId) =>
+                    (
+                        (
+                            window as typeof window & {
+                                __workspaceCalls?: Array<{
+                                    arguments?: Record<string, unknown>;
+                                    name?: string;
+                                }>;
+                            }
+                        ).__workspaceCalls || []
+                    ).filter(
+                        (call) =>
+                            call.name === "workspace_reentry" &&
+                            call.arguments?.action === "attempt" &&
+                            call.arguments?.claimId === claimId,
+                    ).length,
+                ambiguousClaimId,
+            ),
+            1,
+        );
+    },
+);
+
+test(
+    "Workspace user can pause an active Goal without triggering model re-entry",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
                 __workspaceGoalDueNow: boolean;
                 __workspaceQuestionAnswered: boolean;
                 __workspaceWaitInterrupted: boolean;
             };
-            state.__workspaceGoalContinuationCount = count;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+            state.__workspaceGoalDueNow = false;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Pause Goal", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_pause')",
+        );
+        await app
+            .getByText("Paused", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Resume Goal", exact: true })
+                .count(),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        assert.equal(
+            await page.evaluate("window.__workspaceReentryMode"),
+            "paused",
+        );
+    },
+);
+
+test(
+    "Workspace Goal requests one model continuation after inactivity",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        const browserFailures: string[] = [];
+        page.on("console", (message) => {
+            if (message.type() === "error")
+                browserFailures.push(`console: ${message.text()}`);
+        });
+        page.on("pageerror", (error) =>
+            browserFailures.push(`pageerror: ${error.message}`),
+        );
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
             state.__workspaceGoalDueNow = true;
             state.__workspaceQuestionAnswered = true;
             state.__workspaceApprovalPending = false;
             state.__workspaceWaitInterrupted = true;
-        }, item.count);
+        });
         await page.evaluate((html) => {
-            const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-            if (iframe === null) throw new Error("Workspace iframe is missing.");
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
             iframe.srcdoc = html;
         }, workspaceAppHtml);
-        await page.waitForFunction("(window.__modelMessages || []).length === 1");
-        const text = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-        assert.match(text, new RegExp(item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-        assert.doesNotMatch(text, new RegExp(item.forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
-        assert.match(text, /Finish the current Goal item shown in the Workspace context\./u);
-        assert.match(text, /Then immediately continue with the next Goal item\./u);
-        assert.match(text, /Do not stop after completing or reporting the current item\./u);
-        assert.doesNotMatch(text, /Verify Workspace UI|Current task item|completing the final task item completes the Goal/u);
-        await page.close();
-    }
-});
 
-test("Workspace user cancellation suppresses automatic Goal continuation until later agent activity", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceAgentBusy: boolean;
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_reentry' && ['claim','validate','attempt','report'].includes(call.arguments.action)).length >= 4",
+        );
+        const continuationText = (await page.evaluate(
+            "window.__modelMessages[0].content[0].text",
+        )) as string;
+        assert.equal(
+            continuationText,
+            "Finish the current Goal item shown in the Workspace context.\n\nThen immediately continue with the next Goal item.\n\nDo not stop after completing or reporting the current item.",
+        );
+        assert.doesNotMatch(
+            continuationText,
+            /Verify Workspace UI|Current task item/u,
+        );
+        const goalContinuationContext = (await page.evaluate(`
+        (window.__modelContextUpdates || [])
+            .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
+            .filter(state => state && state.continuation && state.continuation.kind === "goal")
+            .at(-1).continuation
+    `)) as {
+            attempt: number;
+            currentItem: { id: string; text: string };
+            nextItem: { id: string; kind: string; text: string };
+            orderedItems: Array<{ id: string }>;
         };
-        state.__workspaceAgentBusy = true;
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        assert.equal(goalContinuationContext.attempt, 1);
+        assert.equal(goalContinuationContext.currentItem.id, "verify");
+        assert.equal(
+            goalContinuationContext.currentItem.text,
+            "Verify Workspace UI",
+        );
+        assert.equal(goalContinuationContext.nextItem.id, "finish-goal");
+        assert.equal(goalContinuationContext.nextItem.kind, "goal-terminal");
+        assert.equal(
+            goalContinuationContext.nextItem.text,
+            "Complete the Goal.",
+        );
+        assert.deepEqual(
+            goalContinuationContext.orderedItems.map((item) => item.id),
+            ["implement", "verify", "finish-goal"],
+        );
+        const automaticClaimId = (await page.evaluate(
+            "window.__workspaceReentryReports.at(-1).claimId",
+        )) as string;
+        const continuationCalls = (await page.evaluate(
+            (claimId) =>
+                (
+                    (
+                        window as typeof window & {
+                            __workspaceCalls?: Array<{
+                                arguments?: Record<string, unknown>;
+                                name?: string;
+                            }>;
+                        }
+                    ).__workspaceCalls || []
+                ).filter(
+                    (call) =>
+                        call.name === "workspace_reentry" &&
+                        call.arguments?.claimId === claimId,
+                ),
+            automaticClaimId,
+        )) as Array<{ arguments?: Record<string, unknown> }>;
+        assert.equal(continuationCalls[0]?.arguments?.action, "claim");
+        assert.equal(continuationCalls[0]?.arguments?.intent, "automatic");
+        assert.equal(continuationCalls[1]?.arguments?.action, "validate");
+        assert.equal(continuationCalls[2]?.arguments?.action, "attempt");
+        assert.equal(continuationCalls[3]?.arguments?.action, "report");
+        assert.equal(continuationCalls[3]?.arguments?.outcome, "accepted");
+        assert.equal(
+            await page.evaluate(
+                "(window.__goalContinuationReports || []).length",
+            ),
+            1,
+        );
+        assert.deepEqual(browserFailures, []);
+    },
+);
 
-    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        iframe?.contentWindow?.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/tool-cancelled",
-            params: { reason: "user action" }
-        }, "*");
-    });
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'yield')");
+test(
+    "Workspace Goal continuation prompt preserves escalating enforcement around one boundary-crossing contract",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    assert.equal(await page.evaluate("window.__emitWorkspaceSnapshotAfterCancellation()"), true);
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-});
+        const cases = [
+            {
+                count: 0,
+                expected:
+                    "Finish the current Goal item shown in the Workspace context.",
+                forbidden: "Wake attempt",
+            },
+            {
+                count: 1,
+                expected:
+                    "Wake attempt 2. The previous continuation produced no verifiable execution progress.",
+                forbidden: "Wake attempt 3.",
+            },
+            {
+                count: 2,
+                expected:
+                    "Wake attempt 3. Repeated continuation attempts have not produced verifiable execution progress.",
+                forbidden: "Wake attempt 4.",
+            },
+            {
+                count: 3,
+                expected:
+                    "Wake attempt 4. You have repeatedly failed to advance an actionable Goal.",
+                forbidden: "Critical execution failure",
+            },
+            {
+                count: 4,
+                expected:
+                    "Wake attempt 5. Critical execution failure: the Goal remains actionable after repeated continuation attempts without verifiable progress.",
+                forbidden: "Wake attempt 4.",
+            },
+        ];
+        for (const item of cases) {
+            const page = await browser.newPage();
+            await page.setContent(
+                '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+            );
+            await page.evaluate(BRIDGE_SCRIPT);
+            await page.evaluate((count) => {
+                const state = window as typeof window & {
+                    __workspaceApprovalPending: boolean;
+                    __workspaceGoalContinuationCount: number;
+                    __workspaceGoalDueNow: boolean;
+                    __workspaceQuestionAnswered: boolean;
+                    __workspaceWaitInterrupted: boolean;
+                };
+                state.__workspaceGoalContinuationCount = count;
+                state.__workspaceGoalDueNow = true;
+                state.__workspaceQuestionAnswered = true;
+                state.__workspaceApprovalPending = false;
+                state.__workspaceWaitInterrupted = true;
+            }, item.count);
+            await page.evaluate((html) => {
+                const iframe =
+                    document.querySelector<HTMLIFrameElement>("#workspace");
+                if (iframe === null)
+                    throw new Error("Workspace iframe is missing.");
+                iframe.srcdoc = html;
+            }, workspaceAppHtml);
+            await page.waitForFunction(
+                "(window.__modelMessages || []).length === 1",
+            );
+            const text = (await page.evaluate(
+                "window.__modelMessages[0].content[0].text",
+            )) as string;
+            assert.match(
+                text,
+                new RegExp(
+                    item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                    "u",
+                ),
+            );
+            assert.doesNotMatch(
+                text,
+                new RegExp(
+                    item.forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                    "u",
+                ),
+            );
+            assert.match(
+                text,
+                /Finish the current Goal item shown in the Workspace context\./u,
+            );
+            assert.match(
+                text,
+                /Then immediately continue with the next Goal item\./u,
+            );
+            assert.match(
+                text,
+                /Do not stop after completing or reporting the current item\./u,
+            );
+            assert.doesNotMatch(
+                text,
+                /Verify Workspace UI|Current task item|completing the final task item completes the Goal/u,
+            );
+            await page.close();
+        }
+    },
+);
 
-test("Workspace Goal does not re-enter for a legacy active Goal with no actionable step", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace user cancellation suppresses automatic Goal continuation until later agent activity",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceGoalStepsDone: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceGoalStepsDone = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceAgentBusy: boolean;
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceAgentBusy = true;
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-});
+        await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            iframe?.contentWindow?.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-cancelled",
+                    params: { reason: "user action" },
+                },
+                "*",
+            );
+        });
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'yield')",
+        );
 
-test("Workspace Goal does not auto-continue while an Agent tool call is still running", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        assert.equal(
+            await page.evaluate(
+                "window.__emitWorkspaceSnapshotAfterCancellation()",
+            ),
+            true,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+    },
+);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceAgentBusy: boolean;
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceAgentBusy = true;
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+test(
+    "Workspace Goal does not re-enter for a legacy active Goal with no actionable step",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(250);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
-        0,
-    );
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-});
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceGoalStepsDone: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceGoalStepsDone = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-test("Workspace Goal respects continuation retry backoff", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        await page.waitForFunction("(window.__workspaceWatchCount || 0) >= 2");
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+    },
+);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceGoalRetryAfter: string;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceGoalRetryAfter = new Date(Date.now() + 5 * 60_000).toISOString();
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+test(
+    "Workspace Goal does not auto-continue while an Agent tool call is still running",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(250);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
-        0,
-    );
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-});
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceAgentBusy: boolean;
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceAgentBusy = true;
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-test("Workspace Stop fences an in-flight Goal continuation before model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        await page
+            .frameLocator("#workspace")
+            .getByText("Ship Workspace Goal mode", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length",
+            ),
+            0,
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+    },
+);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __holdGoalContinuationContext: boolean;
-            __workspaceApprovalPending: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__holdGoalContinuationContext = true;
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+test(
+    "Workspace Goal respects continuation retry backoff",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    await page.waitForFunction("window.__pendingGoalContinuationContext != null");
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
-    await page.waitForFunction(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        return !iframe?.contentDocument?.body.textContent?.includes("Ship Workspace Goal mode");
-    });
-    assert.equal(await page.evaluate("window.__releaseGoalContinuationContext()"), true);
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'release')");
-    await page.waitForTimeout(100);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceGoalRetryAfter: string;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceGoalRetryAfter = new Date(
+                Date.now() + 5 * 60_000,
+            ).toISOString();
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(await page.evaluate("(window.__goalContinuationReports || []).length"), 0);
-});
+        await page
+            .frameLocator("#workspace")
+            .getByText("Ship Workspace Goal mode", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length",
+            ),
+            0,
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+    },
+);
 
-test("Workspace Goal does not continue while a detached wait is still pending", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace Stop fences an in-flight Goal continuation before model re-entry",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:500px"></iframe>');
-    await page.evaluate(BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __workspaceApprovalPending: boolean;
-            __workspaceBackgroundDetached: boolean;
-            __workspaceGoalDueNow: boolean;
-            __workspaceQuestionAnswered: boolean;
-            __workspaceWaitInterrupted: boolean;
-        };
-        state.__workspaceGoalDueNow = true;
-        state.__workspaceQuestionAnswered = true;
-        state.__workspaceApprovalPending = false;
-        state.__workspaceWaitInterrupted = true;
-        state.__workspaceBackgroundDetached = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __holdGoalContinuationContext: boolean;
+                __workspaceApprovalPending: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__holdGoalContinuationContext = true;
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    await page.frameLocator("#workspace").getByText("Ship Workspace Goal mode", { exact: true }).waitFor({ state: "visible" });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
-        0,
-    );
-});
+        await page.waitForFunction(
+            "window.__pendingGoalContinuationContext != null",
+        );
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Stop Goal", exact: true })
+            .click();
+        await page.waitForFunction(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            return !iframe?.contentDocument?.body.textContent?.includes(
+                "Ship Workspace Goal mode",
+            );
+        });
+        assert.equal(
+            await page.evaluate("window.__releaseGoalContinuationContext()"),
+            true,
+        );
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_reentry' && call.arguments.action === 'release')",
+        );
+        await page.waitForTimeout(100);
 
-test("Workspace App keeps the internal ctxId even when Context selection came from an external session", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__goalContinuationReports || []).length",
+            ),
+            0,
+        );
+    },
+);
 
-    const page = await browser.newPage();
-    const browserFailures: string[] = [];
-    page.on("console", (message) => {
-        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
-    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
-    await page.evaluate(SESSION_MODE_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+test(
+    "Workspace Goal does not continue while a detached wait is still pending",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Session mode question?", { exact: true }).waitFor({ state: "visible" });
-    await app.locator('[data-question-choice="wait-session-question"]').click();
-    await page.waitForFunction("(window.__sessionModeCalls || []).some(call => call.name === 'workspace_answer')");
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:500px"></iframe>',
+        );
+        await page.evaluate(BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __workspaceApprovalPending: boolean;
+                __workspaceBackgroundDetached: boolean;
+                __workspaceGoalDueNow: boolean;
+                __workspaceQuestionAnswered: boolean;
+                __workspaceWaitInterrupted: boolean;
+            };
+            state.__workspaceGoalDueNow = true;
+            state.__workspaceQuestionAnswered = true;
+            state.__workspaceApprovalPending = false;
+            state.__workspaceWaitInterrupted = true;
+            state.__workspaceBackgroundDetached = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const calls = await page.evaluate("window.__sessionModeCalls || []") as Array<{
-        arguments?: Record<string, unknown>;
-        name?: string;
-    }>;
-    assert.equal(calls.length > 0, true);
-    assert.equal(calls.every((call) => call.arguments?.ctxId === "ctx-session-mode"), true);
-    const answer = calls.find((call) => call.name === "workspace_answer");
-    assert.equal(answer?.arguments?.token, "session-mode-token");
-    assert.equal(answer?.arguments?.waitId, "wait-session-question");
+        await page
+            .frameLocator("#workspace")
+            .getByText("Ship Workspace Goal mode", { exact: true })
+            .waitFor({ state: "visible" });
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_goal_continue').length",
+            ),
+            0,
+        );
+    },
+);
 
-    const contexts = await page.evaluate("window.__sessionModeContexts || []") as Array<{
-        structuredContent?: { portableDevshellWorkspace?: Record<string, unknown> };
-    }>;
-    assert.equal(contexts.length > 0, true);
-    assert.equal(
-        contexts.every((entry) => entry.structuredContent?.portableDevshellWorkspace?.ctxId === "ctx-session-mode"),
-        true
-    );
-    assert.deepEqual(browserFailures, []);
-});
+test(
+    "Workspace App keeps the internal ctxId even when Context selection came from an external session",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        const browserFailures: string[] = [];
+        page.on("console", (message) => {
+            if (message.type() === "error")
+                browserFailures.push(`console: ${message.text()}`);
+        });
+        page.on("pageerror", (error) =>
+            browserFailures.push(`pageerror: ${error.message}`),
+        );
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(SESSION_MODE_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Session mode question?", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .locator('[data-question-choice="wait-session-question"]')
+            .click();
+        await page.waitForFunction(
+            "(window.__sessionModeCalls || []).some(call => call.name === 'workspace_answer')",
+        );
+
+        const calls = (await page.evaluate(
+            "window.__sessionModeCalls || []",
+        )) as Array<{
+            arguments?: Record<string, unknown>;
+            name?: string;
+        }>;
+        assert.equal(calls.length > 0, true);
+        assert.equal(
+            calls.every((call) => call.arguments?.ctxId === "ctx-session-mode"),
+            true,
+        );
+        const answer = calls.find((call) => call.name === "workspace_answer");
+        assert.equal(answer?.arguments?.token, "session-mode-token");
+        assert.equal(answer?.arguments?.waitId, "wait-session-question");
+
+        const contexts = (await page.evaluate(
+            "window.__sessionModeContexts || []",
+        )) as Array<{
+            structuredContent?: {
+                portableDevshellWorkspace?: Record<string, unknown>;
+            };
+        }>;
+        assert.equal(contexts.length > 0, true);
+        assert.equal(
+            contexts.every(
+                (entry) =>
+                    entry.structuredContent?.portableDevshellWorkspace
+                        ?.ctxId === "ctx-session-mode",
+            ),
+            true,
+        );
+        assert.deepEqual(browserFailures, []);
+    },
+);
 
 test(
     "Workspace App resumes after a delayed initial tool result instead of staying in Waiting",
@@ -778,385 +1393,699 @@ test(
     },
 );
 
-test("Workspace App claims a resolved detached wait before one automatic model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace App claims a resolved detached wait before one automatic model re-entry",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    const mount = async () => await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        const mount = async () =>
+            await page.evaluate((html) => {
+                const iframe =
+                    document.querySelector<HTMLIFrameElement>("#workspace");
+                if (iframe === null)
+                    throw new Error("Workspace iframe is missing.");
+                iframe.srcdoc = html;
+            }, workspaceAppHtml);
 
-    await mount();
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__recoveryReentryReports || []).length === 1");
-    const recoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-    assert.equal(
-        recoveryText,
-        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
-    );
-    assert.doesNotMatch(recoveryText, /tmux-recovery|status 0|finish the Goal|block the Goal|workspace_goal/u);
-    const waitContinuationContext = await page.evaluate(`
+        await mount();
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__recoveryReentryReports || []).length === 1",
+        );
+        const recoveryText = (await page.evaluate(
+            "window.__modelMessages[0].content[0].text",
+        )) as string;
+        assert.equal(
+            recoveryText,
+            "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+        );
+        assert.doesNotMatch(
+            recoveryText,
+            /tmux-recovery|status 0|finish the Goal|block the Goal|workspace_goal/u,
+        );
+        const waitContinuationContext = (await page.evaluate(`
         (window.__recoveryModelContextUpdates || [])
             .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
             .filter(state => state && state.continuation && state.continuation.kind === "wait")
             .at(-1).continuation
-    `) as {
-        constraints: { restartTask: boolean };
-        nextOperation: { taskId: string; tool: string };
-        reason: string;
-        result: { task: { status: string } };
-        suspendedOperation: { kind: string; taskId: string };
-    };
-    assert.equal(waitContinuationContext.reason, "tmux-finished");
-    assert.equal(waitContinuationContext.result.task.status, "0");
-    assert.equal(waitContinuationContext.suspendedOperation.kind, "tmux-wait");
-    assert.equal(waitContinuationContext.suspendedOperation.taskId, "tmux-recovery");
-    assert.equal(waitContinuationContext.nextOperation.tool, "tmux_read");
-    assert.equal(waitContinuationContext.nextOperation.taskId, "tmux-recovery");
-    assert.equal(waitContinuationContext.constraints.restartTask, false);
-
-    const firstEvents = await page.evaluate("window.__bridgeEvents || []") as string[];
-    const firstMessage = firstEvents.indexOf("message");
-    assert.equal(firstMessage > 0 && firstEvents[firstMessage - 1] === "context", true);
-
-    await mount();
-    await page.waitForTimeout(100);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__recoveryReentryReports || []).length"), 1);
-    const recoveryClaimId = await page.evaluate("window.__recoveryReentryReports[0].claimId") as string;
-    const recoverCalls = await page.evaluate((claimId) =>
-        ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId),
-        recoveryClaimId,
-    ) as Array<{ arguments?: Record<string, unknown> }>;
-    assert.deepEqual(recoverCalls.map((call) => call.arguments?.action), ["claim", "validate", "attempt", "report"]);
-    assert.equal(recoverCalls[0]?.arguments?.token, "recovery-secret-token");
-    assert.equal(recoverCalls[0]?.arguments?.intent, "automatic");
-    assert.equal(recoverCalls[3]?.arguments?.outcome, "accepted");
-});
-
-test("Workspace never automatically replays an uncertain detached wait", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        (window as typeof window & { __recoveryAttempted: boolean }).__recoveryAttempted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    await page.waitForFunction(
-        "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
-    );
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length"),
-        0,
-    );
-});
-
-test("Workspace user ownership fences a ready detached wait recovery", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __recoveryReentryMode: string;
-            __recoverySuppressedAt: string;
+    `)) as {
+            constraints: { restartTask: boolean };
+            nextOperation: { taskId: string; tool: string };
+            reason: string;
+            result: { task: { status: string } };
+            suspendedOperation: { kind: string; taskId: string };
         };
-        state.__recoveryReentryMode = "user_owned";
-        state.__recoverySuppressedAt = new Date().toISOString();
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        assert.equal(waitContinuationContext.reason, "tmux-finished");
+        assert.equal(waitContinuationContext.result.task.status, "0");
+        assert.equal(
+            waitContinuationContext.suspendedOperation.kind,
+            "tmux-wait",
+        );
+        assert.equal(
+            waitContinuationContext.suspendedOperation.taskId,
+            "tmux-recovery",
+        );
+        assert.equal(waitContinuationContext.nextOperation.tool, "tmux_read");
+        assert.equal(
+            waitContinuationContext.nextOperation.taskId,
+            "tmux-recovery",
+        );
+        assert.equal(waitContinuationContext.constraints.restartTask, false);
 
-    await page.waitForFunction(
-        "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
-    );
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 0);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length"),
-        0,
-    );
-});
+        const firstEvents = (await page.evaluate(
+            "window.__bridgeEvents || []",
+        )) as string[];
+        const firstMessage = firstEvents.indexOf("message");
+        assert.equal(
+            firstMessage > 0 && firstEvents[firstMessage - 1] === "context",
+            true,
+        );
 
-test("Workspace re-enters after a detached tmux wait deadline", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        await mount();
+        await page.waitForTimeout(100);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__recoveryReentryReports || []).length",
+            ),
+            1,
+        );
+        const recoveryClaimId = (await page.evaluate(
+            "window.__recoveryReentryReports[0].claimId",
+        )) as string;
+        const recoverCalls = (await page.evaluate(
+            (claimId) =>
+                (
+                    (
+                        window as typeof window & {
+                            __workspaceCalls?: Array<{
+                                arguments?: Record<string, unknown>;
+                                name?: string;
+                            }>;
+                        }
+                    ).__workspaceCalls || []
+                ).filter(
+                    (call) =>
+                        call.name === "workspace_reentry" &&
+                        call.arguments?.claimId === claimId,
+                ),
+            recoveryClaimId,
+        )) as Array<{ arguments?: Record<string, unknown> }>;
+        assert.deepEqual(
+            recoverCalls.map((call) => call.arguments?.action),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(
+            recoverCalls[0]?.arguments?.token,
+            "recovery-secret-token",
+        );
+        assert.equal(recoverCalls[0]?.arguments?.intent, "automatic");
+        assert.equal(recoverCalls[3]?.arguments?.outcome, "accepted");
+    },
+);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        (window as typeof window & { __recoveryTimedOut: boolean }).__recoveryTimedOut = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+test(
+    "Workspace never automatically replays an uncertain detached wait",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__recoveryReentryReports || []).length === 1");
-    assert.equal(
-        await page.evaluate("window.__modelMessages[0].content[0].text"),
-        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
-    );
-    const timeoutContinuationContext = await page.evaluate(`
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            (
+                window as typeof window & { __recoveryAttempted: boolean }
+            ).__recoveryAttempted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
+        );
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length",
+            ),
+            0,
+        );
+    },
+);
+
+test(
+    "Workspace user ownership fences a ready detached wait recovery",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __recoveryReentryMode: string;
+                __recoverySuppressedAt: string;
+            };
+            state.__recoveryReentryMode = "user_owned";
+            state.__recoverySuppressedAt = new Date().toISOString();
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect')",
+        );
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).filter(call => call.name === 'workspace_recover').length",
+            ),
+            0,
+        );
+    },
+);
+
+test(
+    "Workspace re-enters after a detached tmux wait deadline",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            (
+                window as typeof window & { __recoveryTimedOut: boolean }
+            ).__recoveryTimedOut = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__recoveryReentryReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate("window.__modelMessages[0].content[0].text"),
+            "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+        );
+        const timeoutContinuationContext = (await page.evaluate(`
         (window.__recoveryModelContextUpdates || [])
             .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
             .filter(state => state && state.continuation && state.continuation.kind === "wait")
             .at(-1).continuation
-    `) as { afterResult: { operation: { kind: string; taskId: string; tool: string }; when: string }; reason: string };
-    assert.equal(timeoutContinuationContext.reason, "tmux-wait-deadline-elapsed");
-    assert.equal(timeoutContinuationContext.afterResult.when, "task-still-running-and-result-required");
-    assert.equal(timeoutContinuationContext.afterResult.operation.kind, "blocking-wait");
-    assert.equal(timeoutContinuationContext.afterResult.operation.tool, "tmux_read");
-    assert.equal(timeoutContinuationContext.afterResult.operation.taskId, "tmux-recovery");
-});
-
-test("Workspace Goal recovers a resolved detached wait without Todo", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        (window as typeof window & { __goalRecovery: boolean }).__goalRecovery = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__recoveryReentryReports || []).length === 1");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-});
-
-test("Workspace recovers an unassociated resolved wait by Context", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        (window as typeof window & { __unassociatedRecovery: boolean }).__unassociatedRecovery = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__recoveryReentryReports || []).length === 1");
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-});
-
-test("Workspace Stop waiting resumes the agent after a detached tmux wait", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RESUME_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
-
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
-    await app.getByText("Stop waiting", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Stop waiting", { exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await page.waitForFunction("(window.__resumeReports || []).length === 1");
-    const recoveryClaimId = await page.evaluate("window.__resumeReports[0].claimId") as string;
-    const recoveryActions = await page.evaluate((claimId) =>
-        ((window as typeof window & { __workspaceCalls?: Array<{ arguments?: Record<string, unknown>; name?: string }> }).__workspaceCalls || [])
-            .filter((call) => call.name === "workspace_reentry" && call.arguments?.claimId === claimId)
-            .map((call) => call.arguments?.action),
-        recoveryClaimId,
-    );
-    assert.deepEqual(recoveryActions, ["claim", "validate", "attempt", "report"]);
-});
-
-test("Workspace task Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RESUME_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __taskStatus: string;
-            __waitWindowInterrupted: boolean;
+    `)) as {
+            afterResult: {
+                operation: { kind: string; taskId: string; tool: string };
+                when: string;
+            };
+            reason: string;
         };
-        state.__taskStatus = "paused";
-        state.__waitWindowInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        assert.equal(
+            timeoutContinuationContext.reason,
+            "tmux-wait-deadline-elapsed",
+        );
+        assert.equal(
+            timeoutContinuationContext.afterResult.when,
+            "task-still-running-and-result-required",
+        );
+        assert.equal(
+            timeoutContinuationContext.afterResult.operation.kind,
+            "blocking-wait",
+        );
+        assert.equal(
+            timeoutContinuationContext.afterResult.operation.tool,
+            "tmux_read",
+        );
+        assert.equal(
+            timeoutContinuationContext.afterResult.operation.taskId,
+            "tmux-recovery",
+        );
+    },
+);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
-    await page.waitForFunction("(window.__resumeReports || []).length === 1");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__resumeReports[0].outcome"), "accepted");
-});
+test(
+    "Workspace Goal recovers a resolved detached wait without Todo",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-test("Workspace task Resume ignores a background wait whose recovery ownership is disabled", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            (
+                window as typeof window & { __goalRecovery: boolean }
+            ).__goalRecovery = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RESUME_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __taskStatus: string;
-            __waitRecoveryDisabled: boolean;
-        };
-        state.__taskStatus = "paused";
-        state.__waitRecoveryDisabled = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__recoveryReentryReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+    },
+);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Resume task", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__resumeReports.length"), 1);
-    assert.equal(
-        await page.evaluate("(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'task-resume')?.arguments.sourceId"),
-        "task-resume",
-    );
-});
+test(
+    "Workspace recovers an unassociated resolved wait by Context",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-test("Workspace Goal Resume uses an already resolved wait as its single model re-entry", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RECOVERY_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            (
+                window as typeof window & { __unassociatedRecovery: boolean }
+            ).__unassociatedRecovery = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(RESUME_BRIDGE_SCRIPT);
-    await page.evaluate(() => {
-        const state = window as typeof window & {
-            __resumeGoalBlocked: boolean;
-            __resumeGoalMode: boolean;
-            __waitWindowInterrupted: boolean;
-        };
-        state.__resumeGoalMode = true;
-        state.__resumeGoalBlocked = true;
-        state.__waitWindowInterrupted = true;
-    });
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__recoveryReentryReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+    },
+);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Resume Goal", exact: true }).click();
-    await page.waitForFunction("(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')");
-    await page.waitForFunction("(window.__resumeReports || []).length === 1");
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__resumeReports[0].outcome"), "accepted");
-});
+test(
+    "Workspace Stop waiting resumes the agent after a detached tmux wait",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-test("Workspace re-enters after a detached answer without surfacing detached tmux state", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RESUME_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:900px"></iframe>');
-    await page.evaluate(DETACHED_INTERACTION_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Background task", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app.getByText("No blocking event.", { exact: true }).count(),
+            0,
+        );
+        await app
+            .getByText("Stop waiting", { exact: true })
+            .waitFor({ state: "visible" });
+        await app.getByText("Stop waiting", { exact: true }).click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_interrupt')",
+        );
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__resumeReports || []).length === 1",
+        );
+        const recoveryClaimId = (await page.evaluate(
+            "window.__resumeReports[0].claimId",
+        )) as string;
+        const recoveryActions = await page.evaluate(
+            (claimId) =>
+                (
+                    (
+                        window as typeof window & {
+                            __workspaceCalls?: Array<{
+                                arguments?: Record<string, unknown>;
+                                name?: string;
+                            }>;
+                        }
+                    ).__workspaceCalls || []
+                )
+                    .filter(
+                        (call) =>
+                            call.name === "workspace_reentry" &&
+                            call.arguments?.claimId === claimId,
+                    )
+                    .map((call) => call.arguments?.action),
+            recoveryClaimId,
+        );
+        assert.deepEqual(recoveryActions, [
+            "claim",
+            "validate",
+            "attempt",
+            "report",
+        ]);
+    },
+);
 
-    const app = page.frameLocator("#workspace");
-    await app.locator('[data-question-choice="wait-question-detached"]').click();
-    await page.waitForFunction("(window.__modelMessages || []).length === 1");
-    const answerRecoveryText = await page.evaluate("window.__modelMessages[0].content[0].text") as string;
-    assert.equal(
-        answerRecoveryText,
-        "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
-    );
-    assert.doesNotMatch(answerRecoveryText, /Continue|question|finish the Goal|block the Goal|workspace_goal/u);
-    const answerContinuationContext = await page.evaluate(`
+test(
+    "Workspace task Resume uses an already resolved wait as its single model re-entry",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RESUME_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __taskStatus: string;
+                __waitWindowInterrupted: boolean;
+            };
+            state.__taskStatus = "paused";
+            state.__waitWindowInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Resume task", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')",
+        );
+        await page.waitForFunction(
+            "(window.__resumeReports || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("window.__resumeReports[0].outcome"),
+            "accepted",
+        );
+    },
+);
+
+test(
+    "Workspace task Resume ignores a background wait whose recovery ownership is disabled",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RESUME_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __taskStatus: string;
+                __waitRecoveryDisabled: boolean;
+            };
+            state.__taskStatus = "paused";
+            state.__waitRecoveryDisabled = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Resume task", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_task' && call.arguments.action === 'resume')",
+        );
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+        assert.equal(await page.evaluate("window.__resumeReports.length"), 1);
+        assert.equal(
+            await page.evaluate(
+                "(window.__workspaceCalls || []).find(call => call.name === 'workspace_reentry' && call.arguments.action === 'claim' && call.arguments.intent === 'task-resume')?.arguments.sourceId",
+            ),
+            "task-resume",
+        );
+    },
+);
+
+test(
+    "Workspace Goal Resume uses an already resolved wait as its single model re-entry",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(RESUME_BRIDGE_SCRIPT);
+        await page.evaluate(() => {
+            const state = window as typeof window & {
+                __resumeGoalBlocked: boolean;
+                __resumeGoalMode: boolean;
+                __waitWindowInterrupted: boolean;
+            };
+            state.__resumeGoalMode = true;
+            state.__resumeGoalBlocked = true;
+            state.__waitWindowInterrupted = true;
+        });
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Resume Goal", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__workspaceCalls || []).some(call => call.name === 'workspace_resume')",
+        );
+        await page.waitForFunction(
+            "(window.__resumeReports || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("window.__resumeReports[0].outcome"),
+            "accepted",
+        );
+    },
+);
+
+test(
+    "Workspace re-enters after a detached answer without surfacing detached tmux state",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
+
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:900px"></iframe>',
+        );
+        await page.evaluate(DETACHED_INTERACTION_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .locator('[data-question-choice="wait-question-detached"]')
+            .click();
+        await page.waitForFunction(
+            "(window.__modelMessages || []).length === 1",
+        );
+        const answerRecoveryText = (await page.evaluate(
+            "window.__modelMessages[0].content[0].text",
+        )) as string;
+        assert.equal(
+            answerRecoveryText,
+            "Resume the existing execution from the Workspace continuation context.\n\nPerform the continuation operation, then continue the suspended work from its result.",
+        );
+        assert.doesNotMatch(
+            answerRecoveryText,
+            /Continue|question|finish the Goal|block the Goal|workspace_goal/u,
+        );
+        const answerContinuationContext = (await page.evaluate(`
         (window.__detachedModelContextUpdates || [])
             .map(update => update.structuredContent && update.structuredContent.portableDevshellWorkspace)
             .filter(state => state && state.continuation && state.continuation.kind === "wait")
             .at(-1).continuation
-    `) as { nextOperation: { kind: string }; reason: string; result: { answer: string } };
-    assert.equal(answerContinuationContext.reason, "question-answered");
-    assert.equal(answerContinuationContext.result.answer, "Continue");
-    assert.equal(answerContinuationContext.nextOperation.kind, "resume-with-answer");
-    await app.getByText("Background task", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("No blocking event.", { exact: true }).count(), 0);
-    assert.equal(await app.getByRole("button", { name: "Resume agent", exact: true }).count(), 0);
-    await page.waitForTimeout(100);
-    assert.equal(await page.evaluate("(window.__modelMessages || []).length"), 1);
-});
+    `)) as {
+            nextOperation: { kind: string };
+            reason: string;
+            result: { answer: string };
+        };
+        assert.equal(answerContinuationContext.reason, "question-answered");
+        assert.equal(answerContinuationContext.result.answer, "Continue");
+        assert.equal(
+            answerContinuationContext.nextOperation.kind,
+            "resume-with-answer",
+        );
+        await app
+            .getByText("Background task", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app.getByText("No blocking event.", { exact: true }).count(),
+            0,
+        );
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Resume agent", exact: true })
+                .count(),
+            0,
+        );
+        await page.waitForTimeout(100);
+        assert.equal(
+            await page.evaluate("(window.__modelMessages || []).length"),
+            1,
+        );
+    },
+);
 
-test("Workspace remount follows current ChatGPT tool output and falls back to widget state", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace remount follows current ChatGPT tool output and falls back to widget state",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
-    await page.evaluate(REMOUNT_BRIDGE_SCRIPT);
-    const mount = async (globals: string) => await page.evaluate(({ html, globals }) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>window.openai = ${globals};<\/script><script>`);
-    }, { html: workspaceAppHtml, globals });
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(REMOUNT_BRIDGE_SCRIPT);
+        const mount = async (globals: string) =>
+            await page.evaluate(
+                ({ html, globals }) => {
+                    const iframe =
+                        document.querySelector<HTMLIFrameElement>("#workspace");
+                    if (iframe === null)
+                        throw new Error("Workspace iframe is missing.");
+                    iframe.srcdoc = html.replace(
+                        "<script>",
+                        `<script>window.openai = ${globals};<\/script><script>`,
+                    );
+                },
+                { html: workspaceAppHtml, globals },
+            );
 
-    await mount(`{
+        await mount(`{
         widgetState: {
             modelContent: null,
             privateContent: { portableDevshellWorkspace: { ctxId: "ctx-widget-stale", token: "stale-token" } },
@@ -1171,20 +2100,35 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
             this.widgetState = state;
         }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current' && call.arguments.token === 'current-token')");
-    await page.waitForTimeout(100);
-    const currentFrame = page.frames().find((frame) => frame !== page.mainFrame());
-    const currentApp = page.frameLocator("#workspace");
-    await currentApp.getByText("Workspace", { exact: true }).waitFor({ state: "visible" });
-    await currentApp.getByText("Ready", { exact: true }).waitFor({ state: "visible" });
-    await currentApp.getByText("No active goal, task, question, approval, or background wait.", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(
-        await currentFrame?.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId"),
-        "ctx-current"
-    );
+        await page.waitForFunction(
+            "(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-current' && call.arguments.token === 'current-token')",
+        );
+        await page.waitForTimeout(100);
+        const currentFrame = page
+            .frames()
+            .find((frame) => frame !== page.mainFrame());
+        const currentApp = page.frameLocator("#workspace");
+        await currentApp
+            .getByText("Workspace", { exact: true })
+            .waitFor({ state: "visible" });
+        await currentApp
+            .getByText("Ready", { exact: true })
+            .waitFor({ state: "visible" });
+        await currentApp
+            .getByText(
+                "No active goal, task, question, approval, or background wait.",
+                { exact: true },
+            )
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await currentFrame?.evaluate(
+                "window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId",
+            ),
+            "ctx-current",
+        );
 
-    await page.evaluate("window.__remountCalls = []");
-    await mount(`{
+        await page.evaluate("window.__remountCalls = []");
+        await mount(`{
         widgetState: {
             modelContent: null,
             privateContent: { portableDevshellWorkspace: { ctxId: "ctx-widget-only", token: "widget-token" } },
@@ -1192,37 +2136,69 @@ test("Workspace remount follows current ChatGPT tool output and falls back to wi
         },
         setWidgetState: function (state) { this.widgetState = state; }
     }`);
-    await page.waitForFunction("(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-widget-only' && call.arguments.token === 'widget-token')");
-    assert.equal(await page.evaluate("(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')"), false);
-});
+        await page.waitForFunction(
+            "(window.__remountCalls || []).some(call => (call.name === 'workspace_snapshot' || call.name === 'workspace_reconnect') && call.arguments.ctxId === 'ctx-widget-only' && call.arguments.token === 'widget-token')",
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__remountCalls || []).some(call => call.arguments.ctxId === 'ctx-stale')",
+            ),
+            false,
+        );
+    },
+);
 
-test("mounted Workspace stops reconnecting after Workspace tools are disabled", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "mounted Workspace stops reconnecting after Workspace tools are disabled",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
-    await page.evaluate(WORKSPACE_DISABLED_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(WORKSPACE_DISABLED_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Ready", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForFunction("window.__disabledWorkspacePendingWatch !== null");
-    assert.equal(await page.evaluate("window.__disableWorkspacePolicy()"), true);
-    await app.getByText("Workspace disabled", { exact: true }).waitFor({ state: "visible" });
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Ready", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForFunction(
+            "window.__disabledWorkspacePendingWatch !== null",
+        );
+        assert.equal(
+            await page.evaluate("window.__disableWorkspacePolicy()"),
+            true,
+        );
+        await app
+            .getByText("Workspace disabled", { exact: true })
+            .waitFor({ state: "visible" });
 
-    const callsAfterDisable = await page.evaluate("window.__disabledWorkspaceCalls.length") as number;
-    await page.waitForTimeout(1_200);
-    assert.equal(await page.evaluate("window.__disabledWorkspaceCalls.length"), callsAfterDisable);
-});
+        const callsAfterDisable = (await page.evaluate(
+            "window.__disabledWorkspaceCalls.length",
+        )) as number;
+        await page.waitForTimeout(1_200);
+        assert.equal(
+            await page.evaluate("window.__disabledWorkspaceCalls.length"),
+            callsAfterDisable,
+        );
+    },
+);
 
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
-        throw new Error("A Chromium executable is required for this browser test.");
+        throw new Error(
+            "A Chromium executable is required for this browser test.",
+        );
     }
     return await chromium.launch({
         executablePath: CHROMIUM_EXECUTABLE,
@@ -1240,7 +2216,10 @@ function resolveChromiumExecutable(): string | undefined {
         "/usr/bin/google-chrome",
         "/usr/bin/google-chrome-stable",
         "/opt/google/chrome/chrome",
-    ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
+    ].filter(
+        (candidate): candidate is string =>
+            candidate !== undefined && candidate.length > 0,
+    );
     return candidates.find((candidate) => existsSync(candidate));
 }
 

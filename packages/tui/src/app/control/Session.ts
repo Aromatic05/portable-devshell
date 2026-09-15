@@ -62,17 +62,24 @@ export class TuiControlSession {
         this.#refreshScheduler = new ControlRefreshScheduler({
             model: this.#model,
             onFailure: (kind, error) =>
-                this.#reportRefreshFailure(kind === "oauth" ? "connections" : "overview", error),
+                this.#reportRefreshFailure(
+                    kind === "oauth" ? "connections" : "overview",
+                    error,
+                ),
             onSuccess: (kind) =>
-                this.#clearRefreshFailure(kind === "oauth" ? "connections" : "overview"),
+                this.#clearRefreshFailure(
+                    kind === "oauth" ? "connections" : "overview",
+                ),
             overviewIntervalMs: options.overviewRefreshIntervalMs,
             shouldRefreshOAuth: () => {
                 const status = this.#model.state.mcpStatus;
-                return this.#started &&
+                return (
+                    this.#started &&
                     this.#store.getState().connection.status === "connected" &&
                     status?.authMode === "oauth2" &&
                     status.oauthReady === true &&
-                    status.running === true;
+                    status.running === true
+                );
             },
             shouldRefreshOverview: () =>
                 this.#started &&
@@ -80,7 +87,9 @@ export class TuiControlSession {
                 this.#store.getState().ui.selectedPage === "overview",
         });
         this.#model.subscribe(() => this.#syncModel());
-        this.#offTransportClose = this.#clients.onTransportClose(() => this.#handleDisconnected());
+        this.#offTransportClose = this.#clients.onTransportClose(() =>
+            this.#handleDisconnected(),
+        );
     }
 
     get store(): TuiAppStore {
@@ -104,7 +113,10 @@ export class TuiControlSession {
         } catch (error) {
             if (this.#current(generation)) this.#applyConnectionFailure(error);
         }
-        if (this.#current(generation) && this.#store.getState().connection.status === "connected") {
+        if (
+            this.#current(generation) &&
+            this.#store.getState().connection.status === "connected"
+        ) {
             this.#refreshScheduler.start();
         }
     }
@@ -131,9 +143,15 @@ export class TuiControlSession {
                 this.#readTimeoutMs,
                 "control.reconnect",
             );
-            this.#assertCurrent(generation, "Control connection changed while reconnecting.");
+            this.#assertCurrent(
+                generation,
+                "Control connection changed while reconnecting.",
+            );
             await this.#connect(generation);
-            this.#assertCurrent(generation, "Control connection changed while refreshing after reconnect.");
+            this.#assertCurrent(
+                generation,
+                "Control connection changed while refreshing after reconnect.",
+            );
             this.#refreshScheduler.start();
         } catch (error) {
             if (this.#current(generation)) this.#applyConnectionFailure(error);
@@ -141,22 +159,36 @@ export class TuiControlSession {
         }
     }
 
-    async refreshConfig(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+    async refreshConfig(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
         if (!this.#canRefresh(generation, signal)) return;
         await this.#model.refreshControl();
     }
 
-    async refreshInstances(generation = this.#generation, signal?: AbortSignal): Promise<void> {
+    async refreshInstances(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
         if (!this.#canRefresh(generation, signal)) return;
         await this.#model.refreshInstances();
     }
 
-    async refreshOverview(generation = this.#generation, signal?: AbortSignal): Promise<void> {
-        if (this.#canRefresh(generation, signal)) await this.#refreshScheduler.refresh("overview");
+    async refreshOverview(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (this.#canRefresh(generation, signal))
+            await this.#refreshScheduler.refresh("overview");
     }
 
-    async refreshOAuth(generation = this.#generation, signal?: AbortSignal): Promise<void> {
-        if (this.#canRefresh(generation, signal)) await this.#refreshScheduler.refresh("oauth");
+    async refreshOAuth(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (this.#canRefresh(generation, signal))
+            await this.#refreshScheduler.refresh("oauth");
     }
 
     async refreshAudit(
@@ -167,10 +199,11 @@ export class TuiControlSession {
         if (!this.#canRefresh(generation, signal)) return;
         await Promise.all([
             this.#model.refreshContexts(),
-            this.#model.refreshInstance(
-                instance,
-                ["toolCalls", "approvals", "comments"],
-            ),
+            this.#model.refreshInstance(instance, [
+                "toolCalls",
+                "approvals",
+                "comments",
+            ]),
         ]);
     }
 
@@ -196,7 +229,10 @@ export class TuiControlSession {
         }
     }
 
-    async readToolCallDetail(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+    async readToolCallDetail(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined> {
         return await this.#model.readToolCallDetail(instance, callId);
     }
 
@@ -226,7 +262,8 @@ export class TuiControlSession {
     }
 
     async refreshLogs(generation = this.#generation): Promise<void> {
-        if (this.#current(generation)) await this.#model.refreshAllInstanceLogs();
+        if (this.#current(generation))
+            await this.#model.refreshAllInstanceLogs();
     }
 
     async refreshInstance(
@@ -234,8 +271,14 @@ export class TuiControlSession {
         generation = this.#generation,
     ): Promise<number | undefined> {
         if (!this.#current(generation)) return undefined;
-        const sequence = await this.#model.refreshInstance(instance, ["snapshot", "approvals", "goals", "todo"]);
-        if (sequence !== undefined) this.#model.ensureInstanceSubscription(instance);
+        const sequence = await this.#model.refreshInstance(instance, [
+            "snapshot",
+            "approvals",
+            "goals",
+            "todo",
+        ]);
+        if (sequence !== undefined)
+            this.#model.ensureInstanceSubscription(instance);
         return sequence;
     }
 
@@ -245,34 +288,48 @@ export class TuiControlSession {
         try {
             await this.#load(activeGeneration);
         } catch (error) {
-            if (this.#current(activeGeneration)) this.#applyConnectionFailure(error);
+            if (this.#current(activeGeneration))
+                this.#applyConnectionFailure(error);
         }
     }
 
     async #load(generation: number): Promise<void> {
-        this.#assertCurrent(generation, "Control connection changed before refresh.");
+        this.#assertCurrent(
+            generation,
+            "Control connection changed before refresh.",
+        );
         this.#store.setConnectionState("connecting");
         await this.#model.load({
             artifacts: true,
             config: true,
             serviceStatus: false,
         });
-        this.#assertCurrent(generation, "Control connection changed during refresh.");
+        this.#assertCurrent(
+            generation,
+            "Control connection changed during refresh.",
+        );
         this.#store.setConnectionState("connected");
     }
 
     async #connect(generation: number): Promise<void> {
-        this.#assertCurrent(generation, "Control connection changed before connecting.");
+        this.#assertCurrent(
+            generation,
+            "Control connection changed before connecting.",
+        );
         this.#store.setConnectionState("connecting");
         await this.#model.connect({
             artifacts: true,
             config: true,
             serviceStatus: false,
         });
-        this.#assertCurrent(generation, "Control connection changed while connecting.");
+        this.#assertCurrent(
+            generation,
+            "Control connection changed while connecting.",
+        );
         this.#store.setConnectionState("connected");
         void this.#model.hydrate().catch((error) => {
-            if (this.#current(generation)) this.#reportRefreshFailure("overview", error);
+            if (this.#current(generation))
+                this.#reportRefreshFailure("overview", error);
         });
     }
 
@@ -282,7 +339,9 @@ export class TuiControlSession {
             model,
             mergeInstances(model.configView, model.instances),
         );
-        this.#store.setControlRestartRequired(model.configView?.restartControlRequired === true);
+        this.#store.setControlRestartRequired(
+            model.configView?.restartControlRequired === true,
+        );
         this.#syncFailures(model);
     }
 
@@ -302,7 +361,9 @@ export class TuiControlSession {
             this.#appliedPanelFailures.add(panel);
             this.#store.setPanelError(
                 panel,
-                toControlError(new Error(errors.map((error) => error.message).join("; "))),
+                toControlError(
+                    new Error(errors.map((error) => error.message).join("; ")),
+                ),
             );
         }
     }
@@ -320,7 +381,8 @@ export class TuiControlSession {
         if (
             this.#store.getState().ui.selectedPage === "overview" &&
             isOverviewRefreshEvent(event.type)
-        ) this.#refreshScheduler.scheduleOverview(75);
+        )
+            this.#refreshScheduler.scheduleOverview(75);
         const state = this.#store.getState();
         if (
             event.type === "log.appended" &&
@@ -328,7 +390,10 @@ export class TuiControlSession {
             state.ui.selectedInstance === event.instanceName &&
             state.ui.logsFollowByInstance[event.instanceName] !== false
         ) {
-            this.#store.setScrollOffset(selectMainScrollKey(state), Number.MAX_SAFE_INTEGER);
+            this.#store.setScrollOffset(
+                selectMainScrollKey(state),
+                Number.MAX_SAFE_INTEGER,
+            );
         }
     }
 
@@ -354,9 +419,15 @@ export class TuiControlSession {
         this.#refreshScheduler.stop();
     }
 
-    #clearRefreshFailure(page: "audit" | "connections" | "overview" | "todo"): void {
-        const status = this.#store.getState().interaction.screenStatusByPage[page];
-        if (status?.startsWith(`${refreshPageLabel(page)} refresh failed:`) === true) {
+    #clearRefreshFailure(
+        page: "audit" | "connections" | "overview" | "todo",
+    ): void {
+        const status =
+            this.#store.getState().interaction.screenStatusByPage[page];
+        if (
+            status?.startsWith(`${refreshPageLabel(page)} refresh failed:`) ===
+            true
+        ) {
             this.#store.setScreenStatus(page, undefined);
         }
     }
@@ -409,7 +480,9 @@ function mergeInstances(
     configView: Record<string, JsonValue> | undefined,
     runtimeInstances: InstanceListEntry[],
 ): TuiInstanceListEntry[] {
-    const runtimeByName = new Map(runtimeInstances.map((instance) => [instance.name, instance] as const));
+    const runtimeByName = new Map(
+        runtimeInstances.map((instance) => [instance.name, instance] as const),
+    );
     const merged = new Map<string, TuiInstanceListEntry>();
     for (const instance of readConfigInstances(configView)) {
         const runtime = runtimeByName.get(instance.name);
@@ -429,7 +502,9 @@ function mergeInstances(
             });
         }
     }
-    return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return [...merged.values()].sort((left, right) =>
+        left.name.localeCompare(right.name),
+    );
 }
 
 function readConfigInstances(
@@ -439,44 +514,74 @@ function readConfigInstances(
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry) => {
         if (
-            typeof entry !== "object" || entry === null || Array.isArray(entry) ||
+            typeof entry !== "object" ||
+            entry === null ||
+            Array.isArray(entry) ||
             typeof entry.name !== "string"
-        ) return [];
-        const mcp = typeof entry.mcp === "object" && entry.mcp !== null && !Array.isArray(entry.mcp)
-            ? entry.mcp
-            : undefined;
-        return [{
-            enabled: entry.enabled !== false,
-            mcpEnabled: mcp?.enabled === true,
-            mcpPath: typeof mcp?.path === "string" ? mcp.path : undefined,
-            name: entry.name,
-            provider: typeof entry.provider === "string" ? entry.provider : undefined,
-        }];
+        )
+            return [];
+        const mcp =
+            typeof entry.mcp === "object" &&
+            entry.mcp !== null &&
+            !Array.isArray(entry.mcp)
+                ? entry.mcp
+                : undefined;
+        return [
+            {
+                enabled: entry.enabled !== false,
+                mcpEnabled: mcp?.enabled === true,
+                mcpPath: typeof mcp?.path === "string" ? mcp.path : undefined,
+                name: entry.name,
+                provider:
+                    typeof entry.provider === "string"
+                        ? entry.provider
+                        : undefined,
+            },
+        ];
     });
 }
 
-function refreshPageLabel(page: "audit" | "connections" | "overview" | "todo"): string {
+function refreshPageLabel(
+    page: "audit" | "connections" | "overview" | "todo",
+): string {
     return page[0]!.toUpperCase() + page.slice(1);
 }
 
 function isTuiPresentationEvent(name: string): boolean {
-    return isInstanceHealthEvent(name) || name === "log.appended" ||
-        name.startsWith("toolCall.") || name.startsWith("approval.") ||
-        name.startsWith("context.message.") || name.startsWith("todo.") ||
-        name.startsWith("artifact.share") || name.startsWith("artifact.transfer");
+    return (
+        isInstanceHealthEvent(name) ||
+        name === "log.appended" ||
+        name.startsWith("toolCall.") ||
+        name.startsWith("approval.") ||
+        name.startsWith("context.message.") ||
+        name.startsWith("todo.") ||
+        name.startsWith("artifact.share") ||
+        name.startsWith("artifact.transfer")
+    );
 }
 
 function isOverviewRefreshEvent(name: string): boolean {
-    return isInstanceHealthEvent(name) || name.startsWith("toolCall.") ||
-        name.startsWith("approval.") || name.startsWith("todo.");
+    return (
+        isInstanceHealthEvent(name) ||
+        name.startsWith("toolCall.") ||
+        name.startsWith("approval.") ||
+        name.startsWith("todo.")
+    );
 }
 
 function isInstanceHealthEvent(name: string): boolean {
     return [
-        "instance.started", "instance.stopped", "instance.statusChanged",
-        "instance.connectionChanged", "instance.readyChanged", "worker.rpcConnected",
-        "worker.rpcDisconnected", "reverse.connected", "reverse.disconnected",
-        "reverse.enrollmentChanged", "reverse.transportChanged",
+        "instance.started",
+        "instance.stopped",
+        "instance.statusChanged",
+        "instance.connectionChanged",
+        "instance.readyChanged",
+        "worker.rpcConnected",
+        "worker.rpcDisconnected",
+        "reverse.connected",
+        "reverse.disconnected",
+        "reverse.enrollmentChanged",
+        "reverse.transportChanged",
     ].includes(name);
 }
 
@@ -495,7 +600,9 @@ function toFailure(error: unknown): {
 }
 
 export function readTuiControlErrorCode(error: unknown): string | undefined {
-    return typeof error === "object" && error !== null && "code" in error &&
+    return typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
         typeof error.code === "string"
         ? error.code
         : undefined;

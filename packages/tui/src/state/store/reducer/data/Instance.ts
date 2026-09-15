@@ -10,7 +10,8 @@ export function reduceTuiStoreReducerInstance(
         case "log.clearBuffer": {
             const instance = state.ui.selectedInstance;
             if (instance === undefined) return state;
-            const throughSeq = state.readModel.instanceState[instance]?.logs.at(-1)?.seq ?? 0;
+            const throughSeq =
+                state.readModel.instanceState[instance]?.logs.at(-1)?.seq ?? 0;
             return {
                 ...state,
                 ui: {
@@ -27,9 +28,13 @@ export function reduceTuiStoreReducerInstance(
             const maxEvents = action.maxEvents ?? 100;
             const nextState = {
                 ...state,
-                rawEvents: rawEvents.slice(Math.max(0, rawEvents.length - maxEvents)),
+                rawEvents: rawEvents.slice(
+                    Math.max(0, rawEvents.length - maxEvents),
+                ),
             };
-            return withDerivedState(applyEventRecord(nextState, action.rawEvent));
+            return withDerivedState(
+                applyEventRecord(nextState, action.rawEvent),
+            );
         }
     }
 }

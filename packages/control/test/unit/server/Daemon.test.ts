@@ -8,20 +8,20 @@ test("a stopping daemon preserves successor lifecycle state", async () => {
     const daemon = new ControlDaemon({
         logger: {
             async info() {},
-            path: "/tmp/control.log"
+            path: "/tmp/control.log",
         } as never,
         pidFile: {
             async write() {
                 lifecycle.pid = "old";
-            }
+            },
         } as never,
         server: {
             async start() {},
-            async stop() {}
+            async stop() {},
         } as never,
         socketFile: {
-            async ensureRuntimeDir() {}
-        } as never
+            async ensureRuntimeDir() {},
+        } as never,
     });
 
     await daemon.start();
@@ -38,22 +38,22 @@ test("a daemon tears down a started server when pid publication fails", async ()
     const daemon = new ControlDaemon({
         logger: {
             async info() {},
-            path: "/tmp/control.log"
+            path: "/tmp/control.log",
         } as never,
         pidFile: {
             async write() {
                 throw new Error("pid write failed");
-            }
+            },
         } as never,
         server: {
             async start() {},
             async stop() {
                 stopCalls += 1;
-            }
+            },
         } as never,
         socketFile: {
-            async ensureRuntimeDir() {}
-        } as never
+            async ensureRuntimeDir() {},
+        } as never,
     });
 
     await assert.rejects(daemon.start(), /pid write failed/u);
@@ -72,12 +72,12 @@ test("a stop requested during startup runs after startup completes", async () =>
     const daemon = new ControlDaemon({
         logger: {
             async info() {},
-            path: "/tmp/control.log"
+            path: "/tmp/control.log",
         } as never,
         pidFile: {
             async write() {
                 calls.push("pid");
-            }
+            },
         } as never,
         server: {
             async start() {
@@ -88,11 +88,11 @@ test("a stop requested during startup runs after startup completes", async () =>
             async stop() {
                 if (!startCompleted) stopOverlappedStart = true;
                 calls.push("stop");
-            }
+            },
         } as never,
         socketFile: {
-            async ensureRuntimeDir() {}
-        } as never
+            async ensureRuntimeDir() {},
+        } as never,
     });
 
     const starting = daemon.start();

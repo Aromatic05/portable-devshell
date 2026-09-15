@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): string {
+export function resolvePortableDevshellApplicationVersion(
+    startUrl = import.meta.url,
+): string {
     let directory = dirname(fileURLToPath(startUrl));
     while (true) {
         const manifestPath = join(directory, "package.json");
@@ -12,8 +14,13 @@ export function resolvePortableDevshellApplicationVersion(startUrl = import.meta
                 version?: unknown;
             };
             if (manifest.name === "portable-devshell") {
-                if (typeof manifest.version !== "string" || manifest.version.length === 0) {
-                    throw new Error(`Application package version is invalid: ${manifestPath}`);
+                if (
+                    typeof manifest.version !== "string" ||
+                    manifest.version.length === 0
+                ) {
+                    throw new Error(
+                        `Application package version is invalid: ${manifestPath}`,
+                    );
                 }
                 return manifest.version;
             }
@@ -26,5 +33,7 @@ export function resolvePortableDevshellApplicationVersion(startUrl = import.meta
         if (parent === directory) break;
         directory = parent;
     }
-    throw new Error("Cannot locate portable-devshell application package manifest.");
+    throw new Error(
+        "Cannot locate portable-devshell application package manifest.",
+    );
 }

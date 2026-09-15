@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core/testing";
-import type { JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
+import type {
+    JsonValue,
+    PrefixRouteContext,
+    PrefixRouteStream,
+} from "@portable-devshell/shared";
 
 import { RuntimeSubscriptionManager } from "../../../../src/instance/execution/runtime/Subscription.ts";
 
@@ -17,11 +21,15 @@ test("RuntimeSubscriptionManager returns snapshot lastSeq and pushes sequenced e
         harness.context,
         "alpha",
         worker as unknown as WorkerInstance,
-        1
+        1,
     );
 
     assert.equal((harness.initialPayload as { lastSeq?: number })?.lastSeq, 1);
-    assert.equal((harness.initialPayload as { events?: Array<{ seq: number }> })?.events?.[0]?.seq, 1);
+    assert.equal(
+        (harness.initialPayload as { events?: Array<{ seq: number }> })
+            ?.events?.[0]?.seq,
+        1,
+    );
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     await waitFor(() => harness.events.length === 1);
@@ -74,19 +82,22 @@ test("RuntimeSubscriptionManager returns stream.gap when fromSeq is unavailable"
             createStreamContext("conn-2", "subscribe-2").context,
             "alpha",
             worker as unknown as WorkerInstance,
-            1
+            1,
         ),
         (error: unknown) => {
             assert.equal((error as { code?: string }).code, "stream.gap");
             assert.equal((error as { retryable?: boolean }).retryable, true);
-            assert.deepEqual((error as { details?: Record<string, unknown> }).details, {
-                instance: "alpha",
-                latestSeq: 2,
-                oldestAvailableSeq: 2,
-                requestedFromSeq: 1
-            });
+            assert.deepEqual(
+                (error as { details?: Record<string, unknown> }).details,
+                {
+                    instance: "alpha",
+                    latestSeq: 2,
+                    oldestAvailableSeq: 2,
+                    requestedFromSeq: 1,
+                },
+            );
             return true;
-        }
+        },
     );
     manager.unsubscribeConnection("conn-2");
 });
@@ -98,7 +109,12 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
 
     const harness = createStreamContext("conn-3", "subscribe-3");
 
-    await manager.subscribe(harness.context, "alpha", worker as unknown as WorkerInstance, 1);
+    await manager.subscribe(
+        harness.context,
+        "alpha",
+        worker as unknown as WorkerInstance,
+        1,
+    );
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     await waitFor(() => harness.events.length === 1);
 
@@ -112,7 +128,7 @@ test("RuntimeSubscriptionManager emits a non-terminal runtime stream.gap", async
         instance: "alpha",
         latestSeq: 3,
         oldestAvailableSeq: 4,
-        requestedFromSeq: 3
+        requestedFromSeq: 3,
     });
     manager.unsubscribeConnection("conn-3");
 });
@@ -139,7 +155,12 @@ test("RuntimeSubscriptionManager does not overlap polls while an event emit is p
         }
     });
 
-    await manager.subscribe(harness.context, "alpha", worker as unknown as WorkerInstance, 1);
+    await manager.subscribe(
+        harness.context,
+        "alpha",
+        worker as unknown as WorkerInstance,
+        1,
+    );
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     t.mock.timers.tick(1);
     await emitStarted;
@@ -164,7 +185,7 @@ test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (
                 throw new Error("bad instance subscription");
             }
             return badWorker.subscribe(fromSeq);
-        }
+        },
     };
     const unhandled: unknown[] = [];
     const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
@@ -173,8 +194,18 @@ test("RuntimeSubscriptionManager isolates a throwing subscription poll", async (
     const healthy = createStreamContext("conn-healthy", "subscribe-healthy");
 
     try {
-        await manager.subscribe(bad.context, "bad", throwingWorker as WorkerInstance, 1);
-        await manager.subscribe(healthy.context, "healthy", healthyWorker as unknown as WorkerInstance, 1);
+        await manager.subscribe(
+            bad.context,
+            "bad",
+            throwingWorker as WorkerInstance,
+            1,
+        );
+        await manager.subscribe(
+            healthy.context,
+            "healthy",
+            healthyWorker as unknown as WorkerInstance,
+            1,
+        );
         failPoll = true;
         healthyWorker.emit("toolCall.completed", { toolName: "bash_run" });
         t.mock.timers.tick(1);
@@ -207,8 +238,8 @@ test("RuntimeSubscriptionManager shares the same polling owner with callback wat
             onEvent(event) {
                 events.push(event.seq);
             },
-            onGap() {}
-        }
+            onGap() {},
+        },
     );
     worker.emit("todo.updated", { taskId: "task-a" });
     await waitFor(() => events.length === 1);
@@ -221,19 +252,29 @@ test("RuntimeSubscriptionManager shares the same polling owner with callback wat
 function createStreamContext(
     connectionId: string,
     requestId: string,
-    beforeEmit?: () => Promise<void>
+    beforeEmit?: () => Promise<void>,
 ): {
     context: PrefixRouteContext;
-    events: Array<{ module?: string; name: string; payload?: JsonValue; seq?: number }>;
+    events: Array<{
+        module?: string;
+        name: string;
+        payload?: JsonValue;
+        seq?: number;
+    }>;
     initialPayload?: JsonValue;
 } {
     const result: {
         context: PrefixRouteContext;
-        events: Array<{ module?: string; name: string; payload?: JsonValue; seq?: number }>;
+        events: Array<{
+            module?: string;
+            name: string;
+            payload?: JsonValue;
+            seq?: number;
+        }>;
         initialPayload?: JsonValue;
     } = {
         context: undefined as unknown as PrefixRouteContext,
-        events: []
+        events: [],
     };
     const stream: PrefixRouteStream = {
         id: requestId,
@@ -249,9 +290,9 @@ function createStreamContext(
                 ...(module === undefined ? {} : { module }),
                 name,
                 ...(payload === undefined ? {} : { payload }),
-                ...(seq === undefined ? {} : { seq })
+                ...(seq === undefined ? {} : { seq }),
             });
-        }
+        },
     };
     result.context = {
         afterReply() {},
@@ -264,14 +305,20 @@ function createStreamContext(
         },
         peer: "cli",
         requestId,
-        signal: new AbortController().signal
+        signal: new AbortController().signal,
     };
     return result;
 }
 
 class FakeWorker {
     readonly #name: string;
-    #events: Array<{ at: string; data?: unknown; instanceName: string; seq: number; type: string }> = [];
+    #events: Array<{
+        at: string;
+        data?: unknown;
+        instanceName: string;
+        seq: number;
+        type: string;
+    }> = [];
     #lastSeq = 0;
     #snapshot = {
         connectionState: "disconnected",
@@ -279,14 +326,14 @@ class FakeWorker {
         lastSeq: 0,
         name: "alpha",
         ready: false,
-        status: "stopped"
+        status: "stopped",
     };
 
     constructor(name: string) {
         this.#name = name;
         this.#snapshot = {
             ...this.#snapshot,
-            name
+            name,
         };
     }
 
@@ -298,7 +345,7 @@ class FakeWorker {
             lastSeq: this.#lastSeq,
             name: this.#name,
             ready: true,
-            status: "ready"
+            status: "ready",
         };
         return this.snapshot();
     }
@@ -316,14 +363,14 @@ class FakeWorker {
                 fromSeq,
                 kind: "gap" as const,
                 lastSeq: this.#lastSeq,
-                nextSeq
+                nextSeq,
             };
         }
 
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events" as const,
-            lastSeq: this.#lastSeq
+            lastSeq: this.#lastSeq,
         };
     }
 
@@ -333,14 +380,14 @@ class FakeWorker {
             data,
             instanceName: this.#name,
             seq: this.#lastSeq + 1,
-            type
+            type,
         };
 
         this.#lastSeq = event.seq;
         this.#events.push(event);
         this.#snapshot = {
             ...this.#snapshot,
-            lastSeq: this.#lastSeq
+            lastSeq: this.#lastSeq,
         };
     }
 

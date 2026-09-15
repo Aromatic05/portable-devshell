@@ -1,19 +1,36 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { EXTENSION_ID, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import { toNodeHandler, type NodeMcpRequestHandler } from "@modelcontextprotocol/node";
+import {
+    EXTENSION_ID,
+    RESOURCE_MIME_TYPE,
+} from "@modelcontextprotocol/ext-apps/server";
+import {
+    toNodeHandler,
+    type NodeMcpRequestHandler,
+} from "@modelcontextprotocol/node";
 import {
     createMcpHandler,
     ProtocolError,
     ProtocolErrorCode,
     Server,
     type McpHttpHandler,
-    type Tool
+    type Tool,
 } from "@modelcontextprotocol/server";
-import { mergeComments, resolveErrorHints, toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import {
+    mergeComments,
+    resolveErrorHints,
+    toControlErrorBody,
+    type ControlErrorBody,
+    type JsonValue,
+} from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
-import { workspaceAppHtml, workspaceAppResourceMetaForPublicBaseUrl, workspaceAppResourceUri, workspaceAppResourceUris } from "../workspace/app/App.js";
+import {
+    workspaceAppHtml,
+    workspaceAppResourceMetaForPublicBaseUrl,
+    workspaceAppResourceUri,
+    workspaceAppResourceUris,
+} from "../workspace/app/App.js";
 import { McpEndpointWorker } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./Endpoint.js";
 
@@ -22,20 +39,24 @@ export class McpEndpointBinding {
     readonly #nodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #worker: McpEndpointWorker;
-    readonly #workspaceResourceMeta: ReturnType<typeof workspaceAppResourceMetaForPublicBaseUrl>;
+    readonly #workspaceResourceMeta: ReturnType<
+        typeof workspaceAppResourceMetaForPublicBaseUrl
+    >;
 
-    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0", publicBaseUrl?: string) {
+    constructor(
+        worker: McpEndpointWorker,
+        serverVersion = "0.0.0",
+        publicBaseUrl?: string,
+    ) {
         this.#serverVersion = serverVersion;
         this.#worker = worker;
-        this.#workspaceResourceMeta = workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
-        this.#handler = createMcpHandler(
-            () => this.#createServer(),
-            {
-                keepAliveMs: 15_000,
-                legacy: "stateless",
-                responseMode: "sse"
-            }
-        );
+        this.#workspaceResourceMeta =
+            workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
+        this.#handler = createMcpHandler(() => this.#createServer(), {
+            keepAliveMs: 15_000,
+            legacy: "stateless",
+            responseMode: "sse",
+        });
         this.#nodeHandler = toNodeHandler(this.#handler);
     }
 
@@ -47,7 +68,11 @@ export class McpEndpointBinding {
         await this.#worker.restoreTmuxWaits();
     }
 
-    async handleRequest(request: IncomingMessage, response: ServerResponse, body: JsonValue): Promise<void> {
+    async handleRequest(
+        request: IncomingMessage,
+        response: ServerResponse,
+        body: JsonValue,
+    ): Promise<void> {
         await this.#nodeHandler(request, response, body);
     }
 
@@ -56,64 +81,78 @@ export class McpEndpointBinding {
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
-                version: this.#serverVersion
+                version: this.#serverVersion,
             },
             {
                 capabilities: {
-                    ...(workspaceApp ? { extensions: { [EXTENSION_ID]: {} } } : {}),
+                    ...(workspaceApp
+                        ? { extensions: { [EXTENSION_ID]: {} } }
+                        : {}),
                     ...(workspaceApp ? { resources: {} } : {}),
-                    tools: {}
-                }
-            }
+                    tools: {},
+                },
+            },
         );
 
         if (workspaceApp) {
-            server.setRequestHandler('resources/list', async () => ({
-                resources: [{
-                    mimeType: RESOURCE_MIME_TYPE,
-                    name: "portable-devshell Workspace",
-                    uri: workspaceAppResourceUri
-                }]
+            server.setRequestHandler("resources/list", async () => ({
+                resources: [
+                    {
+                        mimeType: RESOURCE_MIME_TYPE,
+                        name: "portable-devshell Workspace",
+                        uri: workspaceAppResourceUri,
+                    },
+                ],
             }));
 
-            server.setRequestHandler('resources/read', async (request) => {
-                if (!workspaceAppResourceUris.includes(request.params.uri as typeof workspaceAppResourceUris[number])) {
-                    throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${request.params.uri}`);
+            server.setRequestHandler("resources/read", async (request) => {
+                if (
+                    !workspaceAppResourceUris.includes(
+                        request.params
+                            .uri as (typeof workspaceAppResourceUris)[number],
+                    )
+                ) {
+                    throw new ProtocolError(
+                        ProtocolErrorCode.InvalidParams,
+                        `Unknown resource: ${request.params.uri}`,
+                    );
                 }
                 return {
-                    contents: [{
-                        _meta: this.#workspaceResourceMeta,
-                        mimeType: RESOURCE_MIME_TYPE,
-                        text: workspaceAppHtml,
-                        uri: request.params.uri
-                    }]
+                    contents: [
+                        {
+                            _meta: this.#workspaceResourceMeta,
+                            mimeType: RESOURCE_MIME_TYPE,
+                            text: workspaceAppHtml,
+                            uri: request.params.uri,
+                        },
+                    ],
                 };
             });
         }
 
-        server.setRequestHandler('tools/list', async () => {
+        server.setRequestHandler("tools/list", async () => {
             try {
                 return {
-                    tools: this.#worker.listTools().map(toProtocolTool)
+                    tools: this.#worker.listTools().map(toProtocolTool),
                 };
             } catch (error) {
                 throw toMcpError(error, undefined);
             }
         });
 
-        server.setRequestHandler('tools/call', async (request, ctx) => {
+        server.setRequestHandler("tools/call", async (request, ctx) => {
             try {
                 const requestMeta = readRequestMeta(request.params._meta);
                 const context = {
                     principal: readPrincipal(ctx.http?.authInfo),
                     ...(requestMeta === undefined ? {} : { requestMeta }),
-                    requestId: toRequestId(ctx.mcpReq.id)
+                    requestId: toRequestId(ctx.mcpReq.id),
                 };
                 const result = await this.#worker.callTool(
                     request.params.name,
                     (request.params.arguments ?? {}) as JsonValue,
                     context,
-                    ctx.mcpReq.signal
+                    ctx.mcpReq.signal,
                 );
                 return toCallToolResult(result);
             } catch (error) {
@@ -125,7 +164,9 @@ export class McpEndpointBinding {
     }
 }
 
-function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unknown> } | undefined): string {
+function readPrincipal(
+    authInfo: { clientId: string; extra?: Record<string, unknown> } | undefined,
+): string {
     const subject = authInfo?.extra?.subject;
     if (typeof subject === "string" && subject.length > 0) {
         return subject;
@@ -134,7 +175,8 @@ function readPrincipal(authInfo: { clientId: string; extra?: Record<string, unkn
 }
 
 function readRequestMeta(meta: unknown): Record<string, unknown> | undefined {
-    if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return undefined;
+    if (typeof meta !== "object" || meta === null || Array.isArray(meta))
+        return undefined;
     return meta as Record<string, unknown>;
 }
 
@@ -156,21 +198,27 @@ function toCallToolResult(result: McpEndpointResult) {
             ...(result._meta === undefined ? {} : { _meta: result._meta }),
             content: result.content,
             isError: result.isError,
-            structuredContent: result.structuredContent
+            structuredContent: result.structuredContent,
         };
     }
     return {
         content: [],
         isError: false,
-        structuredContent: result
+        structuredContent: result,
     };
 }
 
-function toMcpError(error: unknown, toolName: string | undefined): ProtocolError {
+function toMcpError(
+    error: unknown,
+    toolName: string | undefined,
+): ProtocolError {
     const body = toControlErrorBody(error);
     const comment = mergeErrorComment(error, body, toolName);
     if (error instanceof McpToolSchemaUnavailableError) {
-        return new ProtocolError(-32002, error.message, { code: error.code, ...(comment === undefined ? {} : { comment }) });
+        return new ProtocolError(-32002, error.message, {
+            code: error.code,
+            ...(comment === undefined ? {} : { comment }),
+        });
     }
 
     if (body?.code === "core.instanceNotReady") {
@@ -179,33 +227,39 @@ function toMcpError(error: unknown, toolName: string | undefined): ProtocolError
         return new ProtocolError(-32001, "Instance not ready.", {
             ...sanitized,
             code: "mcp.instanceNotReady",
-            ...(comment === undefined ? {} : { comment })
+            ...(comment === undefined ? {} : { comment }),
         });
     }
 
     if (body !== undefined) {
-        return new ProtocolError(ProtocolErrorCode.InternalError, body.message, {
-            ...sanitizeErrorBody(body),
-            ...(comment === undefined ? {} : { comment })
-        });
+        return new ProtocolError(
+            ProtocolErrorCode.InternalError,
+            body.message,
+            {
+                ...sanitizeErrorBody(body),
+                ...(comment === undefined ? {} : { comment }),
+            },
+        );
     }
 
     if (error instanceof Error) {
         return new ProtocolError(
             ProtocolErrorCode.InternalError,
             error.message,
-            comment === undefined ? undefined : { comment }
+            comment === undefined ? undefined : { comment },
         );
     }
 
     return new ProtocolError(
         ProtocolErrorCode.InternalError,
         "Unknown MCP error.",
-        comment === undefined ? undefined : { comment }
+        comment === undefined ? undefined : { comment },
     );
 }
 
-function toProtocolTool(tool: ReturnType<McpEndpointWorker["listTools"]>[number]): Tool {
+function toProtocolTool(
+    tool: ReturnType<McpEndpointWorker["listTools"]>[number],
+): Tool {
     if (
         typeof tool.inputSchema !== "object" ||
         tool.inputSchema === null ||
@@ -220,27 +274,36 @@ function toProtocolTool(tool: ReturnType<McpEndpointWorker["listTools"]>[number]
 function mergeErrorComment(
     error: unknown,
     body: ControlErrorBody | undefined,
-    toolName: string | undefined
+    toolName: string | undefined,
 ): string[] | undefined {
     const userComments = readComment(error) ?? [];
-    const hints = body === undefined ? [] : resolveErrorHints(toolName ?? "", body);
+    const hints =
+        body === undefined ? [] : resolveErrorHints(toolName ?? "", body);
     const merged = mergeComments(userComments, hints);
     return merged.length > 0 ? merged : undefined;
 }
 
 function readComment(error: unknown): string[] | undefined {
-    if (typeof error !== "object" || error === null || !("comment" in error)) return undefined;
+    if (typeof error !== "object" || error === null || !("comment" in error))
+        return undefined;
     const { comment } = error;
-    return Array.isArray(comment) && comment.every((entry) => typeof entry === "string") ? comment : undefined;
+    return Array.isArray(comment) &&
+        comment.every((entry) => typeof entry === "string")
+        ? comment
+        : undefined;
 }
 
 function sanitizeErrorBody(body: ControlErrorBody): Record<string, JsonValue> {
     return {
         code: body.code,
-        ...(body.cause === undefined ? {} : { cause: sanitizeErrorBody(body.cause) }),
-        ...(body.details === undefined ? {} : { details: sanitizeDetails(body.details) }),
+        ...(body.cause === undefined
+            ? {}
+            : { cause: sanitizeErrorBody(body.cause) }),
+        ...(body.details === undefined
+            ? {}
+            : { details: sanitizeDetails(body.details) }),
         message: body.message,
-        retryable: body.retryable
+        retryable: body.retryable,
     };
 }
 
@@ -255,9 +318,19 @@ function sanitizeDetails(details: JsonValue): JsonValue {
 
     const candidate = details as Record<string, JsonValue>;
     const filtered = Object.entries(candidate).filter(([key]) => {
-        return key !== "activeCtxId" && key !== "command" && key !== "commandDisplay" && key !== "createdByCtxId" &&
-            key !== "ctxId" && key !== "cwd" && key !== "stderrTail" && key !== "stdoutTail";
+        return (
+            key !== "activeCtxId" &&
+            key !== "command" &&
+            key !== "commandDisplay" &&
+            key !== "createdByCtxId" &&
+            key !== "ctxId" &&
+            key !== "cwd" &&
+            key !== "stderrTail" &&
+            key !== "stdoutTail"
+        );
     });
 
-    return Object.fromEntries(filtered.map(([key, value]) => [key, sanitizeDetails(value)])) as JsonValue;
+    return Object.fromEntries(
+        filtered.map(([key, value]) => [key, sanitizeDetails(value)]),
+    ) as JsonValue;
 }

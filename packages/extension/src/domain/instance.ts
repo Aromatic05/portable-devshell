@@ -1,9 +1,13 @@
 import type { ExtensionJsonValue } from "../ExtensionApi.js";
 
-export type ExtensionInstanceProvider = "docker" | "local" | "podman" | "reverse" | "ssh";
-export type ExtensionInstanceRuntimeStatus = "failed" | "ready" | "running" | "stale" | "stopped";
-export type ExtensionInstanceDaemonState = "failed" | "running" | "stale" | "starting" | "stopped" | "stopping";
-export type ExtensionInstanceConnectionState = "connected" | "connecting" | "disconnected" | "failed" | "reconnecting";
+export type ExtensionInstanceProvider =
+    "docker" | "local" | "podman" | "reverse" | "ssh";
+export type ExtensionInstanceRuntimeStatus =
+    "failed" | "ready" | "running" | "stale" | "stopped";
+export type ExtensionInstanceDaemonState =
+    "failed" | "running" | "stale" | "starting" | "stopped" | "stopping";
+export type ExtensionInstanceConnectionState =
+    "connected" | "connecting" | "disconnected" | "failed" | "reconnecting";
 
 export interface ExtensionInstanceSnapshot {
     connectionState: ExtensionInstanceConnectionState;
@@ -82,11 +86,17 @@ export interface ExtensionInstanceCapability {
     disable(name: string): Promise<void>;
     enable(name: string): Promise<void>;
     list(): Promise<readonly ExtensionInstanceRecord[]>;
-    readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]>;
+    readLogs(
+        name: string,
+        query?: ExtensionInstanceLogQuery,
+    ): Promise<readonly ExtensionInstanceLogEntry[]>;
     refresh(name: string): Promise<ExtensionInstanceSnapshot>;
     snapshot(name: string): Promise<ExtensionInstanceSnapshot>;
     start(name: string): Promise<ExtensionInstanceSnapshot>;
     stop(name: string): Promise<ExtensionInstanceSnapshot>;
     validateCreate(draft: ExtensionJsonValue): Promise<ExtensionJsonValue>;
-    watchEvents(name: string, watch: ExtensionInstanceEventWatch): Promise<void>;
+    watchEvents(
+        name: string,
+        watch: ExtensionInstanceEventWatch,
+    ): Promise<void>;
 }

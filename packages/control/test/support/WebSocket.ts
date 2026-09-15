@@ -13,13 +13,22 @@ export class NodeWebSocketChannel implements Channel {
         socket.on("message", (data, isBinary) => this.#accept(data, isBinary));
         socket.once("error", (error) => this.#finish(error));
         socket.once("close", (code, reason) => {
-            this.#finish(code === 1000 ? undefined : new Error(`WebSocket closed: ${code} ${reason.toString()}`));
+            this.#finish(
+                code === 1000
+                    ? undefined
+                    : new Error(
+                          `WebSocket closed: ${code} ${reason.toString()}`,
+                      ),
+            );
         });
     }
 
-    static async connect(url: string, cookie: string): Promise<NodeWebSocketChannel> {
+    static async connect(
+        url: string,
+        cookie: string,
+    ): Promise<NodeWebSocketChannel> {
         const socket = new WebSocket(url, "devshell-control-rpc.v1", {
-            headers: { cookie }
+            headers: { cookie },
         });
         await new Promise<void>((resolve, reject) => {
             socket.once("open", resolve);
@@ -37,7 +46,9 @@ export class NodeWebSocketChannel implements Channel {
             throw this.#closeError ?? new Error("WebSocket channel is closed.");
         }
         await new Promise<void>((resolve, reject) => {
-            this.#socket.send(frame, { binary: true }, (error) => error == null ? resolve() : reject(error));
+            this.#socket.send(frame, { binary: true }, (error) =>
+                error == null ? resolve() : reject(error),
+            );
         });
     }
 
@@ -52,7 +63,10 @@ export class NodeWebSocketChannel implements Channel {
     }
 
     close(error?: Error): void {
-        if (this.#socket.readyState === WebSocket.OPEN || this.#socket.readyState === WebSocket.CONNECTING) {
+        if (
+            this.#socket.readyState === WebSocket.OPEN ||
+            this.#socket.readyState === WebSocket.CONNECTING
+        ) {
             this.#socket.close(1000, "client closed");
         }
         this.#finish(error);

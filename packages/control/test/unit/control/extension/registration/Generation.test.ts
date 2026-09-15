@@ -16,7 +16,7 @@ const manifest: ExtensionManifest = {
     id: "example",
     name: "Example",
     schemaVersion: 1,
-    version: "1.0.0"
+    version: "1.0.0",
 };
 
 const registrations = new ExtensionRegistrationSet([]);
@@ -24,10 +24,12 @@ const registrations = new ExtensionRegistrationSet([]);
 test("Extension generation drains existing leases before disposal and rejects new leases", async () => {
     let disposeCount = 0;
     const generation = new ExtensionGeneration({
-        dispose: async () => { disposeCount += 1; },
+        dispose: async () => {
+            disposeCount += 1;
+        },
         generation: "1.0.0-a",
         manifest,
-        registrations
+        registrations,
     });
     generation.activate();
     const lease = generation.acquire();
@@ -50,10 +52,12 @@ test("Extension generation drains existing leases before disposal and rejects ne
 test("Extension candidate can be retired before it becomes active", async () => {
     let disposed = false;
     const generation = new ExtensionGeneration({
-        dispose: async () => { disposed = true; },
+        dispose: async () => {
+            disposed = true;
+        },
         generation: "1.0.0-candidate",
         manifest,
-        registrations
+        registrations,
     });
     await generation.retire();
     assert.equal(disposed, true);
@@ -70,7 +74,7 @@ test("Extension generation surfaces disposal failures without double disposal", 
         },
         generation: "1.0.0-bad-dispose",
         manifest,
-        registrations
+        registrations,
     });
     generation.activate();
     await assert.rejects(generation.retire(), failure);

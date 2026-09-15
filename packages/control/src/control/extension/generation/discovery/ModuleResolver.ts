@@ -36,7 +36,7 @@ export class ExtensionHostModuleResolver {
 
     constructor(
         hostParentUrl: string = import.meta.url,
-        options: ExtensionHostModuleResolverOptions = {}
+        options: ExtensionHostModuleResolverOptions = {},
     ) {
         this.#hostParentUrl = hostParentUrl;
         this.#hostRequire = createRequire(hostParentUrl);
@@ -44,29 +44,40 @@ export class ExtensionHostModuleResolver {
         this.#hooks = registerHooks({
             resolve: (specifier, context, nextResolve) => {
                 if (this.#deniedSpecifiers.has(specifier)) {
-                    throw new Error(`Extension generation cannot import restricted module ${specifier}.`);
+                    throw new Error(
+                        `Extension generation cannot import restricted module ${specifier}.`,
+                    );
                 }
                 const registeredRoot = isBareSpecifier(specifier)
                     ? this.#rootForParent(context.parentURL)
                     : undefined;
                 const requestedPackage = packageRoot(specifier);
                 if (
-                    registeredRoot !== undefined
-                    && requestedPackage?.startsWith("@portable-devshell/") === true
-                    && requestedPackage !== PUBLIC_EXTENSION_SDK_PACKAGE
+                    registeredRoot !== undefined &&
+                    requestedPackage?.startsWith("@portable-devshell/") ===
+                        true &&
+                    requestedPackage !== PUBLIC_EXTENSION_SDK_PACKAGE
                 ) {
                     throw new Error(
-                        `Extension generation cannot import portable-devshell internal package ${requestedPackage}.`
+                        `Extension generation cannot import portable-devshell internal package ${requestedPackage}.`,
                     );
                 }
-                if (registeredRoot !== undefined && requestedPackage === PUBLIC_EXTENSION_SDK_PACKAGE) {
+                if (
+                    registeredRoot !== undefined &&
+                    requestedPackage === PUBLIC_EXTENSION_SDK_PACKAGE
+                ) {
                     try {
-                        return nextResolve(specifier, { ...context, parentURL: this.#hostParentUrl });
+                        return nextResolve(specifier, {
+                            ...context,
+                            parentURL: this.#hostParentUrl,
+                        });
                     } catch (error) {
                         try {
                             return {
                                 shortCircuit: true,
-                                url: pathToFileURL(this.#hostRequire.resolve(specifier)).href
+                                url: pathToFileURL(
+                                    this.#hostRequire.resolve(specifier),
+                                ).href,
                             };
                         } catch {
                             throw error;
@@ -77,40 +88,49 @@ export class ExtensionHostModuleResolver {
                     return nextResolve(specifier, context);
                 } catch (error) {
                     if (
-                        registeredRoot === undefined
-                        || requestedPackage === undefined
-                        || !registeredRoot.hostDependencies.has(requestedPackage)
+                        registeredRoot === undefined ||
+                        requestedPackage === undefined ||
+                        !registeredRoot.hostDependencies.has(requestedPackage)
                     ) {
                         throw error;
                     }
                     try {
-                        return nextResolve(specifier, { ...context, parentURL: this.#hostParentUrl });
+                        return nextResolve(specifier, {
+                            ...context,
+                            parentURL: this.#hostParentUrl,
+                        });
                     } catch {
                         try {
                             return {
                                 shortCircuit: true,
-                                url: pathToFileURL(this.#hostRequire.resolve(specifier)).href
+                                url: pathToFileURL(
+                                    this.#hostRequire.resolve(specifier),
+                                ).href,
                             };
                         } catch {
                             throw error;
                         }
                     }
                 }
-            }
+            },
         });
     }
 
-    register(codeDirectory: string, hostDependencies: readonly string[] = []): ExtensionHostModuleLease {
+    register(
+        codeDirectory: string,
+        hostDependencies: readonly string[] = [],
+    ): ExtensionHostModuleLease {
         const root = resolve(codeDirectory);
         const existing = this.#roots.get(root);
         if (existing === undefined) {
             this.#roots.set(root, {
                 count: 1,
-                hostDependencies: new Set(hostDependencies)
+                hostDependencies: new Set(hostDependencies),
             });
         } else {
             existing.count += 1;
-            for (const dependency of hostDependencies) existing.hostDependencies.add(dependency);
+            for (const dependency of hostDependencies)
+                existing.hostDependencies.add(dependency);
         }
         let released = false;
         return {
@@ -118,9 +138,10 @@ export class ExtensionHostModuleResolver {
                 if (released) return;
                 released = true;
                 const registration = this.#roots.get(root);
-                if (registration === undefined || registration.count <= 1) this.#roots.delete(root);
+                if (registration === undefined || registration.count <= 1)
+                    this.#roots.delete(root);
                 else registration.count -= 1;
-            }
+            },
         };
     }
 
@@ -129,8 +150,11 @@ export class ExtensionHostModuleResolver {
         this.#hooks.deregister();
     }
 
-    #rootForParent(parentUrl: string | undefined): ExtensionHostModuleRoot | undefined {
-        if (parentUrl === undefined || !parentUrl.startsWith("file:")) return undefined;
+    #rootForParent(
+        parentUrl: string | undefined,
+    ): ExtensionHostModuleRoot | undefined {
+        if (parentUrl === undefined || !parentUrl.startsWith("file:"))
+            return undefined;
         let parentPath: string;
         try {
             parentPath = fileURLToPath(parentUrl);
@@ -139,7 +163,10 @@ export class ExtensionHostModuleResolver {
         }
         for (const [root, registration] of this.#roots) {
             const candidate = relative(root, parentPath);
-            if (candidate === "" || (!candidate.startsWith("..") && !isAbsolute(candidate))) {
+            if (
+                candidate === "" ||
+                (!candidate.startsWith("..") && !isAbsolute(candidate))
+            ) {
                 return registration;
             }
         }
@@ -155,17 +182,21 @@ export function sharedExtensionHostModuleResolver(): ExtensionHostModuleResolver
 }
 
 function isBareSpecifier(specifier: string): boolean {
-    return !specifier.startsWith(".")
-        && !specifier.startsWith("/")
-        && !specifier.startsWith("#")
-        && !/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(specifier);
+    return (
+        !specifier.startsWith(".") &&
+        !specifier.startsWith("/") &&
+        !specifier.startsWith("#") &&
+        !/^[A-Za-z][A-Za-z0-9+.-]*:/u.test(specifier)
+    );
 }
 
 function packageRoot(specifier: string): string | undefined {
     if (!isBareSpecifier(specifier)) return undefined;
     const segments = specifier.split("/");
     if (specifier.startsWith("@")) {
-        return segments.length >= 2 && segments[0]!.length > 1 && segments[1]!.length > 0
+        return segments.length >= 2 &&
+            segments[0]!.length > 1 &&
+            segments[1]!.length > 0
             ? `${segments[0]}/${segments[1]}`
             : undefined;
     }

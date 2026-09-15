@@ -11,7 +11,11 @@ import {
 import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertPackageBinFile, readPackageBinPath, writePortableApplicationManifest } from "./application-layout.mjs";
+import {
+    assertPackageBinFile,
+    readPackageBinPath,
+    writePortableApplicationManifest,
+} from "./application-layout.mjs";
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -22,7 +26,9 @@ const outputDirectory = resolve(
 );
 const target = readOption("--target") ?? hostTarget();
 if (target !== hostTarget()) {
-    throw new Error(`cannot package ${target} on ${hostTarget()}; install dependencies on the target platform first.`);
+    throw new Error(
+        `cannot package ${target} on ${hostTarget()}; install dependencies on the target platform first.`,
+    );
 }
 const packageJson = JSON.parse(
     await readFile(resolve(repoRoot, "package.json"), "utf8"),
@@ -46,9 +52,11 @@ try {
     ]);
     await writePortableApplicationManifest(appDirectory, {
         minimumNodeMajor: 24,
-        version
+        version,
     });
-    const cli = await assertPackageBinFile(await readPackageBinPath(appDirectory, "devshell"));
+    const cli = await assertPackageBinFile(
+        await readPackageBinPath(appDirectory, "devshell"),
+    );
     await chmod(cli.absolutePath, 0o755);
     await writeFile(
         resolve(appDirectory, "portable-devshell-install.json"),
@@ -60,11 +68,7 @@ try {
     const sha256 = createHash("sha256")
         .update(await readFile(assetPath))
         .digest("hex");
-    await writeFile(
-        `${assetPath}.sha256`,
-        `${sha256}  ${assetName}\n`,
-        "utf8",
-    );
+    await writeFile(`${assetPath}.sha256`, `${sha256}  ${assetName}\n`, "utf8");
     process.stdout.write(`${assetPath}\n${assetPath}.sha256\n`);
 } finally {
     await rm(stagingRoot, { force: true, recursive: true });
@@ -106,8 +110,18 @@ function requireString(value, name) {
 }
 
 function hostTarget() {
-    const os = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
-    const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : undefined;
+    const os =
+        process.platform === "darwin"
+            ? "darwin"
+            : process.platform === "win32"
+              ? "windows"
+              : "linux";
+    const arch =
+        process.arch === "arm64"
+            ? "arm64"
+            : process.arch === "x64"
+              ? "x64"
+              : undefined;
     if (arch === undefined) {
         throw new Error(`unsupported host architecture: ${process.arch}`);
     }

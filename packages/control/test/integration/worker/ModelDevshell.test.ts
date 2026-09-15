@@ -6,7 +6,7 @@ import test from "node:test";
 import {
     WorkerBinary,
     WorkerInstanceFactory,
-    WorkerTransportDriverLocal
+    WorkerTransportDriverLocal,
 } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
@@ -22,7 +22,7 @@ import { RuntimeSubscriptionManager } from "../../../src/instance/execution/runt
 import {
     commandAvailable,
     realWorkerTestOptions,
-    resolveTestWorkerBinary
+    resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
@@ -50,16 +50,20 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async () => {
         const instanceName = "model-devshell-real";
-        const homeDirectory = await createTestTempDirectory("model-devshell-home");
-        const workspace = await createTestTempDirectory("model-devshell-workspace");
+        const homeDirectory = await createTestTempDirectory(
+            "model-devshell-home",
+        );
+        const workspace = await createTestTempDirectory(
+            "model-devshell-workspace",
+        );
         const worker = new WorkerInstanceFactory().create({
             env: { ...process.env, HOME: homeDirectory },
             homeDirectory,
             name: asInstanceName(instanceName),
             transport: new WorkerTransportDriverLocal({
                 spawnFunction: spawn,
-                workerBinary: new WorkerBinary(workerBinaryPath!)
-            })
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+            }),
         });
         const descriptor = {
             enabled: true,
@@ -69,28 +73,33 @@ test(
             name: instanceName,
             provider: "local",
             todo: {
-                summaries: () => []
+                summaries: () => [],
             },
-            worker
+            worker,
         } as unknown as InstanceDescriptor;
         const instances = new InstanceRegistry([descriptor]);
         const host = new McpHost({
-            instances: [{
-                auth: { enabled: false, provider: "none" },
-                name: instanceName,
-                worker
-            }],
+            instances: [
+                {
+                    auth: { enabled: false, provider: "none" },
+                    name: instanceName,
+                    worker,
+                },
+            ],
             listenHost: "127.0.0.1",
-            listenPort: 0
+            listenPort: 0,
         });
-        const commands = new CliExtensionCommandService(instanceModelExtensionHost(instances, instanceName), {
-            surface: "model"
-        });
+        const commands = new CliExtensionCommandService(
+            instanceModelExtensionHost(instances, instanceName),
+            {
+                surface: "model",
+            },
+        );
         const broker = new ModelDevshellBroker({
             access: { allows: ({ extensionId }) => extensionId === "instance" },
             commands,
             contextAdmin: () => host.contextAdmin,
-            instances
+            instances,
         });
 
         try {
@@ -104,88 +113,142 @@ test(
                 params: {
                     capabilities: {},
                     clientInfo: { name: "model-devshell-test", version: "1" },
-                    protocolVersion: "2025-06-18"
-                }
+                    protocolVersion: "2025-06-18",
+                },
             });
-            assert.equal(initialize.error, undefined, JSON.stringify(initialize));
+            assert.equal(
+                initialize.error,
+                undefined,
+                JSON.stringify(initialize),
+            );
             const headers = {
-                "mcp-protocol-version": String(initialize.result?.protocolVersion ?? "")
+                "mcp-protocol-version": String(
+                    initialize.result?.protocolVersion ?? "",
+                ),
             };
-            await postRaw(endpoint, {
-                jsonrpc: "2.0",
-                method: "notifications/initialized"
-            }, headers);
+            await postRaw(
+                endpoint,
+                {
+                    jsonrpc: "2.0",
+                    method: "notifications/initialized",
+                },
+                headers,
+            );
             const ctxId = await createContext(endpoint, headers, workspace);
 
             const status = await callBash(
                 endpoint,
                 headers,
                 ctxId,
-                `devshell instance status ${instanceName}`
+                `devshell instance status ${instanceName}`,
             );
             assert.equal(status.error, undefined, JSON.stringify(status));
             assert.equal(status.result?.isError, false, JSON.stringify(status));
-            assert.equal(status.result?.structuredContent?.exitCode, 0, JSON.stringify(status));
+            assert.equal(
+                status.result?.structuredContent?.exitCode,
+                0,
+                JSON.stringify(status),
+            );
             assert.match(
                 String(status.result?.structuredContent?.stdout ?? ""),
-                new RegExp(`instance: ${instanceName}\\nstatus: ready`, "u")
+                new RegExp(`instance: ${instanceName}\\nstatus: ready`, "u"),
             );
 
-            const forbidden = await callBash(endpoint, headers, ctxId, "devshell stop");
+            const forbidden = await callBash(
+                endpoint,
+                headers,
+                ctxId,
+                "devshell stop",
+            );
             assert.equal(forbidden.error, undefined, JSON.stringify(forbidden));
-            assert.equal(forbidden.result?.isError, false, JSON.stringify(forbidden));
+            assert.equal(
+                forbidden.result?.isError,
+                false,
+                JSON.stringify(forbidden),
+            );
             assert.equal(forbidden.result?.structuredContent?.exitCode, 127);
             assert.match(
                 String(forbidden.result?.structuredContent?.stderr ?? ""),
-                /CLI command stop is unavailable\./u
+                /CLI command stop is unavailable\./u,
             );
 
             const stillAlive = await callBash(
                 endpoint,
                 headers,
                 ctxId,
-                `devshell instance status ${instanceName}`
+                `devshell instance status ${instanceName}`,
             );
             assert.equal(stillAlive.result?.structuredContent?.exitCode, 0);
 
-            if (process.platform !== "win32" && commandAvailable("tmux", ["-V"])) {
+            if (
+                process.platform !== "win32" &&
+                commandAvailable("tmux", ["-V"])
+            ) {
                 const tmux = await callTool(endpoint, headers, "tmux_run", {
                     command: `devshell instance status ${instanceName}`,
                     ctxId,
                     line: 80,
                     timeout: 30_000,
-                    wait: "block"
+                    wait: "block",
                 });
                 assert.equal(tmux.error, undefined, JSON.stringify(tmux));
                 assert.equal(tmux.result?.isError, false, JSON.stringify(tmux));
                 assert.equal(tmux.result?.structuredContent?.task?.status, "0");
                 assert.match(
-                    String((tmux.result?.structuredContent?.output ?? []).join("\n")),
-                    new RegExp(`instance: ${instanceName}`, "u")
+                    String(
+                        (tmux.result?.structuredContent?.output ?? []).join(
+                            "\n",
+                        ),
+                    ),
+                    new RegExp(`instance: ${instanceName}`, "u"),
                 );
 
                 const delayed = await callTool(endpoint, headers, "tmux_run", {
                     command: `sleep 0.4; devshell instance status ${instanceName}`,
                     ctxId,
                     line: 0,
-                    wait: "nonblock"
+                    wait: "nonblock",
                 });
                 assert.equal(delayed.error, undefined, JSON.stringify(delayed));
-                assert.equal(delayed.result?.isError, false, JSON.stringify(delayed));
+                assert.equal(
+                    delayed.result?.isError,
+                    false,
+                    JSON.stringify(delayed),
+                );
                 const delayedTask = delayed.result?.structuredContent?.task?.id;
-                assert.ok(typeof delayedTask === "string", JSON.stringify(delayed));
+                assert.ok(
+                    typeof delayedTask === "string",
+                    JSON.stringify(delayed),
+                );
                 await new Promise((resolve) => setTimeout(resolve, 600));
-                const delayedRead = await callTool(endpoint, headers, "tmux_read", {
-                    ctxId,
-                    line: -80,
-                    task: delayedTask,
-                    timeMs: 3_000
-                });
-                assert.equal(delayedRead.error, undefined, JSON.stringify(delayedRead));
-                assert.equal(delayedRead.result?.isError, false, JSON.stringify(delayedRead));
+                const delayedRead = await callTool(
+                    endpoint,
+                    headers,
+                    "tmux_read",
+                    {
+                        ctxId,
+                        line: -80,
+                        task: delayedTask,
+                        timeMs: 3_000,
+                    },
+                );
+                assert.equal(
+                    delayedRead.error,
+                    undefined,
+                    JSON.stringify(delayedRead),
+                );
+                assert.equal(
+                    delayedRead.result?.isError,
+                    false,
+                    JSON.stringify(delayedRead),
+                );
                 assert.match(
-                    String((delayedRead.result?.structuredContent?.output ?? []).join("\n")),
-                    new RegExp(`instance: ${instanceName}`, "u")
+                    String(
+                        (
+                            delayedRead.result?.structuredContent?.output ?? []
+                        ).join("\n"),
+                    ),
+                    new RegExp(`instance: ${instanceName}`, "u"),
                 );
             }
         } finally {
@@ -196,23 +259,27 @@ test(
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(workspace, { force: true, recursive: true });
         }
-    }
+    },
 );
 
 async function createContext(
     endpoint: string,
     headers: Record<string, string>,
-    workspace: string
+    workspace: string,
 ): Promise<string> {
-    const response = await postJson(endpoint, {
-        id: "environ",
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-            arguments: { workspace },
-            name: "environ_info"
-        }
-    }, headers);
+    const response = await postJson(
+        endpoint,
+        {
+            id: "environ",
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: { workspace },
+                name: "environ_info",
+            },
+        },
+        headers,
+    );
     const ctxId = response.result?.structuredContent?.ctxId;
     assert.ok(typeof ctxId === "string", JSON.stringify(response));
     return ctxId;
@@ -222,51 +289,81 @@ async function callBash(
     endpoint: string,
     headers: Record<string, string>,
     ctxId: string,
-    command: string
+    command: string,
 ) {
-    return await callTool(endpoint, headers, "bash_run", { command, ctxId, timeoutMs: 30_000 });
+    return await callTool(endpoint, headers, "bash_run", {
+        command,
+        ctxId,
+        timeoutMs: 30_000,
+    });
 }
 
 async function callTool(
     endpoint: string,
     headers: Record<string, string>,
     name: string,
-    args: Record<string, JsonValue>
+    args: Record<string, JsonValue>,
 ) {
-    return await postJson(endpoint, {
-        id: `${name}-${Date.now()}-${Math.random()}`,
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-            arguments: args,
-            name
-        }
-    }, headers);
+    return await postJson(
+        endpoint,
+        {
+            id: `${name}-${Date.now()}-${Math.random()}`,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: {
+                arguments: args,
+                name,
+            },
+        },
+        headers,
+    );
 }
 
-function instanceModelExtensionHost(instances: InstanceRegistry, instanceName: string) {
+function instanceModelExtensionHost(
+    instances: InstanceRegistry,
+    instanceName: string,
+) {
     const capability = new ExtensionInstanceCapabilityControl({
         allowed: true,
         create: {
-            async createInstance() { throw new Error("not used"); },
-            getSchema() { return {} as never; },
-            validateDraft() { return {} as never; }
+            async createInstance() {
+                throw new Error("not used");
+            },
+            getSchema() {
+                return {} as never;
+            },
+            validateDraft() {
+                return {} as never;
+            },
         },
         editor: {
-            async deleteInstance() { throw new Error("not used"); },
-            async disableInstance() { throw new Error("not used"); },
-            async enableInstance() { throw new Error("not used"); }
+            async deleteInstance() {
+                throw new Error("not used");
+            },
+            async disableInstance() {
+                throw new Error("not used");
+            },
+            async enableInstance() {
+                throw new Error("not used");
+            },
         },
         extensionId: "instance",
         instances,
-        listConfigured: () => [{ enabled: true, mcpEnabled: true, name: instanceName, provider: "local" }],
-        subscriptions: new RuntimeSubscriptionManager()
+        listConfigured: () => [
+            {
+                enabled: true,
+                mcpEnabled: true,
+                name: instanceName,
+                provider: "local",
+            },
+        ],
+        subscriptions: new RuntimeSubscriptionManager(),
     });
     const declaration = {
         id: "instance",
         summary: "Inspect portable-devshell instances",
         title: "Instance",
-        usage: "instance <command>"
+        usage: "instance <command>",
     };
     return {
         async acquireRegistration(pointId: string, id: string) {
@@ -275,40 +372,49 @@ function instanceModelExtensionHost(instances: InstanceRegistry, instanceName: s
             return {
                 lease: { release() {} },
                 registration: {
-                    binding: async (argv: readonly string[], invocation: CliModelCommandInvocationContext) =>
-                        await executeInstanceCommand(capability, argv, invocation),
+                    binding: async (
+                        argv: readonly string[],
+                        invocation: CliModelCommandInvocationContext,
+                    ) =>
+                        await executeInstanceCommand(
+                            capability,
+                            argv,
+                            invocation,
+                        ),
                     declaration,
                     id,
-                    pointId
-                }
+                    pointId,
+                },
             } as never;
         },
         listDeclarations(pointId: string) {
             if (pointId !== "cli.model-commands") return [];
-            return [{
-                declaration,
-                extensionId: "instance",
-                generation: "test",
-                id: "instance",
-                pointId
-            }];
-        }
+            return [
+                {
+                    declaration,
+                    extensionId: "instance",
+                    generation: "test",
+                    id: "instance",
+                    pointId,
+                },
+            ];
+        },
     } as never;
 }
 
 async function postJson(
     url: string,
     body: JsonValue,
-    extraHeaders: Record<string, string> = {}
+    extraHeaders: Record<string, string> = {},
 ): Promise<TestRpcResponse> {
     const response = await fetch(url, {
         body: JSON.stringify(body),
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
-            ...extraHeaders
+            ...extraHeaders,
         },
-        method: "POST"
+        method: "POST",
     });
     const text = await response.text();
     assert.equal(response.ok, true, text);
@@ -323,15 +429,15 @@ async function postJson(
 async function postRaw(
     url: string,
     body: JsonValue,
-    extraHeaders: Record<string, string>
+    extraHeaders: Record<string, string>,
 ): Promise<Response> {
     return await fetch(url, {
         body: JSON.stringify(body),
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
-            ...extraHeaders
+            ...extraHeaders,
         },
-        method: "POST"
+        method: "POST",
     });
 }

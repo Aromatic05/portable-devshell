@@ -39,7 +39,11 @@ export class ArtifactHttpRoute {
         });
     }
 
-    async #handle(request: IncomingMessage, response: ServerResponse, headOnly: boolean): Promise<void> {
+    async #handle(
+        request: IncomingMessage,
+        response: ServerResponse,
+        headOnly: boolean,
+    ): Promise<void> {
         setSecurityHeaders(response);
         const token = readToken(request, this.#routeBase);
         if (token === undefined) {
@@ -75,7 +79,15 @@ export class ArtifactHttpRoute {
         const length = totalBytes === 0 ? 0 : end - start + 1;
         if (headOnly) {
             response.statusCode = range === undefined ? 200 : 206;
-            setDownloadHeaders(response, access.share, range, start, end, totalBytes, length);
+            setDownloadHeaders(
+                response,
+                access.share,
+                range,
+                start,
+                end,
+                totalBytes,
+                length,
+            );
             response.end();
             return;
         }
@@ -88,15 +100,30 @@ export class ArtifactHttpRoute {
         }
 
         response.statusCode = range === undefined ? 200 : 206;
-        setDownloadHeaders(response, access.share, range, start, end, totalBytes, length);
+        setDownloadHeaders(
+            response,
+            access.share,
+            range,
+            start,
+            end,
+            totalBytes,
+            length,
+        );
         const exclusiveEnd = length === 0 ? start : end + 1;
         let offset = start;
         let downloadFinished = false;
         let finalBytes: Buffer | undefined;
         try {
             while (offset < exclusiveEnd && length > 0) {
-                const requested = Math.min(HTTP_CHUNK_BYTES, exclusiveEnd - offset);
-                const chunk = await this.#service.readSharePayload(access, offset, requested);
+                const requested = Math.min(
+                    HTTP_CHUNK_BYTES,
+                    exclusiveEnd - offset,
+                );
+                const chunk = await this.#service.readSharePayload(
+                    access,
+                    offset,
+                    requested,
+                );
                 if (
                     chunk.encoding !== "base64" ||
                     chunk.offsetBytes !== offset ||
@@ -104,11 +131,15 @@ export class ArtifactHttpRoute {
                     chunk.returnedBytes > requested ||
                     chunk.totalBytes !== totalBytes
                 ) {
-                    throw new Error("Artifact payload returned an invalid HTTP chunk.");
+                    throw new Error(
+                        "Artifact payload returned an invalid HTTP chunk.",
+                    );
                 }
                 const bytes = Buffer.from(chunk.content, "base64");
                 if (bytes.length !== chunk.returnedBytes) {
-                    throw new Error("Artifact payload byte count does not match its encoded content.");
+                    throw new Error(
+                        "Artifact payload byte count does not match its encoded content.",
+                    );
                 }
                 const nextOffset = offset + bytes.length;
                 if (nextOffset >= exclusiveEnd) {
@@ -124,7 +155,7 @@ export class ArtifactHttpRoute {
             await this.#service.finishShareDownload(token, true, {
                 endBytes: exclusiveEnd,
                 range: range !== undefined,
-                startBytes: start
+                startBytes: start,
             });
             downloadFinished = true;
             if (finalBytes !== undefined && !response.write(finalBytes)) {
@@ -136,10 +167,14 @@ export class ArtifactHttpRoute {
                 sendShareError(response, error);
                 return;
             }
-            response.destroy(error instanceof Error ? error : new Error(String(error)));
+            response.destroy(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         } finally {
             if (!downloadFinished) {
-                await this.#service.finishShareDownload(token, false).catch(() => undefined);
+                await this.#service
+                    .finishShareDownload(token, false)
+                    .catch(() => undefined);
             }
         }
     }
@@ -152,14 +187,20 @@ function setDownloadHeaders(
     start: number,
     end: number,
     totalBytes: number,
-    length: number
+    length: number,
 ): void {
     response.setHeader("Accept-Ranges", "bytes");
     response.setHeader("Content-Type", share.mediaType);
-    response.setHeader("Content-Disposition", contentDisposition(share.downloadName));
+    response.setHeader(
+        "Content-Disposition",
+        contentDisposition(share.downloadName),
+    );
     response.setHeader("Content-Length", String(length));
     if (range !== undefined) {
-        response.setHeader("Content-Range", `bytes ${start}-${end}/${totalBytes}`);
+        response.setHeader(
+            "Content-Range",
+            `bytes ${start}-${end}/${totalBytes}`,
+        );
     }
 }
 
@@ -168,11 +209,15 @@ export function artifactShareRoute(publicBaseUrl?: string): string {
         return ROUTE_SUFFIX;
     }
     const url = new URL(publicBaseUrl);
-    const basePath = url.pathname === "/" ? "" : url.pathname.replace(/\/+$/u, "");
+    const basePath =
+        url.pathname === "/" ? "" : url.pathname.replace(/\/+$/u, "");
     return `${basePath}${ROUTE_SUFFIX}`;
 }
 
-function readToken(request: IncomingMessage, routeBase: string): string | undefined {
+function readToken(
+    request: IncomingMessage,
+    routeBase: string,
+): string | undefined {
     if (request.url === undefined) {
         return undefined;
     }
@@ -193,11 +238,18 @@ function readToken(request: IncomingMessage, routeBase: string): string | undefi
     }
 }
 
-function parseRange(header: string | undefined, totalBytes: number): ByteRange | undefined {
+function parseRange(
+    header: string | undefined,
+    totalBytes: number,
+): ByteRange | undefined {
     if (header === undefined) {
         return undefined;
     }
-    if (totalBytes <= 0 || !header.startsWith("bytes=") || header.includes(",")) {
+    if (
+        totalBytes <= 0 ||
+        !header.startsWith("bytes=") ||
+        header.includes(",")
+    ) {
         throw new UnsatisfiableRangeError();
     }
     const value = header.slice("bytes=".length).trim();
@@ -213,7 +265,7 @@ function parseRange(header: string | undefined, totalBytes: number): ByteRange |
         }
         return {
             end: totalBytes - 1,
-            start: Math.max(totalBytes - suffixLength, 0)
+            start: Math.max(totalBytes - suffixLength, 0),
         };
     }
 
@@ -230,7 +282,7 @@ function parseRange(header: string | undefined, totalBytes: number): ByteRange |
     }
     return {
         end: Math.min(requestedEnd, totalBytes - 1),
-        start
+        start,
     };
 }
 
@@ -240,8 +292,9 @@ function contentDisposition(name: string): string {
             .replace(/[\r\n\\/"]/gu, "_")
             .replace(/[^\x20-\x7e]/gu, "_")
             .slice(0, 180) || "download";
-    const encoded = encodeURIComponent(name).replace(/[!'()*]/gu, (character) =>
-        `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+    const encoded = encodeURIComponent(name).replace(
+        /[!'()*]/gu,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
     );
     return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
@@ -271,7 +324,11 @@ function sendShareError(response: ServerResponse, error: unknown): void {
     sendText(response, status, message);
 }
 
-function sendText(response: ServerResponse, status: number, message: string): void {
+function sendText(
+    response: ServerResponse,
+    status: number,
+    message: string,
+): void {
     const body = Buffer.from(`${message}\n`, "utf8");
     response.statusCode = status;
     response.setHeader("Content-Type", "text/plain; charset=utf-8");

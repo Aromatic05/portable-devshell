@@ -66,6 +66,7 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
     let project_memory_agent_file = project_memory_directory.join("AGENT.md");
     OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .open(&project_memory_agent_file)
         .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error.to_string()))?;

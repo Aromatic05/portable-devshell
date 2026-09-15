@@ -5,7 +5,8 @@ export function captureInstalledRuntimeState(runCli) {
     assertCliSuccess(status, "inspect current Control state");
     const statusOutput = String(status.stdout ?? "");
     const pidMatch = statusOutput.match(/^pid:\s+([1-9][0-9]*)\s*$/mu);
-    const pid = pidMatch === null ? undefined : Number.parseInt(pidMatch[1], 10);
+    const pid =
+        pidMatch === null ? undefined : Number.parseInt(pidMatch[1], 10);
     if (!/^control:\s+running\s*$/mu.test(statusOutput)) {
         return {
             controlRunning: false,
@@ -20,18 +21,23 @@ export function captureInstalledRuntimeState(runCli) {
     try {
         payload = JSON.parse(String(overview.stdout ?? ""));
     } catch (error) {
-        throw new Error(`Failed to capture running instances: overview returned invalid JSON. ${formatError(error)}`);
+        throw new Error(
+            `Failed to capture running instances: overview returned invalid JSON. ${formatError(error)}`,
+        );
     }
     if (!Array.isArray(payload?.instances)) {
-        throw new Error("Failed to capture running instances: overview result is missing instances.");
+        throw new Error(
+            "Failed to capture running instances: overview result is missing instances.",
+        );
     }
 
     const instances = payload.instances
-        .filter((entry) =>
-            typeof entry?.name === "string" &&
-            entry.name.length > 0 &&
-            entry.snapshot?.reverse === undefined &&
-            restorableDaemonStates.has(entry.snapshot?.daemonState)
+        .filter(
+            (entry) =>
+                typeof entry?.name === "string" &&
+                entry.name.length > 0 &&
+                entry.snapshot?.reverse === undefined &&
+                restorableDaemonStates.has(entry.snapshot?.daemonState),
         )
         .map((entry) => entry.name);
 
@@ -66,13 +72,21 @@ export function restoreInstalledInstances(runCli, state) {
         }
     }
     if (failures.length > 0) {
-        throw new AggregateError(failures, `Failed to restore ${failures.length} instance(s) after installation.`);
+        throw new AggregateError(
+            failures,
+            `Failed to restore ${failures.length} instance(s) after installation.`,
+        );
     }
 }
 
 function assertCliSuccess(result, action) {
     if (result?.error === undefined && result?.status === 0) return;
-    const detail = String(result?.stderr || result?.stdout || result?.error?.message || "unknown CLI failure").trim();
+    const detail = String(
+        result?.stderr ||
+            result?.stdout ||
+            result?.error?.message ||
+            "unknown CLI failure",
+    ).trim();
     throw new Error(`Failed to ${action}: ${detail}`);
 }
 

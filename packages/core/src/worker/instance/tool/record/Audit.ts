@@ -6,21 +6,33 @@ import {
     type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallQuery,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { AuditToolCallHistory } from "../../../../storage/audit/ToolCallHistory.js";
 import type { InstanceEventInput } from "../../../../instance/EventBuffer.js";
 import { getErrorCode } from "../../state/Error.js";
 import { toEventData } from "../../state/Event.js";
-import { createWorkerInstanceToolCallScope, type WorkerInstanceToolCallScope } from "../call/Context.js";
+import {
+    createWorkerInstanceToolCallScope,
+    type WorkerInstanceToolCallScope,
+} from "../call/Context.js";
 import type { WorkerInstanceBashToolResult } from "./Result.js";
-import { commandResultOutput, readByteLength, stripCommandStreams } from "./Result.js";
+import {
+    commandResultOutput,
+    readByteLength,
+    stripCommandStreams,
+} from "./Result.js";
 import { throwIfToolCallAborted } from "../Error.js";
 
 interface WorkerInstanceToolAuditOptions {
-    appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
-    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
+    appendEvent(
+        type: InstanceEventInput["type"],
+        data?: JsonValue,
+    ): Promise<unknown>;
+    toolCallAssociationProvider?: (
+        context: ToolCallContext,
+    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
 }
 
@@ -29,13 +41,16 @@ export type WorkerInstanceToolApprovalState = {
     decision?: ToolCallApprovalDecision;
 };
 
-export type WorkerInstanceToolRunningContext = WorkerInstanceToolCallScope["eventContext"] & {
-    approvalId?: string;
-};
+export type WorkerInstanceToolRunningContext =
+    WorkerInstanceToolCallScope["eventContext"] & {
+        approvalId?: string;
+    };
 
 export class WorkerInstanceToolAudit {
     readonly #appendEvent: WorkerInstanceToolAuditOptions["appendEvent"];
-    readonly #toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
+    readonly #toolCallAssociationProvider?: (
+        context: ToolCallContext,
+    ) => ToolCallAssociation | undefined;
     readonly #toolCallHistory: AuditToolCallHistory;
 
     constructor(options: WorkerInstanceToolAuditOptions) {
@@ -44,17 +59,28 @@ export class WorkerInstanceToolAudit {
         this.#toolCallHistory = options.toolCallHistory;
     }
 
-    createScope(toolName: string, input: JsonValue, context: ToolCallContext): WorkerInstanceToolCallScope {
-        return createWorkerInstanceToolCallScope(toolName, input, context, this.#toolCallAssociationProvider?.(context));
+    createScope(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): WorkerInstanceToolCallScope {
+        return createWorkerInstanceToolCallScope(
+            toolName,
+            input,
+            context,
+            this.#toolCallAssociationProvider?.(context),
+        );
     }
 
     runningContext(
         scope: WorkerInstanceToolCallScope,
-        approvalState: WorkerInstanceToolApprovalState
+        approvalState: WorkerInstanceToolApprovalState,
     ): WorkerInstanceToolRunningContext {
         return {
             ...scope.eventContext,
-            ...(approvalState.approvalId === undefined ? {} : { approvalId: approvalState.approvalId })
+            ...(approvalState.approvalId === undefined
+                ? {}
+                : { approvalId: approvalState.approvalId }),
         };
     }
 
@@ -67,7 +93,7 @@ export class WorkerInstanceToolAudit {
             scope.startedAt,
             "queued",
             scope.association,
-            scope.input
+            scope.input,
         );
         await this.#appendEvent(
             "toolCall.queued",
@@ -75,25 +101,30 @@ export class WorkerInstanceToolAudit {
                 ...scope.eventContext,
                 queuedAt: scope.startedAt,
                 startedAt: scope.startedAt,
-                status: "queued"
-            })
+                status: "queued",
+            }),
         );
     }
 
     async running(
         scope: WorkerInstanceToolCallScope,
         runningContext: WorkerInstanceToolRunningContext,
-        approvalState: WorkerInstanceToolApprovalState
+        approvalState: WorkerInstanceToolApprovalState,
     ): Promise<void> {
-        await this.#toolCallHistory.running(scope.callId, approvalState.decision);
+        await this.#toolCallHistory.running(
+            scope.callId,
+            approvalState.decision,
+        );
         await this.#appendEvent(
             "toolCall.running",
             toEventData({
                 ...runningContext,
-                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                ...(approvalState.decision === undefined
+                    ? {}
+                    : { decision: approvalState.decision }),
                 startedAt: scope.startedAt,
-                status: "running"
-            })
+                status: "running",
+            }),
         );
     }
 
@@ -103,18 +134,21 @@ export class WorkerInstanceToolAudit {
         approvalState: WorkerInstanceToolApprovalState,
         result: JsonValue,
         bashResult: WorkerInstanceBashToolResult | undefined,
-        appendLogs: () => Promise<void>
+        appendLogs: () => Promise<void>,
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         await this.#toolCallHistory.completed(scope.callId, completedAt, {
-            output: bashResult === undefined ? result : stripCommandStreams(result),
-            ...(bashResult === undefined ? {} : {
-                exitCode: bashResult.exitCode,
-                stderrBytes: bashResult.stderrBytes,
-                stdoutBytes: bashResult.stdoutBytes,
-                termSignal: bashResult.termSignal,
-                termination: bashResult.termination
-            })
+            output:
+                bashResult === undefined ? result : stripCommandStreams(result),
+            ...(bashResult === undefined
+                ? {}
+                : {
+                      exitCode: bashResult.exitCode,
+                      stderrBytes: bashResult.stderrBytes,
+                      stdoutBytes: bashResult.stdoutBytes,
+                      termSignal: bashResult.termSignal,
+                      termination: bashResult.termination,
+                  }),
         });
         await appendLogs();
         await this.#appendEvent(
@@ -122,15 +156,17 @@ export class WorkerInstanceToolAudit {
             toEventData({
                 ...runningContext,
                 completedAt,
-                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                ...(approvalState.decision === undefined
+                    ? {}
+                    : { decision: approvalState.decision }),
                 exitCode: bashResult?.exitCode,
                 startedAt: scope.startedAt,
                 status: "completed",
                 stderrBytes: bashResult?.stderrBytes,
                 stdoutBytes: bashResult?.stdoutBytes,
                 termSignal: bashResult?.termSignal,
-                termination: bashResult?.termination
-            })
+                termination: bashResult?.termination,
+            }),
         );
     }
 
@@ -139,24 +175,36 @@ export class WorkerInstanceToolAudit {
         runningContext: WorkerInstanceToolRunningContext,
         approvalState: WorkerInstanceToolApprovalState,
         status: "queueTimeout" | "cancelled",
-        errorCode: string
+        errorCode: string,
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         if (status === "queueTimeout") {
-            await this.#toolCallHistory.queueTimeout(scope.callId, errorCode, completedAt);
+            await this.#toolCallHistory.queueTimeout(
+                scope.callId,
+                errorCode,
+                completedAt,
+            );
         } else {
-            await this.#toolCallHistory.cancelled(scope.callId, errorCode, completedAt);
+            await this.#toolCallHistory.cancelled(
+                scope.callId,
+                errorCode,
+                completedAt,
+            );
         }
         await this.#appendEvent(
-            status === "queueTimeout" ? "toolCall.queueTimeout" : "toolCall.cancelled",
+            status === "queueTimeout"
+                ? "toolCall.queueTimeout"
+                : "toolCall.cancelled",
             toEventData({
                 ...runningContext,
                 completedAt,
                 errorCode,
-                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                ...(approvalState.decision === undefined
+                    ? {}
+                    : { decision: approvalState.decision }),
                 startedAt: scope.startedAt,
-                status
-            })
+                status,
+            }),
         );
     }
 
@@ -166,7 +214,7 @@ export class WorkerInstanceToolAudit {
         approvalState: WorkerInstanceToolApprovalState,
         errorCode: string,
         result: CommandResult | undefined,
-        appendLogs: () => Promise<void>
+        appendLogs: () => Promise<void>,
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         await appendLogs();
@@ -180,35 +228,48 @@ export class WorkerInstanceToolAudit {
                       exitCode: result.exitCode,
                       output: stripCommandStreams(commandResultOutput(result)),
                       stderrBytes: readByteLength(result.stderr),
-                      stdoutBytes: readByteLength(result.stdout)
-                  }
+                      stdoutBytes: readByteLength(result.stdout),
+                  },
         );
         await this.#appendEvent(
             "toolCall.failed",
             toEventData({
                 ...runningContext,
                 completedAt,
-                ...(approvalState.decision === undefined ? {} : { decision: approvalState.decision }),
+                ...(approvalState.decision === undefined
+                    ? {}
+                    : { decision: approvalState.decision }),
                 errorCode,
                 exitCode: result?.exitCode,
                 startedAt: scope.startedAt,
                 status: "failed",
-                stderrBytes: result === undefined ? undefined : readByteLength(result.stderr),
-                stdoutBytes: result === undefined ? undefined : readByteLength(result.stdout)
-            })
+                stderrBytes:
+                    result === undefined
+                        ? undefined
+                        : readByteLength(result.stderr),
+                stdoutBytes:
+                    result === undefined
+                        ? undefined
+                        : readByteLength(result.stdout),
+            }),
         );
     }
 
-    async failActive(scope: WorkerInstanceToolCallScope, error: unknown): Promise<void> {
+    async failActive(
+        scope: WorkerInstanceToolCallScope,
+        error: unknown,
+    ): Promise<void> {
         if (!this.#toolCallHistory.hasActive(scope.callId)) {
             return;
         }
 
-        await this.#toolCallHistory.failed(
-            scope.callId,
-            getErrorCode(error, errorCodes.coreProviderFailed),
-            new Date().toISOString()
-        ).catch(() => undefined);
+        await this.#toolCallHistory
+            .failed(
+                scope.callId,
+                getErrorCode(error, errorCodes.coreProviderFailed),
+                new Date().toISOString(),
+            )
+            .catch(() => undefined);
     }
 
     async auditOperation<T extends JsonValue>(
@@ -216,7 +277,7 @@ export class WorkerInstanceToolAudit {
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T> {
         throwIfToolCallAborted(signal);
         const scope = this.createScope(toolName, input, context);
@@ -229,39 +290,50 @@ export class WorkerInstanceToolAudit {
             scope.startedAt,
             "running",
             scope.association,
-            scope.input
+            scope.input,
         );
         await this.#appendEvent(
             "toolCall.running",
             toEventData({
                 ...scope.eventContext,
                 startedAt: scope.startedAt,
-                status: "running"
-            })
+                status: "running",
+            }),
         );
 
         try {
             throwIfToolCallAborted(signal);
             const result = await operation(scope.callId);
             const completedAt = new Date().toISOString();
-            await this.#toolCallHistory.completed(scope.callId, completedAt, { output: result });
+            await this.#toolCallHistory.completed(scope.callId, completedAt, {
+                output: result,
+            });
             await this.#appendEvent(
                 "toolCall.completed",
                 toEventData({
                     ...scope.eventContext,
                     completedAt,
                     startedAt: scope.startedAt,
-                    status: "completed"
-                })
+                    status: "completed",
+                }),
             );
             return result;
         } catch (error) {
             const completedAt = new Date().toISOString();
-            const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-            const cancelled = errorCode === errorCodes.coreToolCallCancelled || errorCode === "tool.cancelled";
+            const errorCode = getErrorCode(
+                error,
+                errorCodes.coreProviderFailed,
+            );
+            const cancelled =
+                errorCode === errorCodes.coreToolCallCancelled ||
+                errorCode === "tool.cancelled";
 
             if (cancelled) {
-                await this.#toolCallHistory.cancelled(scope.callId, errorCodes.coreToolCallCancelled, completedAt);
+                await this.#toolCallHistory.cancelled(
+                    scope.callId,
+                    errorCodes.coreToolCallCancelled,
+                    completedAt,
+                );
                 await this.#appendEvent(
                     "toolCall.cancelled",
                     toEventData({
@@ -269,11 +341,15 @@ export class WorkerInstanceToolAudit {
                         completedAt,
                         errorCode: errorCodes.coreToolCallCancelled,
                         startedAt: scope.startedAt,
-                        status: "cancelled"
-                    })
+                        status: "cancelled",
+                    }),
                 );
             } else {
-                await this.#toolCallHistory.failed(scope.callId, errorCode, completedAt);
+                await this.#toolCallHistory.failed(
+                    scope.callId,
+                    errorCode,
+                    completedAt,
+                );
                 await this.#appendEvent(
                     "toolCall.failed",
                     toEventData({
@@ -281,8 +357,8 @@ export class WorkerInstanceToolAudit {
                         completedAt,
                         errorCode,
                         startedAt: scope.startedAt,
-                        status: "failed"
-                    })
+                        status: "failed",
+                    }),
                 );
             }
             throw error;

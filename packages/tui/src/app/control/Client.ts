@@ -12,7 +12,8 @@ export type TuiClients = PersistentControlClients;
 export function createTuiClients(options: TuiClientOptions = {}): TuiClients {
     return createPersistentControlClients({
         clientKind: "tui",
-        connectChannel: async (signal) => await connectControlClientChannel(options, signal),
+        connectChannel: async (signal) =>
+            await connectControlClientChannel(options, signal),
         mapError: toClientError,
         mapRemoteError: toRemoteError,
         peer: "tui",

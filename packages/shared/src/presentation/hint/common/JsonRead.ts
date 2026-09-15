@@ -1,6 +1,8 @@
 import type { JsonValue } from "../../../protocol/JsonValue.js";
 
-export function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+export function asRecord(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
         return value as Record<string, JsonValue>;
     }
@@ -12,7 +14,9 @@ export function asString(value: JsonValue | undefined): string | undefined {
 }
 
 export function asNumber(value: JsonValue | undefined): number | undefined {
-    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    return typeof value === "number" && Number.isFinite(value)
+        ? value
+        : undefined;
 }
 
 export function asBoolean(value: JsonValue | undefined): boolean | undefined {

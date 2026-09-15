@@ -15,7 +15,11 @@ export function runCiSteps(steps, options = {}) {
         try {
             result = execute(step);
         } catch (error) {
-            log(error instanceof Error ? (error.stack ?? error.message) : String(error));
+            log(
+                error instanceof Error
+                    ? (error.stack ?? error.message)
+                    : String(error),
+            );
             result = { error, status: 1 };
         }
         const status = Number.isInteger(result?.status) ? result.status : 1;
@@ -54,7 +58,11 @@ export function createCommonCiSteps(platform = process.platform) {
         pnpmStep("Lint", ["lint"]),
         pnpmStep("Build", ["build"]),
         pnpmStep("Typecheck", ["typecheck"]),
-        { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
+        {
+            args: ["test", "--locked", "--workspace"],
+            command: "cargo",
+            name: "Rust workspace tests",
+        },
         pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         {
@@ -70,7 +78,11 @@ export function createPlatformContractCiSteps(platform = process.platform) {
     }
     const pnpmStep = createPnpmStepFactory(platform);
     return [
-        { args: ["test", "--locked", "--workspace"], command: "cargo", name: "Rust workspace tests" },
+        {
+            args: ["test", "--locked", "--workspace"],
+            command: "cargo",
+            name: "Rust workspace tests",
+        },
         pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         {
@@ -89,41 +101,114 @@ export function createTargetCiSteps(target, platform = process.platform) {
         "ci-artifacts",
         `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
     );
-    const application = join("ci-artifacts", `portable-devshell-app-${target}.tar.gz`);
+    const application = join(
+        "ci-artifacts",
+        `portable-devshell-app-${target}.tar.gz`,
+    );
     const steps = [
         pnpmStep("Build", ["build"]),
-        pnpmStep("Build native Worker", ["build:worker", target, "--output-dir", "./ci-artifacts"]),
+        pnpmStep("Build native Worker", [
+            "build:worker",
+            target,
+            "--output-dir",
+            "./ci-artifacts",
+        ]),
     ];
 
     if (platform === "win32") {
         steps.push(
-            pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
-            pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
+            pnpmStep("Package native application", [
+                "package:app",
+                "--",
+                "--target",
+                target,
+                "--output-dir",
+                "./ci-artifacts",
+            ]),
+            pnpmStep("Package Agent artifacts", [
+                "package:agent",
+                "--",
+                "--target",
+                target,
+                "--output-dir",
+                "./ci-artifacts",
+            ]),
         );
         if (target === "windows-x64") {
             steps.push(
-                { args: ["--test", "./scripts/install-release.test.mjs"], command: process.execPath, name: "Windows installer contract tests" },
-                { args: ["./scripts/smoke-install-release-windows.mjs", application], command: process.execPath, name: "Windows release installer smoke" },
+                {
+                    args: ["--test", "./scripts/install-release.test.mjs"],
+                    command: process.execPath,
+                    name: "Windows installer contract tests",
+                },
+                {
+                    args: [
+                        "./scripts/smoke-install-release-windows.mjs",
+                        application,
+                    ],
+                    command: process.execPath,
+                    name: "Windows release installer smoke",
+                },
             );
         }
         return steps;
     }
 
     steps.push(
-        { args: ["./scripts/smoke-worker.mjs", worker], command: process.execPath, name: "Worker daemon smoke" },
-        { args: ["./scripts/smoke-reverse-worker.mjs", worker], command: process.execPath, name: "Reverse worker PTY smoke" },
-        { args: ["./scripts/smoke-client.mjs", worker], command: process.execPath, name: "Client and local instance smoke" },
-        pnpmStep("Package native application", ["package:app", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
-        pnpmStep("Package Agent artifacts", ["package:agent", "--", "--target", target, "--output-dir", "./ci-artifacts"]),
-        pnpmStep("Application package smoke", ["smoke:package", "--", application]),
-        pnpmStep("Unix release installer smoke", ["smoke:install-release", "--", application]),
+        {
+            args: ["./scripts/smoke-worker.mjs", worker],
+            command: process.execPath,
+            name: "Worker daemon smoke",
+        },
+        {
+            args: ["./scripts/smoke-reverse-worker.mjs", worker],
+            command: process.execPath,
+            name: "Reverse worker PTY smoke",
+        },
+        {
+            args: ["./scripts/smoke-client.mjs", worker],
+            command: process.execPath,
+            name: "Client and local instance smoke",
+        },
+        pnpmStep("Package native application", [
+            "package:app",
+            "--",
+            "--target",
+            target,
+            "--output-dir",
+            "./ci-artifacts",
+        ]),
+        pnpmStep("Package Agent artifacts", [
+            "package:agent",
+            "--",
+            "--target",
+            target,
+            "--output-dir",
+            "./ci-artifacts",
+        ]),
+        pnpmStep("Application package smoke", [
+            "smoke:package",
+            "--",
+            application,
+        ]),
+        pnpmStep("Unix release installer smoke", [
+            "smoke:install-release",
+            "--",
+            application,
+        ]),
         pnpmStep("Agent package smoke", [
             "smoke:agent-package",
             "--",
             application,
             join("ci-artifacts", `portable-devshell-agent-${target}.dsext`),
-            join("ci-artifacts", `portable-devshell-agent-provider-pi-${target}.dsprovider`),
-            join("ci-artifacts", `portable-devshell-agent-provider-opencode-${target}.dsprovider`),
+            join(
+                "ci-artifacts",
+                `portable-devshell-agent-provider-pi-${target}.dsprovider`,
+            ),
+            join(
+                "ci-artifacts",
+                `portable-devshell-agent-provider-opencode-${target}.dsprovider`,
+            ),
             worker,
         ]),
     );
@@ -179,7 +264,10 @@ export function runDevelopmentCi(target, options = {}) {
 
 function executeCiStep(step) {
     const result = spawnSync(step.command, step.args, {
-        env: step.env === undefined ? process.env : { ...process.env, ...step.env },
+        env:
+            step.env === undefined
+                ? process.env
+                : { ...process.env, ...step.env },
         shell: false,
         stdio: "inherit",
     });
@@ -190,7 +278,10 @@ function executeCiStep(step) {
     return { status: result.status ?? 1 };
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+    process.argv[1] !== undefined &&
+    import.meta.url === pathToFileURL(process.argv[1]).href
+) {
     const [mode, target] = process.argv.slice(2);
     let result;
     if (mode === "--common") {

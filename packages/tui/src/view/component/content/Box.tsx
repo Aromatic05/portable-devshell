@@ -3,9 +3,15 @@ import stringWidth from "string-width";
 import type { TuiBoxLineTone, TuiBoxModel } from "../../../state/Ui.js";
 import type { TuiExpandableBoxStatus } from "../../../state/Ui.js";
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+});
 
-export type { TuiBoxLine as BoxLine, TuiBoxLineTone as BoxLineTone, TuiBoxModel as BoxModel } from "../../../state/Ui.js";
+export type {
+    TuiBoxLine as BoxLine,
+    TuiBoxLineTone as BoxLineTone,
+    TuiBoxModel as BoxModel,
+} from "../../../state/Ui.js";
 
 export interface TuiComponentExpandableBoxRenderLine {
     backgroundColor?: string;
@@ -17,14 +23,35 @@ export interface TuiComponentExpandableBoxRenderLine {
     text: string;
 }
 
-export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: number): TuiComponentExpandableBoxRenderLine[] {
+export function renderExpandableBoxLines(
+    box: TuiBoxModel,
+    requestedInnerWidth: number,
+): TuiComponentExpandableBoxRenderLine[] {
     const innerWidth = Math.max(24, requestedInnerWidth);
     const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
     const frame = box.focused
-        ? { bottomLeft: "╰", bottomRight: "╯", horizontal: "─", topLeft: "╭", topRight: "╮" }
-        : { bottomLeft: "└", bottomRight: "┘", horizontal: "─", topLeft: "┌", topRight: "┐" };
-    const borderColor = box.disabled ? "gray" : lineColor(box.severity) ?? statusColor(box.status);
-    const titleLine = renderTopBorder(`${interactionMarker(box)} ${box.title} [${statusMarker(box.status)} ${box.status}]`, innerWidth, frame);
+        ? {
+              bottomLeft: "╰",
+              bottomRight: "╯",
+              horizontal: "─",
+              topLeft: "╭",
+              topRight: "╮",
+          }
+        : {
+              bottomLeft: "└",
+              bottomRight: "┘",
+              horizontal: "─",
+              topLeft: "┌",
+              topRight: "┐",
+          };
+    const borderColor = box.disabled
+        ? "gray"
+        : (lineColor(box.severity) ?? statusColor(box.status));
+    const titleLine = renderTopBorder(
+        `${interactionMarker(box)} ${box.title} [${statusMarker(box.status)} ${box.status}]`,
+        innerWidth,
+        frame,
+    );
     const bottomBorder = `${frame.bottomLeft}${frame.horizontal.repeat(innerWidth + 2)}${frame.bottomRight}`;
 
     return [
@@ -32,47 +59,83 @@ export function renderExpandableBoxLines(box: TuiBoxModel, requestedInnerWidth: 
             backgroundColor: box.focused ? "magenta" : undefined,
             color: box.focused ? "white" : borderColor,
             key: `${box.id}-top`,
-            text: titleLine
+            text: titleLine,
         },
         ...bodyLines.flatMap((line, index) => {
-            const selected = box.expanded && box.focused && box.selectedDetailLineId === line.id;
+            const selected =
+                box.expanded &&
+                box.focused &&
+                box.selectedDetailLineId === line.id;
 
             if (line.editableValue !== undefined) {
                 const rendered = renderEditableBodyLine(line, innerWidth);
-                return [{
-                    backgroundColor: selected ? "cyan" : box.focused ? "magenta" : undefined,
-                    color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
-                    dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
-                    key: `${box.id}-${line.id ?? index}-0`,
-                    ...(line.id === undefined ? {} : { lineId: line.id }),
-                    segments: rendered.segments,
-                    text: rendered.text,
-                }];
+                return [
+                    {
+                        backgroundColor: selected
+                            ? "cyan"
+                            : box.focused
+                              ? "magenta"
+                              : undefined,
+                        color: selected
+                            ? "black"
+                            : box.focused
+                              ? "white"
+                              : lineColor(line.tone),
+                        dimColor:
+                            !selected &&
+                            !box.focused &&
+                            (line.tone === "muted" || line.disabled === true),
+                        key: `${box.id}-${line.id ?? index}-0`,
+                        ...(line.id === undefined ? {} : { lineId: line.id }),
+                        segments: rendered.segments,
+                        text: rendered.text,
+                    },
+                ];
             }
 
-            return wrapTerminalText(line.text, innerWidth).map((wrapped, wrappedIndex) => ({
-                backgroundColor: selected ? "cyan" : box.focused ? "magenta" : undefined,
-                color: selected ? "black" : box.focused ? "white" : lineColor(line.tone),
-                dimColor: !selected && !box.focused && (line.tone === "muted" || line.disabled === true),
-                key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
-                ...(line.id === undefined ? {} : { lineId: line.id }),
-                text: renderBodyLine(wrapped, innerWidth),
-            }));
+            return wrapTerminalText(line.text, innerWidth).map(
+                (wrapped, wrappedIndex) => ({
+                    backgroundColor: selected
+                        ? "cyan"
+                        : box.focused
+                          ? "magenta"
+                          : undefined,
+                    color: selected
+                        ? "black"
+                        : box.focused
+                          ? "white"
+                          : lineColor(line.tone),
+                    dimColor:
+                        !selected &&
+                        !box.focused &&
+                        (line.tone === "muted" || line.disabled === true),
+                    key: `${box.id}-${line.id ?? index}-${wrappedIndex}`,
+                    ...(line.id === undefined ? {} : { lineId: line.id }),
+                    text: renderBodyLine(wrapped, innerWidth),
+                }),
+            );
         }),
         {
             backgroundColor: box.focused ? "magenta" : undefined,
             color: box.focused ? "white" : borderColor,
             key: `${box.id}-bottom`,
-            text: bottomBorder
-        }
+            text: bottomBorder,
+        },
     ];
 }
 
-export function measureExpandableBoxHeight(box: TuiBoxModel, requestedInnerWidth = 80): number {
+export function measureExpandableBoxHeight(
+    box: TuiBoxModel,
+    requestedInnerWidth = 80,
+): number {
     const innerWidth = Math.max(24, requestedInnerWidth);
     const bodyLines = box.expanded ? box.expandedLines : box.collapsedLines;
     return bodyLines.reduce(
-        (height, line) => height + (line.editableValue === undefined ? wrapTerminalText(line.text, innerWidth).length : 1),
+        (height, line) =>
+            height +
+            (line.editableValue === undefined
+                ? wrapTerminalText(line.text, innerWidth).length
+                : 1),
         2,
     );
 }
@@ -83,15 +146,26 @@ function renderEditableBodyLine(
 ): { segments: Array<{ text: string; underline?: boolean }>; text: string } {
     const editable = line.editableValue!;
     const value = editable.value;
-    const displayValue = value.length === 0 ? editable.emptyPlaceholder ?? "<empty>" : value;
-    const valueSegments = editable.kind === "choice"
-        ? [{
-              text: `<${displayValue}>`,
-              underline: line.editing === true ? line.cursorVisible || undefined : true,
-          }]
-        : line.editing === true
-          ? editCursorSegments(value, line.cursor ?? value.length, line.cursorVisible === true)
-          : [{ text: displayValue, underline: true }];
+    const displayValue =
+        value.length === 0 ? (editable.emptyPlaceholder ?? "<empty>") : value;
+    const valueSegments =
+        editable.kind === "choice"
+            ? [
+                  {
+                      text: `<${displayValue}>`,
+                      underline:
+                          line.editing === true
+                              ? line.cursorVisible || undefined
+                              : true,
+                  },
+              ]
+            : line.editing === true
+              ? editCursorSegments(
+                    value,
+                    line.cursor ?? value.length,
+                    line.cursorVisible === true,
+                )
+              : [{ text: displayValue, underline: true }];
     const content = fitStyledSegments(
         [
             { text: editable.prefix },
@@ -131,22 +205,33 @@ function fitStyledSegments(
             text += item.segment;
             used += nextWidth;
         }
-        if (text.length > 0) output.push({ text, underline: segment.underline });
+        if (text.length > 0)
+            output.push({ text, underline: segment.underline });
         if (used >= width) break;
     }
     if (used < width) output.push({ text: " ".repeat(width - used) });
     return output;
 }
 
-function renderTopBorder(title: string, innerWidth: number, frame: { horizontal: string; topLeft: string; topRight: string }): string {
+function renderTopBorder(
+    title: string,
+    innerWidth: number,
+    frame: { horizontal: string; topLeft: string; topRight: string },
+): string {
     const maxTitleWidth = Math.max(1, innerWidth - 1);
     const normalizedTitle = truncateTitle(title, maxTitleWidth);
-    const suffixWidth = Math.max(0, innerWidth - stringWidth(normalizedTitle) - 1);
+    const suffixWidth = Math.max(
+        0,
+        innerWidth - stringWidth(normalizedTitle) - 1,
+    );
     return `${frame.topLeft}${frame.horizontal} ${normalizedTitle}${suffixWidth > 0 ? ` ${frame.horizontal.repeat(suffixWidth)}` : ""}${frame.topRight}`;
 }
 
 function renderBodyLine(text: string, innerWidth: number): string {
-    const normalized = padRight(truncateTerminalText(text, innerWidth), innerWidth);
+    const normalized = padRight(
+        truncateTerminalText(text, innerWidth),
+        innerWidth,
+    );
     return `│ ${normalized} │`;
 }
 
@@ -214,7 +299,9 @@ export function wrapTerminalText(text: string, width: number): string[] {
 
 function takeTerminalWidth(text: string, width: number): string {
     let output = "";
-    for (const segment of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)) {
+    for (const segment of new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+    }).segment(text)) {
         if (stringWidth(output + segment.segment) > width) {
             break;
         }

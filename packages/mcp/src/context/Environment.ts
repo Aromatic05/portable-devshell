@@ -2,7 +2,7 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type McpContextEnvironment
+    type McpContextEnvironment,
 } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../endpoint/Port.js";
@@ -27,38 +27,61 @@ export class McpContextRemoteEnvironment {
         ctxId: string,
         handle: string,
         workspace?: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<JsonValue> {
         signal?.throwIfAborted();
-        const instance = await this.#contextRegistry.resolveRemoteInstanceHandle(ctxId, handle);
+        const instance =
+            await this.#contextRegistry.resolveRemoteInstanceHandle(
+                ctxId,
+                handle,
+            );
         const gateway = this.#requireGateway(instance);
         const previous = await this.#environment(ctxId, instance);
-        const connected = await waitAbortable(gateway.connectInstance(instance, ctxId), signal);
+        const connected = await waitAbortable(
+            gateway.connectInstance(instance, ctxId),
+            signal,
+        );
         if (workspace === undefined) {
             try {
-                await this.#contextRegistry.attachEnvironment(ctxId, { instance });
+                await this.#contextRegistry.attachEnvironment(ctxId, {
+                    instance,
+                });
                 return {
-                    ...(isRecord(connected) ? connected : { result: connected }),
-                    instance
+                    ...(isRecord(connected)
+                        ? connected
+                        : { result: connected }),
+                    instance,
                 };
             } catch (error) {
-                if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
+                if (previous === undefined)
+                    await gateway.releaseInstanceReference?.(instance, ctxId);
                 throw error;
             }
         }
 
-        if (previous?.workspace === workspace && previous.temporaryDirectory !== undefined) {
+        if (
+            previous?.workspace === workspace &&
+            previous.temporaryDirectory !== undefined
+        ) {
             try {
                 await waitAbortable(
-                    gateway.touchTemporaryDirectory(instance, previous.temporaryDirectory),
-                    signal
+                    gateway.touchTemporaryDirectory(
+                        instance,
+                        previous.temporaryDirectory,
+                    ),
+                    signal,
                 );
-                await waitAbortable(gateway.touchAlerts(instance, workspace), signal);
+                await waitAbortable(
+                    gateway.touchAlerts(instance, workspace),
+                    signal,
+                );
                 return {
-                    ...(isRecord(connected) ? connected : { result: connected }),
+                    ...(isRecord(connected)
+                        ? connected
+                        : { result: connected }),
                     instance,
                     temporaryDirectory: previous.temporaryDirectory,
-                    workspace
+                    workspace,
                 };
             } catch (error) {
                 if (!isRecoverableTemporaryError(error)) throw error;
@@ -67,60 +90,90 @@ export class McpContextRemoteEnvironment {
 
         let preparedWorkspace: string | undefined;
         try {
-            const prepared = await waitAbortable(gateway.prepareWorkspace(instance, workspace), signal);
+            const prepared = await waitAbortable(
+                gateway.prepareWorkspace(instance, workspace),
+                signal,
+            );
             preparedWorkspace = prepared.workspace;
-            const alerts = await waitAbortable(gateway.readAlerts(instance, prepared.workspace), signal);
+            const alerts = await waitAbortable(
+                gateway.readAlerts(instance, prepared.workspace),
+                signal,
+            );
             await this.#contextRegistry.attachEnvironment(ctxId, {
                 instance,
                 temporaryDirectory: prepared.temporaryDirectory,
-                workspace: prepared.workspace
+                workspace: prepared.workspace,
             });
-            if (previous?.workspace !== undefined && previous.workspace !== prepared.workspace) {
-                await this.#releaseAlertsIfUnused(gateway, instance, previous.workspace).catch(() => undefined);
+            if (
+                previous?.workspace !== undefined &&
+                previous.workspace !== prepared.workspace
+            ) {
+                await this.#releaseAlertsIfUnused(
+                    gateway,
+                    instance,
+                    previous.workspace,
+                ).catch(() => undefined);
             }
-            const base = isRecord(connected) ? connected : { result: connected };
+            const base = isRecord(connected)
+                ? connected
+                : { result: connected };
             return {
                 ...base,
                 comment: [
                     ...(prepared.projectMemoryPresent !== false
                         ? [
                               `Read ${prepared.projectMemoryAgentFile} before working.`,
-                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`
+                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
                           ]
                         : []),
                     `Use ${prepared.temporaryDirectory} for all temporary files.`,
-                    ...alerts.advice.map((advice) => advice.text)
+                    ...alerts.advice.map((advice) => advice.text),
                 ],
                 instance,
                 ...(prepared.projectMemoryPresent !== false
                     ? {
-                          projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-                          projectMemoryDirectory: prepared.projectMemoryDirectory
+                          projectMemoryAgentFile:
+                              prepared.projectMemoryAgentFile,
+                          projectMemoryDirectory:
+                              prepared.projectMemoryDirectory,
                       }
                     : {}),
                 temporaryDirectory: prepared.temporaryDirectory,
-                workspace: prepared.workspace
+                workspace: prepared.workspace,
             };
         } catch (error) {
             if (preparedWorkspace !== undefined) {
-                await this.#releaseAlertsIfUnused(gateway, instance, preparedWorkspace).catch(() => undefined);
+                await this.#releaseAlertsIfUnused(
+                    gateway,
+                    instance,
+                    preparedWorkspace,
+                ).catch(() => undefined);
             }
-            if (previous === undefined) await gateway.releaseInstanceReference?.(instance, ctxId);
+            if (previous === undefined)
+                await gateway.releaseInstanceReference?.(instance, ctxId);
             throw error;
         }
     }
 
-    async mask(ctxId: string, handle: string): Promise<{ instance: string; masked: true }> {
-        const masked = await this.#contextRegistry.maskRemoteInstance(ctxId, handle);
+    async mask(
+        ctxId: string,
+        handle: string,
+    ): Promise<{ instance: string; masked: true }> {
+        const masked = await this.#contextRegistry.maskRemoteInstance(
+            ctxId,
+            handle,
+        );
         if (masked.environment !== undefined) {
             const gateway = this.#gateway(masked.instance);
             if (gateway !== undefined) {
-                await gateway.releaseInstanceReference?.(masked.instance, ctxId).catch(() => undefined);
+                await gateway
+                    .releaseInstanceReference?.(masked.instance, ctxId)
+                    .catch(() => undefined);
                 if (masked.environment.workspace !== undefined) {
                     await this.#releaseAlertsIfUnused(
                         gateway,
                         masked.instance,
-                        masked.environment.workspace
+                        masked.environment.workspace,
                     ).catch(() => undefined);
                 }
             }
@@ -135,37 +188,54 @@ export class McpContextRemoteEnvironment {
             code: errorCodes.coreToolSchemaUnavailable,
             details: { instance },
             message: `Remote environment attachment is not available for ${instance}.`,
-            retryable: false
+            retryable: false,
         });
     }
 
-    async #environment(ctxId: string, instance: string): Promise<McpContextEnvironment | undefined> {
-        const record = (await this.#contextRegistry.list()).find((context) =>
-            context.ctxId === ctxId && context.status === "active"
+    async #environment(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextEnvironment | undefined> {
+        const record = (await this.#contextRegistry.list()).find(
+            (context) => context.ctxId === ctxId && context.status === "active",
         );
-        return record?.environments.find((environment) => environment.instance === instance);
+        return record?.environments.find(
+            (environment) => environment.instance === instance,
+        );
     }
 
     async #releaseAlertsIfUnused(
         gateway: McpInstanceGateway,
         instance: string,
-        workspace: string
+        workspace: string,
     ): Promise<void> {
-        const inUse = (await this.#contextRegistry.list()).some((context) =>
-            context.status === "active" && context.environments.some((environment) =>
-                environment.instance === instance && environment.workspace === workspace
-            )
+        const inUse = (await this.#contextRegistry.list()).some(
+            (context) =>
+                context.status === "active" &&
+                context.environments.some(
+                    (environment) =>
+                        environment.instance === instance &&
+                        environment.workspace === workspace,
+                ),
         );
         if (!inUse) await gateway.releaseAlerts(instance, workspace);
     }
 }
 
-async function waitAbortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+async function waitAbortable<T>(
+    operation: Promise<T>,
+    signal?: AbortSignal,
+): Promise<T> {
     if (signal === undefined) return await operation;
     signal.throwIfAborted();
     let abort: (() => void) | undefined;
     const aborted = new Promise<never>((_resolve, reject) => {
-        abort = () => reject(signal.reason instanceof Error ? signal.reason : new Error("Remote environment operation was cancelled."));
+        abort = () =>
+            reject(
+                signal.reason instanceof Error
+                    ? signal.reason
+                    : new Error("Remote environment operation was cancelled."),
+            );
         signal.addEventListener("abort", abort, { once: true });
     });
     try {
@@ -180,7 +250,11 @@ function isRecord(value: JsonValue): value is Record<string, JsonValue> {
 }
 
 function isRecoverableTemporaryError(error: unknown): boolean {
-    if (typeof error !== "object" || error === null || !("code" in error)) return false;
+    if (typeof error !== "object" || error === null || !("code" in error))
+        return false;
     const code = (error as { code?: unknown }).code;
-    return code === "workspace.temporaryUnavailable" || code === "workspace.temporaryInvalid";
+    return (
+        code === "workspace.temporaryUnavailable" ||
+        code === "workspace.temporaryInvalid"
+    );
 }

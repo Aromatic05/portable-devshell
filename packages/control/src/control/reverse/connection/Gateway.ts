@@ -9,13 +9,13 @@ import {
     WebSocketServerChannel,
     type JsonValue,
     type ReverseEnrollmentRequest,
-    type ReverseUpstreamBatch
+    type ReverseUpstreamBatch,
 } from "@portable-devshell/shared";
 import { WebSocketServer } from "ws";
 
 import {
     ReverseConnectionService,
-    type ReverseConnectionIdentity
+    type ReverseConnectionIdentity,
 } from "./Service.js";
 import { ReverseCredentialStore } from "../credential/Store.js";
 import type { ReverseInstanceLookupPort } from "../Port.js";
@@ -38,7 +38,7 @@ export class ReverseConnectionGateway {
     #publicBaseUrl: string;
     readonly #webSocketServer = new WebSocketServer({
         clientTracking: false,
-        noServer: true
+        noServer: true,
     });
 
     constructor(options: ReverseConnectionGatewayOptions) {
@@ -56,18 +56,29 @@ export class ReverseConnectionGateway {
         const upstreamPath = reverseRoute(this.#publicBaseUrl, UPSTREAM_SUFFIX);
         const wssPath = reverseRoute(this.#publicBaseUrl, WSS_SUFFIX);
 
-        server.registerRawRoute("post", enrollPath, async (request, response) => {
-            await this.#handleEnroll(request, response);
-        });
+        server.registerRawRoute(
+            "post",
+            enrollPath,
+            async (request, response) => {
+                await this.#handleEnroll(request, response);
+            },
+        );
         server.registerRawRoute("get", ssePath, async (request, response) => {
             await this.#handleSse(request, response);
         });
-        server.registerRawRoute("post", upstreamPath, async (request, response) => {
-            await this.#handleUpstream(request, response);
-        });
-        server.registerUpgradeHandler(wssPath, async (request, socket, head) => {
-            await this.#handleWebSocketUpgrade(request, socket, head);
-        });
+        server.registerRawRoute(
+            "post",
+            upstreamPath,
+            async (request, response) => {
+                await this.#handleUpstream(request, response);
+            },
+        );
+        server.registerUpgradeHandler(
+            wssPath,
+            async (request, socket, head) => {
+                await this.#handleWebSocketUpgrade(request, socket, head);
+            },
+        );
     }
 
     disconnect(instance: string): void {
@@ -81,7 +92,7 @@ export class ReverseConnectionGateway {
 
     async #handleEnroll(
         request: IncomingMessage,
-        response: ServerResponse
+        response: ServerResponse,
     ): Promise<void> {
         try {
             const body = asEnrollmentRequest(await readJsonBody(request));
@@ -94,7 +105,7 @@ export class ReverseConnectionGateway {
     async #handleWebSocketUpgrade(
         request: IncomingMessage,
         socket: Duplex,
-        head: Buffer
+        head: Buffer,
     ): Promise<void> {
         try {
             const identity = await this.#authenticateRequest(request);
@@ -102,8 +113,9 @@ export class ReverseConnectionGateway {
             if (!hasWebSocketProtocol(request, "devshell-worker-rpc.v1")) {
                 throw createError({
                     code: errorCodes.reverseTransportUnavailable,
-                    message: "Sec-WebSocket-Protocol devshell-worker-rpc.v1 is required.",
-                    retryable: false
+                    message:
+                        "Sec-WebSocket-Protocol devshell-worker-rpc.v1 is required.",
+                    retryable: false,
                 });
             }
 
@@ -115,13 +127,10 @@ export class ReverseConnectionGateway {
                     const channel = new LengthPrefixedChannel(
                         new WebSocketServerChannel(webSocket as never),
                     );
-                    void this.#connectionService.activate(
-                        identity,
-                        "wss",
-                        channel,
-                        lane
-                    ).catch(() => channel.close());
-                }
+                    void this.#connectionService
+                        .activate(identity, "wss", channel, lane)
+                        .catch(() => channel.close());
+                },
             );
         } catch (error) {
             writeUpgradeError(socket, error);
@@ -130,7 +139,7 @@ export class ReverseConnectionGateway {
 
     async #handleSse(
         request: IncomingMessage,
-        response: ServerResponse
+        response: ServerResponse,
     ): Promise<void> {
         try {
             const identity = await this.#authenticateRequest(request);
@@ -138,12 +147,12 @@ export class ReverseConnectionGateway {
                 "Cache-Control": "no-cache, no-transform",
                 Connection: "keep-alive",
                 "Content-Type": "text/event-stream",
-                "X-Accel-Buffering": "no"
+                "X-Accel-Buffering": "no",
             });
             response.flushHeaders();
             const channel = new ReverseRpcSseChannel(
                 response,
-                readLastEventId(request)
+                readLastEventId(request),
             );
             await this.#connectionService.activate(identity, "sse", channel);
         } catch (error) {
@@ -161,7 +170,7 @@ export class ReverseConnectionGateway {
 
     async #handleUpstream(
         request: IncomingMessage,
-        response: ServerResponse
+        response: ServerResponse,
     ): Promise<void> {
         try {
             const identity = await this.#authenticateRequest(request);
@@ -169,7 +178,7 @@ export class ReverseConnectionGateway {
             sendJson(
                 response,
                 200,
-                this.#connectionService.acceptUpstream(identity, batch)
+                this.#connectionService.acceptUpstream(identity, batch),
             );
         } catch (error) {
             sendGatewayError(response, error);
@@ -177,20 +186,17 @@ export class ReverseConnectionGateway {
     }
 
     async #authenticateRequest(
-        request: IncomingMessage
+        request: IncomingMessage,
     ): Promise<ReverseConnectionIdentity> {
-        const instance = readRequiredHeader(
-            request,
-            "x-devshell-instance"
-        );
+        const instance = readRequiredHeader(request, "x-devshell-instance");
         const generation = parseGeneration(
-            readRequiredHeader(request, "x-devshell-generation")
+            readRequiredHeader(request, "x-devshell-generation"),
         );
         const token = readBearerToken(request.headers.authorization);
         return await this.#connectionService.authenticate(
             instance,
             generation,
-            token
+            token,
         );
     }
 }
@@ -203,7 +209,7 @@ function asEnrollmentRequest(value: JsonValue): ReverseEnrollmentRequest {
         arch: readString(value.arch, "arch"),
         deviceCode: readString(value.deviceCode, "deviceCode"),
         os: readString(value.os, "os"),
-        workerVersion: readString(value.workerVersion, "workerVersion")
+        workerVersion: readString(value.workerVersion, "workerVersion"),
     };
 }
 
@@ -227,9 +233,9 @@ function asUpstreamBatch(value: JsonValue): ReverseUpstreamBatch {
             }
             return {
                 frame: frame.frame,
-                seq: frame.seq as number
+                seq: frame.seq as number,
             };
-        })
+        }),
     };
 }
 
@@ -261,7 +267,7 @@ function readBearerToken(authorization: string | undefined): string {
         throw createError({
             code: errorCodes.reverseDeviceTokenInvalid,
             message: "Bearer device token is required.",
-            retryable: false
+            retryable: false,
         });
     }
     return match[1];
@@ -273,13 +279,15 @@ function parseGeneration(value: string): number {
         throw createError({
             code: errorCodes.reverseGenerationInvalid,
             message: "Connection generation must be a positive integer.",
-            retryable: false
+            retryable: false,
         });
     }
     return generation;
 }
 
-function readReverseRpcLane(request: IncomingMessage): "control" | "bulk" | undefined {
+function readReverseRpcLane(
+    request: IncomingMessage,
+): "control" | "bulk" | undefined {
     const raw = request.headers["x-devshell-rpc-lane"];
     const value = Array.isArray(raw) ? raw[0] : raw;
     if (value === undefined || value.length === 0) return undefined;
@@ -287,12 +295,13 @@ function readReverseRpcLane(request: IncomingMessage): "control" | "bulk" | unde
     throw createError({
         code: errorCodes.reverseTransportUnavailable,
         message: "x-devshell-rpc-lane must be control or bulk.",
-        retryable: false
+        retryable: false,
     });
 }
 
 function readLastEventId(request: IncomingMessage): number {
-    const raw = request.headers["last-event-id"] ??
+    const raw =
+        request.headers["last-event-id"] ??
         request.headers["x-devshell-downstream-ack"];
     const value = Array.isArray(raw) ? raw[0] : raw;
     if (value === undefined) return 0;
@@ -302,17 +311,19 @@ function readLastEventId(request: IncomingMessage): number {
 
 function hasWebSocketProtocol(
     request: IncomingMessage,
-    expected: string
+    expected: string,
 ): boolean {
     const header = request.headers["sec-websocket-protocol"];
-    return typeof header === "string" &&
-        header.split(",").some((value) => value.trim() === expected);
+    return (
+        typeof header === "string" &&
+        header.split(",").some((value) => value.trim() === expected)
+    );
 }
 
 function sendJson(
     response: ServerResponse,
     status: number,
-    body: JsonValue
+    body: JsonValue,
 ): void {
     response.writeHead(status, { "Content-Type": "application/json" });
     response.end(JSON.stringify(body));
@@ -320,35 +331,40 @@ function sendJson(
 
 function sendGatewayError(response: ServerResponse, error: unknown): void {
     const code = readErrorCode(error);
-    const status = code === errorCodes.instanceMissing
-        ? 404
-        : code === errorCodes.reverseDeviceTokenInvalid ||
-            code === errorCodes.reverseDeviceTokenRevoked
-            ? 401
-            : code === errorCodes.reverseConnectionSuperseded ||
-                code === errorCodes.reverseGenerationInvalid
+    const status =
+        code === errorCodes.instanceMissing
+            ? 404
+            : code === errorCodes.reverseDeviceTokenInvalid ||
+                code === errorCodes.reverseDeviceTokenRevoked
+              ? 401
+              : code === errorCodes.reverseConnectionSuperseded ||
+                  code === errorCodes.reverseGenerationInvalid
                 ? 409
                 : 400;
     sendJson(response, status, {
         error: {
             code,
-            message: error instanceof Error ? error.message : String(error)
-        }
+            message: error instanceof Error ? error.message : String(error),
+        },
     });
 }
 
 function writeUpgradeError(socket: Duplex, error: unknown): void {
     const code = readErrorCode(error);
-    const status = code === errorCodes.reverseDeviceTokenInvalid
-        ? "401 Unauthorized"
-        : "409 Conflict";
+    const status =
+        code === errorCodes.reverseDeviceTokenInvalid
+            ? "401 Unauthorized"
+            : "409 Conflict";
     socket.end(
-        `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({
-            error: {
-                code,
-                message: error instanceof Error ? error.message : String(error)
-            }
-        })}`
+        `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(
+            {
+                error: {
+                    code,
+                    message:
+                        error instanceof Error ? error.message : String(error),
+                },
+            },
+        )}`,
     );
 }
 
@@ -363,9 +379,8 @@ function readErrorCode(error: unknown): string {
 
 export function reverseRoute(publicBaseUrl: string, suffix: string): string {
     const url = new URL(publicBaseUrl);
-    const basePath = url.pathname === "/"
-        ? ""
-        : url.pathname.replace(/\/$/u, "");
+    const basePath =
+        url.pathname === "/" ? "" : url.pathname.replace(/\/$/u, "");
     return `${basePath}/${suffix.replace(/^\//u, "")}`;
 }
 

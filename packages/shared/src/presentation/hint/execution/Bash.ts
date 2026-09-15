@@ -1,7 +1,17 @@
 import type { ControlErrorBody } from "../../../protocol/Error.js";
 import type { JsonValue } from "../../../protocol/JsonValue.js";
-import { asArray, asBoolean, asNumber, asRecord, asString } from "../common/JsonRead.js";
-import { diagnosticHint, errorHint, type ToolDiagnosticHint } from "../ToolDiagnosticHint.js";
+import {
+    asArray,
+    asBoolean,
+    asNumber,
+    asRecord,
+    asString,
+} from "../common/JsonRead.js";
+import {
+    diagnosticHint,
+    errorHint,
+    type ToolDiagnosticHint,
+} from "../ToolDiagnosticHint.js";
 import { workerCommonErrorHints } from "../common/Worker.js";
 
 export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
@@ -14,20 +24,30 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const termSignal = asNumber(record.termSignal);
 
     if (termination === "timeout" || asBoolean(record.timedOut) === true) {
-        hints.push(errorHint(
-            "bash.timeout",
-            "Command timed out; use tmux_run for long tasks."
-        ));
+        hints.push(
+            errorHint(
+                "bash.timeout",
+                "Command timed out; use tmux_run for long tasks.",
+            ),
+        );
     } else if (termination === "signaled") {
-        hints.push(errorHint(
-            "bash.signaled",
-            `Terminated by signal ${termSignal ?? "unknown"}; inspect output.`
-        ));
-    } else if (termination === "exited" && exitCode !== undefined && exitCode !== 0) {
-        hints.push(errorHint(
-            "bash.nonZeroExit",
-            `Exited with code ${exitCode}; inspect output.`
-        ));
+        hints.push(
+            errorHint(
+                "bash.signaled",
+                `Terminated by signal ${termSignal ?? "unknown"}; inspect output.`,
+            ),
+        );
+    } else if (
+        termination === "exited" &&
+        exitCode !== undefined &&
+        exitCode !== 0
+    ) {
+        hints.push(
+            errorHint(
+                "bash.nonZeroExit",
+                `Exited with code ${exitCode}; inspect output.`,
+            ),
+        );
     }
 
     const stdoutTruncated = asBoolean(record.stdoutTruncated) === true;
@@ -35,20 +55,24 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     if (stdoutTruncated || stderrTruncated) {
         const streams = [
             ...(stdoutTruncated ? ["stdout"] : []),
-            ...(stderrTruncated ? ["stderr"] : [])
+            ...(stderrTruncated ? ["stderr"] : []),
         ].join(" and ");
-        hints.push(diagnosticHint(
-            "bash.outputTruncated",
-            `${streams} output is incomplete.`
-        ));
+        hints.push(
+            diagnosticHint(
+                "bash.outputTruncated",
+                `${streams} output is incomplete.`,
+            ),
+        );
     }
 
     const warnings = asArray(record.artifactWarnings);
     if (warnings !== undefined && warnings.length > 0) {
-        hints.push(diagnosticHint(
-            "bash.artifactWarning",
-            "Full output may not be stored."
-        ));
+        hints.push(
+            diagnosticHint(
+                "bash.artifactWarning",
+                "Full output may not be stored.",
+            ),
+        );
     }
 
     return hints;
@@ -57,35 +81,37 @@ export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
 export function bashErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
     switch (body.code) {
         case "bash.invalidCommand":
-            return [errorHint(
-                "bash.invalidCommand",
-                "Provide one non-empty command line."
-            )];
+            return [
+                errorHint(
+                    "bash.invalidCommand",
+                    "Provide one non-empty command line.",
+                ),
+            ];
         case "bash.invalidCwd":
-            return [errorHint(
-                "bash.invalidCwd",
-                "Use ./ for a workspace-relative cwd or / for an absolute cwd."
-            )];
+            return [
+                errorHint(
+                    "bash.invalidCwd",
+                    "Use ./ for a workspace-relative cwd or / for an absolute cwd.",
+                ),
+            ];
         case "bash.spawnFailed":
-            return [errorHint(
-                "bash.spawnFailed",
-                "Check the shell runtime."
-            )];
+            return [errorHint("bash.spawnFailed", "Check the shell runtime.")];
         case "bash.shellUnavailable":
-            return [errorHint(
-                "bash.shellUnavailable",
-                "Verify the shell installation."
-            )];
+            return [
+                errorHint(
+                    "bash.shellUnavailable",
+                    "Verify the shell installation.",
+                ),
+            ];
         case "bash.ioFailed":
-            return [errorHint(
-                "bash.ioFailed",
-                "Inspect process I/O state."
-            )];
+            return [errorHint("bash.ioFailed", "Inspect process I/O state.")];
         case "tool.cancelled":
-            return [errorHint(
-                "tool.cancelled",
-                "Cancelled; inspect output and possible side effects."
-            )];
+            return [
+                errorHint(
+                    "tool.cancelled",
+                    "Cancelled; inspect output and possible side effects.",
+                ),
+            ];
         default:
             return workerCommonErrorHints(body);
     }

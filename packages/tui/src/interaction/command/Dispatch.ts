@@ -6,7 +6,7 @@ import type {
     ConfigDraft,
     ArtifactViewImageResult,
     JsonValue,
-    ToolCallRecord
+    ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { TuiFocusManager } from "../focus/Manager.js";
@@ -15,7 +15,10 @@ import type { TuiAppStore } from "../../state/store/App.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
 import type { TuiPageId } from "../../state/Ui.js";
 import type { TuiInteractionProjection } from "../Projection.js";
-import { TuiCommandDispatcherAudit, type TuiArtifactViewImageRequest } from "./action/Audit.js";
+import {
+    TuiCommandDispatcherAudit,
+    type TuiArtifactViewImageRequest,
+} from "./action/Audit.js";
 import { TuiCommandDispatcherDetail } from "./action/Detail.js";
 import { TuiCommandDispatcherEditor } from "./action/Editor.js";
 import { TuiCommandDispatcherFocus } from "./navigation/Focus.js";
@@ -28,17 +31,17 @@ export interface TuiCommandDispatcherOptions {
     onApprovalDecision(
         instance: string,
         approvalId: string,
-        decision: "approve" | "deny"
+        decision: "approve" | "deny",
     ): Promise<void>;
     onArtifactRevokeShare?(shareId: string): Promise<void>;
     onArtifactCancelTransfer?(transferId: string): Promise<void>;
     onArtifactViewImage?(
         instance: string,
-        input: TuiArtifactViewImageRequest
+        input: TuiArtifactViewImageRequest,
     ): Promise<ArtifactViewImageResult>;
     onInstanceAction(
         action: "refresh" | "restart" | "start" | "stop",
-        instance: string
+        instance: string,
     ): Promise<void>;
     onOpenTerminal(instance: string): Promise<void>;
     onTerminalKill?(instance: string): Promise<void>;
@@ -50,10 +53,17 @@ export interface TuiCommandDispatcherOptions {
     onToolCall(
         instance: string,
         toolName: string,
-        input: string
+        input: string,
     ): Promise<boolean>;
-    onToolCallDetail?(instance: string, callId: string): Promise<ToolCallRecord | undefined>;
-    onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
+    onToolCallDetail?(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined>;
+    onContextMessage?(
+        instance: string,
+        ctxId: string,
+        text: string,
+    ): Promise<void>;
     onContextDisable?(instance: string, ctxId: string): Promise<void>;
     onContextRenew?(instance: string, ctxId: string): Promise<void>;
     onControlRestart?(): Promise<void>;
@@ -65,11 +75,11 @@ export interface TuiCommandDispatcherOptions {
     onTodoDelete?(instance: string, taskId: string): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
-        decision: "approve" | "deny"
+        decision: "approve" | "deny",
     ): Promise<void>;
     onValidateConfigDraft?(draft: ConfigDraft): Promise<void>;
     onValidateInstanceCreateDraft?(
-        draft: InstanceCreateDraft
+        draft: InstanceCreateDraft,
     ): Promise<InstanceCreateSummary>;
     projection: TuiInteractionProjection;
     store: TuiAppStore;
@@ -94,14 +104,14 @@ export class TuiCommandDispatcher {
             mainContentColumns: options.mainContentColumns,
             mainViewportRows: options.mainViewportRows,
             projection: options.projection,
-            store: this.#store
+            store: this.#store,
         });
         this.#audit = new TuiCommandDispatcherAudit({
             dispatch: (intent) => this.dispatch(intent),
             focusManager: this.#focusManager,
             onArtifactViewImage: options.onArtifactViewImage,
             onToolCallDetail: options.onToolCallDetail,
-            store: this.#store
+            store: this.#store,
         });
         this.#editor = new TuiCommandDispatcherEditor({
             dispatch: (intent) => this.dispatch(intent),
@@ -110,13 +120,12 @@ export class TuiCommandDispatcher {
                 options.onGetInstanceCreateSchema ?? unavailable,
             onInstanceAction: options.onInstanceAction,
             onConfigUpdate: options.onConfigUpdate ?? unavailable,
-            onValidateConfigDraft:
-                options.onValidateConfigDraft ?? unavailable,
+            onValidateConfigDraft: options.onValidateConfigDraft ?? unavailable,
             onValidateInstanceCreateDraft:
                 options.onValidateInstanceCreateDraft ?? unavailable,
             projection: options.projection,
             store: this.#store,
-            syncMainFocus: () => this.#focus.syncMainFocus()
+            syncMainFocus: () => this.#focus.syncMainFocus(),
         });
         this.#detail = new TuiCommandDispatcherDetail({
             audit: this.#audit,
@@ -124,7 +133,7 @@ export class TuiCommandDispatcher {
             editor: this.#editor,
             focus: this.#focus,
             projection: options.projection,
-            store: this.#store
+            store: this.#store,
         });
         this.#navigation = new TuiCommandDispatcherNavigation({
             dispatch: (intent) => this.dispatch(intent),
@@ -135,7 +144,7 @@ export class TuiCommandDispatcher {
             onPageReload: options.onPageReload,
             onRedraw: options.onRedraw,
             projection: options.projection,
-            store: this.#store
+            store: this.#store,
         });
     }
 
@@ -155,7 +164,7 @@ export class TuiCommandDispatcher {
                 this.#store.setControlRestartRequired(false);
                 this.#store.setScreenStatus(
                     "connections",
-                    "Control runtime restarted and MCP configuration reloaded."
+                    "Control runtime restarted and MCP configuration reloaded.",
                 );
                 return true;
             case "focus.activate":
@@ -166,7 +175,10 @@ export class TuiCommandDispatcher {
                 await this.#options.onInstanceAction("start", intent.instance);
                 return true;
             case "instance.restart":
-                await this.#options.onInstanceAction("restart", intent.instance);
+                await this.#options.onInstanceAction(
+                    "restart",
+                    intent.instance,
+                );
                 return true;
             case "instance.stop":
                 await this.#options.onInstanceAction("stop", intent.instance);
@@ -174,7 +186,7 @@ export class TuiCommandDispatcher {
             case "instance.setEnabled":
                 await (this.#options.onInstanceEnabledChange ?? unavailable)(
                     intent.instance,
-                    intent.enabled
+                    intent.enabled,
                 );
                 return true;
             case "instance.openTerminal":
@@ -183,7 +195,10 @@ export class TuiCommandDispatcher {
             case "terminal.requestKill": {
                 const state = this.#store.getState();
                 const instance = state.ui.selectedInstance;
-                if (state.ui.selectedPage !== "terminal" || instance === undefined) {
+                if (
+                    state.ui.selectedPage !== "terminal" ||
+                    instance === undefined
+                ) {
                     return false;
                 }
                 return await this.dispatch({
@@ -195,7 +210,9 @@ export class TuiCommandDispatcher {
                 });
             }
             case "terminal.kill":
-                await (this.#options.onTerminalKill ?? unavailable)(intent.instance);
+                await (this.#options.onTerminalKill ?? unavailable)(
+                    intent.instance,
+                );
                 this.#store.setScreenStatus(
                     "terminal",
                     `Terminal for ${intent.instance} was killed.`,
@@ -204,52 +221,52 @@ export class TuiCommandDispatcher {
             case "instance.delete":
                 await (this.#options.onInstanceDangerAction ?? unavailable)(
                     "delete",
-                    intent.instance
+                    intent.instance,
                 );
                 return true;
             case "todo.delete":
                 await (this.#options.onTodoDelete ?? unavailable)(
                     intent.instance,
-                    intent.taskId
+                    intent.taskId,
                 );
                 this.#store.setScreenStatus("todo", "Todo project deleted.");
                 return true;
             case "context.disable":
                 await (this.#options.onContextDisable ?? unavailable)(
                     intent.instance,
-                    intent.ctxId
+                    intent.ctxId,
                 );
                 this.#store.setScreenStatus(
                     "audit",
-                    `Context ${intent.ctxId} disabled.`
+                    `Context ${intent.ctxId} disabled.`,
                 );
                 return true;
             case "context.renew":
                 await (this.#options.onContextRenew ?? unavailable)(
                     intent.instance,
-                    intent.ctxId
+                    intent.ctxId,
                 );
                 this.#store.setScreenStatus(
                     "audit",
-                    `Context ${intent.ctxId} renewed.`
+                    `Context ${intent.ctxId} renewed.`,
                 );
                 return true;
             case "artifact.revokeShare":
                 await (this.#options.onArtifactRevokeShare ?? unavailable)(
-                    intent.shareId
+                    intent.shareId,
                 );
                 this.#store.setScreenStatus(
                     "instances",
-                    `Artifact share ${intent.shareId} revoked.`
+                    `Artifact share ${intent.shareId} revoked.`,
                 );
                 return true;
             case "artifact.cancelTransfer":
                 await (this.#options.onArtifactCancelTransfer ?? unavailable)(
-                    intent.transferId
+                    intent.transferId,
                 );
                 this.#store.setScreenStatus(
                     "instances",
-                    `Artifact transfer ${intent.transferId} cancellation requested.`
+                    `Artifact transfer ${intent.transferId} cancellation requested.`,
                 );
                 return true;
             case "approval.open":
@@ -259,25 +276,25 @@ export class TuiCommandDispatcher {
                 return await this.#decideApproval(
                     intent.instance,
                     intent.approvalId,
-                    intent.decision
+                    intent.decision,
                 );
             case "oauthApproval.decide":
                 await (this.#options.onOAuthApprovalDecision ?? unavailable)(
                     intent.approvalId,
-                    intent.decision
+                    intent.decision,
                 );
                 this.#store.setScreenStatus(
                     "connections",
                     intent.decision === "approve"
                         ? "OAuth approval granted."
-                        : "OAuth approval denied."
+                        : "OAuth approval denied.",
                 );
                 return true;
             case "approval.confirmDeny":
                 await this.#options.onApprovalDecision(
                     intent.instance,
                     intent.approvalId,
-                    "deny"
+                    "deny",
                 );
                 this.#audit.returnToPage();
                 return true;
@@ -290,7 +307,7 @@ export class TuiCommandDispatcher {
                     input: '{"command":""}',
                     instance: intent.instance,
                     kind: "tool-form",
-                    toolName: intent.toolName
+                    toolName: intent.toolName,
                 });
                 return true;
             case "toolForm.append":
@@ -302,7 +319,11 @@ export class TuiCommandDispatcher {
             case "toolForm.submit":
                 return await this.#submitToolForm();
             case "toolForm.cancel":
-                if (topTuiOverlay(this.#store.getState().interaction.overlays)?.kind !== "tool-form") return false;
+                if (
+                    topTuiOverlay(this.#store.getState().interaction.overlays)
+                        ?.kind !== "tool-form"
+                )
+                    return false;
                 this.#store.popOverlay();
                 this.#focusManager.restore();
                 return true;
@@ -314,10 +335,10 @@ export class TuiCommandDispatcher {
                     ...(intent.schema === undefined
                         ? {}
                         : { schema: intent.schema }),
-                    ...(intent.kind === "create" ? { step: 1 } : {})
+                    ...(intent.kind === "create" ? { step: 1 } : {}),
                 });
                 this.#store.setFocusScope(
-                    intent.kind === "create" ? "wizard" : "form"
+                    intent.kind === "create" ? "wizard" : "form",
                 );
                 return true;
             case "editor.close":
@@ -392,7 +413,8 @@ export class TuiCommandDispatcher {
             const box = this.#options.projection
                 .selectMainScreenModel(this.#store.getState())
                 .boxes.find(
-                    (candidate) => candidate.id === this.#store.getState().ui.mainFocusId,
+                    (candidate) =>
+                        candidate.id === this.#store.getState().ui.mainFocusId,
                 );
             if (
                 this.#store.getState().ui.selectedPage === "instances" &&
@@ -400,7 +422,10 @@ export class TuiCommandDispatcher {
             ) {
                 return await this.#editor.openCreateWizard();
             }
-            if (box?.primaryAction?.kind === "navigate" && box.disabled !== true) {
+            if (
+                box?.primaryAction?.kind === "navigate" &&
+                box.disabled !== true
+            ) {
                 return this.#navigation.openFocusedRoute();
             }
             return await this.dispatch({ type: "screen.toggle" });
@@ -423,13 +448,9 @@ export class TuiCommandDispatcher {
     async #decideApproval(
         instance: string,
         approvalId: string,
-        decision: "approve" | "deny"
+        decision: "approve" | "deny",
     ): Promise<boolean> {
-        await this.#options.onApprovalDecision(
-            instance,
-            approvalId,
-            decision
-        );
+        await this.#options.onApprovalDecision(instance, approvalId, decision);
         this.#audit.returnToPage();
         return true;
     }
@@ -444,7 +465,13 @@ export class TuiCommandDispatcher {
     async #submitToolForm(): Promise<boolean> {
         const form = topTuiOverlay(this.#store.getState().interaction.overlays);
         if (form?.kind !== "tool-form") return false;
-        if (await this.#options.onToolCall(form.instance, form.toolName, form.input)) {
+        if (
+            await this.#options.onToolCall(
+                form.instance,
+                form.toolName,
+                form.input,
+            )
+        ) {
             this.#store.popOverlay();
             this.#focusManager.restore();
         }

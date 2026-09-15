@@ -24,7 +24,7 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
                 blake3: "a".repeat(64),
                 bytes: 4,
                 receiveId,
-                targetPath: "/tmp/result.bin"
+                targetPath: "/tmp/result.bin",
             };
         },
         async openArtifactPayload(input: unknown) {
@@ -35,10 +35,10 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
                     name: "result.bin",
                     payloadBlake3: "a".repeat(64),
                     payloadBytes: 4,
-                    type: "file"
+                    type: "file",
                 },
                 expiresAtMs: 100,
-                payloadId: "payload-1"
+                payloadId: "payload-1",
             };
         },
         async readArtifactPayload(input: unknown) {
@@ -49,22 +49,30 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
                 eof: true,
                 offsetBytes: 0,
                 payloadId: "payload-1",
-                totalBytes: 4
+                totalBytes: 4,
             };
         },
         async writeArtifactReceive(input: unknown) {
             calls.push(["write", input]);
-            return { nextOffsetBytes: 4, receivedBytes: 4, receiveId: "receive-1" };
-        }
+            return {
+                nextOffsetBytes: 4,
+                receivedBytes: 4,
+                receiveId: "receive-1",
+            };
+        },
     };
     const artifact = new WorkerInstanceArtifact({
         assertReady() {
             readyChecks += 1;
         },
-        protocolClient: protocolClient as never
+        protocolClient: protocolClient as never,
     });
 
-    const openInput = { expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" } as const;
+    const openInput = {
+        expiresAtMs: 100,
+        path: "./result.bin",
+        workspace: "/workspace",
+    } as const;
     const readInput = { maxBytes: 10, offsetBytes: 0, payloadId: "payload-1" };
     const beginInput = {
         descriptor: {
@@ -72,18 +80,28 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
             name: "result.bin",
             payloadBlake3: "a".repeat(64),
             payloadBytes: 4,
-            type: "file" as const
+            type: "file" as const,
         },
         overwrite: false,
         targetPath: "/tmp/result.bin",
-        workspace: "/tmp"
+        workspace: "/tmp",
     };
-    const writeInput = { content: "dGVzdA==", offsetBytes: 0, receiveId: "receive-1" };
+    const writeInput = {
+        content: "dGVzdA==",
+        offsetBytes: 0,
+        receiveId: "receive-1",
+    };
 
-    assert.equal((await artifact.openPayload(openInput)).payloadId, "payload-1");
+    assert.equal(
+        (await artifact.openPayload(openInput)).payloadId,
+        "payload-1",
+    );
     assert.equal((await artifact.readPayload(readInput)).eof, true);
     await artifact.closePayload("payload-1");
-    assert.equal((await artifact.beginReceive(beginInput)).receiveId, "receive-1");
+    assert.equal(
+        (await artifact.beginReceive(beginInput)).receiveId,
+        "receive-1",
+    );
     assert.equal((await artifact.writeReceive(writeInput)).receivedBytes, 4);
     assert.equal((await artifact.finishReceive("receive-1")).bytes, 4);
     await artifact.abortReceive("receive-2");
@@ -96,7 +114,7 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
         ["begin", beginInput],
         ["write", writeInput],
         ["finish", "receive-1"],
-        ["abort", "receive-2"]
+        ["abort", "receive-2"],
     ]);
 });
 
@@ -111,13 +129,17 @@ test("worker artifact facade never calls the protocol client when readiness fail
             async openArtifactPayload() {
                 protocolCalls += 1;
                 return {};
-            }
-        } as never
+            },
+        } as never,
     });
 
     await assert.rejects(
-        artifact.openPayload({ expiresAtMs: 100, path: "./result.bin", workspace: "/workspace" }),
-        (error: unknown) => error === expected
+        artifact.openPayload({
+            expiresAtMs: 100,
+            path: "./result.bin",
+            workspace: "/workspace",
+        }),
+        (error: unknown) => error === expected,
     );
     assert.equal(protocolCalls, 0);
 });
@@ -130,7 +152,7 @@ test("worker audit emits MCP lifecycle records without undefined fields", async 
         },
         auditDatabase: { close() {} } as never,
         isReady: () => false,
-        protocolClient: {} as never
+        protocolClient: {} as never,
     });
 
     await audit.appendMcpSessionOpened("session-1");
@@ -142,13 +164,17 @@ test("worker audit emits MCP lifecycle records without undefined fields", async 
         { data: { sessionId: "session-1" }, type: "mcp.sessionOpened" },
         {
             data: { ctxId: "ctx-1", source: "mcp", toolName: "bash_run" },
-            type: "mcp.toolCalled"
+            type: "mcp.toolCalled",
         },
         {
-            data: { requestId: "request-1", source: "mcp", toolName: "file_read" },
-            type: "mcp.toolCalled"
+            data: {
+                requestId: "request-1",
+                source: "mcp",
+                toolName: "file_read",
+            },
+            type: "mcp.toolCalled",
         },
-        { data: { sessionId: "session-1" }, type: "mcp.sessionClosed" }
+        { data: { sessionId: "session-1" }, type: "mcp.sessionClosed" },
     ]);
 });
 
@@ -160,15 +186,15 @@ test("worker audit releases ready sessions best-effort and closes its database",
         auditDatabase: {
             close() {
                 calls.push("database.close");
-            }
+            },
         } as never,
         isReady: () => ready,
         protocolClient: {
             async closeToolSession(sessionId: string) {
                 calls.push(`session.close:${sessionId}`);
                 throw new Error("transport already closed");
-            }
-        } as never
+            },
+        } as never,
     });
 
     await audit.releaseToolSession("offline-session");

@@ -16,7 +16,9 @@ import { createWebClients } from "../../src/app/transport/Client.js";
 describe("WebSocketChannel", () => {
     it("sends one binary message per frame and notifies close once", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(socket as unknown as WebSocketClientLike);
+        const channel = new WebSocketChannel(
+            socket as unknown as WebSocketClientLike,
+        );
         let closeCount = 0;
         channel.onClose(() => (closeCount += 1));
         socket.open();
@@ -36,7 +38,9 @@ describe("WebSocketChannel", () => {
 
     it("decodes ordered ArrayBuffer and Blob messages as frames", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(socket as unknown as WebSocketClientLike);
+        const channel = new WebSocketChannel(
+            socket as unknown as WebSocketClientLike,
+        );
         socket.open();
         const frames: string[] = [];
         let resolveFrames!: () => void;
@@ -62,7 +66,9 @@ describe("WebSocketChannel", () => {
 
     it("closes when an open send throws", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(socket as unknown as WebSocketClientLike);
+        const channel = new WebSocketChannel(
+            socket as unknown as WebSocketClientLike,
+        );
         socket.open();
         socket.failOnSend();
         const errors: Error[] = [];

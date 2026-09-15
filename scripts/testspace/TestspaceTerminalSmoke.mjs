@@ -10,113 +10,138 @@ export async function runTestspaceTerminalSmoke({ runtimeDirectory, targets }) {
 
 async function smokeTerminal(target, runtimeDirectory) {
     const { instance, workspace } = target;
-    return await withTestspaceControlConnection(runtimeDirectory, async (_shared, connection) => {
-        const opened = await connection.request(instance, "terminal", "open", {
-            cols: 80,
-            rows: 24,
-            workspace,
-        });
-        let version = opened.version;
-        let lastSeq = 0;
-        let clientSeq = 0;
-        const attached = await connection.openStream(instance, "terminal", "attach", {
-            fromSeq: 0,
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-        });
-        const readyMarker = `${instance}-terminal-ready`;
-        await attached.stream.send("input", {
-            clientSeq: ++clientSeq,
-            data: terminalPrintCommand(readyMarker),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version,
-        });
-        const ready = await waitForTerminal(attached.stream, {
-            generation: opened.generation,
-            label: `${instance}:initial-output`,
-            marker: readyMarker,
-            terminalId: opened.terminalId,
-            version: () => version,
-        });
-        lastSeq = Math.max(lastSeq, ready.lastSeq);
+    return await withTestspaceControlConnection(
+        runtimeDirectory,
+        async (_shared, connection) => {
+            const opened = await connection.request(
+                instance,
+                "terminal",
+                "open",
+                {
+                    cols: 80,
+                    rows: 24,
+                    workspace,
+                },
+            );
+            let version = opened.version;
+            let lastSeq = 0;
+            let clientSeq = 0;
+            const attached = await connection.openStream(
+                instance,
+                "terminal",
+                "attach",
+                {
+                    fromSeq: 0,
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                },
+            );
+            const readyMarker = `${instance}-terminal-ready`;
+            await attached.stream.send("input", {
+                clientSeq: ++clientSeq,
+                data: terminalPrintCommand(readyMarker),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version,
+            });
+            const ready = await waitForTerminal(attached.stream, {
+                generation: opened.generation,
+                label: `${instance}:initial-output`,
+                marker: readyMarker,
+                terminalId: opened.terminalId,
+                version: () => version,
+            });
+            lastSeq = Math.max(lastSeq, ready.lastSeq);
 
-        await attached.stream.send("resize", {
-            clientSeq: ++clientSeq,
-            cols: 100,
-            generation: opened.generation,
-            rows: 40,
-            terminalId: opened.terminalId,
-            version,
-        });
-        const resized = await waitForTerminal(attached.stream, {
-            generation: opened.generation,
-            label: `${instance}:resize`,
-            predicate: (event) =>
-                event.name === "terminal.resized" &&
-                event.payload?.clientSeq === clientSeq,
-            terminalId: opened.terminalId,
-            version: () => version,
-        });
-        version = resized.event.payload.version;
-        lastSeq = Math.max(lastSeq, resized.lastSeq);
+            await attached.stream.send("resize", {
+                clientSeq: ++clientSeq,
+                cols: 100,
+                generation: opened.generation,
+                rows: 40,
+                terminalId: opened.terminalId,
+                version,
+            });
+            const resized = await waitForTerminal(attached.stream, {
+                generation: opened.generation,
+                label: `${instance}:resize`,
+                predicate: (event) =>
+                    event.name === "terminal.resized" &&
+                    event.payload?.clientSeq === clientSeq,
+                terminalId: opened.terminalId,
+                version: () => version,
+            });
+            version = resized.event.payload.version;
+            lastSeq = Math.max(lastSeq, resized.lastSeq);
 
-        await attached.stream.send("input", {
-            clientSeq: ++clientSeq,
-            data: terminalSizeProbeCommand(),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version,
-        });
-        const sized = await waitForTerminal(attached.stream, {
-            generation: opened.generation,
-            label: `${instance}:size-probe`,
-            marker: terminalExpectedSize(40, 100),
-            terminalId: opened.terminalId,
-            version: () => version,
-        });
-        lastSeq = Math.max(lastSeq, sized.lastSeq);
-        attached.stream.close();
+            await attached.stream.send("input", {
+                clientSeq: ++clientSeq,
+                data: terminalSizeProbeCommand(),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version,
+            });
+            const sized = await waitForTerminal(attached.stream, {
+                generation: opened.generation,
+                label: `${instance}:size-probe`,
+                marker: terminalExpectedSize(40, 100),
+                terminalId: opened.terminalId,
+                version: () => version,
+            });
+            lastSeq = Math.max(lastSeq, sized.lastSeq);
+            attached.stream.close();
 
-        const resumed = await connection.openStream(instance, "terminal", "attach", {
-            fromSeq: lastSeq,
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-        });
-        const resumedMarker = `${instance}-terminal-resumed`;
-        await resumed.stream.send("input", {
-            clientSeq: ++clientSeq,
-            data: terminalPrintCommand(resumedMarker),
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version,
-        });
-        const resumedResult = await waitForTerminal(resumed.stream, {
-            generation: opened.generation,
-            label: `${instance}:resume`,
-            marker: resumedMarker,
-            terminalId: opened.terminalId,
-            version: () => version,
-        });
-        lastSeq = Math.max(lastSeq, resumedResult.lastSeq);
-        resumed.stream.close();
+            const resumed = await connection.openStream(
+                instance,
+                "terminal",
+                "attach",
+                {
+                    fromSeq: lastSeq,
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                },
+            );
+            const resumedMarker = `${instance}-terminal-resumed`;
+            await resumed.stream.send("input", {
+                clientSeq: ++clientSeq,
+                data: terminalPrintCommand(resumedMarker),
+                generation: opened.generation,
+                terminalId: opened.terminalId,
+                version,
+            });
+            const resumedResult = await waitForTerminal(resumed.stream, {
+                generation: opened.generation,
+                label: `${instance}:resume`,
+                marker: resumedMarker,
+                terminalId: opened.terminalId,
+                version: () => version,
+            });
+            lastSeq = Math.max(lastSeq, resumedResult.lastSeq);
+            resumed.stream.close();
 
-        const killed = await connection.request(instance, "terminal", "kill", {
-            generation: opened.generation,
-            terminalId: opened.terminalId,
-            version,
-        });
-        if (killed.state !== "killed" && killed.state !== "exited") {
-            throw new Error(`terminal kill failed for ${instance}: ${JSON.stringify(killed)}`);
-        }
-        return {
-            instance,
-            lastSeq,
-            resized: `${killed.rows}x${killed.cols}`,
-            state: killed.state,
-            terminalId: opened.terminalId,
-        };
-    });
+            const killed = await connection.request(
+                instance,
+                "terminal",
+                "kill",
+                {
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                    version,
+                },
+            );
+            if (killed.state !== "killed" && killed.state !== "exited") {
+                throw new Error(
+                    `terminal kill failed for ${instance}: ${JSON.stringify(killed)}`,
+                );
+            }
+            return {
+                instance,
+                lastSeq,
+                resized: `${killed.rows}x${killed.cols}`,
+                state: killed.state,
+                terminalId: opened.terminalId,
+            };
+        },
+    );
 }
 
 async function waitForTerminal(stream, options) {
@@ -131,7 +156,10 @@ async function waitForTerminal(stream, options) {
             event = await Promise.race([
                 stream.nextEvent(),
                 new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("terminal event timeout")), remaining),
+                    setTimeout(
+                        () => reject(new Error("terminal event timeout")),
+                        remaining,
+                    ),
                 ),
             ]);
         } catch (error) {
@@ -141,7 +169,10 @@ async function waitForTerminal(stream, options) {
             );
         }
         lastEvent = event;
-        if (event.name === "stream.cancelled" || event.name === "stream.completed") {
+        if (
+            event.name === "stream.cancelled" ||
+            event.name === "stream.completed"
+        ) {
             throw new Error(
                 `${options.label} ended unexpectedly: ${event.name}; ` +
                     `error=${JSON.stringify(event.error)}; output=${JSON.stringify(output)}`,
@@ -158,7 +189,8 @@ async function waitForTerminal(stream, options) {
                 version: options.version(),
             });
         }
-        const matched = options.predicate?.(event, output) ??
+        const matched =
+            options.predicate?.(event, output) ??
             (options.marker !== undefined && output.includes(options.marker));
         if (matched) return { event, lastSeq, output };
     }

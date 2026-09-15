@@ -1,8 +1,14 @@
 import type { ContextMessageRecord } from "../protocol/interaction/context/ContextMessage.js";
 import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
 import type { InstanceSnapshot } from "../protocol/instance/activity/State.js";
-import type { OAuthApprovalDecision, OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
-import type { ApprovalDecision, ApprovalRequest } from "../protocol/tool/Approval.js";
+import type {
+    OAuthApprovalDecision,
+    OAuthApprovalRequest,
+} from "../protocol/interaction/OAuth.js";
+import type {
+    ApprovalDecision,
+    ApprovalRequest,
+} from "../protocol/tool/Approval.js";
 import type { ControlReadModel } from "../read-model/ControlReadModel.js";
 import type { ControlClients, RuntimeStartOptions } from "./ControlClients.js";
 import { withRequestTimeout } from "./connection/RequestTimeout.js";
@@ -29,13 +35,17 @@ export class ControlCommands {
         this.#epoch += 1;
     }
 
-    async startInstance(instance: string, options: RuntimeStartOptions = {}): Promise<InstanceSnapshot> {
+    async startInstance(
+        instance: string,
+        options: RuntimeStartOptions = {},
+    ): Promise<InstanceSnapshot> {
         const epoch = this.#epoch;
         const snapshot = await this.#request(
             this.#clients.runtime.start(instance, options),
             `runtime.start:${instance}`,
         );
-        if (this.#current(epoch, options.signal)) this.#acceptSnapshot(snapshot);
+        if (this.#current(epoch, options.signal))
+            this.#acceptSnapshot(snapshot);
         return snapshot;
     }
 
@@ -56,7 +66,8 @@ export class ControlCommands {
             `runtime.refresh:${instance}`,
             "read",
         );
-        if (this.#current(epoch)) this.#model.applyAuthoritativeSnapshot(result.snapshot);
+        if (this.#current(epoch))
+            this.#model.applyAuthoritativeSnapshot(result.snapshot);
         return result.snapshot;
     }
 
@@ -166,6 +177,11 @@ export class ControlCommands {
         label: string,
         outcome: "read" | "uncertain" = "uncertain",
     ): Promise<T> {
-        return await withRequestTimeout(request, this.#timeoutMs, label, outcome);
+        return await withRequestTimeout(
+            request,
+            this.#timeoutMs,
+            label,
+            outcome,
+        );
     }
 }

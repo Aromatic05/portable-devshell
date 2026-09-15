@@ -9,25 +9,31 @@ test("instance connection service shares one managed Worker across MCP and Agent
     let starts = 0;
     let stops = 0;
     const handle = { marker: "shared-worker-handle" };
-    const registry = new InstanceRegistry([{
-        enabled: true,
-        name: "worker-a",
-        worker: {
-            get handle() { return handle; },
-            managementMode: "controllerManaged",
-            snapshot() { return { ready }; },
-            async start() {
-                starts += 1;
-                ready = true;
-                return { ready: true };
+    const registry = new InstanceRegistry([
+        {
+            enabled: true,
+            name: "worker-a",
+            worker: {
+                get handle() {
+                    return handle;
+                },
+                managementMode: "controllerManaged",
+                snapshot() {
+                    return { ready };
+                },
+                async start() {
+                    starts += 1;
+                    ready = true;
+                    return { ready: true };
+                },
+                async stop() {
+                    stops += 1;
+                    ready = false;
+                    return { ready: false };
+                },
             },
-            async stop() {
-                stops += 1;
-                ready = false;
-                return { ready: false };
-            }
-        }
-    } as never]);
+        } as never,
+    ]);
     const connections = new InstanceConnectionService(registry);
 
     const mcp = await connections.acquire("worker-a", "ctx:mcp");

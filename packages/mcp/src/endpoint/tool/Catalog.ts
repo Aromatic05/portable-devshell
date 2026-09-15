@@ -4,11 +4,14 @@ import {
     errorCodes,
     toolNamespace,
     type JsonValue,
-    type ToolDefinition
+    type ToolDefinition,
 } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../../auth/Config.js";
-import { createMcpContextSelector, type McpContextSelector } from "../../context/Selector.js";
+import {
+    createMcpContextSelector,
+    type McpContextSelector,
+} from "../../context/Selector.js";
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../Port.js";
 import { mcpToolAnnotations } from "./Metadata.js";
 import { McpToolDescriptionEnhancer } from "./Metadata.js";
@@ -16,12 +19,12 @@ import { mcpToolInvocationStatus, mcpToolTitle } from "./Metadata.js";
 import {
     McpToolSchemaAdapter,
     McpToolSchemaUnavailableError,
-    type McpTool
+    type McpTool,
 } from "./Schema.js";
 import { McpToolCatalogArtifact } from "../domain/artifact/Catalog.js";
 import {
     isMcpEnvironmentToolName,
-    McpToolCatalogEnvironment
+    McpToolCatalogEnvironment,
 } from "../domain/environment/Catalog.js";
 import { McpToolCatalogInteraction } from "../domain/interaction/Catalog.js";
 import { McpToolCatalogTodo } from "../domain/todo/Catalog.js";
@@ -29,7 +32,7 @@ import { withMcpCommentOutputSchema } from "../domain/interaction/Handler.js";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
-    withMcpProvenance
+    withMcpProvenance,
 } from "../dispatch/Input.js";
 
 export interface McpEndpointCatalogWorker {
@@ -72,7 +75,8 @@ export class McpEndpointCatalog {
     constructor(options: McpEndpointCatalogOptions) {
         this.#auth = options.auth ?? { enabled: false, provider: "none" };
         this.#catalog = new McpToolCatalogEndpoint();
-        this.#contextSelector = options.contextSelector ?? createMcpContextSelector("explicit");
+        this.#contextSelector =
+            options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -80,7 +84,8 @@ export class McpEndpointCatalog {
     }
 
     snapshot(): McpEndpointCatalogSnapshot {
-        const hasWorkerSchema = this.#worker.snapshot().ready === true ||
+        const hasWorkerSchema =
+            this.#worker.snapshot().ready === true ||
             this.#worker.hasToolSchemaCache?.() === true;
         const merged = this.#catalog.merge(this.#sources(hasWorkerSchema));
         const exposed = merged;
@@ -88,7 +93,7 @@ export class McpEndpointCatalog {
             exposed,
             hasWorkerSchema,
             instanceRoutingEnabled: this.#gateway !== undefined,
-            merged
+            merged,
         };
     }
 
@@ -100,7 +105,7 @@ export class McpEndpointCatalog {
 
         return snapshot.exposed.map((entry) => {
             return this.adapt(
-                this.#withRoutingTarget(entry, snapshot.instanceRoutingEnabled)
+                this.#withRoutingTarget(entry, snapshot.instanceRoutingEnabled),
             );
         });
     }
@@ -123,34 +128,43 @@ export class McpEndpointCatalog {
 
     adapt(tool: ToolDefinition): McpTool {
         const modelTool = hideInternalWorkerInput(tool);
-        const provenanceTool = isMcpEnvironmentToolName(modelTool.name) || !isModelFacingTool(modelTool)
-            ? modelTool
-            : withMcpProvenance(modelTool);
+        const provenanceTool =
+            isMcpEnvironmentToolName(modelTool.name) ||
+            !isModelFacingTool(modelTool)
+                ? modelTool
+                : withMcpProvenance(modelTool);
         const modelFacing = isModelFacingTool(provenanceTool);
-        const contextualTool = this.#contextSelector.requiresExplicitContextId || !modelFacing
-            ? withMcpContextId(
-                  provenanceTool,
-                  modelFacing
-                      ? undefined
-                      : "Internal Context ID carried by the Workspace App.",
-              )
-            : provenanceTool;
+        const contextualTool =
+            this.#contextSelector.requiresExplicitContextId || !modelFacing
+                ? withMcpContextId(
+                      provenanceTool,
+                      modelFacing
+                          ? undefined
+                          : "Internal Context ID carried by the Workspace App.",
+                  )
+                : provenanceTool;
         const exposed = isMcpEnvironmentToolName(contextualTool.name)
             ? contextualTool
             : withMcpCommentOutputSchema(contextualTool);
         const adapted = this.#schemaAdapter.toMcpTool(
             exposed,
-            this.#descriptionEnhancer.enhance(exposed.name, exposed.description),
+            this.#descriptionEnhancer.enhance(
+                exposed.name,
+                exposed.description,
+            ),
             { modelFacing },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);
         const invocationStatus = mcpToolInvocationStatus(exposed.name);
         const meta = {
             ...asRecord(adapted._meta),
-            ...(invocationStatus === undefined ? {} : {
-                "openai/toolInvocation/invoked": invocationStatus.invoked,
-                "openai/toolInvocation/invoking": invocationStatus.invoking,
-            }),
+            ...(invocationStatus === undefined
+                ? {}
+                : {
+                      "openai/toolInvocation/invoked": invocationStatus.invoked,
+                      "openai/toolInvocation/invoking":
+                          invocationStatus.invoking,
+                  }),
             ...(securitySchemes === undefined ? {} : { securitySchemes }),
         };
         return {
@@ -167,45 +181,53 @@ export class McpEndpointCatalog {
     }
 
     #sources(hasWorkerSchema: boolean): McpToolCatalogEndpointSource[] {
-        const workspaceTools = this.#workspaceAppEnabled && this.#gateway !== undefined && isMcpInteractionGateway(this.#gateway)
-            ? this.#interactionTools.list()
-            : [];
-        const workspaceApp = workspaceTools.some((tool) => tool.name === "workspace_open");
-        const sources: McpToolCatalogEndpointSource[] = [{
-            owner: "environment",
-            tools: this.#environmentTools.list({
-                remoteEnvironment: this.#gateway !== undefined,
-                requireExplicitContextId: this.#contextSelector.requiresExplicitContextId,
-                workspaceApp,
-            })
-        }];
+        const workspaceTools =
+            this.#workspaceAppEnabled &&
+            this.#gateway !== undefined &&
+            isMcpInteractionGateway(this.#gateway)
+                ? this.#interactionTools.list()
+                : [];
+        const workspaceApp = workspaceTools.some(
+            (tool) => tool.name === "workspace_open",
+        );
+        const sources: McpToolCatalogEndpointSource[] = [
+            {
+                owner: "environment",
+                tools: this.#environmentTools.list({
+                    remoteEnvironment: this.#gateway !== undefined,
+                    requireExplicitContextId:
+                        this.#contextSelector.requiresExplicitContextId,
+                    workspaceApp,
+                }),
+            },
+        ];
 
         if (hasWorkerSchema) {
             sources.push({
                 owner: "worker",
-                tools: this.#worker.listTools()
+                tools: this.#worker.listTools(),
             });
         }
 
         if (this.#gateway !== undefined) {
             const artifactTools = this.#artifactTools.list({
-                viewImage: this.#gateway.viewArtifactImage !== undefined
+                viewImage: this.#gateway.viewArtifactImage !== undefined,
             });
             if (artifactTools.length > 0) {
                 sources.push({
                     owner: "artifact",
-                    tools: artifactTools
+                    tools: artifactTools,
                 });
             }
             if (workspaceTools.length > 0) {
                 sources.push({
                     owner: "workspace",
-                    tools: workspaceTools
+                    tools: workspaceTools,
                 });
             }
             sources.push({
                 owner: "todo",
-                tools: this.#todoTools.list()
+                tools: this.#todoTools.list(),
             });
         }
 
@@ -214,7 +236,7 @@ export class McpEndpointCatalog {
 
     #withRoutingTarget(
         entry: McpToolCatalogEndpointEntry,
-        instanceRoutingEnabled: boolean
+        instanceRoutingEnabled: boolean,
     ): ToolDefinition {
         if (
             instanceRoutingEnabled &&
@@ -257,10 +279,14 @@ function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
 
 function isModelFacingTool(tool: ToolDefinition): boolean {
     const visibility = asRecord(asRecord(tool._meta).ui).visibility;
-    return !Array.isArray(visibility) || visibility.some((entry) => entry === "model");
+    return (
+        !Array.isArray(visibility) ||
+        visibility.some((entry) => entry === "model")
+    );
 }
 
-export type McpToolCatalogEndpointOwner = "worker" | "artifact" | "environment" | "workspace" | "todo";
+export type McpToolCatalogEndpointOwner =
+    "worker" | "artifact" | "environment" | "workspace" | "todo";
 
 export interface McpToolCatalogEndpointEntry {
     definition: ToolDefinition;
@@ -273,7 +299,9 @@ export interface McpToolCatalogEndpointSource {
 }
 
 export class McpToolCatalogEndpoint {
-    merge(sources: readonly McpToolCatalogEndpointSource[]): McpToolCatalogEndpointEntry[] {
+    merge(
+        sources: readonly McpToolCatalogEndpointSource[],
+    ): McpToolCatalogEndpointEntry[] {
         const merged = new Map<string, McpToolCatalogEndpointEntry>();
 
         for (const source of sources) {
@@ -286,32 +314,38 @@ export class McpToolCatalogEndpoint {
                             group: definition.group,
                             namespace: namespace ?? null,
                             owner: source.owner,
-                            toolName: definition.name
+                            toolName: definition.name,
                         },
                         message: `Tool ${definition.name} group ${definition.group} must match its namespace.`,
-                        retryable: false
+                        retryable: false,
                     });
                 }
-                if (namespace === bootstrapToolNamespace && source.owner !== "environment") {
+                if (
+                    namespace === bootstrapToolNamespace &&
+                    source.owner !== "environment"
+                ) {
                     throw createError({
                         code: errorCodes.coreToolSchemaUnavailable,
                         details: {
                             owner: source.owner,
-                            toolName: definition.name
+                            toolName: definition.name,
                         },
                         message: `Tool namespace ${bootstrapToolNamespace} is reserved for the environment bootstrap owner.`,
-                        retryable: false
+                        retryable: false,
                     });
                 }
-                if (source.owner === "environment" && namespace !== bootstrapToolNamespace) {
+                if (
+                    source.owner === "environment" &&
+                    namespace !== bootstrapToolNamespace
+                ) {
                     throw createError({
                         code: errorCodes.coreToolSchemaUnavailable,
                         details: {
                             namespace,
-                            toolName: definition.name
+                            toolName: definition.name,
                         },
                         message: `Environment bootstrap owner may only define ${bootstrapToolNamespace}_* tools.`,
-                        retryable: false
+                        retryable: false,
                     });
                 }
                 const previous = merged.get(definition.name);
@@ -321,15 +355,15 @@ export class McpToolCatalogEndpoint {
                         details: {
                             firstOwner: previous.owner,
                             secondOwner: source.owner,
-                            toolName: definition.name
+                            toolName: definition.name,
                         },
                         message: `Tool ${definition.name} is defined by both ${previous.owner} and ${source.owner}.`,
-                        retryable: false
+                        retryable: false,
                     });
                 }
                 merged.set(definition.name, {
                     definition,
-                    owner: source.owner
+                    owner: source.owner,
                 });
             }
         }

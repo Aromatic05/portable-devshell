@@ -20,13 +20,18 @@ export function ConfirmationDialog({
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLElement>(null);
-    const destructive = actionLabel === "Delete" || actionLabel === "Deny" || actionLabel === "Disable" || actionLabel === "Stop";
+    const destructive =
+        actionLabel === "Delete" ||
+        actionLabel === "Deny" ||
+        actionLabel === "Disable" ||
+        actionLabel === "Stop";
     const progressLabel = actionProgressLabel(actionLabel);
 
     useEffect(() => {
-        const previous = document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : undefined;
+        const previous =
+            document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : undefined;
         (destructive ? cancelRef.current : confirmRef.current)?.focus();
         return () => previous?.focus();
     }, [destructive]);
@@ -42,10 +47,10 @@ export function ConfirmationDialog({
             return;
         }
         if (event.key !== "Tab") return;
-        const controls = [cancelRef.current, confirmRef.current]
-            .filter((control): control is HTMLButtonElement =>
-                control !== null && !control.disabled
-            );
+        const controls = [cancelRef.current, confirmRef.current].filter(
+            (control): control is HTMLButtonElement =>
+                control !== null && !control.disabled,
+        );
         if (controls.length === 0) {
             event.preventDefault();
             dialogRef.current?.focus();
@@ -65,7 +70,9 @@ export function ConfirmationDialog({
     return (
         <div
             className="dialog-backdrop"
-            onMouseDown={() => { if (!busy) onCancel(); }}
+            onMouseDown={() => {
+                if (!busy) onCancel();
+            }}
             role="presentation"
         >
             <section
@@ -79,11 +86,19 @@ export function ConfirmationDialog({
                 role="dialog"
                 tabIndex={-1}
             >
-                <h2 id="confirmation-title">Confirm {actionLabel.toLowerCase()}</h2>
+                <h2 id="confirmation-title">
+                    Confirm {actionLabel.toLowerCase()}
+                </h2>
                 <p>{description}</p>
-                {error === undefined ? null : <p className="error" role="alert">{error}</p>}
+                {error === undefined ? null : (
+                    <p className="error" role="alert">
+                        {error}
+                    </p>
+                )}
                 <div className="actions">
-                    <button disabled={busy} onClick={onCancel} ref={cancelRef}>Cancel</button>
+                    <button disabled={busy} onClick={onCancel} ref={cancelRef}>
+                        Cancel
+                    </button>
                     <button
                         className={destructive ? "danger" : "primary"}
                         disabled={busy || disabled}

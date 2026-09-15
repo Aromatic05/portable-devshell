@@ -28,10 +28,10 @@ deny
 
 语义：
 
-* `disabled` 与 `allow` 的默认决策都是直接允许；
-* `ask` 创建 pending Approval，调用等待人工决定；
-* `deny` 默认拒绝；
-* `rules` 按配置顺序 first-match，命中后覆盖 mode 的默认决策。
+- `disabled` 与 `allow` 的默认决策都是直接允许；
+- `ask` 创建 pending Approval，调用等待人工决定；
+- `deny` 默认拒绝；
+- `rules` 按配置顺序 first-match，命中后覆盖 mode 的默认决策。
 
 Rule 当前使用 exact match：
 
@@ -101,11 +101,11 @@ devshell secret scan [directory] [--glob <pattern>] [--limit <n>]
 
 ```json
 {
-  "findings": [
-    { "type": "github_token", "path": "config/example.txt", "line": 12 }
-  ],
-  "truncated": false,
-  "truncatedFiles": 0
+    "findings": [
+        { "type": "github_token", "path": "config/example.txt", "line": 12 }
+    ],
+    "truncated": false,
+    "truncatedFiles": 0
 }
 ```
 
@@ -156,10 +156,10 @@ devshell secret scan . --glob '**/*.toml'
 
 这是轻量 preflight，不是凭据泄露的完整证明：
 
-* pattern 可以漏报；
-* generic pattern 可以误报；
-* 不扫描超出 discovery/size 边界的全部内容；
-* 不检查 Git 历史、远程 secret manager 或已删除文件。
+- pattern 可以漏报；
+- generic pattern 可以误报；
+- 不扫描超出 discovery/size 边界的全部内容；
+- 不检查 Git 历史、远程 secret manager 或已删除文件。
 
 因此适合提交/发布前快速检查，但不能替代专业 secret scanner 或仓库历史审计。
 

@@ -3,7 +3,10 @@ import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertPackageBinFile, readPackageBinPath } from "./application-layout.mjs";
+import {
+    assertPackageBinFile,
+    readPackageBinPath,
+} from "./application-layout.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
@@ -12,10 +15,19 @@ if (workerArgument === undefined) {
 }
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const cli = process.env.PORTABLE_DEVSHELL_CLI_PATH ?? (await assertPackageBinFile(
-    await readPackageBinPath(resolve(repositoryRoot, "packages", "cli"), "devshell")
-)).absolutePath;
-const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
+const cli =
+    process.env.PORTABLE_DEVSHELL_CLI_PATH ??
+    (
+        await assertPackageBinFile(
+            await readPackageBinPath(
+                resolve(repositoryRoot, "packages", "cli"),
+                "devshell",
+            ),
+        )
+    ).absolutePath;
+const worker = isAbsolute(workerArgument)
+    ? workerArgument
+    : resolve(process.cwd(), workerArgument);
 const root = await createTestTempDirectory("client-smoke");
 const home = resolve(root, "user");
 const devshellHome = resolve(home, ".devshell");
@@ -34,7 +46,7 @@ const env = {
     LOCALAPPDATA: resolve(root, "local-app-data"),
     PORTABLE_DEVSHELL_HOME: devshellHome,
     XDG_RUNTIME_DIR: runtime,
-    [workerEnvName]: worker
+    [workerEnvName]: worker,
 };
 
 delete env.DEVSHELL_WORKER_INTERNAL_INSTANCE;
@@ -57,9 +69,9 @@ await writeFile(
         'listenHost = "127.0.0.1"',
         "listenPort = 17890",
         'publicBaseUrl = "http://127.0.0.1:17890"',
-        ""
+        "",
     ].join("\n"),
-    "utf8"
+    "utf8",
 );
 
 await writeFile(
@@ -82,9 +94,9 @@ await writeFile(
         "",
         "[security]",
         'mode = "workspace"',
-        ""
+        "",
     ].join("\n"),
-    "utf8"
+    "utf8",
 );
 
 let currentStage = "initialization";
@@ -98,17 +110,33 @@ try {
     stage("migrate legacy instance config");
     const migratedInstanceConfig = await readFile(
         resolve(devshellHome, "control", "instances", `${instance}.toml`),
-        "utf8"
+        "utf8",
     );
     if (!/^version = 4$/mu.test(migratedInstanceConfig)) {
-        throw new Error(`legacy instance config was not rewritten to version 4:\n${migratedInstanceConfig}`);
+        throw new Error(
+            `legacy instance config was not rewritten to version 4:\n${migratedInstanceConfig}`,
+        );
     }
     if (/^\[mcp\.tools\]$/mu.test(migratedInstanceConfig)) {
-        throw new Error(`legacy mcp.tools policy survived version 4 migration:\n${migratedInstanceConfig}`);
+        throw new Error(
+            `legacy mcp.tools policy survived version 4 migration:\n${migratedInstanceConfig}`,
+        );
     }
-    for (const extensionId of ["artifact", "instance", "mcp", "secret", "skill"]) {
-        if (!new RegExp(`^model = \\[.*"${extensionId}".*\\]$`, "mu").test(migratedInstanceConfig)) {
-            throw new Error(`version 4 migration did not grant bundled model Extension ${extensionId}:\n${migratedInstanceConfig}`);
+    for (const extensionId of [
+        "artifact",
+        "instance",
+        "mcp",
+        "secret",
+        "skill",
+    ]) {
+        if (
+            !new RegExp(`^model = \\[.*"${extensionId}".*\\]$`, "mu").test(
+                migratedInstanceConfig,
+            )
+        ) {
+            throw new Error(
+                `version 4 migration did not grant bundled model Extension ${extensionId}:\n${migratedInstanceConfig}`,
+            );
         }
     }
 
@@ -127,9 +155,18 @@ try {
         process.platform === "win32"
             ? "Write-Output 'portable-devshell-client-smoke'"
             : "printf 'portable-devshell-client-smoke\\n'";
-    const call = runCli(["instance", "call", instance, workspace, "bash_run", JSON.stringify({ command, timeoutMs: 30_000 })]);
+    const call = runCli([
+        "instance",
+        "call",
+        instance,
+        workspace,
+        "bash_run",
+        JSON.stringify({ command, timeoutMs: 30_000 }),
+    ]);
     if (!call.stdout.includes("portable-devshell-client-smoke")) {
-        throw new Error(`client tool call did not return expected output:\n${call.stdout}${call.stderr}`);
+        throw new Error(
+            `client tool call did not return expected output:\n${call.stdout}${call.stderr}`,
+        );
     }
 
     stage("stop instance");
@@ -151,7 +188,12 @@ try {
         stage("cleanup control");
         runCli(["stop"], true);
     }
-    await rm(root, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
+    await rm(root, {
+        force: true,
+        maxRetries: 10,
+        recursive: true,
+        retryDelay: 100,
+    });
 }
 
 function runCli(args, ignoreFailure = false) {
@@ -160,25 +202,28 @@ function runCli(args, ignoreFailure = false) {
         encoding: "utf8",
         env,
         timeout: 45_000,
-        windowsHide: true
+        windowsHide: true,
     });
     if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
         throw new Error(
-            `devshell ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
+            `devshell ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
         );
     }
     return {
         status: result.status,
         stderr: result.stderr ?? "",
-        stdout: result.stdout ?? ""
+        stdout: result.stdout ?? "",
     };
 }
 
 async function reportFailure(error) {
     const logs = [];
     for (const [label, path] of [
-        ["control.log", resolve(devshellHome, "control", "logs", "control.log")],
-        ["worker.log", resolve(devshellHome, instance, "logs", "worker.log")]
+        [
+            "control.log",
+            resolve(devshellHome, "control", "logs", "control.log"),
+        ],
+        ["worker.log", resolve(devshellHome, instance, "logs", "worker.log")],
     ]) {
         try {
             logs.push(`${label}:\n${await readFile(path, "utf8")}`);
@@ -187,7 +232,12 @@ async function reportFailure(error) {
         }
     }
     try {
-        const auditDatabase = resolve(devshellHome, instance, "control-worker", "audit.sqlite3");
+        const auditDatabase = resolve(
+            devshellHome,
+            instance,
+            "control-worker",
+            "audit.sqlite3",
+        );
         const metadata = await stat(auditDatabase);
         logs.push(`audit.sqlite3: ${metadata.size} bytes`);
     } catch {
@@ -195,11 +245,11 @@ async function reportFailure(error) {
     }
     const rendered = [
         `stage: ${currentStage}`,
-        error instanceof Error ? error.stack ?? error.message : String(error),
-        ...logs
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+        ...logs,
     ].join("\n\n");
     process.stderr.write(
-        `::error title=Windows client smoke::${escapeWorkflowCommand(rendered)}\n`
+        `::error title=Windows client smoke::${escapeWorkflowCommand(rendered)}\n`,
     );
 }
 
@@ -216,10 +266,24 @@ function stage(message) {
 }
 
 function resolveTargetKey(platform, architecture) {
-    const os = platform === "win32" ? "windows" : platform === "darwin" ? "darwin" : platform === "linux" ? "linux" : undefined;
-    const arch = architecture === "x64" ? "x64" : architecture === "arm64" ? "arm64" : undefined;
+    const os =
+        platform === "win32"
+            ? "windows"
+            : platform === "darwin"
+              ? "darwin"
+              : platform === "linux"
+                ? "linux"
+                : undefined;
+    const arch =
+        architecture === "x64"
+            ? "x64"
+            : architecture === "arm64"
+              ? "arm64"
+              : undefined;
     if (os === undefined || arch === undefined) {
-        throw new Error(`unsupported client smoke platform: ${platform}-${architecture}`);
+        throw new Error(
+            `unsupported client smoke platform: ${platform}-${architecture}`,
+        );
     }
     return `${os}-${arch}`;
 }

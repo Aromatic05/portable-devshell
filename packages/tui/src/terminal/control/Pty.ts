@@ -94,7 +94,9 @@ export class TuiControlTerminalPtyFactory {
         };
     }
 
-    async kill(instance: string): Promise<TerminalSessionDescriptor | undefined> {
+    async kill(
+        instance: string,
+    ): Promise<TerminalSessionDescriptor | undefined> {
         const identity = this.#sessions.get(instance);
         if (identity === undefined || identity.state !== "running") {
             return undefined;
@@ -447,9 +449,7 @@ function readInteger(value: unknown, field: string): number {
     return value;
 }
 
-function readTerminalState(
-    value: unknown,
-): TerminalSessionDescriptor["state"] {
+function readTerminalState(value: unknown): TerminalSessionDescriptor["state"] {
     if (
         value !== "running" &&
         value !== "exited" &&

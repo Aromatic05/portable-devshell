@@ -2,7 +2,11 @@ import {
     CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,
     CONTROL_REMOTE_RPC_SUBPROTOCOL,
 } from "../../protocol/control/ControlProtocol.js";
-import { ChannelBase, asChannelError, type Channel } from "../protocol/Channel.js";
+import {
+    ChannelBase,
+    asChannelError,
+    type Channel,
+} from "../protocol/Channel.js";
 import type { Frame } from "../protocol/Frame.js";
 
 export interface WebSocketClientLike {
@@ -72,9 +76,10 @@ export class WebSocketChannel implements Channel {
                 )}`,
             );
         }
-        const socket = (
-            options.webSocketFactory ?? defaultWebSocketFactory
-        )(options.url, protocols);
+        const socket = (options.webSocketFactory ?? defaultWebSocketFactory)(
+            options.url,
+            protocols,
+        );
         const channel = new WebSocketChannel(socket);
         return await new Promise<WebSocketChannel>((resolve, reject) => {
             let settled = false;
@@ -103,10 +108,7 @@ export class WebSocketChannel implements Channel {
                         "Control WebSocket connection failed or was rejected.",
                     ),
                 );
-            const closed = (event: {
-                code?: number;
-                reason?: string;
-            }) =>
+            const closed = (event: { code?: number; reason?: string }) =>
                 finishFailure(
                     new Error(
                         `Control WebSocket closed during connect: ${event.code ?? 1006} ${event.reason ?? ""}`.trim(),
@@ -210,10 +212,7 @@ export class WebSocketChannel implements Channel {
         this.#finish(new Error("Control WebSocket connection failed."));
     };
 
-    readonly #close = (event: {
-        code?: number;
-        reason?: string;
-    }): void => {
+    readonly #close = (event: { code?: number; reason?: string }): void => {
         const code = event.code ?? 1006;
         this.#finish(
             code === 1000
@@ -265,11 +264,7 @@ function defaultWebSocketFactory(
 async function toBytes(value: unknown): Promise<Uint8Array> {
     if (value instanceof ArrayBuffer) return new Uint8Array(value);
     if (ArrayBuffer.isView(value)) {
-        return new Uint8Array(
-            value.buffer,
-            value.byteOffset,
-            value.byteLength,
-        );
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     }
     if (
         typeof value === "object" &&
@@ -305,10 +300,7 @@ function encodeBase64Url(value: string): string {
         const first = bytes[index]!;
         const second = bytes[index + 1];
         const third = bytes[index + 2];
-        const bits =
-            (first << 16) |
-            ((second ?? 0) << 8) |
-            (third ?? 0);
+        const bits = (first << 16) | ((second ?? 0) << 8) | (third ?? 0);
         result += alphabet[(bits >>> 18) & 0x3f];
         result += alphabet[(bits >>> 12) & 0x3f];
         if (second !== undefined) {
@@ -326,11 +318,21 @@ const SERVER_DEAD_CONNECTION_MS = 60_000;
 
 export interface WebSocketServerLike {
     readonly readyState: number;
-    on(event: "message", listener: (data: unknown, isBinary: boolean) => void): unknown;
+    on(
+        event: "message",
+        listener: (data: unknown, isBinary: boolean) => void,
+    ): unknown;
     on(event: "pong", listener: () => void): unknown;
     once(event: "error", listener: (error: Error) => void): unknown;
-    once(event: "close", listener: (code: number, reason: Uint8Array) => void): unknown;
-    send(data: Uint8Array, options: { binary: true }, callback: (error?: Error) => void): void;
+    once(
+        event: "close",
+        listener: (code: number, reason: Uint8Array) => void,
+    ): unknown;
+    send(
+        data: Uint8Array,
+        options: { binary: true },
+        callback: (error?: Error) => void,
+    ): void;
     close(code?: number, reason?: string): void;
     ping(): void;
     terminate(): void;
@@ -350,36 +352,57 @@ export class WebSocketServerChannel extends ChannelBase {
     #lastSeenAt: number;
     #sendTail: Promise<void> = Promise.resolve();
 
-    constructor(socket: WebSocketServerLike, options: WebSocketServerChannelOptions = {}) {
+    constructor(
+        socket: WebSocketServerLike,
+        options: WebSocketServerChannelOptions = {},
+    ) {
         super();
         this.#socket = socket;
-        this.#deadConnectionMs = options.deadConnectionMs ?? SERVER_DEAD_CONNECTION_MS;
+        this.#deadConnectionMs =
+            options.deadConnectionMs ?? SERVER_DEAD_CONNECTION_MS;
         this.#now = options.now ?? Date.now;
         this.#lastSeenAt = this.#now();
         socket.on("message", this.#message);
-        socket.on("pong", () => { this.#lastSeenAt = this.#now(); });
+        socket.on("pong", () => {
+            this.#lastSeenAt = this.#now();
+        });
         socket.once("error", (error) => this.#fail(error));
         socket.once("close", (code, reason) => {
             clearInterval(this.#heartbeat);
             this.finish(
-                code === 1000 ? undefined : new Error(`WebSocket closed: ${code} ${Buffer.from(reason).toString()}`.trim()),
+                code === 1000
+                    ? undefined
+                    : new Error(
+                          `WebSocket closed: ${code} ${Buffer.from(reason).toString()}`.trim(),
+                      ),
             );
         });
-        this.#heartbeat = setInterval(() => this.#heartbeatTick(), options.heartbeatIntervalMs ?? SERVER_HEARTBEAT_INTERVAL_MS);
+        this.#heartbeat = setInterval(
+            () => this.#heartbeatTick(),
+            options.heartbeatIntervalMs ?? SERVER_HEARTBEAT_INTERVAL_MS,
+        );
         this.#heartbeat.unref();
     }
 
     async send(frame: Frame): Promise<void> {
         const copy = Uint8Array.from(frame);
         const operation = this.#sendTail.then(async () => {
-            if (this.closed || this.#socket.readyState !== OPEN) throw this.closeError("WebSocket channel is closed.");
+            if (this.closed || this.#socket.readyState !== OPEN)
+                throw this.closeError("WebSocket channel is closed.");
             await new Promise<void>((resolve, reject) => {
-                try { this.#socket.send(copy, { binary: true }, (error) => error == null ? resolve() : reject(error)); }
-                catch (error) { reject(error); }
+                try {
+                    this.#socket.send(copy, { binary: true }, (error) =>
+                        error == null ? resolve() : reject(error),
+                    );
+                } catch (error) {
+                    reject(error);
+                }
             });
         });
         this.#sendTail = operation.catch(() => undefined);
-        try { await operation; } catch (error) {
+        try {
+            await operation;
+        } catch (error) {
             const normalized = asChannelError(error);
             this.#fail(normalized);
             throw normalized;
@@ -389,8 +412,14 @@ export class WebSocketServerChannel extends ChannelBase {
     close(error?: Error): void {
         if (this.closed) return;
         try {
-            if (this.#socket.readyState === OPEN || this.#socket.readyState === CONNECTING) {
-                this.#socket.close(error === undefined ? 1000 : 1011, (error?.message ?? "channel closed").slice(0, 120));
+            if (
+                this.#socket.readyState === OPEN ||
+                this.#socket.readyState === CONNECTING
+            ) {
+                this.#socket.close(
+                    error === undefined ? 1000 : 1011,
+                    (error?.message ?? "channel closed").slice(0, 120),
+                );
             }
         } catch (closeError) {
             this.#fail(closeError);
@@ -412,7 +441,11 @@ export class WebSocketServerChannel extends ChannelBase {
             this.finish(new Error("WebSocket channel requires binary frames."));
             return;
         }
-        try { this.emitFrame(toServerBytes(data)); } catch (error) { this.#fail(error); }
+        try {
+            this.emitFrame(toServerBytes(data));
+        } catch (error) {
+            this.#fail(error);
+        }
     };
 
     #heartbeatTick(): void {
@@ -422,7 +455,11 @@ export class WebSocketServerChannel extends ChannelBase {
             return;
         }
         if (this.#socket.readyState === OPEN) {
-            try { this.#socket.ping(); } catch (error) { this.#fail(error); }
+            try {
+                this.#socket.ping();
+            } catch (error) {
+                this.#fail(error);
+            }
         }
     }
 
@@ -440,8 +477,10 @@ export class WebSocketServerChannel extends ChannelBase {
 
 function toServerBytes(data: unknown): Uint8Array {
     if (Buffer.isBuffer(data)) return data;
-    if (Array.isArray(data)) return Buffer.concat(data.map((value) => Buffer.from(value)));
+    if (Array.isArray(data))
+        return Buffer.concat(data.map((value) => Buffer.from(value)));
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
-    if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    if (ArrayBuffer.isView(data))
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     throw new Error("WebSocket binary frame has an unsupported payload type.");
 }

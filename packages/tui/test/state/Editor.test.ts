@@ -1,150 +1,245 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { type InstanceCreateSchema, type InstanceCreateSummary, type JsonValue } from "@portable-devshell/shared";
+import {
+    type InstanceCreateSchema,
+    type InstanceCreateSummary,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import { TuiAppStore } from "../../src/state/store/App.ts";
 import { createDefaultInstanceDraft } from "../../src/state/editor/Instance.ts";
 import { buildInstancesPageBoxes } from "../../src/view/page/instance/Instances.ts";
 
 {
-const schema: InstanceCreateSchema = {
-    container: {
-        defaultMode: "preset",
-        modes: ["preset", "dockerfile", "compose", "existingImage", "existingStoppedContainer"],
-        presets: [{ image: "archlinux:latest", preset: "arch" }]
-    },
-    defaultEnabled: true,
-    defaultMcpEnabled: true,
-    defaultModelExtensions: ["instance"],
-    defaultProvider: "local",
-    defaultSecurityMode: "disabled",
-    providers: ["local", "ssh", "docker", "podman", "reverse"]
-};
-
-function wizard(step: number, patch: Record<string, JsonValue> = {}) {
-    const store = new TuiAppStore();
-    store.setSelectedPage("instances");
-    store.setEditor({ editing: false, key: "create-instance", kind: "create", schema, step });
-    store.setFormDraft("create-instance", deepMerge(createDefaultInstanceDraft(), patch), true);
-    const box = buildInstancesPageBoxes(store.getState())[0];
-    assert.ok(box);
-    store.toggleExpanded(box.expandedKey);
-    const expanded = buildInstancesPageBoxes(store.getState())[0];
-    assert.ok(expanded?.expanded);
-    return expanded.expandedLines
-        .map((line) => line.id)
-        .filter((id): id is string => id !== undefined);
-}
-
-function wizardText(
-    step: number,
-    patch: Record<string, JsonValue>,
-    summary?: InstanceCreateSummary
-): string {
-    const store = new TuiAppStore();
-    store.setSelectedPage("instances");
-    store.setEditor({ editing: false, key: "create-instance", kind: "create", schema, step, summary });
-    store.setFormDraft("create-instance", deepMerge(createDefaultInstanceDraft(), patch), true);
-    const box = buildInstancesPageBoxes(store.getState())[0];
-    assert.ok(box);
-    store.toggleExpanded(box.expandedKey);
-    const expanded = buildInstancesPageBoxes(store.getState())[0];
-    assert.ok(expanded?.expanded);
-    return expanded.expandedLines.map((line) => line.text).join("\n");
-}
-
-test("create provider step exposes only fields relevant to the selected provider and mode", () => {
-    assert.equal(wizard(2, { provider: "local" }).some((id) => id.includes(":field:ssh.command")), false);
-    assert.equal(wizard(2, { provider: "local" }).some((id) => id.includes(":field:container.mode")), false);
-
-    const ssh = wizard(2, { provider: "ssh", ssh: { command: "ssh host" } });
-    assert.equal(ssh.some((id) => id.includes(":field:ssh.command")), true);
-    assert.equal(ssh.some((id) => id.includes(":field:container.mode")), false);
-
-    const compose = wizard(2, {
-        container: { compose: { file: "compose.yml", service: "dev" }, mode: "compose" },
-        provider: "docker"
-    });
-    assert.equal(compose.some((id) => id.includes(":field:container.mode")), true);
-    assert.equal(compose.some((id) => id.includes(":field:container.compose.file")), true);
-    assert.equal(compose.some((id) => id.includes(":field:container.build.context")), false);
-    assert.equal(compose.some((id) => id.includes(":field:podmanBinary")), false);
-});
-
-test("create wizard renders object arrays as editable JSON", () => {
-    const provider = wizardText(2, {
+    const schema: InstanceCreateSchema = {
         container: {
-            containerName: "devshell-demo-docker",
-            image: "archlinux:latest",
-            mode: "existingImage",
-            mounts: [{ source: "/host", target: "/container" }]
+            defaultMode: "preset",
+            modes: [
+                "preset",
+                "dockerfile",
+                "compose",
+                "existingImage",
+                "existingStoppedContainer",
+            ],
+            presets: [{ image: "archlinux:latest", preset: "arch" }],
         },
-        name: "demo-docker",
-        provider: "docker"
-    });
-    const approval = wizardText(4, {
-        approvalPolicy: {
-            mode: "ask",
-            rules: [{ decision: "ask", match: "exact", source: "mcp", toolName: "bash_run" }]
-        }
+        defaultEnabled: true,
+        defaultMcpEnabled: true,
+        defaultModelExtensions: ["instance"],
+        defaultProvider: "local",
+        defaultSecurityMode: "disabled",
+        providers: ["local", "ssh", "docker", "podman", "reverse"],
+    };
+
+    function wizard(step: number, patch: Record<string, JsonValue> = {}) {
+        const store = new TuiAppStore();
+        store.setSelectedPage("instances");
+        store.setEditor({
+            editing: false,
+            key: "create-instance",
+            kind: "create",
+            schema,
+            step,
+        });
+        store.setFormDraft(
+            "create-instance",
+            deepMerge(createDefaultInstanceDraft(), patch),
+            true,
+        );
+        const box = buildInstancesPageBoxes(store.getState())[0];
+        assert.ok(box);
+        store.toggleExpanded(box.expandedKey);
+        const expanded = buildInstancesPageBoxes(store.getState())[0];
+        assert.ok(expanded?.expanded);
+        return expanded.expandedLines
+            .map((line) => line.id)
+            .filter((id): id is string => id !== undefined);
+    }
+
+    function wizardText(
+        step: number,
+        patch: Record<string, JsonValue>,
+        summary?: InstanceCreateSummary,
+    ): string {
+        const store = new TuiAppStore();
+        store.setSelectedPage("instances");
+        store.setEditor({
+            editing: false,
+            key: "create-instance",
+            kind: "create",
+            schema,
+            step,
+            summary,
+        });
+        store.setFormDraft(
+            "create-instance",
+            deepMerge(createDefaultInstanceDraft(), patch),
+            true,
+        );
+        const box = buildInstancesPageBoxes(store.getState())[0];
+        assert.ok(box);
+        store.toggleExpanded(box.expandedKey);
+        const expanded = buildInstancesPageBoxes(store.getState())[0];
+        assert.ok(expanded?.expanded);
+        return expanded.expandedLines.map((line) => line.text).join("\n");
+    }
+
+    test("create provider step exposes only fields relevant to the selected provider and mode", () => {
+        assert.equal(
+            wizard(2, { provider: "local" }).some((id) =>
+                id.includes(":field:ssh.command"),
+            ),
+            false,
+        );
+        assert.equal(
+            wizard(2, { provider: "local" }).some((id) =>
+                id.includes(":field:container.mode"),
+            ),
+            false,
+        );
+
+        const ssh = wizard(2, {
+            provider: "ssh",
+            ssh: { command: "ssh host" },
+        });
+        assert.equal(
+            ssh.some((id) => id.includes(":field:ssh.command")),
+            true,
+        );
+        assert.equal(
+            ssh.some((id) => id.includes(":field:container.mode")),
+            false,
+        );
+
+        const compose = wizard(2, {
+            container: {
+                compose: { file: "compose.yml", service: "dev" },
+                mode: "compose",
+            },
+            provider: "docker",
+        });
+        assert.equal(
+            compose.some((id) => id.includes(":field:container.mode")),
+            true,
+        );
+        assert.equal(
+            compose.some((id) => id.includes(":field:container.compose.file")),
+            true,
+        );
+        assert.equal(
+            compose.some((id) => id.includes(":field:container.build.context")),
+            false,
+        );
+        assert.equal(
+            compose.some((id) => id.includes(":field:podmanBinary")),
+            false,
+        );
     });
 
-    assert.equal(provider.includes('[{"source":"/host","target":"/container"}]'), true);
-    assert.equal(approval.includes('[{"decision":"ask","match":"exact","source":"mcp","toolName":"bash_run"}]'), true);
-    assert.equal(provider.includes("[object Object]"), false);
-    assert.equal(approval.includes("[object Object]"), false);
-});
-
-test("create wizard review and validation output redact every secret value", () => {
-    const text = wizardText(
-        6,
-        {
+    test("create wizard renders object arrays as editable JSON", () => {
+        const provider = wizardText(2, {
             container: {
                 containerName: "devshell-demo-docker",
-                env: { CONTAINER_TOKEN: "container-secret" },
                 image: "archlinux:latest",
-                mode: "existingImage"
-            },
-            env: { API_TOKEN: "instance-secret" },
-            extensions: { model: ["instance"] },
-            mcp: {
-                auth: "token",
-                enabled: true,
-                token: "mcp-secret"
-            },
-            name: "demo-docker",
-            provider: "docker"
-        },
-        {
-            enabled: true,
-            env: { API_TOKEN: "summary-secret" },
-            extensions: { model: ["instance"] },
-            mcp: {
-                auth: { mode: "none" },
-                enabled: true,
-                path: "/demo-docker/mcp"
+                mode: "existingImage",
+                mounts: [{ source: "/host", target: "/container" }],
             },
             name: "demo-docker",
             provider: "docker",
-            security: { mode: "disabled" }
+        });
+        const approval = wizardText(4, {
+            approvalPolicy: {
+                mode: "ask",
+                rules: [
+                    {
+                        decision: "ask",
+                        match: "exact",
+                        source: "mcp",
+                        toolName: "bash_run",
+                    },
+                ],
+            },
+        });
+
+        assert.equal(
+            provider.includes('[{"source":"/host","target":"/container"}]'),
+            true,
+        );
+        assert.equal(
+            approval.includes(
+                '[{"decision":"ask","match":"exact","source":"mcp","toolName":"bash_run"}]',
+            ),
+            true,
+        );
+        assert.equal(provider.includes("[object Object]"), false);
+        assert.equal(approval.includes("[object Object]"), false);
+    });
+
+    test("create wizard review and validation output redact every secret value", () => {
+        const text = wizardText(
+            6,
+            {
+                container: {
+                    containerName: "devshell-demo-docker",
+                    env: { CONTAINER_TOKEN: "container-secret" },
+                    image: "archlinux:latest",
+                    mode: "existingImage",
+                },
+                env: { API_TOKEN: "instance-secret" },
+                extensions: { model: ["instance"] },
+                mcp: {
+                    auth: "token",
+                    enabled: true,
+                    token: "mcp-secret",
+                },
+                name: "demo-docker",
+                provider: "docker",
+            },
+            {
+                enabled: true,
+                env: { API_TOKEN: "summary-secret" },
+                extensions: { model: ["instance"] },
+                mcp: {
+                    auth: { mode: "none" },
+                    enabled: true,
+                    path: "/demo-docker/mcp",
+                },
+                name: "demo-docker",
+                provider: "docker",
+                security: { mode: "disabled" },
+            },
+        );
+
+        for (const secret of [
+            "container-secret",
+            "instance-secret",
+            "mcp-secret",
+            "summary-secret",
+        ]) {
+            assert.equal(text.includes(secret), false, secret);
         }
-    );
+        assert.equal(text.includes("********"), true);
+    });
 
-    for (const secret of ["container-secret", "instance-secret", "mcp-secret", "summary-secret"]) {
-        assert.equal(text.includes(secret), false, secret);
+    function deepMerge(
+        base: Record<string, JsonValue>,
+        patch: Record<string, JsonValue>,
+    ): Record<string, JsonValue> {
+        const result = structuredClone(base);
+        for (const [key, value] of Object.entries(patch)) {
+            const current = result[key];
+            result[key] =
+                isRecord(current) && isRecord(value)
+                    ? deepMerge(current, value)
+                    : value;
+        }
+        return result;
     }
-    assert.equal(text.includes("********"), true);
-});
 
-function deepMerge(base: Record<string, JsonValue>, patch: Record<string, JsonValue>): Record<string, JsonValue> {
-    const result = structuredClone(base);
-    for (const [key, value] of Object.entries(patch)) {
-        const current = result[key];
-        result[key] = isRecord(current) && isRecord(value) ? deepMerge(current, value) : value;
+    function isRecord(
+        value: JsonValue | undefined,
+    ): value is Record<string, JsonValue> {
+        return (
+            typeof value === "object" && value !== null && !Array.isArray(value)
+        );
     }
-    return result;
-}
-
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 }

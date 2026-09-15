@@ -541,11 +541,9 @@ impl FileEditTool {
                 detail,
                 local_snapshots,
             ),
-            PreparedOperation::Delete {
-                display,
-                path,
-                base,
-            } => self.execute_delete(call, index, display, path, base, detail, local_snapshots),
+            delete @ PreparedOperation::Delete { .. } => {
+                self.execute_delete(call, index, delete, detail, local_snapshots)
+            }
             PreparedOperation::Move {
                 source_display,
                 source,
@@ -890,12 +888,18 @@ impl FileEditTool {
         &self,
         call: &ToolCall,
         index: usize,
-        display: String,
-        path: PathBuf,
-        base: Option<ContextFileSnapshot>,
+        operation: PreparedOperation,
         detail: FileChangeResultDetail,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
+        let PreparedOperation::Delete {
+            display,
+            path,
+            base,
+        } = operation
+        else {
+            unreachable!("execute_delete requires a prepared delete operation");
+        };
         let base = require_bound_base(base)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let lock = self.state.write_lock(&path);

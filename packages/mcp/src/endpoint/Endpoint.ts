@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import type {
     ControlMcpContextMode,
     JsonValue,
-    ToolDefinition
+    ToolDefinition,
 } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../auth/Config.js";
@@ -17,13 +17,13 @@ import type { McpToolProvenanceRecorder } from "./domain/worker/Provenance.js";
 import {
     McpEndpointDispatch,
     type McpEndpointCallContext,
-    type McpEndpointWorkerPort
+    type McpEndpointWorkerPort,
 } from "./dispatch/Dispatch.js";
 
 export type {
     McpEndpointCallContext,
     McpEndpointEnvironmentHandshake,
-    McpEndpointWorkerPort
+    McpEndpointWorkerPort,
 } from "./dispatch/Dispatch.js";
 
 export interface McpEndpointWorkerOptions {
@@ -48,14 +48,16 @@ export class McpEndpointWorker {
     readonly #worker: McpEndpointWorkerPort;
 
     constructor(options: McpEndpointWorkerOptions) {
-        const contextSelector = createMcpContextSelector(options.contextMode ?? "explicit");
+        const contextSelector = createMcpContextSelector(
+            options.contextMode ?? "explicit",
+        );
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker,
-            workspaceAppEnabled: options.workspaceAppEnabled
+            workspaceAppEnabled: options.workspaceAppEnabled,
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
@@ -68,7 +70,7 @@ export class McpEndpointWorker {
             worker: options.worker,
             workspaceAppLeases: options.workspaceAppLeases,
             workspaceAppPresence: options.workspaceAppPresence,
-            workspaceLiveBaseUrl: options.workspaceLiveBaseUrl
+            workspaceLiveBaseUrl: options.workspaceLiveBaseUrl,
         });
         this.#instanceName = options.instanceName;
         this.#worker = options.worker;
@@ -80,7 +82,7 @@ export class McpEndpointWorker {
 
     assertReady(
         worker: Pick<McpEndpointWorkerPort, "snapshot"> = this.#worker,
-        instanceName: string = this.#instanceName
+        instanceName: string = this.#instanceName,
     ): void {
         this.#dispatch.assertReady(worker, instanceName);
     }
@@ -105,13 +107,13 @@ export class McpEndpointWorker {
         toolName: string,
         input: JsonValue,
         requestContext: McpEndpointCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
         return await this.#dispatch.callTool(
             toolName,
             input,
             requestContext,
-            signal
+            signal,
         );
     }
 

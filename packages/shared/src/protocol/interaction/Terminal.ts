@@ -1,9 +1,5 @@
 export type TerminalSessionState =
-    | "running"
-    | "exited"
-    | "killed"
-    | "lost"
-    | "failed";
+    "running" | "exited" | "killed" | "lost" | "failed";
 
 export interface TerminalSessionDescriptor {
     cols: number;

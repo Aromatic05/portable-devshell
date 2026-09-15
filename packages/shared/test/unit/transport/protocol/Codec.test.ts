@@ -8,7 +8,7 @@ import {
     SocketChannel,
     Codec,
     type Event,
-    type Channel
+    type Channel,
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
@@ -29,15 +29,22 @@ async function pair(clientPeer: "tui" | "web" = "tui"): Promise<CodecPair> {
         listener.once("error", reject);
         listener.listen(socketPath, resolve);
     });
-    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(SocketChannel.accept(socket))));
+    const accepted = new Promise<Channel>((resolve) =>
+        listener.once("connection", (socket) =>
+            resolve(SocketChannel.accept(socket)),
+        ),
+    );
     const clientChannel = await SocketChannel.connect(socketPath);
     const serverChannel = await accepted;
     return {
-        client: new Codec(clientChannel, { local: clientPeer, remote: "server" }),
+        client: new Codec(clientChannel, {
+            local: clientPeer,
+            remote: "server",
+        }),
         clientChannel,
         directory,
         listener,
-        server: new Codec(serverChannel, { local: "server" })
+        server: new Codec(serverChannel, { local: "server" }),
     };
 }
 
@@ -93,7 +100,7 @@ test("Codec round-trips Event and binds the first server peer", async (t) => {
         id: "tui-1",
         destination: asInstanceName("aromatic-pc"),
         name: "todo.get",
-        payload: {}
+        payload: {},
     });
 
     assert.deepEqual(await incoming, {
@@ -102,7 +109,7 @@ test("Codec round-trips Event and binds the first server peer", async (t) => {
         to: "server",
         destination: "aromatic-pc",
         name: "todo.get",
-        payload: {}
+        payload: {},
     });
     assert.equal(value.server.remotePeer, "tui");
 });
@@ -112,7 +119,11 @@ test("Codec accepts web as a server-bound client peer", async (t) => {
     t.after(() => closePair(value));
 
     const incoming = onceEvent(value.server);
-    await value.client.send({ id: "web-1", destination: "@control", name: "service.ping" });
+    await value.client.send({
+        id: "web-1",
+        destination: "@control",
+        name: "service.ping",
+    });
 
     assert.equal((await incoming).from, "web");
     assert.equal(value.server.remotePeer, "web");
@@ -122,7 +133,11 @@ test("Codec preserves replyTo, streamId, error, and seq", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
     const binding = onceEvent(value.server);
-    await value.client.send({ id: "bind-1", destination: "@control", name: "service.ping" });
+    await value.client.send({
+        id: "bind-1",
+        destination: "@control",
+        name: "service.ping",
+    });
     await binding;
 
     const incoming = onceEvent(value.client);
@@ -133,7 +148,7 @@ test("Codec preserves replyTo, streamId, error, and seq", async (t) => {
         destination: "@control",
         name: "service.ping",
         seq: 3,
-        error: { code: "test.failed", message: "failed", retryable: false }
+        error: { code: "test.failed", message: "failed", retryable: false },
     });
 
     const event = await incoming;
@@ -151,55 +166,85 @@ test("Codec rejects invalid operation names before sending", async (t) => {
         value.client.send({
             id: "bad",
             destination: "@control",
-            name: "three.segment.name" as "service.ping"
+            name: "three.segment.name" as "service.ping",
         }),
-        /module\.operation/
+        /module\.operation/,
     );
 });
 
 test("Codec rejects legacy envelopes", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
-    const closed = new Promise<Error | undefined>((resolve) => value.server.onClose(resolve));
+    const closed = new Promise<Error | undefined>((resolve) =>
+        value.server.onClose(resolve),
+    );
 
-    await value.clientChannel.send(Buffer.from(JSON.stringify({
-        id: "old",
-        method: "control.ping",
-        target: { kind: "control" },
-        type: "request"
-    }), "utf8"));
+    await value.clientChannel.send(
+        Buffer.from(
+            JSON.stringify({
+                id: "old",
+                method: "control.ping",
+                target: { kind: "control" },
+                type: "request",
+            }),
+            "utf8",
+        ),
+    );
 
-    assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.invalidDirection");
+    assert.equal(
+        ((await closed) as { code?: string } | undefined)?.code,
+        "protocol.invalidDirection",
+    );
 });
 
 test("Codec rejects a peer change after first-event binding", async (t) => {
     const value = await pair();
     t.after(() => closePair(value));
     const binding = onceEvent(value.server);
-    await value.client.send({ id: "bind", destination: "@control", name: "service.ping" });
-    await binding;
-    const closed = new Promise<Error | undefined>((resolve) => value.server.onClose(resolve));
-
-    await value.clientChannel.send(Buffer.from(JSON.stringify({
-        id: "spoof",
-        from: "cli",
-        to: "server",
+    await value.client.send({
+        id: "bind",
         destination: "@control",
-        name: "service.ping"
-    }), "utf8"));
+        name: "service.ping",
+    });
+    await binding;
+    const closed = new Promise<Error | undefined>((resolve) =>
+        value.server.onClose(resolve),
+    );
 
-    assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.invalidDirection");
+    await value.clientChannel.send(
+        Buffer.from(
+            JSON.stringify({
+                id: "spoof",
+                from: "cli",
+                to: "server",
+                destination: "@control",
+                name: "service.ping",
+            }),
+            "utf8",
+        ),
+    );
+
+    assert.equal(
+        ((await closed) as { code?: string } | undefined)?.code,
+        "protocol.invalidDirection",
+    );
 });
 
 test("Codec send failure closes the protocol and notifies listeners", async () => {
     const channel = new FailingChannel();
     channel.sendError = new Error("frame send failed");
     const codec = new Codec(channel, { local: "tui", remote: "server" });
-    const closed = new Promise<Error | undefined>((resolve) => codec.onClose(resolve));
+    const closed = new Promise<Error | undefined>((resolve) =>
+        codec.onClose(resolve),
+    );
 
     await assert.rejects(
-        codec.send({ id: "failed-send", destination: "@control", name: "service.ping" }),
-        /frame send failed/iu
+        codec.send({
+            id: "failed-send",
+            destination: "@control",
+            name: "service.ping",
+        }),
+        /frame send failed/iu,
     );
 
     assert.equal(codec.closed, true);
@@ -211,7 +256,9 @@ test("Codec closes locally when the transport close operation throws", async () 
     const channel = new FailingChannel();
     channel.closeError = new Error("transport close failed");
     const codec = new Codec(channel, { local: "tui", remote: "server" });
-    const closed = new Promise<Error | undefined>((resolve) => codec.onClose(resolve));
+    const closed = new Promise<Error | undefined>((resolve) =>
+        codec.onClose(resolve),
+    );
 
     codec.close();
 

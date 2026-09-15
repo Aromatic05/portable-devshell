@@ -30,14 +30,11 @@ worker:<instance>
 
 ```js
 (event) => {
-    if (
-        event.method === "callTool" &&
-        event.args.toolName === "file_read"
-    ) {
+    if (event.method === "callTool" && event.args.toolName === "file_read") {
         return { action: "hold", label: "host-timeout-probe" };
     }
     return { action: "continue" };
-}
+};
 ```
 
 `worker:<instance>.callTool` 的 `event.args` 为：

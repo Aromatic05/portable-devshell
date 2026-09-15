@@ -23,28 +23,44 @@ function arraySchema(items: JsonValue): JsonValue {
     return { items, type: "array" };
 }
 
-const todoCheckpointSchema = objectSchema({
-    blockers: arraySchema(stringValue),
-    next: stringValue,
-    summary: stringValue,
-    updatedAt: stringValue,
-}, ["summary", "updatedAt"]);
-
-const todoItemSchema = objectSchema({
-    content: stringValue,
-    detail: stringValue,
-    id: nonEmptyString,
-    status: {
-        enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled"],
-        type: "string",
+const todoCheckpointSchema = objectSchema(
+    {
+        blockers: arraySchema(stringValue),
+        next: stringValue,
+        summary: stringValue,
+        updatedAt: stringValue,
     },
-}, ["content", "id", "status"]);
+    ["summary", "updatedAt"],
+);
 
-const todoSummarySchema = objectSchema({
-    completed: nonNegativeInteger,
-    currentItemId: stringValue,
-    total: nonNegativeInteger,
-}, ["completed", "total"]);
+const todoItemSchema = objectSchema(
+    {
+        content: stringValue,
+        detail: stringValue,
+        id: nonEmptyString,
+        status: {
+            enum: [
+                "pending",
+                "in_progress",
+                "blocked",
+                "completed",
+                "failed",
+                "cancelled",
+            ],
+            type: "string",
+        },
+    },
+    ["content", "id", "status"],
+);
+
+const todoSummarySchema = objectSchema(
+    {
+        completed: nonNegativeInteger,
+        currentItemId: stringValue,
+        total: nonNegativeInteger,
+    },
+    ["completed", "total"],
+);
 
 const activeTodoSummaryProperties: Record<string, JsonValue> = {
     checkpoint: todoCheckpointSchema,
@@ -53,7 +69,16 @@ const activeTodoSummaryProperties: Record<string, JsonValue> = {
     pausedAt: stringValue,
     revision: nonNegativeInteger,
     status: {
-        enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled", "none", "paused"],
+        enum: [
+            "pending",
+            "in_progress",
+            "blocked",
+            "completed",
+            "failed",
+            "cancelled",
+            "none",
+            "paused",
+        ],
         type: "string",
     },
     taskId: nonEmptyString,
@@ -61,44 +86,71 @@ const activeTodoSummaryProperties: Record<string, JsonValue> = {
     total: nonNegativeInteger,
 };
 
-const activeTodoSummaryOutputSchema = objectSchema(activeTodoSummaryProperties, [
-    "completed", "revision", "status", "taskId", "title", "total"
-]);
+const activeTodoSummaryOutputSchema = objectSchema(
+    activeTodoSummaryProperties,
+    ["completed", "revision", "status", "taskId", "title", "total"],
+);
 
-export const todoTaskSummaryOutputSchema = objectSchema({
-    ...activeTodoSummaryProperties,
-    ctxId: nonEmptyString,
-    updatedAt: stringValue,
-}, ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"]);
+export const todoTaskSummaryOutputSchema = objectSchema(
+    {
+        ...activeTodoSummaryProperties,
+        ctxId: nonEmptyString,
+        updatedAt: stringValue,
+    },
+    [
+        "completed",
+        "revision",
+        "status",
+        "taskId",
+        "title",
+        "total",
+        "updatedAt",
+    ],
+);
 
-export const todoReadOutputSchema = objectSchema({
-    cancelledAt: stringValue,
-    checkpoint: todoCheckpointSchema,
-    items: arraySchema(todoItemSchema),
-    pausedAt: stringValue,
-    revision: nonNegativeInteger,
-    summary: todoSummarySchema,
-    taskId: nonEmptyString,
-    tasks: arraySchema(todoTaskSummaryOutputSchema),
-    title: stringValue,
-}, ["items", "revision", "summary"]);
+export const todoReadOutputSchema = objectSchema(
+    {
+        cancelledAt: stringValue,
+        checkpoint: todoCheckpointSchema,
+        items: arraySchema(todoItemSchema),
+        pausedAt: stringValue,
+        revision: nonNegativeInteger,
+        summary: todoSummarySchema,
+        taskId: nonEmptyString,
+        tasks: arraySchema(todoTaskSummaryOutputSchema),
+        title: stringValue,
+    },
+    ["items", "revision", "summary"],
+);
 
-const reverseInstanceStatusSchema = objectSchema({
-    availability: { enum: ["offline", "online"], type: "string" },
-    connectedAt: stringValue,
-    enrollmentState: { enum: ["pending", "enrolled", "revoked"], type: "string" },
-    generation: nonNegativeInteger,
-    lastErrorCode: stringValue,
-    lastErrorMessage: stringValue,
-    lastSeenAt: stringValue,
-    managementMode: { const: "selfManaged", type: "string" },
-    transport: { enum: ["wss", "sse"], type: "string" },
-}, ["availability", "enrollmentState", "managementMode"]);
+const reverseInstanceStatusSchema = objectSchema(
+    {
+        availability: { enum: ["offline", "online"], type: "string" },
+        connectedAt: stringValue,
+        enrollmentState: {
+            enum: ["pending", "enrolled", "revoked"],
+            type: "string",
+        },
+        generation: nonNegativeInteger,
+        lastErrorCode: stringValue,
+        lastErrorMessage: stringValue,
+        lastSeenAt: stringValue,
+        managementMode: { const: "selfManaged", type: "string" },
+        transport: { enum: ["wss", "sse"], type: "string" },
+    },
+    ["availability", "enrollmentState", "managementMode"],
+);
 
 const instanceSnapshotProperties: Record<string, JsonValue> = {
     activeTodos: arraySchema(activeTodoSummaryOutputSchema),
     connectionState: {
-        enum: ["connected", "connecting", "disconnected", "reconnecting", "failed"],
+        enum: [
+            "connected",
+            "connecting",
+            "disconnected",
+            "reconnecting",
+            "failed",
+        ],
         type: "string",
     },
     daemonState: {
@@ -113,133 +165,208 @@ const instanceSnapshotProperties: Record<string, JsonValue> = {
     pid: nonNegativeInteger,
     ready: booleanValue,
     reverse: reverseInstanceStatusSchema,
-    status: { enum: ["ready", "running", "stale", "stopped", "failed"], type: "string" },
+    status: {
+        enum: ["ready", "running", "stale", "stopped", "failed"],
+        type: "string",
+    },
 };
 
-export const instanceSnapshotOutputSchema = objectSchema(instanceSnapshotProperties, [
-    "connectionState", "daemonState", "lastSeq", "name", "ready", "status"
-]);
+export const instanceSnapshotOutputSchema = objectSchema(
+    instanceSnapshotProperties,
+    ["connectionState", "daemonState", "lastSeq", "name", "ready", "status"],
+);
 
-const instanceDescriptorSchema = objectSchema({
-    enabled: booleanValue,
-    mcpEnabled: booleanValue,
-    name: nonEmptyString,
-    provider: { enum: ["local", "ssh", "docker", "podman", "reverse"], type: "string" },
-    snapshot: instanceSnapshotOutputSchema,
-}, ["enabled", "mcpEnabled", "name", "snapshot"]);
+const instanceDescriptorSchema = objectSchema(
+    {
+        enabled: booleanValue,
+        mcpEnabled: booleanValue,
+        name: nonEmptyString,
+        provider: {
+            enum: ["local", "ssh", "docker", "podman", "reverse"],
+            type: "string",
+        },
+        snapshot: instanceSnapshotOutputSchema,
+    },
+    ["enabled", "mcpEnabled", "name", "snapshot"],
+);
 
 export const instanceStatusOutputSchema = instanceDescriptorSchema;
 
-export const instanceListOutputSchema = objectSchema({
-    instances: arraySchema(instanceDescriptorSchema),
-}, ["instances"]);
+export const instanceListOutputSchema = objectSchema(
+    {
+        instances: arraySchema(instanceDescriptorSchema),
+    },
+    ["instances"],
+);
 
-export const instanceCreateOutputSchema = objectSchema({
-    enabled: booleanValue,
-    mcpPath: nonEmptyString,
-    name: nonEmptyString,
-    snapshot: instanceSnapshotOutputSchema,
-}, ["enabled", "name"]);
+export const instanceCreateOutputSchema = objectSchema(
+    {
+        enabled: booleanValue,
+        mcpPath: nonEmptyString,
+        name: nonEmptyString,
+        snapshot: instanceSnapshotOutputSchema,
+    },
+    ["enabled", "name"],
+);
 
-export const artifactSourceOutputSchema = objectSchema({
-    handle: nonEmptyString,
-    instance: nonEmptyString,
-    path: nonEmptyString,
-    type: { enum: ["artifact", "file", "directory"], type: "string" },
-    workspace: nonEmptyString,
-}, ["instance"]);
+export const artifactSourceOutputSchema = objectSchema(
+    {
+        handle: nonEmptyString,
+        instance: nonEmptyString,
+        path: nonEmptyString,
+        type: { enum: ["artifact", "file", "directory"], type: "string" },
+        workspace: nonEmptyString,
+    },
+    ["instance"],
+);
 
-export const artifactShareOutputSchema = objectSchema({
-    blake3: nonEmptyString,
-    bytes: nonNegativeInteger,
-    downloadName: nonEmptyString,
-    expiresAtMs: nonNegativeInteger,
-    mediaType: nonEmptyString,
-    shareId: nonEmptyString,
-    source: artifactSourceOutputSchema,
-    state: { enum: ["active", "expired", "revoked"], type: "string" },
-    url: nonEmptyString,
-}, ["blake3", "bytes", "downloadName", "expiresAtMs", "mediaType", "shareId", "source", "state", "url"]);
+export const artifactShareOutputSchema = objectSchema(
+    {
+        blake3: nonEmptyString,
+        bytes: nonNegativeInteger,
+        downloadName: nonEmptyString,
+        expiresAtMs: nonNegativeInteger,
+        mediaType: nonEmptyString,
+        shareId: nonEmptyString,
+        source: artifactSourceOutputSchema,
+        state: { enum: ["active", "expired", "revoked"], type: "string" },
+        url: nonEmptyString,
+    },
+    [
+        "blake3",
+        "bytes",
+        "downloadName",
+        "expiresAtMs",
+        "mediaType",
+        "shareId",
+        "source",
+        "state",
+        "url",
+    ],
+);
 
-const approvalDecisionSchema = objectSchema({
-    approvalId: nonEmptyString,
-    decidedAt: stringValue,
-    decidedBy: { enum: ["cli", "tui", "web", "policy"], type: "string" },
-    decision: { enum: ["approve", "deny"], type: "string" },
-    policyPatch: anyValue,
-    reason: stringValue,
-    remember: booleanValue,
-}, ["approvalId", "decidedAt", "decidedBy", "decision"]);
+const approvalDecisionSchema = objectSchema(
+    {
+        approvalId: nonEmptyString,
+        decidedAt: stringValue,
+        decidedBy: { enum: ["cli", "tui", "web", "policy"], type: "string" },
+        decision: { enum: ["approve", "deny"], type: "string" },
+        policyPatch: anyValue,
+        reason: stringValue,
+        remember: booleanValue,
+    },
+    ["approvalId", "decidedAt", "decidedBy", "decision"],
+);
 
-export const approvalRequestOutputSchema = objectSchema({
-    approvalId: nonEmptyString,
-    callId: nonEmptyString,
-    createdAt: stringValue,
-    ctxId: nonEmptyString,
-    decision: approvalDecisionSchema,
-    expiresAt: stringValue,
-    inputSummary: stringValue,
-    instance: nonEmptyString,
-    reason: stringValue,
-    requestId: stringValue,
-    riskLevel: { enum: ["low", "medium", "high"], type: "string" },
-    source: { enum: ["cli", "tui", "web", "mcp"], type: "string" },
-    status: { enum: ["pending", "approved", "denied", "expired", "cancelled"], type: "string" },
-    toolName: nonEmptyString,
-    workspace: stringValue,
-}, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
+export const approvalRequestOutputSchema = objectSchema(
+    {
+        approvalId: nonEmptyString,
+        callId: nonEmptyString,
+        createdAt: stringValue,
+        ctxId: nonEmptyString,
+        decision: approvalDecisionSchema,
+        expiresAt: stringValue,
+        inputSummary: stringValue,
+        instance: nonEmptyString,
+        reason: stringValue,
+        requestId: stringValue,
+        riskLevel: { enum: ["low", "medium", "high"], type: "string" },
+        source: { enum: ["cli", "tui", "web", "mcp"], type: "string" },
+        status: {
+            enum: ["pending", "approved", "denied", "expired", "cancelled"],
+            type: "string",
+        },
+        toolName: nonEmptyString,
+        workspace: stringValue,
+    },
+    [
+        "approvalId",
+        "callId",
+        "createdAt",
+        "expiresAt",
+        "inputSummary",
+        "instance",
+        "reason",
+        "riskLevel",
+        "source",
+        "status",
+        "toolName",
+    ],
+);
 
-const workspaceBackgroundSchema = objectSchema({
-    automaticRecovery: booleanValue,
-    detachedAt: stringValue,
-    goalId: nonEmptyString,
-    goalProgressAt: nonEmptyString,
-    goalRevision: positiveInteger,
-    goalStepId: nonEmptyString,
-    kind: { enum: ["question", "tmux"], type: "string" },
-    recoveryDisabledAt: stringValue,
-    recoveryMessageAttemptedAt: stringValue,
-    recoveryMessageId: nonEmptyString,
-    result: anyValue,
-    status: { enum: ["detached", "resolved", "waiting"], type: "string" },
-    targetInstance: nonEmptyString,
-    taskId: nonEmptyString,
-    tmuxTaskId: stringValue,
-    todoItemId: nonEmptyString,
-    updatedAt: stringValue,
-    waitId: nonEmptyString,
-}, ["kind", "status", "updatedAt", "waitId"]);
+const workspaceBackgroundSchema = objectSchema(
+    {
+        automaticRecovery: booleanValue,
+        detachedAt: stringValue,
+        goalId: nonEmptyString,
+        goalProgressAt: nonEmptyString,
+        goalRevision: positiveInteger,
+        goalStepId: nonEmptyString,
+        kind: { enum: ["question", "tmux"], type: "string" },
+        recoveryDisabledAt: stringValue,
+        recoveryMessageAttemptedAt: stringValue,
+        recoveryMessageId: nonEmptyString,
+        result: anyValue,
+        status: { enum: ["detached", "resolved", "waiting"], type: "string" },
+        targetInstance: nonEmptyString,
+        taskId: nonEmptyString,
+        tmuxTaskId: stringValue,
+        todoItemId: nonEmptyString,
+        updatedAt: stringValue,
+        waitId: nonEmptyString,
+    },
+    ["kind", "status", "updatedAt", "waitId"],
+);
 
-const workspaceApprovalEventSchema = objectSchema({
-    approvalId: nonEmptyString,
-    eventName: { const: "approval.decision", type: "string" },
-    inputSummary: stringValue,
-    kind: { const: "approval", type: "string" },
-    name: nonEmptyString,
-    reason: stringValue,
-    riskLevel: { enum: ["low", "medium", "high"], type: "string" },
-    status: { const: "waiting", type: "string" },
-    toolName: nonEmptyString,
-    updatedAt: stringValue,
-}, ["approvalId", "eventName", "inputSummary", "kind", "name", "riskLevel", "status", "toolName", "updatedAt"]);
+const workspaceApprovalEventSchema = objectSchema(
+    {
+        approvalId: nonEmptyString,
+        eventName: { const: "approval.decision", type: "string" },
+        inputSummary: stringValue,
+        kind: { const: "approval", type: "string" },
+        name: nonEmptyString,
+        reason: stringValue,
+        riskLevel: { enum: ["low", "medium", "high"], type: "string" },
+        status: { const: "waiting", type: "string" },
+        toolName: nonEmptyString,
+        updatedAt: stringValue,
+    },
+    [
+        "approvalId",
+        "eventName",
+        "inputSummary",
+        "kind",
+        "name",
+        "riskLevel",
+        "status",
+        "toolName",
+        "updatedAt",
+    ],
+);
 
-const workspaceQuestionPayloadSchema = objectSchema({
-    allowText: booleanValue,
-    choices: arraySchema(nonEmptyString),
-    question: nonEmptyString,
-}, ["allowText", "choices", "question"]);
+const workspaceQuestionPayloadSchema = objectSchema(
+    {
+        allowText: booleanValue,
+        choices: arraySchema(nonEmptyString),
+        question: nonEmptyString,
+    },
+    ["allowText", "choices", "question"],
+);
 
-const workspaceQuestionEventSchema = objectSchema({
-    eventName: { const: "user.answer", type: "string" },
-    goalId: nonEmptyString,
-    kind: { const: "question", type: "string" },
-    name: { const: "workspace_ask", type: "string" },
-    payload: workspaceQuestionPayloadSchema,
-    status: { enum: ["waiting", "detached"], type: "string" },
-    taskId: nonEmptyString,
-    updatedAt: stringValue,
-    waitId: nonEmptyString,
-}, ["eventName", "kind", "name", "status", "updatedAt", "waitId"]);
+const workspaceQuestionEventSchema = objectSchema(
+    {
+        eventName: { const: "user.answer", type: "string" },
+        goalId: nonEmptyString,
+        kind: { const: "question", type: "string" },
+        name: { const: "workspace_ask", type: "string" },
+        payload: workspaceQuestionPayloadSchema,
+        status: { enum: ["waiting", "detached"], type: "string" },
+        taskId: nonEmptyString,
+        updatedAt: stringValue,
+        waitId: nonEmptyString,
+    },
+    ["eventName", "kind", "name", "status", "updatedAt", "waitId"],
+);
 
 const workspaceCurrentEventSchema: JsonValue = {
     anyOf: [
@@ -249,119 +376,186 @@ const workspaceCurrentEventSchema: JsonValue = {
     ],
 };
 
-const workspaceTodoTaskSummaryOutputSchema = objectSchema({
-    ...activeTodoSummaryProperties,
-    updatedAt: stringValue,
-}, ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"]);
+const workspaceTodoTaskSummaryOutputSchema = objectSchema(
+    {
+        ...activeTodoSummaryProperties,
+        updatedAt: stringValue,
+    },
+    [
+        "completed",
+        "revision",
+        "status",
+        "taskId",
+        "title",
+        "total",
+        "updatedAt",
+    ],
+);
 
-const workspaceGoalStepOutputSchema = objectSchema({
-    id: nonEmptyString,
-    note: stringValue,
-    status: { enum: ["pending", "active", "completed", "skipped"], type: "string" },
-    text: nonEmptyString,
-}, ["id", "status", "text"]);
+const workspaceGoalStepOutputSchema = objectSchema(
+    {
+        id: nonEmptyString,
+        note: stringValue,
+        status: {
+            enum: ["pending", "active", "completed", "skipped"],
+            type: "string",
+        },
+        text: nonEmptyString,
+    },
+    ["id", "status", "text"],
+);
 
-export const workspaceGoalOutputSchema = objectSchema({
-    autoContinueExhausted: booleanValue,
-    continuationAttemptedAt: stringValue,
-    continuationCount: nonNegativeInteger,
-    continuationMessageId: nonEmptyString,
-    continuationDue: booleanValue,
-    continuationDueAt: nonEmptyString,
-    continuationPending: booleanValue,
-    continuationRetryAfter: stringValue,
-    continuationUncertain: booleanValue,
-    createdAt: nonEmptyString,
-    goalId: nonEmptyString,
-    lastAgentActivityAt: nonEmptyString,
-    lastExecutionAt: stringValue,
-    lastReentryAt: stringValue,
-    lastContinuationAt: stringValue,
-    lastProgressAt: nonEmptyString,
-    maxContinuations: nonNegativeInteger,
-    noActionStreak: nonNegativeInteger,
-    note: stringValue,
-    objective: nonEmptyString,
-    progressEpoch: nonNegativeInteger,
-    revision: nonNegativeInteger,
-    stagnationStreak: nonNegativeInteger,
-    status: { enum: ["active", "blocked", "paused", "completed", "stopped"], type: "string" },
-    steps: arraySchema(workspaceGoalStepOutputSchema),
-    updatedAt: nonEmptyString,
-    workspace: stringValue,
-}, [
-    "autoContinueExhausted", "continuationCount", "continuationDue", "continuationDueAt",
-    "continuationPending", "continuationUncertain", "createdAt", "goalId", "lastAgentActivityAt", "lastProgressAt", "maxContinuations",
-    "objective", "revision", "status", "steps", "updatedAt"
-]);
+export const workspaceGoalOutputSchema = objectSchema(
+    {
+        autoContinueExhausted: booleanValue,
+        continuationAttemptedAt: stringValue,
+        continuationCount: nonNegativeInteger,
+        continuationMessageId: nonEmptyString,
+        continuationDue: booleanValue,
+        continuationDueAt: nonEmptyString,
+        continuationPending: booleanValue,
+        continuationRetryAfter: stringValue,
+        continuationUncertain: booleanValue,
+        createdAt: nonEmptyString,
+        goalId: nonEmptyString,
+        lastAgentActivityAt: nonEmptyString,
+        lastExecutionAt: stringValue,
+        lastReentryAt: stringValue,
+        lastContinuationAt: stringValue,
+        lastProgressAt: nonEmptyString,
+        maxContinuations: nonNegativeInteger,
+        noActionStreak: nonNegativeInteger,
+        note: stringValue,
+        objective: nonEmptyString,
+        progressEpoch: nonNegativeInteger,
+        revision: nonNegativeInteger,
+        stagnationStreak: nonNegativeInteger,
+        status: {
+            enum: ["active", "blocked", "paused", "completed", "stopped"],
+            type: "string",
+        },
+        steps: arraySchema(workspaceGoalStepOutputSchema),
+        updatedAt: nonEmptyString,
+        workspace: stringValue,
+    },
+    [
+        "autoContinueExhausted",
+        "continuationCount",
+        "continuationDue",
+        "continuationDueAt",
+        "continuationPending",
+        "continuationUncertain",
+        "createdAt",
+        "goalId",
+        "lastAgentActivityAt",
+        "lastProgressAt",
+        "maxContinuations",
+        "objective",
+        "revision",
+        "status",
+        "steps",
+        "updatedAt",
+    ],
+);
 
-export const workspaceGoalResultOutputSchema = objectSchema({
-    goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
-}, ["goal"]);
+export const workspaceGoalResultOutputSchema = objectSchema(
+    {
+        goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
+    },
+    ["goal"],
+);
 
-export const workspaceGoalContinuationOutputSchema = objectSchema({
-    attempted: booleanValue,
-    claimed: booleanValue,
-    claimId: nonEmptyString,
-    continuationCount: nonNegativeInteger,
-    messageId: nonEmptyString,
-    goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
-    valid: booleanValue,
-}, ["goal"]);
+export const workspaceGoalContinuationOutputSchema = objectSchema(
+    {
+        attempted: booleanValue,
+        claimed: booleanValue,
+        claimId: nonEmptyString,
+        continuationCount: nonNegativeInteger,
+        messageId: nonEmptyString,
+        goal: { anyOf: [{ type: "null" }, workspaceGoalOutputSchema] },
+        valid: booleanValue,
+    },
+    ["goal"],
+);
 
-export const workspaceReentryOutputSchema = objectSchema({
-    claimId: nonEmptyString,
-    claimed: booleanValue,
-    epoch: nonNegativeInteger,
-    mode: { enum: ["automatic", "user_owned", "paused"], type: "string" },
-    pending: booleanValue,
-    reason: stringValue,
-    released: booleanValue,
-    resumed: booleanValue,
-    suppressed: booleanValue,
-    suppressedAt: stringValue,
-    valid: booleanValue,
-}, ["epoch", "pending"]);
+export const workspaceReentryOutputSchema = objectSchema(
+    {
+        claimId: nonEmptyString,
+        claimed: booleanValue,
+        epoch: nonNegativeInteger,
+        mode: { enum: ["automatic", "user_owned", "paused"], type: "string" },
+        pending: booleanValue,
+        reason: stringValue,
+        released: booleanValue,
+        resumed: booleanValue,
+        suppressed: booleanValue,
+        suppressedAt: stringValue,
+        valid: booleanValue,
+    },
+    ["epoch", "pending"],
+);
 
-const workspaceQuestionWaitOutputSchema = objectSchema({
-    automaticRecovery: booleanValue,
-    createdAt: stringValue,
-    detachedAt: stringValue,
-    goalId: nonEmptyString,
-    goalRevision: positiveInteger,
-    goalStepId: nonEmptyString,
-    kind: { const: "question", type: "string" },
-    payload: workspaceQuestionPayloadSchema,
-    recoveryDisabledAt: stringValue,
-    status: { enum: ["detached", "waiting"], type: "string" },
-    targetInstance: nonEmptyString,
-    targetId: nonEmptyString,
-    taskId: nonEmptyString,
-    taskRevision: positiveInteger,
-    todoItemId: nonEmptyString,
-    updatedAt: stringValue,
-    waitId: nonEmptyString,
-    workspace: stringValue,
-}, ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"]);
+const workspaceQuestionWaitOutputSchema = objectSchema(
+    {
+        automaticRecovery: booleanValue,
+        createdAt: stringValue,
+        detachedAt: stringValue,
+        goalId: nonEmptyString,
+        goalRevision: positiveInteger,
+        goalStepId: nonEmptyString,
+        kind: { const: "question", type: "string" },
+        payload: workspaceQuestionPayloadSchema,
+        recoveryDisabledAt: stringValue,
+        status: { enum: ["detached", "waiting"], type: "string" },
+        targetInstance: nonEmptyString,
+        targetId: nonEmptyString,
+        taskId: nonEmptyString,
+        taskRevision: positiveInteger,
+        todoItemId: nonEmptyString,
+        updatedAt: stringValue,
+        waitId: nonEmptyString,
+        workspace: stringValue,
+    },
+    ["createdAt", "kind", "status", "targetId", "updatedAt", "waitId"],
+);
 
-export const workspaceApprovalRequestOutputSchema = objectSchema({
-    approvalId: nonEmptyString,
-    callId: nonEmptyString,
-    createdAt: stringValue,
-    decision: approvalDecisionSchema,
-    expiresAt: stringValue,
-    inputSummary: stringValue,
-    instance: nonEmptyString,
-    reason: stringValue,
-    requestId: stringValue,
-    riskLevel: { enum: ["low", "medium", "high"], type: "string" },
-    source: { enum: ["cli", "tui", "web", "mcp"], type: "string" },
-    status: { enum: ["pending", "approved", "denied", "expired", "cancelled"], type: "string" },
-    toolName: nonEmptyString,
-    workspace: stringValue,
-}, ["approvalId", "callId", "createdAt", "expiresAt", "inputSummary", "instance", "reason", "riskLevel", "source", "status", "toolName"]);
+export const workspaceApprovalRequestOutputSchema = objectSchema(
+    {
+        approvalId: nonEmptyString,
+        callId: nonEmptyString,
+        createdAt: stringValue,
+        decision: approvalDecisionSchema,
+        expiresAt: stringValue,
+        inputSummary: stringValue,
+        instance: nonEmptyString,
+        reason: stringValue,
+        requestId: stringValue,
+        riskLevel: { enum: ["low", "medium", "high"], type: "string" },
+        source: { enum: ["cli", "tui", "web", "mcp"], type: "string" },
+        status: {
+            enum: ["pending", "approved", "denied", "expired", "cancelled"],
+            type: "string",
+        },
+        toolName: nonEmptyString,
+        workspace: stringValue,
+    },
+    [
+        "approvalId",
+        "callId",
+        "createdAt",
+        "expiresAt",
+        "inputSummary",
+        "instance",
+        "reason",
+        "riskLevel",
+        "source",
+        "status",
+        "toolName",
+    ],
+);
 
-export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
+export const workspaceSnapshotOutputSchema: JsonValue = objectSchema(
+    {
         agentBusy: booleanValue,
         approvals: arraySchema(workspaceApprovalRequestOutputSchema),
         background: arraySchema(workspaceBackgroundSchema),
@@ -373,52 +567,81 @@ export const workspaceSnapshotOutputSchema: JsonValue = objectSchema({
         questions: arraySchema(workspaceQuestionWaitOutputSchema),
         reentry: workspaceReentryOutputSchema,
         tasks: arraySchema(workspaceTodoTaskSummaryOutputSchema),
-}, ["agentBusy", "approvals", "background", "ctxId", "currentEvent", "cursor", "goal", "instance", "questions", "reentry", "tasks"]);
+    },
+    [
+        "agentBusy",
+        "approvals",
+        "background",
+        "ctxId",
+        "currentEvent",
+        "cursor",
+        "goal",
+        "instance",
+        "questions",
+        "reentry",
+        "tasks",
+    ],
+);
 
-export const workspaceOpenOutputSchema: JsonValue = objectSchema({
-    ctxId: nonEmptyString,
-    instance: nonEmptyString,
-}, ["ctxId", "instance"]);
+export const workspaceOpenOutputSchema: JsonValue = objectSchema(
+    {
+        ctxId: nonEmptyString,
+        instance: nonEmptyString,
+    },
+    ["ctxId", "instance"],
+);
 
-export const workspaceWatchOutputSchema: JsonValue = objectSchema({
-    changed: booleanValue,
-    cursor: nonNegativeInteger,
-    snapshot: workspaceSnapshotOutputSchema,
-}, ["changed", "cursor"]);
+export const workspaceWatchOutputSchema: JsonValue = objectSchema(
+    {
+        changed: booleanValue,
+        cursor: nonNegativeInteger,
+        snapshot: workspaceSnapshotOutputSchema,
+    },
+    ["changed", "cursor"],
+);
 
-export const workspaceQuestionAnswerOutputSchema = objectSchema({
-    answer: stringValue,
-    detached: booleanValue,
-    goalId: nonEmptyString,
-    questionId: stringValue,
-    taskId: nonEmptyString,
-    waitId: nonEmptyString,
-}, ["answer", "detached", "questionId", "waitId"]);
+export const workspaceQuestionAnswerOutputSchema = objectSchema(
+    {
+        answer: stringValue,
+        detached: booleanValue,
+        goalId: nonEmptyString,
+        questionId: stringValue,
+        taskId: nonEmptyString,
+        waitId: nonEmptyString,
+    },
+    ["answer", "detached", "questionId", "waitId"],
+);
 
-export const workspaceWaitInterruptOutputSchema = objectSchema({
-    detached: booleanValue,
-    goalId: nonEmptyString,
-    interrupted: { const: true, type: "boolean" },
-    status: { const: "resolved", type: "string" },
-    taskId: nonEmptyString,
-    tmuxTaskId: stringValue,
-    waitId: nonEmptyString,
-}, ["detached", "interrupted", "status", "tmuxTaskId", "waitId"]);
+export const workspaceWaitInterruptOutputSchema = objectSchema(
+    {
+        detached: booleanValue,
+        goalId: nonEmptyString,
+        interrupted: { const: true, type: "boolean" },
+        status: { const: "resolved", type: "string" },
+        taskId: nonEmptyString,
+        tmuxTaskId: stringValue,
+        waitId: nonEmptyString,
+    },
+    ["detached", "interrupted", "status", "tmuxTaskId", "waitId"],
+);
 
-export const workspaceWaitRecoveryOutputSchema = objectSchema({
-    attempted: { const: true, type: "boolean" },
-    claimId: nonEmptyString,
-    completed: { const: true, type: "boolean" },
-    dismissed: { const: true, type: "boolean" },
-    goalId: nonEmptyString,
-    kind: { enum: ["question", "tmux"], type: "string" },
-    recoveryGoalProgressEpoch: nonNegativeInteger,
-    recoveryMessageAttemptedAt: stringValue,
-    recoveryMessageId: nonEmptyString,
-    rejected: { const: true, type: "boolean" },
-    released: { const: true, type: "boolean" },
-    result: anyValue,
-    taskId: nonEmptyString,
-    targetId: stringValue,
-    waitId: nonEmptyString,
-}, ["waitId"]);
+export const workspaceWaitRecoveryOutputSchema = objectSchema(
+    {
+        attempted: { const: true, type: "boolean" },
+        claimId: nonEmptyString,
+        completed: { const: true, type: "boolean" },
+        dismissed: { const: true, type: "boolean" },
+        goalId: nonEmptyString,
+        kind: { enum: ["question", "tmux"], type: "string" },
+        recoveryGoalProgressEpoch: nonNegativeInteger,
+        recoveryMessageAttemptedAt: stringValue,
+        recoveryMessageId: nonEmptyString,
+        rejected: { const: true, type: "boolean" },
+        released: { const: true, type: "boolean" },
+        result: anyValue,
+        taskId: nonEmptyString,
+        targetId: stringValue,
+        waitId: nonEmptyString,
+    },
+    ["waitId"],
+);

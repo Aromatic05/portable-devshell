@@ -2,7 +2,8 @@ import type { JsonValue } from "../JsonValue.js";
 import type { InstanceName } from "../instance/Identity.js";
 import type { ToolCallSource } from "./Call.js";
 
-export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled";
+export type ApprovalStatus =
+    "pending" | "approved" | "denied" | "expired" | "cancelled";
 export type ApprovalDecisionValue = "approve" | "deny";
 export type ApprovalDecisionBy = "cli" | "tui" | "web" | "policy";
 export type ApprovalPolicyMode = "disabled" | "allow" | "ask" | "deny";
@@ -55,4 +56,3 @@ export interface ApprovalPolicy {
 export interface ApprovalTimeout {
     ms: number;
 }
-

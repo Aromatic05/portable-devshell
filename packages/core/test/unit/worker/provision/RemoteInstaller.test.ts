@@ -105,7 +105,9 @@ test(
                 : false,
     },
     async (t) => {
-        const remoteHome = await createTestTempDirectory("remote-worker-gc-home");
+        const remoteHome = await createTestTempDirectory(
+            "remote-worker-gc-home",
+        );
         const assets = await createTestTempDirectory("remote-worker-gc-assets");
         t.after(async () => {
             await rm(remoteHome, { recursive: true, force: true });
@@ -113,7 +115,12 @@ test(
         });
 
         const target = getWorkerTargetByKey("linux-x64");
-        const generations = join(remoteHome, ".devshell", "workers", target.key);
+        const generations = join(
+            remoteHome,
+            ".devshell",
+            "workers",
+            target.key,
+        );
         const staleInstall = join(generations, "a".repeat(64));
         const recent = join(generations, "b".repeat(64));
         const unknown = join(generations, "manual-backup");
@@ -123,10 +130,18 @@ test(
             mkdir(unknown, { recursive: true }),
         ]);
         const old = new Date(Date.now() - 10 * 24 * 60 * 60 * 1_000);
-        await Promise.all([utimes(staleInstall, old, old), utimes(unknown, old, old)]);
+        await Promise.all([
+            utimes(staleInstall, old, old),
+            utimes(unknown, old, old),
+        ]);
 
         const asset = await writeAsset(assets, "worker-current", target);
-        const installer = createInstaller(remoteHome, asset, target, process.env.PATH ?? "");
+        const installer = createInstaller(
+            remoteHome,
+            asset,
+            target,
+            process.env.PATH ?? "",
+        );
         await installer.ensure("devshell-worker");
 
         await assert.rejects(access(staleInstall));
@@ -144,7 +159,12 @@ test(
         await utimes(currentGeneration, old, old);
         await installer.ensure("devshell-worker");
         const next = await writeAsset(assets, "worker-next", target);
-        await createInstaller(remoteHome, next, target, process.env.PATH ?? "").ensure("devshell-worker");
+        await createInstaller(
+            remoteHome,
+            next,
+            target,
+            process.env.PATH ?? "",
+        ).ensure("devshell-worker");
         await assert.doesNotReject(access(currentGeneration));
     },
 );

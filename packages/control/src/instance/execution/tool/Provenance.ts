@@ -1,9 +1,27 @@
-import { appendFile, mkdir, open, readFile, readdir, rename, stat, truncate, unlink, writeFile } from "node:fs/promises";
+import {
+    appendFile,
+    mkdir,
+    open,
+    readFile,
+    readdir,
+    rename,
+    stat,
+    truncate,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "@portable-devshell/mcp";
+import type {
+    McpToolProvenanceRecord,
+    McpToolProvenanceRecorder,
+} from "@portable-devshell/mcp";
 import type { ToolCallRecord } from "@portable-devshell/shared";
 import { randomUUID } from "node:crypto";
-import { constants as zlibConstants, zstdCompress, zstdDecompress } from "node:zlib";
+import {
+    constants as zlibConstants,
+    zstdCompress,
+    zstdDecompress,
+} from "node:zlib";
 
 const RECORD_VERSION = 1;
 
@@ -34,18 +52,30 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
     #initializePromise?: Promise<void>;
     #mutation: Promise<void> = Promise.resolve();
 
-    constructor(filePath: string, options: ToolCallProvenanceStoreOptions = {}) {
+    constructor(
+        filePath: string,
+        options: ToolCallProvenanceStoreOptions = {},
+    ) {
         this.#filePath = filePath;
-        this.#hotMaxBytes = positiveInteger(options.hotMaxBytes ?? DEFAULT_HOT_MAX_BYTES, "hotMaxBytes");
-        const coldMaxBytes = positiveInteger(options.coldMaxBytes ?? DEFAULT_COLD_MAX_BYTES, "coldMaxBytes");
-        const retentionDays = positiveInteger(options.retentionDays ?? DEFAULT_RETENTION_DAYS, "retentionDays");
+        this.#hotMaxBytes = positiveInteger(
+            options.hotMaxBytes ?? DEFAULT_HOT_MAX_BYTES,
+            "hotMaxBytes",
+        );
+        const coldMaxBytes = positiveInteger(
+            options.coldMaxBytes ?? DEFAULT_COLD_MAX_BYTES,
+            "coldMaxBytes",
+        );
+        const retentionDays = positiveInteger(
+            options.retentionDays ?? DEFAULT_RETENTION_DAYS,
+            "retentionDays",
+        );
         this.#now = options.now ?? Date.now;
         this.#retentionMs = retentionDays * DAY_MS;
         this.#archive = new ToolCallProvenanceArchive({
             archiveDirectory: `${filePath}.archive`,
             coldMaxBytes,
             now: this.#now,
-            retentionMs: this.#retentionMs
+            retentionMs: this.#retentionMs,
         });
     }
 
@@ -54,7 +84,8 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
     }
 
     async record(record: McpToolProvenanceRecord): Promise<void> {
-        if (record.purpose === undefined && record.explanation === undefined) return;
+        if (record.purpose === undefined && record.explanation === undefined)
+            return;
         const operation = this.#mutation.then(async () => {
             if (this.#initializePromise !== undefined) await this.#initialize();
             if (this.#initialized) await this.#pruneHotRetention();
@@ -62,44 +93,72 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             const stored: StoredToolCallProvenance = {
                 ...record,
                 recordedAt: new Date(this.#now()).toISOString(),
-                version: RECORD_VERSION
+                version: RECORD_VERSION,
             };
-            await mkdir(dirname(this.#filePath), { mode: 0o700, recursive: true });
-            await appendFile(this.#filePath, `${JSON.stringify(stored)}\n`, { encoding: "utf8", mode: 0o600 });
-            if (this.#initialized) this.#hotRecords.set(provenanceKey(record.instance, record.callId), stored);
+            await mkdir(dirname(this.#filePath), {
+                mode: 0o700,
+                recursive: true,
+            });
+            await appendFile(this.#filePath, `${JSON.stringify(stored)}\n`, {
+                encoding: "utf8",
+                mode: 0o600,
+            });
+            if (this.#initialized)
+                this.#hotRecords.set(
+                    provenanceKey(record.instance, record.callId),
+                    stored,
+                );
             await this.#rotateIfNeeded();
         });
         this.#mutation = operation.catch(() => undefined);
         await operation;
     }
 
-    async decorate(instance: string, records: readonly ToolCallRecord[]): Promise<ToolCallRecord[]> {
+    async decorate(
+        instance: string,
+        records: readonly ToolCallRecord[],
+    ): Promise<ToolCallRecord[]> {
         await this.#initialize();
         const operation = this.#mutation.then(async () => {
             const cutoff = this.#now() - this.#retentionMs;
-            const keys = records.map((record) => provenanceKey(instance, record.callId));
+            const keys = records.map((record) =>
+                provenanceKey(instance, record.callId),
+            );
             const hot = new Map<string, StoredToolCallProvenance>();
             for (const key of keys) {
                 const provenance = this.#hotRecords.get(key);
-                if (provenance !== undefined && Date.parse(provenance.recordedAt) >= cutoff) {
+                if (
+                    provenance !== undefined &&
+                    Date.parse(provenance.recordedAt) >= cutoff
+                ) {
                     hot.set(key, provenance);
                 }
             }
             const missing = keys.filter((key) => !hot.has(key));
             if (missing.length > 0) await this.#initializeArchive();
-            const cold = missing.length === 0 ? new Map() : await this.#archive.lookup(missing);
+            const cold =
+                missing.length === 0
+                    ? new Map()
+                    : await this.#archive.lookup(missing);
             return records.map((record) => {
                 const key = provenanceKey(instance, record.callId);
                 const provenance = hot.get(key) ?? cold.get(key);
                 if (provenance === undefined) return record;
                 return {
                     ...record,
-                    ...(provenance.explanation === undefined ? {} : { explanation: provenance.explanation }),
-                    ...(provenance.purpose === undefined ? {} : { purpose: provenance.purpose })
+                    ...(provenance.explanation === undefined
+                        ? {}
+                        : { explanation: provenance.explanation }),
+                    ...(provenance.purpose === undefined
+                        ? {}
+                        : { purpose: provenance.purpose }),
                 };
             });
         });
-        this.#mutation = operation.then(() => undefined, () => undefined);
+        this.#mutation = operation.then(
+            () => undefined,
+            () => undefined,
+        );
         return await operation;
     }
 
@@ -120,13 +179,21 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             throw error;
         }
         const cutoff = this.#now() - this.#retentionMs;
-        const records = parseRecords(source, { allowIncompleteTail: true })
-            .filter((record) => Date.parse(record.recordedAt) >= cutoff);
+        const records = parseRecords(source, {
+            allowIncompleteTail: true,
+        }).filter((record) => Date.parse(record.recordedAt) >= cutoff);
         for (const record of records) {
-            this.#hotRecords.set(provenanceKey(record.instance, record.callId), record);
+            this.#hotRecords.set(
+                provenanceKey(record.instance, record.callId),
+                record,
+            );
         }
         const compacted = serializeRecords([...this.#hotRecords.values()]);
-        if (compacted !== source) await writeFile(this.#filePath, compacted, { encoding: "utf8", mode: 0o600 });
+        if (compacted !== source)
+            await writeFile(this.#filePath, compacted, {
+                encoding: "utf8",
+                mode: 0o600,
+            });
         this.#initialized = true;
         await this.#rotateIfNeeded();
     }
@@ -140,10 +207,14 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
             changed = true;
         }
         if (!changed) return;
-        await writeFile(this.#filePath, serializeRecords([...this.#hotRecords.values()]), {
-            encoding: "utf8",
-            mode: 0o600
-        });
+        await writeFile(
+            this.#filePath,
+            serializeRecords([...this.#hotRecords.values()]),
+            {
+                encoding: "utf8",
+                mode: 0o600,
+            },
+        );
     }
 
     async #rotateIfNeeded(): Promise<void> {
@@ -206,12 +277,18 @@ export class ToolCallProvenanceStore implements McpToolProvenanceRecorder {
 }
 
 function positiveInteger(value: number, name: string): number {
-    if (!Number.isSafeInteger(value) || value < 1) throw new TypeError(`${name} must be a positive safe integer.`);
+    if (!Number.isSafeInteger(value) || value < 1)
+        throw new TypeError(`${name} must be a positive safe integer.`);
     return value;
 }
 
 function isEnoent(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }
 
 export interface StoredToolCallProvenance extends McpToolProvenanceRecord {
@@ -278,14 +355,19 @@ export class ToolCallProvenanceArchive {
         if (records.length === 0) return;
         await mkdir(this.#archiveDirectory, { mode: 0o700, recursive: true });
         const stamp = String(this.#now()).padStart(13, "0");
-        const path = join(this.#archiveDirectory, `${stamp}-${randomUUID()}.jsonl.zst`);
+        const path = join(
+            this.#archiveDirectory,
+            `${stamp}-${randomUUID()}.jsonl.zst`,
+        );
         await writeArchive(path, records);
         await this.#indexArchive(path, records);
         await this.#pruneRetention();
         await this.#enforceBudget();
     }
 
-    async lookup(keys: readonly string[]): Promise<Map<string, StoredToolCallProvenance>> {
+    async lookup(
+        keys: readonly string[],
+    ): Promise<Map<string, StoredToolCallProvenance>> {
         const cutoff = this.#now() - this.#retentionMs;
         const byArchive = new Map<string, Set<string>>();
         for (const key of keys) {
@@ -307,7 +389,10 @@ export class ToolCallProvenanceArchive {
         return found;
     }
 
-    async #indexArchive(path: string, records: readonly StoredToolCallProvenance[]): Promise<void> {
+    async #indexArchive(
+        path: string,
+        records: readonly StoredToolCallProvenance[],
+    ): Promise<void> {
         const keys = new Set<string>();
         let newestAtMs = 0;
         let oldestAtMs = Number.POSITIVE_INFINITY;
@@ -320,7 +405,13 @@ export class ToolCallProvenanceArchive {
             oldestAtMs = Math.min(oldestAtMs, recordedAtMs);
         }
         const file = await stat(path);
-        this.#entries.set(path, { bytes: file.size, keys, newestAtMs, oldestAtMs, path });
+        this.#entries.set(path, {
+            bytes: file.size,
+            keys,
+            newestAtMs,
+            oldestAtMs,
+            path,
+        });
     }
 
     async #pruneRetention(): Promise<void> {
@@ -344,10 +435,14 @@ export class ToolCallProvenanceArchive {
     }
 
     async #enforceBudget(): Promise<void> {
-        let bytes = [...this.#entries.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+        let bytes = [...this.#entries.values()].reduce(
+            (sum, entry) => sum + entry.bytes,
+            0,
+        );
         if (bytes <= this.#coldMaxBytes) return;
-        const oldest = [...this.#entries.values()].sort((a, b) =>
-            a.newestAtMs - b.newestAtMs || a.path.localeCompare(b.path)
+        const oldest = [...this.#entries.values()].sort(
+            (a, b) =>
+                a.newestAtMs - b.newestAtMs || a.path.localeCompare(b.path),
         );
         for (const entry of oldest) {
             if (bytes <= this.#coldMaxBytes) break;
@@ -366,9 +461,13 @@ export class ToolCallProvenanceArchive {
         }
     }
 
-    #retained(records: readonly StoredToolCallProvenance[]): StoredToolCallProvenance[] {
+    #retained(
+        records: readonly StoredToolCallProvenance[],
+    ): StoredToolCallProvenance[] {
         const cutoff = this.#now() - this.#retentionMs;
-        return records.filter((record) => Date.parse(record.recordedAt) >= cutoff);
+        return records.filter(
+            (record) => Date.parse(record.recordedAt) >= cutoff,
+        );
     }
 }
 
@@ -376,16 +475,22 @@ export function provenanceKey(instance: string, callId: string): string {
     return `${instance}\u0000${callId}`;
 }
 
-export function isStoredToolCallProvenance(value: unknown): value is StoredToolCallProvenance {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+export function isStoredToolCallProvenance(
+    value: unknown,
+): value is StoredToolCallProvenance {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
     const record = value as Partial<StoredToolCallProvenance>;
-    return record.version === 1 &&
+    return (
+        record.version === 1 &&
         typeof record.callId === "string" &&
         typeof record.instance === "string" &&
         typeof record.recordedAt === "string" &&
         Number.isFinite(Date.parse(record.recordedAt)) &&
         (record.purpose === undefined || typeof record.purpose === "string") &&
-        (record.explanation === undefined || typeof record.explanation === "string");
+        (record.explanation === undefined ||
+            typeof record.explanation === "string")
+    );
 }
 
 async function readArchive(path: string): Promise<StoredToolCallProvenance[]> {
@@ -396,11 +501,11 @@ async function readArchive(path: string): Promise<StoredToolCallProvenance[]> {
 
 async function writeArchive(
     path: string,
-    records: readonly StoredToolCallProvenance[]
+    records: readonly StoredToolCallProvenance[],
 ): Promise<void> {
     const source = serializeRecords(records);
     const compressed = await compress(Buffer.from(source, "utf8"), {
-        params: { [zlibConstants.ZSTD_c_compressionLevel]: 1 }
+        params: { [zlibConstants.ZSTD_c_compressionLevel]: 1 },
     });
     const temporary = `${path}.${randomUUID()}.tmp`;
     try {
@@ -414,19 +519,26 @@ async function writeArchive(
 
 function decompress(source: Buffer): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-        zstdDecompress(source, (error, result) => error === null ? resolve(result) : reject(error));
+        zstdDecompress(source, (error, result) =>
+            error === null ? resolve(result) : reject(error),
+        );
     });
 }
 
-function compress(source: Buffer, options: Parameters<typeof zstdCompress>[1]): Promise<Buffer> {
+function compress(
+    source: Buffer,
+    options: Parameters<typeof zstdCompress>[1],
+): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-        zstdCompress(source, options, (error, result) => error === null ? resolve(result) : reject(error));
+        zstdCompress(source, options, (error, result) =>
+            error === null ? resolve(result) : reject(error),
+        );
     });
 }
 
 export function parseRecords(
     source: string,
-    options: { allowIncompleteTail?: boolean } = {}
+    options: { allowIncompleteTail?: boolean } = {},
 ): StoredToolCallProvenance[] {
     const records: StoredToolCallProvenance[] = [];
     const lines = source.split("\n");
@@ -437,8 +549,10 @@ export function parseRecords(
         try {
             record = JSON.parse(line) as unknown;
         } catch (error) {
-            const incompleteTail = options.allowIncompleteTail === true &&
-                index === lines.length - 1 && !source.endsWith("\n");
+            const incompleteTail =
+                options.allowIncompleteTail === true &&
+                index === lines.length - 1 &&
+                !source.endsWith("\n");
             if (incompleteTail) break;
             throw error;
         }
@@ -447,6 +561,11 @@ export function parseRecords(
     return records;
 }
 
-export function serializeRecords(records: readonly StoredToolCallProvenance[]): string {
-    return records.map((record) => JSON.stringify(record)).join("\n") + (records.length === 0 ? "" : "\n");
+export function serializeRecords(
+    records: readonly StoredToolCallProvenance[],
+): string {
+    return (
+        records.map((record) => JSON.stringify(record)).join("\n") +
+        (records.length === 0 ? "" : "\n")
+    );
 }

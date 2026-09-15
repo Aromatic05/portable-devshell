@@ -7,7 +7,9 @@ import { posix, resolve } from "node:path";
 
 export const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
-export async function ipcEndpointAcceptsConnections(path: string): Promise<boolean> {
+export async function ipcEndpointAcceptsConnections(
+    path: string,
+): Promise<boolean> {
     return await new Promise<boolean>((resolvePromise) => {
         const socket = createConnection(path);
         socket.once("connect", () => {
@@ -21,7 +23,7 @@ export async function ipcEndpointAcceptsConnections(path: string): Promise<boole
 export function createTestIpcPath(
     name: string,
     directory: string,
-    platform = process.platform
+    platform = process.platform,
 ): string {
     const normalized = name.replaceAll(/[^A-Za-z0-9._-]/gu, "-");
     if (platform === "win32") {
@@ -31,7 +33,7 @@ export function createTestIpcPath(
         const shortName = normalized.slice(0, 16) || "ipc";
         return posix.join(
             "/tmp",
-            `pds-${shortName}-${process.pid}-${randomUUID().slice(0, 8)}.sock`
+            `pds-${shortName}-${process.pid}-${randomUUID().slice(0, 8)}.sock`,
         );
     }
     return posix.join(directory, `${normalized}.sock`);
@@ -40,15 +42,16 @@ export function createTestIpcPath(
 export function resolveTestWorkerBinary(): string | undefined {
     const configured = process.env.PORTABLE_DEVSHELL_TEST_WORKER_PATH;
     const targetDirectory = process.env.CARGO_TARGET_DIR;
-    const candidate = configured !== undefined && configured.length > 0
-        ? resolve(repositoryRoot, configured)
-        : resolve(
-            targetDirectory === undefined || targetDirectory.length === 0
-                ? resolve(repositoryRoot, "target")
-                : resolve(repositoryRoot, targetDirectory),
-            "debug",
-            `devshell-worker${process.platform === "win32" ? ".exe" : ""}`
-        );
+    const candidate =
+        configured !== undefined && configured.length > 0
+            ? resolve(repositoryRoot, configured)
+            : resolve(
+                  targetDirectory === undefined || targetDirectory.length === 0
+                      ? resolve(repositoryRoot, "target")
+                      : resolve(repositoryRoot, targetDirectory),
+                  "debug",
+                  `devshell-worker${process.platform === "win32" ? ".exe" : ""}`,
+              );
     return existsSync(candidate) ? candidate : undefined;
 }
 
@@ -57,12 +60,15 @@ export function realWorkerTestOptions(
     environment: NodeJS.ProcessEnv = process.env,
 ): { skip: false | string } {
     if (workerBinaryPath === undefined && environment.CI) {
-        throw new Error("CI requires a prepared devshell-worker binary for real Worker tests.");
+        throw new Error(
+            "CI requires a prepared devshell-worker binary for real Worker tests.",
+        );
     }
     return {
-        skip: workerBinaryPath === undefined
-            ? "requires PORTABLE_DEVSHELL_TEST_WORKER_PATH or a host worker in target/debug"
-            : false
+        skip:
+            workerBinaryPath === undefined
+                ? "requires PORTABLE_DEVSHELL_TEST_WORKER_PATH or a host worker in target/debug"
+                : false,
     };
 }
 
@@ -74,12 +80,15 @@ export function chromiumTestOptions(
         chromiumExecutable === undefined &&
         environment.PORTABLE_DEVSHELL_REQUIRE_CHROMIUM === "1"
     ) {
-        throw new Error("This test target requires Chromium browser acceptance.");
+        throw new Error(
+            "This test target requires Chromium browser acceptance.",
+        );
     }
     return {
-        skip: chromiumExecutable === undefined
-            ? "A Chromium executable is unavailable on this target."
-            : false,
+        skip:
+            chromiumExecutable === undefined
+                ? "A Chromium executable is unavailable on this target."
+                : false,
     };
 }
 
@@ -117,7 +126,8 @@ export function terminalPrintCommand(marker: string, delayMs = 0): string {
         throw new Error(`invalid terminal delay: ${delayMs}`);
     }
     if (process.platform === "win32") {
-        const delay = delayMs === 0 ? "" : `Start-Sleep -Milliseconds ${delayMs}; `;
+        const delay =
+            delayMs === 0 ? "" : `Start-Sleep -Milliseconds ${delayMs}; `;
         return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${delay}[Console]::WriteLine(('${left}' + '${right}'))"\r`;
     }
     const delay = delayMs === 0 ? "" : `sleep ${(delayMs / 1000).toFixed(3)}; `;
@@ -142,19 +152,27 @@ function splitTerminalMarker(marker: string): [string, string] {
     return [marker.slice(0, middle), marker.slice(middle)];
 }
 
-export function workerPathEnvironmentName(platform = process.platform, arch = process.arch): string {
+export function workerPathEnvironmentName(
+    platform = process.platform,
+    arch = process.arch,
+): string {
     return `PORTABLE_DEVSHELL_WORKER_${normalizeWorkerPlatform(platform)}_${normalizeWorkerArch(arch)}_PATH`;
 }
 
-export function commandAvailable(command: string, args: readonly string[] = []): boolean {
+export function commandAvailable(
+    command: string,
+    args: readonly string[] = [],
+): boolean {
     const result = spawnSync(command, args, {
         stdio: "ignore",
-        windowsHide: true
+        windowsHide: true,
     });
     return result.status === 0;
 }
 
-export function tmuxTestOptions(workerBinaryPath: string | undefined): { skip: false | string } {
+export function tmuxTestOptions(workerBinaryPath: string | undefined): {
+    skip: false | string;
+} {
     if (workerBinaryPath === undefined) {
         return realWorkerTestOptions(workerBinaryPath);
     }
@@ -164,7 +182,7 @@ export function tmuxTestOptions(workerBinaryPath: string | undefined): { skip: f
     return {
         skip: commandAvailable("tmux", ["-V"])
             ? false
-            : "requires tmux on PATH"
+            : "requires tmux on PATH",
     };
 }
 

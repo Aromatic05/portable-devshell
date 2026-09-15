@@ -105,13 +105,13 @@ instance config write version  4
 
 instance version 4 中：
 
-* 不存在持久化默认 workspace path；`[workspace].enabled` 只是 Workspace App/Goal/Wait recovery 子系统开关；
-* 不存在 MCP group/capability policy；`tools/list` 使用固定 runtime catalog；
-* `[extensions].model` 是 model Extension command allowlist；当前 bundled 默认是 `artifact / instance / mcp / secret / skill`，独立安装的 `agent` 需要显式加入；
-* MCP 不暴露 `instance_connect`；Instance Extension 的 model `list/status` 只负责 Context-filtered discovery 并返回 opaque remote handle，真正的 Context attachment 使用固定 `environ_remote(command="attach")`；
-* `environ_remote` 使用稳定的 `command + handle? + workspace?` object schema，不把 command vocabulary 编成 enum/union；`help` 返回 authoritative command catalog，`environ_info` 返回紧凑 command hints；
-* `environ_remote(command="mask")` 对当前 Context 做不可撤销的单调权限收缩：masked instance 从 model discovery 消失，已有 attachment 被撤销，所有 routed tool 永久拒绝；不存在 unmask；
-* `devshell instance ...` 仍保留 builtin CLI 管理主干；Artifact 管理/传输由真实 builtin Artifact Extension 的 `cli.native-commands` / `cli.model-commands` registrations 提供，而不是 Control-resident provider、builtin Artifact parser 或 `artifact_transfer` MCP tool。
+- 不存在持久化默认 workspace path；`[workspace].enabled` 只是 Workspace App/Goal/Wait recovery 子系统开关；
+- 不存在 MCP group/capability policy；`tools/list` 使用固定 runtime catalog；
+- `[extensions].model` 是 model Extension command allowlist；当前 bundled 默认是 `artifact / instance / mcp / secret / skill`，独立安装的 `agent` 需要显式加入；
+- MCP 不暴露 `instance_connect`；Instance Extension 的 model `list/status` 只负责 Context-filtered discovery 并返回 opaque remote handle，真正的 Context attachment 使用固定 `environ_remote(command="attach")`；
+- `environ_remote` 使用稳定的 `command + handle? + workspace?` object schema，不把 command vocabulary 编成 enum/union；`help` 返回 authoritative command catalog，`environ_info` 返回紧凑 command hints；
+- `environ_remote(command="mask")` 对当前 Context 做不可撤销的单调权限收缩：masked instance 从 model discovery 消失，已有 attachment 被撤销，所有 routed tool 永久拒绝；不存在 unmask；
+- `devshell instance ...` 仍保留 builtin CLI 管理主干；Artifact 管理/传输由真实 builtin Artifact Extension 的 `cli.native-commands` / `cli.model-commands` registrations 提供，而不是 Control-resident provider、builtin Artifact parser 或 `artifact_transfer` MCP tool。
 
 ## MCP / Context / Workspace 门禁
 
@@ -135,13 +135,13 @@ instance version 4 中：
 
 正式公网 ChatGPT/云 Host 验收应优先覆盖 OAuth：
 
-* protected-resource metadata；
-* authorization-server discovery；
-* resource/audience/scope；
-* PKCE；
-* refresh/revocation；
-* v2 OAuth issuer validation；
-* 代理不缓存/缓冲 request-scoped SSE。
+- protected-resource metadata；
+- authorization-server discovery；
+- resource/audience/scope；
+- PKCE；
+- refresh/revocation；
+- v2 OAuth issuer validation；
+- 代理不缓存/缓冲 request-scoped SSE。
 
 ## 安装/升级门禁
 
@@ -161,10 +161,10 @@ instance version 4 中：
 
 发布前还应检查：
 
-* README 与 `docs/README.md` 不包含不存在的相对链接；
-* 不再出现 OpenAI 90 秒 tmux handoff 的旧说明；
-* 不把 `Mcp-Session-Id` 写成 Context identity；
-* 不把 instance version 2 当成当前配置；
-* 不把 `workspace` 写回 instance config；
-* 不把 app-only Workspace helper 推荐给模型；
-* 当前 CLI 示例能在 `devshell --help` / 子命令 help 中找到对应入口。
+- README 与 `docs/README.md` 不包含不存在的相对链接；
+- 不再出现 OpenAI 90 秒 tmux handoff 的旧说明；
+- 不把 `Mcp-Session-Id` 写成 Context identity；
+- 不把 instance version 2 当成当前配置；
+- 不把 `workspace` 写回 instance config；
+- 不把 app-only Workspace helper 推荐给模型；
+- 当前 CLI 示例能在 `devshell --help` / 子命令 help 中找到对应入口。

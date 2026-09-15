@@ -1,6 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 
-import { selectInstanceAfterListReplace, withDerivedState } from "../Support.js";
+import {
+    selectInstanceAfterListReplace,
+    withDerivedState,
+} from "../Support.js";
 import type { TuiAppAction, TuiAppState } from "../../Model.js";
 
 export function reduceTuiStoreReducerControl(
@@ -12,12 +15,15 @@ export function reduceTuiStoreReducerControl(
             if (
                 isDeepStrictEqual(state.instances, action.instances) &&
                 isDeepStrictEqual(state.readModel, action.readModel)
-            ) return state;
-            return withDerivedState(selectInstanceAfterListReplace({
-                ...state,
-                instances: action.instances,
-                readModel: action.readModel,
-            }));
+            )
+                return state;
+            return withDerivedState(
+                selectInstanceAfterListReplace({
+                    ...state,
+                    instances: action.instances,
+                    readModel: action.readModel,
+                }),
+            );
         }
         case "command.upsert": {
             const without = state.commandRecords.filter(
@@ -25,8 +31,9 @@ export function reduceTuiStoreReducerControl(
             );
             return {
                 ...state,
-                commandRecords: [...without, action.command].sort((left, right) =>
-                    right.startedAt.localeCompare(left.startedAt)
+                commandRecords: [...without, action.command].sort(
+                    (left, right) =>
+                        right.startedAt.localeCompare(left.startedAt),
                 ),
             };
         }
@@ -34,8 +41,10 @@ export function reduceTuiStoreReducerControl(
             const current = state.panelErrors[action.key];
             if (
                 (action.error === undefined && current === undefined) ||
-                (action.error !== undefined && isDeepStrictEqual(current, action.error))
-            ) return state;
+                (action.error !== undefined &&
+                    isDeepStrictEqual(current, action.error))
+            )
+                return state;
             const panelErrors = { ...state.panelErrors };
             if (action.error === undefined) delete panelErrors[action.key];
             else panelErrors[action.key] = action.error;
@@ -68,8 +77,12 @@ export function reduceTuiStoreReducerControl(
                     ...state.relayByCommand,
                     [action.commandId]: {
                         ...current,
-                        ...(action.provider === undefined ? {} : { provider: action.provider }),
-                        ...(action.requestId === undefined ? {} : { requestId: action.requestId }),
+                        ...(action.provider === undefined
+                            ? {}
+                            : { provider: action.provider }),
+                        ...(action.requestId === undefined
+                            ? {}
+                            : { requestId: action.requestId }),
                     },
                 },
             };

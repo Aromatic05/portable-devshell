@@ -7,7 +7,9 @@ import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 if (process.platform === "win32") {
-    throw new Error("smoke-install-release.mjs currently validates the Unix release installer.");
+    throw new Error(
+        "smoke-install-release.mjs currently validates the Unix release installer.",
+    );
 }
 
 const archive = resolveApplicationSmokeArchive(process.argv.slice(2));
@@ -28,7 +30,10 @@ const environment = {
     PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
     PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
     PORTABLE_DEVSHELL_HOME: devshellHome,
-    PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, "")
+    PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(
+        /\/$/u,
+        "",
+    ),
 };
 let controlStarted = false;
 
@@ -50,7 +55,11 @@ try {
         }
     }
 
-    run("sh", [resolve(repositoryRoot, "scripts", "install-release.sh")], environment);
+    run(
+        "sh",
+        [resolve(repositoryRoot, "scripts", "install-release.sh")],
+        environment,
+    );
 
     run(command, ["start"], environment);
     controlStarted = true;
@@ -93,16 +102,16 @@ function run(executable, args, env, ignoreFailure = false) {
         cwd: repositoryRoot,
         encoding: "utf8",
         env,
-        timeout: 60_000
+        timeout: 60_000,
     });
     if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
         throw new Error(
-            `${executable} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
+            `${executable} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
         );
     }
     return {
         status: result.status,
         stderr: result.stderr ?? "",
-        stdout: result.stdout ?? ""
+        stdout: result.stdout ?? "",
     };
 }

@@ -9,6 +9,6 @@ test("Control grants the reserved Agent Extension a bounded large-Provider asset
     assert.deepEqual(resolveControlExtensionAssetLimits("agent"), {
         maxCompressedBytes: 128 * 1024 * 1024,
         maxFileBytes: 256 * 1024 * 1024,
-        maxLogicalBytes: 512 * 1024 * 1024
+        maxLogicalBytes: 512 * 1024 * 1024,
     });
 });

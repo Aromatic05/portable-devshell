@@ -13,7 +13,7 @@ import {
     type ExtensionManifest,
     type ExtensionModule,
     type ExtensionProcessCapability,
-    type ExtensionWorkerCapability
+    type ExtensionWorkerCapability,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
@@ -24,12 +24,15 @@ import { ExtensionProcessCapabilityControl } from "../capability/Execution.js";
 import { ExtensionGeneration } from "../registration/Generation.js";
 import { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";
-import { sharedExtensionHostModuleResolver, type ExtensionHostModuleResolver } from "./ModuleResolver.js";
+import {
+    sharedExtensionHostModuleResolver,
+    type ExtensionHostModuleResolver,
+} from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
 import { ExtensionWorkerCapabilityControl } from "../capability/Execution.js";
 import {
     ExtensionSandboxHost,
-    type ExtensionSandboxHostOptions
+    type ExtensionSandboxHostOptions,
 } from "../sandbox/bridge/Host.js";
 import type { ExtensionSandboxReadyDescriptor } from "../sandbox/bridge/Protocol.js";
 
@@ -70,7 +73,9 @@ export interface ExtensionLoaderOptions {
         extensionId: string;
         generation: string;
     }) => ExtensionProcessRuntime;
-    sandboxFactory?: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
+    sandboxFactory?: (
+        options: ExtensionSandboxHostOptions,
+    ) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
     workerFactory?: (input: {
         allowed: boolean;
@@ -87,12 +92,17 @@ export class ExtensionLoader {
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
     readonly #instances: InstanceRegistry;
-    readonly #loggerFactory: (id: string, generation: string) => ExtensionLogger;
+    readonly #loggerFactory: (
+        id: string,
+        generation: string,
+    ) => ExtensionLogger;
     readonly #paths: ExtensionPathLayout;
     readonly points: ExtensionPointRegistry;
     readonly #processFactory?: ExtensionLoaderOptions["processFactory"];
     readonly #runtimeRoots = new Map<string, Promise<void>>();
-    readonly #sandboxFactory: (options: ExtensionSandboxHostOptions) => ExtensionSandboxHost;
+    readonly #sandboxFactory: (
+        options: ExtensionSandboxHostOptions,
+    ) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
 
@@ -100,14 +110,19 @@ export class ExtensionLoader {
         this.#artifactFactory = options.artifactFactory;
         this.#assetsFactory = options.assetsFactory;
         this.#importer = options.importer;
-        this.#hostModuleResolver = options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
+        this.#hostModuleResolver =
+            options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
         this.#instanceFactory = options.instanceFactory;
         this.#instances = options.instances;
-        this.#loggerFactory = options.loggerFactory ?? ((id, generation) => consoleExtensionLogger(id, generation));
+        this.#loggerFactory =
+            options.loggerFactory ??
+            ((id, generation) => consoleExtensionLogger(id, generation));
         this.#paths = options.paths;
         this.points = options.points;
         this.#processFactory = options.processFactory;
-        this.#sandboxFactory = options.sandboxFactory ?? ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
+        this.#sandboxFactory =
+            options.sandboxFactory ??
+            ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
         this.#workerFactory = options.workerFactory;
     }
@@ -118,97 +133,137 @@ export class ExtensionLoader {
         const dataDirectory = this.#paths.dataDirectory(id);
         const runtimeRoot = this.#paths.runtimeDirectory(id, generation);
         const stateDirectory = this.#paths.stateDirectory(id);
-        const entryPath = resolveContainedPath(codeDirectory, manifest.entry, "Extension entry");
+        const entryPath = resolveContainedPath(
+            codeDirectory,
+            manifest.entry,
+            "Extension entry",
+        );
         await assertPlainFile(entryPath, `Extension entry for ${id}`);
         await this.#prepareRuntimeRoot(runtimeRoot);
         await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
-        await assertPlainDirectory(runtimeRoot, `Extension runtime generation root for ${id}`);
+        await assertPlainDirectory(
+            runtimeRoot,
+            `Extension runtime generation root for ${id}`,
+        );
         const runtimeDirectory = join(runtimeRoot, `run-${randomUUID()}`);
         await Promise.all([
             mkdir(dataDirectory, { mode: 0o700, recursive: true }),
             mkdir(runtimeDirectory, { mode: 0o700 }),
-            mkdir(stateDirectory, { mode: 0o700, recursive: true })
+            mkdir(stateDirectory, { mode: 0o700, recursive: true }),
         ]);
 
-        const assets = this.#assetsFactory?.({
-            allowed: manifest.capabilities.includes("assets"),
-            dataDirectory,
-            extensionId: id,
-            generation
-        }) ?? new ExtensionAssetCapabilityControl({
-            allowed: manifest.capabilities.includes("assets"),
-            dataDirectory,
-            extensionId: id
-        });
+        const assets =
+            this.#assetsFactory?.({
+                allowed: manifest.capabilities.includes("assets"),
+                dataDirectory,
+                extensionId: id,
+                generation,
+            }) ??
+            new ExtensionAssetCapabilityControl({
+                allowed: manifest.capabilities.includes("assets"),
+                dataDirectory,
+                extensionId: id,
+            });
 
-        const artifacts = this.#artifactFactory?.({
-            allowed: manifest.capabilities.includes("artifacts"),
-            extensionId: id,
-            generation
-        }) ?? unavailableArtifacts(id);
-        const instanceManagement = this.#instanceFactory?.({
-            allowed: manifest.capabilities.includes("instances"),
-            extensionId: id,
-            generation
-        }) ?? unavailableInstances(id);
+        const artifacts =
+            this.#artifactFactory?.({
+                allowed: manifest.capabilities.includes("artifacts"),
+                extensionId: id,
+                generation,
+            }) ?? unavailableArtifacts(id);
+        const instanceManagement =
+            this.#instanceFactory?.({
+                allowed: manifest.capabilities.includes("instances"),
+                extensionId: id,
+                generation,
+            }) ?? unavailableInstances(id);
 
         const worker = manifest.capabilities.includes("workers")
-            ? this.#workerFactory?.({
+            ? (this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
-                  recording: "host"
-              }) ?? new ExtensionWorkerCapabilityControl({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-                  instances: this.#instances,
-                  recording: "host"
-              })
-            : unavailableWorkerRuntime(id, this.#instances);
-        const delegatedWorker = manifest.capabilities.includes("delegatedWorkers")
-            ? this.#workerFactory?.({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-                  recording: "caller"
-              }) ?? new ExtensionWorkerCapabilityControl({
+                  recording: "host",
+              }) ??
+              new ExtensionWorkerCapabilityControl({
                   allowed: true,
                   extensionId: id,
                   generation,
                   instances: this.#instances,
-                  recording: "caller"
-              })
+                  recording: "host",
+              }))
             : unavailableWorkerRuntime(id, this.#instances);
-        const processes = this.#processFactory?.({
-            allowed: manifest.capabilities.includes("processes"),
-            extensionId: id,
-            generation
-        }) ?? new ExtensionProcessCapabilityControl({
-            allowed: manifest.capabilities.includes("processes"),
-            extensionId: id,
-            generation
-        });
+        const delegatedWorker = manifest.capabilities.includes(
+            "delegatedWorkers",
+        )
+            ? (this.#workerFactory?.({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  recording: "caller",
+              }) ??
+              new ExtensionWorkerCapabilityControl({
+                  allowed: true,
+                  extensionId: id,
+                  generation,
+                  instances: this.#instances,
+                  recording: "caller",
+              }))
+            : unavailableWorkerRuntime(id, this.#instances);
+        const processes =
+            this.#processFactory?.({
+                allowed: manifest.capabilities.includes("processes"),
+                extensionId: id,
+                generation,
+            }) ??
+            new ExtensionProcessCapabilityControl({
+                allowed: manifest.capabilities.includes("processes"),
+                extensionId: id,
+                generation,
+            });
         const logger = this.#loggerFactory(id, generation);
-        const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory, this.points);
-        const register: ExtensionContext["register"] = (point, localId, binding) => {
+        const registrations = new ExtensionRegistrationBuilder(
+            manifest,
+            codeDirectory,
+            this.points,
+        );
+        const register: ExtensionContext["register"] = (
+            point,
+            localId,
+            binding,
+        ) => {
             registrations.register(point, localId, binding);
         };
         const context: ExtensionContext = Object.freeze({
             capabilities: Object.freeze({
-                ...(manifest.capabilities.includes("artifacts") ? { artifacts } : {}),
+                ...(manifest.capabilities.includes("artifacts")
+                    ? { artifacts }
+                    : {}),
                 ...(manifest.capabilities.includes("assets") ? { assets } : {}),
-                ...(manifest.capabilities.includes("delegatedWorkers") ? { delegatedWorkers: delegatedWorker } : {}),
-                ...(manifest.capabilities.includes("instances") ? { instances: instanceManagement } : {}),
-                ...(manifest.capabilities.includes("processes") ? { processes } : {}),
-                ...(manifest.capabilities.includes("workers") ? { workers: worker } : {})
+                ...(manifest.capabilities.includes("delegatedWorkers")
+                    ? { delegatedWorkers: delegatedWorker }
+                    : {}),
+                ...(manifest.capabilities.includes("instances")
+                    ? { instances: instanceManagement }
+                    : {}),
+                ...(manifest.capabilities.includes("processes")
+                    ? { processes }
+                    : {}),
+                ...(manifest.capabilities.includes("workers")
+                    ? { workers: worker }
+                    : {}),
             }),
             generation,
             id,
             logger,
-            paths: Object.freeze({ codeDirectory, dataDirectory, runtimeDirectory, stateDirectory }),
+            paths: Object.freeze({
+                codeDirectory,
+                dataDirectory,
+                runtimeDirectory,
+                stateDirectory,
+            }),
             register,
-            version: manifest.version
+            version: manifest.version,
         });
 
         if (this.#importer === undefined) {
@@ -227,61 +282,91 @@ export class ExtensionLoader {
                 runtimeRoot,
                 runtimeDirectory,
                 delegatedWorker,
-                worker
+                worker,
             });
         }
 
-        const hostModules = this.#hostModuleResolver.register(codeDirectory, manifest.hostDependencies);
+        const hostModules = this.#hostModuleResolver.register(
+            codeDirectory,
+            manifest.hostDependencies,
+        );
         let module: ExtensionModule | undefined;
         try {
-            module = readExtensionModule(await this.#importer(pathToFileURL(entryPath).href), id);
+            module = readExtensionModule(
+                await this.#importer(pathToFileURL(entryPath).href),
+                id,
+            );
             await module.activate(context);
             const bindings = await registrations.finalize();
             return new ExtensionGeneration({
-                dispose: async () => await disposeGeneration(
-                    module!,
-                    processes,
-                    delegatedWorker,
-                    worker,
-                    runtimeRoot,
-                    runtimeDirectory,
-                    hostModules.release
-                ),
+                dispose: async () =>
+                    await disposeGeneration(
+                        module!,
+                        processes,
+                        delegatedWorker,
+                        worker,
+                        runtimeRoot,
+                        runtimeDirectory,
+                        hostModules.release,
+                    ),
                 generation,
                 manifest,
                 registrations: bindings,
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         delegatedWorker.retireInstance(instance),
-                        worker.retireInstance(instance)
+                        worker.retireInstance(instance),
                     ]);
-                }
+                },
             });
         } catch (error) {
             const cleanupFailures: unknown[] = [];
-            await Promise.resolve(module?.deactivate?.()).catch((cleanupError: unknown) => cleanupFailures.push(cleanupError));
-            await processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await delegatedWorker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory)
+            await Promise.resolve(module?.deactivate?.()).catch(
+                (cleanupError: unknown) => cleanupFailures.push(cleanupError),
+            );
+            await processes
+                .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            try { hostModules.release(); } catch (cleanupError) { cleanupFailures.push(cleanupError); }
+            await delegatedWorker
+                .closeAll()
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await worker
+                .closeAll()
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
+                (cleanupError) => cleanupFailures.push(cleanupError),
+            );
+            try {
+                hostModules.release();
+            } catch (cleanupError) {
+                cleanupFailures.push(cleanupError);
+            }
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
                 [error, ...cleanupFailures],
-                `Extension ${id} activation failed and candidate cleanup was incomplete.`
+                `Extension ${id} activation failed and candidate cleanup was incomplete.`,
             );
         }
     }
 
-    async readManifest(id: string, generation: string): Promise<ExtensionManifest> {
+    async readManifest(
+        id: string,
+        generation: string,
+    ): Promise<ExtensionManifest> {
         const codeDirectory = this.#paths.generationDirectory(id, generation);
-        await assertPlainDirectory(codeDirectory, `Extension generation directory for ${id}`);
+        await assertPlainDirectory(
+            codeDirectory,
+            `Extension generation directory for ${id}`,
+        );
         const manifestPath = this.#paths.manifestFile(id, generation);
         await assertPlainFile(manifestPath, `Extension manifest for ${id}`);
-        const manifest = parseExtensionManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
+        const manifest = parseExtensionManifest(
+            JSON.parse(await readFile(manifestPath, "utf8")) as unknown,
+        );
         if (manifest.id !== id) {
-            throw new Error(`Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`);
+            throw new Error(
+                `Extension generation ${generation} declares id ${manifest.id}, expected ${id}.`,
+            );
         }
         return manifest;
     }
@@ -292,10 +377,15 @@ export class ExtensionLoader {
             preparation = (async () => {
                 await rm(runtimeRoot, { force: true, recursive: true });
                 await mkdir(runtimeRoot, { mode: 0o700, recursive: true });
-                await assertPlainDirectory(runtimeRoot, "Extension runtime generation root");
+                await assertPlainDirectory(
+                    runtimeRoot,
+                    "Extension runtime generation root",
+                );
             })();
             this.#runtimeRoots.set(runtimeRoot, preparation);
-            void preparation.catch(() => this.#runtimeRoots.delete(runtimeRoot));
+            void preparation.catch(() =>
+                this.#runtimeRoots.delete(runtimeRoot),
+            );
         }
         await preparation;
     }
@@ -327,7 +417,7 @@ export class ExtensionLoader {
                 generation: input.generation,
                 id: input.id,
                 paths: input.context.paths,
-                version: input.manifest.version
+                version: input.manifest.version,
             },
             entryUrl: pathToFileURL(input.entryPath).href,
             hostDependencies: input.manifest.hostDependencies,
@@ -340,11 +430,13 @@ export class ExtensionLoader {
                 void input.worker.closeAll().catch(() => undefined);
             },
             processes: input.processes,
-            ...(this.#sandboxResourceLimits === undefined ? {} : {
-                resourceLimits: this.#sandboxResourceLimits
-            }),
+            ...(this.#sandboxResourceLimits === undefined
+                ? {}
+                : {
+                      resourceLimits: this.#sandboxResourceLimits,
+                  }),
             delegatedWorker: input.delegatedWorker,
-            worker: input.worker
+            worker: input.worker,
         });
         try {
             const descriptor = await sandbox.start();
@@ -353,49 +445,64 @@ export class ExtensionLoader {
                 input.manifest,
                 input.codeDirectory,
                 this.points,
-                sandbox
+                sandbox,
             );
             candidate = new ExtensionGeneration({
-                dispose: async () => await disposeSandboxGeneration(
-                    sandbox,
-                    input.processes,
-                    input.delegatedWorker,
-                    input.worker,
-                    input.runtimeRoot,
-                    input.runtimeDirectory
-                ),
+                dispose: async () =>
+                    await disposeSandboxGeneration(
+                        sandbox,
+                        input.processes,
+                        input.delegatedWorker,
+                        input.worker,
+                        input.runtimeRoot,
+                        input.runtimeDirectory,
+                    ),
                 generation: input.generation,
                 manifest: input.manifest,
                 registrations: bindings,
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         input.delegatedWorker.retireInstance(instance),
-                        input.worker.retireInstance(instance)
+                        input.worker.retireInstance(instance),
                     ]);
-                }
+                },
             });
             if (sandbox.faultError !== undefined) throw sandbox.faultError;
             return candidate;
         } catch (error) {
             const cleanupFailures: unknown[] = [];
-            await sandbox.dispose().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.processes.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.delegatedWorker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.worker.closeAll().catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await cleanupRuntimeDirectory(input.runtimeRoot, input.runtimeDirectory)
+            await sandbox
+                .dispose()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.processes
+                .closeAll()
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.delegatedWorker
+                .closeAll()
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await input.worker
+                .closeAll()
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            await cleanupRuntimeDirectory(
+                input.runtimeRoot,
+                input.runtimeDirectory,
+            ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             if (cleanupFailures.length === 0) throw error;
             throw new AggregateError(
                 [error, ...cleanupFailures],
-                `Extension ${input.id} sandbox activation failed and candidate cleanup was incomplete.`
+                `Extension ${input.id} sandbox activation failed and candidate cleanup was incomplete.`,
             );
         }
     }
 }
 
-function unavailableArtifacts(extensionId: string): ExtensionArtifactCapability {
+function unavailableArtifacts(
+    extensionId: string,
+): ExtensionArtifactCapability {
     const unavailable = (): never => {
-        throw new Error(`Extension ${extensionId} requested artifacts but the host did not configure that capability.`);
+        throw new Error(
+            `Extension ${extensionId} requested artifacts but the host did not configure that capability.`,
+        );
     };
     return Object.freeze({
         cancelTransfer: async () => unavailable(),
@@ -405,13 +512,17 @@ function unavailableArtifacts(extensionId: string): ExtensionArtifactCapability 
         listTransfers: async () => unavailable(),
         revokeShare: async () => unavailable(),
         startTransfer: async () => unavailable(),
-        waitForTransfer: async () => unavailable()
+        waitForTransfer: async () => unavailable(),
     });
 }
 
-function unavailableInstances(extensionId: string): ExtensionInstanceCapability {
+function unavailableInstances(
+    extensionId: string,
+): ExtensionInstanceCapability {
     const unavailable = (): never => {
-        throw new Error(`Extension ${extensionId} requested instances but the host did not configure that capability.`);
+        throw new Error(
+            `Extension ${extensionId} requested instances but the host did not configure that capability.`,
+        );
     };
     return Object.freeze({
         create: async () => unavailable(),
@@ -426,16 +537,19 @@ function unavailableInstances(extensionId: string): ExtensionInstanceCapability 
         start: async () => unavailable(),
         stop: async () => unavailable(),
         validateCreate: async () => unavailable(),
-        watchEvents: async () => unavailable()
+        watchEvents: async () => unavailable(),
     });
 }
 
-function unavailableWorkerRuntime(extensionId: string, instances: InstanceRegistry): ExtensionWorkerRuntime {
+function unavailableWorkerRuntime(
+    extensionId: string,
+    instances: InstanceRegistry,
+): ExtensionWorkerRuntime {
     return new ExtensionWorkerCapabilityControl({
         allowed: false,
         extensionId,
         generation: "unavailable",
-        instances
+        instances,
     });
 }
 
@@ -444,9 +558,13 @@ async function registrationsFromSandbox(
     manifest: ExtensionManifest,
     codeDirectory: string,
     points: ExtensionPointRegistry,
-    sandbox: ExtensionSandboxHost
+    sandbox: ExtensionSandboxHost,
 ): Promise<import("../registration/Registration.js").ExtensionRegistrationSet> {
-    const registrations = new ExtensionRegistrationBuilder(manifest, codeDirectory, points);
+    const registrations = new ExtensionRegistrationBuilder(
+        manifest,
+        codeDirectory,
+        points,
+    );
     for (const registration of descriptor.registrations) {
         const binding = points.createSandboxBinding(
             registration.pointId,
@@ -454,25 +572,42 @@ async function registrationsFromSandbox(
             Object.freeze({
                 codeDirectory,
                 extensionId: manifest.id,
-                id: registration.id
+                id: registration.id,
             }),
-            sandbox
+            sandbox,
         );
-        registrations.registerById(registration.pointId, registration.id, binding);
+        registrations.registerById(
+            registration.pointId,
+            registration.id,
+            binding,
+        );
     }
     return await registrations.finalize();
 }
 
 function readExtensionModule(value: unknown, id: string): ExtensionModule {
     if (!isRecord(value) || typeof value.activate !== "function") {
-        throw new TypeError(`Extension ${id} entry must export an activate(context) function.`);
+        throw new TypeError(
+            `Extension ${id} entry must export an activate(context) function.`,
+        );
     }
-    if (value.deactivate !== undefined && typeof value.deactivate !== "function") {
-        throw new TypeError(`Extension ${id} deactivate export must be a function.`);
+    if (
+        value.deactivate !== undefined &&
+        typeof value.deactivate !== "function"
+    ) {
+        throw new TypeError(
+            `Extension ${id} deactivate export must be a function.`,
+        );
     }
     return {
         activate: value.activate as ExtensionModule["activate"],
-        ...(value.deactivate === undefined ? {} : { deactivate: value.deactivate as NonNullable<ExtensionModule["deactivate"]> })
+        ...(value.deactivate === undefined
+            ? {}
+            : {
+                  deactivate: value.deactivate as NonNullable<
+                      ExtensionModule["deactivate"]
+                  >,
+              }),
     };
 }
 
@@ -483,17 +618,29 @@ async function disposeGeneration(
     worker: ExtensionWorkerRuntime,
     runtimeRoot: string,
     runtimeDirectory: string,
-    releaseHostModules: () => void
+    releaseHostModules: () => void,
 ): Promise<void> {
     const failures: unknown[] = [];
-    await Promise.resolve(module.deactivate?.()).catch((error) => failures.push(error));
+    await Promise.resolve(module.deactivate?.()).catch((error) =>
+        failures.push(error),
+    );
     await processes.closeAll().catch((error) => failures.push(error));
     await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
-    try { releaseHostModules(); } catch (error) { failures.push(error); }
+    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
+        (error) => failures.push(error),
+    );
+    try {
+        releaseHostModules();
+    } catch (error) {
+        failures.push(error);
+    }
     if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, "Extension generation cleanup failed.");
+    if (failures.length > 1)
+        throw new AggregateError(
+            failures,
+            "Extension generation cleanup failed.",
+        );
 }
 
 async function disposeSandboxGeneration(
@@ -502,19 +649,28 @@ async function disposeSandboxGeneration(
     delegatedWorker: ExtensionWorkerRuntime,
     worker: ExtensionWorkerRuntime,
     runtimeRoot: string,
-    runtimeDirectory: string
+    runtimeDirectory: string,
 ): Promise<void> {
     const failures: unknown[] = [];
     await sandbox.dispose().catch((error) => failures.push(error));
     await processes.closeAll().catch((error) => failures.push(error));
     await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
-    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch((error) => failures.push(error));
+    await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
+        (error) => failures.push(error),
+    );
     if (failures.length === 1) throw failures[0];
-    if (failures.length > 1) throw new AggregateError(failures, "Extension sandbox generation cleanup failed.");
+    if (failures.length > 1)
+        throw new AggregateError(
+            failures,
+            "Extension sandbox generation cleanup failed.",
+        );
 }
 
-async function cleanupRuntimeDirectory(runtimeRoot: string, runtimeDirectory: string): Promise<void> {
+async function cleanupRuntimeDirectory(
+    runtimeRoot: string,
+    runtimeDirectory: string,
+): Promise<void> {
     await rm(runtimeDirectory, { force: true, recursive: true });
     await rmdir(runtimeRoot).catch((error: unknown) => {
         if (isMissing(error) || isDirectoryNotEmpty(error)) return;
@@ -522,18 +678,34 @@ async function cleanupRuntimeDirectory(runtimeRoot: string, runtimeDirectory: st
     });
 }
 
-function resolveContainedPath(root: string, candidate: string, label: string): string {
-    if (isAbsolute(candidate)) throw new TypeError(`${label} must be relative to the Extension generation.`);
+function resolveContainedPath(
+    root: string,
+    candidate: string,
+    label: string,
+): string {
+    if (isAbsolute(candidate))
+        throw new TypeError(
+            `${label} must be relative to the Extension generation.`,
+        );
     const resolved = resolve(root, candidate);
     const relativePath = relative(root, resolved);
-    if (relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath))) return resolved;
+    if (
+        relativePath === "" ||
+        (!relativePath.startsWith("..") && !isAbsolute(relativePath))
+    )
+        return resolved;
     throw new TypeError(`${label} must stay inside the Extension generation.`);
 }
 
-async function assertPlainDirectory(path: string, label: string): Promise<void> {
+async function assertPlainDirectory(
+    path: string,
+    label: string,
+): Promise<void> {
     const metadata = await lstat(path);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
-        throw new TypeError(`${label} must be a real directory, not a symlink.`);
+        throw new TypeError(
+            `${label} must be a real directory, not a symlink.`,
+        );
     }
 }
 
@@ -545,22 +717,33 @@ async function assertPlainFile(path: string, label: string): Promise<void> {
 }
 
 function isMissing(error: unknown): boolean {
-    return typeof error === "object"
-        && error !== null
-        && "code" in error
-        && (error as NodeJS.ErrnoException).code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
 }
 
 function isDirectoryNotEmpty(error: unknown): boolean {
-    return typeof error === "object"
-        && error !== null
-        && "code" in error
-        && (error as NodeJS.ErrnoException).code === "ENOTEMPTY";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOTEMPTY"
+    );
 }
 
-function consoleExtensionLogger(id: string, generation: string): ExtensionLogger {
+function consoleExtensionLogger(
+    id: string,
+    generation: string,
+): ExtensionLogger {
     const prefix = `[extension:${id}:${generation}]`;
-    const write = (method: "debug" | "error" | "info" | "warn", message: string, details?: ExtensionJsonValue) => {
+    const write = (
+        method: "debug" | "error" | "info" | "warn",
+        message: string,
+        details?: ExtensionJsonValue,
+    ) => {
         if (details === undefined) console[method](`${prefix} ${message}`);
         else console[method](`${prefix} ${message}`, details);
     };
@@ -568,7 +751,7 @@ function consoleExtensionLogger(id: string, generation: string): ExtensionLogger
         debug: (message, details) => write("debug", message, details),
         error: (message, details) => write("error", message, details),
         info: (message, details) => write("info", message, details),
-        warn: (message, details) => write("warn", message, details)
+        warn: (message, details) => write("warn", message, details),
     };
 }
 

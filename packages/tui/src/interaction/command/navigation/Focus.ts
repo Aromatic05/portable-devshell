@@ -29,13 +29,18 @@ export class TuiCommandDispatcherFocus {
 
     pauseLogFollow(): void {
         const state = this.#store.getState();
-        if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
+        if (
+            state.ui.selectedPage === "logs" &&
+            state.ui.selectedInstance !== undefined
+        ) {
             this.#store.setLogsFollow(state.ui.selectedInstance, false);
         }
     }
 
     syncMainFocus(): void {
-        const boxIds = this.#projection.selectMainBoxIds(this.#store.getState());
+        const boxIds = this.#projection.selectMainBoxIds(
+            this.#store.getState(),
+        );
         if (boxIds.length === 0) {
             this.#store.setMainFocusId(undefined);
             return;
@@ -49,16 +54,27 @@ export class TuiCommandDispatcherFocus {
 
     expandedKey(boxId: string): string {
         const state = this.#store.getState();
-        return this.#projection.selectMainScreenModel(state).boxes.find((box) => box.id === boxId)?.expandedKey ?? `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`;
+        return (
+            this.#projection
+                .selectMainScreenModel(state)
+                .boxes.find((box) => box.id === boxId)?.expandedKey ??
+            `${state.ui.selectedPage}:${state.ui.selectedInstance}:${boxId}`
+        );
     }
 
     instanceNameFromBox(boxId: string | undefined): string | undefined {
-        return boxId?.startsWith("instance:") ? boxId.slice("instance:".length) : undefined;
+        return boxId?.startsWith("instance:")
+            ? boxId.slice("instance:".length)
+            : undefined;
     }
 
     approvalIdFromBox(boxId: string): string | undefined {
-        const box = this.#projection.selectMainScreenModel(this.#store.getState()).boxes.find((candidate) => candidate.id === boxId);
-        const action = box?.expandedLines.find((line) => line.id?.startsWith(`${boxId}:approval.open:`));
+        const box = this.#projection
+            .selectMainScreenModel(this.#store.getState())
+            .boxes.find((candidate) => candidate.id === boxId);
+        const action = box?.expandedLines.find((line) =>
+            line.id?.startsWith(`${boxId}:approval.open:`),
+        );
         return action?.id?.slice(`${boxId}:approval.open:`.length);
     }
 
@@ -77,9 +93,10 @@ export class TuiCommandDispatcherFocus {
         const stored = state.ui.scrollOffsets[key];
         const current = clamp(stored ?? 0, 0, max);
         const next = clamp(delta === 0 ? current : current + delta, 0, max);
-        const target = state.ui.selectedPage === "messages" && next === max
-            ? Number.MAX_SAFE_INTEGER
-            : next;
+        const target =
+            state.ui.selectedPage === "messages" && next === max
+                ? Number.MAX_SAFE_INTEGER
+                : next;
         if (stored === target || (stored === undefined && target === 0)) {
             return true;
         }
@@ -92,9 +109,10 @@ export class TuiCommandDispatcherFocus {
         const key = this.#projection.selectMainScrollKey(state);
         const max = this.maxMainScrollOffset();
         const next = clamp(offset, 0, max);
-        const target = state.ui.selectedPage === "messages" && next === max
-            ? Number.MAX_SAFE_INTEGER
-            : next;
+        const target =
+            state.ui.selectedPage === "messages" && next === max
+                ? Number.MAX_SAFE_INTEGER
+                : next;
         const stored = state.ui.scrollOffsets[key];
         if (stored === target || (stored === undefined && target === 0)) {
             return true;
@@ -131,7 +149,10 @@ export class TuiCommandDispatcherFocus {
         }
 
         if (range.end > current + viewportRows) {
-            this.#store.setScrollOffset(metrics.scrollKey, clamp(range.end - viewportRows, 0, this.maxMainScrollOffset()));
+            this.#store.setScrollOffset(
+                metrics.scrollKey,
+                clamp(range.end - viewportRows, 0, this.maxMainScrollOffset()),
+            );
         }
     }
 

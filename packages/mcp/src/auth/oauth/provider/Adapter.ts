@@ -58,7 +58,7 @@ class McpOidcFileAdapter implements Adapter {
             }
             await this.#commit({
                 ...state,
-                [id]: { ...record, consumed: Math.floor(Date.now() / 1000) }
+                [id]: { ...record, consumed: Math.floor(Date.now() / 1000) },
             });
         });
     }
@@ -96,15 +96,20 @@ class McpOidcFileAdapter implements Adapter {
         return await this.#findBy((record) => record.payload.uid === uid);
     }
 
-    async findByUserCode(userCode: string): Promise<AdapterPayload | undefined> {
-        return await this.#findBy((record) => record.payload.userCode === userCode);
+    async findByUserCode(
+        userCode: string,
+    ): Promise<AdapterPayload | undefined> {
+        return await this.#findBy(
+            (record) => record.payload.userCode === userCode,
+        );
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {
         await this.store.lock.runExclusive(async () => {
             const current = await this.#state();
             const pruned = pruneExpiredCopy(current);
-            const state = pruned.state === current ? { ...current } : pruned.state;
+            const state =
+                pruned.state === current ? { ...current } : pruned.state;
             let changed = pruned.changed;
             for (const [id, record] of Object.entries(current)) {
                 if (record.payload.grantId === grantId) {
@@ -118,23 +123,38 @@ class McpOidcFileAdapter implements Adapter {
         });
     }
 
-    async upsert(id: string, payload: AdapterPayload, expiresIn: number): Promise<void> {
+    async upsert(
+        id: string,
+        payload: AdapterPayload,
+        expiresIn: number,
+    ): Promise<void> {
         await this.store.lock.runExclusive(async () => {
             const current = await this.#state();
             const pruned = pruneExpiredCopy(current);
-            const state = pruned.state === current ? { ...current } : pruned.state;
-            if (state[id] === undefined && Object.keys(state).length >= this.maxRecords) {
-                throw new Error(`OIDC ${this.#modelName()} storage limit of ${this.maxRecords} records was reached.`);
+            const state =
+                pruned.state === current ? { ...current } : pruned.state;
+            if (
+                state[id] === undefined &&
+                Object.keys(state).length >= this.maxRecords
+            ) {
+                throw new Error(
+                    `OIDC ${this.#modelName()} storage limit of ${this.maxRecords} records was reached.`,
+                );
             }
             state[id] = {
-                expiresAt: expiresIn > 0 ? Math.floor(Date.now() / 1000) + expiresIn : undefined,
-                payload: structuredClone(payload)
+                expiresAt:
+                    expiresIn > 0
+                        ? Math.floor(Date.now() / 1000) + expiresIn
+                        : undefined,
+                payload: structuredClone(payload),
             };
             await this.#commit(state);
         });
     }
 
-    async #findBy(predicate: (record: StoredRecord) => boolean): Promise<AdapterPayload | undefined> {
+    async #findBy(
+        predicate: (record: StoredRecord) => boolean,
+    ): Promise<AdapterPayload | undefined> {
         return await this.store.lock.runExclusive(async () => {
             const current = await this.#state();
             const pruned = pruneExpiredCopy(current);
@@ -239,7 +259,10 @@ class AsyncMutex {
     }
 }
 
-function pruneExpiredCopy(state: StoredState): { changed: boolean; state: StoredState } {
+function pruneExpiredCopy(state: StoredState): {
+    changed: boolean;
+    state: StoredState;
+} {
     let next = state;
     for (const [id, record] of Object.entries(state)) {
         if (isExpired(record)) {
@@ -251,11 +274,19 @@ function pruneExpiredCopy(state: StoredState): { changed: boolean; state: Stored
 }
 
 function isExpired(record: StoredRecord): boolean {
-    return typeof record.expiresAt === "number" && record.expiresAt <= Math.floor(Date.now() / 1000);
+    return (
+        typeof record.expiresAt === "number" &&
+        record.expiresAt <= Math.floor(Date.now() / 1000)
+    );
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }
 
 function isStoredState(value: unknown): value is StoredState {
@@ -263,14 +294,20 @@ function isStoredState(value: unknown): value is StoredState {
         return false;
     }
     return Object.values(value).every((record) => {
-        return typeof record === "object" && record !== null && !Array.isArray(record) &&
-            "payload" in record && typeof record.payload === "object" && record.payload !== null;
+        return (
+            typeof record === "object" &&
+            record !== null &&
+            !Array.isArray(record) &&
+            "payload" in record &&
+            typeof record.payload === "object" &&
+            record.payload !== null
+        );
     });
 }
 
 function toAdapterPayload(record: StoredRecord): AdapterPayload {
     return structuredClone({
         ...record.payload,
-        ...(record.consumed === undefined ? {} : { consumed: record.consumed })
+        ...(record.consumed === undefined ? {} : { consumed: record.consumed }),
     });
 }

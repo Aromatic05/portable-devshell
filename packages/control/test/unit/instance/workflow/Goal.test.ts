@@ -11,7 +11,9 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
     const root = await createTestTempDirectory("goal-stop-all");
     const events: string[] = [];
     const service = new GoalService({
-        appendEvent: async (type) => { events.push(type); },
+        appendEvent: async (type) => {
+            events.push(type);
+        },
         filePath: join(root, "goals.json"),
         instanceName: "alpha",
     });
@@ -25,7 +27,10 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
         objective: "Blocked goal",
         steps: [{ id: "blocked", text: "Wait" }],
     });
-    await service.manage("ctx-blocked", { action: "block", note: "Need input" });
+    await service.manage("ctx-blocked", {
+        action: "block",
+        note: "Need input",
+    });
     await service.manage("ctx-completed", {
         action: "start",
         objective: "Completed goal",
@@ -34,11 +39,17 @@ test("GoalService stopAll terminalizes every live Goal while preserving complete
 
     const stopped = await service.stopAll();
 
-    assert.deepEqual(stopped.map((goal) => goal.status), ["stopped", "stopped"]);
+    assert.deepEqual(
+        stopped.map((goal) => goal.status),
+        ["stopped", "stopped"],
+    );
     assert.equal((await service.read("ctx-active"))?.status, "stopped");
     assert.equal((await service.read("ctx-blocked"))?.status, "stopped");
     assert.equal((await service.read("ctx-completed"))?.status, "completed");
-    assert.equal(events.filter((type) => type === "goal.updated").length >= 2, true);
+    assert.equal(
+        events.filter((type) => type === "goal.updated").length >= 2,
+        true,
+    );
 });
 
 test("GoalService persists ordinary activity outside the structural Goal document", async () => {
@@ -46,7 +57,12 @@ test("GoalService persists ordinary activity outside the structural Goal documen
     const filePath = join(root, "goals.json");
     let now = Date.parse("2026-09-05T10:00:00.000Z");
     const state = new GoalState({ now: () => new Date(now).toISOString() });
-    const service = new GoalService({ appendEvent: async () => undefined, filePath, instanceName: "alpha", state });
+    const service = new GoalService({
+        appendEvent: async () => undefined,
+        filePath,
+        instanceName: "alpha",
+        state,
+    });
     await service.manage("ctx-goal", {
         action: "start",
         objective: "Keep working",
@@ -57,7 +73,10 @@ test("GoalService persists ordinary activity outside the structural Goal documen
     now += 10_000;
     await service.touch("ctx-goal", "execution");
     assert.equal(await readFile(filePath, "utf8"), structural);
-    assert.equal((await service.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T10:00:10.000Z");
+    assert.equal(
+        (await service.read("ctx-goal"))?.lastExecutionAt,
+        "2026-09-05T10:00:10.000Z",
+    );
 
     const reloaded = new GoalService({
         appendEvent: async () => undefined,
@@ -65,7 +84,10 @@ test("GoalService persists ordinary activity outside the structural Goal documen
         instanceName: "alpha",
         state: new GoalState({ now: () => new Date(now).toISOString() }),
     });
-    assert.equal((await reloaded.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T10:00:10.000Z");
+    assert.equal(
+        (await reloaded.read("ctx-goal"))?.lastExecutionAt,
+        "2026-09-05T10:00:10.000Z",
+    );
 });
 
 test("GoalService keeps continuation settlement on the structural persistence path", async () => {
@@ -89,7 +111,11 @@ test("GoalService keeps continuation settlement on the structural persistence pa
         claimId: "claim-1",
         userInitiated: true,
     });
-    await service.continuation("ctx-goal", { action: "attempt", available: true, claimId: "claim-1" });
+    await service.continuation("ctx-goal", {
+        action: "attempt",
+        available: true,
+        claimId: "claim-1",
+    });
     const before = await readFile(filePath, "utf8");
 
     now += 1_000;
@@ -116,10 +142,17 @@ test("GoalService falls back to structural persistence when the activity sidecar
         steps: [{ id: "work", text: "Work" }],
     });
     const before = await readFile(filePath, "utf8");
-    await writeFile(join(root, "goals.activity.sqlite3"), "not-a-sqlite-database", "utf8");
+    await writeFile(
+        join(root, "goals.activity.sqlite3"),
+        "not-a-sqlite-database",
+        "utf8",
+    );
 
     now += 1_000;
     await service.touch("ctx-goal", "execution");
     assert.notEqual(await readFile(filePath, "utf8"), before);
-    assert.equal((await service.read("ctx-goal"))?.lastExecutionAt, "2026-09-05T12:00:01.000Z");
+    assert.equal(
+        (await service.read("ctx-goal"))?.lastExecutionAt,
+        "2026-09-05T12:00:01.000Z",
+    );
 });

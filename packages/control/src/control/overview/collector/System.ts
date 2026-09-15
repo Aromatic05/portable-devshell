@@ -1,24 +1,18 @@
 import { readFileSync } from "node:fs";
 import { statfs } from "node:fs/promises";
-import {
-    cpus,
-    freemem,
-    homedir,
-    loadavg,
-    totalmem
-} from "node:os";
+import { cpus, freemem, homedir, loadavg, totalmem } from "node:os";
 
 import {
     createOperationalOverviewSystemCollection,
     type OperationalOverviewCpuTimes,
     type OperationalOverviewDiskUsage,
-    type OperationalOverviewSystemCollection
+    type OperationalOverviewSystemCollection,
 } from "./Policy.js";
 
 export type {
     OperationalOverviewCpuTimes,
     OperationalOverviewDiskUsage,
-    OperationalOverviewSystemCollection
+    OperationalOverviewSystemCollection,
 } from "./Policy.js";
 
 export interface OperationalOverviewSystemCollectorOptions {
@@ -35,7 +29,9 @@ export class OperationalOverviewSystemCollector {
     readonly #cpuCount: () => number;
     readonly #cpuTimes: () => OperationalOverviewCpuTimes;
     readonly #diskPath: string;
-    readonly #diskUsage: (path: string) => Promise<OperationalOverviewDiskUsage>;
+    readonly #diskUsage: (
+        path: string,
+    ) => Promise<OperationalOverviewDiskUsage>;
     readonly #freeMemoryBytes: () => number;
     readonly #load1m: () => number;
     readonly #totalMemoryBytes: () => number;
@@ -46,7 +42,8 @@ export class OperationalOverviewSystemCollector {
         this.#cpuTimes = options.cpuTimes ?? readCpuTimes;
         this.#diskPath = options.diskPath ?? homedir();
         this.#diskUsage = options.diskUsage ?? readDiskUsage;
-        this.#freeMemoryBytes = options.freeMemoryBytes ?? readAvailableMemoryBytes;
+        this.#freeMemoryBytes =
+            options.freeMemoryBytes ?? readAvailableMemoryBytes;
         this.#load1m = options.load1m ?? (() => loadavg()[0] ?? 0);
         this.#totalMemoryBytes = options.totalMemoryBytes ?? totalmem;
     }
@@ -66,8 +63,10 @@ export class OperationalOverviewSystemCollector {
             diskPath: this.#diskPath,
             freeMemoryBytes: this.#freeMemoryBytes(),
             load1m: this.#load1m(),
-            ...(this.#previousCpu === undefined ? {} : { previousCpu: this.#previousCpu }),
-            totalMemoryBytes: this.#totalMemoryBytes()
+            ...(this.#previousCpu === undefined
+                ? {}
+                : { previousCpu: this.#previousCpu }),
+            totalMemoryBytes: this.#totalMemoryBytes(),
         });
         this.#previousCpu = cpu;
         return result;
@@ -75,27 +74,37 @@ export class OperationalOverviewSystemCollector {
 }
 
 function readCpuTimes(): OperationalOverviewCpuTimes {
-    return cpus().reduce<OperationalOverviewCpuTimes>((aggregate, cpu) => ({
-        idle: aggregate.idle + cpu.times.idle,
-        total: aggregate.total + Object.values(cpu.times)
-            .reduce((total, value) => total + value, 0)
-    }), { idle: 0, total: 0 });
+    return cpus().reduce<OperationalOverviewCpuTimes>(
+        (aggregate, cpu) => ({
+            idle: aggregate.idle + cpu.times.idle,
+            total:
+                aggregate.total +
+                Object.values(cpu.times).reduce(
+                    (total, value) => total + value,
+                    0,
+                ),
+        }),
+        { idle: 0, total: 0 },
+    );
 }
 
-async function readDiskUsage(path: string): Promise<OperationalOverviewDiskUsage> {
+async function readDiskUsage(
+    path: string,
+): Promise<OperationalOverviewDiskUsage> {
     const stats = await statfs(path);
     const blockSize = Number(stats.bsize);
     return {
         availableBytes: blockSize * Number(stats.bavail),
-        totalBytes: blockSize * Number(stats.blocks)
+        totalBytes: blockSize * Number(stats.blocks),
     };
 }
 
 function readAvailableMemoryBytes(): number {
     if (process.platform === "linux") {
         try {
-            const value = readFileSync("/proc/meminfo", "utf8")
-                .match(/^MemAvailable:\s+(\d+)\s+kB$/mu)?.[1];
+            const value = readFileSync("/proc/meminfo", "utf8").match(
+                /^MemAvailable:\s+(\d+)\s+kB$/mu,
+            )?.[1];
             if (value !== undefined) return Number(value) * 1024;
         } catch {
             // Fall through to the portable OS value.

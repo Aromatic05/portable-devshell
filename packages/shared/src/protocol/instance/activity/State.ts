@@ -2,9 +2,12 @@ import type { ReverseInstanceStatus } from "../Connection.js";
 import type { InstanceName } from "../Identity.js";
 import type { ActiveTodoSummary } from "../task/Todo.js";
 
-export type DaemonState = "running" | "starting" | "stopped" | "stale" | "stopping" | "failed";
-export type ConnectionState = "connected" | "connecting" | "disconnected" | "reconnecting" | "failed";
-export type RuntimeStatus = "ready" | "running" | "stale" | "stopped" | "failed";
+export type DaemonState =
+    "running" | "starting" | "stopped" | "stale" | "stopping" | "failed";
+export type ConnectionState =
+    "connected" | "connecting" | "disconnected" | "reconnecting" | "failed";
+export type RuntimeStatus =
+    "ready" | "running" | "stale" | "stopped" | "failed";
 export type EffectiveSecurityMode = "disabled" | "workspace";
 
 export interface InstanceSnapshot {

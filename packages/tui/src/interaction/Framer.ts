@@ -81,7 +81,8 @@ export class TuiInputFramer {
                 this.#buffer = this.#buffer.slice(1);
                 continue;
             }
-            const end = controlIndex === -1 ? this.#buffer.length : controlIndex;
+            const end =
+                controlIndex === -1 ? this.#buffer.length : controlIndex;
             appendDataFrames(actions, this.#buffer.slice(0, end));
             this.#buffer = this.#buffer.slice(end);
         }
@@ -90,7 +91,9 @@ export class TuiInputFramer {
     }
 
     hasPendingEscape(): boolean {
-        return this.#pasteBuffer === undefined && this.#buffer.startsWith(ESCAPE);
+        return (
+            this.#pasteBuffer === undefined && this.#buffer.startsWith(ESCAPE)
+        );
     }
 
     flushPendingEscape(): TuiInputFrame[] {
@@ -142,17 +145,20 @@ function firstControlIndex(value: string): number {
 function isPartialMouse(value: string): boolean {
     if (!value.startsWith(MOUSE_PREFIX)) return MOUSE_PREFIX.startsWith(value);
     return [...value.slice(MOUSE_PREFIX.length)].every(
-        (character) => character === ";" || (character >= "0" && character <= "9"),
+        (character) =>
+            character === ";" || (character >= "0" && character <= "9"),
     );
 }
 
-function parseMouse(value: string): {
-    button: number;
-    kind: "press" | "release";
-    length: number;
-    x: number;
-    y: number;
-} | undefined {
+function parseMouse(value: string):
+    | {
+          button: number;
+          kind: "press" | "release";
+          length: number;
+          x: number;
+          y: number;
+      }
+    | undefined {
     if (!value.startsWith(MOUSE_PREFIX)) return undefined;
     for (let index = MOUSE_PREFIX.length; index < value.length; index += 1) {
         const character = value[index]!;

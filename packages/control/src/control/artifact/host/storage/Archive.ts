@@ -1,17 +1,6 @@
 import { once } from "node:events";
-import {
-    constants,
-    createReadStream,
-    createWriteStream
-} from "node:fs";
-import {
-    chmod,
-    lstat,
-    mkdir,
-    open,
-    readdir,
-    utimes
-} from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { chmod, lstat, mkdir, open, readdir, utimes } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
@@ -56,11 +45,15 @@ export interface ArtifactDirectoryArchiveLimits {
 
 export async function createArtifactDirectoryArchive(
     sourcePath: string,
-    targetPath: string
+    targetPath: string,
 ): Promise<ArtifactDirectoryManifestResult> {
     const entries = await collectEntries(sourcePath);
     const archive = pack();
-    const output = pipeline(archive, createZstdCompress(), createWriteStream(targetPath, { flags: "wx", mode: 0o600 }));
+    const output = pipeline(
+        archive,
+        createZstdCompress(),
+        createWriteStream(targetPath, { flags: "wx", mode: 0o600 }),
+    );
     const manifestHasher = await createArtifactHasher();
     let logicalBytes = 0;
 
@@ -78,7 +71,9 @@ export async function createArtifactDirectoryArchive(
         archive.finalize();
         await output;
     } catch (error) {
-        archive.destroy(error instanceof Error ? error : new Error(String(error)));
+        archive.destroy(
+            error instanceof Error ? error : new Error(String(error)),
+        );
         await output.catch(() => undefined);
         throw error;
     }
@@ -86,26 +81,37 @@ export async function createArtifactDirectoryArchive(
     return {
         entryCount: entries.length,
         logicalBytes,
-        manifestBlake3: manifestHasher.digest("hex")
+        manifestBlake3: manifestHasher.digest("hex"),
     };
 }
 
 export async function extractArtifactDirectoryArchive(
     archivePath: string,
     targetDirectory: string,
-    limits: ArtifactDirectoryArchiveLimits = {}
+    limits: ArtifactDirectoryArchiveLimits = {},
 ): Promise<ArtifactDirectoryManifestResult> {
     const parser = extract();
     const manifestEntries: ManifestEntry[] = [];
     const seen = new Set<string>();
-    const directories: Array<{ mode: number; modifiedAtSeconds: number; path: string; relativePath: string }> = [];
+    const directories: Array<{
+        mode: number;
+        modifiedAtSeconds: number;
+        path: string;
+        relativePath: string;
+    }> = [];
     let logicalBytes = 0;
     let entryFailure: unknown;
 
     parser.on("entry", (header, stream, next) => {
         const nextEntryCount = manifestEntries.length + 1;
-        if (limits.maxEntries !== undefined && nextEntryCount > limits.maxEntries) {
-            entryFailure = artifactError("artifact.payloadInvalid", "Directory archive exceeds the entry limit.");
+        if (
+            limits.maxEntries !== undefined &&
+            nextEntryCount > limits.maxEntries
+        ) {
+            entryFailure = artifactError(
+                "artifact.payloadInvalid",
+                "Directory archive exceeds the entry limit.",
+            );
             abortArchiveEntry(stream, parser, entryFailure as Error);
             return;
         }
@@ -115,7 +121,10 @@ export async function extractArtifactDirectoryArchive(
             limits.maxFileBytes !== undefined &&
             header.size > limits.maxFileBytes
         ) {
-            entryFailure = artifactError("artifact.payloadInvalid", `Archive member exceeds the file limit: ${header.name}`);
+            entryFailure = artifactError(
+                "artifact.payloadInvalid",
+                `Archive member exceeds the file limit: ${header.name}`,
+            );
             abortArchiveEntry(stream, parser, entryFailure as Error);
             return;
         }
@@ -125,11 +134,22 @@ export async function extractArtifactDirectoryArchive(
             limits.maxLogicalBytes !== undefined &&
             logicalBytes + header.size > limits.maxLogicalBytes
         ) {
-            entryFailure = artifactError("artifact.payloadInvalid", "Directory archive exceeds the logical byte limit.");
+            entryFailure = artifactError(
+                "artifact.payloadInvalid",
+                "Directory archive exceeds the logical byte limit.",
+            );
             abortArchiveEntry(stream, parser, entryFailure as Error);
             return;
         }
-        void extractEntry(header, stream, targetDirectory, seen, directories, limits, logicalBytes)
+        void extractEntry(
+            header,
+            stream,
+            targetDirectory,
+            seen,
+            directories,
+            limits,
+            logicalBytes,
+        )
             .then((entry) => {
                 manifestEntries.push(entry);
                 if (entry.entryType === "file") {
@@ -139,24 +159,44 @@ export async function extractArtifactDirectoryArchive(
             })
             .catch((error: unknown) => {
                 entryFailure = error;
-                parser.destroy(error instanceof Error ? error : new Error(String(error)));
+                parser.destroy(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             });
     });
 
     try {
-        await pipeline(createReadStream(archivePath), createZstdDecompress(), parser);
+        await pipeline(
+            createReadStream(archivePath),
+            createZstdDecompress(),
+            parser,
+        );
     } catch (error) {
-        throw entryFailure ?? artifactError("artifact.payloadInvalid", "Invalid directory archive.", error);
+        throw (
+            entryFailure ??
+            artifactError(
+                "artifact.payloadInvalid",
+                "Invalid directory archive.",
+                error,
+            )
+        );
     }
 
-    directories.sort((left, right) => depth(right.relativePath) - depth(left.relativePath));
+    directories.sort(
+        (left, right) => depth(right.relativePath) - depth(left.relativePath),
+    );
     for (const directory of directories) {
         await chmod(directory.path, directory.mode);
         const timestamp = new Date(directory.modifiedAtSeconds * 1000);
         await utimes(directory.path, timestamp, timestamp);
     }
 
-    manifestEntries.sort((left, right) => Buffer.compare(Buffer.from(left.relativePath), Buffer.from(right.relativePath)));
+    manifestEntries.sort((left, right) =>
+        Buffer.compare(
+            Buffer.from(left.relativePath),
+            Buffer.from(right.relativePath),
+        ),
+    );
     const manifestHasher = await createArtifactHasher();
     for (const entry of manifestEntries) {
         updateManifestHash(manifestHasher, entry);
@@ -164,7 +204,7 @@ export async function extractArtifactDirectoryArchive(
     return {
         entryCount: manifestEntries.length,
         logicalBytes,
-        manifestBlake3: manifestHasher.digest("hex")
+        manifestBlake3: manifestHasher.digest("hex"),
     };
 }
 
@@ -172,15 +212,27 @@ async function collectEntries(root: string): Promise<SourceEntry[]> {
     const canonicalRoot = resolve(root);
     const rootMetadata = await lstat(canonicalRoot);
     if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
-        throw artifactError("artifact.directoryUnsafe", "Directory archive source must be a plain directory.");
+        throw artifactError(
+            "artifact.directoryUnsafe",
+            "Directory archive source must be a plain directory.",
+        );
     }
     const entries: SourceEntry[] = [];
     await collectDirectory(canonicalRoot, canonicalRoot, entries);
-    entries.sort((left, right) => Buffer.compare(Buffer.from(left.relativePath), Buffer.from(right.relativePath)));
+    entries.sort((left, right) =>
+        Buffer.compare(
+            Buffer.from(left.relativePath),
+            Buffer.from(right.relativePath),
+        ),
+    );
     return entries;
 }
 
-async function collectDirectory(root: string, current: string, output: SourceEntry[]): Promise<void> {
+async function collectDirectory(
+    root: string,
+    current: string,
+    output: SourceEntry[],
+): Promise<void> {
     const names = await readdir(current, { encoding: "buffer" });
     names.sort(Buffer.compare);
     const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -189,15 +241,31 @@ async function collectDirectory(root: string, current: string, output: SourceEnt
         try {
             name = decoder.decode(encodedName);
         } catch (error) {
-            throw artifactError("artifact.directoryUnsafe", "Directory contains a non-UTF-8 path.", error);
+            throw artifactError(
+                "artifact.directoryUnsafe",
+                "Directory contains a non-UTF-8 path.",
+                error,
+            );
         }
-        if (name.length === 0 || name === "." || name === ".." || name.includes("/") || name.includes("\\")) {
-            throw artifactError("artifact.directoryUnsafe", `Unsafe directory member: ${name}`);
+        if (
+            name.length === 0 ||
+            name === "." ||
+            name === ".." ||
+            name.includes("/") ||
+            name.includes("\\")
+        ) {
+            throw artifactError(
+                "artifact.directoryUnsafe",
+                `Unsafe directory member: ${name}`,
+            );
         }
         const absolutePath = join(current, name);
         const metadata = await lstat(absolutePath);
         if (metadata.isSymbolicLink()) {
-            throw artifactError("artifact.directoryUnsafe", `Directory contains symbolic link: ${name}`);
+            throw artifactError(
+                "artifact.directoryUnsafe",
+                `Directory contains symbolic link: ${name}`,
+            );
         }
         const relativePath = relative(root, absolutePath).split("\\").join("/");
         validateRelativePath(relativePath);
@@ -205,7 +273,7 @@ async function collectDirectory(root: string, current: string, output: SourceEnt
             absolutePath,
             mode: metadata.mode & 0o777,
             modifiedAtSeconds: Math.floor(metadata.mtimeMs / 1000),
-            relativePath
+            relativePath,
         };
         if (metadata.isDirectory()) {
             output.push({ ...base, entryType: "directory", size: 0 });
@@ -213,23 +281,37 @@ async function collectDirectory(root: string, current: string, output: SourceEnt
         } else if (metadata.isFile()) {
             output.push({ ...base, entryType: "file", size: metadata.size });
         } else {
-            throw artifactError("artifact.directoryUnsafe", `Directory contains unsupported member: ${relativePath}`);
+            throw artifactError(
+                "artifact.directoryUnsafe",
+                `Directory contains unsupported member: ${relativePath}`,
+            );
         }
     }
 }
 
-async function appendDirectory(archive: Pack, entry: SourceEntry): Promise<void> {
+async function appendDirectory(
+    archive: Pack,
+    entry: SourceEntry,
+): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-        archive.entry(header(entry), (error) => (error ? reject(error) : resolve()));
+        archive.entry(header(entry), (error) =>
+            error ? reject(error) : resolve(),
+        );
     });
 }
 
 async function appendFile(archive: Pack, entry: SourceEntry): Promise<string> {
-    const source = await open(entry.absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const source = await open(
+        entry.absolutePath,
+        constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
     const current = await source.stat();
     if (!current.isFile() || current.size !== entry.size) {
         await source.close();
-        throw artifactError("artifact.directoryChanged", `Directory member changed: ${entry.relativePath}`);
+        throw artifactError(
+            "artifact.directoryChanged",
+            `Directory member changed: ${entry.relativePath}`,
+        );
     }
     const hasher = await createBLAKE3();
     hasher.init();
@@ -251,9 +333,17 @@ async function appendFile(archive: Pack, entry: SourceEntry): Promise<string> {
         const buffer = Buffer.allocUnsafe(64 * 1024);
         while (position < entry.size) {
             const requested = Math.min(buffer.length, entry.size - position);
-            const { bytesRead } = await source.read(buffer, 0, requested, position);
+            const { bytesRead } = await source.read(
+                buffer,
+                0,
+                requested,
+                position,
+            );
             if (bytesRead <= 0) {
-                throw artifactError("artifact.directoryChanged", `Directory member changed: ${entry.relativePath}`);
+                throw artifactError(
+                    "artifact.directoryChanged",
+                    `Directory member changed: ${entry.relativePath}`,
+                );
             }
             // tar-stream may retain a written Buffer until downstream backpressure
             // drains. The read buffer is reused on the next iteration, so hand the
@@ -283,7 +373,7 @@ function header(entry: SourceEntry): Headers {
         size: entry.size,
         type: entry.entryType,
         uid: 0,
-        uname: ""
+        uname: "",
     };
 }
 
@@ -292,9 +382,14 @@ async function extractEntry(
     stream: Readable,
     targetDirectory: string,
     seen: Set<string>,
-    directories: Array<{ mode: number; modifiedAtSeconds: number; path: string; relativePath: string }>,
+    directories: Array<{
+        mode: number;
+        modifiedAtSeconds: number;
+        path: string;
+        relativePath: string;
+    }>,
     limits: ArtifactDirectoryArchiveLimits,
-    logicalBytesBefore: number
+    logicalBytesBefore: number,
 ): Promise<ManifestEntry> {
     const relativePath =
         header.type === "directory" && header.name.endsWith("/")
@@ -302,11 +397,22 @@ async function extractEntry(
             : header.name;
     validateRelativePath(relativePath);
     if (!seen.add(relativePath)) {
-        throw artifactError("artifact.directoryUnsafe", `Duplicate archive member: ${relativePath}`);
+        throw artifactError(
+            "artifact.directoryUnsafe",
+            `Duplicate archive member: ${relativePath}`,
+        );
     }
-    const entryType = header.type === "directory" ? "directory" : header.type === "file" ? "file" : undefined;
+    const entryType =
+        header.type === "directory"
+            ? "directory"
+            : header.type === "file"
+              ? "file"
+              : undefined;
     if (entryType === undefined) {
-        throw artifactError("artifact.directoryUnsafe", `Unsupported archive member type: ${String(header.type)}`);
+        throw artifactError(
+            "artifact.directoryUnsafe",
+            `Unsupported archive member type: ${String(header.type)}`,
+        );
     }
     const mode = (header.mode ?? 0o644) & 0o777;
     const modifiedAtSeconds = Math.floor((header.mtime?.getTime() ?? 0) / 1000);
@@ -315,7 +421,12 @@ async function extractEntry(
     if (entryType === "directory") {
         await drain(stream);
         await mkdir(outputPath, { recursive: true, mode: 0o700 });
-        directories.push({ mode, modifiedAtSeconds, path: outputPath, relativePath });
+        directories.push({
+            mode,
+            modifiedAtSeconds,
+            path: outputPath,
+            relativePath,
+        });
         return { entryType, mode, modifiedAtSeconds, relativePath, size: 0 };
     }
 
@@ -326,25 +437,45 @@ async function extractEntry(
     const hashing = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
             const nextSize = size + chunk.length;
-            if (limits.maxFileBytes !== undefined && nextSize > limits.maxFileBytes) {
-                callback(artifactError("artifact.payloadInvalid", `Archive member exceeds the file limit: ${relativePath}`));
+            if (
+                limits.maxFileBytes !== undefined &&
+                nextSize > limits.maxFileBytes
+            ) {
+                callback(
+                    artifactError(
+                        "artifact.payloadInvalid",
+                        `Archive member exceeds the file limit: ${relativePath}`,
+                    ),
+                );
                 return;
             }
             if (
                 limits.maxLogicalBytes !== undefined &&
                 logicalBytesBefore + nextSize > limits.maxLogicalBytes
             ) {
-                callback(artifactError("artifact.payloadInvalid", "Directory archive exceeds the logical byte limit."));
+                callback(
+                    artifactError(
+                        "artifact.payloadInvalid",
+                        "Directory archive exceeds the logical byte limit.",
+                    ),
+                );
                 return;
             }
             hasher.update(chunk);
             size = nextSize;
             callback(null, chunk);
-        }
+        },
     });
-    await pipeline(stream, hashing, createWriteStream(outputPath, { flags: "wx", mode: 0o600 }));
+    await pipeline(
+        stream,
+        hashing,
+        createWriteStream(outputPath, { flags: "wx", mode: 0o600 }),
+    );
     if (header.size !== undefined && size !== header.size) {
-        throw artifactError("artifact.payloadInvalid", `Archive member size mismatch: ${relativePath}`);
+        throw artifactError(
+            "artifact.payloadInvalid",
+            `Archive member size mismatch: ${relativePath}`,
+        );
     }
     await chmod(outputPath, mode);
     const timestamp = new Date(modifiedAtSeconds * 1000);
@@ -355,7 +486,7 @@ async function extractEntry(
         mode,
         modifiedAtSeconds,
         relativePath,
-        size
+        size,
     };
 }
 
@@ -364,7 +495,11 @@ async function drain(stream: Readable): Promise<void> {
     await once(stream, "end");
 }
 
-function abortArchiveEntry(stream: Readable, parser: ReturnType<typeof extract>, error: Error): void {
+function abortArchiveEntry(
+    stream: Readable,
+    parser: ReturnType<typeof extract>,
+    error: Error,
+): void {
     // tar-stream exposes the current member as a child stream. Destroy it
     // without an error first so aborting the parent parser cannot leave an
     // unhandled member-stream error after the extraction promise rejects.
@@ -378,9 +513,15 @@ function validateRelativePath(path: string): void {
         path.length === 0 ||
         path.startsWith("/") ||
         path.includes("\\") ||
-        segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
+        segments.some(
+            (segment) =>
+                segment.length === 0 || segment === "." || segment === "..",
+        )
     ) {
-        throw artifactError("artifact.directoryUnsafe", `Unsafe archive member path: ${path}`);
+        throw artifactError(
+            "artifact.directoryUnsafe",
+            `Unsafe archive member path: ${path}`,
+        );
     }
 }
 
@@ -391,7 +532,8 @@ function depth(path: string): number {
 function artifactError(code: string, message: string, cause?: unknown) {
     return createError({
         code,
-        message: cause instanceof Error ? `${message} ${cause.message}` : message,
-        retryable: false
+        message:
+            cause instanceof Error ? `${message} ${cause.message}` : message,
+        retryable: false,
     });
 }

@@ -6,7 +6,8 @@ export function reduceTuiStoreReducerInteraction(
 ): TuiAppState | undefined {
     switch (action.type) {
         case "focus.scope.set":
-            if (state.interaction.focusScope === action.focusScope) return state;
+            if (state.interaction.focusScope === action.focusScope)
+                return state;
             return {
                 ...state,
                 interaction: {
@@ -58,7 +59,12 @@ export function reduceTuiStoreReducerInteraction(
             };
         }
         case "sidebar.cursor.set":
-            if (sameSidebarCursor(state.interaction.sidebarCursor, action.cursor)) {
+            if (
+                sameSidebarCursor(
+                    state.interaction.sidebarCursor,
+                    action.cursor,
+                )
+            ) {
                 return state;
             }
             return {
@@ -212,7 +218,9 @@ export function reduceTuiStoreReducerInteraction(
                 },
             };
         case "logs.setFollow":
-            if (state.ui.logsFollowByInstance[action.instance] === action.follow) {
+            if (
+                state.ui.logsFollowByInstance[action.instance] === action.follow
+            ) {
                 return state;
             }
             return {
@@ -227,7 +235,8 @@ export function reduceTuiStoreReducerInteraction(
             };
         case "logs.setPausedAtSeq":
             if (
-                state.ui.logsPausedAtSeqByInstance[action.instance] === action.seq
+                state.ui.logsPausedAtSeqByInstance[action.instance] ===
+                action.seq
             ) {
                 return state;
             }

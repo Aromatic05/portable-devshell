@@ -4,12 +4,17 @@ import { join } from "node:path";
 import { createDevshellPiExtension } from "./extension/index.js";
 import { PiChildToolSession } from "./PiChildToolSession.js";
 import { PiGuiWeb } from "./PiGuiWeb.js";
-import { PiSdkLoader, type PiModelRuntimeLike, type PiSdkModule, type PiSessionLike } from "./PiSdkLoader.js";
+import {
+    PiSdkLoader,
+    type PiModelRuntimeLike,
+    type PiSdkModule,
+    type PiSessionLike,
+} from "./PiSdkLoader.js";
 import type {
     PiChildAgentCommandMessage,
     PiChildAgentStartMessage,
     PiChildInitMessage,
-    PiParentMessage
+    PiParentMessage,
 } from "./PiProcessProtocol.js";
 import { deliverPiAgentMessage } from "./PiAgentCommands.js";
 import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
@@ -31,11 +36,14 @@ let sdk: PiSdkModule | undefined;
 let ownerLost = false;
 let lastOwnerHeartbeatMs = Date.now();
 const ownerHeartbeatTimeoutMs = readOwnerHeartbeatTimeout(process.argv[2]);
-const ownerWatchdog = setInterval(() => {
-    if (Date.now() - lastOwnerHeartbeatMs > ownerHeartbeatTimeoutMs) {
-        loseOwner(new Error("Pi provider owner heartbeat timed out."));
-    }
-}, Math.max(25, Math.min(1_000, Math.floor(ownerHeartbeatTimeoutMs / 4))));
+const ownerWatchdog = setInterval(
+    () => {
+        if (Date.now() - lastOwnerHeartbeatMs > ownerHeartbeatTimeoutMs) {
+            loseOwner(new Error("Pi provider owner heartbeat timed out."));
+        }
+    },
+    Math.max(25, Math.min(1_000, Math.floor(ownerHeartbeatTimeoutMs / 4))),
+);
 ownerWatchdog.unref();
 
 process.on("message", (value: unknown) => {
@@ -78,7 +86,8 @@ async function handleMessage(message: PiParentMessage): Promise<void> {
 }
 
 async function initialize(input: PiChildInitMessage): Promise<URL> {
-    if (sdk !== undefined) throw new Error("Pi provider child is already initialized.");
+    if (sdk !== undefined)
+        throw new Error("Pi provider child is already initialized.");
     process.env.PI_CODING_AGENT_DIR = input.agentDirectory;
     process.env.PI_MANAGED_INSTALL_ROOT = input.managedInstallRoot;
     sdk = await new PiSdkLoader().load(input.entrypoint);
@@ -86,14 +95,15 @@ async function initialize(input: PiChildInitMessage): Promise<URL> {
     await mkdir(agentDir, { recursive: true });
     modelRuntime = await sdk.ModelRuntime.create({
         authPath: join(agentDir, "auth.json"),
-        modelsPath: join(agentDir, "models.json")
+        modelsPath: join(agentDir, "models.json"),
     });
     gui = await PiGuiWeb.start(input.webBasePath);
     return gui.upstream;
 }
 
 async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
-    if (agents.has(input.agentId)) throw new Error(`Pi Agent already exists: ${input.agentId}`);
+    if (agents.has(input.agentId))
+        throw new Error(`Pi Agent already exists: ${input.agentId}`);
     const activeSdk = requireSdk();
     const activeAgentDir = requireAgentDir();
     const activeModelRuntime = requireModelRuntime();
@@ -104,20 +114,27 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         modelTools: input.modelTools,
         send,
         target: input.target,
-        tools: input.tools
+        tools: input.tools,
     });
     toolSessions.set(input.agentId, tools);
 
-    const settingsManager = activeSdk.SettingsManager.create(input.localCwd, activeAgentDir);
+    const settingsManager = activeSdk.SettingsManager.create(
+        input.localCwd,
+        activeAgentDir,
+    );
     const resourceLoader = new activeSdk.DefaultResourceLoader({
         agentDir: activeAgentDir,
         cwd: input.localCwd,
-        extensionFactories: [{
-            factory: createDevshellPiExtension(tools, { closeSessionOnShutdown: false }),
-            hidden: true,
-            name: "portable-devshell"
-        }],
-        settingsManager
+        extensionFactories: [
+            {
+                factory: createDevshellPiExtension(tools, {
+                    closeSessionOnShutdown: false,
+                }),
+                hidden: true,
+                name: "portable-devshell",
+            },
+        ],
+        settingsManager,
     });
     let session: PiSessionLike | undefined;
     try {
@@ -130,16 +147,18 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
             noTools: "builtin",
             resourceLoader,
             sessionManager,
-            settingsManager
+            settingsManager,
         });
         session = created.session;
-        session.setSessionName?.(`${input.agentId} · ${input.target.instance}:${input.target.workspace}`);
+        session.setSessionName?.(
+            `${input.agentId} · ${input.target.instance}:${input.target.workspace}`,
+        );
         activeGui.attach(session, input.localCwd);
         agents.set(input.agentId, {
             localCwd: input.localCwd,
             session,
             target: { ...input.target },
-            tools
+            tools,
         });
     } catch (error) {
         session?.dispose();
@@ -152,7 +171,9 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
     }
 }
 
-async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> {
+async function commandAgent(
+    message: PiChildAgentCommandMessage,
+): Promise<void> {
     if (message.command === "stop") {
         await stopAgent(message.agentId);
         return;
@@ -160,13 +181,25 @@ async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> 
     const active = requireAgent(message.agentId).session;
     switch (message.command) {
         case "prompt":
-            await deliverPiAgentMessage(active, "prompt", requireMessage(message));
+            await deliverPiAgentMessage(
+                active,
+                "prompt",
+                requireMessage(message),
+            );
             return;
         case "steer":
-            await deliverPiAgentMessage(active, "steer", requireMessage(message));
+            await deliverPiAgentMessage(
+                active,
+                "steer",
+                requireMessage(message),
+            );
             return;
         case "followUp":
-            await deliverPiAgentMessage(active, "followUp", requireMessage(message));
+            await deliverPiAgentMessage(
+                active,
+                "followUp",
+                requireMessage(message),
+            );
             return;
         case "wait":
             await active.waitForIdle();
@@ -175,7 +208,10 @@ async function commandAgent(message: PiChildAgentCommandMessage): Promise<void> 
             await active.abort();
             return;
         case "reload":
-            if (active.isStreaming === true) throw new Error("Cannot reload a Pi Agent while a turn is active.");
+            if (active.isStreaming === true)
+                throw new Error(
+                    "Cannot reload a Pi Agent while a turn is active.",
+                );
             await active.reload();
             return;
     }
@@ -256,7 +292,8 @@ function requireGui(): PiGuiWeb {
 }
 
 function requireMessage(message: PiChildAgentCommandMessage): string {
-    if (typeof message.message === "string" && message.message.length > 0) return message.message;
+    if (typeof message.message === "string" && message.message.length > 0)
+        return message.message;
     throw new Error(`${message.command} requires a message.`);
 }
 
@@ -266,7 +303,12 @@ function sendFailure(message: PiParentMessage, error: unknown): void {
         send({ error: text, ok: false, type: "ready" });
         return;
     }
-    if (message.type === "owner.heartbeat" || message.type === "tool.result" || message.type === "tool.progress") return;
+    if (
+        message.type === "owner.heartbeat" ||
+        message.type === "tool.result" ||
+        message.type === "tool.progress"
+    )
+        return;
     send({ error: text, id: message.id, ok: false, type: "result" });
 }
 

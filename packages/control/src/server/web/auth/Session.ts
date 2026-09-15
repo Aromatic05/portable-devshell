@@ -2,7 +2,10 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { HttpHost } from "@portable-devshell/mcp";
-import { CONTROL_WEB_BASE_PATH, type ControlWebAuthConfig } from "@portable-devshell/shared";
+import {
+    CONTROL_WEB_BASE_PATH,
+    type ControlWebAuthConfig,
+} from "@portable-devshell/shared";
 
 const DEFAULT_SESSION_TTL_MS = 12 * 60 * 60 * 1_000;
 const DEFAULT_MAX_SESSIONS = 16;
@@ -33,18 +36,29 @@ export class ControlWebSessionService {
 
     constructor(options: ControlWebSessionServiceOptions = {}) {
         this.#auth = options.auth ?? { mode: "none" };
-        this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
+        this.#basePath = normalizeBasePath(
+            options.basePath ?? CONTROL_WEB_BASE_PATH,
+        );
         this.#maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
         if (!Number.isSafeInteger(this.#maxSessions) || this.#maxSessions < 1) {
-            throw new Error("Control web maxSessions must be a positive safe integer.");
+            throw new Error(
+                "Control web maxSessions must be a positive safe integer.",
+            );
         }
         this.#now = options.now ?? Date.now;
         this.#secureCookie = options.secureCookie ?? false;
         this.#sessionTtlMs = options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
-        if (!Number.isSafeInteger(this.#sessionTtlMs) || this.#sessionTtlMs < 1) {
-            throw new Error("Control web sessionTtlMs must be a positive safe integer.");
+        if (
+            !Number.isSafeInteger(this.#sessionTtlMs) ||
+            this.#sessionTtlMs < 1
+        ) {
+            throw new Error(
+                "Control web sessionTtlMs must be a positive safe integer.",
+            );
         }
-        this.#tokenFactory = options.tokenFactory ?? (() => randomBytes(32).toString("base64url"));
+        this.#tokenFactory =
+            options.tokenFactory ??
+            (() => randomBytes(32).toString("base64url"));
     }
 
     get auth(): ControlWebAuthConfig {
@@ -57,31 +71,43 @@ export class ControlWebSessionService {
         }
         this.#installed = true;
         const sessionPath = `${this.#basePath}/session`;
-        const removeCreate = http.registerRawRoute("post", sessionPath, (request, response) => {
-            if (!this.#authorizeBearer(request)) {
-                writeJsonError(response, 401, "Unauthorized");
-                return;
-            }
-            this.#create(response);
-        });
-        const removeRead = http.registerRawRoute("get", sessionPath, (request, response) => {
-            if (!this.authorize(request)) {
+        const removeCreate = http.registerRawRoute(
+            "post",
+            sessionPath,
+            (request, response) => {
+                if (!this.#authorizeBearer(request)) {
+                    writeJsonError(response, 401, "Unauthorized");
+                    return;
+                }
+                this.#create(response);
+            },
+        );
+        const removeRead = http.registerRawRoute(
+            "get",
+            sessionPath,
+            (request, response) => {
+                if (!this.authorize(request)) {
+                    writeJson(response, 200, {
+                        auth: this.#auth.mode,
+                        authenticated: false,
+                    });
+                    return;
+                }
                 writeJson(response, 200, {
                     auth: this.#auth.mode,
-                    authenticated: false,
+                    authenticated: true,
                 });
-                return;
-            }
-            writeJson(response, 200, {
-                auth: this.#auth.mode,
-                authenticated: true,
-            });
-        });
-        const removeDelete = http.registerRawRoute("delete", sessionPath, (request, response) => {
-            this.#revoke(request);
-            response.setHeader("Set-Cookie", this.#cookie("", 0));
-            writeNoContent(response);
-        });
+            },
+        );
+        const removeDelete = http.registerRawRoute(
+            "delete",
+            sessionPath,
+            (request, response) => {
+                this.#revoke(request);
+                response.setHeader("Set-Cookie", this.#cookie("", 0));
+                writeNoContent(response);
+            },
+        );
         return () => {
             removeCreate();
             removeRead();
@@ -100,7 +126,10 @@ export class ControlWebSessionService {
 
     createSessionCookie(): string {
         const token = this.#registerSession();
-        return this.#cookie(token, Math.max(1, Math.floor(this.#sessionTtlMs / 1_000)));
+        return this.#cookie(
+            token,
+            Math.max(1, Math.floor(this.#sessionTtlMs / 1_000)),
+        );
     }
 
     #authorizeBearer(request: IncomingMessage): boolean {
@@ -154,7 +183,8 @@ export class ControlWebSessionService {
     #registerSession(): string {
         this.#prune();
         while (this.#sessions.size >= this.#maxSessions) {
-            const oldest = this.#sessions.keys().next().value as string | undefined;
+            const oldest = this.#sessions.keys().next().value as
+                string | undefined;
             if (oldest === undefined) {
                 break;
             }
@@ -201,7 +231,9 @@ export class ControlWebSessionService {
             try {
                 listener(token);
             } catch (error) {
-                console.warn(error instanceof Error ? error : new Error(String(error)));
+                console.warn(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
         }
     }
@@ -213,14 +245,16 @@ export class ControlWebSessionService {
             "HttpOnly",
             "SameSite=Strict",
             `Max-Age=${maxAgeSeconds}`,
-            ...(this.#secureCookie ? ["Secure"] : [])
+            ...(this.#secureCookie ? ["Secure"] : []),
         ].join("; ");
     }
 }
 
 function normalizeBasePath(value: string): string {
     if (!value.startsWith("/") || value === "/") {
-        throw new Error("Control web basePath must be an absolute non-root path.");
+        throw new Error(
+            "Control web basePath must be an absolute non-root path.",
+        );
     }
     return value.replace(/\/+$/u, "");
 }
@@ -234,7 +268,10 @@ function constantTimeEquals(left: string, right: string): boolean {
     return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function readCookie(header: string | undefined, name: string): string | undefined {
+function readCookie(
+    header: string | undefined,
+    name: string,
+): string | undefined {
     if (header === undefined) {
         return undefined;
     }
@@ -262,7 +299,7 @@ function writeJsonError(
     response: ServerResponse,
     statusCode: number,
     message: string,
-    extra: Record<string, string> = {}
+    extra: Record<string, string> = {},
 ): void {
     writeJson(response, statusCode, { error: message, ...extra });
 }

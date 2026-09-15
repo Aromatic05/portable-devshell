@@ -42,10 +42,13 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
         (await service.list()).map((message) => message.status),
         ["sent", "sent", "sent"],
     );
-    assert.deepEqual(await service.consumePending("ctx-missing", "call-missing"), {
-        callId: "call-missing",
-        messages: [],
-    });
+    assert.deepEqual(
+        await service.consumePending("ctx-missing", "call-missing"),
+        {
+            callId: "call-missing",
+            messages: [],
+        },
+    );
 
     const delivered = await service.consumePending("ctx-a", "call-1");
     assert.equal(delivered.callId, "call-1");
@@ -58,7 +61,11 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
         ["Check the latest failure", "Then compare the next output"],
     );
     assert.deepEqual(
-        (await service.list()).map((message) => [message.id, message.status, message.callId]),
+        (await service.list()).map((message) => [
+            message.id,
+            message.status,
+            message.callId,
+        ]),
         [
             [first.id, "delivered", "call-1"],
             [followUp.id, "delivered", "call-1"],
@@ -70,15 +77,24 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
         [followUp.id, second.id],
     );
     assert.deepEqual(
-        (await service.list({ before: second.id, limit: 1 })).map((message) => message.id),
+        (await service.list({ before: second.id, limit: 1 })).map(
+            (message) => message.id,
+        ),
         [followUp.id],
     );
     const byteBounded = await service.list({ maxBytes: 220 });
-    assert.equal(Buffer.byteLength(JSON.stringify(byteBounded), "utf8") <= 220, true);
+    assert.equal(
+        Buffer.byteLength(JSON.stringify(byteBounded), "utf8") <= 220,
+        true,
+    );
 
     const reloaded = new ContextMessageService(options);
     assert.deepEqual(
-        (await reloaded.list()).map((message) => [message.id, message.status, message.callId]),
+        (await reloaded.list()).map((message) => [
+            message.id,
+            message.status,
+            message.callId,
+        ]),
         [
             [first.id, "delivered", "call-1"],
             [followUp.id, "delivered", "call-1"],
@@ -123,11 +139,16 @@ test("ContextMessageService fails undelivered Comments when their Context is ret
     const root = await createTestTempDirectory("context-message-retired");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const service = new ContextMessageService({
-        appendEvent: async (type, data) => { events.push({ data, type }); },
+        appendEvent: async (type, data) => {
+            events.push({ data, type });
+        },
         filePath: join(root, "context-messages.json"),
         instanceName: "alpha",
     });
-    const first = await service.queue({ ctxId: "ctx-retired", text: "Do not deliver later" });
+    const first = await service.queue({
+        ctxId: "ctx-retired",
+        text: "Do not deliver later",
+    });
     await service.queue({ ctxId: "ctx-live", text: "Keep live" });
 
     const failed = await service.failPending(
@@ -135,16 +156,25 @@ test("ContextMessageService fails undelivered Comments when their Context is ret
         "Context ctx-retired was disabled before Comment delivery.",
     );
 
-    assert.deepEqual(failed.map((message) => [message.id, message.status]), [[first.id, "failed"]]);
+    assert.deepEqual(
+        failed.map((message) => [message.id, message.status]),
+        [[first.id, "failed"]],
+    );
     assert.match(failed[0]?.error ?? "", /disabled before Comment delivery/u);
     assert.deepEqual(
         (await service.list())
             .map((message) => [message.ctxId, message.status])
-            .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
-        [["ctx-live", "sent"], ["ctx-retired", "failed"]],
+            .sort((left, right) =>
+                String(left[0]).localeCompare(String(right[0])),
+            ),
+        [
+            ["ctx-live", "sent"],
+            ["ctx-retired", "failed"],
+        ],
     );
     assert.equal(
-        events.filter((event) => event.type === "context.message.failed").length,
+        events.filter((event) => event.type === "context.message.failed")
+            .length,
         1,
     );
     assert.deepEqual(await service.consumePending("ctx-retired", "call-late"), {
@@ -161,18 +191,34 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
         instanceName: "alpha",
     });
     await service.queue({ ctxId: "ctx-a", text: "First" });
-    const delivered = await service.queue({ ctxId: "ctx-b", text: "#stop Delivered history" });
+    const delivered = await service.queue({
+        ctxId: "ctx-b",
+        text: "#stop Delivered history",
+    });
     await service.consumePending("ctx-b", "call-b");
     await service.queue({ ctxId: "ctx-c", text: "Second" });
-    assert.equal((await service.beforeModelToolCall("ctx-b", "file_read")).kind, "stop");
+    assert.equal(
+        (await service.beforeModelToolCall("ctx-b", "file_read")).kind,
+        "stop",
+    );
 
-    const failed = await service.failAllPending("Instance alpha was deleted before Comment delivery.");
+    const failed = await service.failAllPending(
+        "Instance alpha was deleted before Comment delivery.",
+    );
 
-    assert.deepEqual(failed.map((message) => message.ctxId).sort(), ["ctx-a", "ctx-c"]);
-    assert.equal(failed.every((message) => message.status === "failed"), true);
+    assert.deepEqual(failed.map((message) => message.ctxId).sort(), [
+        "ctx-a",
+        "ctx-c",
+    ]);
+    assert.equal(
+        failed.every((message) => message.status === "failed"),
+        true,
+    );
     assert.equal((await service.list("ctx-b"))[0]?.id, delivered.id);
     assert.equal((await service.list("ctx-b"))[0]?.status, "delivered");
-    assert.deepEqual(await service.beforeModelToolCall("ctx-b", "file_read"), { kind: "allow" });
+    assert.deepEqual(await service.beforeModelToolCall("ctx-b", "file_read"), {
+        kind: "allow",
+    });
 });
 
 test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
@@ -198,7 +244,10 @@ test("ContextMessageService delivery event failure never blocks or requeues a co
     );
     assert.equal(delivered.comment, "Retry this message");
     assert.deepEqual(
-        (await service.list("ctx-a")).map((message) => [message.status, message.callId]),
+        (await service.list("ctx-a")).map((message) => [
+            message.status,
+            message.callId,
+        ]),
         [["delivered", "call-1"]],
     );
     assert.deepEqual(await service.consumePending("ctx-a", "call-2"), {
@@ -215,29 +264,49 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
         instanceName: "alpha",
     };
     const service = new ContextMessageService(options);
-    const stop = await service.queue({ ctxId: "ctx-a", text: "#stop Stop before the next tool" });
-
-    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read", "request-stop"), {
-        comment: "#stop Stop before the next tool",
-        commentId: stop.id,
-        kind: "stop",
+    const stop = await service.queue({
+        ctxId: "ctx-a",
+        text: "#stop Stop before the next tool",
     });
+
+    assert.deepEqual(
+        await service.beforeModelToolCall("ctx-a", "file_read", "request-stop"),
+        {
+            comment: "#stop Stop before the next tool",
+            commentId: stop.id,
+            kind: "stop",
+        },
+    );
     const reloaded = new ContextMessageService(options);
-    assert.equal((await reloaded.beforeModelToolCall("ctx-a", "file_read")).kind, "stop");
+    assert.equal(
+        (await reloaded.beforeModelToolCall("ctx-a", "file_read")).kind,
+        "stop",
+    );
     const resume = await reloaded.queue({
         ctxId: "ctx-a",
         text: "#resume Continue, but do not delete files",
     });
-    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read", "request-resume"), {
-        comment: "#resume Continue, but do not delete files",
-        commentId: resume.id,
-        kind: "resume",
+    assert.deepEqual(
+        await reloaded.beforeModelToolCall(
+            "ctx-a",
+            "file_read",
+            "request-resume",
+        ),
+        {
+            comment: "#resume Continue, but do not delete files",
+            commentId: resume.id,
+            kind: "resume",
+        },
+    );
+    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), {
+        kind: "allow",
     });
-    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
 });
 
 test("ContextMessageService delivers queued Stop-era messages through Resume without reactivating an old Stop", async () => {
-    const root = await createTestTempDirectory("context-message-stop-resume-queued");
+    const root = await createTestTempDirectory(
+        "context-message-stop-resume-queued",
+    );
     const service = new ContextMessageService({
         appendEvent: async () => undefined,
         conversationFilePath: join(root, "conversation.sqlite3"),
@@ -245,15 +314,31 @@ test("ContextMessageService delivers queued Stop-era messages through Resume wit
     });
     await service.queue({ ctxId: "ctx-a", text: "#stop Stop now" });
     await service.queue({ ctxId: "ctx-a", text: "Also keep this constraint" });
-    const resume = await service.queue({ ctxId: "ctx-a", text: "#resume Continue carefully" });
-
-    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read", "request-resume-batch"), {
-        comment: "#stop Stop now\n\nAlso keep this constraint\n\n#resume Continue carefully",
-        commentId: resume.id,
-        kind: "resume",
+    const resume = await service.queue({
+        ctxId: "ctx-a",
+        text: "#resume Continue carefully",
     });
-    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
-    assert.deepEqual(await service.consumePending("ctx-a", "next-call"), { callId: "next-call", messages: [] });
+
+    assert.deepEqual(
+        await service.beforeModelToolCall(
+            "ctx-a",
+            "file_read",
+            "request-resume-batch",
+        ),
+        {
+            comment:
+                "#stop Stop now\n\nAlso keep this constraint\n\n#resume Continue carefully",
+            commentId: resume.id,
+            kind: "resume",
+        },
+    );
+    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), {
+        kind: "allow",
+    });
+    assert.deepEqual(await service.consumePending("ctx-a", "next-call"), {
+        callId: "next-call",
+        messages: [],
+    });
 });
 
 test("ContextMessageService persists the remaining #push budget without replenishing repeated Push", async () => {
@@ -267,13 +352,18 @@ test("ContextMessageService persists the remaining #push budget without replenis
     await service.queue({ ctxId: "ctx-a", text: "#push Answer this first" });
     await service.consumePending("ctx-a", "delivery-one");
     for (let index = 0; index < 4; index += 1) {
-        assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+        assert.deepEqual(
+            await service.beforeModelToolCall("ctx-a", "file_read"),
+            { kind: "allow" },
+        );
     }
     await service.queue({ ctxId: "ctx-a", text: "#push I am still waiting" });
     await service.consumePending("ctx-a", "delivery-two");
 
     const reloaded = new ContextMessageService(options);
-    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), { kind: "allow" });
+    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), {
+        kind: "allow",
+    });
     const blocked = await reloaded.beforeModelToolCall("ctx-a", "file_read");
     assert.equal(blocked.kind, "push");
     if (blocked.kind === "push") assert.equal(blocked.toolCallBudget, 5);

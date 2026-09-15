@@ -6,7 +6,7 @@ import type {
     TodoReadResult,
     TodoTaskControlAction,
     TodoWriteInput,
-    ToolCallAssociation
+    ToolCallAssociation,
 } from "@portable-devshell/shared";
 
 import { TodoState, type TodoDocument, type TodoTransition } from "./Store.js";
@@ -15,7 +15,7 @@ import { TodoStore } from "./Store.js";
 export interface TodoServiceOptions {
     appendEvent(
         type: Extract<InstanceEventType, `todo.${string}`>,
-        data: JsonValue
+        data: JsonValue,
     ): Promise<void>;
     filePath: string;
     instanceName: string;
@@ -33,13 +33,16 @@ export class TodoService {
         this.#store = new TodoStore({
             filePath: options.filePath,
             instanceName: options.instanceName,
-            state: this.#state
+            state: this.#state,
         });
     }
 
     async read(input?: TodoReadInput | string): Promise<TodoReadResult> {
         await this.#operation;
-        return this.#readDocument(input === undefined ? this.#store.readActive() : this.#store.read(), input);
+        return this.#readDocument(
+            input === undefined ? this.#store.readActive() : this.#store.read(),
+            input,
+        );
     }
 
     summaries(): ActiveTodoSummary[] {
@@ -50,20 +53,23 @@ export class TodoService {
         return this.#state.currentAssociation(this.#store.readActive(), ctxId);
     }
 
-    async write(
-        input: TodoWriteInput,
-        ctxId: string
-    ): Promise<TodoReadResult> {
+    async write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
             const committed = await this.#store.transition((document) => {
-                const transition = this.#state.transition(document, input, ctxId);
+                const transition = this.#state.transition(
+                    document,
+                    input,
+                    ctxId,
+                );
                 const result = this.#readDocument(transition.document, {
-                    ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
-                    title: input.title
+                    ...(input.taskId === undefined
+                        ? {}
+                        : { taskId: input.taskId }),
+                    title: input.title,
                 });
                 return {
                     document: transition.document,
-                    result: { events: transition.events, value: result }
+                    result: { events: transition.events, value: result },
                 };
             });
             await this.#emitEvents(committed.events);
@@ -79,11 +85,19 @@ export class TodoService {
     ): Promise<TodoReadResult> {
         return await this.#runExclusive(async () => {
             const committed = await this.#store.transition((document) => {
-                const transition = this.#state.control(document, taskId, action, ctxId, expectedRevision);
-                const result = this.#readDocument(transition.document, { taskId });
+                const transition = this.#state.control(
+                    document,
+                    taskId,
+                    action,
+                    ctxId,
+                    expectedRevision,
+                );
+                const result = this.#readDocument(transition.document, {
+                    taskId,
+                });
                 return {
                     document: transition.document,
-                    result: { events: transition.events, value: result }
+                    result: { events: transition.events, value: result },
                 };
             });
             await this.#emitEvents(committed.events);
@@ -102,7 +116,10 @@ export class TodoService {
                         task.activeCtxId ?? task.createdByCtxId,
                         task.revision,
                     );
-                    return { document: transition.document, result: transition.events };
+                    return {
+                        document: transition.document,
+                        result: transition.events,
+                    };
                 });
                 await this.#emitEvents(events);
             }
@@ -113,7 +130,10 @@ export class TodoService {
         await this.#runExclusive(async () => {
             const events = await this.#store.transition((document) => {
                 const transition = this.#state.delete(document, taskId);
-                return { document: transition.document, result: transition.events };
+                return {
+                    document: transition.document,
+                    result: transition.events,
+                };
             });
             await this.#emitEvents(events);
         });
@@ -121,17 +141,20 @@ export class TodoService {
 
     async #emitEvents(events: TodoTransition["events"]): Promise<void> {
         for (const event of events) {
-            await this.#appendEvent(event.type, event.data).catch(() => undefined);
+            await this.#appendEvent(event.type, event.data).catch(
+                () => undefined,
+            );
         }
     }
 
-    #readDocument(document: TodoDocument, input?: TodoReadInput | string): TodoReadResult {
+    #readDocument(
+        document: TodoDocument,
+        input?: TodoReadInput | string,
+    ): TodoReadResult {
         return this.#state.readResult(document, input);
     }
 
-    async #runExclusive<T>(
-        operation: () => Promise<T>
-    ): Promise<T> {
+    async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
         const previous = this.#operation;
         let release!: () => void;
 

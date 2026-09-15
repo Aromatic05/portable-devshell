@@ -84,10 +84,16 @@ test("testspace launcher prepares build artifacts before entering the isolated r
 });
 
 test("testspace instance fixtures use v4 model ACL without retired MCP policy", () => {
-    for (const config of [buildTestspaceInstanceConfig(), buildTestspaceReverseInstanceConfig()]) {
+    for (const config of [
+        buildTestspaceInstanceConfig(),
+        buildTestspaceReverseInstanceConfig(),
+    ]) {
         assert.match(config, /^version = 4$/mu);
         assert.match(config, /^\[extensions\]$/mu);
-        assert.match(config, /^model = \["artifact", "instance", "mcp", "secret", "skill"\]$/mu);
+        assert.match(
+            config,
+            /^model = \["artifact", "instance", "mcp", "secret", "skill"\]$/mu,
+        );
         assert.doesNotMatch(config, /^\[mcp\.tools\]$/mu);
         assert.doesNotMatch(config, /^groups =/mu);
         assert.doesNotMatch(config, /^capabilities =/mu);
@@ -96,26 +102,37 @@ test("testspace instance fixtures use v4 model ACL without retired MCP policy", 
 
 test("Web smoke disables the Chromium sandbox for Linux CI or map-root Testspace", () => {
     assert.equal(
-        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "linux", uid: 1000 })
-            .includes("--no-sandbox"),
+        chromiumLaunchArguments({
+            environment: { CI: "true" },
+            platform: "linux",
+            uid: 1000,
+        }).includes("--no-sandbox"),
         true,
     );
     assert.equal(
         chromiumLaunchArguments({
-            environment: { DEVSHELL_TESTSPACE_ISOLATION: LINUX_TESTSPACE_ISOLATION },
+            environment: {
+                DEVSHELL_TESTSPACE_ISOLATION: LINUX_TESTSPACE_ISOLATION,
+            },
             platform: "linux",
             uid: 0,
         }).includes("--no-sandbox"),
         true,
     );
     assert.equal(
-        chromiumLaunchArguments({ environment: {}, platform: "linux", uid: 1000 })
-            .includes("--no-sandbox"),
+        chromiumLaunchArguments({
+            environment: {},
+            platform: "linux",
+            uid: 1000,
+        }).includes("--no-sandbox"),
         false,
     );
     assert.equal(
-        chromiumLaunchArguments({ environment: { CI: "true" }, platform: "darwin", uid: 0 })
-            .includes("--no-sandbox"),
+        chromiumLaunchArguments({
+            environment: { CI: "true" },
+            platform: "darwin",
+            uid: 0,
+        }).includes("--no-sandbox"),
         false,
     );
 });
@@ -128,13 +145,19 @@ test("Web smoke requires the current Audit navigation contract", () => {
         secureContext: false,
     };
 
-    assert.doesNotThrow(() => assertWebSmokeState(pageState, [], TESTSPACE_INSTANCE));
+    assert.doesNotThrow(() =>
+        assertWebSmokeState(pageState, [], TESTSPACE_INSTANCE),
+    );
     assert.throws(
-        () => assertWebSmokeState(
-            { ...pageState, body: pageState.body.replace("Audit", "Tool Calls") },
-            [],
-            TESTSPACE_INSTANCE,
-        ),
+        () =>
+            assertWebSmokeState(
+                {
+                    ...pageState,
+                    body: pageState.body.replace("Audit", "Tool Calls"),
+                },
+                [],
+                TESTSPACE_INSTANCE,
+            ),
         /did not render the real testspace read model/u,
     );
 });
@@ -153,7 +176,10 @@ test("testspace starts when invoked without a subcommand", () => {
     assert.equal(resolveTestspaceCommand("stop"), "stop");
     assert.equal(resolveTestspaceCommand("logs"), "invalid");
     assert.equal(resolveTestspaceCommand("reset"), "invalid");
-    assert.deepEqual(resolveTestspaceInvocation([]), { args: [], command: "start" });
+    assert.deepEqual(resolveTestspaceInvocation([]), {
+        args: [],
+        command: "start",
+    });
     assert.deepEqual(resolveTestspaceInvocation(["web-smoke"]), {
         args: [],
         command: "web-smoke",
@@ -162,10 +188,13 @@ test("testspace starts when invoked without a subcommand", () => {
         args: ["--skip-build"],
         command: "start",
     });
-    assert.deepEqual(resolveTestspaceInvocation(["--skip-build", "--interval-ms", "500"]), {
-        args: ["--skip-build", "--interval-ms", "500"],
-        command: "start",
-    });
+    assert.deepEqual(
+        resolveTestspaceInvocation(["--skip-build", "--interval-ms", "500"]),
+        {
+            args: ["--skip-build", "--interval-ms", "500"],
+            command: "start",
+        },
+    );
 });
 
 test("re-entering a running testspace restores a stopped local instance", async () => {
@@ -215,7 +244,8 @@ test("testspace keeps an activity connector alive for both local and reverse ins
     ];
     const result = await ensureConnectorProcesses(targets, {
         isProcessAlive: (pid) => pid === 101,
-        readPid: async (target) => target.instance === TESTSPACE_INSTANCE ? 101 : undefined,
+        readPid: async (target) =>
+            target.instance === TESTSPACE_INSTANCE ? 101 : undefined,
         startConnector: async (target) => {
             started.push(target.instance);
             return 202;
@@ -263,9 +293,11 @@ test("re-entering testspace restarts an alive connector whose health is degraded
     const result = await ensureConnectorProcesses(targets, {
         isProcessAlive: () => true,
         readHealth: async (target) => ({
-            status: target.instance === TESTSPACE_INSTANCE ? "active" : "degraded",
+            status:
+                target.instance === TESTSPACE_INSTANCE ? "active" : "degraded",
         }),
-        readPid: async (target) => target.instance === TESTSPACE_INSTANCE ? 101 : 102,
+        readPid: async (target) =>
+            target.instance === TESTSPACE_INSTANCE ? 101 : 102,
         restartConnector: async (target, pid) => {
             restarted.push({ instance: target.instance, pid });
             return 202;
@@ -275,7 +307,9 @@ test("re-entering testspace restarts an alive connector whose health is degraded
         },
     });
 
-    assert.deepEqual(restarted, [{ instance: TESTSPACE_REVERSE_INSTANCE, pid: 102 }]);
+    assert.deepEqual(restarted, [
+        { instance: TESTSPACE_REVERSE_INSTANCE, pid: 102 },
+    ]);
     assert.deepEqual(result, {
         [TESTSPACE_INSTANCE]: { pid: 101, restarted: false },
         [TESTSPACE_REVERSE_INSTANCE]: { pid: 202, restarted: true },
@@ -302,12 +336,18 @@ test("connector startup completes only after health reaches a usable state", asy
 
     await assert.rejects(
         waitForConnectorReady(
-            { healthFile: "/health/reverse", instance: TESTSPACE_REVERSE_INSTANCE },
+            {
+                healthFile: "/health/reverse",
+                instance: TESTSPACE_REVERSE_INSTANCE,
+            },
             102,
             {
                 delay: async () => undefined,
                 isProcessAlive: () => true,
-                readHealth: async () => ({ status: "error", lastError: "cannot connect" }),
+                readHealth: async () => ({
+                    status: "error",
+                    lastError: "cannot connect",
+                }),
                 timeoutMs: 100,
             },
         ),
@@ -316,7 +356,9 @@ test("connector startup completes only after health reaches a usable state", asy
 });
 
 test("connector activity publishes health that status can expose", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "pds-testspace-connector-health-"));
+    const directory = await mkdtemp(
+        join(tmpdir(), "pds-testspace-connector-health-"),
+    );
     t.after(async () => await rm(directory, { recursive: true, force: true }));
     const healthFile = join(directory, "health.json");
     const logFile = join(directory, "activity.jsonl");
@@ -350,7 +392,13 @@ test("connector activity publishes health that status can expose", async (t) => 
     assert.equal(typeof health?.lastActivityAt, "string");
 
     const statuses = await readConnectorStatuses(
-        [{ healthFile, instance: TESTSPACE_REVERSE_INSTANCE, pidFile: join(directory, "pid") }],
+        [
+            {
+                healthFile,
+                instance: TESTSPACE_REVERSE_INSTANCE,
+                pidFile: join(directory, "pid"),
+            },
+        ],
         {
             isProcessAlive: () => true,
             readHealth: readTestspaceConnectorHealth,
@@ -378,13 +426,23 @@ test("testspace tmux activity uses the public tmux_run timeout contract", () => 
 
 test("testspace long wait smoke outlives the 180 second synchronous boundary and SDK default timeout", () => {
     assert.equal(TESTSPACE_LONG_WAIT_TASK_DURATION_MS > 180_000, true);
-    assert.equal(TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS > TESTSPACE_LONG_WAIT_TASK_DURATION_MS, true);
-    assert.equal(TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS > TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS, true);
+    assert.equal(
+        TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS >
+            TESTSPACE_LONG_WAIT_TASK_DURATION_MS,
+        true,
+    );
+    assert.equal(
+        TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS >
+            TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS,
+        true,
+    );
     assert.equal(TESTSPACE_LONG_WAIT_REQUEST_TIMEOUT_MS > 60_000, true);
 });
 
 test("a connector tool error is exposed as degraded rather than active", async (t) => {
-    const directory = await mkdtemp(join(tmpdir(), "pds-testspace-connector-degraded-"));
+    const directory = await mkdtemp(
+        join(tmpdir(), "pds-testspace-connector-degraded-"),
+    );
     t.after(async () => await rm(directory, { recursive: true, force: true }));
     const healthFile = join(directory, "health.json");
     await runConnectorLoop({
@@ -416,22 +474,23 @@ test("a connector tool error is exposed as degraded rather than active", async (
 test("worker cleanup attempts local and reverse even when one stop fails", () => {
     const calls = [];
     assert.throws(
-        () => stopWorkerProcesses([
-            {
-                instance: TESTSPACE_INSTANCE,
-                stop() {
-                    calls.push(TESTSPACE_INSTANCE);
-                    throw new Error("local stop failed");
+        () =>
+            stopWorkerProcesses([
+                {
+                    instance: TESTSPACE_INSTANCE,
+                    stop() {
+                        calls.push(TESTSPACE_INSTANCE);
+                        throw new Error("local stop failed");
+                    },
                 },
-            },
-            {
-                instance: TESTSPACE_REVERSE_INSTANCE,
-                stop() {
-                    calls.push(TESTSPACE_REVERSE_INSTANCE);
-                    return true;
+                {
+                    instance: TESTSPACE_REVERSE_INSTANCE,
+                    stop() {
+                        calls.push(TESTSPACE_REVERSE_INSTANCE);
+                        return true;
+                    },
                 },
-            },
-        ]),
+            ]),
         AggregateError,
     );
     assert.deepEqual(calls, [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE]);
@@ -439,10 +498,7 @@ test("worker cleanup attempts local and reverse even when one stop fails", () =>
 
 test("testspace root rejects destructive cleanup targets that contain the repository", () => {
     const repo = join(tmpdir(), "portable-devshell-review-fixture");
-    assert.throws(
-        () => resolveTestspaceRoot(repo, ""),
-        /must not be empty/u,
-    );
+    assert.throws(() => resolveTestspaceRoot(repo, ""), /must not be empty/u);
     assert.throws(
         () => resolveTestspaceRoot(repo, repo),
         /must not contain the portable-devshell repository/u,
@@ -479,25 +535,42 @@ test("recursive Testspace cleanup refuses an existing directory until Testspace 
 test("testspace runtime is deterministic and keeps Unix worker sockets short", () => {
     const options = {
         platform: "darwin",
-        temporaryDirectory: "/var/folders/very/long/per-user/temporary/directory"
+        temporaryDirectory:
+            "/var/folders/very/long/per-user/temporary/directory",
     };
-    const first = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell", options);
-    const repeated = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell", options);
-    const other = resolveTestspaceRuntimeDirectory("/workspace/portable-devshell-other", options);
+    const first = resolveTestspaceRuntimeDirectory(
+        "/workspace/portable-devshell",
+        options,
+    );
+    const repeated = resolveTestspaceRuntimeDirectory(
+        "/workspace/portable-devshell",
+        options,
+    );
+    const other = resolveTestspaceRuntimeDirectory(
+        "/workspace/portable-devshell-other",
+        options,
+    );
 
     assert.equal(first, repeated);
     assert.notEqual(first, other);
     assert.match(first, /^\/tmp\/pds-testspace-[0-9a-f]{16}$/u);
     assert.equal(
-        join(first, "devshell-worker", TESTSPACE_INSTANCE, "worker.sock").length < 100,
+        join(first, "devshell-worker", TESTSPACE_INSTANCE, "worker.sock")
+            .length < 100,
         true,
     );
 
-    const windows = resolveTestspaceRuntimeDirectory("C:\\workspace\\portable-devshell", {
-        platform: "win32",
-        temporaryDirectory: "C:\\Users\\runner\\AppData\\Local\\Temp"
-    });
-    assert.match(windows, /^C:\\Users\\runner\\AppData\\Local\\Temp\\pds-testspace-[0-9a-f]{16}$/u);
+    const windows = resolveTestspaceRuntimeDirectory(
+        "C:\\workspace\\portable-devshell",
+        {
+            platform: "win32",
+            temporaryDirectory: "C:\\Users\\runner\\AppData\\Local\\Temp",
+        },
+    );
+    assert.match(
+        windows,
+        /^C:\\Users\\runner\\AppData\\Local\\Temp\\pds-testspace-[0-9a-f]{16}$/u,
+    );
 });
 
 test("testspace process environment isolates runtime and container storage", () => {
@@ -514,7 +587,10 @@ test("testspace process environment isolates runtime and container storage", () 
     assert.equal(env.HOME, "/tmp/testspace-home");
     assert.equal(env.USERPROFILE, "/tmp/testspace-home");
     assert.equal(env.XDG_RUNTIME_DIR, "/tmp/testspace-runtime");
-    assert.equal(env.XDG_DATA_HOME, join("/tmp/testspace-home", ".local", "share"));
+    assert.equal(
+        env.XDG_DATA_HOME,
+        join("/tmp/testspace-home", ".local", "share"),
+    );
     assert.equal(env.XDG_CONFIG_HOME, join("/tmp/testspace-home", ".config"));
     assert.equal(env.XDG_CACHE_HOME, join("/tmp/testspace-home", ".cache"));
     assert.equal(env.PATH, "/usr/bin");
@@ -573,44 +649,60 @@ test("testspace Podman cleanup is disabled on Windows", () => {
 test("testspace Docker cleanup removes only managed containers declared by isolated configs", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "pds-testspace-docker-cleanup-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
-    await writeFile(join(root, "managed.toml"), [
-        'version = 2',
-        'name = "managed-docker"',
-        'provider = "docker"',
-        '',
-        '[container]',
-        'mode = "existingImage"',
-        'image = "ubuntu:24.04"',
-        'containerName = "managed-container"',
-    ].join("\n"), "utf8");
-    await writeFile(join(root, "default-name.toml"), [
-        'version = 2',
-        'name = "default-docker"',
-        'provider = "docker"',
-        '',
-        '[container]',
-        'mode = "preset"',
-        'preset = "ubuntu"',
-    ].join("\n"), "utf8");
-    await writeFile(join(root, "adopted.toml"), [
-        'version = 2',
-        'name = "adopted-docker"',
-        'provider = "docker"',
-        '',
-        '[container]',
-        'mode = "existingStoppedContainer"',
-        'containerName = "user-container"',
-    ].join("\n"), "utf8");
-    await writeFile(join(root, "podman.toml"), [
-        'version = 2',
-        'name = "managed-podman"',
-        'provider = "podman"',
-        '',
-        '[container]',
-        'mode = "existingImage"',
-        'image = "ubuntu:24.04"',
-        'containerName = "podman-container"',
-    ].join("\n"), "utf8");
+    await writeFile(
+        join(root, "managed.toml"),
+        [
+            "version = 2",
+            'name = "managed-docker"',
+            'provider = "docker"',
+            "",
+            "[container]",
+            'mode = "existingImage"',
+            'image = "ubuntu:24.04"',
+            'containerName = "managed-container"',
+        ].join("\n"),
+        "utf8",
+    );
+    await writeFile(
+        join(root, "default-name.toml"),
+        [
+            "version = 2",
+            'name = "default-docker"',
+            'provider = "docker"',
+            "",
+            "[container]",
+            'mode = "preset"',
+            'preset = "ubuntu"',
+        ].join("\n"),
+        "utf8",
+    );
+    await writeFile(
+        join(root, "adopted.toml"),
+        [
+            "version = 2",
+            'name = "adopted-docker"',
+            'provider = "docker"',
+            "",
+            "[container]",
+            'mode = "existingStoppedContainer"',
+            'containerName = "user-container"',
+        ].join("\n"),
+        "utf8",
+    );
+    await writeFile(
+        join(root, "podman.toml"),
+        [
+            "version = 2",
+            'name = "managed-podman"',
+            'provider = "podman"',
+            "",
+            "[container]",
+            'mode = "existingImage"',
+            'image = "ubuntu:24.04"',
+            'containerName = "podman-container"',
+        ].join("\n"),
+        "utf8",
+    );
     const calls = [];
     const removed = removeTestspaceDockerContainers(root, {
         spawn(command, args) {
@@ -620,7 +712,10 @@ test("testspace Docker cleanup removes only managed containers declared by isola
     });
     assert.deepEqual(removed, ["devshell-default-docker", "managed-container"]);
     assert.deepEqual(calls, [
-        { command: "docker", args: ["rm", "--force", "devshell-default-docker"] },
+        {
+            command: "docker",
+            args: ["rm", "--force", "devshell-default-docker"],
+        },
         { command: "docker", args: ["rm", "--force", "managed-container"] },
     ]);
 });
@@ -641,56 +736,77 @@ test("Web smoke resolves an explicit Chromium executable before default candidat
     assert.deepEqual(probes, ["/opt/chromium"]);
 });
 
-test("testspace stop terminates legacy and workspace-scoped tmux servers", {
-    skip: process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0,
-}, async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "pds-testspace-root-"));
-    const runtime = resolveTestspaceRuntimeDirectory(root);
-    const devshellHome = join(root, "home", ".devshell");
-    const workspace = join(root, "workspace");
-    await mkdir(workspace, { recursive: true });
-    const options = {
-        devshellHome,
-        instanceName: TESTSPACE_INSTANCE,
-        runtimeDirectory: runtime,
-        workspace,
-    };
-    const sockets = await resolveTestspaceTmuxSockets(options);
-    for (const socket of sockets) await mkdir(dirname(socket), { recursive: true });
-    t.after(async () => {
-        for (const socket of sockets) {
-            spawnSync("tmux", ["-S", socket, "kill-server"], { stdio: "ignore" });
-        }
-        await rm(runtime, { force: true, recursive: true });
-        await rm(root, { force: true, recursive: true });
-    });
-
-    for (const socket of sockets) {
-        const started = spawnSync("tmux", [
-            "-S",
-            socket,
-            "new-session",
-            "-d",
-            "-s",
-            "devshell",
-            "-c",
+test(
+    "testspace stop terminates legacy and workspace-scoped tmux servers",
+    {
+        skip:
+            process.platform === "win32" ||
+            spawnSync("tmux", ["-V"]).status !== 0,
+    },
+    async (t) => {
+        const root = await mkdtemp(join(tmpdir(), "pds-testspace-root-"));
+        const runtime = resolveTestspaceRuntimeDirectory(root);
+        const devshellHome = join(root, "home", ".devshell");
+        const workspace = join(root, "workspace");
+        await mkdir(workspace, { recursive: true });
+        const options = {
+            devshellHome,
+            instanceName: TESTSPACE_INSTANCE,
+            runtimeDirectory: runtime,
             workspace,
-            "sleep 60",
-        ], { encoding: "utf8" });
-        assert.equal(started.status, 0, started.stderr);
-    }
-    assert.equal(await stopTestspaceTmux(options), true);
-    for (const socket of sockets) {
-        assert.notEqual(
-            spawnSync("tmux", ["-S", socket, "has-session", "-t", "devshell"]).status,
-            0,
-        );
-    }
-});
+        };
+        const sockets = await resolveTestspaceTmuxSockets(options);
+        for (const socket of sockets)
+            await mkdir(dirname(socket), { recursive: true });
+        t.after(async () => {
+            for (const socket of sockets) {
+                spawnSync("tmux", ["-S", socket, "kill-server"], {
+                    stdio: "ignore",
+                });
+            }
+            await rm(runtime, { force: true, recursive: true });
+            await rm(root, { force: true, recursive: true });
+        });
+
+        for (const socket of sockets) {
+            const started = spawnSync(
+                "tmux",
+                [
+                    "-S",
+                    socket,
+                    "new-session",
+                    "-d",
+                    "-s",
+                    "devshell",
+                    "-c",
+                    workspace,
+                    "sleep 60",
+                ],
+                { encoding: "utf8" },
+            );
+            assert.equal(started.status, 0, started.stderr);
+        }
+        assert.equal(await stopTestspaceTmux(options), true);
+        for (const socket of sockets) {
+            assert.notEqual(
+                spawnSync("tmux", [
+                    "-S",
+                    socket,
+                    "has-session",
+                    "-t",
+                    "devshell",
+                ]).status,
+                0,
+            );
+        }
+    },
+);
 
 test("testspace reverse lifecycle enrolls with a one-time code and stops by persistent identity", async (t) => {
     const calls = [];
-    const root = await mkdtemp(join(tmpdir(), "portable-devshell-reverse-testspace-"));
+    const root = await mkdtemp(
+        join(tmpdir(), "portable-devshell-reverse-testspace-"),
+    );
     t.after(async () => await rm(root, { recursive: true, force: true }));
     const paths = {
         reverseDevshellHome: join(root, "reverse-home", ".devshell"),
@@ -698,9 +814,8 @@ test("testspace reverse lifecycle enrolls with a one-time code and stops by pers
         reverseRuntime: join(root, "reverse-runtime"),
         reverseWorkspace: join(root, "reverse-workspace"),
     };
-    const { startTestspaceReverse, stopTestspaceReverse } = await import(
-        "./testspace/TestspaceReverse.mjs"
-    );
+    const { startTestspaceReverse, stopTestspaceReverse } =
+        await import("./testspace/TestspaceReverse.mjs");
     const started = await startTestspaceReverse({
         controllerUrl: "http://127.0.0.1:47011",
         createDeviceCode: async (input) => {
@@ -724,10 +839,13 @@ test("testspace reverse lifecycle enrolls with a one-time code and stops by pers
     });
 
     assert.equal(started.instanceName, "testspace-reverse");
-    assert.deepEqual(calls[0], ["code", {
-        instanceName: "testspace-reverse",
-        runtimeDirectory: join(root, "control-runtime"),
-    }]);
+    assert.deepEqual(calls[0], [
+        "code",
+        {
+            instanceName: "testspace-reverse",
+            runtimeDirectory: join(root, "control-runtime"),
+        },
+    ]);
     assert.deepEqual(calls[1][1].args, [
         "enroll",
         "--controller",
@@ -736,15 +854,30 @@ test("testspace reverse lifecycle enrolls with a one-time code and stops by pers
         "device-code-once",
     ]);
     assert.equal(calls[1][1].environment.HOME, paths.reverseHome);
-    assert.equal(calls[1][1].environment.PORTABLE_DEVSHELL_HOME, paths.reverseDevshellHome);
+    assert.equal(
+        calls[1][1].environment.PORTABLE_DEVSHELL_HOME,
+        paths.reverseDevshellHome,
+    );
     assert.equal(calls[1][1].environment.XDG_RUNTIME_DIR, paths.reverseRuntime);
-    assert.equal("DEVSHELL_WORKER_INTERNAL_INSTANCE" in calls[1][1].environment, false);
-    assert.equal("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE" in calls[1][1].environment, false);
-    assert.equal("DEVSHELL_WORKER_INTERNAL_WORKSPACE" in calls[1][1].environment, false);
-    assert.deepEqual(calls[2], ["ready", {
-        instanceName: "testspace-reverse",
-        runtimeDirectory: join(root, "control-runtime"),
-    }]);
+    assert.equal(
+        "DEVSHELL_WORKER_INTERNAL_INSTANCE" in calls[1][1].environment,
+        false,
+    );
+    assert.equal(
+        "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE" in calls[1][1].environment,
+        false,
+    );
+    assert.equal(
+        "DEVSHELL_WORKER_INTERNAL_WORKSPACE" in calls[1][1].environment,
+        false,
+    );
+    assert.deepEqual(calls[2], [
+        "ready",
+        {
+            instanceName: "testspace-reverse",
+            runtimeDirectory: join(root, "control-runtime"),
+        },
+    ]);
 
     const stopped = stopTestspaceReverse({
         environment: { PATH: "/usr/bin" },
@@ -765,10 +898,13 @@ test("testspace reverse lifecycle enrolls with a one-time code and stops by pers
 
 test("testspace exposes exec only through the guarded command surface", () => {
     assert.equal(resolveTestspaceCommand("exec"), "exec");
-    assert.deepEqual(resolveTestspaceInvocation(["exec", "--", "printf", "ok"]), {
-        args: ["--", "printf", "ok"],
-        command: "exec",
-    });
+    assert.deepEqual(
+        resolveTestspaceInvocation(["exec", "--", "printf", "ok"]),
+        {
+            args: ["--", "printf", "ok"],
+            command: "exec",
+        },
+    );
 });
 
 test("testspace lifecycle rejects direct or host-home execution", () => {
@@ -782,9 +918,18 @@ test("testspace lifecycle rejects direct or host-home execution", () => {
         isolation: LINUX_TESTSPACE_ISOLATION,
         platform: "linux",
     });
-    assert.doesNotThrow(() => assertTestspaceLifecycleEnvironment(root, guarded, { platform: "linux" }));
+    assert.doesNotThrow(() =>
+        assertTestspaceLifecycleEnvironment(root, guarded, {
+            platform: "linux",
+        }),
+    );
     assert.throws(
-        () => assertTestspaceLifecycleEnvironment(root, { ...guarded, HOME: "/home/real-user" }, { platform: "linux" }),
+        () =>
+            assertTestspaceLifecycleEnvironment(
+                root,
+                { ...guarded, HOME: "/home/real-user" },
+                { platform: "linux" },
+            ),
         /non-isolated HOME/u,
     );
     const portable = buildTestspaceExecutionEnvironment(root, "b".repeat(48), {
@@ -792,7 +937,9 @@ test("testspace lifecycle rejects direct or host-home execution", () => {
         platform: "darwin",
         runtimeOptions: { platform: "darwin", temporaryDirectory: "/tmp" },
     });
-    assert.doesNotThrow(() => assertTestspaceExecutionContext(root, portable, { platform: "darwin" }));
+    assert.doesNotThrow(() =>
+        assertTestspaceExecutionContext(root, portable, { platform: "darwin" }),
+    );
 });
 
 test("testspace namespace state path is deterministic per user and root", () => {

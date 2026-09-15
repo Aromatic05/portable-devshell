@@ -1,25 +1,42 @@
 import assert from "node:assert/strict";
 
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+    Client,
+    StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 
-export async function runTestspaceWorkspaceSmoke({ endpoint, instance, workspace }) {
-    const client = new Client({ name: "testspace-workspace-smoke", version: "0.0.0" });
+export async function runTestspaceWorkspaceSmoke({
+    endpoint,
+    instance,
+    workspace,
+}) {
+    const client = new Client({
+        name: "testspace-workspace-smoke",
+        version: "0.0.0",
+    });
     try {
-        await client.connect(new StreamableHTTPClientTransport(new URL(endpoint)));
+        await client.connect(
+            new StreamableHTTPClientTransport(new URL(endpoint)),
+        );
 
         const listed = await client.listResources();
-        const workspaceResource = listed.resources.find((resource) => (
-            resource.name === "portable-devshell Workspace" &&
-            resource.uri.startsWith("ui://portable-devshell/workspace")
-        ));
+        const workspaceResource = listed.resources.find(
+            (resource) =>
+                resource.name === "portable-devshell Workspace" &&
+                resource.uri.startsWith("ui://portable-devshell/workspace"),
+        );
         assert.notEqual(
             workspaceResource,
             undefined,
             "Workspace resource is not discoverable from the Testspace MCP endpoint.",
         );
-        const resource = await client.readResource({ uri: workspaceResource.uri });
+        const resource = await client.readResource({
+            uri: workspaceResource.uri,
+        });
         const html = resource.contents
-            .map((content) => typeof content.text === "string" ? content.text : "")
+            .map((content) =>
+                typeof content.text === "string" ? content.text : "",
+            )
             .join("\n");
         assert.match(html, /portable-devshell/iu);
         assert.match(html, /Workspace/u);

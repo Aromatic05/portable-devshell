@@ -1,9 +1,20 @@
 import { join } from "node:path";
 
-import { HttpHost, type McpHost, type McpOAuthApprovalService } from "@portable-devshell/mcp";
-import type { ControlConfig, ControlWebAuthConfig, JsonValue } from "@portable-devshell/shared";
+import {
+    HttpHost,
+    type McpHost,
+    type McpOAuthApprovalService,
+} from "@portable-devshell/mcp";
+import type {
+    ControlConfig,
+    ControlWebAuthConfig,
+    JsonValue,
+} from "@portable-devshell/shared";
 
-import { ConfigEditorCoordinator, type ConfigRuntimeChangeSet } from "../../../control/config/editor/Coordinator.js";
+import {
+    ConfigEditorCoordinator,
+    type ConfigRuntimeChangeSet,
+} from "../../../control/config/editor/Coordinator.js";
 import { ToolCallProvenanceStore } from "../../../instance/execution/tool/Provenance.js";
 import { McpInstanceGatewayControl } from "../../mcp/Gateway.js";
 import { decorateMcpInstanceGatewayArtifact } from "../../mcp/Gateway.js";
@@ -36,8 +47,14 @@ export class ControlRuntimeMcp {
     readonly #state: ControlRuntimeState;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #controlPaths: ControlPathHome;
-    #applyWebConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
-    #applyMcpConfig?: (previous: ControlConfig, next: ControlConfig) => Promise<void>;
+    #applyWebConfig?: (
+        previous: ControlConfig,
+        next: ControlConfig,
+    ) => Promise<void>;
+    #applyMcpConfig?: (
+        previous: ControlConfig,
+        next: ControlConfig,
+    ) => Promise<void>;
 
     constructor(options: ControlRuntimeMcpOptions) {
         const factory = options.factory ?? new McpRuntimeFactory();
@@ -45,7 +62,9 @@ export class ControlRuntimeMcp {
         this.#state = options.state;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
-        this.toolProvenance = new ToolCallProvenanceStore(options.controlPaths.toolProvenanceFile);
+        this.toolProvenance = new ToolCallProvenanceStore(
+            options.controlPaths.toolProvenanceFile,
+        );
         const config = options.state.requireConfig();
         this.#mcpEnabled = config.mcp.enabled;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
@@ -60,42 +79,58 @@ export class ControlRuntimeMcp {
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
             mutationRunner: options.state.configMutations,
-            setConfig: (config) => options.state.setConfig(config)
+            setConfig: (config) => options.state.setConfig(config),
         });
         this.instanceGateway = new McpInstanceGatewayControl({
             getConfig: () => options.state.requireConfig(),
             instanceRegistry: options.state.instances,
-            toolProvenance: this.toolProvenance
+            toolProvenance: this.toolProvenance,
         });
         gatewayHolder.value = this.instanceGateway;
-        this.#host = factory.wire(options.state.requireConfig(), options.state.instances, {
-            contextFile: options.controlPaths.contextsFile,
-            gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, options.artifact.service),
-            storageDir: options.controlPaths.oauthDir,
-            toolProvenance: this.toolProvenance,
-            workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile
-        });
+        this.#host = factory.wire(
+            options.state.requireConfig(),
+            options.state.instances,
+            {
+                contextFile: options.controlPaths.contextsFile,
+                gateway: decorateMcpInstanceGatewayArtifact(
+                    this.instanceGateway,
+                    options.artifact.service,
+                ),
+                storageDir: options.controlPaths.oauthDir,
+                toolProvenance: this.toolProvenance,
+                workspaceAppLeaseFile:
+                    options.controlPaths.workspaceAppLeasesFile,
+            },
+        );
         if (config.web.enabled) {
             this.#webPublicBaseUrl = config.web.publicBaseUrl;
-            this.#webHost = this.#host !== undefined && sameEndpoint(config.mcp, config.web)
-                ? this.#host.server
-                : new HttpHost({ listenHost: config.web.listenHost, listenPort: config.web.listenPort });
+            this.#webHost =
+                this.#host !== undefined && sameEndpoint(config.mcp, config.web)
+                    ? this.#host.server
+                    : new HttpHost({
+                          listenHost: config.web.listenHost,
+                          listenPort: config.web.listenPort,
+                      });
         }
-        if (this.#host !== undefined) options.artifact.installHttpRoute(this.#host.server);
+        if (this.#host !== undefined)
+            options.artifact.installHttpRoute(this.#host.server);
         this.configEditor = new ConfigEditorCoordinator({
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
             getMcpHost: () => this.#host,
             getMcpInstanceGateway: () => this.instanceGateway,
-            getRestartControlRequired: () => options.state.restartControlRequired,
+            getRestartControlRequired: () =>
+                options.state.restartControlRequired,
             homeDirectory: options.state.homeDirectory,
             instanceRegistry: options.state.instances,
-            markRestartControlRequired: () => options.state.markRestartControlRequired(),
+            markRestartControlRequired: () =>
+                options.state.markRestartControlRequired(),
             mutationRunner: options.state.configMutations,
             runtimeApply: {
-                apply: async (previous, next, changes) => await this.#applyConfig(previous, next, changes)
+                apply: async (previous, next, changes) =>
+                    await this.#applyConfig(previous, next, changes),
             },
-            setConfig: (config) => options.state.setConfig(config)
+            setConfig: (config) => options.state.setConfig(config),
         });
     }
 
@@ -107,24 +142,36 @@ export class ControlRuntimeMcp {
         return this.#publicBaseUrl;
     }
 
-    setWebConfigApplier(apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>): void {
+    setWebConfigApplier(
+        apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>,
+    ): void {
         this.#applyWebConfig = apply;
     }
 
-    setMcpConfigApplier(apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>): void {
+    setMcpConfigApplier(
+        apply: (previous: ControlConfig, next: ControlConfig) => Promise<void>,
+    ): void {
         this.#applyMcpConfig = apply;
     }
 
-    async replaceMcpHost(previousConfig: ControlConfig, config: ControlConfig): Promise<McpHost | undefined> {
+    async replaceMcpHost(
+        previousConfig: ControlConfig,
+        config: ControlConfig,
+    ): Promise<McpHost | undefined> {
         const next = this.#factory.wire(config, this.#state.instances, {
             contextFile: this.#controlPaths.contextsFile,
-            gateway: decorateMcpInstanceGatewayArtifact(this.instanceGateway, this.#artifact.service),
+            gateway: decorateMcpInstanceGatewayArtifact(
+                this.instanceGateway,
+                this.#artifact.service,
+            ),
             storageDir: this.#controlPaths.oauthDir,
             toolProvenance: this.toolProvenance,
-            workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile
+            workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile,
         });
         const previous = this.#host;
-        const sameEndpointAsPrevious = previous !== undefined && sameEndpoint(previousConfig.mcp, config.mcp);
+        const sameEndpointAsPrevious =
+            previous !== undefined &&
+            sameEndpoint(previousConfig.mcp, config.mcp);
         if (sameEndpointAsPrevious) await previous.stop();
         try {
             if (next !== undefined) {
@@ -134,25 +181,36 @@ export class ControlRuntimeMcp {
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             if (sameEndpointAsPrevious) {
-                await previous?.start().catch((rollbackError) => rollbackFailures.push(rollbackError));
+                await previous
+                    ?.start()
+                    .catch((rollbackError) =>
+                        rollbackFailures.push(rollbackError),
+                    );
             }
             if (rollbackFailures.length > 0) {
                 throw new AggregateError(
                     [error, ...rollbackFailures],
-                    "MCP host replacement failed and rollback was incomplete."
+                    "MCP host replacement failed and rollback was incomplete.",
                 );
             }
             throw error;
         }
         this.#host = next;
-        this.#publicBaseUrl = config.mcp.enabled ? config.mcp.publicBaseUrl : undefined;
+        this.#publicBaseUrl = config.mcp.enabled
+            ? config.mcp.publicBaseUrl
+            : undefined;
         return previous;
     }
 
-    async restoreMcpHost(host: McpHost | undefined, config: ControlConfig): Promise<void> {
+    async restoreMcpHost(
+        host: McpHost | undefined,
+        config: ControlConfig,
+    ): Promise<void> {
         const current = this.#host;
         this.#host = host;
-        this.#publicBaseUrl = config.mcp.enabled ? config.mcp.publicBaseUrl : undefined;
+        this.#publicBaseUrl = config.mcp.enabled
+            ? config.mcp.publicBaseUrl
+            : undefined;
         const failures: unknown[] = [];
         if (current !== undefined && current !== host) {
             await current.stop().catch((error) => failures.push(error));
@@ -162,7 +220,10 @@ export class ControlRuntimeMcp {
             await host.start().catch((error) => failures.push(error));
         }
         if (failures.length > 0) {
-            throw new AggregateError(failures, "MCP host rollback was incomplete.");
+            throw new AggregateError(
+                failures,
+                "MCP host rollback was incomplete.",
+            );
         }
     }
 
@@ -186,31 +247,49 @@ export class ControlRuntimeMcp {
         return join(this.#controlPaths.oauthDir, "web");
     }
 
-    async replaceWebHost(previousConfig: ControlConfig, config: ControlConfig): Promise<HttpHost | undefined> {
+    async replaceWebHost(
+        previousConfig: ControlConfig,
+        config: ControlConfig,
+    ): Promise<HttpHost | undefined> {
         const previous = this.#webHost;
         const next = config.web.enabled
             ? this.#host !== undefined && sameEndpoint(config.mcp, config.web)
                 ? this.#host.server
-                : new HttpHost({ listenHost: config.web.listenHost, listenPort: config.web.listenPort })
+                : new HttpHost({
+                      listenHost: config.web.listenHost,
+                      listenPort: config.web.listenPort,
+                  })
             : undefined;
-        const same = previous !== undefined && next !== undefined && next !== previous
-            && next !== this.#host?.server && previous !== this.#host?.server
-            && sameEndpoint(previousConfig.web, config.web);
+        const same =
+            previous !== undefined &&
+            next !== undefined &&
+            next !== previous &&
+            next !== this.#host?.server &&
+            previous !== this.#host?.server &&
+            sameEndpoint(previousConfig.web, config.web);
         if (same && previous !== undefined) {
             await previous.stop();
         }
-        if (next !== undefined && next !== previous && next !== this.#host?.server) {
+        if (
+            next !== undefined &&
+            next !== previous &&
+            next !== this.#host?.server
+        ) {
             try {
                 await next.start();
             } catch (error) {
                 const rollbackFailures: unknown[] = [];
                 if (same && previous !== undefined) {
-                    await previous.start().catch((rollbackError) => rollbackFailures.push(rollbackError));
+                    await previous
+                        .start()
+                        .catch((rollbackError) =>
+                            rollbackFailures.push(rollbackError),
+                        );
                 }
                 if (rollbackFailures.length > 0) {
                     throw new AggregateError(
                         [error, ...rollbackFailures],
-                        "Web host replacement failed and rollback was incomplete."
+                        "Web host replacement failed and rollback was incomplete.",
                     );
                 }
                 throw error;
@@ -218,24 +297,39 @@ export class ControlRuntimeMcp {
         }
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
-        this.#webPublicBaseUrl = config.web.enabled ? config.web.publicBaseUrl : undefined;
+        this.#webPublicBaseUrl = config.web.enabled
+            ? config.web.publicBaseUrl
+            : undefined;
         this.#webHost = next;
         return previous;
     }
 
     async stopRetiredWebHost(host: HttpHost | undefined): Promise<void> {
-        if (host !== undefined && host !== this.#webHost && host !== this.#host?.server) {
+        if (
+            host !== undefined &&
+            host !== this.#webHost &&
+            host !== this.#host?.server
+        ) {
             await host.stop();
         }
     }
 
-    async restoreWebHost(host: HttpHost | undefined, config: ControlConfig): Promise<void> {
+    async restoreWebHost(
+        host: HttpHost | undefined,
+        config: ControlConfig,
+    ): Promise<void> {
         const current = this.#webHost;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
-        this.#webPublicBaseUrl = config.web.enabled ? config.web.publicBaseUrl : undefined;
+        this.#webPublicBaseUrl = config.web.enabled
+            ? config.web.publicBaseUrl
+            : undefined;
         this.#webHost = host;
-        if (current !== undefined && current !== host && current !== this.#host?.server) {
+        if (
+            current !== undefined &&
+            current !== host &&
+            current !== this.#host?.server
+        ) {
             await current.stop();
         }
         if (host !== undefined && host !== this.#host?.server) {
@@ -246,7 +340,7 @@ export class ControlRuntimeMcp {
     async #applyConfig(
         previous: ControlConfig,
         next: ControlConfig,
-        changes: ConfigRuntimeChangeSet
+        changes: ConfigRuntimeChangeSet,
     ): Promise<boolean> {
         if (changes.instanceAuth && !changes.mcp && !changes.web) return true;
 
@@ -255,7 +349,11 @@ export class ControlRuntimeMcp {
             !changes.mcp &&
             previous.web.enabled &&
             next.web.enabled &&
-            endpointIsIndependent(previous.web, previous.mcp, previous.mcp.enabled) &&
+            endpointIsIndependent(
+                previous.web,
+                previous.mcp,
+                previous.mcp.enabled,
+            ) &&
             endpointIsIndependent(next.web, next.mcp, next.mcp.enabled) &&
             this.#applyWebConfig !== undefined
         ) {
@@ -267,7 +365,11 @@ export class ControlRuntimeMcp {
             !changes.web &&
             previous.mcp.enabled &&
             next.mcp.enabled &&
-            endpointIsIndependent(previous.mcp, previous.web, previous.web.enabled) &&
+            endpointIsIndependent(
+                previous.mcp,
+                previous.web,
+                previous.web.enabled,
+            ) &&
             endpointIsIndependent(next.mcp, next.web, next.web.enabled) &&
             this.#applyMcpConfig !== undefined
         ) {
@@ -285,24 +387,34 @@ export class ControlRuntimeMcp {
         if (!this.#mcpEnabled) {
             return {
                 running: false,
-                reason: "MCP runtime is disabled."
+                reason: "MCP runtime is disabled.",
             };
         }
-        return (this.#host as unknown as { status(): JsonValue } | undefined)?.status() ?? {
-            running: false,
-            reason: "MCP runtime is disabled."
-        };
+        return (
+            (
+                this.#host as unknown as { status(): JsonValue } | undefined
+            )?.status() ?? {
+                running: false,
+                reason: "MCP runtime is disabled.",
+            }
+        );
     }
 
     async start(): Promise<void> {
         await this.#host?.start();
-        if (this.#webHost !== undefined && this.#webHost !== this.#host?.server) {
+        if (
+            this.#webHost !== undefined &&
+            this.#webHost !== this.#host?.server
+        ) {
             await this.#webHost.start();
         }
     }
 
     async stop(): Promise<void> {
-        if (this.#webHost !== undefined && this.#webHost !== this.#host?.server) {
+        if (
+            this.#webHost !== undefined &&
+            this.#webHost !== this.#host?.server
+        ) {
             await this.#webHost.stop();
         }
         await this.#host?.stop();
@@ -312,14 +424,17 @@ export class ControlRuntimeMcp {
 function endpointIsIndependent(
     endpoint: { listenHost: string; listenPort: number },
     other: { listenHost: string; listenPort: number },
-    otherEnabled: boolean
+    otherEnabled: boolean,
 ): boolean {
     return !otherEnabled || !sameEndpoint(endpoint, other);
 }
 
 function sameEndpoint(
     left: { listenHost: string; listenPort: number },
-    right: { listenHost: string; listenPort: number }
+    right: { listenHost: string; listenPort: number },
 ): boolean {
-    return left.listenHost === right.listenHost && left.listenPort === right.listenPort;
+    return (
+        left.listenHost === right.listenHost &&
+        left.listenPort === right.listenPort
+    );
 }

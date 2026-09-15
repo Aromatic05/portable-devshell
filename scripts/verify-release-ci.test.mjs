@@ -15,25 +15,32 @@ function run(path, overrides = {}) {
         html_url: `https://example.test/${path}`,
         path,
         status: "completed",
-        ...overrides
+        ...overrides,
     };
 }
 
 test("release CI gate accepts a successful target-matrix dev-tag run for the exact commit", () => {
-    const result = evaluateDevelopmentCiRuns([
-        run(".github/workflows/ci.yml")
-    ], sha);
+    const result = evaluateDevelopmentCiRuns(
+        [run(".github/workflows/ci.yml")],
+        sha,
+    );
 
     assert.equal(result.ok, true);
-    assert.equal(result.workflows.every((workflow) => workflow.successful !== undefined), true);
+    assert.equal(
+        result.workflows.every((workflow) => workflow.successful !== undefined),
+        true,
+    );
 });
 
 test("release CI gate rejects failures, release-tag runs, and runs for another commit", () => {
-    const result = evaluateDevelopmentCiRuns([
-        run(".github/workflows/ci.yml", { conclusion: "failure" }),
-        run(".github/workflows/ci.yml", { head_branch: "v0.4.5" }),
-        run(".github/workflows/ci.yml", { head_sha: "b".repeat(40) })
-    ], sha);
+    const result = evaluateDevelopmentCiRuns(
+        [
+            run(".github/workflows/ci.yml", { conclusion: "failure" }),
+            run(".github/workflows/ci.yml", { head_branch: "v0.4.5" }),
+            run(".github/workflows/ci.yml", { head_sha: "b".repeat(40) }),
+        ],
+        sha,
+    );
 
     assert.equal(result.ok, false);
     assert.equal(result.workflows[0].successful, undefined);

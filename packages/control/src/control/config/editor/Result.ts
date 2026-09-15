@@ -2,11 +2,17 @@ import {
     type ApprovalPolicy,
     type ControlConfig,
     type ControlInstanceAlertsConfig,
-    type ControlInstanceConfig
+    type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
 export interface ConfigApplyChange {
-    kind: "instance.deleted" | "instance.disabled" | "instance.enabled" | "instance.updated" | "mcp.endpoint.updated" | "web.updated";
+    kind:
+        | "instance.deleted"
+        | "instance.disabled"
+        | "instance.enabled"
+        | "instance.updated"
+        | "mcp.endpoint.updated"
+        | "web.updated";
     target: string;
 }
 
@@ -19,49 +25,83 @@ export interface ConfigApplyResult {
     restartControlRequired: boolean;
 }
 
-export function buildApplyResult(previous: ControlConfig, next: ControlConfig, appliedChanges: ConfigApplyChange[], hotApplied = false): ConfigApplyResult {
+export function buildApplyResult(
+    previous: ControlConfig,
+    next: ControlConfig,
+    appliedChanges: ConfigApplyChange[],
+    hotApplied = false,
+): ConfigApplyResult {
     const affectedInstances = new Set<string>();
     const affectedMcpEndpoints = new Set<string>();
     const affectedListeners = new Set<string>();
 
-    const previousInstances = new Map(previous.instances.map((instance) => [instance.name, instance] as const));
-    const nextInstances = new Map(next.instances.map((instance) => [instance.name, instance] as const));
-    const instanceNames = new Set([...previousInstances.keys(), ...nextInstances.keys()]);
+    const previousInstances = new Map(
+        previous.instances.map(
+            (instance) => [instance.name, instance] as const,
+        ),
+    );
+    const nextInstances = new Map(
+        next.instances.map((instance) => [instance.name, instance] as const),
+    );
+    const instanceNames = new Set([
+        ...previousInstances.keys(),
+        ...nextInstances.keys(),
+    ]);
 
     for (const instanceName of instanceNames) {
         const previousInstance = previousInstances.get(instanceName);
         const nextInstance = nextInstances.get(instanceName);
 
-        if (stableStringify(previousInstance) === stableStringify(nextInstance)) {
+        if (
+            stableStringify(previousInstance) === stableStringify(nextInstance)
+        ) {
             continue;
         }
 
         affectedInstances.add(instanceName);
         if (hasMcpEndpointChange(previousInstance, nextInstance)) {
-            affectedMcpEndpoints.add(nextInstance?.mcp.path ?? previousInstance?.mcp.path ?? `/${instanceName}/mcp`);
+            affectedMcpEndpoints.add(
+                nextInstance?.mcp.path ??
+                    previousInstance?.mcp.path ??
+                    `/${instanceName}/mcp`,
+            );
         }
     }
 
     if (stableStringify(previous.mcp) !== stableStringify(next.mcp)) {
         affectedMcpEndpoints.add("mcp");
-        affectedListeners.add(listenerId(previous.mcp.listenHost, previous.mcp.listenPort));
-        affectedListeners.add(listenerId(next.mcp.listenHost, next.mcp.listenPort));
+        affectedListeners.add(
+            listenerId(previous.mcp.listenHost, previous.mcp.listenPort),
+        );
+        affectedListeners.add(
+            listenerId(next.mcp.listenHost, next.mcp.listenPort),
+        );
     }
     if (stableStringify(previous.web) !== stableStringify(next.web)) {
-        affectedListeners.add(listenerId(previous.web.listenHost, previous.web.listenPort));
-        affectedListeners.add(listenerId(next.web.listenHost, next.web.listenPort));
+        affectedListeners.add(
+            listenerId(previous.web.listenHost, previous.web.listenPort),
+        );
+        affectedListeners.add(
+            listenerId(next.web.listenHost, next.web.listenPort),
+        );
     }
 
     return {
-        affectedInstances: [...affectedInstances].sort((left, right) => left.localeCompare(right)),
-        affectedMcpEndpoints: [...affectedMcpEndpoints].sort((left, right) => left.localeCompare(right)),
-        affectedListeners: [...affectedListeners].sort((left, right) => left.localeCompare(right)),
+        affectedInstances: [...affectedInstances].sort((left, right) =>
+            left.localeCompare(right),
+        ),
+        affectedMcpEndpoints: [...affectedMcpEndpoints].sort((left, right) =>
+            left.localeCompare(right),
+        ),
+        affectedListeners: [...affectedListeners].sort((left, right) =>
+            left.localeCompare(right),
+        ),
         appliedChanges,
         reloadRequired: affectedInstances.size > 0,
-        restartControlRequired: !hotApplied && (
-            stableStringify(previous.mcp) !== stableStringify(next.mcp) ||
-            stableStringify(previous.web) !== stableStringify(next.web)
-        )
+        restartControlRequired:
+            !hotApplied &&
+            (stableStringify(previous.mcp) !== stableStringify(next.mcp) ||
+                stableStringify(previous.web) !== stableStringify(next.web)),
     };
 }
 
@@ -78,21 +118,30 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
     const effectiveSecurityMode = instance.security.mode;
 
     return {
-        alerts: instance.alerts === undefined ? undefined : {
-            ...instance.alerts,
-            scripts: instance.alerts.scripts?.map((script) => ({ ...script, command: [...script.command] })),
-        },
+        alerts:
+            instance.alerts === undefined
+                ? undefined
+                : {
+                      ...instance.alerts,
+                      scripts: instance.alerts.scripts?.map((script) => ({
+                          ...script,
+                          command: [...script.command],
+                      })),
+                  },
         approvalPolicy: instance.approvalPolicy,
         effectiveSecurityMode,
         env: {
             ...instance.env,
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
-            DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
-        }
+            DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
+        },
     };
 }
 
-export function requiresWorkerRebuild(previous: ControlInstanceConfig, next: ControlInstanceConfig): boolean {
+export function requiresWorkerRebuild(
+    previous: ControlInstanceConfig,
+    next: ControlInstanceConfig,
+): boolean {
     return [
         previous.provider !== next.provider,
         stableStringify(previous.ssh) !== stableStringify(next.ssh),
@@ -101,15 +150,18 @@ export function requiresWorkerRebuild(previous: ControlInstanceConfig, next: Con
         previous.podmanBinary !== next.podmanBinary,
         previous.security.mode !== next.security.mode,
         stableStringify(previous.logs) !== stableStringify(next.logs),
-        stableStringify(previous.tools) !== stableStringify(next.tools)
+        stableStringify(previous.tools) !== stableStringify(next.tools),
     ].some(Boolean);
 }
 
 function hasMcpEndpointChange(
     previousInstance: ControlInstanceConfig | undefined,
-    nextInstance: ControlInstanceConfig | undefined
+    nextInstance: ControlInstanceConfig | undefined,
 ): boolean {
-    return stableStringify(previousInstance?.mcp) !== stableStringify(nextInstance?.mcp);
+    return (
+        stableStringify(previousInstance?.mcp) !==
+        stableStringify(nextInstance?.mcp)
+    );
 }
 
 function stableStringify(value: unknown): string {

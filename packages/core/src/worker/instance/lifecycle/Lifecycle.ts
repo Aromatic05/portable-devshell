@@ -12,7 +12,7 @@ import {
     readErrorMessage,
     toJsonDetails,
     withInstanceDetails,
-    wrapWorkerCommandError
+    wrapWorkerCommandError,
 } from "../state/Error.js";
 import { parseWorkerStatus } from "./Status.js";
 
@@ -44,17 +44,23 @@ export class WorkerInstanceLifecycle {
         return await this.#runExclusive(async () => await this.#start());
     }
 
-    async startInteractive(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
-        return await this.#runExclusive(async () => await this.#start(interactiveSession));
+    async startInteractive(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<InstanceSnapshot> {
+        return await this.#runExclusive(
+            async () => await this.#start(interactiveSession),
+        );
     }
 
-    async #start(interactiveSession?: WorkerCommandInteractiveSession): Promise<InstanceSnapshot> {
+    async #start(
+        interactiveSession?: WorkerCommandInteractiveSession,
+    ): Promise<InstanceSnapshot> {
         if (this.#config.managementMode === "selfManaged") {
             throw createError({
                 code: errorCodes.reverseSelfManagedLifecycle,
                 details: { instance: this.#config.name, operation: "start" },
                 message: `Instance ${this.#config.name} is self-managed; start it on the remote machine.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -62,17 +68,23 @@ export class WorkerInstanceLifecycle {
             connectionState: "disconnected",
             daemonState: "starting",
             lastErrorCode: undefined,
-            lastErrorMessage: undefined
+            lastErrorMessage: undefined,
         });
 
         try {
-            const startResult = await this.#requireCommandClient().start(interactiveSession);
+            const startResult =
+                await this.#requireCommandClient().start(interactiveSession);
             if (startResult.exitCode !== 0) {
                 throw createError({
                     code: errorCodes.coreWorkerStartFailed,
                     message: `Worker start failed for instance ${this.#config.name}.`,
                     retryable: false,
-                    details: toJsonDetails(withInstanceDetails(startResult.details, this.#config.name))
+                    details: toJsonDetails(
+                        withInstanceDetails(
+                            startResult.details,
+                            this.#config.name,
+                        ),
+                    ),
                 });
             }
         } catch (error) {
@@ -80,13 +92,16 @@ export class WorkerInstanceLifecycle {
                 error,
                 errorCodes.coreWorkerStartFailed,
                 `Worker start failed for instance ${this.#config.name}.`,
-                this.#config.name
+                this.#config.name,
             );
             await this.#applyStateUpdate({
                 connectionState: "disconnected",
                 daemonState: "stopped",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStartFailed),
-                lastErrorMessage: readErrorMessage(wrappedError)
+                lastErrorCode: getErrorCode(
+                    wrappedError,
+                    errorCodes.coreWorkerStartFailed,
+                ),
+                lastErrorMessage: readErrorMessage(wrappedError),
             });
             throw wrappedError;
         }
@@ -105,7 +120,7 @@ export class WorkerInstanceLifecycle {
                 code: errorCodes.reverseSelfManagedLifecycle,
                 details: { instance: this.#config.name, operation: "stop" },
                 message: `Instance ${this.#config.name} is self-managed; stop it on the remote machine.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -113,7 +128,7 @@ export class WorkerInstanceLifecycle {
             connectionState: "disconnected",
             daemonState: "stopping",
             lastErrorCode: undefined,
-            lastErrorMessage: undefined
+            lastErrorMessage: undefined,
         });
         this.#connection.closeBridge();
         this.#connection.clearHandshake();
@@ -124,7 +139,9 @@ export class WorkerInstanceLifecycle {
                     code: errorCodes.coreWorkerStopFailed,
                     message: `Worker stop failed for instance ${this.#config.name}.`,
                     retryable: false,
-                    details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
+                    details: toJsonDetails(
+                        withInstanceDetails(result.details, this.#config.name),
+                    ),
                 });
             }
         } catch (error) {
@@ -132,12 +149,15 @@ export class WorkerInstanceLifecycle {
                 error,
                 errorCodes.coreWorkerStopFailed,
                 `Worker stop failed for instance ${this.#config.name}.`,
-                this.#config.name
+                this.#config.name,
             );
             await this.#refreshStatus().catch(() => undefined);
             await this.#applyStateUpdate({
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStopFailed),
-                lastErrorMessage: readErrorMessage(wrappedError)
+                lastErrorCode: getErrorCode(
+                    wrappedError,
+                    errorCodes.coreWorkerStopFailed,
+                ),
+                lastErrorMessage: readErrorMessage(wrappedError),
             });
             throw wrappedError;
         }
@@ -147,16 +167,20 @@ export class WorkerInstanceLifecycle {
         return await this.#applyStateUpdate({
             connectionState: "disconnected",
             lastErrorCode: undefined,
-            lastErrorMessage: undefined
+            lastErrorMessage: undefined,
         });
     }
 
     async refreshStatus(): Promise<InstanceSnapshot> {
-        return await this.#runExclusive(async () => await this.#refreshStatus());
+        return await this.#runExclusive(
+            async () => await this.#refreshStatus(),
+        );
     }
 
     async reconnectRpc(): Promise<InstanceSnapshot> {
-        return await this.#runExclusive(async () => await this.#connection.reconnectRpc());
+        return await this.#runExclusive(
+            async () => await this.#connection.reconnectRpc(),
+        );
     }
 
     async closeConnection(): Promise<void> {
@@ -172,7 +196,9 @@ export class WorkerInstanceLifecycle {
                     code: errorCodes.coreProviderFailed,
                     message: `Worker runtime retirement failed for instance ${this.#config.name}.`,
                     retryable: false,
-                    details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
+                    details: toJsonDetails(
+                        withInstanceDetails(result.details, this.#config.name),
+                    ),
                 });
             }
         });
@@ -194,7 +220,7 @@ export class WorkerInstanceLifecycle {
                     daemonState: "stopped",
                     lastErrorCode: undefined,
                     lastErrorMessage: undefined,
-                    pid: undefined
+                    pid: undefined,
                 });
             }
 
@@ -213,7 +239,7 @@ export class WorkerInstanceLifecycle {
                     daemonState: status.daemonState,
                     lastErrorCode: undefined,
                     lastErrorMessage: undefined,
-                    pid: status.pid
+                    pid: status.pid,
                 });
             case "running":
                 return await this.#connection.refreshRunningStatus(status.pid);
@@ -223,7 +249,7 @@ export class WorkerInstanceLifecycle {
                     daemonState: "failed",
                     lastErrorCode: errorCodes.coreWorkerStatusFailed,
                     lastErrorMessage: `Worker returned an unsupported status for instance ${this.#config.name}.`,
-                    pid: status.pid
+                    pid: status.pid,
                 });
         }
     }
@@ -237,7 +263,7 @@ export class WorkerInstanceLifecycle {
             code: errorCodes.coreProviderFailed,
             details: { instance: this.#config.name },
             message: `Instance ${this.#config.name} does not have a controller-managed command transport.`,
-            retryable: false
+            retryable: false,
         });
     }
 
@@ -245,7 +271,7 @@ export class WorkerInstanceLifecycle {
         const operation = this.#operationTail.then(factory, factory);
         this.#operationTail = operation.then(
             () => undefined,
-            () => undefined
+            () => undefined,
         );
         return await operation;
     }
@@ -263,13 +289,16 @@ export class WorkerInstanceLifecycle {
                 error,
                 errorCodes.coreWorkerStatusFailed,
                 `Worker status failed for instance ${this.#config.name}.`,
-                this.#config.name
+                this.#config.name,
             );
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(wrappedError, errorCodes.coreWorkerStatusFailed),
-                lastErrorMessage: readErrorMessage(wrappedError)
+                lastErrorCode: getErrorCode(
+                    wrappedError,
+                    errorCodes.coreWorkerStatusFailed,
+                ),
+                lastErrorMessage: readErrorMessage(wrappedError),
             });
             throw wrappedError;
         }
@@ -279,13 +308,15 @@ export class WorkerInstanceLifecycle {
                 code: errorCodes.coreWorkerStatusFailed,
                 message: `Worker status failed for instance ${this.#config.name}.`,
                 retryable: false,
-                details: toJsonDetails(withInstanceDetails(result.details, this.#config.name))
+                details: toJsonDetails(
+                    withInstanceDetails(result.details, this.#config.name),
+                ),
             });
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
                 lastErrorCode: error.code,
-                lastErrorMessage: readErrorMessage(error)
+                lastErrorMessage: readErrorMessage(error),
             });
             throw error;
         }
@@ -296,8 +327,11 @@ export class WorkerInstanceLifecycle {
             await this.#applyStateUpdate({
                 connectionState: "failed",
                 daemonState: "failed",
-                lastErrorCode: getErrorCode(error, errorCodes.coreWorkerStatusFailed),
-                lastErrorMessage: readErrorMessage(error)
+                lastErrorCode: getErrorCode(
+                    error,
+                    errorCodes.coreWorkerStatusFailed,
+                ),
+                lastErrorMessage: readErrorMessage(error),
             });
             throw error;
         }

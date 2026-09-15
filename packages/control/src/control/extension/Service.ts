@@ -1,6 +1,6 @@
 import type {
     ExtensionRemoveResult,
-    ExtensionRuntimeRecord
+    ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
 import type { ExtensionControlPort } from "./Route.js";
@@ -11,7 +11,10 @@ export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: ExtensionHost;
     readonly #installer: ExtensionInstallService;
 
-    constructor(options: { host: ExtensionHost; installer: ExtensionInstallService }) {
+    constructor(options: {
+        host: ExtensionHost;
+        installer: ExtensionInstallService;
+    }) {
         this.#host = options.host;
         this.#installer = options.installer;
     }
@@ -28,7 +31,10 @@ export class ExtensionControlService implements ExtensionControlPort {
         return await this.#installer.install(sourcePath);
     }
 
-    async installBuiltin(id: string, sourcePath: string): Promise<ExtensionRuntimeRecord> {
+    async installBuiltin(
+        id: string,
+        sourcePath: string,
+    ): Promise<ExtensionRuntimeRecord> {
         return await this.#installer.installBuiltin(id, sourcePath);
     }
 

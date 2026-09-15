@@ -8,13 +8,19 @@ if (process.platform !== "win32") {
     throw new Error("smoke-install-release-windows.mjs must run on Windows.");
 }
 
-const archiveArgument = process.argv.slice(2).find((argument) => argument !== "--");
+const archiveArgument = process.argv
+    .slice(2)
+    .find((argument) => argument !== "--");
 if (archiveArgument === undefined) {
-    throw new Error("usage: node scripts/smoke-install-release-windows.mjs <portable-devshell-app.tar.gz>");
+    throw new Error(
+        "usage: node scripts/smoke-install-release-windows.mjs <portable-devshell-app.tar.gz>",
+    );
 }
 
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
-const archive = isAbsolute(archiveArgument) ? archiveArgument : resolve(process.cwd(), archiveArgument);
+const archive = isAbsolute(archiveArgument)
+    ? archiveArgument
+    : resolve(process.cwd(), archiveArgument);
 const target = hostTarget();
 const workerName = `devshell-worker-${target}.exe`;
 const root = await createTestTempDirectory("windows-release-install-smoke");
@@ -32,8 +38,11 @@ const environment = {
     PORTABLE_DEVSHELL_HOME: devshellHome,
     PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
     PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
-    PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(/\/$/u, ""),
-    XDG_RUNTIME_DIR: runtime
+    PORTABLE_DEVSHELL_RELEASE_BASE_URL: pathToFileURL(release).href.replace(
+        /\/$/u,
+        "",
+    ),
+    XDG_RUNTIME_DIR: runtime,
 };
 let controlStarted = false;
 
@@ -50,14 +59,20 @@ try {
         await copyFile(path, resolve(release, basename(path)));
     }
 
-    run("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        resolve(repositoryRoot, "scripts", "install-release.ps1")
-    ], false, false, 180_000);
+    run(
+        "powershell.exe",
+        [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            resolve(repositoryRoot, "scripts", "install-release.ps1"),
+        ],
+        false,
+        false,
+        180_000,
+    );
 
     const command = resolve(binDirectory, "devshell.cmd");
     run(command, ["status"], true);
@@ -72,7 +87,12 @@ try {
     if (controlStarted) {
         run(resolve(binDirectory, "devshell.cmd"), ["stop"], true, true);
     }
-    await rm(root, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
+    await rm(root, {
+        force: true,
+        maxRetries: 10,
+        recursive: true,
+        retryDelay: 100,
+    });
 }
 
 function hostTarget() {
@@ -81,21 +101,29 @@ function hostTarget() {
     throw new Error(`unsupported Windows architecture: ${process.arch}`);
 }
 
-function run(executable, args, shell = false, ignoreFailure = false, timeoutMs = 45_000) {
+function run(
+    executable,
+    args,
+    shell = false,
+    ignoreFailure = false,
+    timeoutMs = 45_000,
+) {
     const result = spawnSync(executable, args, {
         cwd: repositoryRoot,
         encoding: "utf8",
         env: environment,
         shell,
         timeout: timeoutMs,
-        windowsHide: true
+        windowsHide: true,
     });
     if (!ignoreFailure && (result.error !== undefined || result.status !== 0)) {
-        throw new Error(`${executable} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+        throw new Error(
+            `${executable} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
+        );
     }
     return {
         status: result.status,
         stderr: result.stderr ?? "",
-        stdout: result.stdout ?? ""
+        stdout: result.stdout ?? "",
     };
 }

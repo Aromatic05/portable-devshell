@@ -18,9 +18,12 @@ export function resolveAuditCtxId(
     logs: readonly AuditLinkedLog[],
     callId: string,
 ): string | undefined {
-    return ctxId ?? logs.find((entry) =>
-        entry.callId === callId && entry.ctxId !== undefined
-    )?.ctxId;
+    return (
+        ctxId ??
+        logs.find(
+            (entry) => entry.callId === callId && entry.ctxId !== undefined,
+        )?.ctxId
+    );
 }
 
 export function resolveAuditOutput(
@@ -35,11 +38,17 @@ export function resolveAuditOutput(
     );
 }
 
-export function auditInputText(input: JsonValue | undefined, fallback: string | undefined): string {
+export function auditInputText(
+    input: JsonValue | undefined,
+    fallback: string | undefined,
+): string {
     return formatJsonValue(input ?? parseJsonFallback(fallback));
 }
 
-export function auditInputSummary(input: JsonValue | undefined, fallback: string | undefined): string {
+export function auditInputSummary(
+    input: JsonValue | undefined,
+    fallback: string | undefined,
+): string {
     return formatJsonSummary(input ?? parseJsonFallback(fallback));
 }
 

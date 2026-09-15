@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    lstat,
+    mkdir,
+    readFile,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -13,9 +20,21 @@ async function harness(t: test.TestContext) {
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const codeDirectory = join(root, "code");
     const binDirectory = join(root, "bin");
-    const launcher = join(codeDirectory, "dist", "builtin", "pi", "PiLauncher.js");
-    await mkdir(join(codeDirectory, "dist", "builtin", "pi"), { recursive: true });
-    await writeFile(launcher, "export async function launchInstalledPi() {}\n", "utf8");
+    const launcher = join(
+        codeDirectory,
+        "dist",
+        "builtin",
+        "pi",
+        "PiLauncher.js",
+    );
+    await mkdir(join(codeDirectory, "dist", "builtin", "pi"), {
+        recursive: true,
+    });
+    await writeFile(
+        launcher,
+        "export async function launchInstalledPi() {}\n",
+        "utf8",
+    );
     const context = {
         capabilities: {},
         generation: "test-generation",
@@ -25,10 +44,10 @@ async function harness(t: test.TestContext) {
             codeDirectory,
             dataDirectory: join(root, "data"),
             runtimeDirectory: join(root, "runtime"),
-            stateDirectory: join(root, "state")
+            stateDirectory: join(root, "state"),
         },
         register() {},
-        version: "0.1.0"
+        version: "0.1.0",
     } as ExtensionContext;
     return { binDirectory, context, launcher, root };
 }
@@ -38,7 +57,7 @@ test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
     const result = await ensureBundledPiCommand(h.context, {
         environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
         homeDirectory: h.root,
-        platform: "linux"
+        platform: "linux",
     });
 
     assert.equal(result.installed, true);
@@ -52,20 +71,30 @@ test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
 test("Agent bundled Pi migrates the legacy core-owned pi launcher", async (t) => {
     const h = await harness(t);
     await mkdir(h.binDirectory, { recursive: true });
-    const legacy = join(h.root, "portable-devshell", "current", "portable-devshell-pi-launcher.mjs");
-    await mkdir(join(h.root, "portable-devshell", "current"), { recursive: true });
+    const legacy = join(
+        h.root,
+        "portable-devshell",
+        "current",
+        "portable-devshell-pi-launcher.mjs",
+    );
+    await mkdir(join(h.root, "portable-devshell", "current"), {
+        recursive: true,
+    });
     await writeFile(legacy, "// legacy\n", "utf8");
     await symlink(legacy, join(h.binDirectory, "pi"));
 
     const result = await ensureBundledPiCommand(h.context, {
         environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
         homeDirectory: h.root,
-        platform: "linux"
+        platform: "linux",
     });
 
     assert.equal(result.installed, true);
     assert.equal((await lstat(result.command)).isSymbolicLink(), false);
-    assert.match(await readFile(result.command, "utf8"), /portable-devshell-agent:pi-launcher-v1/u);
+    assert.match(
+        await readFile(result.command, "utf8"),
+        /portable-devshell-agent:pi-launcher-v1/u,
+    );
 });
 
 test("Agent bundled Pi never replaces a foreign pi command", async (t) => {
@@ -77,9 +106,16 @@ test("Agent bundled Pi never replaces a foreign pi command", async (t) => {
     const result = await ensureBundledPiCommand(h.context, {
         environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
         homeDirectory: h.root,
-        platform: "linux"
+        platform: "linux",
     });
 
-    assert.deepEqual(result, { command, installed: false, reason: "collision" });
-    assert.equal(await readFile(command, "utf8"), "#!/bin/sh\necho foreign-pi\n");
+    assert.deepEqual(result, {
+        command,
+        installed: false,
+        reason: "collision",
+    });
+    assert.equal(
+        await readFile(command, "utf8"),
+        "#!/bin/sh\necho foreign-pi\n",
+    );
 });

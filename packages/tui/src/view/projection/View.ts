@@ -86,13 +86,19 @@ function selectSidebarContext(
     focused: boolean,
     cursor: TuiAppState["interaction"]["sidebarCursor"],
 ): TuiSidebarModel["context"] {
-    if (state.ui.sidebarLevel === "section" && state.ui.selectedPage === "audit") {
+    if (
+        state.ui.sidebarLevel === "section" &&
+        state.ui.selectedPage === "audit"
+    ) {
         return {
             items: selectTuiAuditSidebarEntries(state, focused, cursor),
             kind: "audit",
         };
     }
-    if (state.ui.sidebarLevel === "section" && state.ui.selectedPage === "messages") {
+    if (
+        state.ui.sidebarLevel === "section" &&
+        state.ui.selectedPage === "messages"
+    ) {
         return {
             items: selectTuiMessagesSidebarEntries(state, focused, cursor),
             kind: "messages",
@@ -100,7 +106,8 @@ function selectSidebarContext(
     }
     return {
         items: tuiPageEntries.map((page): TuiSidebarContextEntry => ({
-            focused: focused && cursor?.kind === "context" && cursor.id === page.id,
+            focused:
+                focused && cursor?.kind === "context" && cursor.id === page.id,
             id: page.id,
             label: page.label,
             selected: state.ui.selectedPage === page.id,
@@ -119,9 +126,10 @@ export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
         .filter(([key]) => key === panelKey || key.startsWith(`${panelKey}:`))
         .map(([, error]) => error);
     const panelError = panelErrors[0];
-    const errorLines = panelErrors.length === 0
-        ? undefined
-        : panelErrors.map((error) => `${error.code}: ${error.message}`);
+    const errorLines =
+        panelErrors.length === 0
+            ? undefined
+            : panelErrors.map((error) => `${error.code}: ${error.message}`);
 
     if (activePage.page === "overview") {
         return {
@@ -263,24 +271,27 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarContext":
             return state.ui.sidebarLevel === "section"
-                ? ["enter open", "esc back", "? help", "0-9 pages", "shift+1-9 instances"]
-                : ["enter open", "→ main", "? help", "0-9 pages", "shift+1-9 instances"];
+                ? [
+                      "enter open",
+                      "esc back",
+                      "? help",
+                      "0-9 pages",
+                      "shift+1-9 instances",
+                  ]
+                : [
+                      "enter open",
+                      "→ main",
+                      "? help",
+                      "0-9 pages",
+                      "shift+1-9 instances",
+                  ];
         case "sidebarInstances":
             return ["enter select", "→ main", "? help", "shift+1-9 instances"];
         case "mainBoxes":
             if (state.ui.selectedPage === "overview") {
-                return [
-                    "← sidebar",
-                    "enter instance",
-                    "r",
-                    "/",
-                    "esc back",
-                ];
+                return ["← sidebar", "enter instance", "r", "/", "esc back"];
             }
-            if (
-                route.page === "audit" &&
-                route.view === "conversation"
-            ) {
+            if (route.page === "audit" && route.view === "conversation") {
                 return ["space expand", "↑↓ draft", "enter edit", "esc back"];
             }
             if (route.page === "audit" && route.view === "contexts") {

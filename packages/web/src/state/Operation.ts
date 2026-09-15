@@ -1,5 +1,8 @@
 import type { WebState } from "./Model.js";
-import { errorMessage, withRequestTimeout } from "@portable-devshell/shared/browser";
+import {
+    errorMessage,
+    withRequestTimeout,
+} from "@portable-devshell/shared/browser";
 
 export interface WebOperationAccess {
     getState(): WebState;
@@ -25,7 +28,8 @@ export class WebOperationCoordinator {
         if (
             !this.access.isCurrent(generation) ||
             state.operations[operation] !== undefined
-        ) return false;
+        )
+            return false;
 
         const controller = new AbortController();
         this.#controllers.set(operation, controller);
@@ -43,7 +47,10 @@ export class WebOperationCoordinator {
                 operation,
                 "uncertain",
             );
-            if (!this.access.isCurrent(generation) || controller.signal.aborted) {
+            if (
+                !this.access.isCurrent(generation) ||
+                controller.signal.aborted
+            ) {
                 return false;
             }
             this.complete(operation, { notice: success });

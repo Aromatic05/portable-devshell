@@ -5,10 +5,7 @@ import type {
 } from "../../../../state/store/Model.js";
 import { currentTuiRoute } from "../../../../state/route/State.js";
 import { buildLogContextListBoxes } from "./Sources.js";
-import {
-    buildLogContextBoxes,
-    filterLogEntries,
-} from "./Stream.js";
+import { buildLogContextBoxes, filterLogEntries } from "./Stream.js";
 
 export { filterLogEntries };
 

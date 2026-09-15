@@ -4,7 +4,7 @@ import type {
     InstanceCreateSummary,
     InstanceListEntry,
     JsonValue,
-    PrefixRouteModuleDefinition
+    PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
@@ -28,23 +28,36 @@ export interface InstanceRouteModuleOptions {
     registry: InstanceRegistry;
 }
 
-export function createInstanceRouteModule(options: InstanceRouteModuleOptions): PrefixRouteModuleDefinition {
-    const create = () => requirePort(options.create, "Instance creation is not available.");
-    const editor = () => requirePort(options.editor, "Config editing is not available.");
+export function createInstanceRouteModule(
+    options: InstanceRouteModuleOptions,
+): PrefixRouteModuleDefinition {
+    const create = () =>
+        requirePort(options.create, "Instance creation is not available.");
+    const editor = () =>
+        requirePort(options.editor, "Config editing is not available.");
     return routeModule("instance", {
-        list: () => options.registry.list().map((descriptor): InstanceListEntry => ({
-            ...(descriptor.worker.handshake?.homeDirectory === undefined
-                ? {}
-                : { homeDirectory: descriptor.worker.handshake.homeDirectory }),
-            mcpEnabled: descriptor.mcpEnabled,
-            name: descriptor.name,
-            snapshot: descriptor.worker.snapshot()
-        })) as never,
+        list: () =>
+            options.registry.list().map((descriptor): InstanceListEntry => ({
+                ...(descriptor.worker.handshake?.homeDirectory === undefined
+                    ? {}
+                    : {
+                          homeDirectory:
+                              descriptor.worker.handshake.homeDirectory,
+                      }),
+                mcpEnabled: descriptor.mcpEnabled,
+                name: descriptor.name,
+                snapshot: descriptor.worker.snapshot(),
+            })) as never,
         createSchema: () => create().getSchema() as never,
-        validateCreate: (request) => create().validateDraft(request.payload) as never,
-        create: async (request) => await create().createInstance(request.payload) as never,
-        enable: async (request) => await editor().enableInstance(request.payload),
-        disable: async (request) => await editor().disableInstance(request.payload),
-        delete: async (request) => await editor().deleteInstance(request.payload)
+        validateCreate: (request) =>
+            create().validateDraft(request.payload) as never,
+        create: async (request) =>
+            (await create().createInstance(request.payload)) as never,
+        enable: async (request) =>
+            await editor().enableInstance(request.payload),
+        disable: async (request) =>
+            await editor().disableInstance(request.payload),
+        delete: async (request) =>
+            await editor().deleteInstance(request.payload),
     });
 }

@@ -8,14 +8,14 @@ import {
     type ArtifactShareInput,
     type ArtifactShareResult,
     type ArtifactShareRevokeResult,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { ArtifactRecordStore } from "../RecordStore.js";
 import {
     readSharePayloadSourceInput,
     readSourceInstance,
-    sourceDescriptor
+    sourceDescriptor,
 } from "../Source.js";
 import {
     ARTIFACT_RECORD_VERSION,
@@ -25,7 +25,7 @@ import {
     type ArtifactServiceEndpoint,
     type ArtifactServiceOptions,
     type ArtifactShareAccess,
-    type StoredArtifactShare
+    type StoredArtifactShare,
 } from "../Service.js";
 
 export interface ArtifactShareServiceOptions {
@@ -63,7 +63,10 @@ export class ArtifactShareService {
             share.result.downloadCount ??= 0;
             this.#shares.set(share.result.shareId, share);
             this.#shareIdsByToken.set(share.token, share.result.shareId);
-            this.#lastTerminalAtMs = Math.max(this.#lastTerminalAtMs, share.terminalAtMs ?? 0);
+            this.#lastTerminalAtMs = Math.max(
+                this.#lastTerminalAtMs,
+                share.terminalAtMs ?? 0,
+            );
         }
 
         this.#initialized = true;
@@ -75,9 +78,15 @@ export class ArtifactShareService {
                 (share.result.downloadCount ?? 0) >= share.result.maxDownloads
             ) {
                 await this.#exhaustShare(share);
-            } else if (share.result.state === "active" && share.result.expiresAtMs <= now) {
+            } else if (
+                share.result.state === "active" &&
+                share.result.expiresAtMs <= now
+            ) {
                 await this.#expireShare(share);
-            } else if (share.result.state !== "active" && !share.payloadClosed) {
+            } else if (
+                share.result.state !== "active" &&
+                !share.payloadClosed
+            ) {
                 await this.#closeSharePayload(share);
             }
         }
@@ -91,24 +100,29 @@ export class ArtifactShareService {
 
     async createShare(
         input: ArtifactShareInput,
-        defaultInstance: string
+        defaultInstance: string,
     ): Promise<ArtifactShareResult> {
         this.#assertInitialized();
-        const sourceInstance = readSourceInstance(input.instance, defaultInstance);
+        const sourceInstance = readSourceInstance(
+            input.instance,
+            defaultInstance,
+        );
         const endpoint = requireArtifactEndpoint(
             this.#resolveEndpoint,
             sourceInstance,
-            defaultInstance
+            defaultInstance,
         );
-        const expiresInSeconds = input.expiresInSeconds ?? DEFAULT_ARTIFACT_SHARE_TTL_SECONDS;
+        const expiresInSeconds =
+            input.expiresInSeconds ?? DEFAULT_ARTIFACT_SHARE_TTL_SECONDS;
         if (
             input.maxDownloads !== undefined &&
-            (!Number.isSafeInteger(input.maxDownloads) || input.maxDownloads < 1)
+            (!Number.isSafeInteger(input.maxDownloads) ||
+                input.maxDownloads < 1)
         ) {
             throw createError({
                 code: errorCodes.targetInvalid,
                 message: "maxDownloads must be a positive safe integer.",
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -120,7 +134,7 @@ export class ArtifactShareService {
             throw createError({
                 code: errorCodes.targetInvalid,
                 message: `expiresInSeconds must be between 60 and ${MAX_ARTIFACT_SHARE_TTL_SECONDS}.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -128,7 +142,7 @@ export class ArtifactShareService {
         const expiresAtMs = Date.now() + expiresInSeconds * 1000;
         const opened = await endpoint.openArtifactPayload({
             ...sourceInput,
-            expiresAtMs
+            expiresAtMs,
         });
         const shareId = randomUUID();
         const token = randomBytes(32).toString("base64url");
@@ -138,12 +152,18 @@ export class ArtifactShareService {
             downloadCount: 0,
             downloadName: opened.descriptor.name,
             expiresAtMs,
-            ...(input.maxDownloads === undefined ? {} : { maxDownloads: input.maxDownloads }),
+            ...(input.maxDownloads === undefined
+                ? {}
+                : { maxDownloads: input.maxDownloads }),
             mediaType: opened.descriptor.mediaType,
             shareId,
-            source: sourceDescriptor(sourceInstance, sourceInput, opened.descriptor),
+            source: sourceDescriptor(
+                sourceInstance,
+                sourceInput,
+                opened.descriptor,
+            ),
             state: "active",
-            url: this.#shareUrl(token)
+            url: this.#shareUrl(token),
         };
         const stored: StoredArtifactShare = {
             authorityInstance: defaultInstance,
@@ -152,13 +172,15 @@ export class ArtifactShareService {
             result,
             sourceInstance,
             token,
-            version: ARTIFACT_RECORD_VERSION
+            version: ARTIFACT_RECORD_VERSION,
         };
 
         try {
             await this.#recordStore.persistShare(stored);
         } catch (error) {
-            await endpoint.closeArtifactPayload(opened.payloadId).catch(() => undefined);
+            await endpoint
+                .closeArtifactPayload(opened.payloadId)
+                .catch(() => undefined);
             throw error;
         }
 
@@ -178,9 +200,11 @@ export class ArtifactShareService {
     async retireInstance(instance: string): Promise<void> {
         this.#assertInitialized();
         const shareIds = [...this.#shares.values()]
-            .filter((share) =>
-                share.result.state === "active" &&
-                (share.sourceInstance === instance || share.authorityInstance === instance)
+            .filter(
+                (share) =>
+                    share.result.state === "active" &&
+                    (share.sourceInstance === instance ||
+                        share.authorityInstance === instance),
             )
             .map((share) => share.result.shareId);
         for (const shareId of shareIds) {
@@ -196,7 +220,7 @@ export class ArtifactShareService {
                 code: errorCodes.artifactShareNotFound,
                 message: "Artifact share was not found.",
                 retryable: false,
-                details: { shareId }
+                details: { shareId },
             });
         }
 
@@ -215,13 +239,13 @@ export class ArtifactShareService {
             await this.#closeSharePayload(share);
             const endpoint = this.#resolveEndpoint(
                 share.sourceInstance,
-                share.authorityInstance
+                share.authorityInstance,
             );
             if (endpoint !== undefined) {
                 await this.#emitToEndpoint(
                     endpoint,
                     "artifact.shareRevoked",
-                    share.result
+                    share.result,
                 );
             }
             await this.#compactTerminalHistory();
@@ -233,13 +257,14 @@ export class ArtifactShareService {
     async resolveShare(token: string): Promise<ArtifactShareAccess> {
         this.#assertInitialized();
         const shareId = this.#shareIdsByToken.get(token);
-        const share = shareId === undefined ? undefined : this.#shares.get(shareId);
+        const share =
+            shareId === undefined ? undefined : this.#shares.get(shareId);
 
         if (share === undefined) {
             throw createError({
                 code: errorCodes.artifactShareNotFound,
                 message: "Artifact share was not found.",
-                retryable: false
+                retryable: false,
             });
         }
         if (share.result.state === "revoked") {
@@ -247,26 +272,29 @@ export class ArtifactShareService {
                 code: errorCodes.artifactShareRevoked,
                 message: "Artifact share has been revoked.",
                 retryable: false,
-                details: { shareId: share.result.shareId }
+                details: { shareId: share.result.shareId },
             });
         }
         if (share.result.state === "exhausted") {
             throw exhaustedShare(share.result.shareId);
         }
-        if (share.result.state === "expired" || share.result.expiresAtMs <= Date.now()) {
+        if (
+            share.result.state === "expired" ||
+            share.result.expiresAtMs <= Date.now()
+        ) {
             await this.#expireShare(share);
             throw createError({
                 code: errorCodes.artifactShareExpired,
                 message: "Artifact share has expired.",
                 retryable: false,
-                details: { shareId: share.result.shareId }
+                details: { shareId: share.result.shareId },
             });
         }
 
         return {
             payloadId: share.payloadId,
             share: structuredClone(share.result),
-            sourceInstance: share.sourceInstance
+            sourceInstance: share.sourceInstance,
         };
     }
 
@@ -277,7 +305,8 @@ export class ArtifactShareService {
         const active = this.#activeDownloads.get(shareId) ?? 0;
         if (
             share.result.maxDownloads !== undefined &&
-            (share.result.downloadCount ?? 0) + active >= share.result.maxDownloads
+            (share.result.downloadCount ?? 0) + active >=
+                share.result.maxDownloads
         ) {
             throw exhaustedShare(shareId);
         }
@@ -288,24 +317,29 @@ export class ArtifactShareService {
     async readSharePayload(
         access: ArtifactShareAccess,
         offsetBytes: number,
-        maxBytes: number
+        maxBytes: number,
     ): Promise<WorkerArtifactPayloadReadResult> {
         const share = this.#shares.get(access.share.shareId);
         const endpoint = requireArtifactEndpoint(
             this.#resolveEndpoint,
             access.sourceInstance,
-            share?.authorityInstance ?? access.sourceInstance
+            share?.authorityInstance ?? access.sourceInstance,
         );
         return await endpoint.readArtifactPayload({
             maxBytes,
             offsetBytes,
-            payloadId: access.payloadId
+            payloadId: access.payloadId,
         });
     }
 
-    async finishShareDownload(token: string, completed: boolean, details?: JsonValue): Promise<void> {
+    async finishShareDownload(
+        token: string,
+        completed: boolean,
+        details?: JsonValue,
+    ): Promise<void> {
         const shareId = this.#shareIdsByToken.get(token);
-        const share = shareId === undefined ? undefined : this.#shares.get(shareId);
+        const share =
+            shareId === undefined ? undefined : this.#shares.get(shareId);
         if (share === undefined) return;
         if (!completed) {
             this.#releaseDownload(share.result.shareId);
@@ -315,7 +349,10 @@ export class ArtifactShareService {
         await this.#commitDownload(share, details);
     }
 
-    async #commitDownload(share: StoredArtifactShare, details?: JsonValue): Promise<void> {
+    async #commitDownload(
+        share: StoredArtifactShare,
+        details?: JsonValue,
+    ): Promise<void> {
         const shareId = share.result.shareId;
         const active = this.#activeDownloads.get(shareId) ?? 1;
         const remainingActive = Math.max(0, active - 1);
@@ -341,18 +378,25 @@ export class ArtifactShareService {
             throw error;
         }
 
-        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
+        const endpoint = this.#resolveEndpoint(
+            share.sourceInstance,
+            share.authorityInstance,
+        );
         if (endpoint !== undefined) {
             await this.#emitToEndpoint(endpoint, "artifact.shareDownloaded", {
                 ...(isJsonRecord(details) ? details : {}),
                 downloadCount: share.result.downloadCount,
-                shareId
+                shareId,
             });
         }
         if (exhausted) {
             await this.#closeSharePayload(share);
             if (endpoint !== undefined) {
-                await this.#emitToEndpoint(endpoint, "artifact.shareExhausted", share.result);
+                await this.#emitToEndpoint(
+                    endpoint,
+                    "artifact.shareExhausted",
+                    share.result,
+                );
             }
             await this.#compactTerminalHistory();
         }
@@ -379,9 +423,16 @@ export class ArtifactShareService {
             }
         }
         await this.#closeSharePayload(share);
-        const endpoint = this.#resolveEndpoint(share.sourceInstance, share.authorityInstance);
+        const endpoint = this.#resolveEndpoint(
+            share.sourceInstance,
+            share.authorityInstance,
+        );
         if (endpoint !== undefined) {
-            await this.#emitToEndpoint(endpoint, "artifact.shareExhausted", share.result);
+            await this.#emitToEndpoint(
+                endpoint,
+                "artifact.shareExhausted",
+                share.result,
+            );
         }
         await this.#compactTerminalHistory();
     }
@@ -403,13 +454,13 @@ export class ArtifactShareService {
         await this.#closeSharePayload(share);
         const endpoint = this.#resolveEndpoint(
             share.sourceInstance,
-            share.authorityInstance
+            share.authorityInstance,
         );
         if (endpoint !== undefined) {
             await this.#emitToEndpoint(
                 endpoint,
                 "artifact.shareExpired",
-                share.result
+                share.result,
             );
         }
         await this.#compactTerminalHistory();
@@ -419,7 +470,8 @@ export class ArtifactShareService {
         const terminal = [...this.#shares.values()]
             .filter((share) => share.result.state !== "active")
             .sort((left, right) => {
-                const byTime = (left.terminalAtMs ?? left.result.expiresAtMs) -
+                const byTime =
+                    (left.terminalAtMs ?? left.result.expiresAtMs) -
                     (right.terminalAtMs ?? right.result.expiresAtMs);
                 return byTime === 0
                     ? left.result.shareId.localeCompare(right.result.shareId)
@@ -438,7 +490,10 @@ export class ArtifactShareService {
     }
 
     #nextTerminalAtMs(): number {
-        this.#lastTerminalAtMs = Math.max(Date.now(), this.#lastTerminalAtMs + 1);
+        this.#lastTerminalAtMs = Math.max(
+            Date.now(),
+            this.#lastTerminalAtMs + 1,
+        );
         return this.#lastTerminalAtMs;
     }
 
@@ -446,7 +501,7 @@ export class ArtifactShareService {
         if (share.payloadClosed) return;
         const endpoint = this.#resolveEndpoint(
             share.sourceInstance,
-            share.authorityInstance
+            share.authorityInstance,
         );
         if (endpoint === undefined) return;
 
@@ -462,12 +517,14 @@ export class ArtifactShareService {
     async #emitToEndpoint(
         endpoint: ArtifactServiceEndpoint,
         type: ArtifactEventType,
-        data?: unknown
+        data?: unknown,
     ): Promise<void> {
-        await endpoint.appendControlEvent(
-            type,
-            data === undefined ? undefined : toJsonValue(data)
-        ).catch(() => undefined);
+        await endpoint
+            .appendControlEvent(
+                type,
+                data === undefined ? undefined : toJsonValue(data),
+            )
+            .catch(() => undefined);
     }
 
     #assertInitialized(): void {
@@ -481,7 +538,9 @@ function toJsonValue(value: unknown): JsonValue {
     return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
-function isJsonRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isJsonRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -490,6 +549,6 @@ function exhaustedShare(shareId: string) {
         code: errorCodes.artifactShareExhausted,
         message: "Artifact share has reached its download limit.",
         retryable: false,
-        details: { shareId }
+        details: { shareId },
     });
 }

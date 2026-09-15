@@ -28,7 +28,9 @@ export class ConversationPreferenceStore {
         return await this.#exclusive(async () => await this.#read());
     }
 
-    async update(patch: ConversationPreferencesPatch): Promise<ConversationPreferencesSnapshot> {
+    async update(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot> {
         const normalized = parseConversationPreferencesPatch(patch);
         return await this.#exclusive(async () => {
             const current = await this.#read();
@@ -40,12 +42,16 @@ export class ConversationPreferenceStore {
     }
 
     async #read(): Promise<ConversationPreferencesSnapshot> {
-        const source = await readFile(this.#filePath, "utf8").catch((error: unknown) => {
-            if (isMissing(error)) return undefined;
-            throw error;
-        });
+        const source = await readFile(this.#filePath, "utf8").catch(
+            (error: unknown) => {
+                if (isMissing(error)) return undefined;
+                throw error;
+            },
+        );
         if (source === undefined) return createEmptyConversationPreferences();
-        return parseConversationPreferencesSnapshot(JSON.parse(source) as unknown);
+        return parseConversationPreferencesSnapshot(
+            JSON.parse(source) as unknown,
+        );
     }
 
     async #write(snapshot: ConversationPreferencesSnapshot): Promise<void> {
@@ -55,7 +61,10 @@ export class ConversationPreferenceStore {
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
         const handle = await open(temporary, "wx", 0o600);
         try {
-            await handle.writeFile(`${JSON.stringify(validated, null, 2)}\n`, "utf8");
+            await handle.writeFile(
+                `${JSON.stringify(validated, null, 2)}\n`,
+                "utf8",
+            );
             await handle.sync();
         } catch (error) {
             await handle.close().catch(() => undefined);
@@ -81,12 +90,19 @@ export class ConversationPreferenceStore {
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
         const next = this.#operationQueue.then(operation, operation);
-        this.#operationQueue = next.then(() => undefined, () => undefined);
+        this.#operationQueue = next.then(
+            () => undefined,
+            () => undefined,
+        );
         return await next;
     }
 }
 
 function isMissing(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
 }

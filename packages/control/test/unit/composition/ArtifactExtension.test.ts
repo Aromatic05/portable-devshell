@@ -7,7 +7,7 @@ import {
     ControlPathHome,
     createDefaultControlConfig,
     type ArtifactPayloadDescriptor,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { ControlRuntimeArtifact } from "../../../src/composition/control/subsystem/Artifact.ts";
@@ -22,13 +22,19 @@ class MemoryArtifactReceiver {
         this.events.push(type);
     }
 
-    async beginArtifactReceive(input: { descriptor: ArtifactPayloadDescriptor }) {
+    async beginArtifactReceive(input: {
+        descriptor: ArtifactPayloadDescriptor;
+    }) {
         this.#descriptor = input.descriptor;
         this.chunks.length = 0;
         return { nextOffsetBytes: 0, receiveId: "receive-1" };
     }
 
-    async writeArtifactReceive(input: { content: string; offsetBytes: number; receiveId: string }) {
+    async writeArtifactReceive(input: {
+        content: string;
+        offsetBytes: number;
+        receiveId: string;
+    }) {
         assert.equal(input.receiveId, "receive-1");
         const bytes = Buffer.from(input.content, "base64");
         assert.equal(input.offsetBytes, Buffer.concat(this.chunks).length);
@@ -36,7 +42,7 @@ class MemoryArtifactReceiver {
         return {
             nextOffsetBytes: input.offsetBytes + bytes.length,
             receiveId: input.receiveId,
-            receivedBytes: bytes.length
+            receivedBytes: bytes.length,
         };
     }
 
@@ -48,18 +54,24 @@ class MemoryArtifactReceiver {
             blake3: descriptor!.payloadBlake3,
             bytes: Buffer.concat(this.chunks).length,
             receiveId,
-            targetPath: "/remote/skill"
+            targetPath: "/remote/skill",
         };
     }
 
     async abortArtifactReceive(_receiveId: string): Promise<void> {}
     async closeArtifactPayload(_payloadId: string): Promise<void> {}
-    async openArtifactPayload(): Promise<never> { throw new Error("target-only endpoint"); }
-    async readArtifactPayload(): Promise<never> { throw new Error("target-only endpoint"); }
+    async openArtifactPayload(): Promise<never> {
+        throw new Error("target-only endpoint");
+    }
+    async readArtifactPayload(): Promise<never> {
+        throw new Error("target-only endpoint");
+    }
 }
 
 async function harness(t: test.TestContext) {
-    const root = await createTestTempDirectory("control-runtime-artifact-extension");
+    const root = await createTestTempDirectory(
+        "control-runtime-artifact-extension",
+    );
     const home = join(root, "home");
     const source = join(root, "asset");
     await mkdir(home, { recursive: true });
@@ -74,8 +86,8 @@ async function harness(t: test.TestContext) {
         instances: {
             get(name: string) {
                 return name === "remote-one" ? { worker: target } : undefined;
-            }
-        } as never
+            },
+        } as never,
     });
     await runtime.start();
     t.after(async () => {
@@ -93,11 +105,14 @@ test("Extension assets use the Artifact core to transfer a Control-owned directo
         target: {
             instance: "remote-one",
             path: "./review",
-            workspace: "/remote/skills"
-        }
+            workspace: "/remote/skills",
+        },
     });
 
-    assert.equal(result.transferredBytes, Buffer.concat(h.target.chunks).length);
+    assert.equal(
+        result.transferredBytes,
+        Buffer.concat(h.target.chunks).length,
+    );
     assert.ok(result.transferredBytes > 0);
     assert.equal("transferId" in result, false);
     assert.equal(h.target.events.includes("artifact.transferCompleted"), true);
@@ -107,15 +122,18 @@ test("Artifact callers cannot forge the private Extension host authority", async
     const h = await harness(t);
 
     await assert.rejects(
-        h.runtime.service.startTransfer({
-            instance: "host",
-            operation: "start",
-            sourcePath: h.source,
-            sourceWorkspace: h.source,
-            targetInstance: "remote-one",
-            targetPath: "./review",
-            targetWorkspace: "/remote/skills"
-        }, "@extension-asset:guessed"),
-        /Instance host was not found/u
+        h.runtime.service.startTransfer(
+            {
+                instance: "host",
+                operation: "start",
+                sourcePath: h.source,
+                sourceWorkspace: h.source,
+                targetInstance: "remote-one",
+                targetPath: "./review",
+                targetWorkspace: "/remote/skills",
+            },
+            "@extension-asset:guessed",
+        ),
+        /Instance host was not found/u,
     );
 });

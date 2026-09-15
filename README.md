@@ -6,15 +6,15 @@
 
 ## 主要能力
 
-* `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
-* 每个 instance 独立 worker、生命周期、日志、审批策略和 MCP endpoint。
-* workspace 不持久化到 instance；CLI 操作显式给出路径，MCP 通过 Context 为每个 instance 绑定 workspace。
-* `bash`、`file`、`tmux`、`artifact`、`todo`、Workspace 以及可选跨实例连接。
-* managed tmux task、persistent pane、durable Wait 和 Workspace 自动恢复。
-* MCP TypeScript SDK v2；支持 2026-07-28 语义并保留旧 Streamable HTTP 客户端兼容。
-* request-scoped SSE keepalive，使长时间 `tools/call` 不因 HTTP idle timeout 被提前切断。
-* OAuth、Artifact 分享与跨实例传输、分层 Agent Skills、Secret 扫描、运行时 Debug Patch。
-* 全屏 TUI 与完整 Control CLI。
+- `local`、`ssh`、`docker`、`podman`、`reverse` 五种 provider。
+- 每个 instance 独立 worker、生命周期、日志、审批策略和 MCP endpoint。
+- workspace 不持久化到 instance；CLI 操作显式给出路径，MCP 通过 Context 为每个 instance 绑定 workspace。
+- `bash`、`file`、`tmux`、`artifact`、`todo`、Workspace 以及可选跨实例连接。
+- managed tmux task、persistent pane、durable Wait 和 Workspace 自动恢复。
+- MCP TypeScript SDK v2；支持 2026-07-28 语义并保留旧 Streamable HTTP 客户端兼容。
+- request-scoped SSE keepalive，使长时间 `tools/call` 不因 HTTP idle timeout 被提前切断。
+- OAuth、Artifact 分享与跨实例传输、分层 Agent Skills、Secret 扫描、运行时 Debug Patch。
+- 全屏 TUI 与完整 Control CLI。
 
 ## 安装
 
@@ -141,14 +141,14 @@ instance 再独立选择 `auth = "oauth2"`。
 
 ## 文档
 
-* [文档索引](docs/README.md)
-* [系统架构](docs/concepts/architecture.md)
-* [MCP](docs/concepts/mcp.md)
-* [Context](docs/concepts/context.md)
-* [Workspace](docs/concepts/workspace.md)
-* [Control 管理面](docs/operations/control-plane.md)
-* [配置与运行目录](docs/operations/configuration.md)
-* [安全、审批与 Secret 扫描](docs/operations/security.md)
-* [tmux 工具](docs/tools/tmux.md)
-* [Agent Skills](docs/tools/skills.md)
-* [验收与发布门禁](docs/development/acceptance.md)
+- [文档索引](docs/README.md)
+- [系统架构](docs/concepts/architecture.md)
+- [MCP](docs/concepts/mcp.md)
+- [Context](docs/concepts/context.md)
+- [Workspace](docs/concepts/workspace.md)
+- [Control 管理面](docs/operations/control-plane.md)
+- [配置与运行目录](docs/operations/configuration.md)
+- [安全、审批与 Secret 扫描](docs/operations/security.md)
+- [tmux 工具](docs/tools/tmux.md)
+- [Agent Skills](docs/tools/skills.md)
+- [验收与发布门禁](docs/development/acceptance.md)

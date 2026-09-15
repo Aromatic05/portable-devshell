@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const releaseWorkflowPath = fileURLToPath(new URL("../.github/workflows/release.yml", import.meta.url));
+const releaseWorkflowPath = fileURLToPath(
+    new URL("../.github/workflows/release.yml", import.meta.url),
+);
 
 async function readReleaseWorkflow() {
     return await readFile(releaseWorkflowPath, "utf8");
@@ -13,12 +15,21 @@ test("release asset jobs install the frozen dependency graph before building", a
     const workflow = await readReleaseWorkflow();
     const buildStart = workflow.indexOf("    build-worker:\n");
     const publishStart = workflow.indexOf("    publish:\n", buildStart);
-    assert.ok(buildStart >= 0 && publishStart > buildStart, "release build-worker job must exist");
+    assert.ok(
+        buildStart >= 0 && publishStart > buildStart,
+        "release build-worker job must exist",
+    );
     const buildJob = workflow.slice(buildStart, publishStart);
     const install = buildJob.indexOf("pnpm install --frozen-lockfile");
     const build = buildJob.indexOf("pnpm build");
-    assert.ok(install >= 0, "release build-worker must install dependencies from the frozen lockfile");
-    assert.ok(build > install, "release build-worker must install dependencies before pnpm build");
+    assert.ok(
+        install >= 0,
+        "release build-worker must install dependencies from the frozen lockfile",
+    );
+    assert.ok(
+        build > install,
+        "release build-worker must install dependencies before pnpm build",
+    );
 });
 
 test("release matrix emits a native Agent Extension and both Agent providers per target", async () => {
@@ -26,9 +37,15 @@ test("release matrix emits a native Agent Extension and both Agent providers per
     const buildStart = workflow.indexOf("    build-worker:\n");
     const publishStart = workflow.indexOf("    publish:\n", buildStart);
     const buildJob = workflow.slice(buildStart, publishStart);
-    assert.match(buildJob, /pnpm package:agent -- --target "\$\{\{ matrix\.target \}\}" --output-dir \.\/release-assets/u);
+    assert.match(
+        buildJob,
+        /pnpm package:agent -- --target "\$\{\{ matrix\.target \}\}" --output-dir \.\/release-assets/u,
+    );
     assert.doesNotMatch(buildJob, /package:agent[^\n]*--provider-only/u);
-    assert.match(buildJob, /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm smoke:agent-package -- \.\/release-assets\/portable-devshell-app-linux-x64\.tar\.gz \.\/release-assets\/portable-devshell-agent-linux-x64\.dsext \.\/release-assets\/portable-devshell-agent-provider-pi-linux-x64\.dsprovider \.\/release-assets\/portable-devshell-agent-provider-opencode-linux-x64\.dsprovider/u);
+    assert.match(
+        buildJob,
+        /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm smoke:agent-package -- \.\/release-assets\/portable-devshell-app-linux-x64\.tar\.gz \.\/release-assets\/portable-devshell-agent-linux-x64\.dsext \.\/release-assets\/portable-devshell-agent-provider-pi-linux-x64\.dsprovider \.\/release-assets\/portable-devshell-agent-provider-opencode-linux-x64\.dsprovider/u,
+    );
 });
 
 test("release Windows x64 job runs installer contracts and the real release smoke", async () => {
@@ -38,11 +55,11 @@ test("release Windows x64 job runs installer contracts and the real release smok
     const buildJob = workflow.slice(buildStart, publishStart);
     assert.match(
         buildJob,
-        /if: matrix\.target == 'windows-x64'[\s\S]*?node --test \.\/scripts\/install-release\.test\.mjs/u
+        /if: matrix\.target == 'windows-x64'[\s\S]*?node --test \.\/scripts\/install-release\.test\.mjs/u,
     );
     assert.match(
         buildJob,
-        /if: matrix\.target == 'windows-x64'[\s\S]*?node \.\/scripts\/smoke-install-release-windows\.mjs \.\/release-assets\/portable-devshell-app-windows-x64\.tar\.gz/u
+        /if: matrix\.target == 'windows-x64'[\s\S]*?node \.\/scripts\/smoke-install-release-windows\.mjs \.\/release-assets\/portable-devshell-app-windows-x64\.tar\.gz/u,
     );
 });
 
@@ -50,7 +67,10 @@ test("release verifies the tagged commit belongs to the default branch before as
     const workflow = await readReleaseWorkflow();
     const verifyStart = workflow.indexOf("    verify-development-ci:\n");
     const buildStart = workflow.indexOf("    build-worker:\n", verifyStart);
-    assert.ok(verifyStart >= 0 && buildStart > verifyStart, "release verification job must precede asset jobs");
+    assert.ok(
+        verifyStart >= 0 && buildStart > verifyStart,
+        "release verification job must precede asset jobs",
+    );
     const verifyJob = workflow.slice(verifyStart, buildStart);
     assert.match(verifyJob, /fetch-depth: 0/u);
     assert.match(
@@ -61,7 +81,10 @@ test("release verifies the tagged commit belongs to the default branch before as
 
 test("release automation writes a scoped conventional version bump commit", async () => {
     const workflow = await readReleaseWorkflow();
-    assert.match(workflow, /git add package\.json crates\/devshell-worker\/Cargo\.toml Cargo\.lock scripts\/install-local\.test\.mjs/u);
+    assert.match(
+        workflow,
+        /git add package\.json crates\/devshell-worker\/Cargo\.toml Cargo\.lock scripts\/install-local\.test\.mjs/u,
+    );
     assert.match(
         workflow,
         /git commit -m "chore\(release\): bump version to \$next_version"/u,

@@ -9,7 +9,7 @@ import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 test("Unix invokes pnpm directly", () => {
     assert.deepEqual(resolvePnpmCommand({ platform: "linux" }), {
         args: [],
-        command: "pnpm"
+        command: "pnpm",
     });
 });
 
@@ -25,12 +25,12 @@ test("Windows invokes the PNPM_HOME JavaScript entry through Node", async () => 
             resolvePnpmCommand({
                 environment: { PNPM_HOME: pnpmHome },
                 nodeExecutable: "C:\\Program Files\\nodejs\\node.exe",
-                platform: "win32"
+                platform: "win32",
             }),
             {
                 args: [cli],
-                command: "C:\\Program Files\\nodejs\\node.exe"
-            }
+                command: "C:\\Program Files\\nodejs\\node.exe",
+            },
         );
     } finally {
         await rm(root, { force: true, recursive: true });
@@ -40,6 +40,6 @@ test("Windows invokes the PNPM_HOME JavaScript entry through Node", async () => 
 test("Windows rejects packaging without a resolvable pnpm JavaScript entry", () => {
     assert.throws(
         () => resolvePnpmCommand({ environment: {}, platform: "win32" }),
-        /Cannot locate pnpm\.cjs/u
+        /Cannot locate pnpm\.cjs/u,
     );
 });

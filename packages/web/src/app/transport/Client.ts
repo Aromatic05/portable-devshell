@@ -33,9 +33,12 @@ function mapError(error: unknown): Error {
 }
 
 function isControlErrorBody(value: unknown): value is ControlErrorBody {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
     const body = value as Partial<ControlErrorBody>;
-    return typeof body.code === "string" &&
+    return (
+        typeof body.code === "string" &&
         typeof body.message === "string" &&
-        typeof body.retryable === "boolean";
+        typeof body.retryable === "boolean"
+    );
 }

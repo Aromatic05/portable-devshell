@@ -57,10 +57,17 @@ export class TuiTerminalController {
 
     ownsInput(): boolean {
         const state = this.#options.store.getState();
-        return state.ui.selectedPage === "terminal" && state.interaction.focusScope === "terminal";
+        return (
+            state.ui.selectedPage === "terminal" &&
+            state.interaction.focusScope === "terminal"
+        );
     }
 
-    async open(instance: string | undefined, columns: number, rows: number): Promise<void> {
+    async open(
+        instance: string | undefined,
+        columns: number,
+        rows: number,
+    ): Promise<void> {
         this.#columns = Math.max(1, Math.floor(columns));
         this.#rows = Math.max(1, Math.floor(rows));
 
@@ -77,13 +84,17 @@ export class TuiTerminalController {
         const current = this.#options.terminal.getSnapshot();
         if (
             this.#instance === instance &&
-            (current.status === "starting" || current.status === "running" || current.status === "exited")
+            (current.status === "starting" ||
+                current.status === "running" ||
+                current.status === "exited")
         ) {
             this.#options.terminal.resize(this.#columns, this.#rows);
             return;
         }
 
-        const entry = this.#options.store.getState().instances.find((candidate) => candidate.name === instance);
+        const entry = this.#options.store
+            .getState()
+            .instances.find((candidate) => candidate.name === instance);
         if (entry === undefined) {
             this.#instance = instance;
             this.#options.terminal.setError(
@@ -114,10 +125,18 @@ export class TuiTerminalController {
 
     selectTab(tab: TuiTerminalTab): void {
         const state = this.#options.store.getState();
-        if (state.ui.selectedPage !== "terminal" || selectTerminalTab(state) === tab) return;
+        if (
+            state.ui.selectedPage !== "terminal" ||
+            selectTerminalTab(state) === tab
+        )
+            return;
         const keepTerminalFocus = state.interaction.focusScope === "terminal";
         if (tab === "instances") this.#options.tmuxPanes.exitAttach();
-        this.#options.store.replaceRoute({ page: "terminal", tab, view: "session" });
+        this.#options.store.replaceRoute({
+            page: "terminal",
+            tab,
+            view: "session",
+        });
         if (keepTerminalFocus) this.#options.store.setFocusScope("terminal");
     }
 
@@ -140,7 +159,9 @@ export class TuiTerminalController {
         if (focused === this.#focused) return;
         this.#focused = focused;
         this.#options.terminal.setFocused(focused);
-        this.#options.stdout.write(focused ? "\u001B[?1h\u001B=" : "\u001B[?1l\u001B>");
+        this.#options.stdout.write(
+            focused ? "\u001B[?1h\u001B=" : "\u001B[?1l\u001B>",
+        );
     }
 
     syncTmuxPanes(): void {
@@ -163,31 +184,58 @@ export class TuiTerminalController {
             this.#tmuxPanesActive = true;
             this.#tmuxPanesInstance = instance;
             this.#options.tmuxPanes.stopPolling();
-            void this.#options.tmuxPanes.bind(undefined).then(async () => {
-                if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) return;
-                await this.#options.session.refreshToolCallsForInstance(instance);
-                if (!this.#tmuxPanesActive || this.#tmuxPanesInstance !== instance) return;
-                await this.#options.tmuxPanes.bind(instance);
-                if (this.#tmuxPanesActive && this.#tmuxPanesInstance === instance) {
-                    this.#options.tmuxPanes.startPolling(2000);
-                }
-            }).catch((error: unknown) => {
-                if (this.#tmuxPanesActive && this.#tmuxPanesInstance === instance) {
-                    this.#options.store.setScreenStatus(
-                        "terminal",
-                        `Tmux pane load failed: ${readErrorMessage(error)}`,
+            void this.#options.tmuxPanes
+                .bind(undefined)
+                .then(async () => {
+                    if (
+                        !this.#tmuxPanesActive ||
+                        this.#tmuxPanesInstance !== instance
+                    )
+                        return;
+                    await this.#options.session.refreshToolCallsForInstance(
+                        instance,
                     );
-                }
-            });
+                    if (
+                        !this.#tmuxPanesActive ||
+                        this.#tmuxPanesInstance !== instance
+                    )
+                        return;
+                    await this.#options.tmuxPanes.bind(instance);
+                    if (
+                        this.#tmuxPanesActive &&
+                        this.#tmuxPanesInstance === instance
+                    ) {
+                        this.#options.tmuxPanes.startPolling(2000);
+                    }
+                })
+                .catch((error: unknown) => {
+                    if (
+                        this.#tmuxPanesActive &&
+                        this.#tmuxPanesInstance === instance
+                    ) {
+                        this.#options.store.setScreenStatus(
+                            "terminal",
+                            `Tmux pane load failed: ${readErrorMessage(error)}`,
+                        );
+                    }
+                });
         }
     }
 
     scroll(direction: "pageUp" | "pageDown" | "top" | "bottom"): void {
         switch (direction) {
-            case "pageUp": this.#options.terminal.scrollPages(-1); return;
-            case "pageDown": this.#options.terminal.scrollPages(1); return;
-            case "top": this.#options.terminal.scrollToTop(); return;
-            case "bottom": this.#options.terminal.scrollToBottom(); return;
+            case "pageUp":
+                this.#options.terminal.scrollPages(-1);
+                return;
+            case "pageDown":
+                this.#options.terminal.scrollPages(1);
+                return;
+            case "top":
+                this.#options.terminal.scrollToTop();
+                return;
+            case "bottom":
+                this.#options.terminal.scrollToBottom();
+                return;
         }
     }
 
@@ -200,15 +248,23 @@ export class TuiTerminalController {
     }
 
     renderGraphics(visible: boolean): void {
-        if (!visible || this.#options.store.getState().ui.selectedPage !== "terminal") {
-            const clear = terminalGraphicsClearSequence(this.#options.graphicsSupport);
+        if (
+            !visible ||
+            this.#options.store.getState().ui.selectedPage !== "terminal"
+        ) {
+            const clear = terminalGraphicsClearSequence(
+                this.#options.graphicsSupport,
+            );
             if (clear.length > 0) this.#options.stdout.write(clear);
             return;
         }
-        const region = buildTuiTerminalViewportRegion(this.#options.store.getState(), {
-            columns: this.#options.columns(),
-            rows: this.#options.rows(),
-        });
+        const region = buildTuiTerminalViewportRegion(
+            this.#options.store.getState(),
+            {
+                columns: this.#options.columns(),
+                rows: this.#options.rows(),
+            },
+        );
         if (region === undefined) return;
         const snapshot = this.#options.terminal.getSnapshot();
         const transient = this.#options.terminal
@@ -221,7 +277,10 @@ export class TuiTerminalController {
             }));
         const frame = renderTerminalGraphicsFrame({
             clear: true,
-            graphics: [...transient, ...this.#options.terminal.getVisibleGraphics()],
+            graphics: [
+                ...transient,
+                ...this.#options.terminal.getVisibleGraphics(),
+            ],
             region,
             support: this.#options.graphicsSupport,
         });
@@ -239,45 +298,74 @@ export class TuiTerminalController {
             if (action.type === "focus.leave") {
                 focused = false;
                 this.#options.tmuxPanes.exitAttach();
-                const cursor = this.#options.store.getState().interaction.sidebarCursor;
-                this.#options.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarContext");
+                const cursor =
+                    this.#options.store.getState().interaction.sidebarCursor;
+                this.#options.store.setFocusScope(
+                    cursor?.kind === "instance"
+                        ? "sidebarInstances"
+                        : "sidebarContext",
+                );
                 continue;
             }
             if (!focused) {
                 if (action.type === "data" || action.type === "paste") {
                     this.#options.writeAppInput(action.data);
                 } else if (action.type === "mouse") {
-                    this.#options.enqueueInput(async () => await this.#options.handleAppMouse(action));
+                    this.#options.enqueueInput(
+                        async () => await this.#options.handleAppMouse(action),
+                    );
                 }
                 continue;
             }
             if (tab === "tmuxPanes") {
-                if (action.type === "data" && action.data === "\u001B" && this.#options.tmuxPanes.getSnapshot().active === undefined) {
+                if (
+                    action.type === "data" &&
+                    action.data === "\u001B" &&
+                    this.#options.tmuxPanes.getSnapshot().active === undefined
+                ) {
                     focused = false;
-                    const cursor = this.#options.store.getState().interaction.sidebarCursor;
-                    this.#options.store.setFocusScope(cursor?.kind === "instance" ? "sidebarInstances" : "sidebarContext");
+                    const cursor =
+                        this.#options.store.getState().interaction
+                            .sidebarCursor;
+                    this.#options.store.setFocusScope(
+                        cursor?.kind === "instance"
+                            ? "sidebarInstances"
+                            : "sidebarContext",
+                    );
                     continue;
                 }
                 this.#dispatchTmuxPaneInputAction(action);
                 continue;
             }
-            if (action.type === "data") this.#options.terminal.writeInput(action.data);
-            else if (action.type === "paste") this.#options.terminal.paste(action.data);
+            if (action.type === "data")
+                this.#options.terminal.writeInput(action.data);
+            else if (action.type === "paste")
+                this.#options.terminal.paste(action.data);
             else if (action.type === "scroll") this.scroll(action.direction);
-            else if (action.type === "mouse") this.#options.enqueueInput(async () => await this.handleMouse(action));
+            else if (action.type === "mouse")
+                this.#options.enqueueInput(
+                    async () => await this.handleMouse(action),
+                );
         }
     }
 
     async handleMouse(event: TuiTerminalMouseEvent): Promise<void> {
-        const region = buildTuiTerminalViewportRegion(this.#options.store.getState(), {
-            columns: this.#options.columns(),
-            rows: this.#options.rows(),
-        });
+        const region = buildTuiTerminalViewportRegion(
+            this.#options.store.getState(),
+            {
+                columns: this.#options.columns(),
+                rows: this.#options.rows(),
+            },
+        );
         if (region === undefined) {
             await this.#options.handleAppMouse(event);
             return;
         }
-        const inside = event.x >= region.x && event.x < region.x + region.width && event.y >= region.y && event.y < region.y + region.height;
+        const inside =
+            event.x >= region.x &&
+            event.x < region.x + region.width &&
+            event.y >= region.y &&
+            event.y < region.y + region.height;
         if (this.#selecting) {
             this.#options.terminal.updateSelection(
                 Math.min(Math.max(1, event.x - region.x + 1), region.width),
@@ -285,7 +373,9 @@ export class TuiTerminalController {
             );
             if (event.kind === "release") {
                 this.#selecting = false;
-                this.#options.copyText(this.#options.terminal.getSelectionText());
+                this.#options.copyText(
+                    this.#options.terminal.getSelectionText(),
+                );
             }
             return;
         }
@@ -293,36 +383,67 @@ export class TuiTerminalController {
             await this.#options.handleAppMouse(event);
             return;
         }
-        const relative = { button: event.button, kind: event.kind, x: event.x - region.x + 1, y: event.y - region.y + 1 } as const;
-        const tracking = this.#options.terminal.getSnapshot().modes.mouseTracking;
+        const relative = {
+            button: event.button,
+            kind: event.kind,
+            x: event.x - region.x + 1,
+            y: event.y - region.y + 1,
+        } as const;
+        const tracking =
+            this.#options.terminal.getSnapshot().modes.mouseTracking;
         const selectionModifier = (event.button & 4) !== 0;
         const leftButton = (event.button & 3) === 0;
         const motion = (event.button & 32) !== 0;
-        if (event.kind === "press" && leftButton && !motion && (event.button & 64) === 0 && (tracking === "none" || selectionModifier)) {
+        if (
+            event.kind === "press" &&
+            leftButton &&
+            !motion &&
+            (event.button & 64) === 0 &&
+            (tracking === "none" || selectionModifier)
+        ) {
             this.#selecting = true;
             this.#options.terminal.beginSelection(relative.x, relative.y);
             return;
         }
         if (this.#options.terminal.sendMouse(relative)) return;
-        if (event.kind === "press" && (event.button & 64) !== 0 && tracking === "none") {
-            this.#options.terminal.scrollLines((event.button & 1) === 0 ? -3 : 3);
+        if (
+            event.kind === "press" &&
+            (event.button & 64) !== 0 &&
+            tracking === "none"
+        ) {
+            this.#options.terminal.scrollLines(
+                (event.button & 1) === 0 ? -3 : 3,
+            );
         }
     }
 
-    #dispatchTmuxPaneInputAction(action: Exclude<TuiTerminalInputAction, { type: "focus.leave" } | { type: "source.toggle" }>): void {
+    #dispatchTmuxPaneInputAction(
+        action: Exclude<
+            TuiTerminalInputAction,
+            { type: "focus.leave" } | { type: "source.toggle" }
+        >,
+    ): void {
         if (action.type === "data" || action.type === "paste") {
             void this.#options.tmuxPanes.handleRawInput(action.data);
             return;
         }
         if (action.type === "scroll") {
             const rows = Math.max(1, this.#options.rows() - 8);
-            const delta = action.direction === "pageUp" ? -rows : action.direction === "pageDown" ? rows : action.direction === "top" ? -1_000_000 : 1_000_000;
+            const delta =
+                action.direction === "pageUp"
+                    ? -rows
+                    : action.direction === "pageDown"
+                      ? rows
+                      : action.direction === "top"
+                        ? -1_000_000
+                        : 1_000_000;
             this.#options.tmuxPanes.scroll(delta);
             return;
         }
-        this.#options.enqueueInput(async () => await this.#options.handleAppMouse(action));
+        this.#options.enqueueInput(
+            async () => await this.#options.handleAppMouse(action),
+        );
     }
-
 }
 
 function readErrorMessage(error: unknown): string {

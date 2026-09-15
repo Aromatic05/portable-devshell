@@ -8,7 +8,7 @@ import {
     listSkills,
     loadSkill,
     readSkillFile,
-    searchSkills
+    searchSkills,
 } from "../../src/builtin/SkillCatalog.ts";
 
 test("skill catalog layers project over managed over global without loading instructions", async () => {
@@ -17,20 +17,53 @@ test("skill catalog layers project over managed over global without loading inst
         const workspace = join(root, "workspace");
         const home = join(root, "home");
         const configHome = join(root, "config");
-        await skill(workspace, ".agents/skills/review", "Project review", "PROJECT BODY");
-        await skill(home, ".devshell/skill/review", "Managed review", "MANAGED BODY");
-        await skill(home, ".devshell/skill/build", "Build packages", "BUILD BODY");
-        await skill(configHome, "agents/skills/global-only", "Global helper", "GLOBAL BODY");
+        await skill(
+            workspace,
+            ".agents/skills/review",
+            "Project review",
+            "PROJECT BODY",
+        );
+        await skill(
+            home,
+            ".devshell/skill/review",
+            "Managed review",
+            "MANAGED BODY",
+        );
+        await skill(
+            home,
+            ".devshell/skill/build",
+            "Build packages",
+            "BUILD BODY",
+        );
+        await skill(
+            configHome,
+            "agents/skills/global-only",
+            "Global helper",
+            "GLOBAL BODY",
+        );
 
         const result = await listSkills({ configHome, home, workspace });
 
         assert.deepEqual(result.skills, [
             { description: "Build packages", name: "build", source: "managed" },
-            { description: "Global helper", name: "global-only", source: "global" },
-            { description: "Project review", name: "review", source: "project" }
+            {
+                description: "Global helper",
+                name: "global-only",
+                source: "global",
+            },
+            {
+                description: "Project review",
+                name: "review",
+                source: "project",
+            },
         ]);
         assert.equal(JSON.stringify(result).includes("PROJECT BODY"), false);
-        assert.equal(result.warnings.some((warning) => warning.includes("duplicate Skill 'review'")), true);
+        assert.equal(
+            result.warnings.some((warning) =>
+                warning.includes("duplicate Skill 'review'"),
+            ),
+            true,
+        );
     } finally {
         await rm(root, { force: true, recursive: true });
     }
@@ -43,17 +76,37 @@ test("skill search stays metadata-only while load discovers related files lazily
         const home = join(root, "home");
         const configHome = join(root, "config");
         const directory = join(workspace, ".agents/skills/review");
-        await skill(workspace, ".agents/skills/review", "Review pull requests", "Use the review workflow.");
+        await skill(
+            workspace,
+            ".agents/skills/review",
+            "Review pull requests",
+            "Use the review workflow.",
+        );
         await mkdir(join(directory, "scripts"), { recursive: true });
-        await writeFile(join(directory, "scripts/check.sh"), "#!/bin/sh\nprintf checked\n", "utf8");
+        await writeFile(
+            join(directory, "scripts/check.sh"),
+            "#!/bin/sh\nprintf checked\n",
+            "utf8",
+        );
         await writeFile(join(directory, "notes.md"), "extra notes\n", "utf8");
 
-        const searched = await searchSkills("pull", { configHome, home, workspace });
-        assert.deepEqual(searched.skills.map((entry) => entry.name), ["review"]);
+        const searched = await searchSkills("pull", {
+            configHome,
+            home,
+            workspace,
+        });
+        assert.deepEqual(
+            searched.skills.map((entry) => entry.name),
+            ["review"],
+        );
         assert.equal("content" in searched.skills[0]!, false);
         assert.equal("relatedFiles" in searched.skills[0]!, false);
 
-        const loaded = await loadSkill("review", { configHome, home, workspace });
+        const loaded = await loadSkill("review", {
+            configHome,
+            home,
+            workspace,
+        });
         assert.equal(loaded.source, "project");
         assert.match(loaded.content, /Use the review workflow/u);
         assert.deepEqual(loaded.relatedFiles, ["notes.md", "scripts/check.sh"]);
@@ -69,16 +122,29 @@ test("skill read loads one bounded related file and rejects SKILL.md", async () 
         const home = join(root, "home");
         const configHome = join(root, "config");
         const directory = join(home, ".devshell/skill/build");
-        await skill(home, ".devshell/skill/build", "Build helper", "Build instructions.");
+        await skill(
+            home,
+            ".devshell/skill/build",
+            "Build helper",
+            "Build instructions.",
+        );
         await mkdir(join(directory, "scripts"), { recursive: true });
-        await writeFile(join(directory, "scripts/run.sh"), "#!/bin/sh\nprintf build\n", "utf8");
+        await writeFile(
+            join(directory, "scripts/run.sh"),
+            "#!/bin/sh\nprintf build\n",
+            "utf8",
+        );
 
-        const read = await readSkillFile("build", "scripts/run.sh", { configHome, home, workspace });
+        const read = await readSkillFile("build", "scripts/run.sh", {
+            configHome,
+            home,
+            workspace,
+        });
         assert.equal(read.source, "managed");
         assert.match(read.content, /printf build/u);
         await assert.rejects(
             readSkillFile("build", "SKILL.md", { configHome, home, workspace }),
-            /skill load/u
+            /skill load/u,
         );
     } finally {
         await rm(root, { force: true, recursive: true });
@@ -96,27 +162,43 @@ test("skill load and read reject symlink targets outside the Skill root", async 
         await mkdir(directory, { recursive: true });
         await writeFile(outside, "outside\n", "utf8");
         await symlink(outside, join(directory, "SKILL.md"));
-        await assert.rejects(loadSkill("review", { configHome, home, workspace }), /outside the Skill directory/u);
+        await assert.rejects(
+            loadSkill("review", { configHome, home, workspace }),
+            /outside the Skill directory/u,
+        );
 
         await rm(join(directory, "SKILL.md"));
-        await writeFile(join(directory, "SKILL.md"), "# Review\n\nInside.\n", "utf8");
+        await writeFile(
+            join(directory, "SKILL.md"),
+            "# Review\n\nInside.\n",
+            "utf8",
+        );
         await mkdir(join(directory, "scripts"));
         await symlink(outside, join(directory, "scripts/outside.txt"));
         await assert.rejects(
-            readSkillFile("review", "scripts/outside.txt", { configHome, home, workspace }),
-            /outside the Skill directory/u
+            readSkillFile("review", "scripts/outside.txt", {
+                configHome,
+                home,
+                workspace,
+            }),
+            /outside the Skill directory/u,
         );
     } finally {
         await rm(root, { force: true, recursive: true });
     }
 });
 
-async function skill(base: string, relative: string, description: string, body: string): Promise<void> {
+async function skill(
+    base: string,
+    relative: string,
+    description: string,
+    body: string,
+): Promise<void> {
     const directory = join(base, relative);
     await mkdir(directory, { recursive: true });
     await writeFile(
         join(directory, "SKILL.md"),
         `---\ndescription: ${description}\n---\n# Skill\n\n${body}\n`,
-        "utf8"
+        "utf8",
     );
 }

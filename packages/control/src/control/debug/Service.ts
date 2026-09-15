@@ -10,10 +10,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../instance/registry/Registry.js";
-import {
-    DebugPatchManager,
-    type DebugMethodAdapter,
-} from "./Patch.js";
+import { DebugPatchManager, type DebugMethodAdapter } from "./Patch.js";
 
 export class DebugPatchService {
     readonly #instances: InstanceRegistry;
@@ -42,7 +39,10 @@ export class DebugPatchService {
 
     async load(request: DebugPatchLoadRequest): Promise<DebugPatchSummary> {
         await this.#syncTail;
-        if (request.target.startsWith("worker:") && request.scope?.ctxId === undefined) {
+        if (
+            request.target.startsWith("worker:") &&
+            request.scope?.ctxId === undefined
+        ) {
             throw createError({
                 code: errorCodes.controlDebugPatchInvalid,
                 message: "Worker debug patches require a ctxId scope.",
@@ -75,9 +75,13 @@ export class DebugPatchService {
 
     #registerInitialTargets(): void {
         for (const descriptor of this.#instances.list()) {
-            this.#manager.registerTarget(workerTarget(descriptor.name), descriptor.worker, {
-                callTool: workerCallToolAdapter,
-            });
+            this.#manager.registerTarget(
+                workerTarget(descriptor.name),
+                descriptor.worker,
+                {
+                    callTool: workerCallToolAdapter,
+                },
+            );
             this.#registered.set(descriptor.name, descriptor.worker);
         }
     }
@@ -95,7 +99,9 @@ export class DebugPatchService {
 
     async #syncTargets(): Promise<void> {
         const next = new Map(
-            this.#instances.list().map((entry) => [entry.name, entry.worker] as const),
+            this.#instances
+                .list()
+                .map((entry) => [entry.name, entry.worker] as const),
         );
         for (const [name, worker] of [...this.#registered]) {
             if (next.get(name) === worker) continue;
@@ -117,11 +123,21 @@ const workerCallToolAdapter: DebugMethodAdapter = {
         const context = args[2] as ToolCallContext | undefined;
         return {
             context: {
-                ...(context?.ctxId === undefined ? {} : { ctxId: context.ctxId }),
-                ...(context?.extensionId === undefined ? {} : { extensionId: context.extensionId }),
-                ...(context?.requestId === undefined ? {} : { requestId: context.requestId }),
-                ...(context?.source === undefined ? {} : { source: context.source }),
-                ...(context?.workspace === undefined ? {} : { workspace: context.workspace }),
+                ...(context?.ctxId === undefined
+                    ? {}
+                    : { ctxId: context.ctxId }),
+                ...(context?.extensionId === undefined
+                    ? {}
+                    : { extensionId: context.extensionId }),
+                ...(context?.requestId === undefined
+                    ? {}
+                    : { requestId: context.requestId }),
+                ...(context?.source === undefined
+                    ? {}
+                    : { source: context.source }),
+                ...(context?.workspace === undefined
+                    ? {}
+                    : { workspace: context.workspace }),
             },
             input: cloneInput(args[1]),
             signalAborted: readAbortSignal(args[3])?.aborted ?? false,
@@ -134,7 +150,8 @@ const workerCallToolAdapter: DebugMethodAdapter = {
             ? undefined
             : {
                   ctxId: context.ctxId,
-                  toolName: typeof args[0] === "string" ? args[0] : String(args[0]),
+                  toolName:
+                      typeof args[0] === "string" ? args[0] : String(args[0]),
               };
     },
     signal: (args) => readAbortSignal(args[3]),

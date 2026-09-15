@@ -1,6 +1,34 @@
-import type { WorkerArtifactDirectPushInput, WorkerArtifactDirectPushResult, WorkerArtifactDirectReceiveOpenInput, WorkerArtifactDirectReceiveOpenResult, WorkerArtifactPayloadOpenInput, WorkerArtifactPayloadOpenResult, WorkerArtifactPayloadReadInput, WorkerArtifactPayloadReadResult, WorkerArtifactReceiveBeginInput, WorkerArtifactReceiveBeginResult, WorkerArtifactReceiveFinishResult, WorkerArtifactReceiveWriteInput, WorkerArtifactReceiveWriteResult } from "@portable-devshell/core";
+import type {
+    WorkerArtifactDirectPushInput,
+    WorkerArtifactDirectPushResult,
+    WorkerArtifactDirectReceiveOpenInput,
+    WorkerArtifactDirectReceiveOpenResult,
+    WorkerArtifactPayloadOpenInput,
+    WorkerArtifactPayloadOpenResult,
+    WorkerArtifactPayloadReadInput,
+    WorkerArtifactPayloadReadResult,
+    WorkerArtifactReceiveBeginInput,
+    WorkerArtifactReceiveBeginResult,
+    WorkerArtifactReceiveFinishResult,
+    WorkerArtifactReceiveWriteInput,
+    WorkerArtifactReceiveWriteResult,
+} from "@portable-devshell/core";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ArtifactEventType, ArtifactShareInput, ArtifactShareResult, ArtifactShareRevokeResult, ArtifactStoredImageResult, ArtifactTransferCancelInput, ArtifactTransferLookupInput, ArtifactTransferRecord, ArtifactTransferResult, ArtifactTransferStartInput, ArtifactViewImageInput, ArtifactViewImageResult, JsonValue } from "@portable-devshell/shared";
+import type {
+    ArtifactEventType,
+    ArtifactShareInput,
+    ArtifactShareResult,
+    ArtifactShareRevokeResult,
+    ArtifactStoredImageResult,
+    ArtifactTransferCancelInput,
+    ArtifactTransferLookupInput,
+    ArtifactTransferRecord,
+    ArtifactTransferResult,
+    ArtifactTransferStartInput,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
+    JsonValue,
+} from "@portable-devshell/shared";
 import { ArtifactRecordStore } from "./RecordStore.js";
 import { ArtifactImageService } from "./delivery/Image.js";
 import { ArtifactShareService } from "./delivery/Share.js";
@@ -14,9 +42,16 @@ export class ArtifactService {
     #initialized = false;
 
     constructor(options: ArtifactServiceOptions) {
-        const terminalHistoryLimit = options.terminalHistoryLimit ?? DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT;
-        if (!Number.isSafeInteger(terminalHistoryLimit) || terminalHistoryLimit < 0) {
-            throw new TypeError("Artifact terminalHistoryLimit must be a non-negative safe integer.");
+        const terminalHistoryLimit =
+            options.terminalHistoryLimit ??
+            DEFAULT_ARTIFACT_TERMINAL_HISTORY_LIMIT;
+        if (
+            !Number.isSafeInteger(terminalHistoryLimit) ||
+            terminalHistoryLimit < 0
+        ) {
+            throw new TypeError(
+                "Artifact terminalHistoryLimit must be a non-negative safe integer.",
+            );
         }
         this.#imageService = new ArtifactImageService(options);
         this.#recordStore = new ArtifactRecordStore(options.storageDir);
@@ -24,7 +59,7 @@ export class ArtifactService {
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
             shareUrl: options.shareUrl,
-            terminalHistoryLimit
+            terminalHistoryLimit,
         });
         this.#transferService = new ArtifactTransferService({
             chunkBytes: options.chunkBytes,
@@ -32,7 +67,7 @@ export class ArtifactService {
             recordStore: this.#recordStore,
             resolveEndpoint: options.resolveEndpoint,
             schedule: options.schedule,
-            terminalHistoryLimit
+            terminalHistoryLimit,
         });
     }
 
@@ -61,7 +96,7 @@ export class ArtifactService {
     async viewImage(
         input: ArtifactViewImageInput,
         defaultInstance: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<ArtifactViewImageResult> {
         if (!this.#initialized) {
             throw new Error("ArtifactService is not initialized.");
@@ -78,7 +113,7 @@ export class ArtifactService {
 
     async createShare(
         input: ArtifactShareInput,
-        defaultInstance: string
+        defaultInstance: string,
     ): Promise<ArtifactShareResult> {
         return await this.#shareService.createShare(input, defaultInstance);
     }
@@ -102,19 +137,19 @@ export class ArtifactService {
     async readSharePayload(
         access: ArtifactShareAccess,
         offsetBytes: number,
-        maxBytes: number
+        maxBytes: number,
     ): Promise<WorkerArtifactPayloadReadResult> {
         return await this.#shareService.readSharePayload(
             access,
             offsetBytes,
-            maxBytes
+            maxBytes,
         );
     }
 
     async finishShareDownload(
         token: string,
         completed: boolean,
-        details?: JsonValue
+        details?: JsonValue,
     ): Promise<void> {
         await this.#shareService.finishShareDownload(token, completed, details);
     }
@@ -129,11 +164,11 @@ export class ArtifactService {
 
     async startTransfer(
         input: ArtifactTransferStartInput,
-        defaultInstance: string
+        defaultInstance: string,
     ): Promise<ArtifactTransferResult> {
         return await this.#transferService.startTransfer(
             input,
-            defaultInstance
+            defaultInstance,
         );
     }
 
@@ -146,13 +181,13 @@ export class ArtifactService {
     }
 
     async lookupTransfer(
-        input: ArtifactTransferLookupInput
+        input: ArtifactTransferLookupInput,
     ): Promise<ArtifactTransferResult> {
         return await this.#transferService.lookupTransfer(input);
     }
 
     async cancelTransfer(
-        input: ArtifactTransferCancelInput | string
+        input: ArtifactTransferCancelInput | string,
     ): Promise<ArtifactTransferResult> {
         return await this.#transferService.cancelTransfer(input);
     }
@@ -178,22 +213,47 @@ export type ArtifactServiceSchedule = (task: () => void) => void;
 
 export interface ArtifactServiceEndpoint {
     abortArtifactReceive(receiveId: string): Promise<void>;
-    appendControlEvent(type: ArtifactEventType, data?: JsonValue): Promise<unknown>;
-    beginArtifactReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult>;
+    appendControlEvent(
+        type: ArtifactEventType,
+        data?: JsonValue,
+    ): Promise<unknown>;
+    beginArtifactReceive(
+        input: WorkerArtifactReceiveBeginInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveBeginResult>;
     closeArtifactPayload(payloadId: string): Promise<void>;
-    finishArtifactReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult>;
-    openArtifactPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult>;
-    readArtifactPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult>;
-    writeArtifactReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult>;
-    openArtifactDirectReceive?(input: WorkerArtifactDirectReceiveOpenInput, signal?: AbortSignal): Promise<WorkerArtifactDirectReceiveOpenResult>;
+    finishArtifactReceive(
+        receiveId: string,
+    ): Promise<WorkerArtifactReceiveFinishResult>;
+    openArtifactPayload(
+        input: WorkerArtifactPayloadOpenInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadOpenResult>;
+    readArtifactPayload(
+        input: WorkerArtifactPayloadReadInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadReadResult>;
+    writeArtifactReceive(
+        input: WorkerArtifactReceiveWriteInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveWriteResult>;
+    openArtifactDirectReceive?(
+        input: WorkerArtifactDirectReceiveOpenInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactDirectReceiveOpenResult>;
     closeArtifactDirectReceive?(receiverId: string): Promise<void>;
-    pushArtifactPayloadDirect?(input: WorkerArtifactDirectPushInput): Promise<WorkerArtifactDirectPushResult>;
+    pushArtifactPayloadDirect?(
+        input: WorkerArtifactDirectPushInput,
+    ): Promise<WorkerArtifactDirectPushResult>;
 }
 
 export interface ArtifactServiceOptions {
     chunkBytes?: number;
     directTransfer?: boolean;
-    resolveEndpoint: (instance: string, authorityInstance?: string) => ArtifactServiceEndpoint | undefined;
+    resolveEndpoint: (
+        instance: string,
+        authorityInstance?: string,
+    ) => ArtifactServiceEndpoint | undefined;
     schedule?: ArtifactServiceSchedule;
     shareUrl: (token: string) => string;
     storageDir: string;
@@ -203,7 +263,7 @@ export interface ArtifactServiceOptions {
 export function requireArtifactEndpoint(
     resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"],
     instance: string,
-    authorityInstance: string
+    authorityInstance: string,
 ): ArtifactServiceEndpoint {
     const endpoint = resolveEndpoint(instance, authorityInstance);
     if (endpoint !== undefined) {
@@ -214,7 +274,7 @@ export function requireArtifactEndpoint(
         code: errorCodes.instanceMissing,
         message: `Instance ${instance} was not found.`,
         retryable: false,
-        details: { instance }
+        details: { instance },
     });
 }
 
@@ -245,4 +305,5 @@ export interface ArtifactShareAccess {
     sourceInstance: string;
 }
 
-export type ArtifactPayloadSourceInput = { handle: string } | { path: string; workspace: string };
+export type ArtifactPayloadSourceInput =
+    { handle: string } | { path: string; workspace: string };

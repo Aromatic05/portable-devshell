@@ -1,14 +1,23 @@
-import type { ApprovalDecision, ApprovalRequest, JsonValue } from "@portable-devshell/shared";
+import type {
+    ApprovalDecision,
+    ApprovalRequest,
+    JsonValue,
+} from "@portable-devshell/shared";
 
 import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 
 export function toEventData(
-    record: Record<string, JsonValue | undefined>
+    record: Record<string, JsonValue | undefined>,
 ): Record<string, JsonValue> {
-    return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as Record<string, JsonValue>;
+    return Object.fromEntries(
+        Object.entries(record).filter(([, value]) => value !== undefined),
+    ) as Record<string, JsonValue>;
 }
 
-export function toApprovalEventData(request: ApprovalRequest, decision?: ApprovalDecision): Record<string, JsonValue> {
+export function toApprovalEventData(
+    request: ApprovalRequest,
+    decision?: ApprovalDecision,
+): Record<string, JsonValue> {
     return toEventData({
         approvalId: request.approvalId,
         callId: request.callId,
@@ -32,7 +41,10 @@ export function toApprovalEventData(request: ApprovalRequest, decision?: Approva
     });
 }
 
-export function createStatusChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+export function createStatusChangedEventData(
+    previous: InstanceSnapshot,
+    next: InstanceSnapshot,
+): Record<string, JsonValue> {
     return toEventData({
         connectionState: next.connectionState,
         daemonState: next.daemonState,
@@ -42,11 +54,14 @@ export function createStatusChangedEventData(previous: InstanceSnapshot, next: I
         previousDaemonState: previous.daemonState,
         previousStatus: previous.status,
         ready: next.ready,
-        status: next.status
+        status: next.status,
     });
 }
 
-export function createConnectionChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+export function createConnectionChangedEventData(
+    previous: InstanceSnapshot,
+    next: InstanceSnapshot,
+): Record<string, JsonValue> {
     return toEventData({
         connectionState: next.connectionState,
         daemonState: next.daemonState,
@@ -55,11 +70,14 @@ export function createConnectionChangedEventData(previous: InstanceSnapshot, nex
         pid: next.pid,
         previousConnectionState: previous.connectionState,
         ready: next.ready,
-        status: next.status
+        status: next.status,
     });
 }
 
-export function createReadyChangedEventData(previous: InstanceSnapshot, next: InstanceSnapshot): Record<string, JsonValue> {
+export function createReadyChangedEventData(
+    previous: InstanceSnapshot,
+    next: InstanceSnapshot,
+): Record<string, JsonValue> {
     return toEventData({
         connectionState: next.connectionState,
         daemonState: next.daemonState,
@@ -68,7 +86,6 @@ export function createReadyChangedEventData(previous: InstanceSnapshot, next: In
         pid: next.pid,
         previousReady: previous.ready,
         ready: next.ready,
-        status: next.status
+        status: next.status,
     });
 }
-

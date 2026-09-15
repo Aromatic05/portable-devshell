@@ -6,8 +6,7 @@ export const mcpEnvironmentToolName = "environ_info" as const;
 export const mcpRemoteEnvironmentToolName = "environ_remote" as const;
 
 export type McpToolCatalogEnvironmentName =
-    | typeof mcpEnvironmentToolName
-    | typeof mcpRemoteEnvironmentToolName;
+    typeof mcpEnvironmentToolName | typeof mcpRemoteEnvironmentToolName;
 
 export interface McpToolCatalogEnvironmentListOptions {
     remoteEnvironment?: boolean;
@@ -30,7 +29,9 @@ const contextStateProperties: Record<string, JsonValue> = {
 export function isMcpEnvironmentToolName(
     name: string,
 ): name is McpToolCatalogEnvironmentName {
-    return name === mcpEnvironmentToolName || name === mcpRemoteEnvironmentToolName;
+    return (
+        name === mcpEnvironmentToolName || name === mcpRemoteEnvironmentToolName
+    );
 }
 
 export class McpToolCatalogEnvironment {
@@ -83,18 +84,21 @@ export class McpToolCatalogEnvironment {
                     type: "object",
                 },
                 projectMemoryAgentFile: {
-                    description: "Durable project memory to read before working. Omitted when a current worker confirms no memory exists yet.",
+                    description:
+                        "Durable project memory to read before working. Omitted when a current worker confirms no memory exists yet.",
                     minLength: 1,
                     type: "string",
                 },
                 projectMemoryDirectory: {
-                    description: "Directory for durable project memory. Omitted together with projectMemoryAgentFile when no memory exists yet.",
+                    description:
+                        "Directory for durable project memory. Omitted together with projectMemoryAgentFile when no memory exists yet.",
                     minLength: 1,
                     type: "string",
                 },
                 remoteEnvironment: {
                     additionalProperties: false,
-                    description: "Current environ_remote command vocabulary. Use environ_remote command='help' for authoritative argument details.",
+                    description:
+                        "Current environ_remote command vocabulary. Use environ_remote command='help' for authoritative argument details.",
                     properties: {
                         commands: {
                             items: { minLength: 1, type: "string" },
@@ -172,33 +176,36 @@ export class McpToolCatalogEnvironment {
         if (options.remoteEnvironment === true) {
             definitions.push(structuredClone(this.#remoteDefinition));
         }
-        const requireExplicitContextId = options.requireExplicitContextId !== false;
+        const requireExplicitContextId =
+            options.requireExplicitContextId !== false;
         if (requireExplicitContextId) {
             for (const definition of definitions) {
-            const inputSchema = definition.inputSchema as {
-                properties?: Record<string, JsonValue>;
-            };
-            if (inputSchema.properties !== undefined) {
-                inputSchema.properties.ctxId = {
-                    description: "Internal Context ID when explicitly selecting an existing Context.",
-                    minLength: 1,
-                    type: "string",
+                const inputSchema = definition.inputSchema as {
+                    properties?: Record<string, JsonValue>;
                 };
-            }
-            const outputSchema = definition.outputSchema as {
-                properties?: Record<string, JsonValue>;
-                required?: string[];
-            };
-            if (outputSchema.properties !== undefined) {
-                outputSchema.properties.ctxId = {
-                    description: "Internal Context ID used by portable-devshell to anchor this Context.",
-                    minLength: 1,
-                    type: "string",
+                if (inputSchema.properties !== undefined) {
+                    inputSchema.properties.ctxId = {
+                        description:
+                            "Internal Context ID when explicitly selecting an existing Context.",
+                        minLength: 1,
+                        type: "string",
+                    };
+                }
+                const outputSchema = definition.outputSchema as {
+                    properties?: Record<string, JsonValue>;
+                    required?: string[];
                 };
-            }
-            if (outputSchema.required !== undefined) {
-                outputSchema.required = ["ctxId", ...outputSchema.required];
-            }
+                if (outputSchema.properties !== undefined) {
+                    outputSchema.properties.ctxId = {
+                        description:
+                            "Internal Context ID used by portable-devshell to anchor this Context.",
+                        minLength: 1,
+                        type: "string",
+                    };
+                }
+                if (outputSchema.required !== undefined) {
+                    outputSchema.required = ["ctxId", ...outputSchema.required];
+                }
             }
         }
         definitions[0]!.description = environmentDescription(
@@ -207,7 +214,10 @@ export class McpToolCatalogEnvironment {
         );
         if (options.workspaceApp === true) {
             definitions[0]!._meta = {
-                ui: { resourceUri: workspaceAppResourceUri, visibility: ["model", "app"] },
+                ui: {
+                    resourceUri: workspaceAppResourceUri,
+                    visibility: ["model", "app"],
+                },
                 "ui/resourceUri": workspaceAppResourceUri,
                 "openai/outputTemplate": workspaceAppResourceUri,
                 "openai/widgetAccessible": true,
@@ -217,7 +227,10 @@ export class McpToolCatalogEnvironment {
     }
 }
 
-function environmentDescription(workspaceApp: boolean, requireExplicitContextId: boolean): string {
+function environmentDescription(
+    workspaceApp: boolean,
+    requireExplicitContextId: boolean,
+): string {
     const prefix = workspaceApp
         ? "Prepare and inspect the workspace environment for the current portable-devshell Context; the same call also bootstraps the Live Workspace App."
         : "Prepare and inspect the workspace environment for the current portable-devshell Context.";

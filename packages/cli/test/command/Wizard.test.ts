@@ -6,7 +6,7 @@ import { normalizeConfigInstanceDraft } from "@portable-devshell/shared";
 import type {
     InstanceCreateDraft,
     InstanceCreateSchema,
-    InstanceCreateSummary
+    InstanceCreateSummary,
 } from "@portable-devshell/shared";
 
 import { CliWizardInstanceCreate } from "../../src/command/instance/create/Wizard.js";
@@ -19,12 +19,12 @@ const schema: InstanceCreateSchema = {
             "dockerfile",
             "compose",
             "existingImage",
-            "existingStoppedContainer"
+            "existingStoppedContainer",
         ],
         presets: [
             { image: "archlinux:latest", preset: "arch" },
-            { image: "debian:stable", preset: "debian" }
-        ]
+            { image: "debian:stable", preset: "debian" },
+        ],
     },
     defaultEnabled: true,
     defaultMcpContextMode: "explicit",
@@ -32,7 +32,7 @@ const schema: InstanceCreateSchema = {
     defaultModelExtensions: ["instance"],
     defaultProvider: "local",
     defaultSecurityMode: "disabled",
-    providers: ["local", "ssh", "docker", "podman", "reverse"]
+    providers: ["local", "ssh", "docker", "podman", "reverse"],
 };
 
 test("instance wizard retries invalid basic answers, deduplicates lists, and supports cancellation", async () => {
@@ -57,9 +57,9 @@ test("instance wizard retries invalid basic answers, deduplicates lists, and sup
             "",
             "",
             "",
-            "n"
+            "n",
         ],
-        output
+        output,
     );
 
     const result = await wizard.run(schema, async (draft) => {
@@ -91,9 +91,9 @@ test("instance wizard collects SSH configuration and accepts validated creation"
             "",
             "",
             "",
-            "y"
+            "y",
         ],
-        output
+        output,
     );
 
     const result = await wizard.run(schema, async (draft) => summaryFor(draft));
@@ -105,12 +105,12 @@ test("instance wizard collects SSH configuration and accepts validated creation"
         mcp: {
             auth: "none",
             contextMode: "explicit",
-            enabled: false
+            enabled: false,
         },
         name: "remote-one",
         provider: "ssh",
         security: { mode: "disabled" },
-        ssh: { command: "ssh devbox" }
+        ssh: { command: "ssh devbox" },
     });
 });
 
@@ -147,16 +147,16 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
             "8",
             "30000",
             '{"bash_run":{"maxRunning":1,"queueDepth":4}}',
-            "y"
+            "y",
         ],
-        output
+        output,
     );
 
     const result = await wizard.run(schema, async (draft) => summaryFor(draft));
 
     assert.notEqual(result, undefined);
     assert.deepEqual(result?.draft.extensions, {
-        model: ["file", "bash"]
+        model: ["file", "bash"],
     });
     assert.deepEqual(result?.draft.mcp, {
         auth: "oauth2",
@@ -165,18 +165,25 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
         oauth2: {
             documentationUrl: "https://docs.example.test/mcp",
             requiredScopes: ["mcp", "profile"],
-            resourceName: "complete-resource"
-        }
+            resourceName: "complete-resource",
+        },
     });
     assert.deepEqual(result?.draft.approvalPolicy, {
         mode: "ask",
-        rules: [{ decision: "allow", match: "exact", source: "cli", toolName: "file_read" }]
+        rules: [
+            {
+                decision: "allow",
+                match: "exact",
+                source: "cli",
+                toolName: "file_read",
+            },
+        ],
     });
     assert.deepEqual(result?.draft.env, { API_TOKEN: "instance-secret" });
     assert.deepEqual(result?.draft.logs, {
         eventBufferSize: 512,
         maxBytes: 1048576,
-        retentionDays: 14
+        retentionDays: 14,
     });
     assert.deepEqual(result?.draft.tools, {
         scheduler: {
@@ -185,8 +192,8 @@ test("instance wizard collects complete OAuth, approval, environment, log, and s
             maxRunningPerSession: 2,
             queueDepth: 32,
             queueDepthPerSession: 8,
-            queueTimeoutMs: 30000
-        }
+            queueTimeoutMs: 30000,
+        },
     });
 
     const text = output.flush();
@@ -229,9 +236,9 @@ test("instance wizard validates and collects a managed Docker preset", async () 
             "",
             "",
             "",
-            "y"
+            "y",
         ],
-        output
+        output,
     );
 
     const result = await wizard.run(schema, async (draft) => summaryFor(draft));
@@ -246,52 +253,65 @@ test("instance wizard validates and collects a managed Docker preset", async () 
             {
                 mode: "ro",
                 source: "/host",
-                target: "/container"
-            }
+                target: "/container",
+            },
         ],
         network: "bridge",
         preset: "debian",
-        user: "1000"
+        user: "1000",
     });
     assert.equal(result?.draft.dockerBinary, "/usr/bin/docker");
 });
 
-function createWizard(lines: string[], output: ReturnType<typeof createBuffer>): CliWizardInstanceCreate {
+function createWizard(
+    lines: string[],
+    output: ReturnType<typeof createBuffer>,
+): CliWizardInstanceCreate {
     return new CliWizardInstanceCreate({
         input: Readable.from(lines.map((line) => `${line}\n`)),
-        output
+        output,
     });
 }
 
 function summaryFor(draft: InstanceCreateDraft): InstanceCreateSummary {
     const instance = normalizeConfigInstanceDraft(draft);
     return {
-        ...(instance.approvalPolicy === undefined ? {} : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
-        ...(instance.container === undefined ? {} : { container: instance.container }),
-        ...(instance.dockerBinary === undefined ? {} : { dockerBinary: instance.dockerBinary }),
+        ...(instance.approvalPolicy === undefined
+            ? {}
+            : { approvalPolicy: structuredClone(instance.approvalPolicy) }),
+        ...(instance.container === undefined
+            ? {}
+            : { container: instance.container }),
+        ...(instance.dockerBinary === undefined
+            ? {}
+            : { dockerBinary: instance.dockerBinary }),
         ...(instance.env === undefined ? {} : { env: { ...instance.env } }),
         extensions: { model: [...instance.extensions.model] },
         ...(instance.logs === undefined ? {} : { logs: { ...instance.logs } }),
-        ...(instance.podmanBinary === undefined ? {} : { podmanBinary: instance.podmanBinary }),
+        ...(instance.podmanBinary === undefined
+            ? {}
+            : { podmanBinary: instance.podmanBinary }),
         ...(instance.ssh === undefined ? {} : { ssh: instance.ssh }),
-        ...(instance.tools === undefined ? {} : { tools: structuredClone(instance.tools) }),
+        ...(instance.tools === undefined
+            ? {}
+            : { tools: structuredClone(instance.tools) }),
         enabled: instance.enabled,
         mcp: {
             auth: {
                 mode: instance.mcp.auth.mode,
                 ...(instance.mcp.auth.mode === "oauth2"
                     ? { oauth2: structuredClone(instance.mcp.auth.oauth2) }
-                    : {})
+                    : {}),
             },
             contextMode: instance.mcp.contextMode,
             enabled: instance.mcp.enabled,
-            path: instance.mcp.path
+            path: instance.mcp.path,
         },
         name: instance.name,
         provider: instance.provider,
         security: {
-            mode: instance.security.mode
-        }
+            mode: instance.security.mode,
+        },
     };
 }
 
@@ -305,6 +325,6 @@ function createBuffer(): { flush(): string; write(chunk: string): void } {
         },
         write(chunk: string) {
             chunks.push(chunk);
-        }
+        },
     };
 }

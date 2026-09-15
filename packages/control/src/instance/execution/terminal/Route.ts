@@ -10,10 +10,7 @@ import {
 
 import { routeModule } from "../../../server/Route.js";
 import type { TerminalBackend } from "./Backend.js";
-import type {
-    TerminalAttachment,
-    TerminalSessionService,
-} from "./Service.js";
+import type { TerminalAttachment, TerminalSessionService } from "./Service.js";
 
 export interface TerminalRouteModuleOptions {
     backend: TerminalBackend;

@@ -1,7 +1,15 @@
-import { errorCodes, type InstanceName, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type InstanceName,
+    type JsonValue,
+    type ToolCallContext,
+} from "@portable-devshell/shared";
 
 import type { WorkerToolInvoker } from "../../../tool/Invoker.js";
-import type { WorkerToolCallScheduler, WorkerToolSchedulerReservation } from "../../../tool/Scheduler.js";
+import type {
+    WorkerToolCallScheduler,
+    WorkerToolSchedulerReservation,
+} from "../../../tool/Scheduler.js";
 import { getErrorCode } from "../../state/Error.js";
 import type { WorkerInstanceToolApproval } from "./Approval.js";
 import type { WorkerInstanceToolAudit } from "../record/Audit.js";
@@ -9,7 +17,7 @@ import type { WorkerInstanceToolLog } from "../record/Log.js";
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
-    throwIfToolCallAborted
+    throwIfToolCallAborted,
 } from "../Error.js";
 import { asBashToolResult, asCommandResult } from "../record/Result.js";
 
@@ -47,7 +55,10 @@ export class WorkerInstanceToolExecution {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput: JsonValue = input,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
@@ -66,15 +77,17 @@ export class WorkerInstanceToolExecution {
                     instanceName: this.#instanceName,
                     ctxId: context.ctxId,
                     source: context.source,
-                    toolName
+                    toolName,
                 },
-                signal
+                signal,
             );
         } catch (error) {
             throw normalizeToolSchedulerError(error);
         }
 
-        let approvalState: Awaited<ReturnType<WorkerInstanceToolApproval["prepare"]>>;
+        let approvalState: Awaited<
+            ReturnType<WorkerInstanceToolApproval["prepare"]>
+        >;
         try {
             if (hostRecorded) await this.#audit.queued(scope);
             approvalState = await this.#approval.prepare(
@@ -85,7 +98,7 @@ export class WorkerInstanceToolExecution {
                 scope.startedAt,
                 () => reservation.markPendingApproval(),
                 signal,
-                recording
+                recording,
             );
         } catch (error) {
             reservation.release();
@@ -98,21 +111,30 @@ export class WorkerInstanceToolExecution {
 
         try {
             const rawResult = await reservation.run(async () => {
-                if (hostRecorded) await this.#audit.running(scope, runningContext, approvalState);
+                if (hostRecorded)
+                    await this.#audit.running(
+                        scope,
+                        runningContext,
+                        approvalState,
+                    );
                 return await this.#toolInvoker.invoke(
                     toolName,
                     invocationInput,
                     { ...context, operationId: scope.callId },
                     signal,
-                    onProgress
+                    onProgress,
                 );
             });
-            const result = transformResult === undefined
-                ? rawResult
-                : await transformResult(rawResult, scope.callId);
+            const result =
+                transformResult === undefined
+                    ? rawResult
+                    : await transformResult(rawResult, scope.callId);
             toolExecutionSucceeded = true;
             if (hostRecorded) {
-                const bashResult = toolName === "bash_run" ? asBashToolResult(result) : undefined;
+                const bashResult =
+                    toolName === "bash_run"
+                        ? asBashToolResult(result)
+                        : undefined;
                 await this.#audit.completed(
                     scope,
                     runningContext,
@@ -123,7 +145,7 @@ export class WorkerInstanceToolExecution {
                         if (bashResult !== undefined) {
                             await this.#log.append(bashResult, runningContext);
                         }
-                    }
+                    },
                 );
             }
             return result;
@@ -132,13 +154,25 @@ export class WorkerInstanceToolExecution {
                 throw error;
             }
 
-            const rawErrorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-            const errorCode = rawErrorCode === "tool.cancelled" ? errorCodes.coreToolCallCancelled : rawErrorCode;
+            const rawErrorCode = getErrorCode(
+                error,
+                errorCodes.coreProviderFailed,
+            );
+            const errorCode =
+                rawErrorCode === "tool.cancelled"
+                    ? errorCodes.coreToolCallCancelled
+                    : rawErrorCode;
             const nonRunningStatus = readNonRunningSchedulerStatus(errorCode);
 
             if (nonRunningStatus !== undefined) {
                 if (hostRecorded) {
-                    await this.#audit.nonRunning(scope, runningContext, approvalState, nonRunningStatus, errorCode);
+                    await this.#audit.nonRunning(
+                        scope,
+                        runningContext,
+                        approvalState,
+                        nonRunningStatus,
+                        errorCode,
+                    );
                 }
                 throw normalizeToolSchedulerError(error);
             }
@@ -155,7 +189,7 @@ export class WorkerInstanceToolExecution {
                         if (result !== undefined) {
                             await this.#log.append(result, runningContext);
                         }
-                    }
+                    },
                 );
             }
             throw error;

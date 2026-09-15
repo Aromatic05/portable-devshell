@@ -40,4 +40,3 @@ export interface ReverseUpstreamBatch {
     frames: ReverseSseFrame[];
     generation: number;
 }
-

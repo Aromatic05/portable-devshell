@@ -23,17 +23,19 @@ export interface ControlWebSocketBearerRevocation {
 }
 
 export interface ControlWebSocketAccessAuthorizer {
-    authorize(request: IncomingMessage): Promise<ControlWebSocketAccess | undefined>;
+    authorize(
+        request: IncomingMessage,
+    ): Promise<ControlWebSocketAccess | undefined>;
     onRevoked(listener: (key: string) => void): () => void;
 }
 
 export interface ControlWebSocketAccessServiceOptions {
     onBearerRevoked?: (
-        listener: (revocation: ControlWebSocketBearerRevocation) => void
+        listener: (revocation: ControlWebSocketBearerRevocation) => void,
     ) => () => void;
     sessions: ControlWebSessionService;
     verifyBearer?: (
-        token: string
+        token: string,
     ) => Promise<ControlWebSocketBearerVerification | boolean>;
 }
 
@@ -48,7 +50,9 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
         this.#verifyBearer = options.verifyBearer;
     }
 
-    async authorize(request: IncomingMessage): Promise<ControlWebSocketAccess | undefined> {
+    async authorize(
+        request: IncomingMessage,
+    ): Promise<ControlWebSocketAccess | undefined> {
         const sessionToken = this.#sessions.authorizeToken(request);
         if (sessionToken !== undefined) {
             return { key: sessionKey(sessionToken), kind: "browser" };
@@ -69,18 +73,24 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
         try {
             const verified = await this.#verifyBearer(token);
             if (verified === false) return undefined;
-            if (verified === true) return { key: nativeKey(token), kind: "native" };
-            if (typeof verified.grantId !== "string" || verified.grantId.length === 0) {
+            if (verified === true)
+                return { key: nativeKey(token), kind: "native" };
+            if (
+                typeof verified.grantId !== "string" ||
+                verified.grantId.length === 0
+            ) {
                 return undefined;
             }
             const key = nativeGrantKey(verified.grantId);
-            const expiresAtMs = typeof verified.expiresAt === "number" && Number.isFinite(verified.expiresAt)
-                ? verified.expiresAt * 1_000
-                : undefined;
+            const expiresAtMs =
+                typeof verified.expiresAt === "number" &&
+                Number.isFinite(verified.expiresAt)
+                    ? verified.expiresAt * 1_000
+                    : undefined;
             return {
                 ...(expiresAtMs === undefined ? {} : { expiresAtMs }),
                 key,
-                kind: "native"
+                kind: "native",
             };
         } catch {
             return undefined;
@@ -88,7 +98,9 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
     }
 
     onRevoked(listener: (key: string) => void): () => void {
-        const unsubscribeSession = this.#sessions.onRevoked((token) => listener(sessionKey(token)));
+        const unsubscribeSession = this.#sessions.onRevoked((token) =>
+            listener(sessionKey(token)),
+        );
         const unsubscribeBearer = this.#onBearerRevoked?.((revocation) => {
             listener(nativeGrantKey(revocation.grantId));
         });
@@ -102,7 +114,9 @@ export class ControlWebSocketAccessService implements ControlWebSocketAccessAuth
 export class ControlWebSocketSessionAccess implements ControlWebSocketAccessAuthorizer {
     constructor(private readonly sessions: ControlWebSessionService) {}
 
-    async authorize(request: IncomingMessage): Promise<ControlWebSocketAccess | undefined> {
+    async authorize(
+        request: IncomingMessage,
+    ): Promise<ControlWebSocketAccess | undefined> {
         const token = this.sessions.authorizeToken(request);
         return token === undefined
             ? undefined
@@ -128,14 +142,17 @@ function nativeGrantKey(grantId: string): string {
 
 function readBearerToken(request: IncomingMessage): string | undefined {
     const authorization = /^Bearer[ \t]+([^ \t]+)$/iu.exec(
-        request.headers.authorization ?? ""
+        request.headers.authorization ?? "",
     )?.[1];
     if (authorization !== undefined) return authorization;
     const protocols = request.headers["sec-websocket-protocol"];
     const value = Array.isArray(protocols) ? protocols.join(",") : protocols;
-    const encoded = value?.split(",")
+    const encoded = value
+        ?.split(",")
         .map((protocol) => protocol.trim())
-        .find((protocol) => protocol.startsWith(CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX))
+        .find((protocol) =>
+            protocol.startsWith(CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX),
+        )
         ?.slice(CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX.length);
     if (encoded === undefined || encoded.length === 0) return undefined;
     try {

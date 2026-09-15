@@ -26,7 +26,6 @@ export const defaultConfigNormalizeContext: ConfigNormalizeContext = {
     defaultSecurityMode: "disabled",
 };
 
-
 export const MASKED_CONFIG_TOKEN = "********";
 
 export const minimumAuditStorageBytes = 1024 * 1024;

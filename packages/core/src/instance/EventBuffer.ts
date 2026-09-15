@@ -1,4 +1,9 @@
-import { errorCodes, type InstanceEvent, type InstanceName, type JsonValue } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type InstanceEvent,
+    type InstanceName,
+    type JsonValue,
+} from "@portable-devshell/shared";
 
 import type { AuditRecordStore } from "../storage/audit/RecordStore.js";
 
@@ -31,7 +36,11 @@ export class InstanceEventBuffer {
     #events: InstanceEvent[] = [];
     #lastSeq = 0;
 
-    constructor(instanceName: InstanceName, capacity: number, store?: AuditRecordStore<InstanceEvent>) {
+    constructor(
+        instanceName: InstanceName,
+        capacity: number,
+        store?: AuditRecordStore<InstanceEvent>,
+    ) {
         this.#instanceName = instanceName;
         this.#capacity = capacity;
         this.#store = store;
@@ -49,7 +58,7 @@ export class InstanceEventBuffer {
                 data: event.data,
                 instanceName: this.#instanceName,
                 seq: this.#lastSeq + 1,
-                type: event.type
+                type: event.type,
             };
 
             await this.#store?.append(storedEvent);
@@ -62,7 +71,7 @@ export class InstanceEventBuffer {
         });
         this.#appendTail = operation.then(
             () => undefined,
-            () => undefined
+            () => undefined,
         );
         return await operation;
     }
@@ -76,14 +85,14 @@ export class InstanceEventBuffer {
                 fromSeq,
                 kind: "gap",
                 lastSeq: this.#lastSeq,
-                nextSeq
+                nextSeq,
             };
         }
 
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events",
-            lastSeq: this.#lastSeq
+            lastSeq: this.#lastSeq,
         };
     }
 
@@ -93,11 +102,15 @@ export class InstanceEventBuffer {
             return;
         }
 
-        const records = this.#store.readTail === undefined
-            ? await this.#store.readAll()
-            : await this.#store.readTail(this.#capacity);
+        const records =
+            this.#store.readTail === undefined
+                ? await this.#store.readAll()
+                : await this.#store.readTail(this.#capacity);
         this.#events = records.slice(-this.#capacity);
-        this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
+        this.#lastSeq = Math.max(
+            records.at(-1)?.seq ?? 0,
+            (await this.#store.readHighWater?.()) ?? 0,
+        );
         this.#initialized = true;
     }
 }

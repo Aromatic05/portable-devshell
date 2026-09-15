@@ -307,7 +307,9 @@ function resolveTodoBreadcrumbTitle(
 ): string {
     const instance = state.ui.selectedInstance;
     const todo =
-        instance === undefined ? undefined : state.readModel.instanceState[instance]?.todo;
+        instance === undefined
+            ? undefined
+            : state.readModel.instanceState[instance]?.todo;
     const title =
         todo?.taskId === todoId
             ? todo.title
@@ -361,9 +363,10 @@ function restoreCurrentTuiRouteView(
     const route = currentTuiRoute(state);
     const focusScope = forceMainFocus ? "mainBoxes" : view.focusRegion;
     const scrollKey = currentTuiRouteScrollKey(state);
-    const scrollOffset = route.page === "messages" && route.view === "thread"
-        ? Number.MAX_SAFE_INTEGER
-        : view.scrollOffset;
+    const scrollOffset =
+        route.page === "messages" && route.view === "thread"
+            ? Number.MAX_SAFE_INTEGER
+            : view.scrollOffset;
     return {
         ...state,
         interaction: { ...state.interaction, focusScope },
@@ -407,10 +410,12 @@ function isTuiRouteResourceValid(
                 ),
         );
         const instanceState = state.readModel.instanceState[instance];
-        return registered ||
+        return (
+            registered ||
             (instanceState?.conversationEntries ?? []).some(
                 (entry) => entry.ctxId === route.ctxId,
-            );
+            )
+        );
     }
     if (route.page === "audit" && route.view !== "contexts") {
         if (instance === undefined) return false;
@@ -418,13 +423,21 @@ function isTuiRouteResourceValid(
             state.readModel.instanceState[instance]?.toolCalls ?? [],
             state.readModel.instanceState[instance]?.commentCalls ?? [],
         );
-        const approvals = state.readModel.instanceState[instance]?.approvals ?? [];
-        const messages = state.readModel.instanceState[instance]?.contextMessages ?? [];
+        const approvals =
+            state.readModel.instanceState[instance]?.approvals ?? [];
+        const messages =
+            state.readModel.instanceState[instance]?.contextMessages ?? [];
         if (route.scope === "unscoped") {
-            return calls.some(
-                (call) => call.ctxId === undefined || call.ctxId.length === 0,
-            ) || approvals.some(
-                (approval) => approval.ctxId === undefined || approval.ctxId.length === 0,
+            return (
+                calls.some(
+                    (call) =>
+                        call.ctxId === undefined || call.ctxId.length === 0,
+                ) ||
+                approvals.some(
+                    (approval) =>
+                        approval.ctxId === undefined ||
+                        approval.ctxId.length === 0,
+                )
             );
         }
         return (

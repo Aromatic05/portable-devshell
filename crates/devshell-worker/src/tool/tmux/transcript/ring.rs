@@ -116,13 +116,13 @@ pub fn remove(name: &str) -> std::io::Result<()> {
 fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
     for _ in 0..SNAPSHOT_RETRIES {
         let before = sequence(mapping).load(Ordering::SeqCst);
-        if before % 2 != 0 {
+        if !before.is_multiple_of(2) {
             std::hint::spin_loop();
             continue;
         }
         let fields = read_header_fields(mapping.as_slice());
         let after_header = sequence(mapping).load(Ordering::SeqCst);
-        if before != after_header || after_header % 2 != 0 {
+        if before != after_header || !after_header.is_multiple_of(2) {
             std::hint::spin_loop();
             continue;
         }
@@ -137,7 +137,7 @@ fn snapshot_mapping(mapping: &SharedMapping) -> std::io::Result<RingSnapshot> {
         validate_range(mapping.as_slice(), base, end, capacity)?;
         let data = read_wrapped(mapping.as_slice(), base, end - base, capacity);
         let after = sequence(mapping).load(Ordering::SeqCst);
-        if before == after && after % 2 == 0 {
+        if before == after && after.is_multiple_of(2) {
             return Ok(RingSnapshot { base, end, data });
         }
         std::hint::spin_loop();
@@ -157,7 +157,7 @@ fn initialize_header(mapping: &mut SharedMapping, offset: u64, capacity: u64) {
 
 fn begin_write(mapping: &SharedMapping) -> u64 {
     let current = sequence(mapping).load(Ordering::SeqCst);
-    let writing = if current % 2 == 0 {
+    let writing = if current.is_multiple_of(2) {
         current.wrapping_add(1)
     } else {
         current.wrapping_add(2)

@@ -20,7 +20,10 @@ test("CLI lifecycle injects every builtin Extension source including MCP", () =>
         { id: "skill", path: skillExtensionDirectory() },
         { id: "secret", path: secretExtensionDirectory() },
         { id: "storage", path: storageExtensionDirectory() },
-        { id: "mcp", path: mcpExtensionDirectory() }
+        { id: "mcp", path: mcpExtensionDirectory() },
     ]);
-    assert.equal(sources.every((source) => isAbsolute(source.path)), true);
+    assert.equal(
+        sources.every((source) => isAbsolute(source.path)),
+        true,
+    );
 });

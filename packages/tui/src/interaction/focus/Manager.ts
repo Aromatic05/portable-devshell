@@ -1,13 +1,7 @@
-import {
-    type TuiFocusItem,
-    isSameTuiFocusItem,
-} from "./Item.js";
+import { type TuiFocusItem, isSameTuiFocusItem } from "./Item.js";
 import type { TuiAppStore } from "../../state/store/App.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
-import {
-    TuiFocusGraph,
-    type TuiFocusDirection,
-} from "./Graph.js";
+import { TuiFocusGraph, type TuiFocusDirection } from "./Graph.js";
 import { resolveSelectedDetailLineId } from "../selection/Detail.js";
 import { type TuiMode } from "../../state/Interaction.js";
 import type { TuiPageId } from "../../state/Ui.js";
@@ -135,21 +129,23 @@ export class TuiFocusManager {
         const graph = this.#context.graphFor(page, mode);
         const remembered = this.#pageMemory.get(page);
         const current = this.currentFocus();
-        const currentBoxId = current?.kind === "line"
-            ? current.boxId
-            : current?.kind === "box"
-              ? current.id
-              : undefined;
-        const sameBoxLine = currentBoxId === undefined
-            ? undefined
-            : graph.firstLineInBox(currentBoxId);
+        const currentBoxId =
+            current?.kind === "line"
+                ? current.boxId
+                : current?.kind === "box"
+                  ? current.id
+                  : undefined;
+        const sameBoxLine =
+            currentBoxId === undefined
+                ? undefined
+                : graph.firstLineInBox(currentBoxId);
         const nextFocus = graph.includes(current)
             ? current
             : sameBoxLine !== undefined
               ? sameBoxLine
-            : graph.includes(remembered)
-              ? remembered
-              : graph.first();
+              : graph.includes(remembered)
+                ? remembered
+                : graph.first();
         if (!isSameTuiFocusItem(nextFocus, current)) {
             this.#applyFocus(nextFocus);
         }
@@ -248,10 +244,7 @@ export class TuiFocusManager {
                       expandedKey
                   ];
         const graph = this.#context.graphFor(this.currentPage(), mode);
-        return resolveSelectedDetailLineId(
-            graph.lineIdsInBox(boxId),
-            storedId,
-        );
+        return resolveSelectedDetailLineId(graph.lineIdsInBox(boxId), storedId);
     }
 
     #applyFocus(item: TuiFocusItem | undefined): void {

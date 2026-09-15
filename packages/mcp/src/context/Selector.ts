@@ -72,23 +72,32 @@ class UnifiedContextSelector implements McpContextSelector {
     ): Promise<McpResolvedContext> {
         const validate = async (ctxId: string) => {
             if (options?.touch !== false) {
-                return await registry.validateAndTouch(ctxId, { principal: requestContext.principal });
+                return await registry.validateAndTouch(ctxId, {
+                    principal: requestContext.principal,
+                });
             }
             if (options.allowExpired === true) {
-                const record = await registry.lookup(ctxId, { principal: requestContext.principal });
+                const record = await registry.lookup(ctxId, {
+                    principal: requestContext.principal,
+                });
                 if (record.status === "disabled") {
-                    return await registry.validate(ctxId, { principal: requestContext.principal });
+                    return await registry.validate(ctxId, {
+                        principal: requestContext.principal,
+                    });
                 }
                 return record;
             }
-            return await registry.validate(ctxId, { principal: requestContext.principal });
+            return await registry.validate(ctxId, {
+                principal: requestContext.principal,
+            });
         };
         const contextInput = readOptionalMcpContextInput(input);
         if (this.requiresExplicitContextId) {
             if (contextInput.ctxId === undefined) {
                 throw createError({
                     code: errorCodes.mcpContextInvalid,
-                    message: "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
+                    message:
+                        "No Context is referenced by this request. Call environ_info with workspace or provide ctxId.",
                     retryable: false,
                 });
             }
@@ -100,7 +109,8 @@ class UnifiedContextSelector implements McpContextSelector {
         if (contextInput.ctxId !== undefined) {
             throw createError({
                 code: errorCodes.mcpContextInvalid,
-                message: "ctxId is internal when Context authority is externally bound.",
+                message:
+                    "ctxId is internal when Context authority is externally bound.",
                 retryable: false,
             });
         }
@@ -135,7 +145,8 @@ class UnifiedContextSelector implements McpContextSelector {
         }
         throw createError({
             code: errorCodes.mcpContextInvalid,
-            message: "No Context is bound to this request. Call environ_info with workspace.",
+            message:
+                "No Context is bound to this request. Call environ_info with workspace.",
             retryable: false,
         });
     }

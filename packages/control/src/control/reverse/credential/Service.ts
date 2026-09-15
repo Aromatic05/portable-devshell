@@ -1,6 +1,13 @@
-import { createError, errorCodes, type ReverseDeviceCodeResult } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type ReverseDeviceCodeResult,
+} from "@portable-devshell/shared";
 
-import type { ReverseInstanceLookupPort, ReverseInstancePort } from "../Port.js";
+import type {
+    ReverseInstanceLookupPort,
+    ReverseInstancePort,
+} from "../Port.js";
 import { ReverseCredentialStore } from "./Store.js";
 
 export class ReverseCredentialService {
@@ -33,21 +40,25 @@ export class ReverseCredentialService {
         await descriptor.worker.setReverseEnrollmentState("pending");
         return {
             controllerUrl: this.#publicBaseUrl,
-            ...result
+            ...result,
         };
     }
 
-    async rotateDeviceToken(instance: string): Promise<{ deviceToken: string; instance: string }> {
+    async rotateDeviceToken(
+        instance: string,
+    ): Promise<{ deviceToken: string; instance: string }> {
         this.#requireReverseInstance(instance);
         const deviceToken = await this.#credentialStore.rotateToken(instance);
         this.#disconnect?.(instance);
         return {
             deviceToken,
-            instance
+            instance,
         };
     }
 
-    async revokeDeviceToken(instance: string): Promise<{ instance: string; revoked: true }> {
+    async revokeDeviceToken(
+        instance: string,
+    ): Promise<{ instance: string; revoked: true }> {
         const descriptor = this.#requireReverseInstance(instance);
         await this.#credentialStore.revoke(instance);
         this.#disconnect?.(instance);
@@ -69,7 +80,7 @@ export class ReverseCredentialService {
                 code: errorCodes.instanceMissing,
                 details: { instance },
                 message: `Instance ${instance} was not found.`,
-                retryable: false
+                retryable: false,
             });
         }
         if (descriptor.provider !== "reverse") {
@@ -77,7 +88,7 @@ export class ReverseCredentialService {
                 code: errorCodes.reverseInstanceNotReverse,
                 details: { instance },
                 message: `Instance ${instance} is not a reverse instance.`,
-                retryable: false
+                retryable: false,
             });
         }
         return descriptor;

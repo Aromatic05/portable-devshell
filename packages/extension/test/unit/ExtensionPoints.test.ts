@@ -11,8 +11,14 @@ test("domain Extension Point descriptors use stable string identity", () => {
     assert.equal(nativeCommands.id, "cli.native-commands");
     assert.equal(modelCommands.id, "cli.model-commands");
     assert.equal(applications.id, "web.applications");
-    assert.notEqual(nativeCommands, defineExtensionPoint("cli.native-commands"));
-    assert.equal(defineExtensionPoint("cli.native-commands").id, nativeCommands.id);
+    assert.notEqual(
+        nativeCommands,
+        defineExtensionPoint("cli.native-commands"),
+    );
+    assert.equal(
+        defineExtensionPoint("cli.native-commands").id,
+        nativeCommands.id,
+    );
     assert.notEqual(nativeCommands, modelCommands);
 });
 

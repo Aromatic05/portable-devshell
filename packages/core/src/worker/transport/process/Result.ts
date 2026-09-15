@@ -2,16 +2,19 @@ import type { ChildProcess } from "node:child_process";
 
 import type { CommandResult, ControlError } from "@portable-devshell/shared";
 
-import type { ProviderCommandContext, WorkerCommandResult } from "../command/Transport.js";
+import type {
+    ProviderCommandContext,
+    WorkerCommandResult,
+} from "../command/Transport.js";
 
 export async function waitForCommandResult(
     child: ChildProcess,
     createProviderError: (
         context: ProviderCommandContext,
         cause: unknown,
-        options?: { errorCode?: string; result?: Partial<CommandResult> }
+        options?: { errorCode?: string; result?: Partial<CommandResult> },
     ) => ControlError,
-    context: ProviderCommandContext
+    context: ProviderCommandContext,
 ): Promise<WorkerCommandResult> {
     let stdout = "";
     let stderr = "";
@@ -27,7 +30,11 @@ export async function waitForCommandResult(
 
     return await new Promise<WorkerCommandResult>((resolve, reject) => {
         child.once("error", (error) => {
-            reject(createProviderError(context, error, { result: { stderr, stdout } }));
+            reject(
+                createProviderError(context, error, {
+                    result: { stderr, stdout },
+                }),
+            );
         });
         child.once("close", (code, signal) => {
             resolve({
@@ -35,18 +42,24 @@ export async function waitForCommandResult(
                     command: [...context.command],
                     commandDisplay: context.commandDisplay,
                     ...(context.cwd === undefined ? {} : { cwd: context.cwd }),
-                    ...(context.instance === undefined ? {} : { instance: context.instance }),
+                    ...(context.instance === undefined
+                        ? {}
+                        : { instance: context.instance }),
                     operation: context.operation,
                     provider: context.provider,
                     ...(signal === null ? {} : { signal }),
-                    ...(stderr.length === 0 ? {} : { stderrTail: tail(stderr) }),
-                    ...(stdout.length === 0 ? {} : { stdoutTail: tail(stdout) }),
-                    exitCode: code
+                    ...(stderr.length === 0
+                        ? {}
+                        : { stderrTail: tail(stderr) }),
+                    ...(stdout.length === 0
+                        ? {}
+                        : { stdoutTail: tail(stdout) }),
+                    exitCode: code,
                 },
                 exitCode: code,
                 signal: signal ?? undefined,
                 stderr,
-                stdout
+                stdout,
             });
         });
     });
@@ -55,5 +68,7 @@ export async function waitForCommandResult(
 const COMMAND_OUTPUT_TAIL_LIMIT = 4000;
 
 function tail(value: string): string {
-    return value.length <= COMMAND_OUTPUT_TAIL_LIMIT ? value : value.slice(-COMMAND_OUTPUT_TAIL_LIMIT);
+    return value.length <= COMMAND_OUTPUT_TAIL_LIMIT
+        ? value
+        : value.slice(-COMMAND_OUTPUT_TAIL_LIMIT);
 }

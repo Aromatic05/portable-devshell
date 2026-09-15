@@ -39,9 +39,8 @@ export async function connectControlClientChannel(
     }
     const endpoint = resolveControlClientEndpoint(options);
     if (endpoint.kind === "websocket") {
-        const { WebSocketChannel } = await import(
-            "../../transport/websocket/WebSocketChannel.js"
-        );
+        const { WebSocketChannel } =
+            await import("../../transport/websocket/WebSocketChannel.js");
         return await WebSocketChannel.connect(
             {
                 ...(endpoint.token === undefined
@@ -52,14 +51,14 @@ export async function connectControlClientChannel(
             signal,
         );
     }
-    const [{ SocketChannel }, { resolveControlSocketPath }] =
-        await Promise.all([
+    const [{ SocketChannel }, { resolveControlSocketPath }] = await Promise.all(
+        [
             import("../../transport/socket/SocketChannel.js"),
             import("../../transport/socket/Endpoint.js"),
-        ]);
+        ],
+    );
     return await SocketChannel.connect(
-        endpoint.socketPath ??
-            resolveControlSocketPath(endpoint.xdgRuntimeDir),
+        endpoint.socketPath ?? resolveControlSocketPath(endpoint.xdgRuntimeDir),
         {
             signal,
             ...(endpoint.socketFactory === undefined

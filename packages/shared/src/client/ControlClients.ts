@@ -1,6 +1,18 @@
-import type { ArtifactStoredImageResult, ArtifactViewImageInput, ArtifactViewImageResult } from "../protocol/artifact/Image.js";
-import type { ArtifactShareInput, ArtifactShareResult, ArtifactShareRevokeResult } from "../protocol/artifact/Share.js";
-import type { ArtifactTransferRecord, ArtifactTransferResult, ArtifactTransferStartInput } from "../protocol/artifact/Transfer.js";
+import type {
+    ArtifactStoredImageResult,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
+} from "../protocol/artifact/Image.js";
+import type {
+    ArtifactShareInput,
+    ArtifactShareResult,
+    ArtifactShareRevokeResult,
+} from "../protocol/artifact/Share.js";
+import type {
+    ArtifactTransferRecord,
+    ArtifactTransferResult,
+    ArtifactTransferStartInput,
+} from "../protocol/artifact/Transfer.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
@@ -36,7 +48,7 @@ import type {
 } from "../protocol/control/extension/Extension.js";
 import type {
     CliCommandDescriptor,
-    CliCommandWireResult
+    CliCommandWireResult,
 } from "../protocol/control/extension/CliCommand.js";
 import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
 import type {
@@ -52,7 +64,10 @@ import type {
 } from "../protocol/instance/activity/State.js";
 import type { InstanceSnapshot } from "../protocol/instance/activity/State.js";
 import type { GoalRpcEnvelope } from "../protocol/instance/task/Goal.js";
-import type { TodoReadInput, TodoRpcEnvelope } from "../protocol/instance/task/Todo.js";
+import type {
+    TodoReadInput,
+    TodoRpcEnvelope,
+} from "../protocol/instance/task/Todo.js";
 import type {
     OAuthApprovalDecision,
     OAuthApprovalRequest,
@@ -70,10 +85,7 @@ import type {
     ApprovalDecision,
     ApprovalRequest,
 } from "../protocol/tool/Approval.js";
-import type {
-    ToolCallQuery,
-    ToolCallRecord,
-} from "../protocol/tool/Call.js";
+import type { ToolCallQuery, ToolCallRecord } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 import { asInstanceName } from "../protocol/instance/Identity.js";
 import {
@@ -91,7 +103,10 @@ export interface ControlServiceStatus {
     pid?: number;
 }
 
-export interface McpRuntimeStatus extends Record<string, JsonValue | undefined> {
+export interface McpRuntimeStatus extends Record<
+    string,
+    JsonValue | undefined
+> {
     authMode?: "none" | "oauth2" | "token";
     oauthReady?: boolean;
     publicBaseUrl?: string;
@@ -108,7 +123,10 @@ export interface RuntimeStartOptions {
 export interface ControlClients {
     artifact: {
         cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
-        createShare(defaultInstance: string, input: ArtifactShareInput): Promise<ArtifactShareResult>;
+        createShare(
+            defaultInstance: string,
+            input: ArtifactShareInput,
+        ): Promise<ArtifactShareResult>;
         getTransfer(transferId: string): Promise<ArtifactTransferRecord>;
         listShares(): Promise<ArtifactShareResult[]>;
         listTransfers(): Promise<ArtifactTransferRecord[]>;
@@ -126,16 +144,22 @@ export interface ControlClients {
     config: {
         get(): Promise<Record<string, JsonValue>>;
         update(request: ConfigBatchUpdateRequest): Promise<JsonValue>;
-        updateInstance(request: ConfigUpdateInstanceRequest): Promise<Record<string, JsonValue>>;
-        updateMcpEndpoint(request: ConfigUpdateMcpRequest): Promise<Record<string, JsonValue>>;
-        updateWeb(request: ConfigUpdateWebRequest): Promise<Record<string, JsonValue>>;
+        updateInstance(
+            request: ConfigUpdateInstanceRequest,
+        ): Promise<Record<string, JsonValue>>;
+        updateMcpEndpoint(
+            request: ConfigUpdateMcpRequest,
+        ): Promise<Record<string, JsonValue>>;
+        updateWeb(
+            request: ConfigUpdateWebRequest,
+        ): Promise<Record<string, JsonValue>>;
         validate(draft: ConfigDraft): Promise<Record<string, JsonValue>>;
     };
     cli: {
         command(
             commandId: string,
             argv: readonly string[],
-            options?: { signal?: AbortSignal; workingDirectory?: string }
+            options?: { signal?: AbortSignal; workingDirectory?: string },
         ): Promise<CliCommandWireResult>;
         commands(): Promise<CliCommandDescriptor[]>;
     };
@@ -145,13 +169,24 @@ export interface ControlClients {
         renew(ctxId: string): Promise<McpContextRecord>;
     };
     contextMessage: {
-        list(instance: string, input?: ContextMessageListInput | string): Promise<ContextMessageRecord[]>;
-        queue(instance: string, input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
+        list(
+            instance: string,
+            input?: ContextMessageListInput | string,
+        ): Promise<ContextMessageRecord[]>;
+        queue(
+            instance: string,
+            input: ContextMessageQueueInput,
+        ): Promise<ContextMessageRecord>;
     };
     conversation: {
-        list(instance: string, input?: ConversationListInput): Promise<ConversationEntry[]>;
+        list(
+            instance: string,
+            input?: ConversationListInput,
+        ): Promise<ConversationEntry[]>;
         preferences(): Promise<ConversationPreferencesSnapshot>;
-        updatePreferences(patch: ConversationPreferencesPatch): Promise<ConversationPreferencesSnapshot>;
+        updatePreferences(
+            patch: ConversationPreferencesPatch,
+        ): Promise<ConversationPreferencesSnapshot>;
     };
     debug: {
         list(): Promise<DebugPatchSummary[]>;
@@ -167,7 +202,10 @@ export interface ControlClients {
         install(sourcePath: string): Promise<ExtensionRuntimeRecord>;
         list(): Promise<ExtensionRuntimeRecord[]>;
         reload(extensionId: string): Promise<ExtensionRuntimeRecord>;
-        remove(extensionId: string, purge?: boolean): Promise<ExtensionRemoveResult>;
+        remove(
+            extensionId: string,
+            purge?: boolean,
+        ): Promise<ExtensionRemoveResult>;
     };
     goal: {
         get(instance: string): Promise<GoalRpcEnvelope>;
@@ -179,7 +217,9 @@ export interface ControlClients {
         disable(instanceName: string): Promise<Record<string, JsonValue>>;
         enable(instanceName: string): Promise<Record<string, JsonValue>>;
         list(): Promise<InstanceListEntry[]>;
-        validateCreate(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
+        validateCreate(
+            draft: InstanceCreateDraft,
+        ): Promise<InstanceCreateSummary>;
     };
     mcp: {
         decideApproval(
@@ -192,20 +232,34 @@ export interface ControlClients {
     overview: { get(): Promise<OperationalOverview> };
     reverse: {
         createCode(instance: string): Promise<ReverseDeviceCodeResult>;
-        revokeToken(instance: string): Promise<{ instance: string; revoked: true }>;
-        rotateToken(instance: string): Promise<{ deviceToken: string; instance: string }>;
+        revokeToken(
+            instance: string,
+        ): Promise<{ instance: string; revoked: true }>;
+        rotateToken(
+            instance: string,
+        ): Promise<{ deviceToken: string; instance: string }>;
     };
     runtime: {
         openStart(instance: string): Promise<OpenedClientStream>;
         readLogs(
             instance: string,
-            query?: { fromSeq?: number; limit?: number; maxDecodedBytes?: number },
+            query?: {
+                fromSeq?: number;
+                limit?: number;
+                maxDecodedBytes?: number;
+            },
         ): Promise<InstanceLogEntry[]>;
         refresh(instance: string): Promise<InstanceRuntimeEnvelope>;
         snapshot(instance: string): Promise<InstanceRuntimeEnvelope>;
-        start(instance: string, options?: RuntimeStartOptions): Promise<InstanceSnapshot>;
+        start(
+            instance: string,
+            options?: RuntimeStartOptions,
+        ): Promise<InstanceSnapshot>;
         stop(instance: string): Promise<InstanceSnapshot>;
-        subscribe(instance: string, fromSeq: number): Promise<InstanceEventStream>;
+        subscribe(
+            instance: string,
+            fromSeq: number,
+        ): Promise<InstanceEventStream>;
     };
     service: {
         hello(): Promise<ControlProtocolHelloResponse>;
@@ -214,25 +268,45 @@ export interface ControlClients {
         status(): Promise<ControlServiceStatus>;
     };
     terminal: {
-        attach(instance: string, input: TerminalAttachInput): Promise<OpenedClientStream>;
+        attach(
+            instance: string,
+            input: TerminalAttachInput,
+        ): Promise<OpenedClientStream>;
         get(
             instance: string,
-            identity: Pick<TerminalVersionedIdentity, "generation" | "terminalId">,
+            identity: Pick<
+                TerminalVersionedIdentity,
+                "generation" | "terminalId"
+            >,
         ): Promise<TerminalSessionDescriptor>;
         kill(
             instance: string,
             identity: TerminalVersionedIdentity,
         ): Promise<TerminalSessionDescriptor>;
         list(instance: string): Promise<TerminalSessionDescriptor[]>;
-        open(instance: string, input: TerminalOpenInput): Promise<TerminalOpenResult>;
+        open(
+            instance: string,
+            input: TerminalOpenInput,
+        ): Promise<TerminalOpenResult>;
     };
     todo: {
-        delete(instance: string, taskId: string): Promise<Record<string, JsonValue>>;
+        delete(
+            instance: string,
+            taskId: string,
+        ): Promise<Record<string, JsonValue>>;
         get(instance: string, input?: TodoReadInput): Promise<TodoRpcEnvelope>;
-        subscribe(instance: string, fromSeq: number): Promise<InstanceEventStream>;
+        subscribe(
+            instance: string,
+            fromSeq: number,
+        ): Promise<InstanceEventStream>;
     };
     tool: {
-        call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
+        call(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            workspace: string,
+        ): Promise<JsonValue>;
         callStreaming(
             instance: string,
             toolName: string,
@@ -250,12 +324,30 @@ export interface ControlClients {
             instance: string,
             approvalId: string,
             decision: ApprovalDecision["decision"],
-            options?: { policyPatch?: JsonValue; reason?: string; remember?: boolean },
+            options?: {
+                policyPatch?: JsonValue;
+                reason?: string;
+                remember?: boolean;
+            },
         ): Promise<ApprovalRequest>;
-        getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
-        listApprovals(instance: string, options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
-        listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
-        openSession(instance: string, workspace: string): Promise<import("../protocol/tool/Definition.js").ToolSessionOpenResult>;
+        getApproval(
+            instance: string,
+            approvalId: string,
+        ): Promise<ApprovalRequest>;
+        listApprovals(
+            instance: string,
+            options?: { pendingOnly?: boolean },
+        ): Promise<ApprovalRequest[]>;
+        listCalls(
+            instance: string,
+            query?: ToolCallQuery,
+        ): Promise<ToolCallRecord[]>;
+        openSession(
+            instance: string,
+            workspace: string,
+        ): Promise<
+            import("../protocol/tool/Definition.js").ToolSessionOpenResult
+        >;
     };
     web: {
         applications(): Promise<WebApplicationDescriptor[]>;
@@ -295,34 +387,45 @@ export function createControlClients(
                 artifact.request("cancelTransfer", { transferId }),
             createShare: (defaultInstance, input) =>
                 artifact.request("createShare", { ...input, defaultInstance }),
-            getTransfer: (transferId) => artifact.request("getTransfer", { transferId }),
+            getTransfer: (transferId) =>
+                artifact.request("getTransfer", { transferId }),
             listShares: () => artifact.request("listShares"),
             listTransfers: () => artifact.request("listTransfers"),
-            readImage: (imageRef) => artifact.request("readImage", { imageRef }),
-            revokeShare: (shareId) => artifact.request("revokeShare", { shareId }),
+            readImage: (imageRef) =>
+                artifact.request("readImage", { imageRef }),
+            revokeShare: (shareId) =>
+                artifact.request("revokeShare", { shareId }),
             startTransfer: (defaultInstance, input) =>
-                artifact.request("startTransfer", { ...input, defaultInstance }),
+                artifact.request("startTransfer", {
+                    ...input,
+                    defaultInstance,
+                }),
             viewImage: (defaultInstance, input) =>
                 artifact.request("viewImage", { ...input, defaultInstance }),
         },
         cli: {
-            command: async (commandId, argv, commandOptions = {}) => await requestWithAbort(
-                connection.request("@control", "cli", "command", {
-                    commandId,
-                    argv: [...argv],
-                    ...(commandOptions.workingDirectory === undefined ? {} : {
-                        workingDirectory: commandOptions.workingDirectory
-                    })
-                }),
-                commandOptions.signal,
-                "CLI command was aborted."
-            ),
+            command: async (commandId, argv, commandOptions = {}) =>
+                await requestWithAbort(
+                    connection.request("@control", "cli", "command", {
+                        commandId,
+                        argv: [...argv],
+                        ...(commandOptions.workingDirectory === undefined
+                            ? {}
+                            : {
+                                  workingDirectory:
+                                      commandOptions.workingDirectory,
+                              }),
+                    }),
+                    commandOptions.signal,
+                    "CLI command was aborted.",
+                ),
             commands: () => cli.request("commands"),
         },
         config: {
             get: () => config.request("get"),
             update: (request) => config.request("update", request),
-            updateInstance: (request) => config.request("updateInstance", request),
+            updateInstance: (request) =>
+                config.request("updateInstance", request),
             updateMcpEndpoint: (request) =>
                 config.request("updateMcpEndpoint", request),
             updateWeb: (request) => config.request("updateWeb", request),
@@ -338,14 +441,19 @@ export function createControlClients(
                 contextMessage.request(
                     name,
                     "list",
-                    typeof input === "string" ? { ctxId: input } : (input ?? {}),
+                    typeof input === "string"
+                        ? { ctxId: input }
+                        : (input ?? {}),
                 ),
-            queue: (name, input) => contextMessage.request(name, "queue", input),
+            queue: (name, input) =>
+                contextMessage.request(name, "queue", input),
         },
         conversation: {
-            list: (name, input) => conversation.request(name, "list", input ?? {}),
+            list: (name, input) =>
+                conversation.request(name, "list", input ?? {}),
             preferences: () => conversationControl.request("preferences"),
-            updatePreferences: (patch) => conversationControl.request("updatePreferences", patch),
+            updatePreferences: (patch) =>
+                conversationControl.request("updatePreferences", patch),
         },
         debug: {
             list: () => debug.request("list"),
@@ -355,13 +463,18 @@ export function createControlClients(
             unload: (patchId) => debug.request("unload", { patchId }),
         },
         extension: {
-            disable: (extensionId) => extension.request("disable", { extensionId }),
-            enable: (extensionId) => extension.request("enable", { extensionId }),
+            disable: (extensionId) =>
+                extension.request("disable", { extensionId }),
+            enable: (extensionId) =>
+                extension.request("enable", { extensionId }),
             get: (extensionId) => extension.request("get", { extensionId }),
-            install: (sourcePath) => extension.request("install", { sourcePath }),
+            install: (sourcePath) =>
+                extension.request("install", { sourcePath }),
             list: () => extension.request("list"),
-            reload: (extensionId) => extension.request("reload", { extensionId }),
-            remove: (extensionId, purge = false) => extension.request("remove", { extensionId, purge }),
+            reload: (extensionId) =>
+                extension.request("reload", { extensionId }),
+            remove: (extensionId, purge = false) =>
+                extension.request("remove", { extensionId, purge }),
         },
         goal: {
             get: (name) => goal.request(name, "get"),
@@ -369,11 +482,15 @@ export function createControlClients(
         instance: {
             create: (draft) => instance.request("create", draft),
             createSchema: () => instance.request("createSchema"),
-            delete: (instanceName) => instance.request("delete", { instanceName }),
-            disable: (instanceName) => instance.request("disable", { instanceName }),
-            enable: (instanceName) => instance.request("enable", { instanceName }),
+            delete: (instanceName) =>
+                instance.request("delete", { instanceName }),
+            disable: (instanceName) =>
+                instance.request("disable", { instanceName }),
+            enable: (instanceName) =>
+                instance.request("enable", { instanceName }),
             list: () => instance.request("list"),
-            validateCreate: (draft) => instance.request("validateCreate", draft),
+            validateCreate: (draft) =>
+                instance.request("validateCreate", draft),
         },
         mcp: {
             decideApproval: (approvalId, decision) =>
@@ -383,9 +500,12 @@ export function createControlClients(
         },
         overview: { get: () => overview.request("get") },
         reverse: {
-            createCode: (name) => reverse.request("createCode", { instance: name }),
-            revokeToken: (name) => reverse.request("revokeToken", { instance: name }),
-            rotateToken: (name) => reverse.request("rotateToken", { instance: name }),
+            createCode: (name) =>
+                reverse.request("createCode", { instance: name }),
+            revokeToken: (name) =>
+                reverse.request("revokeToken", { instance: name }),
+            rotateToken: (name) =>
+                reverse.request("rotateToken", { instance: name }),
         },
         runtime: {
             openStart: openRuntimeStart,
@@ -436,20 +556,36 @@ export function createControlClients(
         tool: {
             call: (name, toolName, input, workspace) =>
                 tool.request(name, "call", { input, toolName, workspace }),
-            callStreaming: async (name, toolName, input, workspace, callOptions = {}) =>
+            callStreaming: async (
+                name,
+                toolName,
+                input,
+                workspace,
+                callOptions = {},
+            ) =>
                 await streamToolCall(
                     connection,
-                    async () => await tool.openStream(name, "callStream", {
-                        input,
-                        ...(callOptions.operationId === undefined ? {} : { operationId: callOptions.operationId }),
-                        ...(callOptions.recording === undefined ? {} : { recording: callOptions.recording }),
-                        toolName,
-                        workspace,
-                    }),
+                    async () =>
+                        await tool.openStream(name, "callStream", {
+                            input,
+                            ...(callOptions.operationId === undefined
+                                ? {}
+                                : { operationId: callOptions.operationId }),
+                            ...(callOptions.recording === undefined
+                                ? {}
+                                : { recording: callOptions.recording }),
+                            toolName,
+                            workspace,
+                        }),
                     callOptions,
                 ),
             closeSession: (name) => tool.request(name, "closeSession", {}),
-            decideApproval: (name, approvalId, decision, decisionOptions = {}) =>
+            decideApproval: (
+                name,
+                approvalId,
+                decision,
+                decisionOptions = {},
+            ) =>
                 tool.request(name, "decideApproval", {
                     approvalId,
                     decision,
@@ -457,9 +593,11 @@ export function createControlClients(
                 }),
             getApproval: (name, approvalId) =>
                 tool.request(name, "getApproval", { approvalId }),
-            listApprovals: (name, options) => tool.request(name, "listApprovals", options),
+            listApprovals: (name, options) =>
+                tool.request(name, "listApprovals", options),
             listCalls: (name, query) => tool.request(name, "listCalls", query),
-            openSession: (name, workspace) => tool.request(name, "openSession", { workspace }),
+            openSession: (name, workspace) =>
+                tool.request(name, "openSession", { workspace }),
         },
         web: {
             applications: () => web.request("applications"),
@@ -472,7 +610,8 @@ async function streamToolCall(
     open: () => Promise<OpenedClientStream>,
     options: { onProgress?(progress: JsonValue): void; signal?: AbortSignal },
 ): Promise<JsonValue> {
-    let stream: import("../transport/ClientConnection.js").ClientStream | undefined;
+    let stream:
+        import("../transport/ClientConnection.js").ClientStream | undefined;
     try {
         const opened = await open();
         stream = opened.stream;
@@ -489,11 +628,16 @@ async function streamToolCall(
                     try {
                         options.onProgress?.(event.payload ?? null);
                     } catch (error) {
-                        console.warn(error instanceof Error ? error : new Error(String(error)));
+                        console.warn(
+                            error instanceof Error
+                                ? error
+                                : new Error(String(error)),
+                        );
                     }
                     continue;
                 }
-                if (event.name === "stream.completed") return event.payload ?? null;
+                if (event.name === "stream.completed")
+                    return event.payload ?? null;
                 if (event.name === "stream.cancelled") {
                     connection.throwRemoteError(event.error);
                     throw new Error("Tool call stream was cancelled.");
@@ -515,7 +659,8 @@ async function startRuntime(
     instance: string,
     options: RuntimeStartOptions,
 ): Promise<InstanceSnapshot> {
-    let stream: import("../transport/ClientConnection.js").ClientStream | undefined;
+    let stream:
+        import("../transport/ClientConnection.js").ClientStream | undefined;
     try {
         const opened = await openStart(instance);
         stream = opened.stream;
@@ -554,7 +699,9 @@ async function startRuntime(
     }
 }
 
-export function readInstanceSnapshot(value: JsonValue | undefined): InstanceSnapshot {
+export function readInstanceSnapshot(
+    value: JsonValue | undefined,
+): InstanceSnapshot {
     const snapshot = record(value);
     if (
         snapshot === undefined ||
@@ -589,7 +736,9 @@ export function readInstanceSnapshot(value: JsonValue | undefined): InstanceSnap
     return snapshot as unknown as InstanceSnapshot;
 }
 
-function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function record(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
@@ -610,18 +759,24 @@ function abortError(signal: AbortSignal, fallbackMessage: string): Error {
 async function requestWithAbort<T>(
     request: Promise<T>,
     signal: AbortSignal | undefined,
-    fallbackMessage: string
+    fallbackMessage: string,
 ): Promise<T> {
     if (signal === undefined) return await request;
     if (signal.aborted) {
-        const reason = signal.reason instanceof Error ? signal.reason : new Error(fallbackMessage);
+        const reason =
+            signal.reason instanceof Error
+                ? signal.reason
+                : new Error(fallbackMessage);
         getRequestCanceller(request)?.(reason);
         throw reason;
     }
     const cancel = getRequestCanceller(request);
-    const aborted = () => cancel?.(
-        signal.reason instanceof Error ? signal.reason : new Error(fallbackMessage)
-    );
+    const aborted = () =>
+        cancel?.(
+            signal.reason instanceof Error
+                ? signal.reason
+                : new Error(fallbackMessage),
+        );
     signal.addEventListener("abort", aborted, { once: true });
     try {
         return await request;

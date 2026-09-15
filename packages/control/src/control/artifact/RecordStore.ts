@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    readFile,
+    readdir,
+    rename,
+    rm,
+    writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 import {
     ARTIFACT_RECORD_VERSION,
     type StoredArtifactShare,
-    type StoredArtifactTransfer
+    type StoredArtifactTransfer,
 } from "./Service.js";
 
 export class ArtifactRecordStore {
@@ -31,8 +39,13 @@ export class ArtifactRecordStore {
     async loadShares(): Promise<StoredArtifactShare[]> {
         const shares: StoredArtifactShare[] = [];
         for (const file of await listJsonFiles(this.#sharesDir)) {
-            const stored = await readJsonFile<StoredArtifactShare>(join(this.#sharesDir, file));
-            if (stored !== undefined && stored.version === ARTIFACT_RECORD_VERSION) {
+            const stored = await readJsonFile<StoredArtifactShare>(
+                join(this.#sharesDir, file),
+            );
+            if (
+                stored !== undefined &&
+                stored.version === ARTIFACT_RECORD_VERSION
+            ) {
                 shares.push(stored);
             }
         }
@@ -42,8 +55,13 @@ export class ArtifactRecordStore {
     async loadTransfers(): Promise<StoredArtifactTransfer[]> {
         const transfers: StoredArtifactTransfer[] = [];
         for (const file of await listJsonFiles(this.#transfersDir)) {
-            const stored = await readJsonFile<StoredArtifactTransfer>(join(this.#transfersDir, file));
-            if (stored !== undefined && stored.version === ARTIFACT_RECORD_VERSION) {
+            const stored = await readJsonFile<StoredArtifactTransfer>(
+                join(this.#transfersDir, file),
+            );
+            if (
+                stored !== undefined &&
+                stored.version === ARTIFACT_RECORD_VERSION
+            ) {
                 transfers.push(stored);
             }
         }
@@ -51,11 +69,17 @@ export class ArtifactRecordStore {
     }
 
     async persistShare(share: StoredArtifactShare): Promise<void> {
-        await this.#persistJson(join(this.#sharesDir, `${share.result.shareId}.json`), share);
+        await this.#persistJson(
+            join(this.#sharesDir, `${share.result.shareId}.json`),
+            share,
+        );
     }
 
     async persistTransfer(transfer: StoredArtifactTransfer): Promise<void> {
-        await this.#persistJson(join(this.#transfersDir, `${transfer.record.transferId}.json`), transfer);
+        await this.#persistJson(
+            join(this.#transfersDir, `${transfer.record.transferId}.json`),
+            transfer,
+        );
     }
 
     async deleteShare(shareId: string): Promise<void> {

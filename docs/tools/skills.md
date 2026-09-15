@@ -169,10 +169,10 @@ portable-devshell 不把整个 Skill catalog 转成巨大的 model-facing MCP sc
 
 Skill 是**指令与代码资产**，不是天然可信的数据：
 
-* project Skill 由项目仓库控制；
-* managed/global Skill 由 Control 主机用户环境控制；
-* `skill load/read` 只读取文本，不自动执行相关脚本；
-* `skill get` 只传输选中的资产，不执行 Skill 内容；
-* Resource Host 只接受合法 Extension/collection namespace，并拒绝符号链接劫持的资源目录；
-* Artifact transfer 只能传输 Extension 已安装的 asset generation，不能借此读取任意 Control host path；
-* 后续执行 Skill 中建议的 shell/tool 操作仍经过普通 tool policy、Approval、Audit 与 workspace 安全边界。
+- project Skill 由项目仓库控制；
+- managed/global Skill 由 Control 主机用户环境控制；
+- `skill load/read` 只读取文本，不自动执行相关脚本；
+- `skill get` 只传输选中的资产，不执行 Skill 内容；
+- Resource Host 只接受合法 Extension/collection namespace，并拒绝符号链接劫持的资源目录；
+- Artifact transfer 只能传输 Extension 已安装的 asset generation，不能借此读取任意 Control host path；
+- 后续执行 Skill 中建议的 shell/tool 操作仍经过普通 tool policy、Approval、Audit 与 workspace 安全边界。

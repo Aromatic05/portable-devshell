@@ -7,10 +7,7 @@ import type {
     JsonValue,
 } from "@portable-devshell/shared";
 
-import type {
-    TuiEditorState,
-    TuiInteractionState,
-} from "../Interaction.js";
+import type { TuiEditorState, TuiInteractionState } from "../Interaction.js";
 import type { TuiOverlay } from "../Overlay.js";
 import type { TuiRoute } from "../route/Model.js";
 import type {
@@ -87,13 +84,19 @@ export interface TuiAppState {
     ui: TuiUiState;
 }
 
-export type TuiControlReadModelPatch = Partial<Omit<ControlReadModelState, "instanceState" | "instances">> & {
+export type TuiControlReadModelPatch = Partial<
+    Omit<ControlReadModelState, "instanceState" | "instances">
+> & {
     instanceState?: Record<string, Partial<ControlInstanceReadState>>;
     instances?: TuiInstanceListEntry[];
 };
 
 export type TuiAppAction =
-    | { instances: TuiInstanceListEntry[]; readModel: ControlReadModelState; type: "control.readModel.replace" }
+    | {
+          instances: TuiInstanceListEntry[];
+          readModel: ControlReadModelState;
+          type: "control.readModel.replace";
+      }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
@@ -148,7 +151,10 @@ export function toRawEventRecord(event: InstanceEvent): TuiRawEventRecord {
     };
 }
 
-export function selectTuiLogs(state: TuiAppState, instance: string): InstanceLogEntry[] {
+export function selectTuiLogs(
+    state: TuiAppState,
+    instance: string,
+): InstanceLogEntry[] {
     const throughSeq = state.ui.logsClearedThroughSeqByInstance[instance] ?? 0;
     return (state.readModel.instanceState[instance]?.logs ?? []).filter(
         (entry) => entry.seq > throughSeq,

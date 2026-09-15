@@ -21,16 +21,24 @@ export class McpProfileStore {
     }
 
     async list(): Promise<readonly McpProfile[]> {
-        return [...(await this.#read()).profiles].sort((left, right) => left.name.localeCompare(right.name));
+        return [...(await this.#read()).profiles].sort((left, right) =>
+            left.name.localeCompare(right.name),
+        );
     }
 
     async get(name: string): Promise<McpProfile | undefined> {
-        return (await this.#read()).profiles.find((profile) => profile.name === name);
+        return (await this.#read()).profiles.find(
+            (profile) => profile.name === name,
+        );
     }
 
     async add(profile: McpProfile): Promise<McpProfile> {
         return await this.#mutate(async (document) => {
-            if (document.profiles.some((candidate) => candidate.name === profile.name)) {
+            if (
+                document.profiles.some(
+                    (candidate) => candidate.name === profile.name,
+                )
+            ) {
                 throw new Error(`MCP profile ${profile.name} already exists.`);
             }
             document.profiles.push(profile);
@@ -40,13 +48,18 @@ export class McpProfileStore {
 
     async remove(name: string): Promise<McpProfile> {
         return await this.#mutate(async (document) => {
-            const index = document.profiles.findIndex((profile) => profile.name === name);
-            if (index < 0) throw new Error(`MCP profile ${name} does not exist.`);
+            const index = document.profiles.findIndex(
+                (profile) => profile.name === name,
+            );
+            if (index < 0)
+                throw new Error(`MCP profile ${name} does not exist.`);
             return document.profiles.splice(index, 1)[0]!;
         });
     }
 
-    async #mutate<T>(change: (document: McpProfileDocument) => Promise<T> | T): Promise<T> {
+    async #mutate<T>(
+        change: (document: McpProfileDocument) => Promise<T> | T,
+    ): Promise<T> {
         let resolveResult!: (value: T) => void;
         let rejectResult!: (error: unknown) => void;
         const result = new Promise<T>((resolve, reject) => {
@@ -82,7 +95,11 @@ export class McpProfileStore {
         await mkdir(dirname(this.#path), { mode: 0o700, recursive: true });
         const temporary = `${this.#path}.${randomUUID()}.tmp`;
         try {
-            await writeFile(temporary, `${JSON.stringify(document, null, 4)}\n`, { encoding: "utf8", mode: 0o600 });
+            await writeFile(
+                temporary,
+                `${JSON.stringify(document, null, 4)}\n`,
+                { encoding: "utf8", mode: 0o600 },
+            );
             await rename(temporary, this.#path);
         } finally {
             await rm(temporary, { force: true }).catch(() => undefined);
@@ -92,13 +109,18 @@ export class McpProfileStore {
 
 export function validateMcpProfile(name: string, urlText: string): McpProfile {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(name)) {
-        throw new TypeError("MCP profile name must contain only letters, numbers, dot, underscore, or hyphen.");
+        throw new TypeError(
+            "MCP profile name must contain only letters, numbers, dot, underscore, or hyphen.",
+        );
     }
     let url: URL;
     try {
         url = new URL(urlText);
     } catch (error) {
-        throw new TypeError("MCP profile URL must be an absolute http(s) URL.", { cause: error });
+        throw new TypeError(
+            "MCP profile URL must be an absolute http(s) URL.",
+            { cause: error },
+        );
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") {
         throw new TypeError("MCP profile URL must use http or https.");
@@ -111,18 +133,31 @@ export function validateMcpProfile(name: string, urlText: string): McpProfile {
 }
 
 function parseDocument(value: unknown): McpProfileDocument {
-    if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.profiles)) {
+    if (
+        !isRecord(value) ||
+        value.version !== 1 ||
+        !Array.isArray(value.profiles)
+    ) {
         throw new TypeError("MCP profile store is invalid.");
     }
     const profiles = value.profiles.map((profile) => {
-        if (!isRecord(profile) || typeof profile.name !== "string" || typeof profile.url !== "string") {
-            throw new TypeError("MCP profile store contains an invalid profile.");
+        if (
+            !isRecord(profile) ||
+            typeof profile.name !== "string" ||
+            typeof profile.url !== "string"
+        ) {
+            throw new TypeError(
+                "MCP profile store contains an invalid profile.",
+            );
         }
         return validateMcpProfile(profile.name, profile.url);
     });
     const names = new Set<string>();
     for (const profile of profiles) {
-        if (names.has(profile.name)) throw new TypeError(`MCP profile store contains duplicate profile ${profile.name}.`);
+        if (names.has(profile.name))
+            throw new TypeError(
+                `MCP profile store contains duplicate profile ${profile.name}.`,
+            );
         names.add(profile.name);
     }
     return { profiles: [...profiles], version: 1 };

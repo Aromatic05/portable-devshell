@@ -10,13 +10,13 @@
 
 ```json
 {
-  "files": [
-    {
-      "path": "./src/lib.rs",
-      "view": "content",
-      "selector": "50-100"
-    }
-  ]
+    "files": [
+        {
+            "path": "./src/lib.rs",
+            "view": "content",
+            "selector": "50-100"
+        }
+    ]
 }
 ```
 
@@ -62,8 +62,8 @@ outline 返回符号的起止行、层级、语言和 `parseStatus`。outline �
 
 ```json
 {
-  "patterns": ["./src/**/*.ts", "./packages/*/package.json"],
-  "type": "file"
+    "patterns": ["./src/**/*.ts", "./packages/*/package.json"],
+    "type": "file"
 }
 ```
 
@@ -83,10 +83,10 @@ Traversal 使用已经解析并锚定的目录能力。因此第一页之后即�
 
 ```json
 {
-  "paths": ["./src"],
-  "pattern": "TODO",
-  "syntax": "literal",
-  "context": 2
+    "paths": ["./src"],
+    "pattern": "TODO",
+    "syntax": "literal",
+    "context": 2
 }
 ```
 
@@ -105,10 +105,10 @@ directory/glob search       20 matches per file
 
 ```json
 {
-  "path": "./src/large.rs",
-  "content": "...",
-  "truncated": true,
-  "nextLine": 841
+    "path": "./src/large.rs",
+    "content": "...",
+    "truncated": true,
+    "nextLine": 841
 }
 ```
 
@@ -144,7 +144,7 @@ MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍
 
 ```json
 {
-  "changes": "*** Begin Edit\n*** Write File: ./src/new.rs\n...\n*** End Edit"
+    "changes": "*** Begin Edit\n*** Write File: ./src/new.rs\n...\n*** End Edit"
 }
 ```
 

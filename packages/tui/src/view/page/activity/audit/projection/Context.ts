@@ -56,15 +56,19 @@ export function projectAuditContexts(
     };
 
     const callsById = new Map(
-        (state.readModel.instanceState[instance]?.toolCalls ?? []).map((call) => [call.callId, call] as const),
+        (state.readModel.instanceState[instance]?.toolCalls ?? []).map(
+            (call) => [call.callId, call] as const,
+        ),
     );
-    for (const call of state.readModel.instanceState[instance]?.commentCalls ?? []) {
+    for (const call of state.readModel.instanceState[instance]?.commentCalls ??
+        []) {
         callsById.set(call.callId, call);
     }
     for (const call of callsById.values()) {
         resolve(call.ctxId).calls.push(call);
     }
-    for (const approval of state.readModel.instanceState[instance]?.approvals ?? []) {
+    for (const approval of state.readModel.instanceState[instance]?.approvals ??
+        []) {
         if (approval.recording === "caller") continue;
         resolve(approval.ctxId).approvals.push(approval);
     }
@@ -103,17 +107,24 @@ function toSummary(
         ]
             .sort()
             .at(-1) ?? "-";
-    const ctxId = context.key.kind === "context" ? context.key.ctxId : undefined;
-    const registryRecord = ctxId === undefined
-        ? undefined
-        : state.readModel.contexts.find((record) => record.ctxId === ctxId);
-    const environment = registryRecord === undefined
-        ? undefined
-        : (registryRecord.environments ?? [{
-              instance: registryRecord.instance,
-              temporaryDirectory: registryRecord.temporaryDirectory,
-              workspace: registryRecord.workspace,
-          }]).find((candidate) => candidate.instance === instance);
+    const ctxId =
+        context.key.kind === "context" ? context.key.ctxId : undefined;
+    const registryRecord =
+        ctxId === undefined
+            ? undefined
+            : state.readModel.contexts.find((record) => record.ctxId === ctxId);
+    const environment =
+        registryRecord === undefined
+            ? undefined
+            : (
+                  registryRecord.environments ?? [
+                      {
+                          instance: registryRecord.instance,
+                          temporaryDirectory: registryRecord.temporaryDirectory,
+                          workspace: registryRecord.workspace,
+                      },
+                  ]
+              ).find((candidate) => candidate.instance === instance);
     const latestApproval = [...context.approvals].sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt),
     )[0];
@@ -123,13 +134,17 @@ function toSummary(
             left.createdAt.localeCompare(right.createdAt),
         ),
         calls: sortedCalls,
-        contextStatus: environment === undefined ? undefined : registryRecord?.status,
+        contextStatus:
+            environment === undefined ? undefined : registryRecord?.status,
         key: context.key,
         label: context.label,
         latestActivityAt,
         latestCall,
         status: contextStatus(sortedCalls, context.approvals),
-        workspace: environment?.workspace ?? latestCall?.workspace ?? latestApproval?.workspace,
+        workspace:
+            environment?.workspace ??
+            latestCall?.workspace ??
+            latestApproval?.workspace,
     };
 }
 
@@ -137,8 +152,11 @@ function contextStatus(
     calls: readonly ToolCallRecord[],
     approvals: readonly ApprovalRequest[],
 ): TuiExpandableBoxStatus {
-    if (calls.some((call) => toolCallOutcome(call.status) === "failure")) return "failed";
-    if (approvals.some((approval) => approval.status === "pending")) return "pending";
-    if (calls.some((call) => toolCallOutcome(call.status) === "pending")) return "running";
+    if (calls.some((call) => toolCallOutcome(call.status) === "failure"))
+        return "failed";
+    if (approvals.some((approval) => approval.status === "pending"))
+        return "pending";
+    if (calls.some((call) => toolCallOutcome(call.status) === "pending"))
+        return "running";
     return calls.length === 0 ? "normal" : "ready";
 }

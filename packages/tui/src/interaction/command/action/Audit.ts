@@ -31,7 +31,10 @@ interface CommandAuditOptions {
         instance: string,
         input: TuiArtifactViewImageRequest,
     ): Promise<ArtifactViewImageResult>;
-    onToolCallDetail?(instance: string, callId: string): Promise<ToolCallRecord | undefined>;
+    onToolCallDetail?(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined>;
     store: TuiAppStore;
 }
 
@@ -120,7 +123,9 @@ export class TuiCommandDispatcherAudit {
         const state = this.#store.getState();
         const overlay = topTuiOverlay(state.interaction.overlays);
         if (overlay?.kind !== "approval") return false;
-        const approval = state.readModel.instanceState[overlay.instance]?.approvals?.find(
+        const approval = state.readModel.instanceState[
+            overlay.instance
+        ]?.approvals?.find(
             (candidate) => candidate.approvalId === overlay.approvalId,
         );
         if (approval === undefined) return this.returnToPage();
@@ -129,7 +134,10 @@ export class TuiCommandDispatcherAudit {
             case "back":
                 return this.returnToPage();
             case "input": {
-                const toolCall = await this.#readToolCall(overlay.instance, approval.callId);
+                const toolCall = await this.#readToolCall(
+                    overlay.instance,
+                    approval.callId,
+                );
                 return await this.#dispatch({
                     body: auditInputText(
                         toolCall?.input,
@@ -167,15 +175,19 @@ export class TuiCommandDispatcherAudit {
         }
     }
 
-    async #readToolCall(instance: string, callId: string): Promise<ToolCallRecord | undefined> {
+    async #readToolCall(
+        instance: string,
+        callId: string,
+    ): Promise<ToolCallRecord | undefined> {
         const compact = this.#store
             .getState()
             .readModel.instanceState[instance]?.toolCalls.find(
                 (candidate) => candidate.callId === callId,
             );
         if (compact === undefined) return undefined;
-        if (compact.input !== undefined && compact.output !== undefined) return compact;
-        return await this.#onToolCallDetail?.(instance, callId) ?? compact;
+        if (compact.input !== undefined && compact.output !== undefined)
+            return compact;
+        return (await this.#onToolCallDetail?.(instance, callId)) ?? compact;
     }
 
     async #openImageOutput(
@@ -245,24 +257,32 @@ function readStoredArtifactViewImageRequest(
     value: JsonValue | undefined,
 ): Extract<TuiArtifactViewImageRequest, { imageRef: string }> | undefined {
     if (!isRecord(value)) return undefined;
-    const imageRef = typeof value.imageRef === "string" && value.imageRef.length > 0
-        ? value.imageRef
-        : undefined;
-    const name = typeof value.name === "string" && value.name.length > 0
-        ? value.name
-        : undefined;
+    const imageRef =
+        typeof value.imageRef === "string" && value.imageRef.length > 0
+            ? value.imageRef
+            : undefined;
+    const name =
+        typeof value.name === "string" && value.name.length > 0
+            ? value.name
+            : undefined;
     const source = readArtifactSourceDescriptor(value.source);
     return imageRef === undefined || name === undefined || source === undefined
         ? undefined
         : { imageRef, name, source };
 }
 
-function readArtifactSourceDescriptor(value: JsonValue | undefined): ArtifactSourceDescriptor | undefined {
+function readArtifactSourceDescriptor(
+    value: JsonValue | undefined,
+): ArtifactSourceDescriptor | undefined {
     const source = readArtifactViewImageRequest(value);
     if (source === undefined || source.instance === undefined) return undefined;
-    const type = isRecord(value) && (value.type === "artifact" || value.type === "file" || value.type === "directory")
-        ? value.type
-        : undefined;
+    const type =
+        isRecord(value) &&
+        (value.type === "artifact" ||
+            value.type === "file" ||
+            value.type === "directory")
+            ? value.type
+            : undefined;
     return {
         ...source,
         ...(type === undefined ? {} : { type }),
@@ -308,7 +328,9 @@ function readArtifactViewImageRequest(
         : { handle, ...(instance === undefined ? {} : { instance }) };
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

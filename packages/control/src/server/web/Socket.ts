@@ -20,7 +20,7 @@ import { ControlWebSessionService } from "./auth/Session.js";
 import {
     ControlWebSocketSessionAccess,
     type ControlWebSocketAccess,
-    type ControlWebSocketAccessAuthorizer
+    type ControlWebSocketAccessAuthorizer,
 } from "./auth/Access.js";
 
 export interface ControlWebSocketListenerOptions {
@@ -30,7 +30,10 @@ export interface ControlWebSocketListenerOptions {
     http: HttpHost;
     path?: string;
     remotePath?: string | false;
-    routeInstaller?: (http: HttpHost, sessions: ControlWebSessionService) => () => void;
+    routeInstaller?: (
+        http: HttpHost,
+        sessions: ControlWebSessionService,
+    ) => () => void;
     sessions: ControlWebSessionService;
 }
 
@@ -55,20 +58,25 @@ export class ControlWebSocketListener implements ControlChannelListener {
 
     constructor(options: ControlWebSocketListenerOptions) {
         this.#assetDirectory = options.assetDirectory;
-        this.#basePath = normalizeBasePath(options.basePath ?? CONTROL_WEB_BASE_PATH);
+        this.#basePath = normalizeBasePath(
+            options.basePath ?? CONTROL_WEB_BASE_PATH,
+        );
         this.#http = options.http;
         this.#routeInstaller = options.routeInstaller;
         this.#sessions = options.sessions;
-        this.#access = options.access ?? new ControlWebSocketSessionAccess(options.sessions);
+        this.#access =
+            options.access ??
+            new ControlWebSocketSessionAccess(options.sessions);
         const browserPath = normalizeAbsolutePath(
             options.path ?? `${this.#basePath}/rpc`,
         );
-        const remotePath = options.remotePath ?? (options.access === undefined
-            ? false
-            : CONTROL_REMOTE_RPC_PATH);
-        const normalizedRemotePath = remotePath === false
-            ? undefined
-            : normalizeAbsolutePath(remotePath);
+        const remotePath =
+            options.remotePath ??
+            (options.access === undefined ? false : CONTROL_REMOTE_RPC_PATH);
+        const normalizedRemotePath =
+            remotePath === false
+                ? undefined
+                : normalizeAbsolutePath(remotePath);
         if (normalizedRemotePath === browserPath) {
             throw new Error(
                 "Control browser and native WebSocket paths must be distinct.",
@@ -78,11 +86,18 @@ export class ControlWebSocketListener implements ControlChannelListener {
             { accessKind: "browser", path: browserPath },
             ...(normalizedRemotePath === undefined
                 ? []
-                : [{ accessKind: "native" as const, path: normalizedRemotePath }]),
+                : [
+                      {
+                          accessKind: "native" as const,
+                          path: normalizedRemotePath,
+                      },
+                  ]),
         ];
     }
 
-    async start(accept: (connection: ControlAcceptedChannel) => void): Promise<void> {
+    async start(
+        accept: (connection: ControlAcceptedChannel) => void,
+    ): Promise<void> {
         if (this.#started) return;
         this.#accept = accept;
         this.#unsubscribeRevocation = this.#access.onRevoked((key) => {
@@ -91,25 +106,32 @@ export class ControlWebSocketListener implements ControlChannelListener {
         if (!this.#routesInstalled) {
             const removeRoutes = [this.#sessions.install(this.#http)];
             if (this.#routeInstaller !== undefined) {
-                removeRoutes.push(this.#routeInstaller(this.#http, this.#sessions));
+                removeRoutes.push(
+                    this.#routeInstaller(this.#http, this.#sessions),
+                );
             }
             if (this.#assetDirectory !== undefined) {
                 removeRoutes.push(
-                    this.#http.registerStaticDirectory(this.#basePath, this.#assetDirectory)
+                    this.#http.registerStaticDirectory(
+                        this.#basePath,
+                        this.#assetDirectory,
+                    ),
                 );
             }
             for (const route of this.#paths) {
-                removeRoutes.push(this.#http.registerUpgradeHandler(
-                    route.path,
-                    async (request, socket, head) => {
-                        await this.#handleUpgrade(
-                            request,
-                            socket,
-                            head,
-                            route.accessKind,
-                        );
-                    }
-                ));
+                removeRoutes.push(
+                    this.#http.registerUpgradeHandler(
+                        route.path,
+                        async (request, socket, head) => {
+                            await this.#handleUpgrade(
+                                request,
+                                socket,
+                                head,
+                                route.accessKind,
+                            );
+                        },
+                    ),
+                );
             }
             this.#removeRoutes = () => {
                 for (const remove of removeRoutes.reverse()) remove();
@@ -118,11 +140,12 @@ export class ControlWebSocketListener implements ControlChannelListener {
         }
         this.#webSocketServer = new WebSocketServer({
             clientTracking: true,
-            handleProtocols: (protocols) => protocols.has(CONTROL_REMOTE_RPC_SUBPROTOCOL)
-                ? CONTROL_REMOTE_RPC_SUBPROTOCOL
-                : false,
+            handleProtocols: (protocols) =>
+                protocols.has(CONTROL_REMOTE_RPC_SUBPROTOCOL)
+                    ? CONTROL_REMOTE_RPC_SUBPROTOCOL
+                    : false,
             maxPayload: TRANSPORT_MAX_FRAME_SIZE,
-            noServer: true
+            noServer: true,
         });
         this.#started = true;
     }
@@ -168,13 +191,16 @@ export class ControlWebSocketListener implements ControlChannelListener {
             writeUpgradeError(socket, 401, "Unauthorized");
             return;
         }
-        if (access.expiresAtMs !== undefined && access.expiresAtMs <= Date.now()) {
+        if (
+            access.expiresAtMs !== undefined &&
+            access.expiresAtMs <= Date.now()
+        ) {
             writeUpgradeError(socket, 401, "Unauthorized");
             return;
         }
         if (!hasProtocol(request, CONTROL_REMOTE_RPC_SUBPROTOCOL)) {
             writeUpgradeError(socket, 426, "Upgrade Required", {
-                "Sec-WebSocket-Protocol": CONTROL_REMOTE_RPC_SUBPROTOCOL
+                "Sec-WebSocket-Protocol": CONTROL_REMOTE_RPC_SUBPROTOCOL,
             });
             return;
         }
@@ -183,14 +209,14 @@ export class ControlWebSocketListener implements ControlChannelListener {
             this.#registerAccessChannel(access, channel);
             accept({
                 admission: {
-                    allowedPeers: access.kind === "browser"
-                        ? ["web"]
-                        : ["cli", "tui"],
+                    allowedPeers:
+                        access.kind === "browser" ? ["web"] : ["cli", "tui"],
                     subject: {
                         id: access.key,
-                        kind: access.kind === "browser"
-                            ? "web-session"
-                            : "bearer",
+                        kind:
+                            access.kind === "browser"
+                                ? "web-session"
+                                : "bearer",
                     },
                 },
                 channel,
@@ -198,15 +224,23 @@ export class ControlWebSocketListener implements ControlChannelListener {
         });
     }
 
-    #registerAccessChannel(access: ControlWebSocketAccess, channel: Channel): void {
+    #registerAccessChannel(
+        access: ControlWebSocketAccess,
+        channel: Channel,
+    ): void {
         const channels = this.#channelsByAccess.get(access.key) ?? new Set();
         channels.add(channel);
         this.#channelsByAccess.set(access.key, channels);
         let expiryTimer: ReturnType<typeof setTimeout> | undefined;
         if (access.expiresAtMs !== undefined) {
-            expiryTimer = setTimeout(() => {
-                channel.close(new Error("Control client authorization expired."));
-            }, Math.max(0, access.expiresAtMs - Date.now()));
+            expiryTimer = setTimeout(
+                () => {
+                    channel.close(
+                        new Error("Control client authorization expired."),
+                    );
+                },
+                Math.max(0, access.expiresAtMs - Date.now()),
+            );
             expiryTimer.unref?.();
         }
         channel.onClose(() => {
@@ -221,27 +255,35 @@ export class ControlWebSocketListener implements ControlChannelListener {
         if (channels === undefined) return;
         this.#channelsByAccess.delete(key);
         for (const channel of [...channels]) {
-            channel.close(new Error("Control client authorization was revoked."));
+            channel.close(
+                new Error("Control client authorization was revoked."),
+            );
         }
     }
 }
 
 function normalizeBasePath(value: string): string {
     if (!value.startsWith("/") || value === "/") {
-        throw new Error("Control web basePath must be an absolute non-root path.");
+        throw new Error(
+            "Control web basePath must be an absolute non-root path.",
+        );
     }
     return value.replace(/\/+$/u, "");
 }
 
 function normalizeAbsolutePath(value: string): string {
-    if (!value.startsWith("/")) throw new Error("Control WebSocket path must be absolute.");
+    if (!value.startsWith("/"))
+        throw new Error("Control WebSocket path must be absolute.");
     return value.replace(/\/+$/u, "");
 }
 
 function hasProtocol(request: IncomingMessage, expected: string): boolean {
     const header = request.headers["sec-websocket-protocol"];
     const value = Array.isArray(header) ? header.join(",") : header;
-    return value?.split(",").some((protocol) => protocol.trim() === expected) ?? false;
+    return (
+        value?.split(",").some((protocol) => protocol.trim() === expected) ??
+        false
+    );
 }
 
 function hasSameOrigin(request: IncomingMessage): boolean {
@@ -260,7 +302,7 @@ function writeUpgradeError(
     socket: Duplex,
     statusCode: number,
     statusText: string,
-    headers: Record<string, string> = {}
+    headers: Record<string, string> = {},
 ): void {
     const lines = [
         `HTTP/1.1 ${statusCode} ${statusText}`,
@@ -268,7 +310,7 @@ function writeUpgradeError(
         "Content-Length: 0",
         ...Object.entries(headers).map(([name, value]) => `${name}: ${value}`),
         "",
-        ""
+        "",
     ];
     socket.end(lines.join("\r\n"));
 }

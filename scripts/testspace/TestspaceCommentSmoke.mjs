@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import {
+    Client,
+    StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {
     createTuiClients,
     TuiControlSession,
@@ -51,19 +54,25 @@ export async function runTestspaceCommentSmoke({
         await operations.queueContextMessage(instance, ctxId, marker);
         await waitFor(
             () =>
-                session.store.getState().readModel.instanceState[instance]?.contextMessages?.some(
-                    (message) =>
-                        message.ctxId === ctxId &&
-                        message.text === marker &&
-                        message.status === "sent",
-                ) === true,
+                session.store
+                    .getState()
+                    .readModel.instanceState[instance]?.contextMessages?.some(
+                        (message) =>
+                            message.ctxId === ctxId &&
+                            message.text === marker &&
+                            message.status === "sent",
+                    ) === true,
             "TUI operation did not publish the queued Comment",
         );
-        const queued = session.store.getState().readModel.instanceState[instance]?.contextMessages?.find(
-            (message) => message.ctxId === ctxId && message.text === marker,
-        );
+        const queued = session.store
+            .getState()
+            .readModel.instanceState[instance]?.contextMessages?.find(
+                (message) => message.ctxId === ctxId && message.text === marker,
+            );
         if (queued === undefined) {
-            throw new Error("queued Comment disappeared from the TUI read model");
+            throw new Error(
+                "queued Comment disappeared from the TUI read model",
+            );
         }
 
         const result = await mcp.callTool({
@@ -83,12 +92,14 @@ export async function runTestspaceCommentSmoke({
 
         await waitFor(
             () =>
-                session.store.getState().readModel.instanceState[instance]?.contextMessages?.some(
-                    (message) =>
-                        message.id === queued.id &&
-                        message.status === "delivered" &&
-                        typeof message.callId === "string",
-                ) === true,
+                session.store
+                    .getState()
+                    .readModel.instanceState[instance]?.contextMessages?.some(
+                        (message) =>
+                            message.id === queued.id &&
+                            message.status === "delivered" &&
+                            typeof message.callId === "string",
+                    ) === true,
             () => {
                 const state = session.store.getState();
                 return [
@@ -99,9 +110,11 @@ export async function runTestspaceCommentSmoke({
                 ].join("\n");
             },
         );
-        const delivered = session.store.getState().readModel.instanceState[instance]?.contextMessages?.find(
-            (message) => message.id === queued.id,
-        );
+        const delivered = session.store
+            .getState()
+            .readModel.instanceState[instance]?.contextMessages?.find(
+                (message) => message.id === queued.id,
+            );
         return {
             callId: delivered?.callId,
             ctxId,

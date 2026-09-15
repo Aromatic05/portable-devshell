@@ -1,4 +1,5 @@
-export type ExtensionArtifactShareState = "active" | "exhausted" | "expired" | "revoked";
+export type ExtensionArtifactShareState =
+    "active" | "exhausted" | "expired" | "revoked";
 
 export type ExtensionArtifactTransferStatus =
     | "queued"
@@ -104,12 +105,20 @@ export interface ExtensionArtifactTransferResult {
 
 /** Host-owned Artifact management operations available to an Extension generation. */
 export interface ExtensionArtifactCapability {
-    cancelTransfer(transferId: string): Promise<ExtensionArtifactTransferResult>;
-    createShare(input: ExtensionArtifactShareInput): Promise<ExtensionArtifactShareRecord>;
+    cancelTransfer(
+        transferId: string,
+    ): Promise<ExtensionArtifactTransferResult>;
+    createShare(
+        input: ExtensionArtifactShareInput,
+    ): Promise<ExtensionArtifactShareRecord>;
     getTransfer(transferId: string): Promise<ExtensionArtifactTransferRecord>;
     listShares(): Promise<readonly ExtensionArtifactShareRecord[]>;
     listTransfers(): Promise<readonly ExtensionArtifactTransferRecord[]>;
     revokeShare(shareId: string): Promise<ExtensionArtifactShareRevokeResult>;
-    startTransfer(input: ExtensionArtifactTransferInput): Promise<ExtensionArtifactTransferResult>;
-    waitForTransfer(transferId: string): Promise<ExtensionArtifactTransferRecord>;
+    startTransfer(
+        input: ExtensionArtifactTransferInput,
+    ): Promise<ExtensionArtifactTransferResult>;
+    waitForTransfer(
+        transferId: string,
+    ): Promise<ExtensionArtifactTransferRecord>;
 }

@@ -6,7 +6,10 @@ import { reduceTuiStoreReducerOverlay } from "./ui/Overlay.js";
 import { reduceTuiStoreReducerRoute } from "./ui/Route.js";
 import type { TuiAppAction, TuiAppState } from "../Model.js";
 
-export function tuiAppReducer(state: TuiAppState, action: TuiAppAction): TuiAppState {
+export function tuiAppReducer(
+    state: TuiAppState,
+    action: TuiAppAction,
+): TuiAppState {
     const nextState =
         reduceTuiStoreReducerControl(state, action) ??
         reduceTuiStoreReducerRoute(state, action) ??

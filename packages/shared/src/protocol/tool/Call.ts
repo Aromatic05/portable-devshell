@@ -22,7 +22,16 @@ export interface ToolCallProvenance {
     purpose?: string;
 }
 
-export type ToolCallStatus = "queued" | "pendingApproval" | "running" | "completed" | "failed" | "denied" | "expired" | "queueTimeout" | "cancelled";
+export type ToolCallStatus =
+    | "queued"
+    | "pendingApproval"
+    | "running"
+    | "completed"
+    | "failed"
+    | "denied"
+    | "expired"
+    | "queueTimeout"
+    | "cancelled";
 
 export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
 

@@ -92,25 +92,42 @@ export class TerminalSessionService {
     #nextGeneration = 1;
 
     constructor(options: TerminalSessionServiceOptions = {}) {
-        this.#idFactory = options.idFactory ?? (() => `terminal-${randomUUID()}`);
-        this.#maxReplayBytes = options.maxReplayBytes ?? DEFAULT_MAX_REPLAY_BYTES;
-        if (!Number.isSafeInteger(this.#maxReplayBytes) || this.#maxReplayBytes < 1) {
-            throw new TypeError("Terminal maxReplayBytes must be a positive safe integer.");
+        this.#idFactory =
+            options.idFactory ?? (() => `terminal-${randomUUID()}`);
+        this.#maxReplayBytes =
+            options.maxReplayBytes ?? DEFAULT_MAX_REPLAY_BYTES;
+        if (
+            !Number.isSafeInteger(this.#maxReplayBytes) ||
+            this.#maxReplayBytes < 1
+        ) {
+            throw new TypeError(
+                "Terminal maxReplayBytes must be a positive safe integer.",
+            );
         }
-        this.#maxTerminalHistory = options.maxTerminalHistory ?? DEFAULT_MAX_TERMINAL_HISTORY;
-        if (!Number.isSafeInteger(this.#maxTerminalHistory) || this.#maxTerminalHistory < 0) {
-            throw new TypeError("Terminal maxTerminalHistory must be a non-negative safe integer.");
+        this.#maxTerminalHistory =
+            options.maxTerminalHistory ?? DEFAULT_MAX_TERMINAL_HISTORY;
+        if (
+            !Number.isSafeInteger(this.#maxTerminalHistory) ||
+            this.#maxTerminalHistory < 0
+        ) {
+            throw new TypeError(
+                "Terminal maxTerminalHistory must be a non-negative safe integer.",
+            );
         }
         this.#now = options.now ?? (() => new Date());
     }
 
-    async open(request: TerminalOpenRequest): Promise<TerminalSessionDescriptor> {
+    async open(
+        request: TerminalOpenRequest,
+    ): Promise<TerminalSessionDescriptor> {
         this.#assertOpen();
         assertDimensions(request.cols, request.rows);
         const epoch = this.#instanceEpoch(request.instance);
         const opened = await request.backend.open({
             cols: request.cols,
-            ...(request.command === undefined ? {} : { command: request.command }),
+            ...(request.command === undefined
+                ? {}
+                : { command: request.command }),
             ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
             rows: request.rows,
             workspace: request.workspace,
@@ -121,11 +138,18 @@ export class TerminalSessionService {
                 ? serviceClosedError()
                 : instanceBackendReplacedError(request.instance);
         }
-        return this.#registerOpened(request.instance, opened, request.cols, request.rows);
+        return this.#registerOpened(
+            request.instance,
+            opened,
+            request.cols,
+            request.rows,
+        );
     }
 
-
-    async recover(instance: string, backend: TerminalBackend): Promise<TerminalSessionDescriptor[]> {
+    async recover(
+        instance: string,
+        backend: TerminalBackend,
+    ): Promise<TerminalSessionDescriptor[]> {
         this.#assertOpen();
         if (backend.recover === undefined) return this.list(instance);
         const epoch = this.#instanceEpoch(instance);
@@ -145,7 +169,7 @@ export class TerminalSessionService {
                 instance,
                 opened,
                 opened.identity.cols ?? 80,
-                opened.identity.rows ?? 24
+                opened.identity.rows ?? 24,
             );
         }
         return this.list(instance);
@@ -154,7 +178,8 @@ export class TerminalSessionService {
     attach(request: TerminalAttachRequest): TerminalAttachment {
         const session = this.#require(request.terminalId, request.generation);
         assertSequence(request.fromSeq);
-        const oldestAvailableSeq = session.replay[0]?.seq ?? session.latestSeq + 1;
+        const oldestAvailableSeq =
+            session.replay[0]?.seq ?? session.latestSeq + 1;
         if (request.fromSeq < oldestAvailableSeq - 1) {
             throw createError({
                 code: errorCodes.streamGap,
@@ -164,7 +189,8 @@ export class TerminalSessionService {
                     requestedFromSeq: request.fromSeq,
                     terminalId: session.terminalId,
                 },
-                message: "Requested terminal output sequence is no longer available.",
+                message:
+                    "Requested terminal output sequence is no longer available.",
                 retryable: true,
             });
         }
@@ -178,7 +204,9 @@ export class TerminalSessionService {
             .filter((frame) => frame.seq > request.fromSeq)
             .map(({ data, seq }) => ({ data, seq }));
         return {
-            ...(session.exit === undefined ? {} : { exit: { ...session.exit } }),
+            ...(session.exit === undefined
+                ? {}
+                : { exit: { ...session.exit } }),
             replay,
             session: descriptor(session),
             detach: () => {
@@ -206,7 +234,11 @@ export class TerminalSessionService {
         return descriptor(this.#requireById(terminalId));
     }
 
-    assertVersion(terminalId: string, generation: number, version: number): TerminalSessionDescriptor {
+    assertVersion(
+        terminalId: string,
+        generation: number,
+        version: number,
+    ): TerminalSessionDescriptor {
         const session = this.#require(terminalId, generation);
         this.#assertVersion(session, version);
         return descriptor(session);
@@ -214,11 +246,18 @@ export class TerminalSessionService {
 
     list(instance?: string): TerminalSessionDescriptor[] {
         return [...this.#sessions.values()]
-            .filter((session) => instance === undefined || session.instance === instance)
+            .filter(
+                (session) =>
+                    instance === undefined || session.instance === instance,
+            )
             .sort((left, right) => {
                 const leftActive = left.state === "running" ? 1 : 0;
                 const rightActive = right.state === "running" ? 1 : 0;
-                return rightActive - leftActive || right.createdAt.localeCompare(left.createdAt) || right.generation - left.generation;
+                return (
+                    rightActive - leftActive ||
+                    right.createdAt.localeCompare(left.createdAt) ||
+                    right.generation - left.generation
+                );
             })
             .map(descriptor);
     }
@@ -226,7 +265,7 @@ export class TerminalSessionService {
     async kill(
         terminalId: string,
         generation: number,
-        version: number
+        version: number,
     ): Promise<TerminalSessionDescriptor> {
         const session = this.#require(terminalId, generation);
         this.#assertVersion(session, version);
@@ -247,9 +286,10 @@ export class TerminalSessionService {
                 try {
                     await this.#killProcess(session);
                 } catch (error) {
-                    const failure = error instanceof Error
-                        ? error
-                        : new Error(String(error));
+                    const failure =
+                        error instanceof Error
+                            ? error
+                            : new Error(String(error));
                     failures.push(failure);
                     this.#failProcess(session, failure);
                 }
@@ -281,24 +321,26 @@ export class TerminalSessionService {
             if (session.state === "running") {
                 session.state = "killed";
                 session.version += 1;
-                void Promise.resolve(session.process.kill()).catch(() => undefined);
+                void Promise.resolve(session.process.kill()).catch(
+                    () => undefined,
+                );
             }
             this.#disposeProcess(session);
         }
         this.#sessions.clear();
     }
 
-
     #registerOpened(
         instance: string,
         opened: TerminalBackendOpenResult,
         cols: number,
-        rows: number
+        rows: number,
     ): TerminalSessionDescriptor {
         this.#assertOpen();
         const backendSession = isBackendSession(opened) ? opened : undefined;
-        const process = backendSession?.process ?? opened as TerminalProcess;
-        const terminalId = backendSession?.identity.terminalId ?? this.#uniqueId();
+        const process = backendSession?.process ?? (opened as TerminalProcess);
+        const terminalId =
+            backendSession?.identity.terminalId ?? this.#uniqueId();
         if (this.#sessions.has(terminalId)) {
             throw createError({
                 code: errorCodes.instanceConflict,
@@ -307,12 +349,14 @@ export class TerminalSessionService {
                 retryable: true,
             });
         }
-        const generation = backendSession?.identity.generation ?? this.#nextGeneration++;
+        const generation =
+            backendSession?.identity.generation ?? this.#nextGeneration++;
         this.#nextGeneration = Math.max(this.#nextGeneration, generation + 1);
         const session: TerminalSessionRecord = {
             attachments: new Set(),
             cols,
-            createdAt: backendSession?.identity.createdAt ?? this.#now().toISOString(),
+            createdAt:
+                backendSession?.identity.createdAt ?? this.#now().toISOString(),
             generation,
             instance,
             killPending: false,
@@ -346,14 +390,20 @@ export class TerminalSessionService {
         return descriptor(session);
     }
 
-    #append(session: TerminalSessionRecord, data: string, sourceSeq?: number): void {
+    #append(
+        session: TerminalSessionRecord,
+        data: string,
+        sourceSeq?: number,
+    ): void {
         if (session.state !== "running") return;
         const nextSeq = sourceSeq ?? session.latestSeq + 1;
         if (nextSeq <= session.latestSeq) return;
         if (nextSeq !== session.latestSeq + 1) {
             this.#failProcess(
                 session,
-                new Error(`Terminal output gap: expected ${session.latestSeq + 1}, received ${nextSeq}.`)
+                new Error(
+                    `Terminal output gap: expected ${session.latestSeq + 1}, received ${nextSeq}.`,
+                ),
             );
             return;
         }
@@ -365,15 +415,18 @@ export class TerminalSessionService {
         };
         session.replay.push(frame);
         session.replayBytes += frame.bytes;
-        while (session.replayBytes > this.#maxReplayBytes && session.replay.length > 1) {
+        while (
+            session.replayBytes > this.#maxReplayBytes &&
+            session.replay.length > 1
+        ) {
             const removed = session.replay.shift();
             if (removed !== undefined) session.replayBytes -= removed.bytes;
         }
         for (const attachment of [...session.attachments]) {
-            if (!attachment.detached) attachment.onOutput({ data, seq: frame.seq });
+            if (!attachment.detached)
+                attachment.onOutput({ data, seq: frame.seq });
         }
     }
-
 
     #failProcess(session: TerminalSessionRecord, error: Error): void {
         if (session.exit !== undefined) return;
@@ -386,12 +439,16 @@ export class TerminalSessionService {
         };
         session.replay.push(frame);
         session.replayBytes += frame.bytes;
-        while (session.replayBytes > this.#maxReplayBytes && session.replay.length > 1) {
+        while (
+            session.replayBytes > this.#maxReplayBytes &&
+            session.replay.length > 1
+        ) {
             const removed = session.replay.shift();
             if (removed !== undefined) session.replayBytes -= removed.bytes;
         }
         for (const attachment of [...session.attachments]) {
-            if (!attachment.detached) attachment.onOutput({ data: message, seq: frame.seq });
+            if (!attachment.detached)
+                attachment.onOutput({ data: message, seq: frame.seq });
         }
         session.exit = { exitCode: -1, signal: 0 };
         session.state = "failed";
@@ -404,7 +461,10 @@ export class TerminalSessionService {
         this.#pruneTerminalHistory(session.instance);
     }
 
-    #finishProcess(session: TerminalSessionRecord, exit: TerminalProcessExit): void {
+    #finishProcess(
+        session: TerminalSessionRecord,
+        exit: TerminalProcessExit,
+    ): void {
         if (session.exit !== undefined) return;
         if (session.killPending) {
             session.pendingKillExit = { ...exit };
@@ -429,7 +489,8 @@ export class TerminalSessionService {
             session.killPending = false;
             const pendingExit = session.pendingKillExit;
             session.pendingKillExit = undefined;
-            if (pendingExit !== undefined) this.#finishProcess(session, pendingExit);
+            if (pendingExit !== undefined)
+                this.#finishProcess(session, pendingExit);
             throw error;
         }
         session.killPending = false;
@@ -453,8 +514,16 @@ export class TerminalSessionService {
 
     #pruneTerminalHistory(instance: string): void {
         const terminal = [...this.#sessions.values()]
-            .filter((session) => session.instance === instance && session.state !== "running")
-            .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.generation - left.generation);
+            .filter(
+                (session) =>
+                    session.instance === instance &&
+                    session.state !== "running",
+            )
+            .sort(
+                (left, right) =>
+                    right.createdAt.localeCompare(left.createdAt) ||
+                    right.generation - left.generation,
+            );
         for (const session of terminal.slice(this.#maxTerminalHistory)) {
             session.attachments.clear();
             this.#unsubscribeProcess(session);
@@ -486,7 +555,6 @@ export class TerminalSessionService {
         session.processDisposed = true;
         session.process.dispose?.();
     }
-
 
     #assertVersion(session: TerminalSessionRecord, version: number): void {
         if (session.version !== version) {
@@ -550,17 +618,22 @@ export class TerminalSessionService {
     #uniqueId(): string {
         for (;;) {
             const id = this.#idFactory();
-            if (id.length === 0) throw new Error("Terminal idFactory returned an empty id.");
+            if (id.length === 0)
+                throw new Error("Terminal idFactory returned an empty id.");
             if (!this.#sessions.has(id)) return id;
         }
     }
 }
 
-function isBackendSession(value: TerminalBackendOpenResult): value is TerminalBackendSession {
-    return typeof value === "object" &&
+function isBackendSession(
+    value: TerminalBackendOpenResult,
+): value is TerminalBackendSession {
+    return (
+        typeof value === "object" &&
         value !== null &&
         "identity" in value &&
-        "process" in value;
+        "process" in value
+    );
 }
 
 async function disposeUnregistered(

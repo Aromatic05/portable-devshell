@@ -37,11 +37,17 @@ export class ContextMessageService {
     constructor(options: ContextMessageServiceOptions) {
         this.#appendEvent = options.appendEvent;
         this.#instanceName = options.instanceName;
-        this.#store = options.store ?? new ConversationStore({
-            filePath: options.conversationFilePath ?? defaultConversationFile(options.filePath),
-            instanceName: options.instanceName,
-            ...(options.filePath === undefined ? {} : { legacyContextMessagesFile: options.filePath }),
-        });
+        this.#store =
+            options.store ??
+            new ConversationStore({
+                filePath:
+                    options.conversationFilePath ??
+                    defaultConversationFile(options.filePath),
+                instanceName: options.instanceName,
+                ...(options.filePath === undefined
+                    ? {}
+                    : { legacyContextMessagesFile: options.filePath }),
+            });
     }
 
     async queue(
@@ -67,7 +73,9 @@ export class ContextMessageService {
         });
     }
 
-    async list(input: ContextMessageListInput | string = {}): Promise<ContextMessageRecord[]> {
+    async list(
+        input: ContextMessageListInput | string = {},
+    ): Promise<ContextMessageRecord[]> {
         await this.#operation;
         const query = typeof input === "string" ? { ctxId: input } : input;
         return this.#store.listComments(query);
@@ -96,7 +104,9 @@ export class ContextMessageService {
                     );
                     await this.#recordDelivered(delivered);
                     state = this.#store.readControlState(ctxId);
-                    const comment = delivered.map((record) => record.text).join("\n\n");
+                    const comment = delivered
+                        .map((record) => record.text)
+                        .join("\n\n");
                     if (state.stoppedByCommentId !== undefined) {
                         return {
                             ...(comment.length === 0 ? {} : { comment }),
@@ -104,20 +114,35 @@ export class ContextMessageService {
                             kind: "stop",
                         };
                     }
-                    const resume = [...delivered].reverse().find(
-                        (record) => parseContextMessageDirective(record.text).directive === "resume",
-                    );
+                    const resume = [...delivered]
+                        .reverse()
+                        .find(
+                            (record) =>
+                                parseContextMessageDirective(record.text)
+                                    .directive === "resume",
+                        );
                     if (resume !== undefined) {
-                        return { comment, commentId: resume.id, kind: "resume" };
+                        return {
+                            comment,
+                            commentId: resume.id,
+                            kind: "resume",
+                        };
                     }
-                    throw new Error("Conversation Stop state cleared without a delivered #resume Comment.");
+                    throw new Error(
+                        "Conversation Stop state cleared without a delivered #resume Comment.",
+                    );
                 }
                 return { commentId: stoppedByCommentId, kind: "stop" };
             }
-            if (toolName === "todo_report" || state.pendingPushCommentId === undefined) {
+            if (
+                toolName === "todo_report" ||
+                state.pendingPushCommentId === undefined
+            ) {
                 return { kind: "allow" };
             }
-            const remaining = state.pushToolCallsRemaining ?? CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+            const remaining =
+                state.pushToolCallsRemaining ??
+                CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
             if (remaining <= 0) {
                 return {
                     commentId: state.pendingPushCommentId,
@@ -132,7 +157,10 @@ export class ContextMessageService {
     }
 
     async pendingReplyCommentId(ctxId: string): Promise<string | undefined> {
-        return await this.#runExclusive(async () => this.#store.readControlState(ctxId).pendingReplyCommentId);
+        return await this.#runExclusive(
+            async () =>
+                this.#store.readControlState(ctxId).pendingReplyCommentId,
+        );
     }
 
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {
@@ -142,25 +170,39 @@ export class ContextMessageService {
             this.#store.clearAllControlStates();
             if (records.length === 0) return [];
             const ids = new Set(records.map((record) => record.id));
-            return this.#store.listComments().filter((message) => ids.has(message.id));
+            return this.#store
+                .listComments()
+                .filter((message) => ids.has(message.id));
         });
     }
 
-    async failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]> {
+    async failPending(
+        ctxId: string,
+        reason: string,
+    ): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(async () => {
             const records = this.#store.pendingComments(ctxId);
             if (records.length > 0) await this.#markFailed(records, reason);
             this.#store.writeControlState(ctxId, {});
             if (records.length === 0) return [];
             const ids = new Set(records.map((record) => record.id));
-            return this.#store.listComments({ ctxId }).filter((message) => ids.has(message.id));
+            return this.#store
+                .listComments({ ctxId })
+                .filter((message) => ids.has(message.id));
         });
     }
 
-    async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
+    async consumePending(
+        ctxId: string,
+        callId: string,
+    ): Promise<ContextMessageReadResult> {
         const delivered = await this.#runExclusive(async () => {
             if (this.#store.pendingComments(ctxId).length === 0) return [];
-            return this.#store.deliverComments(ctxId, callId, new Date().toISOString());
+            return this.#store.deliverComments(
+                ctxId,
+                callId,
+                new Date().toISOString(),
+            );
         });
         const comment = delivered.map((message) => message.text).join("\n\n");
         if (delivered.length > 0) {
@@ -168,7 +210,8 @@ export class ContextMessageService {
                 callId,
                 comment,
                 ctxId,
-                deliveredAt: delivered[0]?.deliveredAt ?? new Date().toISOString(),
+                deliveredAt:
+                    delivered[0]?.deliveredAt ?? new Date().toISOString(),
                 ids: delivered.map((message) => message.id),
                 status: "delivered",
             }).catch(() => undefined);
@@ -176,11 +219,17 @@ export class ContextMessageService {
         return {
             callId,
             ...(comment.length === 0 ? {} : { comment }),
-            messages: delivered.map(({ createdAt, id, text }) => ({ createdAt, id, text })),
+            messages: delivered.map(({ createdAt, id, text }) => ({
+                createdAt,
+                id,
+                text,
+            })),
         };
     }
 
-    async #recordDelivered(records: readonly ContextMessageRecord[]): Promise<void> {
+    async #recordDelivered(
+        records: readonly ContextMessageRecord[],
+    ): Promise<void> {
         if (records.length === 0) return;
         const first = records[0]!;
         await this.#appendEvent("context.message.delivered", {
@@ -226,7 +275,9 @@ export class ContextMessageService {
 
 function defaultConversationFile(legacyFilePath: string | undefined): string {
     if (legacyFilePath === undefined) {
-        throw new Error("ContextMessageService requires store, conversationFilePath, or filePath.");
+        throw new Error(
+            "ContextMessageService requires store, conversationFilePath, or filePath.",
+        );
     }
     return join(dirname(legacyFilePath), "conversation.sqlite3");
 }

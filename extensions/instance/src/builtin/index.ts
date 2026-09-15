@@ -7,8 +7,14 @@ export { executeInstanceCommand, INSTANCE_USAGE } from "./InstanceCommand.js";
 
 export function activate(context: ExtensionContext): void {
     const instances = context.capabilities.instances;
-    if (instances === undefined) throw new Error("Instance Extension requires the instances capability.");
-    context.register(modelCommands, "instance", async (argv, invocation) =>
-        await executeInstanceCommand(instances, argv, invocation)
+    if (instances === undefined)
+        throw new Error(
+            "Instance Extension requires the instances capability.",
+        );
+    context.register(
+        modelCommands,
+        "instance",
+        async (argv, invocation) =>
+            await executeInstanceCommand(instances, argv, invocation),
     );
 }

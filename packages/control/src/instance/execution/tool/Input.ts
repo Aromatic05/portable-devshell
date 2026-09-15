@@ -6,37 +6,68 @@ import {
     type ToolCallQuery,
     type ToolCallRecord,
     type ToolCallSource,
-    type ToolCallStatus
+    type ToolCallStatus,
 } from "@portable-devshell/shared";
 
 const DEFAULT_TOOL_CALL_READ_LIMIT = 200;
 const MAX_TOOL_CALL_READ_LIMIT = 1_000;
 const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export function readToolCall(payload?: JsonValue): { input: JsonValue; operationId?: string; recording?: "caller" | "host"; toolName: string; workspace: string } {
-    if (!isRecord(payload) || typeof payload.toolName !== "string" || payload.toolName.length === 0) {
+export function readToolCall(payload?: JsonValue): {
+    input: JsonValue;
+    operationId?: string;
+    recording?: "caller" | "host";
+    toolName: string;
+    workspace: string;
+} {
+    if (
+        !isRecord(payload) ||
+        typeof payload.toolName !== "string" ||
+        payload.toolName.length === 0
+    ) {
         throw invalid("tool.call requires toolName.");
     }
-    if (typeof payload.workspace !== "string" || payload.workspace.trim().length === 0) {
+    if (
+        typeof payload.workspace !== "string" ||
+        payload.workspace.trim().length === 0
+    ) {
         throw invalid("tool.call requires workspace.");
     }
-    if (payload.operationId !== undefined && (typeof payload.operationId !== "string" || payload.operationId.length === 0)) {
+    if (
+        payload.operationId !== undefined &&
+        (typeof payload.operationId !== "string" ||
+            payload.operationId.length === 0)
+    ) {
         throw invalid("tool.call operationId must be a non-empty string.");
     }
-    if (payload.recording !== undefined && payload.recording !== "caller" && payload.recording !== "host") {
+    if (
+        payload.recording !== undefined &&
+        payload.recording !== "caller" &&
+        payload.recording !== "host"
+    ) {
         throw invalid("tool.call recording must be caller or host.");
     }
     return {
         input: payload.input ?? null,
-        ...(payload.operationId === undefined ? {} : { operationId: payload.operationId }),
-        ...(payload.recording === undefined ? {} : { recording: payload.recording }),
+        ...(payload.operationId === undefined
+            ? {}
+            : { operationId: payload.operationId }),
+        ...(payload.recording === undefined
+            ? {}
+            : { recording: payload.recording }),
         toolName: payload.toolName,
-        workspace: payload.workspace
+        workspace: payload.workspace,
     };
 }
 
-export function readToolSessionOpen(payload?: JsonValue): { workspace: string } {
-    if (!isRecord(payload) || typeof payload.workspace !== "string" || payload.workspace.trim().length === 0) {
+export function readToolSessionOpen(payload?: JsonValue): {
+    workspace: string;
+} {
+    if (
+        !isRecord(payload) ||
+        typeof payload.workspace !== "string" ||
+        payload.workspace.trim().length === 0
+    ) {
         throw invalid("tool.openSession requires workspace.");
     }
     return { workspace: payload.workspace };
@@ -52,25 +83,43 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
     if (payload.before !== undefined && typeof payload.before !== "string") {
         throw invalid("tool.listCalls requires string before.");
     }
-    if (payload.limit !== undefined && (typeof payload.limit !== "number" || !Number.isSafeInteger(payload.limit))) {
+    if (
+        payload.limit !== undefined &&
+        (typeof payload.limit !== "number" ||
+            !Number.isSafeInteger(payload.limit))
+    ) {
         throw invalid("tool.listCalls requires integer limit.");
     }
     if (payload.ctxId !== undefined && typeof payload.ctxId !== "string") {
         throw invalid("tool.listCalls requires string ctxId.");
     }
-    if (payload.includeInput !== undefined && typeof payload.includeInput !== "boolean") {
+    if (
+        payload.includeInput !== undefined &&
+        typeof payload.includeInput !== "boolean"
+    ) {
         throw invalid("tool.listCalls requires boolean includeInput.");
     }
-    if (payload.includeOutput !== undefined && typeof payload.includeOutput !== "boolean") {
+    if (
+        payload.includeOutput !== undefined &&
+        typeof payload.includeOutput !== "boolean"
+    ) {
         throw invalid("tool.listCalls requires boolean includeOutput.");
     }
-    if (payload.maxBytes !== undefined && (typeof payload.maxBytes !== "number" || !Number.isSafeInteger(payload.maxBytes))) {
+    if (
+        payload.maxBytes !== undefined &&
+        (typeof payload.maxBytes !== "number" ||
+            !Number.isSafeInteger(payload.maxBytes))
+    ) {
         throw invalid("tool.listCalls requires integer maxBytes.");
     }
-    const callIds = payload.callIds === undefined
-        ? undefined
-        : readCallIds(payload.callIds);
-    if (payload.toolName !== undefined && typeof payload.toolName !== "string") {
+    const callIds =
+        payload.callIds === undefined
+            ? undefined
+            : readCallIds(payload.callIds);
+    if (
+        payload.toolName !== undefined &&
+        typeof payload.toolName !== "string"
+    ) {
         throw invalid("tool.listCalls requires string toolName.");
     }
     return {
@@ -78,28 +127,48 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
         ...(payload.before === undefined ? {} : { before: payload.before }),
         ...(callIds === undefined ? {} : { callIds }),
         ...(payload.ctxId === undefined ? {} : { ctxId: payload.ctxId }),
-        ...(payload.includeInput === undefined ? {} : { includeInput: payload.includeInput }),
-        ...(payload.includeOutput === undefined ? {} : { includeOutput: payload.includeOutput }),
+        ...(payload.includeInput === undefined
+            ? {}
+            : { includeInput: payload.includeInput }),
+        ...(payload.includeOutput === undefined
+            ? {}
+            : { includeOutput: payload.includeOutput }),
         limit: readToolCallLimit(payload.limit),
-        ...(payload.maxBytes === undefined ? {} : { maxBytes: readToolCallBytes(payload.maxBytes) }),
-        ...(payload.source === undefined ? {} : { source: readSource(payload.source) }),
-        ...(payload.status === undefined ? {} : { status: readStatus(payload.status) }),
-        ...(payload.toolName === undefined ? {} : { toolName: payload.toolName })
+        ...(payload.maxBytes === undefined
+            ? {}
+            : { maxBytes: readToolCallBytes(payload.maxBytes) }),
+        ...(payload.source === undefined
+            ? {}
+            : { source: readSource(payload.source) }),
+        ...(payload.status === undefined
+            ? {}
+            : { status: readStatus(payload.status) }),
+        ...(payload.toolName === undefined
+            ? {}
+            : { toolName: payload.toolName }),
     };
 }
 
-export function limitToolCallResponse(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+export function limitToolCallResponse(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
     const newestFirst = query.after === undefined;
     const candidates = newestFirst ? [...records].reverse() : records;
     const accepted: ToolCallRecord[] = [];
-    const maxBytes = Math.min(query.maxBytes ?? MAX_TOOL_CALL_RESPONSE_BYTES, MAX_TOOL_CALL_RESPONSE_BYTES);
+    const maxBytes = Math.min(
+        query.maxBytes ?? MAX_TOOL_CALL_RESPONSE_BYTES,
+        MAX_TOOL_CALL_RESPONSE_BYTES,
+    );
     let responseBytes = 2;
     for (const record of candidates) {
         const separatorBytes = accepted.length === 0 ? 0 : 1;
         const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8");
         if (responseBytes + separatorBytes + recordBytes > maxBytes) {
             if (accepted.length === 0) {
-                throw invalid(`tool.listCalls record ${record.callId} exceeds the safe response size.`);
+                throw invalid(
+                    `tool.listCalls record ${record.callId} exceeds the safe response size.`,
+                );
             }
             break;
         }
@@ -110,38 +179,66 @@ export function limitToolCallResponse(records: ToolCallRecord[], query: ToolCall
     return accepted;
 }
 
-export function readToolApprovalId(payload: JsonValue | undefined, operation: string): string {
-    if (!isRecord(payload) || typeof payload.approvalId !== "string" || payload.approvalId.length === 0) {
+export function readToolApprovalId(
+    payload: JsonValue | undefined,
+    operation: string,
+): string {
+    if (
+        !isRecord(payload) ||
+        typeof payload.approvalId !== "string" ||
+        payload.approvalId.length === 0
+    ) {
         throw invalid(`${operation} requires approvalId.`);
     }
     return payload.approvalId;
 }
 
-export function readToolApprovalListOptions(payload?: JsonValue): { pendingOnly: boolean } {
+export function readToolApprovalListOptions(payload?: JsonValue): {
+    pendingOnly: boolean;
+} {
     if (payload === undefined) return { pendingOnly: false };
-    if (!isRecord(payload) || (payload.pendingOnly !== undefined && typeof payload.pendingOnly !== "boolean")) {
+    if (
+        !isRecord(payload) ||
+        (payload.pendingOnly !== undefined &&
+            typeof payload.pendingOnly !== "boolean")
+    ) {
         throw invalid("tool.listApprovals requires boolean pendingOnly.");
     }
     return { pendingOnly: payload.pendingOnly === true };
 }
 
-export function readToolApprovalDecision(
-    payload?: JsonValue
-): { decision: ApprovalDecision["decision"]; policyPatch?: JsonValue; reason?: string; remember?: boolean } {
-    if (!isRecord(payload) || (payload.decision !== "approve" && payload.decision !== "deny")) {
-        throw invalid("tool.decideApproval requires decision to be approve or deny.");
+export function readToolApprovalDecision(payload?: JsonValue): {
+    decision: ApprovalDecision["decision"];
+    policyPatch?: JsonValue;
+    reason?: string;
+    remember?: boolean;
+} {
+    if (
+        !isRecord(payload) ||
+        (payload.decision !== "approve" && payload.decision !== "deny")
+    ) {
+        throw invalid(
+            "tool.decideApproval requires decision to be approve or deny.",
+        );
     }
     if (payload.reason !== undefined && typeof payload.reason !== "string") {
         throw invalid("tool.decideApproval requires string reason.");
     }
-    if (payload.remember !== undefined && typeof payload.remember !== "boolean") {
+    if (
+        payload.remember !== undefined &&
+        typeof payload.remember !== "boolean"
+    ) {
         throw invalid("tool.decideApproval requires boolean remember.");
     }
     return {
         decision: payload.decision,
-        ...(payload.policyPatch === undefined ? {} : { policyPatch: payload.policyPatch }),
+        ...(payload.policyPatch === undefined
+            ? {}
+            : { policyPatch: payload.policyPatch }),
         ...(payload.reason === undefined ? {} : { reason: payload.reason }),
-        ...(payload.remember === undefined ? {} : { remember: payload.remember })
+        ...(payload.remember === undefined
+            ? {}
+            : { remember: payload.remember }),
     };
 }
 
@@ -189,10 +286,16 @@ function readToolCallBytes(value: JsonValue): number {
     return Math.min(Math.max(value as number, 1), MAX_TOOL_CALL_RESPONSE_BYTES);
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function invalid(message: string) {
-    return createError({ code: errorCodes.targetInvalid, message, retryable: false });
+    return createError({
+        code: errorCodes.targetInvalid,
+        message,
+        retryable: false,
+    });
 }

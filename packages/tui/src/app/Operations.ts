@@ -2,7 +2,18 @@ import { TuiRuntimeControlOperations } from "./operation/Control.js";
 import { TuiRuntimeExecutionOperations } from "./operation/Execution.js";
 import { TuiRuntimeTmuxOperations } from "./operation/Tmux.js";
 import { type TuiAppStore } from "../state/store/App.js";
-import { type ConfigBatchUpdateRequest, type ConfigDraft, type ConfigUpdateInstanceRequest, type ConfigUpdateMcpRequest, type ConfigUpdateWebRequest, type InstanceCreateDraft, type InstanceCreateSchema, type InstanceCreateSummary, type JsonValue, type ReverseDeviceCodeResult } from "@portable-devshell/shared";
+import {
+    type ConfigBatchUpdateRequest,
+    type ConfigDraft,
+    type ConfigUpdateInstanceRequest,
+    type ConfigUpdateMcpRequest,
+    type ConfigUpdateWebRequest,
+    type InstanceCreateDraft,
+    type InstanceCreateSchema,
+    type InstanceCreateSummary,
+    type JsonValue,
+    type ReverseDeviceCodeResult,
+} from "@portable-devshell/shared";
 
 export interface TuiRuntimeOperationsOptions {
     clients: TuiRuntimeOperationClients;
@@ -59,13 +70,15 @@ export class TuiRuntimeOperations {
         this.callTool = execution.callTool.bind(execution);
         this.decideApproval = execution.decideApproval.bind(execution);
         this.runInstanceAction = execution.runInstanceAction.bind(execution);
-        this.cancelArtifactTransfer = control.cancelArtifactTransfer.bind(control);
+        this.cancelArtifactTransfer =
+            control.cancelArtifactTransfer.bind(control);
         this.createInstance = control.createInstance.bind(control);
         this.decideOAuthApproval = control.decideOAuthApproval.bind(control);
         this.deleteInstance = control.deleteInstance.bind(control);
         this.deleteTodo = control.deleteTodo.bind(control);
         this.disableContext = control.disableContext.bind(control);
-        this.getInstanceCreateSchema = control.getInstanceCreateSchema.bind(control);
+        this.getInstanceCreateSchema =
+            control.getInstanceCreateSchema.bind(control);
         this.queueContextMessage = control.queueContextMessage.bind(control);
         this.reloadLogs = control.reloadLogs.bind(control);
         this.reloadPage = control.reloadPage.bind(control);
@@ -78,7 +91,8 @@ export class TuiRuntimeOperations {
         this.updateMcpEndpoint = control.updateMcpEndpoint.bind(control);
         this.updateWeb = control.updateWeb.bind(control);
         this.validateConfigDraft = control.validateConfigDraft.bind(control);
-        this.validateInstanceCreateDraft = control.validateInstanceCreateDraft.bind(control);
+        this.validateInstanceCreateDraft =
+            control.validateInstanceCreateDraft.bind(control);
     }
 }
 
@@ -98,10 +112,19 @@ export interface TuiRuntimeOperationClients {
         create(draft: InstanceCreateDraft): Promise<{ name: string }>;
         createSchema(): Promise<InstanceCreateSchema>;
         delete(instanceName: string): Promise<unknown>;
-        validateCreate(draft: InstanceCreateDraft): Promise<InstanceCreateSummary>;
+        validateCreate(
+            draft: InstanceCreateDraft,
+        ): Promise<InstanceCreateSummary>;
     };
     reverse: {
-        createCode(instance: string): Promise<Pick<ReverseDeviceCodeResult, "controllerUrl" | "deviceCode" | "expiresAt">>;
+        createCode(
+            instance: string,
+        ): Promise<
+            Pick<
+                ReverseDeviceCodeResult,
+                "controllerUrl" | "deviceCode" | "expiresAt"
+            >
+        >;
     };
     service: {
         restart(): Promise<unknown>;
@@ -110,16 +133,32 @@ export interface TuiRuntimeOperationClients {
         delete(instance: string, taskId: string): Promise<unknown>;
     };
     tool: {
-        call(instance: string, toolName: string, input: JsonValue, workspace: string): Promise<JsonValue>;
+        call(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            workspace: string,
+        ): Promise<JsonValue>;
     };
 }
 
 export interface TuiRuntimeOperationSession {
     commands: {
-        decideOAuthApproval(approvalId: string, decision: "approve" | "deny"): Promise<unknown>;
-        decideToolApproval(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<unknown>;
+        decideOAuthApproval(
+            approvalId: string,
+            decision: "approve" | "deny",
+        ): Promise<unknown>;
+        decideToolApproval(
+            instance: string,
+            approvalId: string,
+            decision: "approve" | "deny",
+        ): Promise<unknown>;
         disableContext(ctxId: string): Promise<unknown>;
-        queueContextMessage(instance: string, ctxId: string, text: string): Promise<unknown>;
+        queueContextMessage(
+            instance: string,
+            ctxId: string,
+            text: string,
+        ): Promise<unknown>;
         refreshInstance(instance: string): Promise<unknown>;
         renewContext(ctxId: string): Promise<unknown>;
         startInstance(

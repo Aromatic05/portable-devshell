@@ -126,9 +126,12 @@ export function isRenderRelevantChange(
         previous.panelErrors !== next.panelErrors ||
         previous.commandRecords !== next.commandRecords ||
         previous.relayByCommand !== next.relayByCommand ||
-        previous.globalDerived.connectedInstanceCount !== next.globalDerived.connectedInstanceCount ||
-        previous.globalDerived.pendingApprovalCount !== next.globalDerived.pendingApprovalCount
-    ) return true;
+        previous.globalDerived.connectedInstanceCount !==
+            next.globalDerived.connectedInstanceCount ||
+        previous.globalDerived.pendingApprovalCount !==
+            next.globalDerived.pendingApprovalCount
+    )
+        return true;
 
     const before = selectedInstanceState(previous);
     const after = selectedInstanceState(next);
@@ -136,37 +139,55 @@ export function isRenderRelevantChange(
         case "overview":
             return previous.readModel.overview !== next.readModel.overview;
         case "instances":
-            return anyInstanceFieldChanged(previous, next, "snapshot") ||
+            return (
+                anyInstanceFieldChanged(previous, next, "snapshot") ||
                 anyInstanceFieldChanged(previous, next, "approvals") ||
-                previous.readModel.artifactShares !== next.readModel.artifactShares ||
-                previous.readModel.artifactTransfers !== next.readModel.artifactTransfers ||
-                previous.readModel.configView !== next.readModel.configView;
+                previous.readModel.artifactShares !==
+                    next.readModel.artifactShares ||
+                previous.readModel.artifactTransfers !==
+                    next.readModel.artifactTransfers ||
+                previous.readModel.configView !== next.readModel.configView
+            );
         case "connections":
-            return previous.readModel.oauthApprovals !== next.readModel.oauthApprovals ||
+            return (
+                previous.readModel.oauthApprovals !==
+                    next.readModel.oauthApprovals ||
                 previous.readModel.configView !== next.readModel.configView ||
                 previous.readModel.mcpStatus !== next.readModel.mcpStatus ||
-                before?.snapshot !== after?.snapshot;
+                before?.snapshot !== after?.snapshot
+            );
         case "config":
-            return previous.readModel.configView !== next.readModel.configView ||
-                before?.snapshot !== after?.snapshot;
+            return (
+                previous.readModel.configView !== next.readModel.configView ||
+                before?.snapshot !== after?.snapshot
+            );
         case "messages":
-            return previous.readModel.contexts !== next.readModel.contexts ||
+            return (
+                previous.readModel.contexts !== next.readModel.contexts ||
                 before?.conversationEntries !== after?.conversationEntries ||
-                before?.snapshot !== after?.snapshot;
+                before?.snapshot !== after?.snapshot
+            );
         case "audit":
-            return previous.readModel.contexts !== next.readModel.contexts ||
+            return (
+                previous.readModel.contexts !== next.readModel.contexts ||
                 before?.commentCalls !== after?.commentCalls ||
                 before?.approvals !== after?.approvals ||
                 before?.logs !== after?.logs ||
                 before?.toolCalls !== after?.toolCalls ||
                 before?.contextMessages !== after?.contextMessages ||
-                before?.snapshot !== after?.snapshot;
+                before?.snapshot !== after?.snapshot
+            );
         case "logs":
-            return before?.logs !== after?.logs || before?.snapshot !== after?.snapshot;
+            return (
+                before?.logs !== after?.logs ||
+                before?.snapshot !== after?.snapshot
+            );
         case "todo":
-            return before?.todo !== after?.todo ||
+            return (
+                before?.todo !== after?.todo ||
                 before?.goals !== after?.goals ||
-                before?.snapshot !== after?.snapshot;
+                before?.snapshot !== after?.snapshot
+            );
         default:
             return false;
     }
@@ -174,7 +195,9 @@ export function isRenderRelevantChange(
 
 function selectedInstanceState(state: TuiAppState) {
     const instance = state.ui.selectedInstance;
-    return instance === undefined ? undefined : state.readModel.instanceState[instance];
+    return instance === undefined
+        ? undefined
+        : state.readModel.instanceState[instance];
 }
 
 function anyInstanceFieldChanged(
@@ -187,7 +210,10 @@ function anyInstanceFieldChanged(
         ...Object.keys(next.readModel.instanceState),
     ]);
     for (const name of names) {
-        if (previous.readModel.instanceState[name]?.[field] !== next.readModel.instanceState[name]?.[field]) {
+        if (
+            previous.readModel.instanceState[name]?.[field] !==
+            next.readModel.instanceState[name]?.[field]
+        ) {
             return true;
         }
     }

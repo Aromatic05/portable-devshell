@@ -19,7 +19,9 @@ export class ConversationService {
         this.#store = options.store;
     }
 
-    async list(input: ConversationListInput = {}): Promise<ConversationEntry[]> {
+    async list(
+        input: ConversationListInput = {},
+    ): Promise<ConversationEntry[]> {
         await this.#ensureLegacyReportsMigrated();
         return this.#store.list(input);
     }
@@ -36,7 +38,9 @@ export class ConversationService {
             callId: input.callId,
             createdAt: input.createdAt ?? new Date().toISOString(),
             ctxId: input.ctxId,
-            ...(input.replyCommentId === undefined ? {} : { replyCommentId: input.replyCommentId }),
+            ...(input.replyCommentId === undefined
+                ? {}
+                : { replyCommentId: input.replyCommentId }),
             text: input.text,
         });
     }
@@ -57,9 +61,14 @@ export class ConversationService {
     }
 
     async #migrateLegacyReports(): Promise<void> {
-        const calls = await this.#legacyReports?.() ?? [];
+        const calls = (await this.#legacyReports?.()) ?? [];
         for (const call of calls) {
-            if (call.toolName !== "todo_report" || call.status !== "completed" || call.ctxId === undefined) continue;
+            if (
+                call.toolName !== "todo_report" ||
+                call.status !== "completed" ||
+                call.ctxId === undefined
+            )
+                continue;
             const text = reportText(call);
             if (text === undefined) continue;
             this.#store.appendReport({
@@ -74,7 +83,14 @@ export class ConversationService {
 }
 
 function reportText(call: ToolCallRecord): string | undefined {
-    if (typeof call.input !== "object" || call.input === null || Array.isArray(call.input)) return undefined;
+    if (
+        typeof call.input !== "object" ||
+        call.input === null ||
+        Array.isArray(call.input)
+    )
+        return undefined;
     const message = call.input.message;
-    return typeof message === "string" && message.length > 0 ? message : undefined;
+    return typeof message === "string" && message.length > 0
+        ? message
+        : undefined;
 }

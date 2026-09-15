@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     InstanceStateMachine,
     WorkerInstance,
-    WORKER_PROTOCOL_VERSION
+    WORKER_PROTOCOL_VERSION,
 } from "@portable-devshell/core/testing";
 import { asInstanceName, createError } from "@portable-devshell/shared";
 
@@ -12,76 +12,119 @@ test("WorkerInstance wraps start stop and status command failures with diagnosti
     const startFailure = createInstance({
         start: async () => ({
             details: {
-                commandDisplay: "ssh devbox -- devshell-worker start --instance demo-local",
+                commandDisplay:
+                    "ssh devbox -- devshell-worker start --instance demo-local",
                 exitCode: 255,
                 instance: "demo-local",
                 operation: "start",
                 provider: "ssh",
-                stderrTail: "Permission denied\n"
+                stderrTail: "Permission denied\n",
             },
             exitCode: 255,
             stderr: "Permission denied\n",
-            stdout: ""
-        })
+            stdout: "",
+        }),
     });
 
     await assert.rejects(startFailure.start(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerStartFailed");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.provider, "ssh");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.operation, "start");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.exitCode, 255);
-        assert.equal((error as { details?: Record<string, unknown> }).details?.stderrTail, "Permission denied\n");
+        assert.equal(
+            (error as { code?: string }).code,
+            "core.workerStartFailed",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.provider,
+            "ssh",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.operation,
+            "start",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.exitCode,
+            255,
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details
+                ?.stderrTail,
+            "Permission denied\n",
+        );
         return true;
     });
 
     const stopFailure = createInstance({
         stop: async () => ({
             details: {
-                commandDisplay: "docker exec worker-container devshell-worker stop --instance demo-local",
+                commandDisplay:
+                    "docker exec worker-container devshell-worker stop --instance demo-local",
                 exitCode: 125,
                 instance: "demo-local",
                 operation: "stop",
                 provider: "docker",
-                stderrTail: "container exited\n"
+                stderrTail: "container exited\n",
             },
             exitCode: 125,
             stderr: "container exited\n",
-            stdout: ""
-        })
+            stdout: "",
+        }),
     });
 
     await assert.rejects(stopFailure.stop(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerStopFailed");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.provider, "docker");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.operation, "stop");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.exitCode, 125);
+        assert.equal(
+            (error as { code?: string }).code,
+            "core.workerStopFailed",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.provider,
+            "docker",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.operation,
+            "stop",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.exitCode,
+            125,
+        );
         return true;
     });
 
     const statusFailure = createInstance({
         status: async () => ({
             details: {
-                commandDisplay: "podman exec worker-container devshell-worker status --instance demo-local",
+                commandDisplay:
+                    "podman exec worker-container devshell-worker status --instance demo-local",
                 exitCode: 126,
                 instance: "demo-local",
                 operation: "status",
                 provider: "podman",
-                stderrTail: "status unavailable\n"
+                stderrTail: "status unavailable\n",
             },
             exitCode: 126,
             stderr: "status unavailable\n",
-            stdout: ""
-        })
+            stdout: "",
+        }),
     });
 
     await assert.rejects(statusFailure.refreshStatus(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerStatusFailed");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.provider, "podman");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.operation, "status");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.exitCode, 126);
+        assert.equal(
+            (error as { code?: string }).code,
+            "core.workerStatusFailed",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.provider,
+            "podman",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.operation,
+            "status",
+        );
+        assert.equal(
+            (error as { details?: Record<string, unknown> }).details?.exitCode,
+            126,
+        );
         return true;
     });
 });
@@ -93,15 +136,21 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
                 code: "core.toolSchemaUnavailable",
                 details: { toolName: "bash_run" },
                 message: "catalog-error-fixture",
-                retryable: false
+                retryable: false,
             });
-        }
+        },
     });
 
     await assert.rejects(instance.start(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
-        assert.equal((error as { message?: string }).message, "catalog-error-fixture");
+        assert.equal(
+            (error as { code?: string }).code,
+            "core.toolSchemaUnavailable",
+        );
+        assert.equal(
+            (error as { message?: string }).message,
+            "catalog-error-fixture",
+        );
         return true;
     });
 });
@@ -109,10 +158,25 @@ test("WorkerInstance preserves catalog failures during startup", async () => {
 function createInstance(
     commands: Partial<{
         listTools: () => Promise<{ tools: [] }>;
-        start: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
-        status: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
-        stop: () => Promise<{ details?: Record<string, unknown>; exitCode: number | null; stderr: string; stdout: string }>;
-    }>
+        start: () => Promise<{
+            details?: Record<string, unknown>;
+            exitCode: number | null;
+            stderr: string;
+            stdout: string;
+        }>;
+        status: () => Promise<{
+            details?: Record<string, unknown>;
+            exitCode: number | null;
+            stderr: string;
+            stdout: string;
+        }>;
+        stop: () => Promise<{
+            details?: Record<string, unknown>;
+            exitCode: number | null;
+            stderr: string;
+            stdout: string;
+        }>;
+    }>,
 ): WorkerInstance {
     return new WorkerInstance({
         approvalManager: {
@@ -120,7 +184,7 @@ function createInstance(
                 throw createError({
                     code: "core.approvalNotFound",
                     message: "unused",
-                    retryable: false
+                    retryable: false,
                 });
             },
             evaluate: async () => ({ decision: "allow" }),
@@ -128,65 +192,80 @@ function createInstance(
                 throw createError({
                     code: "core.approvalNotFound",
                     message: "unused",
-                    retryable: false
+                    retryable: false,
                 });
             },
-            listApprovals: async () => []
+            listApprovals: async () => [],
         } as never,
         auditDatabase: {
-            close: () => undefined
+            close: () => undefined,
         } as never,
         catalog: {
             hasSchema: () => false,
             listTools: () => [],
-            refresh: () => []
+            refresh: () => [],
         } as never,
         commandClient: {
-            start: commands.start ?? (async () => ({ exitCode: 0, stderr: "", stdout: "{}" })),
-            status: commands.status ?? (async () => ({ exitCode: 0, stderr: "", stdout: '{"state":"stopped"}' })),
-            stop: commands.stop ?? (async () => ({ exitCode: 0, stderr: "", stdout: "{}" }))
+            start:
+                commands.start ??
+                (async () => ({ exitCode: 0, stderr: "", stdout: "{}" })),
+            status:
+                commands.status ??
+                (async () => ({
+                    exitCode: 0,
+                    stderr: "",
+                    stdout: '{"state":"stopped"}',
+                })),
+            stop:
+                commands.stop ??
+                (async () => ({ exitCode: 0, stderr: "", stdout: "{}" })),
         } as never,
         config: {
             handshake: {
                 clientName: "portable-devshell",
                 clientVersion: "0.1.0",
                 maxProtocolVersion: WORKER_PROTOCOL_VERSION,
-                minProtocolVersion: WORKER_PROTOCOL_VERSION
+                minProtocolVersion: WORKER_PROTOCOL_VERSION,
             },
-            name: asInstanceName("demo-local")
+            name: asInstanceName("demo-local"),
         } as never,
         eventBuffer: {
-            append: async () => ({ seq: 1 })
+            append: async () => ({ seq: 1 }),
         } as never,
         logStore: {
             append: async () => undefined,
-            read: async () => []
+            read: async () => [],
         } as never,
         protocolClient: {
-            handshake: async () => ({ instance: "demo-local", protocolVersion: WORKER_PROTOCOL_VERSION, workspace: "/tmp/workspace", workerVersion: "0.0.0" }),
+            handshake: async () => ({
+                instance: "demo-local",
+                protocolVersion: WORKER_PROTOCOL_VERSION,
+                workspace: "/tmp/workspace",
+                workerVersion: "0.0.0",
+            }),
             listTools: commands.listTools ?? (async () => ({ tools: [] })),
-            ping: async () => ({ pong: true })
+            ping: async () => ({ pong: true }),
         } as never,
         rpcBridge: {
             close: () => undefined,
             connect: async () => undefined,
             onDisconnect: () => () => undefined,
-            onNotification: () => () => undefined
+            onNotification: () => () => undefined,
         } as never,
         stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
         terminalClient: {} as never,
         toolCallScheduler: {} as never,
         toolCallHistory: {
-            read: async () => []
+            read: async () => [],
         } as never,
         toolInvoker: {
             invoke: async () => {
                 throw createError({
                     code: "core.providerFailed",
                     message: "unused",
-                    retryable: false
+                    retryable: false,
                 });
-            }
-        } as never
+            },
+        } as never,
     });
 }

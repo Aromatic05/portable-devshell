@@ -2,7 +2,8 @@ import type { ExtensionManifest } from "@portable-devshell/extension";
 
 import type { ExtensionRegistrationSet } from "./Registration.js";
 
-export type ExtensionGenerationState = "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
+export type ExtensionGenerationState =
+    "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionGenerationOptions {
     dispose: () => Promise<void>;
@@ -65,14 +66,18 @@ export class ExtensionGeneration {
 
     activate(): void {
         if (this.#state !== "ready") {
-            throw new Error(`Extension generation ${this.generation} cannot activate from ${this.#state}.`);
+            throw new Error(
+                `Extension generation ${this.generation} cannot activate from ${this.#state}.`,
+            );
         }
         this.#state = "active";
     }
 
     acquire(): ExtensionGenerationLease {
         if (this.#state !== "active") {
-            throw new Error(`Extension generation ${this.generation} is not active.`);
+            throw new Error(
+                `Extension generation ${this.generation} is not active.`,
+            );
         }
         this.#inFlight += 1;
         let released = false;
@@ -85,7 +90,7 @@ export class ExtensionGeneration {
                 released = true;
                 this.#inFlight -= 1;
                 this.#maybeDispose();
-            }
+            },
         };
     }
 
@@ -100,7 +105,11 @@ export class ExtensionGeneration {
     }
 
     retire(): Promise<void> {
-        if (this.#state === "ready" || this.#state === "active" || this.#state === "faulted") {
+        if (
+            this.#state === "ready" ||
+            this.#state === "active" ||
+            this.#state === "faulted"
+        ) {
             this.#state = "draining";
             this.#maybeDispose();
         }
@@ -108,7 +117,12 @@ export class ExtensionGeneration {
     }
 
     #maybeDispose(): void {
-        if (this.#state !== "draining" || this.#inFlight !== 0 || this.#disposeStarted) return;
+        if (
+            this.#state !== "draining" ||
+            this.#inFlight !== 0 ||
+            this.#disposeStarted
+        )
+            return;
         this.#disposeStarted = true;
         void this.#dispose().then(
             () => {
@@ -119,7 +133,7 @@ export class ExtensionGeneration {
                 this.#disposeError = error;
                 this.#state = "dispose-failed";
                 this.#rejectRetirement(error);
-            }
+            },
         );
     }
 }

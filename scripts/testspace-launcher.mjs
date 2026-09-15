@@ -12,10 +12,15 @@ import { resolveTestspaceRoot } from "./testspace/TestspaceRuntime.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./testspace.mjs", import.meta.url));
-const supervisorPath = fileURLToPath(new URL("./testspace/TestspaceNamespaceSupervisor.py", import.meta.url));
+const supervisorPath = fileURLToPath(
+    new URL("./testspace/TestspaceNamespaceSupervisor.py", import.meta.url),
+);
 const argv = process.argv.slice(2);
 const { command, prepare, runtimeArgv } = resolveTestspaceLaunchPlan(argv);
-const root = resolveTestspaceRoot(repoRoot, process.env.DEVSHELL_TESTSPACE_ROOT);
+const root = resolveTestspaceRoot(
+    repoRoot,
+    process.env.DEVSHELL_TESTSPACE_ROOT,
+);
 
 if (prepare) {
     run("pnpm", ["build"]);
@@ -29,14 +34,22 @@ if (process.platform === "linux") {
         supervisorPath,
     });
     try {
-        status = runInsideTestspaceNamespace(namespace, scriptPath, runtimeArgv, { cwd: repoRoot });
+        status = runInsideTestspaceNamespace(
+            namespace,
+            scriptPath,
+            runtimeArgv,
+            { cwd: repoRoot },
+        );
     } finally {
-        const discardNamespace = command === "stop"
-            || (namespace.created && command !== "start")
-            || (namespace.created && command === "start" && status !== 0);
+        const discardNamespace =
+            command === "stop" ||
+            (namespace.created && command !== "start") ||
+            (namespace.created && command === "start" && status !== 0);
         if (discardNamespace) {
             await stopLinuxTestspaceNamespace(namespace).catch((error) => {
-                process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+                process.stderr.write(
+                    `${error instanceof Error ? error.message : String(error)}\n`,
+                );
                 if (status === 0) status = 1;
             });
         }
@@ -58,6 +71,8 @@ function run(executable, args) {
     });
     if (result.error !== undefined) throw result.error;
     if (result.status !== 0) {
-        throw new Error(`${executable} ${args.join(" ")} failed with ${String(result.status)}`);
+        throw new Error(
+            `${executable} ${args.join(" ")} failed with ${String(result.status)}`,
+        );
     }
 }

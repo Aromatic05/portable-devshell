@@ -3,7 +3,7 @@ import type {
     ClientStream,
     CliCommandWireResult,
     ControlClients,
-    JsonValue
+    JsonValue,
 } from "@portable-devshell/shared";
 
 export interface CliCommandTerminalRelay {
@@ -22,18 +22,18 @@ export type CliClientCommand = Omit<ControlClients["cli"], "command"> & {
     command(
         commandId: string,
         argv: readonly string[],
-        options?: CliClientCommandOptions
+        options?: CliClientCommandOptions,
     ): Promise<CliCommandWireResult>;
 };
 
 export function createCliCommandAdapter(
     connection: ClientConnection,
-    cli: ControlClients["cli"]
+    cli: ControlClients["cli"],
 ): CliClientCommand {
     return {
         command: async (commandId, argv, options = {}) =>
             await runCommandStream(connection, commandId, argv, options),
-        commands: cli.commands
+        commands: cli.commands,
     };
 }
 
@@ -41,18 +41,25 @@ async function runCommandStream(
     connection: ClientConnection,
     commandId: string,
     argv: readonly string[],
-    options: CliClientCommandOptions
+    options: CliClientCommandOptions,
 ): Promise<CliCommandWireResult> {
     let stream: ClientStream | undefined;
     let relay: InputRelay | undefined;
     try {
-        const opened = await connection.openStream("@control", "cli", "commandStream", {
-            argv: [...argv],
-            commandId,
-            ...(options.workingDirectory === undefined ? {} : {
-                workingDirectory: options.workingDirectory
-            })
-        });
+        const opened = await connection.openStream(
+            "@control",
+            "cli",
+            "commandStream",
+            {
+                argv: [...argv],
+                commandId,
+                ...(options.workingDirectory === undefined
+                    ? {}
+                    : {
+                          workingDirectory: options.workingDirectory,
+                      }),
+            },
+        );
         stream = opened.stream;
         const aborted = () => stream?.close();
         options.signal?.addEventListener("abort", aborted, { once: true });
@@ -62,15 +69,25 @@ async function runCommandStream(
                 throw abortError(options.signal, "CLI command was aborted.");
             }
             while (true) {
-                const event = relay === undefined
-                    ? await stream.nextEvent()
-                    : await Promise.race([stream.nextEvent(), relay.failure]);
-                if (event.name === "cli.stdout" || event.name === "cli.stderr") {
+                const event =
+                    relay === undefined
+                        ? await stream.nextEvent()
+                        : await Promise.race([
+                              stream.nextEvent(),
+                              relay.failure,
+                          ]);
+                if (
+                    event.name === "cli.stdout" ||
+                    event.name === "cli.stderr"
+                ) {
                     const payload = record(event.payload);
                     if (typeof payload?.chunk !== "string") {
                         throw new Error(`Invalid ${event.name} payload.`);
                     }
-                    const output = event.name === "cli.stdout" ? options.relay?.stdout : options.relay?.stderr;
+                    const output =
+                        event.name === "cli.stdout"
+                            ? options.relay?.stdout
+                            : options.relay?.stderr;
                     output?.write(payload.chunk);
                     continue;
                 }
@@ -80,7 +97,11 @@ async function runCommandStream(
                         throw new Error("Invalid cli.terminal payload.");
                     }
                     if (relay === undefined && options.relay !== undefined) {
-                        relay = attachInput(options.relay.input, stream, payload.raw);
+                        relay = attachInput(
+                            options.relay.input,
+                            stream,
+                            payload.raw,
+                        );
                     }
                     continue;
                 }
@@ -108,7 +129,11 @@ interface InputRelay {
     failure: Promise<never>;
 }
 
-function attachInput(input: NodeJS.ReadableStream, stream: ClientStream, raw: boolean): InputRelay {
+function attachInput(
+    input: NodeJS.ReadableStream,
+    stream: ClientStream,
+    raw: boolean,
+): InputRelay {
     const restoreTerminal = raw ? enableRawRelayMode(input) : () => undefined;
     let failed = false;
     let rejectFailure: (error: unknown) => void = () => undefined;
@@ -136,28 +161,31 @@ function attachInput(input: NodeJS.ReadableStream, stream: ClientStream, raw: bo
             input.off("end", onEnd);
             restoreTerminal();
         },
-        failure
+        failure,
     };
 }
 
 function enableRawRelayMode(input: NodeJS.ReadableStream): () => void {
-    if (!isRawModeCapable(input) || input.isTTY !== true) return () => undefined;
+    if (!isRawModeCapable(input) || input.isTTY !== true)
+        return () => undefined;
     const previous = input.isRaw;
     input.setRawMode(true);
     return () => input.setRawMode(previous === true);
 }
 
 function isRawModeCapable(
-    input: NodeJS.ReadableStream
+    input: NodeJS.ReadableStream,
 ): input is NodeJS.ReadableStream & {
     isRaw?: boolean;
     isTTY?: boolean;
     setRawMode(mode: boolean): void;
 } {
-    return typeof input === "object"
-        && input !== null
-        && "setRawMode" in input
-        && typeof input.setRawMode === "function";
+    return (
+        typeof input === "object" &&
+        input !== null &&
+        "setRawMode" in input &&
+        typeof input.setRawMode === "function"
+    );
 }
 
 function readCommandResult(value: JsonValue | undefined): CliCommandWireResult {
@@ -171,12 +199,16 @@ function readCommandResult(value: JsonValue | undefined): CliCommandWireResult {
     throw new Error("Invalid CLI command stream result.");
 }
 
-function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function record(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
 }
 
 function abortError(signal: AbortSignal, fallbackMessage: string): Error {
-    return signal.reason instanceof Error ? signal.reason : new Error(fallbackMessage);
+    return signal.reason instanceof Error
+        ? signal.reason
+        : new Error(fallbackMessage);
 }

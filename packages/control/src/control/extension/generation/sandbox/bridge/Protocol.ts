@@ -7,17 +7,17 @@ import type {
     ExtensionProcessStartInput,
     ExtensionWorkerEnvironment,
     ExtensionWorkerToolDefinition,
-    ExtensionWorkerOpenInput
+    ExtensionWorkerOpenInput,
 } from "@portable-devshell/extension";
 import type {
     ExtensionArtifactShareInput,
-    ExtensionArtifactTransferInput
+    ExtensionArtifactTransferInput,
 } from "@portable-devshell/extension/artifact";
 import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
 import {
     createError,
     toControlErrorBody,
-    type ControlErrorBody
+    type ControlErrorBody,
 } from "@portable-devshell/shared";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
@@ -273,7 +273,10 @@ export interface SandboxProcessTerminateInput {
     signal?: string;
 }
 
-export type SandboxAssetProjectInput = Omit<ExtensionAssetProjectionInput, "signal">;
+export type SandboxAssetProjectInput = Omit<
+    ExtensionAssetProjectionInput,
+    "signal"
+>;
 export type SandboxArtifactShareInput = ExtensionArtifactShareInput;
 export type SandboxArtifactTransferInput = ExtensionArtifactTransferInput;
 export interface SandboxInstanceNameInput {
@@ -301,12 +304,16 @@ export type SandboxWorkerOpenInput = ExtensionWorkerOpenInput;
 export function assertExtensionSandboxMessage(
     value: unknown,
     label: string,
-    maxBytes = EXTENSION_SANDBOX_MAX_MESSAGE_BYTES
+    maxBytes = EXTENSION_SANDBOX_MAX_MESSAGE_BYTES,
 ): void {
     if (!sandboxNumberIsSafeInteger(maxBytes) || maxBytes < 1) {
-        throw new TypeError("Extension sandbox message byte limit must be a positive safe integer.");
+        throw new TypeError(
+            "Extension sandbox message byte limit must be a positive safe integer.",
+        );
     }
-    const stack: SandboxValidationFrame[] = [{ depth: 0, entering: true, value }];
+    const stack: SandboxValidationFrame[] = [
+        { depth: 0, entering: true, value },
+    ];
     let stackLength = 1;
     const ancestors = new SandboxWeakSet<object>();
     let bytes = 0;
@@ -316,15 +323,21 @@ export function assertExtensionSandboxMessage(
         const frame = stack[--stackLength]!;
         const candidate = frame.value;
         if (!frame.entering) {
-            sandboxApply(sandboxWeakSetDelete, ancestors, [candidate as object]);
+            sandboxApply(sandboxWeakSetDelete, ancestors, [
+                candidate as object,
+            ]);
             continue;
         }
         nodes += 1;
         if (nodes > EXTENSION_SANDBOX_MAX_MESSAGE_NODES) {
-            throw new TypeError(`${label} exceeds the sandbox message node limit.`);
+            throw new TypeError(
+                `${label} exceeds the sandbox message node limit.`,
+            );
         }
         if (frame.depth > EXTENSION_SANDBOX_MAX_MESSAGE_DEPTH) {
-            throw new TypeError(`${label} exceeds the sandbox message depth limit.`);
+            throw new TypeError(
+                `${label} exceeds the sandbox message depth limit.`,
+            );
         }
 
         if (candidate === null) {
@@ -337,19 +350,32 @@ export function assertExtensionSandboxMessage(
                     bytes,
                     jsonStringBytes(candidate, maxBytes - bytes),
                     maxBytes,
-                    label
+                    label,
                 );
                 continue;
             case "boolean":
-                bytes = addSandboxMessageBytes(bytes, candidate ? 4 : 5, maxBytes, label);
+                bytes = addSandboxMessageBytes(
+                    bytes,
+                    candidate ? 4 : 5,
+                    maxBytes,
+                    label,
+                );
                 continue;
             case "number": {
                 if (!sandboxNumberIsFinite(candidate)) {
-                    throw new TypeError(`${label} contains a non-finite number.`);
+                    throw new TypeError(
+                        `${label} contains a non-finite number.`,
+                    );
                 }
                 const encoded = sandboxJsonStringify(candidate);
-                if (encoded === undefined) throw new TypeError(`${label} contains an invalid number.`);
-                bytes = addSandboxMessageBytes(bytes, encoded.length, maxBytes, label);
+                if (encoded === undefined)
+                    throw new TypeError(`${label} contains an invalid number.`);
+                bytes = addSandboxMessageBytes(
+                    bytes,
+                    encoded.length,
+                    maxBytes,
+                    label,
+                );
                 continue;
             }
             case "object":
@@ -363,17 +389,27 @@ export function assertExtensionSandboxMessage(
             throw new TypeError(`${label} contains a cyclic object graph.`);
         }
         sandboxApply(sandboxWeakSetAdd, ancestors, [object]);
-        stack[stackLength++] = { depth: frame.depth, entering: false, value: candidate };
+        stack[stackLength++] = {
+            depth: frame.depth,
+            entering: false,
+            value: candidate,
+        };
 
         if (sandboxArrayIsArray(candidate)) {
-            const structuralBytes = candidate.length === 0 ? 2 : candidate.length + 1;
-            bytes = addSandboxMessageBytes(bytes, structuralBytes, maxBytes, label);
+            const structuralBytes =
+                candidate.length === 0 ? 2 : candidate.length + 1;
+            bytes = addSandboxMessageBytes(
+                bytes,
+                structuralBytes,
+                maxBytes,
+                label,
+            );
             assertJsonArrayShape(candidate, label);
             for (let index = candidate.length - 1; index >= 0; index -= 1) {
                 stack[stackLength++] = {
                     depth: frame.depth + 1,
                     entering: true,
-                    value: candidate[index]
+                    value: candidate[index],
                 };
             }
             continue;
@@ -389,7 +425,7 @@ export function assertExtensionSandboxMessage(
             bytes,
             propertyCount === 0 ? 2 : propertyCount + 1,
             maxBytes,
-            label
+            label,
         );
         for (let index = propertyCount - 1; index >= 0; index -= 1) {
             const key = keys[index]!;
@@ -397,8 +433,14 @@ export function assertExtensionSandboxMessage(
                 throw new TypeError(`${label} contains a symbol property.`);
             }
             const descriptor = sandboxGetOwnPropertyDescriptor(candidate, key);
-            if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-                throw new TypeError(`${label} contains a non-enumerable or accessor property.`);
+            if (
+                descriptor === undefined ||
+                descriptor.enumerable !== true ||
+                !("value" in descriptor)
+            ) {
+                throw new TypeError(
+                    `${label} contains a non-enumerable or accessor property.`,
+                );
             }
             if (descriptor.value === undefined) {
                 throw new TypeError(`${label} contains undefined.`);
@@ -407,12 +449,12 @@ export function assertExtensionSandboxMessage(
                 bytes,
                 jsonStringBytes(key, maxBytes - bytes) + 1,
                 maxBytes,
-                label
+                label,
             );
             stack[stackLength++] = {
                 depth: frame.depth + 1,
                 entering: true,
-                value: descriptor.value
+                value: descriptor.value,
             };
         }
     }
@@ -422,38 +464,47 @@ export function serializeSandboxError(error: unknown): ExtensionSandboxError {
     const sourceBody = toControlErrorBody(error) ?? {
         code: "error.unknown",
         message: error instanceof Error ? error.message : String(error),
-        retryable: false
+        retryable: false,
     };
     const body: ControlErrorBody = {
         code: sourceBody.code,
-        ...(sourceBody.details === undefined ? {} : { details: sourceBody.details }),
+        ...(sourceBody.details === undefined
+            ? {}
+            : { details: sourceBody.details }),
         message: sourceBody.message,
-        retryable: sourceBody.retryable
+        retryable: sourceBody.retryable,
     };
     const name = error instanceof Error ? error.name : "Error";
-    const errors = error instanceof AggregateError
-        ? error.errors.map((candidate) => serializeSandboxError(candidate))
-        : undefined;
+    const errors =
+        error instanceof AggregateError
+            ? error.errors.map((candidate) => serializeSandboxError(candidate))
+            : undefined;
     return {
         body,
         ...(errors === undefined ? {} : { errors }),
-        name
+        name,
     };
 }
 
-export function deserializeSandboxError(serialized: ExtensionSandboxError): Error {
+export function deserializeSandboxError(
+    serialized: ExtensionSandboxError,
+): Error {
     let error: Error;
     if (serialized.name === "AggregateError") {
         error = new AggregateError(
-            (serialized.errors ?? []).map((candidate) => deserializeSandboxError(candidate)),
-            serialized.body.message
+            (serialized.errors ?? []).map((candidate) =>
+                deserializeSandboxError(candidate),
+            ),
+            serialized.body.message,
         );
     } else if (serialized.body.code !== "error.unknown") {
         error = createError({
             code: serialized.body.code,
-            ...(serialized.body.details === undefined ? {} : { details: serialized.body.details }),
+            ...(serialized.body.details === undefined
+                ? {}
+                : { details: serialized.body.details }),
             message: serialized.body.message,
-            retryable: serialized.body.retryable
+            retryable: serialized.body.retryable,
         });
     } else if (serialized.name === "TypeError") {
         error = new TypeError(serialized.body.message);
@@ -476,19 +527,24 @@ function assertJsonArrayShape(value: unknown[], label: string): void {
     for (let index = 0; index < value.length; index += 1) {
         const descriptor = sandboxGetOwnPropertyDescriptor(value, `${index}`);
         if (
-            descriptor === undefined
-            || descriptor.enumerable !== true
-            || !("value" in descriptor)
-            || descriptor.value === undefined
+            descriptor === undefined ||
+            descriptor.enumerable !== true ||
+            !("value" in descriptor) ||
+            descriptor.value === undefined
         ) {
-            throw new TypeError(`${label} contains an array hole, accessor, or undefined value.`);
+            throw new TypeError(
+                `${label} contains an array hole, accessor, or undefined value.`,
+            );
         }
     }
     const keys = sandboxOwnKeys(value);
     for (let index = 0; index < keys.length; index += 1) {
         const key = keys[index]!;
         if (key === "length") continue;
-        if (typeof key !== "string" || !isCanonicalArrayIndex(key, value.length)) {
+        if (
+            typeof key !== "string" ||
+            !isCanonicalArrayIndex(key, value.length)
+        ) {
             throw new TypeError(`${label} contains a non-JSON array property.`);
         }
     }
@@ -497,17 +553,22 @@ function assertJsonArrayShape(value: unknown[], label: string): void {
 function isCanonicalArrayIndex(value: string, length: number): boolean {
     if (value.length === 0) return false;
     const index = sandboxToNumber(value);
-    return sandboxNumberIsSafeInteger(index)
-        && index >= 0
-        && index < length
-        && `${index}` === value;
+    return (
+        sandboxNumberIsSafeInteger(index) &&
+        index >= 0 &&
+        index < length &&
+        `${index}` === value
+    );
 }
 
 function jsonStringBytes(value: string, remainingBytes: number): number {
     const rawBytes = sandboxByteLength(value, "utf8") + 2;
     if (rawBytes > remainingBytes) return rawBytes;
     const encoded = sandboxJsonStringify(value);
-    if (encoded === undefined) throw new TypeError("Extension sandbox string could not be JSON encoded.");
+    if (encoded === undefined)
+        throw new TypeError(
+            "Extension sandbox string could not be JSON encoded.",
+        );
     return sandboxByteLength(encoded, "utf8");
 }
 
@@ -515,11 +576,13 @@ function addSandboxMessageBytes(
     current: number,
     addition: number,
     maxBytes: number,
-    label: string
+    label: string,
 ): number {
     const next = current + addition;
     if (next > maxBytes) {
-        throw new TypeError(`${label} exceeds the ${maxBytes}-byte sandbox message limit.`);
+        throw new TypeError(
+            `${label} exceeds the ${maxBytes}-byte sandbox message limit.`,
+        );
     }
     return next;
 }

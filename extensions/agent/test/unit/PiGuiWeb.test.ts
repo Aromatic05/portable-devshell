@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     PiGuiWeb,
     isManagedPiGuiRequest,
-    rewritePiGuiAsset
+    rewritePiGuiAsset,
 } from "../../src/provider/pi/PiGuiWeb.ts";
 
 test("Pi GUI asset rebasing follows the current forwarded Agent mount path", async (t) => {
@@ -12,7 +12,7 @@ test("Pi GUI asset rebasing follows the current forwarded Agent mount path", asy
     t.after(async () => await gui.stop());
 
     const response = await fetch(gui.upstream, {
-        headers: { "x-forwarded-prefix": "/new/web/agent" }
+        headers: { "x-forwarded-prefix": "/new/web/agent" },
     });
     const body = await response.text();
 
@@ -24,9 +24,9 @@ test("Pi GUI asset rebasing follows the current forwarded Agent mount path", asy
 test("Pi GUI assets are rebased under the single Agent path", () => {
     const source = [
         '<script src="/assets/index.js"></script>',
-        'fetch(`/api/sessions/${id}/messages`)',
+        "fetch(`/api/sessions/${id}/messages`)",
         'const icon="/favicon.svg";',
-        'var preload=function(e){return`/`+e}'
+        "var preload=function(e){return`/`+e}",
     ].join("\n");
 
     const rewritten = rewritePiGuiAsset(source, "/web/agent/");
@@ -47,9 +47,13 @@ test("Pi GUI exposes managed live-session controls but blocks local runtime esca
         ["POST", "/api/sessions/session-1/prompt"],
         ["POST", "/api/sessions/session-1/steer"],
         ["POST", "/api/sessions/session-1/abort"],
-        ["PATCH", "/api/sessions/session-1"]
+        ["PATCH", "/api/sessions/session-1"],
     ] as const) {
-        assert.equal(isManagedPiGuiRequest(method, path), true, `${method} ${path}`);
+        assert.equal(
+            isManagedPiGuiRequest(method, path),
+            true,
+            `${method} ${path}`,
+        );
     }
 
     for (const [method, path] of [
@@ -61,8 +65,12 @@ test("Pi GUI exposes managed live-session controls but blocks local runtime esca
         ["POST", "/api/sessions/session-1/share"],
         ["GET", "/api/sessions/session-1/git"],
         ["POST", "/api/sessions/session-1/skills"],
-        ["DELETE", "/api/sessions/session-1"]
+        ["DELETE", "/api/sessions/session-1"],
     ] as const) {
-        assert.equal(isManagedPiGuiRequest(method, path), false, `${method} ${path}`);
+        assert.equal(
+            isManagedPiGuiRequest(method, path),
+            false,
+            `${method} ${path}`,
+        );
     }
 });

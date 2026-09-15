@@ -1,4 +1,9 @@
-import { ControlError, createError, errorCodes, type InstanceContainerConfig } from "@portable-devshell/shared";
+import {
+    ControlError,
+    createError,
+    errorCodes,
+    type InstanceContainerConfig,
+} from "@portable-devshell/shared";
 
 import { WorkerBinary } from "../../Binary.js";
 import { WorkerInstallerRemote } from "../../../provision/install/RemoteInstaller.js";
@@ -7,19 +12,26 @@ import {
     type ProviderCommandContext,
     type SpawnFunction,
     type WorkerCommandResult,
-    type WorkerCommandTransport
+    type WorkerCommandTransport,
 } from "../../command/Transport.js";
-import type { WorkerCommandName, WorkerCommandOptions, WorkerRpcOptions } from "../../command/Model.js";
-import { createWorkerRpcProcess, type WorkerRpcProcess } from "../../../protocol/rpc/Process.js";
+import type {
+    WorkerCommandName,
+    WorkerCommandOptions,
+    WorkerRpcOptions,
+} from "../../command/Model.js";
+import {
+    createWorkerRpcProcess,
+    type WorkerRpcProcess,
+} from "../../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
-    workerTargetProbeCommandLine
+    workerTargetProbeCommandLine,
 } from "../../../provision/target/Probe.js";
 import {
     createWorkerTransportContainerProvision,
     type WorkerTransportContainerLifecycleStatus,
-    type WorkerTransportContainerProvision
+    type WorkerTransportContainerProvision,
 } from "../../container/Provision.js";
 import { WorkerTransportProcessRunner } from "../../process/Runner.js";
 
@@ -50,32 +62,44 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             keepIdUserNamespace: options.keepIdUserNamespace === true,
             operations: {
                 provider: this.#provider,
-                readContainerStatus: (containerName) => this.#readContainerStatus(containerName),
+                readContainerStatus: (containerName) =>
+                    this.#readContainerStatus(containerName),
                 runProviderCommand: (operation, args, commandOptions) =>
-                    this.#runProviderCommand(operation, args, commandOptions)
-            }
+                    this.#runProviderCommand(operation, args, commandOptions),
+            },
         });
         this.#installer = new WorkerInstallerRemote({
-            createContext: (operation, command) => this.#createShellContext(operation, command),
+            createContext: (operation, command) =>
+                this.#createShellContext(operation, command),
             createProviderError: this.#process.createError,
             probeTarget: () => this.#probeTarget(),
-            spawnShell: (commandLine, stdio, context) => this.#spawnShell(commandLine, stdio, context),
+            spawnShell: (commandLine, stdio, context) =>
+                this.#spawnShell(commandLine, stdio, context),
         });
     }
 
     async installWorker(): Promise<void> {
         await this.#provision.ensureReady("installWorker");
-        const installCommand = new WorkerBinary(await this.#resolveExecutable()).buildInstallCommand();
-        const invocation = this.#createExecInvocation("installWorker", [installCommand.command, ...installCommand.args]);
+        const installCommand = new WorkerBinary(
+            await this.#resolveExecutable(),
+        ).buildInstallCommand();
+        const invocation = this.#createExecInvocation("installWorker", [
+            installCommand.command,
+            ...installCommand.args,
+        ]);
         const result = await this.#process.run(invocation.context, {
-            stdio: ["ignore", "pipe", "pipe"]
+            stdio: ["ignore", "pipe", "pipe"],
         });
 
         if (result.exitCode !== 0) {
             throw this.#process.createError(
                 invocation.context,
-                new Error(result.stderr || result.stdout || "worker install check failed"),
-                { errorCode: errorCodes.coreWorkerProvisionFailed, result }
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "worker install check failed",
+                ),
+                { errorCode: errorCodes.coreWorkerProvisionFailed, result },
             );
         }
     }
@@ -84,7 +108,10 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         await this.#provision.retire();
     }
 
-    async runWorkerCommand(command: WorkerCommandName, options: WorkerCommandOptions): Promise<WorkerCommandResult> {
+    async runWorkerCommand(
+        command: WorkerCommandName,
+        options: WorkerCommandOptions,
+    ): Promise<WorkerCommandResult> {
         const environment = this.#workerCommandEnvironment(options.env);
         let preparedRuntimeRetire = false;
         switch (command) {
@@ -97,13 +124,22 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                 return await this.#runStopCommand(options);
             case "logs":
                 if (!(await this.#provision.isAvailable())) {
-                    return this.#syntheticResult("logs", options.instanceName, "");
+                    return this.#syntheticResult(
+                        "logs",
+                        options.instanceName,
+                        "",
+                    );
                 }
                 break;
             case "retire":
-                preparedRuntimeRetire = await this.#provision.prepareRuntimeRetire();
+                preparedRuntimeRetire =
+                    await this.#provision.prepareRuntimeRetire();
                 if (!preparedRuntimeRetire) {
-                    return this.#syntheticResult("retire", options.instanceName, JSON.stringify({ retired: false }));
+                    return this.#syntheticResult(
+                        "retire",
+                        options.instanceName,
+                        JSON.stringify({ retired: false }),
+                    );
                 }
                 break;
         }
@@ -112,17 +148,17 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             const workerCommand = new WorkerBinary(executable).buildCommand(
                 command,
                 options.instanceName,
-                options.extraArgs
+                options.extraArgs,
             );
             const invocation = this.#createExecInvocation(
                 command,
                 [workerCommand.command, ...workerCommand.args],
                 options.instanceName,
-                environment.keys
+                environment.keys,
             );
             return await this.#process.run(invocation.context, {
                 env: environment.processEnv,
-                stdio: ["ignore", "pipe", "pipe"]
+                stdio: ["ignore", "pipe", "pipe"],
             });
         } finally {
             if (preparedRuntimeRetire) {
@@ -135,65 +171,79 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         const environment = this.#workerCommandEnvironment(options.env);
         await this.#provision.ensureReady("spawnWorkerRpc");
         const executable = await this.#resolveExecutable();
-        const workerCommand = new WorkerBinary(executable).buildCommand("rpc", options.instanceName);
+        const workerCommand = new WorkerBinary(executable).buildCommand(
+            "rpc",
+            options.instanceName,
+        );
         const invocation = this.#createExecInvocation(
             "spawnWorkerRpc",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            environment.keys
+            environment.keys,
         );
         return createWorkerRpcProcess(
             this.#process.spawn(
                 invocation.context,
-                { env: environment.processEnv, stdio: ["pipe", "pipe", "pipe"] },
-                errorCodes.coreWorkerRpcSpawnFailed
-            )
+                {
+                    env: environment.processEnv,
+                    stdio: ["pipe", "pipe", "pipe"],
+                },
+                errorCodes.coreWorkerRpcSpawnFailed,
+            ),
         );
     }
 
-    async #runStatusCommand(options: WorkerCommandOptions): Promise<WorkerCommandResult> {
+    async #runStatusCommand(
+        options: WorkerCommandOptions,
+    ): Promise<WorkerCommandResult> {
         if (!(await this.#provision.isAvailable())) {
-            return this.#syntheticResult("status", options.instanceName, JSON.stringify({ state: "stopped" }));
+            return this.#syntheticResult(
+                "status",
+                options.instanceName,
+                JSON.stringify({ state: "stopped" }),
+            );
         }
 
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
-            "status",
-            options.instanceName,
-            options.extraArgs
-        );
+        const workerCommand = new WorkerBinary(
+            await this.#resolveExecutable(),
+        ).buildCommand("status", options.instanceName, options.extraArgs);
         const environment = this.#workerCommandEnvironment(options.env);
         const invocation = this.#createExecInvocation(
             "status",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            environment.keys
+            environment.keys,
         );
         return await this.#process.run(invocation.context, {
             env: environment.processEnv,
-            stdio: ["ignore", "pipe", "pipe"]
+            stdio: ["ignore", "pipe", "pipe"],
         });
     }
 
-    async #runStopCommand(options: WorkerCommandOptions): Promise<WorkerCommandResult> {
+    async #runStopCommand(
+        options: WorkerCommandOptions,
+    ): Promise<WorkerCommandResult> {
         if (!(await this.#provision.isAvailable())) {
-            return this.#syntheticResult("stop", options.instanceName, JSON.stringify({ stopped: true }));
+            return this.#syntheticResult(
+                "stop",
+                options.instanceName,
+                JSON.stringify({ stopped: true }),
+            );
         }
 
-        const workerCommand = new WorkerBinary(await this.#resolveExecutable()).buildCommand(
-            "stop",
-            options.instanceName,
-            options.extraArgs
-        );
+        const workerCommand = new WorkerBinary(
+            await this.#resolveExecutable(),
+        ).buildCommand("stop", options.instanceName, options.extraArgs);
         const environment = this.#workerCommandEnvironment(options.env);
         const invocation = this.#createExecInvocation(
             "stop",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
-            environment.keys
+            environment.keys,
         );
         const result = await this.#process.run(invocation.context, {
             env: environment.processEnv,
-            stdio: ["ignore", "pipe", "pipe"]
+            stdio: ["ignore", "pipe", "pipe"],
         });
 
         if (result.exitCode === 0) {
@@ -208,10 +258,16 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     }
 
     async #probeTarget() {
-        const context = this.#createShellContext("probeTarget", ["sh", "-lc", workerTargetProbeCommandLine]);
+        const context = this.#createShellContext("probeTarget", [
+            "sh",
+            "-lc",
+            workerTargetProbeCommandLine,
+        ]);
 
         try {
-            const result = await this.#process.run(context, { stdio: ["ignore", "pipe", "pipe"] });
+            const result = await this.#process.run(context, {
+                stdio: ["ignore", "pipe", "pipe"],
+            });
             if (result.exitCode !== 0) {
                 throw createWorkerTargetProbeFailedError(context, { result });
             }
@@ -227,24 +283,44 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     #spawnShell(
         _commandLine: string,
         stdio: ["ignore" | "pipe", "pipe", "pipe"],
-        context: ProviderCommandContext
+        context: ProviderCommandContext,
     ) {
         return this.#process.spawn(context, { stdio });
     }
 
-    async #readContainerStatus(containerName: string): Promise<WorkerTransportContainerLifecycleStatus> {
-        const args = ["inspect", "--type", "container", "--format", "{{.State.Status}}", containerName];
-        const result = await this.#runProviderCommand("inspectContainer", args, { allowNonZeroExit: true });
+    async #readContainerStatus(
+        containerName: string,
+    ): Promise<WorkerTransportContainerLifecycleStatus> {
+        const args = [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            containerName,
+        ];
+        const result = await this.#runProviderCommand(
+            "inspectContainer",
+            args,
+            { allowNonZeroExit: true },
+        );
 
         if (result.exitCode !== 0) {
-            if (isMissingContainerMessage(result.stderr) || isMissingContainerMessage(result.stdout)) {
+            if (
+                isMissingContainerMessage(result.stderr) ||
+                isMissingContainerMessage(result.stdout)
+            ) {
                 return "missing";
             }
 
             throw this.#process.createError(
                 this.#createProviderContext("inspectContainer", args),
-                new Error(result.stderr || result.stdout || "container inspect failed"),
-                { result }
+                new Error(
+                    result.stderr ||
+                        result.stdout ||
+                        "container inspect failed",
+                ),
+                { result },
             );
         }
 
@@ -254,19 +330,21 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
     async #runProviderCommand(
         operation: string,
         args: readonly string[],
-        options: { allowNonZeroExit?: boolean; env?: NodeJS.ProcessEnv } = {}
+        options: { allowNonZeroExit?: boolean; env?: NodeJS.ProcessEnv } = {},
     ): Promise<WorkerCommandResult> {
         const context = this.#createProviderContext(operation, args);
         const result = await this.#process.run(context, {
             env: options.env,
-            stdio: ["ignore", "pipe", "pipe"]
+            stdio: ["ignore", "pipe", "pipe"],
         });
 
         if (!options.allowNonZeroExit && result.exitCode !== 0) {
             throw this.#process.createError(
                 context,
-                new Error(result.stderr || result.stdout || `${operation} failed`),
-                { result }
+                new Error(
+                    result.stderr || result.stdout || `${operation} failed`,
+                ),
+                { result },
             );
         }
 
@@ -281,7 +359,7 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
             env,
             platform: process.platform,
             processEnvironment: process.env,
-            provider: this.#provider
+            provider: this.#provider,
         });
     }
 
@@ -289,7 +367,7 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         operation: string,
         command: readonly string[],
         instance?: string,
-        environmentKeys: readonly string[] = []
+        environmentKeys: readonly string[] = [],
     ) {
         const args = this.#provision.buildExecArgs(command, environmentKeys);
         return {
@@ -298,33 +376,45 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                 command: [this.#binary, ...args],
                 instance,
                 operation,
-                provider: this.#provider
-            })
+                provider: this.#provider,
+            }),
         };
     }
 
-    #createProviderContext(operation: string, args: readonly string[]): ProviderCommandContext {
+    #createProviderContext(
+        operation: string,
+        args: readonly string[],
+    ): ProviderCommandContext {
         return createCommandContext({
             command: [this.#binary, ...args],
             operation,
-            provider: this.#provider
+            provider: this.#provider,
         });
     }
 
-    #createShellContext(operation: string, command: readonly string[]): ProviderCommandContext {
+    #createShellContext(
+        operation: string,
+        command: readonly string[],
+    ): ProviderCommandContext {
         const commandLine =
-            command[0] === "sh" && command[1] === "-lc" && typeof command[2] === "string"
+            command[0] === "sh" &&
+            command[1] === "-lc" &&
+            typeof command[2] === "string"
                 ? command[2]
                 : command.join(" ");
         const args = this.#provision.buildShellExecArgs(commandLine);
         return createCommandContext({
             command: [this.#binary, ...args],
             operation,
-            provider: this.#provider
+            provider: this.#provider,
         });
     }
 
-    #syntheticResult(operation: string, instance: string, stdout: string): WorkerCommandResult {
+    #syntheticResult(
+        operation: string,
+        instance: string,
+        stdout: string,
+    ): WorkerCommandResult {
         return {
             details: {
                 command: [this.#binary],
@@ -332,11 +422,11 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                 exitCode: 0,
                 instance,
                 operation,
-                provider: this.#provider
+                provider: this.#provider,
             },
             exitCode: 0,
             stderr: "",
-            stdout
+            stdout,
         };
     }
 }
@@ -353,7 +443,7 @@ const providerEnvironmentKeys = new Set([
     "XDG_CACHE_HOME",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
-    "XDG_RUNTIME_DIR"
+    "XDG_RUNTIME_DIR",
 ]);
 
 export function createContainerWorkerEnvironment(options: {
@@ -366,24 +456,32 @@ export function createContainerWorkerEnvironment(options: {
         return { keys: [] };
     }
 
-    const conflicts = [...new Set(Object.keys(options.env)
-        .filter((key) => options.env?.[key] !== undefined)
-        .map((key) => canonicalProviderEnvironmentKey(key, options.platform))
-        .filter((key): key is string => key !== undefined))]
-        .sort();
+    const conflicts = [
+        ...new Set(
+            Object.keys(options.env)
+                .filter((key) => options.env?.[key] !== undefined)
+                .map((key) =>
+                    canonicalProviderEnvironmentKey(key, options.platform),
+                )
+                .filter((key): key is string => key !== undefined),
+        ),
+    ].sort();
     if (conflicts.length > 0) {
         throw createError({
             code: errorCodes.coreProviderFailed,
             details: {
                 environmentKeys: conflicts,
-                provider: options.provider
+                provider: options.provider,
             },
             message: `Container instance environment cannot override provider-reserved variables: ${conflicts.join(", ")}.`,
-            retryable: false
+            retryable: false,
         });
     }
 
-    const processEnv = normalizeProviderProcessEnvironment(options.processEnvironment, options.platform);
+    const processEnv = normalizeProviderProcessEnvironment(
+        options.processEnvironment,
+        options.platform,
+    );
     const keys: string[] = [];
     for (const [key, value] of Object.entries(options.env)) {
         if (value === undefined || isInternalWorkerEnvironmentKey(key)) {
@@ -396,7 +494,10 @@ export function createContainerWorkerEnvironment(options: {
     return { keys, processEnv };
 }
 
-function canonicalProviderEnvironmentKey(key: string, platform: NodeJS.Platform): string | undefined {
+function canonicalProviderEnvironmentKey(
+    key: string,
+    platform: NodeJS.Platform,
+): string | undefined {
     if (platform === "win32") {
         const normalized = key.toUpperCase();
         return providerEnvironmentKeys.has(normalized) ? normalized : undefined;
@@ -406,7 +507,7 @@ function canonicalProviderEnvironmentKey(key: string, platform: NodeJS.Platform)
 
 function normalizeProviderProcessEnvironment(
     environment: NodeJS.ProcessEnv,
-    platform: NodeJS.Platform
+    platform: NodeJS.Platform,
 ): NodeJS.ProcessEnv {
     const normalized = { ...environment };
     if (platform !== "win32") {
@@ -414,7 +515,9 @@ function normalizeProviderProcessEnvironment(
     }
 
     for (const canonical of providerEnvironmentKeys) {
-        const matches = Object.keys(normalized).filter((key) => key.toUpperCase() === canonical);
+        const matches = Object.keys(normalized).filter(
+            (key) => key.toUpperCase() === canonical,
+        );
         if (matches.length === 0) {
             continue;
         }
@@ -431,12 +534,17 @@ function normalizeProviderProcessEnvironment(
 }
 
 function isInternalWorkerEnvironmentKey(key: string): boolean {
-    return key === "DEVSHELL_WORKER_INTERNAL_INSTANCE"
-        || key === "DEVSHELL_WORKER_INTERNAL_WORKSPACE"
-        || key === "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
+    return (
+        key === "DEVSHELL_WORKER_INTERNAL_INSTANCE" ||
+        key === "DEVSHELL_WORKER_INTERNAL_WORKSPACE" ||
+        key === "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"
+    );
 }
 
 function isMissingContainerMessage(value: string): boolean {
     const normalized = value.toLowerCase();
-    return normalized.includes("no such object") || normalized.includes("no such container");
+    return (
+        normalized.includes("no such object") ||
+        normalized.includes("no such container")
+    );
 }

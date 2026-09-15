@@ -1,6 +1,6 @@
 import type {
     WorkerCommandSessionClose,
-    WorkerCommandSessionOpen
+    WorkerCommandSessionOpen,
 } from "@portable-devshell/core";
 import {
     errorCodes,
@@ -8,14 +8,17 @@ import {
     type CliCommandDescriptor,
     type JsonValue,
     type McpContextRecord,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../../../instance/Descriptor.js";
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 import type { ContextAdminPort } from "../../../../composition/mcp/route/Context.js";
 import type { CliExtensionCommandService } from "./Service.js";
-import type { CliCommandIo, CliModelCommandContext } from "@portable-devshell/extension/cli";
+import type {
+    CliCommandIo,
+    CliModelCommandContext,
+} from "@portable-devshell/extension/cli";
 
 export interface ModelDevshellAccessInput {
     commandId: string;
@@ -51,7 +54,9 @@ export class ModelDevshellBroker {
         this.#contextAdmin = options.contextAdmin;
         this.#instances = options.instances;
         this.#syncWorkers();
-        this.#unsubscribeRegistry = this.#instances.onChange(() => this.#syncWorkers());
+        this.#unsubscribeRegistry = this.#instances.onChange(() =>
+            this.#syncWorkers(),
+        );
     }
 
     dispose(): void {
@@ -68,7 +73,9 @@ export class ModelDevshellBroker {
 
     #syncWorkers(): void {
         if (this.#disposed) return;
-        const workers = new Set(this.#instances.list().map((descriptor) => descriptor.worker));
+        const workers = new Set(
+            this.#instances.list().map((descriptor) => descriptor.worker),
+        );
         for (const [worker, unsubscribe] of this.#subscriptions) {
             if (workers.has(worker as never)) continue;
             unsubscribe();
@@ -76,12 +83,16 @@ export class ModelDevshellBroker {
         }
         for (const descriptor of this.#instances.list()) {
             if (this.#subscriptions.has(descriptor.worker)) continue;
-            const unsubscribeOpen = descriptor.worker.onCommandSessionOpen((request) => {
-                this.#acceptOpen(descriptor, request);
-            });
-            const unsubscribeClose = descriptor.worker.onCommandSessionClose((request) => {
-                this.#acceptClose(descriptor, request);
-            });
+            const unsubscribeOpen = descriptor.worker.onCommandSessionOpen(
+                (request) => {
+                    this.#acceptOpen(descriptor, request);
+                },
+            );
+            const unsubscribeClose = descriptor.worker.onCommandSessionClose(
+                (request) => {
+                    this.#acceptClose(descriptor, request);
+                },
+            );
             this.#subscriptions.set(descriptor.worker, () => {
                 unsubscribeOpen();
                 unsubscribeClose();
@@ -90,12 +101,24 @@ export class ModelDevshellBroker {
         }
     }
 
-    #acceptOpen(descriptor: InstanceDescriptor, request: WorkerCommandSessionOpen): void {
+    #acceptOpen(
+        descriptor: InstanceDescriptor,
+        request: WorkerCommandSessionOpen,
+    ): void {
         const key = sessionKey(descriptor.name, request.sessionId);
         if (this.#active.has(key)) {
-            const error = integrityError("Worker reused an active model devshell session id.");
+            const error = integrityError(
+                "Worker reused an active model devshell session id.",
+            );
             void this.#recordIntegrityFault(descriptor, request, error)
-                .then(async () => await this.#completeFailure(descriptor, request.sessionId, error))
+                .then(
+                    async () =>
+                        await this.#completeFailure(
+                            descriptor,
+                            request.sessionId,
+                            error,
+                        ),
+                )
                 .catch(() => undefined);
             return;
         }
@@ -103,19 +126,29 @@ export class ModelDevshellBroker {
         this.#active.set(key, controller);
         void this.#handle(descriptor, request, controller.signal)
             .catch(async (error: unknown) => {
-                await this.#completeFailure(descriptor, request.sessionId, error).catch(() => undefined);
+                await this.#completeFailure(
+                    descriptor,
+                    request.sessionId,
+                    error,
+                ).catch(() => undefined);
             })
             .finally(() => {
-                if (this.#active.get(key) === controller) this.#active.delete(key);
+                if (this.#active.get(key) === controller)
+                    this.#active.delete(key);
             });
     }
 
-    #acceptClose(descriptor: InstanceDescriptor, request: WorkerCommandSessionClose): void {
+    #acceptClose(
+        descriptor: InstanceDescriptor,
+        request: WorkerCommandSessionClose,
+    ): void {
         const key = sessionKey(descriptor.name, request.sessionId);
         const controller = this.#active.get(key);
         if (controller === undefined) return;
         this.#active.delete(key);
-        controller.abort(new Error("Model devshell client closed the broker session."));
+        controller.abort(
+            new Error("Model devshell client closed the broker session."),
+        );
     }
 
     #abortInstanceSessions(instance: string): void {
@@ -123,14 +156,18 @@ export class ModelDevshellBroker {
         for (const [key, controller] of this.#active) {
             if (!key.startsWith(prefix)) continue;
             this.#active.delete(key);
-            controller.abort(new Error(`Instance ${instance} retired its model devshell sessions.`));
+            controller.abort(
+                new Error(
+                    `Instance ${instance} retired its model devshell sessions.`,
+                ),
+            );
         }
     }
 
     async #handle(
         descriptor: InstanceDescriptor,
         request: WorkerCommandSessionOpen,
-        signal: AbortSignal
+        signal: AbortSignal,
     ): Promise<void> {
         try {
             await this.#validateProvenance(descriptor, request);
@@ -140,29 +177,46 @@ export class ModelDevshellBroker {
         }
 
         const [commandId, ...argv] = request.argv;
-        if (commandId === "--help" || commandId === "-h" || commandId === "help") {
-            await this.#write(descriptor, request.sessionId, "stdout", await this.#renderHelp(descriptor, request.ctxId));
-            await descriptor.worker.completeCommandSession({ exitCode: 0, sessionId: request.sessionId });
+        if (
+            commandId === "--help" ||
+            commandId === "-h" ||
+            commandId === "help"
+        ) {
+            await this.#write(
+                descriptor,
+                request.sessionId,
+                "stdout",
+                await this.#renderHelp(descriptor, request.ctxId),
+            );
+            await descriptor.worker.completeCommandSession({
+                exitCode: 0,
+                sessionId: request.sessionId,
+            });
             return;
         }
 
-        const command = this.#commands.list().find((candidate) => candidate.id === commandId);
+        const command = this.#commands
+            .list()
+            .find((candidate) => candidate.id === commandId);
         if (
             command === undefined ||
-            !await this.#access.allows({
+            !(await this.#access.allows({
                 commandId,
                 ctxId: request.ctxId,
                 extensionId: command.extensionId,
-                instance: descriptor.name
-            })
+                instance: descriptor.name,
+            }))
         ) {
             await this.#write(
                 descriptor,
                 request.sessionId,
                 "stderr",
-                `CLI command ${commandId} is unavailable.\n`
+                `CLI command ${commandId} is unavailable.\n`,
             );
-            await descriptor.worker.completeCommandSession({ exitCode: 127, sessionId: request.sessionId });
+            await descriptor.worker.completeCommandSession({
+                exitCode: 127,
+                sessionId: request.sessionId,
+            });
             return;
         }
 
@@ -171,17 +225,34 @@ export class ModelDevshellBroker {
                 return undefined;
             },
             async requestInput() {
-                throw new Error("Model devshell commands do not support interactive input yet.");
+                throw new Error(
+                    "Model devshell commands do not support interactive input yet.",
+                );
             },
-            writeStderr: async (chunk) => await this.#write(descriptor, request.sessionId, "stderr", chunk),
-            writeStdout: async (chunk) => await this.#write(descriptor, request.sessionId, "stdout", chunk)
+            writeStderr: async (chunk) =>
+                await this.#write(
+                    descriptor,
+                    request.sessionId,
+                    "stderr",
+                    chunk,
+                ),
+            writeStdout: async (chunk) =>
+                await this.#write(
+                    descriptor,
+                    request.sessionId,
+                    "stdout",
+                    chunk,
+                ),
         };
         const modelContext: CliModelCommandContext = Object.freeze({
             instanceReference: async (instance: string) => {
                 const admin = this.#contextAdmin();
-                if (admin === undefined) throw integrityError("MCP Context authority is unavailable.");
+                if (admin === undefined)
+                    throw integrityError(
+                        "MCP Context authority is unavailable.",
+                    );
                 return await admin.referenceInstance(request.ctxId, instance);
-            }
+            },
         });
         try {
             const result = await this.#commands.command(
@@ -192,9 +263,9 @@ export class ModelDevshellBroker {
                     instance: descriptor.name,
                     requestId: request.sessionId,
                     signal,
-                    workspace: request.workspace
+                    workspace: request.workspace,
                 },
-                io
+                io,
             );
             if (result.kind === "text") {
                 if (result.text.length > 0) {
@@ -202,7 +273,9 @@ export class ModelDevshellBroker {
                         descriptor,
                         request.sessionId,
                         "stdout",
-                        result.text.endsWith("\n") ? result.text : `${result.text}\n`
+                        result.text.endsWith("\n")
+                            ? result.text
+                            : `${result.text}\n`,
                     );
                 }
             } else {
@@ -210,10 +283,13 @@ export class ModelDevshellBroker {
                     descriptor,
                     request.sessionId,
                     "stdout",
-                    `${JSON.stringify(result.value ?? null, null, 2)}\n`
+                    `${JSON.stringify(result.value ?? null, null, 2)}\n`,
                 );
             }
-            await descriptor.worker.completeCommandSession({ exitCode: 0, sessionId: request.sessionId });
+            await descriptor.worker.completeCommandSession({
+                exitCode: 0,
+                sessionId: request.sessionId,
+            });
         } catch (error) {
             await this.#completeFailure(descriptor, request.sessionId, error);
         }
@@ -221,12 +297,12 @@ export class ModelDevshellBroker {
 
     async #validateProvenance(
         descriptor: InstanceDescriptor,
-        request: WorkerCommandSessionOpen
+        request: WorkerCommandSessionOpen,
     ): Promise<void> {
         const [record] = await descriptor.worker.readToolCalls({
             callIds: [request.parentCallId],
             includeInput: true,
-            includeOutput: true
+            includeOutput: true,
         });
         if (
             record === undefined ||
@@ -235,31 +311,53 @@ export class ModelDevshellBroker {
             record.ctxId !== request.ctxId ||
             record.workspace !== request.workspace
         ) {
-            throw integrityError("Worker model devshell provenance does not match the authoritative tool call.");
+            throw integrityError(
+                "Worker model devshell provenance does not match the authoritative tool call.",
+            );
         }
 
-        const context = await this.#requireContext(request.ctxId, descriptor.name);
-        if (context.workspace !== request.workspace || context.instance !== descriptor.name) {
-            throw integrityError("Worker model devshell context binding does not match the authoritative MCP Context.");
+        const context = await this.#requireContext(
+            request.ctxId,
+            descriptor.name,
+        );
+        if (
+            context.workspace !== request.workspace ||
+            context.instance !== descriptor.name
+        ) {
+            throw integrityError(
+                "Worker model devshell context binding does not match the authoritative MCP Context.",
+            );
         }
 
         if (request.taskId === undefined) {
             if (record.toolName !== "bash_run" || record.status !== "running") {
-                throw integrityError("Worker model devshell request is not owned by an active bash_run call.");
+                throw integrityError(
+                    "Worker model devshell request is not owned by an active bash_run call.",
+                );
             }
             return;
         }
 
         if (record.toolName !== "tmux_run") {
-            throw integrityError("Worker model devshell task binding does not originate from tmux_run.");
+            throw integrityError(
+                "Worker model devshell task binding does not originate from tmux_run.",
+            );
         }
         if (record.status === "running") return;
-        if (record.status !== "completed" || readTmuxTaskId(record) !== request.taskId) {
-            throw integrityError("Worker model devshell task id does not match the completed tmux_run result.");
+        if (
+            record.status !== "completed" ||
+            readTmuxTaskId(record) !== request.taskId
+        ) {
+            throw integrityError(
+                "Worker model devshell task id does not match the completed tmux_run result.",
+            );
         }
     }
 
-    async #requireContext(ctxId: string, instance: string): Promise<McpContextRecord> {
+    async #requireContext(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextRecord> {
         const admin = this.#contextAdmin();
         if (admin === undefined) {
             throw integrityError("MCP Context authority is unavailable.");
@@ -267,19 +365,26 @@ export class ModelDevshellBroker {
         try {
             return await admin.validateForInstance(ctxId, instance);
         } catch {
-            throw integrityError("Worker model devshell Context is unavailable, expired, disabled, or bound elsewhere.");
+            throw integrityError(
+                "Worker model devshell Context is unavailable, expired, disabled, or bound elsewhere.",
+            );
         }
     }
 
-    async #renderHelp(descriptor: InstanceDescriptor, ctxId: string): Promise<string> {
+    async #renderHelp(
+        descriptor: InstanceDescriptor,
+        ctxId: string,
+    ): Promise<string> {
         const allowed: CliCommandDescriptor[] = [];
         for (const command of this.#commands.list()) {
-            if (await this.#access.allows({
-                commandId: command.id,
-                ctxId,
-                extensionId: command.extensionId,
-                instance: descriptor.name
-            })) {
+            if (
+                await this.#access.allows({
+                    commandId: command.id,
+                    ctxId,
+                    extensionId: command.extensionId,
+                    instance: descriptor.name,
+                })
+            ) {
                 allowed.push(command);
             }
         }
@@ -287,7 +392,9 @@ export class ModelDevshellBroker {
         if (allowed.length === 0) lines.push("  none");
         else {
             for (const command of allowed) {
-                lines.push(`  ${command.id}${command.summary === undefined ? "" : ` - ${command.summary}`}`);
+                lines.push(
+                    `  ${command.id}${command.summary === undefined ? "" : ` - ${command.summary}`}`,
+                );
             }
         }
         return `${lines.join("\n")}\n`;
@@ -297,42 +404,58 @@ export class ModelDevshellBroker {
         descriptor: InstanceDescriptor,
         sessionId: string,
         stream: "stderr" | "stdout",
-        text: string
+        text: string,
     ): Promise<void> {
         for (const data of chunks(text)) {
-            await descriptor.worker.writeCommandSessionOutput({ data, sessionId, stream });
+            await descriptor.worker.writeCommandSessionOutput({
+                data,
+                sessionId,
+                stream,
+            });
         }
     }
 
     async #completeFailure(
         descriptor: InstanceDescriptor,
         sessionId: string,
-        error: unknown
+        error: unknown,
     ): Promise<void> {
         const body = toControlErrorBody(error);
-        const message = body?.message ?? (error instanceof Error ? error.message : String(error));
-        const exitCode = body?.code === "cli.usage"
-            ? 2
-            : body?.code === errorCodes.controlCliCommandFailed
-                ? 127
-                : 1;
-        await this.#write(descriptor, sessionId, "stderr", `${message}\n`).catch(() => undefined);
-        await descriptor.worker.completeCommandSession({ exitCode, sessionId }).catch(() => undefined);
+        const message =
+            body?.message ??
+            (error instanceof Error ? error.message : String(error));
+        const exitCode =
+            body?.code === "cli.usage"
+                ? 2
+                : body?.code === errorCodes.controlCliCommandFailed
+                  ? 127
+                  : 1;
+        await this.#write(
+            descriptor,
+            sessionId,
+            "stderr",
+            `${message}\n`,
+        ).catch(() => undefined);
+        await descriptor.worker
+            .completeCommandSession({ exitCode, sessionId })
+            .catch(() => undefined);
     }
 
     async #recordIntegrityFault(
         descriptor: InstanceDescriptor,
         request: WorkerCommandSessionOpen,
-        error: unknown
+        error: unknown,
     ): Promise<void> {
-        await descriptor.worker.appendControlEvent("worker.protocolIntegrityFault", {
-            ctxId: request.ctxId,
-            parentCallId: request.parentCallId,
-            sessionId: request.sessionId,
-            taskId: request.taskId,
-            workspace: request.workspace,
-            message: error instanceof Error ? error.message : String(error)
-        } as JsonValue).catch(() => undefined);
+        await descriptor.worker
+            .appendControlEvent("worker.protocolIntegrityFault", {
+                ctxId: request.ctxId,
+                parentCallId: request.parentCallId,
+                sessionId: request.sessionId,
+                taskId: request.taskId,
+                workspace: request.workspace,
+                message: error instanceof Error ? error.message : String(error),
+            } as JsonValue)
+            .catch(() => undefined);
     }
 }
 
@@ -342,7 +465,9 @@ function readTmuxTaskId(record: ToolCallRecord): string | undefined {
     return typeof output.task.id === "string" ? output.task.id : undefined;
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName, type ApprovalRequest } from "@portable-devshell/shared";
-import { ApprovalManager, ApprovalStore } from "@portable-devshell/core/testing";
+import {
+    asInstanceName,
+    type ApprovalRequest,
+} from "@portable-devshell/shared";
+import {
+    ApprovalManager,
+    ApprovalStore,
+} from "@portable-devshell/core/testing";
 
 test("ApprovalManager retries a failed durable expiry instead of leaving a dead pending approval", async () => {
     const records: ApprovalRequest[] = [];
@@ -33,12 +39,16 @@ test("ApprovalManager retries a failed durable expiry instead of leaving a dead 
         toolName: "bash_run",
     });
     assert.equal(evaluation.decision, "ask");
-    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+    if (evaluation.decision !== "ask")
+        throw new Error("approval was not requested");
 
     const resolution = await evaluation.awaitDecision;
     assert.equal(resolution.status, "expired");
     assert.equal(failExpiryOnce, false);
-    assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "expired");
+    assert.equal(
+        (await manager.getApproval(evaluation.request.approvalId)).status,
+        "expired",
+    );
 });
 
 test("ApprovalManager serves live pending approvals from memory and drops settled history", async () => {
@@ -64,15 +74,24 @@ test("ApprovalManager serves live pending approvals from memory and drops settle
         toolName: "bash_run",
     });
     assert.equal(evaluation.decision, "ask");
-    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+    if (evaluation.decision !== "ask")
+        throw new Error("approval was not requested");
 
     assert.deepEqual(
-        (await manager.listPendingApprovals("ctx-live")).map((request) => request.approvalId),
+        (await manager.listPendingApprovals("ctx-live")).map(
+            (request) => request.approvalId,
+        ),
         [evaluation.request.approvalId],
     );
-    await manager.decideApproval(evaluation.request.approvalId, { decision: "approve", decidedBy: "web" });
+    await manager.decideApproval(evaluation.request.approvalId, {
+        decision: "approve",
+        decidedBy: "web",
+    });
     assert.deepEqual(await manager.listPendingApprovals("ctx-live"), []);
-    assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "approved");
+    assert.equal(
+        (await manager.getApproval(evaluation.request.approvalId)).status,
+        "approved",
+    );
 });
 
 test("ApprovalManager retries restart reconciliation after a transient store failure", async () => {
@@ -84,7 +103,8 @@ test("ApprovalManager retries restart reconciliation after a transient store fai
         },
         async readAll() {
             reads += 1;
-            if (reads === 1) throw new Error("temporary approval store failure");
+            if (reads === 1)
+                throw new Error("temporary approval store failure");
             return records.map((request) => structuredClone(request));
         },
     } as never);
@@ -94,7 +114,10 @@ test("ApprovalManager retries restart reconciliation after a transient store fai
         store,
     });
 
-    await assert.rejects(manager.listApprovals(), /temporary approval store failure/u);
+    await assert.rejects(
+        manager.listApprovals(),
+        /temporary approval store failure/u,
+    );
     await assert.doesNotReject(manager.listApprovals());
     assert.equal(reads, 3);
 });
@@ -144,10 +167,21 @@ test("ApprovalManager reconciles persisted pending approvals after restart", asy
     });
 
     const approvals = await manager.listApprovals();
-    assert.equal(approvals.find((entry) => entry.approvalId === "approval-expired")?.status, "expired");
-    assert.equal(approvals.find((entry) => entry.approvalId === "approval-orphaned")?.status, "cancelled");
+    assert.equal(
+        approvals.find((entry) => entry.approvalId === "approval-expired")
+            ?.status,
+        "expired",
+    );
+    assert.equal(
+        approvals.find((entry) => entry.approvalId === "approval-orphaned")
+            ?.status,
+        "cancelled",
+    );
     await assert.rejects(
-        manager.decideApproval("approval-orphaned", { decision: "approve", decidedBy: "web" }),
+        manager.decideApproval("approval-orphaned", {
+            decision: "approve",
+            decidedBy: "web",
+        }),
         /already decided/u,
     );
 });
@@ -156,7 +190,8 @@ test("ApprovalManager serializes concurrent decisions for the same approval", as
     const records: ApprovalRequest[] = [];
     const store = new ApprovalStore({
         async append(request: ApprovalRequest) {
-            if (request.status !== "pending") await new Promise<void>((resolve) => setImmediate(resolve));
+            if (request.status !== "pending")
+                await new Promise<void>((resolve) => setImmediate(resolve));
             records.push(structuredClone(request));
         },
         async readAll() {
@@ -176,14 +211,27 @@ test("ApprovalManager serializes concurrent decisions for the same approval", as
         toolName: "bash_run",
     });
     assert.equal(evaluation.decision, "ask");
-    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+    if (evaluation.decision !== "ask")
+        throw new Error("approval was not requested");
 
     const decisions = await Promise.allSettled([
-        manager.decideApproval(evaluation.request.approvalId, { decision: "approve", decidedBy: "web" }),
-        manager.decideApproval(evaluation.request.approvalId, { decision: "deny", decidedBy: "web" }),
+        manager.decideApproval(evaluation.request.approvalId, {
+            decision: "approve",
+            decidedBy: "web",
+        }),
+        manager.decideApproval(evaluation.request.approvalId, {
+            decision: "deny",
+            decidedBy: "web",
+        }),
     ]);
-    assert.equal(decisions.filter((result) => result.status === "fulfilled").length, 1);
-    assert.equal(decisions.filter((result) => result.status === "rejected").length, 1);
+    assert.equal(
+        decisions.filter((result) => result.status === "fulfilled").length,
+        1,
+    );
+    assert.equal(
+        decisions.filter((result) => result.status === "rejected").length,
+        1,
+    );
 
     const resolution = await evaluation.awaitDecision;
     const persisted = await manager.getApproval(evaluation.request.approvalId);
@@ -194,7 +242,8 @@ test("ApprovalManager serializes a decision racing its expiry timer", async () =
     const records: ApprovalRequest[] = [];
     const store = new ApprovalStore({
         async append(request: ApprovalRequest) {
-            if (request.status === "approved") await new Promise<void>((resolve) => setTimeout(resolve, 20));
+            if (request.status === "approved")
+                await new Promise<void>((resolve) => setTimeout(resolve, 20));
             records.push(structuredClone(request));
         },
         async readAll() {
@@ -214,15 +263,25 @@ test("ApprovalManager serializes a decision racing its expiry timer", async () =
         toolName: "bash_run",
     });
     assert.equal(evaluation.decision, "ask");
-    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+    if (evaluation.decision !== "ask")
+        throw new Error("approval was not requested");
 
-    const decided = manager.decideApproval(
-        evaluation.request.approvalId,
-        { decision: "approve", decidedBy: "web" },
-    );
-    const [decision, resolution] = await Promise.all([decided, evaluation.awaitDecision]);
+    const decided = manager.decideApproval(evaluation.request.approvalId, {
+        decision: "approve",
+        decidedBy: "web",
+    });
+    const [decision, resolution] = await Promise.all([
+        decided,
+        evaluation.awaitDecision,
+    ]);
     assert.equal(decision.status, "approved");
     assert.equal(resolution.status, "approved");
-    assert.equal((await manager.getApproval(evaluation.request.approvalId)).status, "approved");
-    assert.equal(records.filter((request) => request.status === "expired").length, 0);
+    assert.equal(
+        (await manager.getApproval(evaluation.request.approvalId)).status,
+        "approved",
+    );
+    assert.equal(
+        records.filter((request) => request.status === "expired").length,
+        0,
+    );
 });

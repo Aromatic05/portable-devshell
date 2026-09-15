@@ -5,13 +5,27 @@ import { readArtifactViewImageInput } from "../../../../src/control/artifact/rou
 
 test("artifact viewImage route accepts exactly one path or handle", () => {
     assert.deepEqual(
-        readArtifactViewImageInput({ defaultInstance: "alpha", path: "./preview.png", workspace: "/workspace" }),
-        { path: "./preview.png", workspace: "/workspace" }
+        readArtifactViewImageInput({
+            defaultInstance: "alpha",
+            path: "./preview.png",
+            workspace: "/workspace",
+        }),
+        { path: "./preview.png", workspace: "/workspace" },
     );
     assert.deepEqual(
-        readArtifactViewImageInput({ handle: "artifact-1", instance: "remote" }),
-        { handle: "artifact-1", instance: "remote" }
+        readArtifactViewImageInput({
+            handle: "artifact-1",
+            instance: "remote",
+        }),
+        { handle: "artifact-1", instance: "remote" },
     );
-    assert.throws(() => readArtifactViewImageInput({ handle: "artifact-1", path: "./preview.png" }));
-    assert.throws(() => readArtifactViewImageInput({ defaultInstance: "alpha" }));
+    assert.throws(() =>
+        readArtifactViewImageInput({
+            handle: "artifact-1",
+            path: "./preview.png",
+        }),
+    );
+    assert.throws(() =>
+        readArtifactViewImageInput({ defaultInstance: "alpha" }),
+    );
 });

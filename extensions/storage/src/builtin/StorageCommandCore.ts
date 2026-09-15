@@ -17,8 +17,7 @@ export const STORAGE_USAGE = [
 ].join("\n");
 
 export type StorageCommandCoreResult =
-    | { kind: "json"; value: unknown }
-    | { kind: "text"; text: string };
+    { kind: "json"; value: unknown } | { kind: "text"; text: string };
 
 export function executeStorageArguments(
     argv: readonly string[],
@@ -26,36 +25,46 @@ export function executeStorageArguments(
 ): StorageCommandCoreResult {
     context.signal.throwIfAborted();
     if (argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")) {
-        if (argv.length > 1) throw usageError("storage help does not accept extra arguments");
+        if (argv.length > 1)
+            throw usageError("storage help does not accept extra arguments");
         return { kind: "text", text: STORAGE_USAGE };
     }
     if (argv[0] === "inspect") {
-        if (argv.length !== 2) throw usageError("storage inspect requires exactly one database path");
+        if (argv.length !== 2)
+            throw usageError(
+                "storage inspect requires exactly one database path",
+            );
         return {
             kind: "json",
-            value: inspectStorageDatabase(resolveLocalPath(argv[1]!, context.workingDirectory)),
+            value: inspectStorageDatabase(
+                resolveLocalPath(argv[1]!, context.workingDirectory),
+            ),
         };
     }
-    if (argv[0] !== "downgrade") throw usageError(`Unknown storage command: ${argv[0]}`);
+    if (argv[0] !== "downgrade")
+        throw usageError(`Unknown storage command: ${argv[0]}`);
     const kind = argv[1];
     if (kind !== "audit" && kind !== "conversation") {
         throw usageError("storage downgrade requires audit or conversation");
     }
     const parsed = parseDowngradeArgs(argv.slice(2), context.workingDirectory);
-    const value = kind === "audit"
-        ? downgradeAuditDatabase({
-            output: parsed.output,
-            signal: context.signal,
-            source: parsed.source,
-            toVersion: parsed.toVersion,
-        })
-        : downgradeConversationDatabase({
-            ...(parsed.instance === undefined ? {} : { instance: parsed.instance }),
-            output: parsed.output,
-            signal: context.signal,
-            source: parsed.source,
-            toVersion: parsed.toVersion,
-        });
+    const value =
+        kind === "audit"
+            ? downgradeAuditDatabase({
+                  output: parsed.output,
+                  signal: context.signal,
+                  source: parsed.source,
+                  toVersion: parsed.toVersion,
+              })
+            : downgradeConversationDatabase({
+                  ...(parsed.instance === undefined
+                      ? {}
+                      : { instance: parsed.instance }),
+                  output: parsed.output,
+                  signal: context.signal,
+                  source: parsed.source,
+                  toVersion: parsed.toVersion,
+              });
     return { kind: "json", value };
 }
 
@@ -73,12 +82,18 @@ function parseDowngradeArgs(
     for (let index = 1; index < args.length; index += 1) {
         const argument = args[index]!;
         if (argument === "--output") {
-            output = resolveLocalPath(requireOption(args, ++index, "--output"), workingDirectory);
+            output = resolveLocalPath(
+                requireOption(args, ++index, "--output"),
+                workingDirectory,
+            );
             continue;
         }
         if (argument === "--to") {
             const value = requireOption(args, ++index, "--to");
-            if (!/^\d+$/u.test(value)) throw usageError("storage downgrade --to requires a non-negative integer");
+            if (!/^\d+$/u.test(value))
+                throw usageError(
+                    "storage downgrade --to requires a non-negative integer",
+                );
             toVersion = Number(value);
             continue;
         }
@@ -88,8 +103,10 @@ function parseDowngradeArgs(
         }
         throw usageError(`Unknown storage downgrade option: ${argument}`);
     }
-    if (output === undefined) throw usageError("storage downgrade requires --output");
-    if (toVersion === undefined) throw usageError("storage downgrade requires --to");
+    if (output === undefined)
+        throw usageError("storage downgrade requires --output");
+    if (toVersion === undefined)
+        throw usageError("storage downgrade requires --to");
     return {
         ...(instance === undefined ? {} : { instance }),
         output,
@@ -98,15 +115,24 @@ function parseDowngradeArgs(
     };
 }
 
-function resolveLocalPath(path: string, workingDirectory: string | undefined): string {
+function resolveLocalPath(
+    path: string,
+    workingDirectory: string | undefined,
+): string {
     if (isAbsolute(path)) return resolve(path);
     if (workingDirectory === undefined) {
-        throw usageError("relative storage paths require the local CLI working directory");
+        throw usageError(
+            "relative storage paths require the local CLI working directory",
+        );
     }
     return resolve(workingDirectory, path);
 }
 
-function requireOption(args: readonly string[], index: number, option: string): string {
+function requireOption(
+    args: readonly string[],
+    index: number,
+    option: string,
+): string {
     const value = args[index];
     if (value === undefined || value.length === 0) {
         throw usageError(`storage downgrade ${option} requires a value`);

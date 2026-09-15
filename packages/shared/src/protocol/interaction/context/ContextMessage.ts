@@ -9,7 +9,9 @@ export interface ParsedContextMessageDirective {
     directive?: ContextMessageDirective;
 }
 
-export function parseContextMessageDirective(text: string): ParsedContextMessageDirective {
+export function parseContextMessageDirective(
+    text: string,
+): ParsedContextMessageDirective {
     const trimmed = text.trimStart();
     const match = /^#(push|stop|resume)(?:\s+|$)/u.exec(trimmed);
     if (match === null) return { body: text };

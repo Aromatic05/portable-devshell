@@ -102,7 +102,8 @@ export function useWebApplicationSession(
     }
 
     async function login(token: string): Promise<boolean> {
-        if (loginRequest.current !== undefined) return await loginRequest.current;
+        if (loginRequest.current !== undefined)
+            return await loginRequest.current;
         const generation = ++lifecycle.current;
         const request = (async () => {
             setBusy("login");
@@ -130,12 +131,14 @@ export function useWebApplicationSession(
         try {
             return await request;
         } finally {
-            if (loginRequest.current === request) loginRequest.current = undefined;
+            if (loginRequest.current === request)
+                loginRequest.current = undefined;
         }
     }
 
     async function logout(): Promise<void> {
-        if (logoutRequest.current !== undefined) return await logoutRequest.current;
+        if (logoutRequest.current !== undefined)
+            return await logoutRequest.current;
         const generation = ++lifecycle.current;
         const request = (async () => {
             setBusy("logout");
@@ -163,7 +166,8 @@ export function useWebApplicationSession(
         try {
             await request;
         } finally {
-            if (logoutRequest.current === request) logoutRequest.current = undefined;
+            if (logoutRequest.current === request)
+                logoutRequest.current = undefined;
         }
     }
 
@@ -182,7 +186,8 @@ export function useWebApplicationSession(
                 if (
                     lifecycle.current !== generation ||
                     storeRef.current !== target
-                ) return;
+                )
+                    return;
                 if (!available) {
                     discardStore();
                     setStore(undefined);
@@ -193,12 +198,14 @@ export function useWebApplicationSession(
                 if (
                     lifecycle.current === generation &&
                     storeRef.current === target
-                ) setError(undefined);
+                )
+                    setError(undefined);
             } catch {
                 if (
                     lifecycle.current === generation &&
                     storeRef.current === target
-                ) setError("Unable to verify the session.");
+                )
+                    setError("Unable to verify the session.");
             } finally {
                 if (lifecycle.current === generation) setBusy(undefined);
             }

@@ -3,7 +3,9 @@ import { createServer, request } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 
-export function requireTcpPort(address: AddressInfo | string | null | undefined): number {
+export function requireTcpPort(
+    address: AddressInfo | string | null | undefined,
+): number {
     assert.notEqual(address, null);
     assert.notEqual(address, undefined);
     assert.equal(typeof address, "object");
@@ -27,16 +29,20 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
         }
 
         const target = new URL(incoming.url ?? "/", targetOrigin);
-        const upstream = request(target, {
-            headers: incoming.headers,
-            method: incoming.method,
-        }, (upstreamResponse) => {
-            response.writeHead(
-                upstreamResponse.statusCode ?? 502,
-                upstreamResponse.headers,
-            );
-            upstreamResponse.pipe(response);
-        });
+        const upstream = request(
+            target,
+            {
+                headers: incoming.headers,
+                method: incoming.method,
+            },
+            (upstreamResponse) => {
+                response.writeHead(
+                    upstreamResponse.statusCode ?? 502,
+                    upstreamResponse.headers,
+                );
+                upstreamResponse.pipe(response);
+            },
+        );
         incoming.once("aborted", () => upstream.destroy());
         response.once("close", () => upstream.destroy());
         upstream.on("error", (error) => {
@@ -51,19 +57,27 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
             return;
         }
 
-        const targetPort = targetOrigin.port.length === 0
-            ? 80
-            : Number.parseInt(targetOrigin.port, 10);
+        const targetPort =
+            targetOrigin.port.length === 0
+                ? 80
+                : Number.parseInt(targetOrigin.port, 10);
         const upstream = connect(targetPort, targetOrigin.hostname);
         upgradedSockets.add(socket);
         upgradedSockets.add(upstream);
-        const forget = (candidate: Duplex) => () => upgradedSockets.delete(candidate);
+        const forget = (candidate: Duplex) => () =>
+            upgradedSockets.delete(candidate);
         socket.once("close", forget(socket));
         upstream.once("close", forget(upstream));
         upstream.once("connect", () => {
             const rawHeaders = [];
-            for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
-                rawHeaders.push(`${incoming.rawHeaders[index]}: ${incoming.rawHeaders[index + 1]}`);
+            for (
+                let index = 0;
+                index < incoming.rawHeaders.length;
+                index += 2
+            ) {
+                rawHeaders.push(
+                    `${incoming.rawHeaders[index]}: ${incoming.rawHeaders[index + 1]}`,
+                );
             }
             upstream.write(
                 `${incoming.method ?? "GET"} ${incoming.url ?? "/"} HTTP/${incoming.httpVersion}\r\n${rawHeaders.join("\r\n")}\r\n\r\n`,
@@ -86,7 +100,9 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
             for (const socket of upgradedSockets) socket.destroy();
             upgradedSockets.clear();
             await new Promise<void>((resolve, reject) => {
-                server.close((error) => error === undefined ? resolve() : reject(error));
+                server.close((error) =>
+                    error === undefined ? resolve() : reject(error),
+                );
             });
         },
         origin,

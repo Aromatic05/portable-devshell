@@ -1,11 +1,19 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+    spawn,
+    type ChildProcess,
+    type SpawnOptions,
+} from "node:child_process";
 
-import { errorCodes, type CommandResult, type ControlError } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type CommandResult,
+    type ControlError,
+} from "@portable-devshell/shared";
 
 import {
     type ProviderCommandContext,
     type SpawnFunction,
-    type WorkerCommandResult
+    type WorkerCommandResult,
 } from "../command/Transport.js";
 import { createProviderError } from "./Error.js";
 import { waitForCommandResult } from "./Result.js";
@@ -20,7 +28,7 @@ export class WorkerTransportProcessRunner {
     spawn(
         context: ProviderCommandContext,
         options: SpawnOptions,
-        errorCode: string = errorCodes.coreProviderFailed
+        errorCode: string = errorCodes.coreProviderFailed,
     ): ChildProcess {
         const [command, ...args] = context.command;
 
@@ -34,18 +42,24 @@ export class WorkerTransportProcessRunner {
     async run(
         context: ProviderCommandContext,
         options: SpawnOptions,
-        errorCode: string = errorCodes.coreProviderFailed
+        errorCode: string = errorCodes.coreProviderFailed,
     ): Promise<WorkerCommandResult> {
-        return await this.wait(this.spawn(context, options, errorCode), context);
+        return await this.wait(
+            this.spawn(context, options, errorCode),
+            context,
+        );
     }
 
-    async wait(child: ChildProcess, context: ProviderCommandContext): Promise<WorkerCommandResult> {
+    async wait(
+        child: ChildProcess,
+        context: ProviderCommandContext,
+    ): Promise<WorkerCommandResult> {
         return await waitForCommandResult(child, this.createError, context);
     }
 
     readonly createError = (
         context: ProviderCommandContext,
         cause: unknown,
-        options?: { errorCode?: string; result?: Partial<CommandResult> }
+        options?: { errorCode?: string; result?: Partial<CommandResult> },
     ): ControlError => createProviderError(context, cause, options);
 }

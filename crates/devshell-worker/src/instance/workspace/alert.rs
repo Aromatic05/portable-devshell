@@ -279,26 +279,26 @@ fn complete_probe(
     config: &AlertConfig,
     advice: Vec<Advice>,
 ) {
-    if let Ok(mut entries) = state.lock() {
-        if let Some(entry) = entries.get_mut(workspace) {
-            if entry.active_probe != Some(probe_id) {
-                return;
-            }
-            entry.active_probe = None;
-            if entry.config == *config {
-                entry.advice = advice;
-                entry.last_run = Some(Instant::now());
-            }
+    if let Ok(mut entries) = state.lock()
+        && let Some(entry) = entries.get_mut(workspace)
+    {
+        if entry.active_probe != Some(probe_id) {
+            return;
+        }
+        entry.active_probe = None;
+        if entry.config == *config {
+            entry.advice = advice;
+            entry.last_run = Some(Instant::now());
         }
     }
 }
 
 fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
     let mut advice = Vec::new();
-    if let (Some(limit), Some(used)) = (config.worker_memory_bytes, worker_rss_bytes()) {
-        if used >= limit {
-            advice.push(Advice { code: "worker.memory.high".to_string(), text: format!("Worker RSS is {} MiB, at or above its {} MiB alert threshold. Stop high-memory work and clean up child processes before continuing.", used / 1024 / 1024, limit / 1024 / 1024) });
-        }
+    if let (Some(limit), Some(used)) = (config.worker_memory_bytes, worker_rss_bytes())
+        && used >= limit
+    {
+        advice.push(Advice { code: "worker.memory.high".to_string(), text: format!("Worker RSS is {} MiB, at or above its {} MiB alert threshold. Stop high-memory work and clean up child processes before continuing.", used / 1024 / 1024, limit / 1024 / 1024) });
     }
     if let Some(limit) = config.max_uncommitted_changes {
         match uncommitted_changes(workspace) {
@@ -416,10 +416,7 @@ fn run_script(workspace: &Path, script: &AlertScript) -> Vec<Advice> {
         .ok()
         .and_then(|output| serde_json::from_slice::<Vec<Advice>>(&output.stdout).ok())
     {
-        Some(advice) => advice
-            .into_iter()
-            .filter(|entry| valid_advice(entry))
-            .collect(),
+        Some(advice) => advice.into_iter().filter(valid_advice).collect(),
         None => vec![script_failure(
             script,
             "did not emit a JSON advice array".to_string(),

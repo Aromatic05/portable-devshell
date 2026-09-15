@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { createError, errorCodes, isControlErrorBody, type Channel, type JsonValue } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    isControlErrorBody,
+    type Channel,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
 import { readWorkerAbortReason } from "../../../AbortReason.js";
@@ -10,7 +16,7 @@ import { WorkerRpcError } from "../Message.js";
 import type {
     WorkerRpcNotificationEnvelope,
     WorkerRpcRequestEnvelope,
-    WorkerRpcResponseEnvelope
+    WorkerRpcResponseEnvelope,
 } from "../Message.js";
 import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "../Message.js";
 import { WorkerRpcProcessConnector } from "../Process.js";
@@ -35,7 +41,8 @@ interface ConnectingHandoff {
     resolve(channel: Channel): void;
 }
 
-type WorkerRpcResponseFrame = Record<string, JsonValue> & WorkerRpcResponseEnvelope;
+type WorkerRpcResponseFrame = Record<string, JsonValue> &
+    WorkerRpcResponseEnvelope;
 
 export interface WorkerRpcBridgeOptions {
     cancellationRetentionMs?: number;
@@ -52,7 +59,9 @@ export class WorkerRpcBridge {
     readonly #preservePendingOnDisconnect: boolean;
     readonly #connectedListeners = new Set<() => void>();
     readonly #disconnectListeners = new Set<(error: WorkerRpcError) => void>();
-    readonly #notificationListeners = new Set<(notification: WorkerRpcNotificationEnvelope) => void>();
+    readonly #notificationListeners = new Set<
+        (notification: WorkerRpcNotificationEnvelope) => void
+    >();
     readonly #pending = new Map<string, PendingResponse>();
     #channel?: Channel;
     #connectionGeneration = 0;
@@ -61,21 +70,43 @@ export class WorkerRpcBridge {
     #connectPromise?: Promise<Channel>;
 
     constructor(options: WorkerRpcBridgeOptions) {
-        if (options.connector === undefined && options.transport === undefined) {
-            throw new TypeError("WorkerRpcBridge requires connector or transport.");
+        if (
+            options.connector === undefined &&
+            options.transport === undefined
+        ) {
+            throw new TypeError(
+                "WorkerRpcBridge requires connector or transport.",
+            );
         }
-        if (options.connector !== undefined && options.transport !== undefined) {
-            throw new TypeError("WorkerRpcBridge accepts connector or transport, not both.");
+        if (
+            options.connector !== undefined &&
+            options.transport !== undefined
+        ) {
+            throw new TypeError(
+                "WorkerRpcBridge accepts connector or transport, not both.",
+            );
         }
 
-        this.#cancellationRetentionMs = options.cancellationRetentionMs ?? DEFAULT_CANCELLATION_RETENTION_MS;
-        if (!Number.isSafeInteger(this.#cancellationRetentionMs) || this.#cancellationRetentionMs < 1) {
-            throw new TypeError("WorkerRpcBridge cancellationRetentionMs must be a positive safe integer.");
+        this.#cancellationRetentionMs =
+            options.cancellationRetentionMs ??
+            DEFAULT_CANCELLATION_RETENTION_MS;
+        if (
+            !Number.isSafeInteger(this.#cancellationRetentionMs) ||
+            this.#cancellationRetentionMs < 1
+        ) {
+            throw new TypeError(
+                "WorkerRpcBridge cancellationRetentionMs must be a positive safe integer.",
+            );
         }
         this.#rpcOptions = options.rpcOptions;
-        this.#preservePendingOnDisconnect = options.preservePendingOnDisconnect === true;
+        this.#preservePendingOnDisconnect =
+            options.preservePendingOnDisconnect === true;
         this.#connector =
-            options.connector ?? new WorkerRpcProcessConnector(options.transport!, options.rpcOptions);
+            options.connector ??
+            new WorkerRpcProcessConnector(
+                options.transport!,
+                options.rpcOptions,
+            );
     }
 
     get connected(): boolean {
@@ -101,7 +132,7 @@ export class WorkerRpcBridge {
     }
 
     onNotification(
-        listener: (notification: WorkerRpcNotificationEnvelope) => void
+        listener: (notification: WorkerRpcNotificationEnvelope) => void,
     ): () => void {
         this.#notificationListeners.add(listener);
         return () => {
@@ -109,7 +140,10 @@ export class WorkerRpcBridge {
         };
     }
 
-    async request(request: WorkerRpcRequestEnvelope, signal?: AbortSignal): Promise<WorkerRpcResponseEnvelope> {
+    async request(
+        request: WorkerRpcRequestEnvelope,
+        signal?: AbortSignal,
+    ): Promise<WorkerRpcResponseEnvelope> {
         this.#throwIfCancelled(request, signal);
         const encodedRequest = this.#encodeRequest(request);
         const channel = await this.#ensureChannel();
@@ -118,38 +152,49 @@ export class WorkerRpcBridge {
             throw new Error(`Duplicate Worker RPC request id: ${request.id}`);
         }
 
-        return await new Promise<WorkerRpcResponseEnvelope>((resolve, reject) => {
-            let removeAbortListener: () => void = () => {};
-            const pending: PendingResponse = {
-                cleanup: () => removeAbortListener(),
-                reject,
-                request,
-                resolve
-            };
-            const onAbort = () => {
+        return await new Promise<WorkerRpcResponseEnvelope>(
+            (resolve, reject) => {
+                let removeAbortListener: () => void = () => {};
+                const pending: PendingResponse = {
+                    cleanup: () => removeAbortListener(),
+                    reject,
+                    request,
+                    resolve,
+                };
+                const onAbort = () => {
+                    if (this.#pending.get(request.id) !== pending) {
+                        return;
+                    }
+                    this.#pending.delete(request.id);
+                    pending.cleanup();
+                    reject(
+                        WorkerRpcError.cancelled(
+                            this.#cancellationDetails(request, signal?.reason),
+                            signal?.reason,
+                        ),
+                    );
+                    this.#enqueueCancellation(request, signal?.reason);
+                };
+                if (signal !== undefined) {
+                    signal.addEventListener("abort", onAbort, { once: true });
+                    removeAbortListener = () =>
+                        signal.removeEventListener("abort", onAbort);
+                }
+                this.#pending.set(request.id, pending);
+                if (signal?.aborted === true) {
+                    onAbort();
+                }
                 if (this.#pending.get(request.id) !== pending) {
                     return;
                 }
-                this.#pending.delete(request.id);
-                pending.cleanup();
-                reject(WorkerRpcError.cancelled(this.#cancellationDetails(request, signal?.reason), signal?.reason));
-                this.#enqueueCancellation(request, signal?.reason);
-            };
-            if (signal !== undefined) {
-                signal.addEventListener("abort", onAbort, { once: true });
-                removeAbortListener = () => signal.removeEventListener("abort", onAbort);
-            }
-            this.#pending.set(request.id, pending);
-            if (signal?.aborted === true) {
-                onAbort();
-            }
-            if (this.#pending.get(request.id) !== pending) {
-                return;
-            }
-            void channel.send(encodedRequest).catch((error: unknown) => {
-                this.#disconnectChannel(channel, this.#createDisconnectError(error));
-            });
-        });
+                void channel.send(encodedRequest).catch((error: unknown) => {
+                    this.#disconnectChannel(
+                        channel,
+                        this.#createDisconnectError(error),
+                    );
+                });
+            },
+        );
     }
 
     async replaceChannel(channel: Channel): Promise<void> {
@@ -165,22 +210,30 @@ export class WorkerRpcBridge {
         try {
             await this.#replayPending(channel);
         } catch (error) {
-            this.#disconnectChannel(channel, this.#createDisconnectError(error));
-            const normalized = error instanceof Error ? error : new Error(String(error));
+            this.#disconnectChannel(
+                channel,
+                this.#createDisconnectError(error),
+            );
+            const normalized =
+                error instanceof Error ? error : new Error(String(error));
             handoff?.reject(normalized);
             connectAbortController?.abort(normalized);
             throw error;
         }
         this.#notifyConnected();
         handoff?.resolve(channel);
-        connectAbortController?.abort(new Error("Worker RPC connector was replaced by an attached channel."));
+        connectAbortController?.abort(
+            new Error(
+                "Worker RPC connector was replaced by an attached channel.",
+            ),
+        );
     }
 
     close(_signal: NodeJS.Signals | number = "SIGTERM"): void {
         this.#connectionGeneration += 1;
         const error = WorkerRpcError.disconnected({
             instanceName: this.#rpcOptions.instanceName,
-            reason: "bridge_closed"
+            reason: "bridge_closed",
         });
         this.#takeConnectingHandoff()?.reject(error);
         this.#takeConnectAbortController()?.abort(error);
@@ -207,7 +260,7 @@ export class WorkerRpcBridge {
             });
             const connectingHandoff: ConnectingHandoff = {
                 reject: rejectHandoff,
-                resolve: resolveHandoff
+                resolve: resolveHandoff,
             };
             const connectAbortController = new AbortController();
             this.#connectAbortController = connectAbortController;
@@ -217,13 +270,18 @@ export class WorkerRpcBridge {
                 .then(async (channel) => {
                     if (generation !== this.#connectionGeneration) {
                         this.#closeChannel(channel);
-                        throw new Error("Worker RPC connection was reset while connecting.");
+                        throw new Error(
+                            "Worker RPC connection was reset while connecting.",
+                        );
                     }
                     this.#attachChannel(channel);
                     try {
                         await this.#replayPending(channel);
                     } catch (error) {
-                        this.#disconnectChannel(channel, this.#createDisconnectError(error));
+                        this.#disconnectChannel(
+                            channel,
+                            this.#createDisconnectError(error),
+                        );
                         throw error;
                     }
                     if (generation !== this.#connectionGeneration) {
@@ -231,23 +289,24 @@ export class WorkerRpcBridge {
                             this.#channel = undefined;
                         }
                         this.#closeChannel(channel);
-                        throw new Error("Worker RPC connection was reset while connecting.");
+                        throw new Error(
+                            "Worker RPC connection was reset while connecting.",
+                        );
                     }
                     this.#notifyConnected();
                     return channel;
                 });
-            const promise = Promise.race([connection, handoff])
-                .finally(() => {
-                    if (this.#connectPromise === promise) {
-                        this.#connectPromise = undefined;
-                    }
-                    if (this.#connectingHandoff === connectingHandoff) {
-                        this.#connectingHandoff = undefined;
-                    }
-                    if (this.#connectAbortController === connectAbortController) {
-                        this.#connectAbortController = undefined;
-                    }
-                });
+            const promise = Promise.race([connection, handoff]).finally(() => {
+                if (this.#connectPromise === promise) {
+                    this.#connectPromise = undefined;
+                }
+                if (this.#connectingHandoff === connectingHandoff) {
+                    this.#connectingHandoff = undefined;
+                }
+                if (this.#connectAbortController === connectAbortController) {
+                    this.#connectAbortController = undefined;
+                }
+            });
             this.#connectPromise = promise;
         }
         return await this.#connectPromise;
@@ -260,11 +319,19 @@ export class WorkerRpcBridge {
             try {
                 this.#handleMessage(channel, decodeWorkerRpcMessage(frame));
             } catch (error) {
-                this.#disconnectChannel(channel, this.#createDisconnectError(error));
+                this.#disconnectChannel(
+                    channel,
+                    this.#createDisconnectError(error),
+                );
             }
         });
         channel.onClose((cause) => {
-            this.#disconnectChannel(channel, this.#createDisconnectError(cause ?? new Error("Worker RPC channel closed.")));
+            this.#disconnectChannel(
+                channel,
+                this.#createDisconnectError(
+                    cause ?? new Error("Worker RPC channel closed."),
+                ),
+            );
         });
     }
 
@@ -274,7 +341,11 @@ export class WorkerRpcBridge {
                 try {
                     listener(message);
                 } catch (error) {
-                    console.warn(error instanceof Error ? error : new Error(String(error)));
+                    console.warn(
+                        error instanceof Error
+                            ? error
+                            : new Error(String(error)),
+                    );
                 }
             }
             return;
@@ -283,8 +354,10 @@ export class WorkerRpcBridge {
             this.#disconnectChannel(
                 channel,
                 this.#createDisconnectError(
-                    new Error("Worker RPC channel returned an invalid message payload.")
-                )
+                    new Error(
+                        "Worker RPC channel returned an invalid message payload.",
+                    ),
+                ),
             );
             return;
         }
@@ -313,7 +386,7 @@ export class WorkerRpcBridge {
                 console.warn(
                     listenerError instanceof Error
                         ? listenerError
-                        : new Error(String(listenerError))
+                        : new Error(String(listenerError)),
                 );
             }
         }
@@ -353,14 +426,23 @@ export class WorkerRpcBridge {
         }
     }
 
-    #throwIfCancelled(request: WorkerRpcRequestEnvelope, signal: AbortSignal | undefined): void {
+    #throwIfCancelled(
+        request: WorkerRpcRequestEnvelope,
+        signal: AbortSignal | undefined,
+    ): void {
         if (signal?.aborted !== true) {
             return;
         }
-        throw WorkerRpcError.cancelled(this.#cancellationDetails(request, signal.reason), signal.reason);
+        throw WorkerRpcError.cancelled(
+            this.#cancellationDetails(request, signal.reason),
+            signal.reason,
+        );
     }
 
-    #enqueueCancellation(request: WorkerRpcRequestEnvelope, reason: unknown): void {
+    #enqueueCancellation(
+        request: WorkerRpcRequestEnvelope,
+        reason: unknown,
+    ): void {
         const ctxId = request.context?.ctxId;
         if (ctxId === undefined || request.method === "tool.call.cancel") {
             return;
@@ -372,12 +454,12 @@ export class WorkerRpcBridge {
             params: {
                 reason: readWorkerAbortReason(reason),
                 rpcRequestId: request.id,
-                ctxId
+                ctxId,
             },
             context: {
                 ctxId,
-                source: request.context?.source
-            }
+                source: request.context?.source,
+            },
         };
         let expiryTimer: ReturnType<typeof setTimeout> | undefined;
         const pending: PendingResponse = {
@@ -389,7 +471,7 @@ export class WorkerRpcBridge {
             },
             reject: () => undefined,
             request: cancellation,
-            resolve: () => undefined
+            resolve: () => undefined,
         };
         this.#pending.set(cancellation.id, pending);
         expiryTimer = setTimeout(() => {
@@ -420,17 +502,23 @@ export class WorkerRpcBridge {
                 this.#pending.delete(cancellation.id);
                 pending.cleanup();
             }
-            this.#disconnectChannel(channel, this.#createDisconnectError(error));
+            this.#disconnectChannel(
+                channel,
+                this.#createDisconnectError(error),
+            );
         });
     }
 
-    #cancellationDetails(request: WorkerRpcRequestEnvelope, reason: unknown): JsonValue {
+    #cancellationDetails(
+        request: WorkerRpcRequestEnvelope,
+        reason: unknown,
+    ): JsonValue {
         return {
             instanceName: this.#rpcOptions.instanceName,
             method: request.method,
             reason: readWorkerAbortReason(reason),
             rpcRequestId: request.id,
-            ctxId: request.context?.ctxId
+            ctxId: request.context?.ctxId,
         } as JsonValue;
     }
 
@@ -444,10 +532,11 @@ export class WorkerRpcBridge {
                     typeof cause.code === "string"
                         ? cause.code
                         : undefined,
-                causeMessage: cause instanceof Error ? cause.message : String(cause),
-                instanceName: this.#rpcOptions.instanceName
+                causeMessage:
+                    cause instanceof Error ? cause.message : String(cause),
+                instanceName: this.#rpcOptions.instanceName,
             } as JsonValue,
-            cause
+            cause,
         );
     }
 
@@ -455,17 +544,20 @@ export class WorkerRpcBridge {
         try {
             channel.close();
         } catch (error) {
-            console.warn(error instanceof Error ? error : new Error(String(error)));
+            console.warn(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
-
 
     #notifyConnected(): void {
         for (const listener of [...this.#connectedListeners]) {
             try {
                 listener();
             } catch (error) {
-                console.warn(error instanceof Error ? error : new Error(String(error)));
+                console.warn(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
         }
     }
@@ -483,21 +575,24 @@ export class WorkerRpcBridge {
     }
 }
 
-
 function isWorkerRpcNotificationEnvelope(
-    value: JsonValue
+    value: JsonValue,
 ): value is WorkerRpcNotificationEnvelope {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
     }
     const candidate = value as Record<string, JsonValue>;
-    return candidate.type === "notification" &&
+    return (
+        candidate.type === "notification" &&
         typeof candidate.method === "string" &&
         candidate.method.length > 0 &&
-        Object.prototype.hasOwnProperty.call(candidate, "params");
+        Object.prototype.hasOwnProperty.call(candidate, "params")
+    );
 }
 
-function isWorkerRpcResponseEnvelope(value: JsonValue): value is WorkerRpcResponseFrame {
+function isWorkerRpcResponseEnvelope(
+    value: JsonValue,
+): value is WorkerRpcResponseFrame {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
     }

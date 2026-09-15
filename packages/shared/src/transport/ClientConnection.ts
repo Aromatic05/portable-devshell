@@ -1,7 +1,10 @@
 import type { ControlErrorBody } from "../protocol/Error.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 import { asInstanceName } from "../protocol/instance/Identity.js";
-import { attachRequestCanceller, getRequestCanceller } from "../client/connection/RequestTimeout.js";
+import {
+    attachRequestCanceller,
+    getRequestCanceller,
+} from "../client/connection/RequestTimeout.js";
 import type { Channel } from "./protocol/Channel.js";
 import {
     Codec,
@@ -42,13 +45,24 @@ export interface OpenedClientStream {
 }
 
 export interface ControlClientModule {
-    openStream(operation: string, payload?: unknown): Promise<OpenedClientStream>;
+    openStream(
+        operation: string,
+        payload?: unknown,
+    ): Promise<OpenedClientStream>;
     request<TResult>(operation: string, payload?: unknown): Promise<TResult>;
 }
 
 export interface InstanceClientModule {
-    openStream(instance: string, operation: string, payload?: unknown): Promise<OpenedClientStream>;
-    request<TResult>(instance: string, operation: string, payload?: unknown): Promise<TResult>;
+    openStream(
+        instance: string,
+        operation: string,
+        payload?: unknown,
+    ): Promise<OpenedClientStream>;
+    request<TResult>(
+        instance: string,
+        operation: string,
+        payload?: unknown,
+    ): Promise<TResult>;
 }
 
 interface PendingRequest {
@@ -74,7 +88,10 @@ interface ClientStreamState {
     localClosed: boolean;
     module: string;
     terminal: boolean;
-    waiters: Array<{ reject(error: Error): void; resolve(event: ClientEvent): void }>;
+    waiters: Array<{
+        reject(error: Error): void;
+        resolve(event: ClientEvent): void;
+    }>;
 }
 
 export class ClientStream {
@@ -90,7 +107,7 @@ export class ClientStream {
             close(): void;
             nextEvent(): Promise<ClientEvent>;
             send(operation: string, payload?: JsonValue): Promise<void>;
-        }
+        },
     ) {
         this.id = id;
         this.#nextEvent = actions.nextEvent;
@@ -142,22 +159,29 @@ export class ClientConnection {
         destination: Destination,
         module: string,
         operation: string,
-        payload?: unknown
+        payload?: unknown,
     ): Promise<TResult> {
-        const event = this.requestEvent(destination, module, operation, payload);
+        const event = this.requestEvent(
+            destination,
+            module,
+            operation,
+            payload,
+        );
         const result = event.then((reply) => {
             this.throwRemoteError(reply.error);
             return reply.payload as unknown as TResult;
         });
         const cancel = getRequestCanceller(event);
-        return cancel === undefined ? result : attachRequestCanceller(result, cancel);
+        return cancel === undefined
+            ? result
+            : attachRequestCanceller(result, cancel);
     }
 
     requestEvent(
         destination: Destination,
         module: string,
         operation: string,
-        payload?: unknown
+        payload?: unknown,
     ): Promise<ClientEvent> {
         let session: ClientSession | undefined;
         let inner: Promise<ClientEvent> | undefined;
@@ -169,7 +193,13 @@ export class ClientConnection {
                 try {
                     session = await this.#acquireSession();
                     if (cancelled !== undefined) return;
-                    inner = session.request(destination, module, operation, payload as JsonValue | undefined, false);
+                    inner = session.request(
+                        destination,
+                        module,
+                        operation,
+                        payload as JsonValue | undefined,
+                        false,
+                    );
                     resolve(await inner);
                 } catch (error) {
                     reject(this.mapError(error));
@@ -182,7 +212,8 @@ export class ClientConnection {
             if (cancelled !== undefined) return;
             cancelled = reason;
             rejectOuter(reason);
-            const cancel = inner === undefined ? undefined : getRequestCanceller(inner);
+            const cancel =
+                inner === undefined ? undefined : getRequestCanceller(inner);
             cancel?.(reason);
         });
     }
@@ -191,7 +222,7 @@ export class ClientConnection {
         destination: Destination,
         module: string,
         operation: string,
-        payload?: unknown
+        payload?: unknown,
     ): Promise<OpenedClientStream> {
         let session: ClientSession | undefined;
         try {
@@ -202,11 +233,13 @@ export class ClientConnection {
                 module,
                 operation,
                 payload as JsonValue | undefined,
-                true
+                true,
             );
             this.throwRemoteError(acknowledgement.error);
             if (acknowledgement.streamId === undefined) {
-                throw new Error("Stream acknowledgement did not include streamId.");
+                throw new Error(
+                    "Stream acknowledgement did not include streamId.",
+                );
             }
             const streamId = acknowledgement.streamId;
             return {
@@ -219,10 +252,15 @@ export class ClientConnection {
                             activeSession.closeStream(streamId);
                         }
                     },
-                    nextEvent: async () => await activeSession.nextStreamEvent(streamId),
+                    nextEvent: async () =>
+                        await activeSession.nextStreamEvent(streamId),
                     send: async (streamOperation, streamPayload) =>
-                        await activeSession.sendStream(streamId, streamOperation, streamPayload)
-                })
+                        await activeSession.sendStream(
+                            streamId,
+                            streamOperation,
+                            streamPayload,
+                        ),
+                }),
             };
         } catch (error) {
             if (this.#mode === "short") {
@@ -258,7 +296,9 @@ export class ClientConnection {
 
     async #reconnectPersistent(): Promise<void> {
         this.#persistentGeneration += 1;
-        this.#cancelConnects(new Error("Client connection was reset while reconnecting."));
+        this.#cancelConnects(
+            new Error("Client connection was reset while reconnecting."),
+        );
         const session = this.#persistentSession;
         this.#persistentSession = undefined;
         this.#persistentSessionPromise = undefined;
@@ -294,7 +334,9 @@ export class ClientConnection {
 
     async #acquireSession(): Promise<ClientSession> {
         this.#assertOpen();
-        return this.#mode === "short" ? await this.#connect() : await this.#acquirePersistentSession();
+        return this.#mode === "short"
+            ? await this.#connect()
+            : await this.#acquirePersistentSession();
     }
 
     async #acquirePersistentSession(): Promise<ClientSession> {
@@ -302,7 +344,10 @@ export class ClientConnection {
         if (this.#persistentFailure !== undefined) {
             throw this.#persistentFailure;
         }
-        if (this.#persistentSession !== undefined && !this.#persistentSession.closed) {
+        if (
+            this.#persistentSession !== undefined &&
+            !this.#persistentSession.closed
+        ) {
             return this.#persistentSession;
         }
         if (this.#persistentSessionPromise !== undefined) {
@@ -317,32 +362,45 @@ export class ClientConnection {
             if (this.#persistentSession === session) {
                 this.#persistentSession = undefined;
             }
-            const failure = this.mapError(error ?? new Error("Client connection closed."));
+            const failure = this.mapError(
+                error ?? new Error("Client connection closed."),
+            );
             this.#persistentFailure = failure;
-            for (const listener of [...this.#transportCloseListeners]) listener(failure);
-        }).then((session) => {
-            if (generation !== this.#persistentGeneration || this.#closed) {
-                session.close();
-                throw new Error("Client connection was reset while connecting.");
-            }
-            this.#persistentSession = session;
-            return session;
-        }).catch((error) => {
-            const failure = this.mapError(error);
-            if (generation === this.#persistentGeneration && !this.#closed) {
-                this.#persistentFailure = failure;
-            }
-            throw failure;
-        }).finally(() => {
-            if (this.#persistentSessionPromise === promise) {
-                this.#persistentSessionPromise = undefined;
-            }
-        });
+            for (const listener of [...this.#transportCloseListeners])
+                listener(failure);
+        })
+            .then((session) => {
+                if (generation !== this.#persistentGeneration || this.#closed) {
+                    session.close();
+                    throw new Error(
+                        "Client connection was reset while connecting.",
+                    );
+                }
+                this.#persistentSession = session;
+                return session;
+            })
+            .catch((error) => {
+                const failure = this.mapError(error);
+                if (
+                    generation === this.#persistentGeneration &&
+                    !this.#closed
+                ) {
+                    this.#persistentFailure = failure;
+                }
+                throw failure;
+            })
+            .finally(() => {
+                if (this.#persistentSessionPromise === promise) {
+                    this.#persistentSessionPromise = undefined;
+                }
+            });
         this.#persistentSessionPromise = promise;
         return await promise;
     }
 
-    async #connect(onClose?: (session: ClientSession, error?: Error) => void): Promise<ClientSession> {
+    async #connect(
+        onClose?: (session: ClientSession, error?: Error) => void,
+    ): Promise<ClientSession> {
         const generation = this.#persistentGeneration;
         let cancellationError: Error | undefined;
         const controller = new AbortController();
@@ -355,17 +413,24 @@ export class ClientConnection {
             };
         });
         this.#connectCancellers.add(cancel);
-        const connecting = this.#connectChannel(controller.signal).then((channel) => {
-            if (
-                cancellationError !== undefined ||
-                generation !== this.#persistentGeneration ||
-                this.#closed
-            ) {
-                closeChannel(channel);
-                throw cancellationError ?? new Error("Client connection was reset while connecting.");
-            }
-            return channel;
-        });
+        const connecting = this.#connectChannel(controller.signal).then(
+            (channel) => {
+                if (
+                    cancellationError !== undefined ||
+                    generation !== this.#persistentGeneration ||
+                    this.#closed
+                ) {
+                    closeChannel(channel);
+                    throw (
+                        cancellationError ??
+                        new Error(
+                            "Client connection was reset while connecting.",
+                        )
+                    );
+                }
+                return channel;
+            },
+        );
         let channel;
         try {
             channel = await Promise.race([connecting, cancellation]);
@@ -374,11 +439,17 @@ export class ClientConnection {
         }
         if (generation !== this.#persistentGeneration || this.#closed) {
             closeChannel(channel);
-            throw cancellationError ?? new Error("Client connection was reset while connecting.");
+            throw (
+                cancellationError ??
+                new Error("Client connection was reset while connecting.")
+            );
         }
-        const route = new PrefixRoute(new Codec(channel, { local: this.#peer, remote: "server" }), {
-            eventIdPrefix: this.#peer
-        });
+        const route = new PrefixRoute(
+            new Codec(channel, { local: this.#peer, remote: "server" }),
+            {
+                eventIdPrefix: this.#peer,
+            },
+        );
         return new ClientSession(route, this.#peer, onClose);
     }
 
@@ -411,7 +482,7 @@ class ClientSession {
     constructor(
         route: PrefixRoute,
         peer: Exclude<Peer, "server">,
-        onClose?: (session: ClientSession, error?: Error) => void
+        onClose?: (session: ClientSession, error?: Error) => void,
     ) {
         this.#route = route;
         this.#peer = peer;
@@ -429,23 +500,34 @@ class ClientSession {
         module: string,
         operation: string,
         payload: JsonValue | undefined,
-        expectsStream: boolean
+        expectsStream: boolean,
     ): Promise<ClientEvent> {
         this.#assertOpen();
         const id = `${this.#peer}-${createTransportId()}`;
         const response = new Promise<ClientEvent>((resolve, reject) => {
-            this.#pending.set(id, { destination, expectsStream, id, module, reject, resolve });
+            this.#pending.set(id, {
+                destination,
+                expectsStream,
+                id,
+                module,
+                reject,
+                resolve,
+            });
         });
         void response.catch(() => undefined);
-        void this.#route.send(destination, module, {
+        void this.#route
+            .send(destination, module, {
                 id,
                 name: operation,
-                ...(payload === undefined ? {} : { payload })
-            }).catch((error) => {
-            const pending = this.#pending.get(id);
-            this.#pending.delete(id);
-            pending?.reject(error instanceof Error ? error : new Error(String(error)));
-        });
+                ...(payload === undefined ? {} : { payload }),
+            })
+            .catch((error) => {
+                const pending = this.#pending.get(id);
+                this.#pending.delete(id);
+                pending?.reject(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
         return attachRequestCanceller(response, (reason) => {
             const pending = this.#pending.get(id);
             if (pending === undefined) return;
@@ -454,11 +536,13 @@ class ClientSession {
             pending.reject(reason);
             const cancelId = `${this.#peer}-${createTransportId()}`;
             this.#rememberAbandoned(cancelId, destination, "request");
-            void this.#route.send(destination, "request", {
-                id: cancelId,
-                name: "cancel",
-                payload: { requestId: id },
-            }).catch(() => undefined);
+            void this.#route
+                .send(destination, "request", {
+                    id: cancelId,
+                    name: "cancel",
+                    payload: { requestId: id },
+                })
+                .catch(() => undefined);
         });
     }
 
@@ -471,24 +555,46 @@ class ClientSession {
             }
             return queued;
         }
-        if (stream.closed || stream.localClosed || stream.terminal || this.#closed) {
-            throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
+        if (
+            stream.closed ||
+            stream.localClosed ||
+            stream.terminal ||
+            this.#closed
+        ) {
+            throw (
+                stream.closeError ??
+                this.#closeError ??
+                new Error("Client stream is closed.")
+            );
         }
         return await new Promise<ClientEvent>((resolve, reject) => {
             stream.waiters.push({ reject, resolve });
         });
     }
 
-    async sendStream(streamId: string, operation: string, payload?: JsonValue): Promise<void> {
+    async sendStream(
+        streamId: string,
+        operation: string,
+        payload?: JsonValue,
+    ): Promise<void> {
         const stream = this.#requireStream(streamId);
-        if (stream.closed || stream.localClosed || stream.terminal || this.#closed) {
-            throw stream.closeError ?? this.#closeError ?? new Error("Client stream is closed.");
+        if (
+            stream.closed ||
+            stream.localClosed ||
+            stream.terminal ||
+            this.#closed
+        ) {
+            throw (
+                stream.closeError ??
+                this.#closeError ??
+                new Error("Client stream is closed.")
+            );
         }
         await this.#route.send(stream.destination, stream.module, {
             id: `${this.#peer}-${createTransportId()}`,
             streamId,
             name: operation,
-            ...(payload === undefined ? {} : { payload })
+            ...(payload === undefined ? {} : { payload }),
         });
     }
 
@@ -507,13 +613,17 @@ class ClientSession {
         for (const waiter of stream.waiters.splice(0)) {
             waiter.reject(stream.closeError);
         }
-        void this.#route.send(stream.destination, "stream", {
-            id: `${this.#peer}-${createTransportId()}`,
-            streamId,
-            name: "cancel"
-        }).catch((error) => {
-            this.close(error instanceof Error ? error : new Error(String(error)));
-        });
+        void this.#route
+            .send(stream.destination, "stream", {
+                id: `${this.#peer}-${createTransportId()}`,
+                streamId,
+                name: "cancel",
+            })
+            .catch((error) => {
+                this.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
     }
 
     close(error?: Error): void {
@@ -539,8 +649,15 @@ class ClientSession {
         if (pending === undefined) {
             const abandoned = this.#abandoned.get(event.replyTo!);
             if (abandoned !== undefined) {
-                if (abandoned.destination !== incoming.destination || abandoned.module !== incoming.module) {
-                    this.close(new Error(`Reply ${event.replyTo} was addressed to the wrong abandoned route.`));
+                if (
+                    abandoned.destination !== incoming.destination ||
+                    abandoned.module !== incoming.module
+                ) {
+                    this.close(
+                        new Error(
+                            `Reply ${event.replyTo} was addressed to the wrong abandoned route.`,
+                        ),
+                    );
                     return;
                 }
                 this.#abandoned.delete(event.replyTo!);
@@ -549,18 +666,29 @@ class ClientSession {
             this.close(new Error(`Unexpected replyTo ${event.replyTo}.`));
             return;
         }
-        if (pending.destination !== incoming.destination || pending.module !== incoming.module) {
-            this.close(new Error(`Reply ${event.replyTo} was addressed to the wrong route.`));
+        if (
+            pending.destination !== incoming.destination ||
+            pending.module !== incoming.module
+        ) {
+            this.close(
+                new Error(
+                    `Reply ${event.replyTo} was addressed to the wrong route.`,
+                ),
+            );
             return;
         }
         if (pending.expectsStream) {
             if (event.error === undefined && event.streamId === undefined) {
-                this.close(new Error("Stream acknowledgement must include streamId."));
+                this.close(
+                    new Error("Stream acknowledgement must include streamId."),
+                );
                 return;
             }
             if (event.error === undefined) {
                 if (this.#streams.has(event.streamId!)) {
-                    this.close(new Error(`Duplicate streamId ${event.streamId}.`));
+                    this.close(
+                        new Error(`Duplicate streamId ${event.streamId}.`),
+                    );
                     return;
                 }
                 this.#streams.set(event.streamId!, {
@@ -571,21 +699,28 @@ class ClientSession {
                     localClosed: false,
                     module: pending.module,
                     terminal: false,
-                    waiters: []
+                    waiters: [],
                 });
             }
         } else if (event.streamId !== undefined) {
-            this.close(new Error("A normal reply must not establish a stream."));
+            this.close(
+                new Error("A normal reply must not establish a stream."),
+            );
             return;
         }
         this.#pending.delete(pending.id);
         pending.resolve(event);
     }
 
-    #rememberAbandoned(id: string, destination: Destination, module: string): void {
+    #rememberAbandoned(
+        id: string,
+        destination: Destination,
+        module: string,
+    ): void {
         this.#abandoned.set(id, { destination, module });
         while (this.#abandoned.size > ClientSession.MAX_ABANDONED_REQUESTS) {
-            const oldest = this.#abandoned.keys().next().value as string | undefined;
+            const oldest = this.#abandoned.keys().next().value as
+                string | undefined;
             if (oldest === undefined) break;
             this.#abandoned.delete(oldest);
         }
@@ -598,7 +733,11 @@ class ClientSession {
             return;
         }
         if (event.destination !== stream.destination) {
-            this.close(new Error(`Stream ${event.streamId} was addressed to the wrong destination.`));
+            this.close(
+                new Error(
+                    `Stream ${event.streamId} was addressed to the wrong destination.`,
+                ),
+            );
             return;
         }
         const terminal = isTerminalStreamEvent(event);
@@ -609,7 +748,11 @@ class ClientSession {
             return;
         }
         if (stream.terminal) {
-            this.close(new Error(`Stream ${event.streamId} emitted after termination.`));
+            this.close(
+                new Error(
+                    `Stream ${event.streamId} emitted after termination.`,
+                ),
+            );
             return;
         }
         if (terminal) {
@@ -643,7 +786,8 @@ class ClientSession {
             return;
         }
         this.#closed = true;
-        const failure = this.#closeError ?? new Error("Client connection closed.");
+        const failure =
+            this.#closeError ?? new Error("Client connection closed.");
         for (const pending of this.#pending.values()) {
             pending.reject(failure);
         }
@@ -675,19 +819,37 @@ class ClientSession {
     }
 }
 
-export function controlClientModule(connection: ClientConnection, module: string): ControlClientModule {
+export function controlClientModule(
+    connection: ClientConnection,
+    module: string,
+): ControlClientModule {
     return {
-        openStream: (operation, payload) => connection.openStream("@control", module, operation, payload),
-        request: (operation, payload) => connection.request("@control", module, operation, payload)
+        openStream: (operation, payload) =>
+            connection.openStream("@control", module, operation, payload),
+        request: (operation, payload) =>
+            connection.request("@control", module, operation, payload),
     };
 }
 
-export function instanceClientModule(connection: ClientConnection, module: string): InstanceClientModule {
+export function instanceClientModule(
+    connection: ClientConnection,
+    module: string,
+): InstanceClientModule {
     return {
         openStream: (instance, operation, payload) =>
-            connection.openStream(asInstanceName(instance), module, operation, payload),
+            connection.openStream(
+                asInstanceName(instance),
+                module,
+                operation,
+                payload,
+            ),
         request: (instance, operation, payload) =>
-            connection.request(asInstanceName(instance), module, operation, payload)
+            connection.request(
+                asInstanceName(instance),
+                module,
+                operation,
+                payload,
+            ),
     };
 }
 
@@ -701,12 +863,14 @@ function toClientEvent(incoming: PrefixRouteIncoming): ClientEvent {
         name: `${incoming.module}.${event.name}`,
         ...(event.payload === undefined ? {} : { payload: event.payload }),
         ...(event.error === undefined ? {} : { error: event.error }),
-        ...(event.seq === undefined ? {} : { seq: event.seq })
+        ...(event.seq === undefined ? {} : { seq: event.seq }),
     };
 }
 
 function isTerminalStreamEvent(event: ClientEvent): boolean {
-    return event.name === "stream.completed" || event.name === "stream.cancelled";
+    return (
+        event.name === "stream.completed" || event.name === "stream.cancelled"
+    );
 }
 
 function closeChannel(channel: Channel): void {

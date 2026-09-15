@@ -23,7 +23,7 @@ export function parseSecretIgnore(source: string): readonly SecretIgnoreRule[] {
 export function ignoredBySecretScopes(
     path: string,
     directory: boolean,
-    scopes: readonly SecretIgnoreScope[]
+    scopes: readonly SecretIgnoreScope[],
 ): boolean {
     let ignored = false;
     for (const scope of scopes) {
@@ -67,7 +67,12 @@ function trimUnescapedTrailingSpaces(value: string): string {
     let end = value.length;
     while (end > 0 && value.charCodeAt(end - 1) === 32) {
         let slashes = 0;
-        for (let index = end - 2; index >= 0 && value.charCodeAt(index) === 92; index -= 1) slashes += 1;
+        for (
+            let index = end - 2;
+            index >= 0 && value.charCodeAt(index) === 92;
+            index -= 1
+        )
+            slashes += 1;
         if (slashes % 2 === 1) break;
         end -= 1;
     }

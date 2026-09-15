@@ -6,7 +6,10 @@ import {
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
-import type { WebClients, WebRuntimeStream } from "../src/app/transport/Client.js";
+import type {
+    WebClients,
+    WebRuntimeStream,
+} from "../src/app/transport/Client.js";
 import { WebStore } from "../src/state/Store.js";
 
 const snapshot: InstanceSnapshot = {
@@ -26,7 +29,12 @@ describe("WebStore", () => {
     it("waits for Control hello before loading Conversation preferences", async () => {
         const clients = fakeClients();
         let resolveHello!: (value: ControlProtocolHelloResponse) => void;
-        clients.service.hello = vi.fn(async () => await new Promise<ControlProtocolHelloResponse>((resolve) => { resolveHello = resolve; }));
+        clients.service.hello = vi.fn(
+            async () =>
+                await new Promise<ControlProtocolHelloResponse>((resolve) => {
+                    resolveHello = resolve;
+                }),
+        );
         clients.conversation.preferences = vi.fn(async () => ({
             orderByWorkspace: {},
             titles: {},
@@ -39,7 +47,10 @@ describe("WebStore", () => {
         await Promise.resolve();
         expect(clients.conversation.preferences).not.toHaveBeenCalled();
 
-        resolveHello({ capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 });
+        resolveHello({
+            capabilities: ["request", "stream", "streamResume"],
+            protocolVersion: 1,
+        });
         await loading;
         expect(clients.conversation.preferences).toHaveBeenCalledOnce();
     });
@@ -53,12 +64,17 @@ describe("WebStore", () => {
             workspaceOrder: ["/work/demo"],
         }));
         clients.conversation.updatePreferences = vi.fn(async (patch) => ({
-            orderByWorkspace: { "/work/demo": ["demo\u0000ctx-b", "demo\u0000ctx-a"] },
+            orderByWorkspace: {
+                "/work/demo": ["demo\u0000ctx-b", "demo\u0000ctx-a"],
+            },
             titles: {
                 "demo\u0000ctx-a": "Server title",
-                ...Object.fromEntries(Object.entries(patch.titles ?? {}).flatMap(([key, value]) =>
-                    value === null ? [] : [[key, value]]
-                )),
+                ...Object.fromEntries(
+                    Object.entries(patch.titles ?? {}).flatMap(
+                        ([key, value]) =>
+                            value === null ? [] : [[key, value]],
+                    ),
+                ),
             },
             version: 1 as const,
             workspaceOrder: ["/work/demo"],
@@ -66,14 +82,20 @@ describe("WebStore", () => {
         const store = new WebStore(clients);
 
         await store.load();
-        expect(store.state.conversationPreferences?.titles["demo\u0000ctx-a"]).toBe("Server title");
-        expect(await store.updateConversationPreferences({
-            titles: { "demo\u0000ctx-b": "Second browser" },
-        })).toBe(true);
+        expect(
+            store.state.conversationPreferences?.titles["demo\u0000ctx-a"],
+        ).toBe("Server title");
+        expect(
+            await store.updateConversationPreferences({
+                titles: { "demo\u0000ctx-b": "Second browser" },
+            }),
+        ).toBe(true);
         expect(clients.conversation.updatePreferences).toHaveBeenCalledWith({
             titles: { "demo\u0000ctx-b": "Second browser" },
         });
-        expect(store.state.conversationPreferences?.titles["demo\u0000ctx-b"]).toBe("Second browser");
+        expect(
+            store.state.conversationPreferences?.titles["demo\u0000ctx-b"],
+        ).toBe("Second browser");
     });
 
     it("does not replay queued Conversation preference mutations after the store generation changes", async () => {
@@ -85,17 +107,24 @@ describe("WebStore", () => {
             workspaceOrder: [],
         };
         let releaseFirst!: () => void;
-        clients.conversation.updatePreferences = vi.fn()
+        clients.conversation.updatePreferences = vi
+            .fn()
             .mockImplementationOnce(async () => {
-                await new Promise<void>((resolve) => { releaseFirst = resolve; });
+                await new Promise<void>((resolve) => {
+                    releaseFirst = resolve;
+                });
                 return snapshot;
             })
             .mockResolvedValue(snapshot);
         const store = new WebStore(clients);
         await store.load();
 
-        const first = store.updateConversationPreferences({ titles: { "demo\u0000ctx-a": "A" } });
-        const second = store.updateConversationPreferences({ titles: { "demo\u0000ctx-b": "B" } });
+        const first = store.updateConversationPreferences({
+            titles: { "demo\u0000ctx-a": "A" },
+        });
+        const second = store.updateConversationPreferences({
+            titles: { "demo\u0000ctx-b": "B" },
+        });
         await Promise.resolve();
         expect(clients.conversation.updatePreferences).toHaveBeenCalledTimes(1);
 
@@ -117,7 +146,9 @@ describe("WebStore", () => {
 
         expect(store.state.connection).toBe("online");
         expect(store.state.conversationPreferences).toBeUndefined();
-        expect(store.state.conversationPreferencesError).toBe("Preference store unavailable");
+        expect(store.state.conversationPreferencesError).toBe(
+            "Preference store unavailable",
+        );
     });
 
     it("does not request OAuth approvals when OAuth is disabled", async () => {
@@ -160,16 +191,24 @@ describe("WebStore", () => {
         expect(clients.tool.listCalls).not.toHaveBeenCalled();
         expect(clients.conversation.list).not.toHaveBeenCalled();
         await store.refreshAudit();
-        expect(store.state.readModel.instanceState.demo?.toolCalls).toEqual([call]);
-        expect(await store.queueContextMessage("demo", "ctx-demo", queued.text)).toBe(true);
+        expect(store.state.readModel.instanceState.demo?.toolCalls).toEqual([
+            call,
+        ]);
+        expect(
+            await store.queueContextMessage("demo", "ctx-demo", queued.text),
+        ).toBe(true);
         expect(clients.contextMessage.queue).toHaveBeenCalledWith("demo", {
             ctxId: "ctx-demo",
             text: queued.text,
         });
-        expect(store.state.readModel.instanceState.demo?.contextMessages).toEqual([queued]);
+        expect(
+            store.state.readModel.instanceState.demo?.contextMessages,
+        ).toEqual([queued]);
         expect(clients.conversation.list).toHaveBeenCalledTimes(2);
         expect(clients.contextMessage.list).not.toHaveBeenCalled();
-        expect(store.state.readModel.instanceState.demo?.commentCalls).toEqual([]);
+        expect(store.state.readModel.instanceState.demo?.commentCalls).toEqual(
+            [],
+        );
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
@@ -181,10 +220,15 @@ describe("WebStore", () => {
 
         await store.load();
 
-        expect(clients.tool.listApprovals).toHaveBeenCalledWith("demo", { pendingOnly: true });
+        expect(clients.tool.listApprovals).toHaveBeenCalledWith("demo", {
+            pendingOnly: true,
+        });
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         await store.refreshInstance("demo");
-        expect(clients.runtime.readLogs).toHaveBeenCalledWith("demo", { limit: 100, maxDecodedBytes: 256 * 1024 });
+        expect(clients.runtime.readLogs).toHaveBeenCalledWith("demo", {
+            limit: 100,
+            maxDecodedBytes: 256 * 1024,
+        });
         store.close();
     });
 
@@ -192,10 +236,14 @@ describe("WebStore", () => {
         const clients = fakeClients();
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
         await store.load();
-        clients.runtime.refresh = vi.fn(async () => { throw new Error("snapshot refresh failed"); });
+        clients.runtime.refresh = vi.fn(async () => {
+            throw new Error("snapshot refresh failed");
+        });
         clients.runtime.readLogs = vi.fn(async () => []);
 
-        await expect(store.refreshInstance("demo")).rejects.toThrow("snapshot refresh failed");
+        await expect(store.refreshInstance("demo")).rejects.toThrow(
+            "snapshot refresh failed",
+        );
         store.close();
     });
 
@@ -203,10 +251,14 @@ describe("WebStore", () => {
         const clients = fakeClients();
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
         await store.load();
-        clients.tool.listCalls = vi.fn(async () => { throw new Error("tool calls refresh failed"); });
+        clients.tool.listCalls = vi.fn(async () => {
+            throw new Error("tool calls refresh failed");
+        });
         clients.runtime.readLogs = vi.fn(async () => []);
 
-        await expect(store.refreshToolCall("demo")).rejects.toThrow("tool calls refresh failed");
+        await expect(store.refreshToolCall("demo")).rejects.toThrow(
+            "tool calls refresh failed",
+        );
         store.close();
     });
 
@@ -270,7 +322,9 @@ describe("WebStore", () => {
             },
             kind: "event",
         });
-        await vi.waitFor(() => expect(store.state.readModel.instanceState.demo?.sequence).toBe(11));
+        await vi.waitFor(() =>
+            expect(store.state.readModel.instanceState.demo?.sequence).toBe(11),
+        );
         expect(clients.tool.listCalls).not.toHaveBeenCalled();
         expect(clients.conversation.list).not.toHaveBeenCalled();
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();
@@ -317,7 +371,9 @@ describe("WebStore", () => {
         await store.load();
         vi.mocked(clients.context.list).mockClear();
 
-        expect(await store.disableContexts(["ctx-a", "ctx-b", "ctx-c"])).toBe(false);
+        expect(await store.disableContexts(["ctx-a", "ctx-b", "ctx-c"])).toBe(
+            false,
+        );
         expect(clients.context.disable).toHaveBeenCalledTimes(3);
         expect(clients.context.disable).toHaveBeenNthCalledWith(1, "ctx-a");
         expect(clients.context.disable).toHaveBeenNthCalledWith(2, "ctx-b");
@@ -345,46 +401,56 @@ describe("WebStore", () => {
             status: "delivered",
         };
         let messages: ContextMessageRecord[] = [];
-        clients.conversation.list = vi.fn(async () => messages.map((message) => ({
-            ...(message.callId === undefined ? {} : { callId: message.callId }),
-            createdAt: message.createdAt,
-            ctxId: message.ctxId,
-            ...(message.deliveredAt === undefined ? {} : { deliveredAt: message.deliveredAt }),
-            id: message.id,
-            kind: "comment" as const,
-            status: message.status,
-            text: message.text,
-        })));
+        clients.conversation.list = vi.fn(async () =>
+            messages.map((message) => ({
+                ...(message.callId === undefined
+                    ? {}
+                    : { callId: message.callId }),
+                createdAt: message.createdAt,
+                ctxId: message.ctxId,
+                ...(message.deliveredAt === undefined
+                    ? {}
+                    : { deliveredAt: message.deliveredAt }),
+                id: message.id,
+                kind: "comment" as const,
+                status: message.status,
+                text: message.text,
+            })),
+        );
         clients.contextMessage.queue = vi.fn(async () => {
             messages = [queued];
             return queued;
         });
         clients.tool.listCalls = vi.fn(async (_instance, query) =>
             query?.callIds?.includes("call-delivery")
-                ? [{
-                      callId: "call-delivery",
-                      completedAt: "2026-08-07T00:00:01Z",
-                      ctxId: "ctx-demo",
-                      inputSummary: "{}",
-                      instance: asInstanceName("demo"),
-                      output: { comment: [queued.text] },
-                      source: "mcp" as const,
-                      startedAt: "2026-08-07T00:00:00Z",
-                      status: "completed" as const,
-                      toolName: "bash_run",
-                  }]
-                : []
+                ? [
+                      {
+                          callId: "call-delivery",
+                          completedAt: "2026-08-07T00:00:01Z",
+                          ctxId: "ctx-demo",
+                          inputSummary: "{}",
+                          instance: asInstanceName("demo"),
+                          output: { comment: [queued.text] },
+                          source: "mcp" as const,
+                          startedAt: "2026-08-07T00:00:00Z",
+                          status: "completed" as const,
+                          toolName: "bash_run",
+                      },
+                  ]
+                : [],
         );
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
         await store.load();
 
-        expect(await store.queueContextMessage("demo", queued.ctxId, queued.text)).toBe(true);
+        expect(
+            await store.queueContextMessage("demo", queued.ctxId, queued.text),
+        ).toBe(true);
         await vi.waitFor(() =>
             expect(
                 store.state.readModel.instanceState.demo?.contextMessages.find(
                     (message) => message.id === queued.id,
                 )?.status,
-            ).toBe("sent")
+            ).toBe("sent"),
         );
 
         messages = [delivered];
@@ -405,21 +471,35 @@ describe("WebStore", () => {
         });
 
         await vi.waitFor(() => {
-            const message = store.state.readModel.instanceState.demo?.contextMessages.find(
-                (candidate) => candidate.id === queued.id,
-            );
+            const message =
+                store.state.readModel.instanceState.demo?.contextMessages.find(
+                    (candidate) => candidate.id === queued.id,
+                );
             expect(message?.status).toBe("delivered");
             expect(message?.callId).toBe("call-delivery");
-            expect(store.state.readModel.instanceState.demo?.commentCalls[0]?.callId).toBe(
-                "call-delivery",
-            );
+            expect(
+                store.state.readModel.instanceState.demo?.commentCalls[0]
+                    ?.callId,
+            ).toBe("call-delivery");
         });
         store.close();
     });
 
     it("uses the server overview as the authoritative operational read model", async () => {
         const clients = fakeClients();
-        const overview = { ...operationalOverview(), alerts: [{ detail: "The server classified this alert.", id: "server-alert", kind: "overview.partial" as const, severity: "attention" as const, title: "Server alert" }], health: "critical" as const };
+        const overview = {
+            ...operationalOverview(),
+            alerts: [
+                {
+                    detail: "The server classified this alert.",
+                    id: "server-alert",
+                    kind: "overview.partial" as const,
+                    severity: "attention" as const,
+                    title: "Server alert",
+                },
+            ],
+            health: "critical" as const,
+        };
         clients.overview.get = vi.fn(async () => overview);
 
         const store = new WebStore(clients);
@@ -451,9 +531,20 @@ describe("WebStore", () => {
         const clients = fakeClients();
         let releaseOld!: () => void;
         let releaseNew!: () => void;
-        clients.runtime.stop = vi.fn()
-            .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseOld = resolve; }))
-            .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseNew = resolve; }));
+        clients.runtime.stop = vi
+            .fn()
+            .mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        releaseOld = resolve;
+                    }),
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        releaseNew = resolve;
+                    }),
+            );
         const store = new WebStore(clients);
         await store.load();
 
@@ -475,9 +566,12 @@ describe("WebStore", () => {
     it("does not send duplicate start or stop mutations while an operation is pending", async () => {
         const clients = fakeClients();
         let finish!: () => void;
-        clients.runtime.stop = vi.fn(() => new Promise<InstanceSnapshot>((resolve) => {
-            finish = () => resolve(snapshot);
-        }));
+        clients.runtime.stop = vi.fn(
+            () =>
+                new Promise<InstanceSnapshot>((resolve) => {
+                    finish = () => resolve(snapshot);
+                }),
+        );
         const store = new WebStore(clients);
         await store.load();
 
@@ -504,11 +598,17 @@ describe("WebStore", () => {
         const store = new WebStore(clients);
         await store.load();
 
-        expect(store.state.readModel.instances[0]?.snapshot.status).toBe("ready");
+        expect(store.state.readModel.instances[0]?.snapshot.status).toBe(
+            "ready",
+        );
         await store.stop("demo");
 
-        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe("stopped");
-        expect(store.state.readModel.instances[0]?.snapshot.status).toBe("stopped");
+        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe(
+            "stopped",
+        );
+        expect(store.state.readModel.instances[0]?.snapshot.status).toBe(
+            "stopped",
+        );
         store.close();
     });
 
@@ -618,7 +718,10 @@ function fakeClients(
             decideApproval: async () => {
                 throw new Error("Not used.");
             },
-            openSession: async (_instance, workspace) => ({ tools: [], workspace }),
+            openSession: async (_instance, workspace) => ({
+                tools: [],
+                workspace,
+            }),
         },
         terminal: {
             attach: async () => {
@@ -650,12 +753,20 @@ function fakeClients(
             delete: async () => ({}),
             get: async () => ({
                 lastSeq: 3,
-                todo: { items: [], revision: 1, summary: { completed: 0, total: 0 } },
+                todo: {
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 0 },
+                },
             }),
             subscribe: async () => pendingStream(),
         },
         mcp: {
-            status: async () => ({ authMode: "none", oauthReady: false, running: true }),
+            status: async () => ({
+                authMode: "none",
+                oauthReady: false,
+                running: true,
+            }),
             listApprovals: async () => [],
             decideApproval: async () => {
                 throw new Error("Not used.");
@@ -680,7 +791,22 @@ function fakeClients(
 
 function operationalOverview() {
     return {
-        activity: [], alerts: [], controller: { pid: 1, uptimeSeconds: 1 }, counts: { activeTodos: 0, failedCalls24h: 0, instancesAttention: 0, instancesCritical: 0, instancesReady: 1, instancesTotal: 1, pendingApprovals: 0 }, generatedAt: "2026-07-31T00:00:00Z", health: "healthy" as const, instances: [], todos: [],
+        activity: [],
+        alerts: [],
+        controller: { pid: 1, uptimeSeconds: 1 },
+        counts: {
+            activeTodos: 0,
+            failedCalls24h: 0,
+            instancesAttention: 0,
+            instancesCritical: 0,
+            instancesReady: 1,
+            instancesTotal: 1,
+            pendingApprovals: 0,
+        },
+        generatedAt: "2026-07-31T00:00:00Z",
+        health: "healthy" as const,
+        instances: [],
+        todos: [],
     };
 }
 
@@ -693,7 +819,9 @@ function pendingStream(): WebRuntimeStream {
 
 type WebRuntimeMessage = Awaited<ReturnType<WebRuntimeStream["next"]>>;
 
-function controllableStream(): WebRuntimeStream & { push(message: WebRuntimeMessage): void } {
+function controllableStream(): WebRuntimeStream & {
+    push(message: WebRuntimeMessage): void;
+} {
     const queued: WebRuntimeMessage[] = [];
     const waiting: Array<(message: WebRuntimeMessage) => void> = [];
     let closed = false;
@@ -701,13 +829,16 @@ function controllableStream(): WebRuntimeStream & { push(message: WebRuntimeMess
         close() {
             if (closed) return;
             closed = true;
-            for (const resolve of waiting.splice(0)) resolve({ kind: "closed" });
+            for (const resolve of waiting.splice(0))
+                resolve({ kind: "closed" });
         },
         async next() {
             const message = queued.shift();
             if (message !== undefined) return message;
             if (closed) return { kind: "closed" };
-            return await new Promise<WebRuntimeMessage>((resolve) => waiting.push(resolve));
+            return await new Promise<WebRuntimeMessage>((resolve) =>
+                waiting.push(resolve),
+            );
         },
         push(message) {
             const resolve = waiting.shift();
@@ -718,7 +849,6 @@ function controllableStream(): WebRuntimeStream & { push(message: WebRuntimeMess
 }
 
 describe("WebStore recovery and consistency", () => {
-
     it("returns the result of each Context message operation independently", async () => {
         const clients = fakeClients();
         clients.contextMessage.queue = vi.fn(async (_instance, input) => {
@@ -746,24 +876,27 @@ describe("WebStore recovery and consistency", () => {
 
     it("loads logs with Tool Calls when Audit is materialized", async () => {
         const clients = fakeClients();
-        clients.runtime.readLogs = vi.fn(async () => [{
-            at: "2026-07-31T00:00:01Z",
-            callId: "call-1",
-            instanceName: asInstanceName("demo"),
-            message: "output",
-            seq: 4,
-            stream: "stdout" as const,
-        }]);
+        clients.runtime.readLogs = vi.fn(async () => [
+            {
+                at: "2026-07-31T00:00:01Z",
+                callId: "call-1",
+                instanceName: asInstanceName("demo"),
+                message: "output",
+                seq: 4,
+                stream: "stdout" as const,
+            },
+        ]);
         const store = new WebStore(clients);
 
         await store.load();
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         await store.refreshAudit();
 
-        expect(store.state.readModel.instanceState.demo?.logs?.[0]?.callId).toBe("call-1");
+        expect(
+            store.state.readModel.instanceState.demo?.logs?.[0]?.callId,
+        ).toBe("call-1");
     });
 });
-
 
 describe("WebStore operation and transport boundaries", () => {
     it("completes a successful lifecycle operation without waiting for auxiliary reads", async () => {
@@ -778,13 +911,21 @@ describe("WebStore operation and transport boundaries", () => {
             lastSeq: 10,
             status: "running",
         }));
-        clients.runtime.refresh = vi.fn(async () => await new Promise<never>(() => undefined));
-        clients.contextMessage.list = vi.fn(async () => await new Promise<never>(() => undefined));
-        clients.overview.get = vi.fn(async () => await new Promise<never>(() => undefined));
+        clients.runtime.refresh = vi.fn(
+            async () => await new Promise<never>(() => undefined),
+        );
+        clients.contextMessage.list = vi.fn(
+            async () => await new Promise<never>(() => undefined),
+        );
+        clients.overview.get = vi.fn(
+            async () => await new Promise<never>(() => undefined),
+        );
 
         await store.start("demo");
 
-        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe("running");
+        expect(store.state.readModel.instanceState.demo?.snapshot?.status).toBe(
+            "running",
+        );
         expect(store.state.operations["start:demo"]).toBeUndefined();
         store.close();
     });

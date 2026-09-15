@@ -43,8 +43,13 @@ export class InstanceRegistry {
         this.#connectionReferences.delete(name);
     }
 
-    retainConnectionReference(name: string, reference: string, ownsLifecycle: boolean): void {
-        const references = this.#connectionReferences.get(name) ?? new Set<string>();
+    retainConnectionReference(
+        name: string,
+        reference: string,
+        ownsLifecycle: boolean,
+    ): void {
+        const references =
+            this.#connectionReferences.get(name) ?? new Set<string>();
         references.add(reference);
         this.#connectionReferences.set(name, references);
         if (ownsLifecycle) {
@@ -58,7 +63,9 @@ export class InstanceRegistry {
         references.delete(reference);
         if (references.size > 0) return false;
         this.#connectionReferences.delete(name);
-        return this.#ownedConnectionReferences.has(name) && !this.#owned.has(name);
+        return (
+            this.#ownedConnectionReferences.has(name) && !this.#owned.has(name)
+        );
     }
 
     clearConnectionOwnership(name: string): void {
@@ -75,7 +82,10 @@ export class InstanceRegistry {
     async stopOwned(): Promise<void> {
         const failures: Error[] = [];
 
-        const owned = new Set([...this.#owned, ...this.#ownedConnectionReferences]);
+        const owned = new Set([
+            ...this.#owned,
+            ...this.#ownedConnectionReferences,
+        ]);
         for (const name of owned) {
             const descriptor = this.#descriptors.get(name);
             if (descriptor === undefined) {
@@ -86,12 +96,17 @@ export class InstanceRegistry {
                 await descriptor.worker.stop();
                 this.clearOwned(name);
             } catch (error) {
-                failures.push(error instanceof Error ? error : new Error(String(error)));
+                failures.push(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
         }
 
         if (failures.length > 0) {
-            throw new AggregateError(failures, `Failed to stop ${failures.length} worker instance(s).`);
+            throw new AggregateError(
+                failures,
+                `Failed to stop ${failures.length} worker instance(s).`,
+            );
         }
     }
 

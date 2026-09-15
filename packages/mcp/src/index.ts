@@ -3,11 +3,14 @@ export { McpOAuthApprovalService } from "./auth/oauth/interaction/Approval.js";
 export { McpOAuthProtectedResource } from "./auth/oauth/Resource.js";
 export type {
     McpOAuthAccessRevocation,
-    McpOAuthAccessTokenVerification
+    McpOAuthAccessTokenVerification,
 } from "./auth/oauth/provider/Provider.js";
 export { McpHost } from "./host/Host.js";
 export type { McpHostInstanceConfig } from "./host/Host.js";
-export type { McpToolProvenanceRecord, McpToolProvenanceRecorder } from "./endpoint/domain/worker/Provenance.js";
+export type {
+    McpToolProvenanceRecord,
+    McpToolProvenanceRecorder,
+} from "./endpoint/domain/worker/Provenance.js";
 export { McpContextRegistry } from "./context/registry/Registry.js";
 export type { McpContextBinding } from "./context/registry/Model.js";
 export { HttpHost } from "./host/Http.js";

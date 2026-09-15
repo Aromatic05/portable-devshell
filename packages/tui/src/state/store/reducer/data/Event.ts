@@ -24,7 +24,9 @@ export function applyEventRecord(
 }
 
 function isStatusEvent(type: string): boolean {
-    return type.startsWith("instance.") ||
+    return (
+        type.startsWith("instance.") ||
         type.startsWith("worker.") ||
-        type.startsWith("reverse.");
+        type.startsWith("reverse.")
+    );
 }

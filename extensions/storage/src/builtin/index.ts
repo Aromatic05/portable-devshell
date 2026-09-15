@@ -9,6 +9,7 @@ export function activate(context: ExtensionContext): void {
     context.register(
         nativeCommands,
         "storage",
-        async (argv, invocation) => await executeStorageCommand(argv, invocation),
+        async (argv, invocation) =>
+            await executeStorageCommand(argv, invocation),
     );
 }

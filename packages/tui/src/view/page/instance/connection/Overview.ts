@@ -7,22 +7,39 @@ import { buildReverseConnectionBoxes } from "./Reverse.js";
 import { buildConnectorPageBoxes } from "../Connector.js";
 import { buildOAuthPageBoxes } from "./OAuth.js";
 
-export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: string): BoxModel[] {
-    const entry = state.instances.find((candidate) => candidate.name === instance);
+export function buildConnectionsOverviewBoxes(
+    state: TuiAppState,
+    instance: string,
+): BoxModel[] {
+    const entry = state.instances.find(
+        (candidate) => candidate.name === instance,
+    );
     const mcp = asRecord(state.readModel.configView?.mcp);
     const instanceConfig = Array.isArray(state.readModel.configView?.instances)
-        ? state.readModel.configView.instances.find((candidate) => asRecord(candidate)?.name === instance)
+        ? state.readModel.configView.instances.find(
+              (candidate) => asRecord(candidate)?.name === instance,
+          )
         : undefined;
     const instanceMcp = asRecord(asRecord(instanceConfig)?.mcp);
-    const authMode = typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
+    const authMode =
+        typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
     const running = state.readModel.mcpStatus?.running === true;
-    const pendingOAuth = state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length;
+    const pendingOAuth = state.readModel.oauthApprovals.filter(
+        (approval) => approval.status === "pending",
+    ).length;
     const snapshot = state.readModel.instanceState[instance]?.snapshot;
     const enabled = entry?.mcpEnabled === true;
     const restartPending = state.ui.controlRestartRequired;
-    const runtime = restartPending ? "restart required" : !enabled ? "disabled" : running ? "running" : "stopped";
+    const runtime = restartPending
+        ? "restart required"
+        : !enabled
+          ? "disabled"
+          : running
+            ? "running"
+            : "stopped";
     const path = entry?.mcpPath ?? `/${instance}/mcp`;
-    const oauthBlocked = authMode === "oauth2" && state.readModel.mcpStatus?.oauthReady !== true;
+    const oauthBlocked =
+        authMode === "oauth2" && state.readModel.mcpStatus?.oauthReady !== true;
     const usable = !restartPending && running && enabled && !oauthBlocked;
     const publicEndpoint = restartPending
         ? "pending Control restart"
@@ -36,56 +53,132 @@ export function buildConnectionsOverviewBoxes(state: TuiAppState, instance: stri
                 formatField("Enabled", String(enabled)),
                 formatField("Path", path),
                 formatField("Runtime", runtime),
-                formatField("Public MCP", publicEndpoint)
+                formatField("Public MCP", publicEndpoint),
             ],
             id: "connections:connector:mcp",
-            primaryRoute: { connectorId: "mcp", page: "connections", view: "connector" },
-            status: usable ? "ready" : !restartPending && !enabled ? "disabled" : "warning",
-            summaryLines: [compactSummary(["runtime", runtime], ["path", path])],
-            title: "Connector"
+            primaryRoute: {
+                connectorId: "mcp",
+                page: "connections",
+                view: "connector",
+            },
+            status: usable
+                ? "ready"
+                : !restartPending && !enabled
+                  ? "disabled"
+                  : "warning",
+            summaryLines: [
+                compactSummary(["runtime", runtime], ["path", path]),
+            ],
+            title: "Connector",
         }),
-        ...(authMode === "oauth2" ? [makeBox(state, "connections", instance, {
-            detailLines: [
-                formatField("Provider", authMode),
-                formatField("Ready", restartPending ? "pending Control restart" : String(state.readModel.mcpStatus?.oauthReady === true)),
-                formatField("Pending", String(pendingOAuth))
-            ],
-            id: "connections:oauth:default",
-            primaryRoute: { page: "connections", providerId: "default", view: "oauth" },
-            status: restartPending ? "warning" : state.readModel.mcpStatus?.oauthReady === true ? "ready" : "failed",
-            summaryLines: [compactSummary(["provider", authMode], ["pending", String(pendingOAuth)])],
-            title: "OAuth Provider"
-        })] : []),
-        ...(entry?.provider === "reverse" ? [makeBox(state, "connections", instance, {
-            detailLines: [
-                formatField("Provider", entry.provider),
-                formatField("Connection", snapshot?.connectionState ?? "unknown"),
-                formatField("Daemon", snapshot?.daemonState ?? "unknown")
-            ],
-            id: `connections:reverse:${instance}`,
-            primaryRoute: { instanceId: instance, page: "connections", view: "reverse" },
-            status: snapshot?.connectionState === "connected" ? "ready" : "warning",
-            summaryLines: [compactSummary(["connection", snapshot?.connectionState ?? "unknown"], ["provider", entry.provider])],
-            title: "Reverse Connection"
-        })] : [])
+        ...(authMode === "oauth2"
+            ? [
+                  makeBox(state, "connections", instance, {
+                      detailLines: [
+                          formatField("Provider", authMode),
+                          formatField(
+                              "Ready",
+                              restartPending
+                                  ? "pending Control restart"
+                                  : String(
+                                        state.readModel.mcpStatus
+                                            ?.oauthReady === true,
+                                    ),
+                          ),
+                          formatField("Pending", String(pendingOAuth)),
+                      ],
+                      id: "connections:oauth:default",
+                      primaryRoute: {
+                          page: "connections",
+                          providerId: "default",
+                          view: "oauth",
+                      },
+                      status: restartPending
+                          ? "warning"
+                          : state.readModel.mcpStatus?.oauthReady === true
+                            ? "ready"
+                            : "failed",
+                      summaryLines: [
+                          compactSummary(
+                              ["provider", authMode],
+                              ["pending", String(pendingOAuth)],
+                          ),
+                      ],
+                      title: "OAuth Provider",
+                  }),
+              ]
+            : []),
+        ...(entry?.provider === "reverse"
+            ? [
+                  makeBox(state, "connections", instance, {
+                      detailLines: [
+                          formatField("Provider", entry.provider),
+                          formatField(
+                              "Connection",
+                              snapshot?.connectionState ?? "unknown",
+                          ),
+                          formatField(
+                              "Daemon",
+                              snapshot?.daemonState ?? "unknown",
+                          ),
+                      ],
+                      id: `connections:reverse:${instance}`,
+                      primaryRoute: {
+                          instanceId: instance,
+                          page: "connections",
+                          view: "reverse",
+                      },
+                      status:
+                          snapshot?.connectionState === "connected"
+                              ? "ready"
+                              : "warning",
+                      summaryLines: [
+                          compactSummary(
+                              [
+                                  "connection",
+                                  snapshot?.connectionState ?? "unknown",
+                              ],
+                              ["provider", entry.provider],
+                          ),
+                      ],
+                      title: "Reverse Connection",
+                  }),
+              ]
+            : []),
     ];
 }
 
-function publicMcpEndpoint(publicBaseUrl: JsonValue | undefined, path: string): string {
-    if (typeof publicBaseUrl !== "string" || publicBaseUrl.length === 0) return "unavailable";
+function publicMcpEndpoint(
+    publicBaseUrl: JsonValue | undefined,
+    path: string,
+): string {
+    if (typeof publicBaseUrl !== "string" || publicBaseUrl.length === 0)
+        return "unavailable";
     try {
-        const base = publicBaseUrl.endsWith("/") ? publicBaseUrl : `${publicBaseUrl}/`;
-        return new URL(path.startsWith("/") ? path.slice(1) : path, base).toString();
+        const base = publicBaseUrl.endsWith("/")
+            ? publicBaseUrl
+            : `${publicBaseUrl}/`;
+        return new URL(
+            path.startsWith("/") ? path.slice(1) : path,
+            base,
+        ).toString();
     } catch {
         return "unavailable";
     }
 }
 
-function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
+function asRecord(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : undefined;
 }
 
-export function buildConnectionsPageBoxes(state: TuiAppState, instanceName: string): BoxModel[] {
+export function buildConnectionsPageBoxes(
+    state: TuiAppState,
+    instanceName: string,
+): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "connections") return [];
     switch (route.view) {
@@ -96,6 +189,10 @@ export function buildConnectionsPageBoxes(state: TuiAppState, instanceName: stri
         case "oauth":
             return buildOAuthPageBoxes(state, instanceName);
         case "reverse":
-            return buildReverseConnectionBoxes(state, instanceName, route.instanceId);
+            return buildReverseConnectionBoxes(
+                state,
+                instanceName,
+                route.instanceId,
+            );
     }
 }

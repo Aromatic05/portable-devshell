@@ -1,5 +1,10 @@
 import { StringDecoder } from "node:string_decoder";
-import type { WorkerInstance, WorkerTerminalDescriptor, WorkerTerminalIdentity, WorkerTerminalNotification } from "@portable-devshell/core";
+import type {
+    WorkerInstance,
+    WorkerTerminalDescriptor,
+    WorkerTerminalIdentity,
+    WorkerTerminalNotification,
+} from "@portable-devshell/core";
 
 export type WorkerTerminalPort = Pick<
     WorkerInstance,
@@ -17,7 +22,9 @@ export type WorkerTerminalPort = Pick<
 export class WorkerTerminalBackend implements TerminalBackend {
     constructor(private readonly options: { worker: WorkerTerminalPort }) {}
 
-    async open(input: TerminalBackendOpenInput): Promise<TerminalBackendOpenResult> {
+    async open(
+        input: TerminalBackendOpenInput,
+    ): Promise<TerminalBackendOpenResult> {
         const descriptor = await this.options.worker.openTerminal({
             cols: input.cols,
             ...(input.command === undefined ? {} : { command: input.command }),
@@ -25,7 +32,10 @@ export class WorkerTerminalBackend implements TerminalBackend {
             rows: input.rows,
             workspace: input.workspace,
         });
-        const process = new WorkerTerminalProcess(this.options.worker, descriptor);
+        const process = new WorkerTerminalProcess(
+            this.options.worker,
+            descriptor,
+        );
         await process.initialize();
         return {
             identity: remoteIdentity(descriptor),
@@ -34,18 +44,26 @@ export class WorkerTerminalBackend implements TerminalBackend {
     }
 
     async recover(): Promise<TerminalBackendSession[]> {
-        const descriptors = (await this.options.worker.listTerminals())
-            .filter((descriptor) => descriptor.state === "running");
-        return await Promise.all(descriptors.map(async (descriptor) => {
-            const process = new WorkerTerminalProcess(this.options.worker, descriptor);
-            await process.initialize();
-            return { identity: remoteIdentity(descriptor), process };
-        }));
+        const descriptors = (await this.options.worker.listTerminals()).filter(
+            (descriptor) => descriptor.state === "running",
+        );
+        return await Promise.all(
+            descriptors.map(async (descriptor) => {
+                const process = new WorkerTerminalProcess(
+                    this.options.worker,
+                    descriptor,
+                );
+                await process.initialize();
+                return { identity: remoteIdentity(descriptor), process };
+            }),
+        );
     }
 }
 
 class WorkerTerminalProcess implements TerminalProcess {
-    readonly #dataListeners = new Set<(data: string, sourceSeq?: number) => void>();
+    readonly #dataListeners = new Set<
+        (data: string, sourceSeq?: number) => void
+    >();
     readonly #errorListeners = new Set<(error: Error) => void>();
     readonly #exitListeners = new Set<(exit: TerminalProcessExit) => void>();
     readonly #decoder = new StringDecoder("utf8");
@@ -68,9 +86,11 @@ class WorkerTerminalProcess implements TerminalProcess {
     ) {
         this.#worker = worker;
         this.#descriptor = descriptor;
-        this.#unsubscribeNotification = worker.onTerminalNotification((notification) => {
-            this.#acceptNotification(notification);
-        });
+        this.#unsubscribeNotification = worker.onTerminalNotification(
+            (notification) => {
+                this.#acceptNotification(notification);
+            },
+        );
         this.#unsubscribeConnected = worker.onRpcConnected(() => {
             if (!this.#closed) this.#scheduleResume();
         });
@@ -102,7 +122,8 @@ class WorkerTerminalProcess implements TerminalProcess {
 
     onData(listener: (data: string, sourceSeq?: number) => void): () => void {
         this.#dataListeners.add(listener);
-        for (const frame of this.#pendingData.splice(0)) listener(frame.data, frame.seq);
+        for (const frame of this.#pendingData.splice(0))
+            listener(frame.data, frame.seq);
         return () => this.#dataListeners.delete(listener);
     }
 
@@ -127,7 +148,8 @@ class WorkerTerminalProcess implements TerminalProcess {
                 cols,
                 rows,
             });
-            if (!result.accepted) throw new Error("Remote terminal resize was not accepted.");
+            if (!result.accepted)
+                throw new Error("Remote terminal resize was not accepted.");
             this.#acceptOperationIdentity(result);
             if (result.version >= this.#descriptor.version) {
                 this.#descriptor = {
@@ -146,10 +168,14 @@ class WorkerTerminalProcess implements TerminalProcess {
                 ...this.#identity(),
                 data: Buffer.from(data, "utf8").toString("base64"),
             });
-            if (!result.accepted) throw new Error("Remote terminal input was not accepted.");
+            if (!result.accepted)
+                throw new Error("Remote terminal input was not accepted.");
             this.#acceptOperationIdentity(result);
             if (result.version >= this.#descriptor.version) {
-                this.#descriptor = { ...this.#descriptor, version: result.version };
+                this.#descriptor = {
+                    ...this.#descriptor,
+                    version: result.version,
+                };
             }
         });
     }
@@ -206,12 +232,16 @@ class WorkerTerminalProcess implements TerminalProcess {
             throw new Error("Remote terminal attachment identity changed.");
         }
         this.#descriptor = attached.session;
-        for (const frame of attached.replay) this.#acceptOutput(frame.seq, frame.dataBase64);
+        for (const frame of attached.replay)
+            this.#acceptOutput(frame.seq, frame.dataBase64);
         if (attached.exit !== undefined) {
-            this.#acceptExit({
-                exitCode: attached.exit.exitCode,
-                signal: attached.exit.signal,
-            }, attached.session.version);
+            this.#acceptExit(
+                {
+                    exitCode: attached.exit.exitCode,
+                    signal: attached.exit.signal,
+                },
+                attached.session.version,
+            );
         }
     }
 
@@ -228,7 +258,10 @@ class WorkerTerminalProcess implements TerminalProcess {
                 this.#scheduleResume();
                 return;
             }
-            this.#acceptOutput(notification.params.seq, notification.params.dataBase64);
+            this.#acceptOutput(
+                notification.params.seq,
+                notification.params.dataBase64,
+            );
             return;
         }
         this.#acceptExit(
@@ -345,7 +378,8 @@ export interface TerminalBackendSession {
     process: TerminalProcess;
 }
 
-export type TerminalBackendOpenResult = TerminalProcess | TerminalBackendSession;
+export type TerminalBackendOpenResult =
+    TerminalProcess | TerminalBackendSession;
 
 export interface TerminalBackend {
     open(input: TerminalBackendOpenInput): Promise<TerminalBackendOpenResult>;

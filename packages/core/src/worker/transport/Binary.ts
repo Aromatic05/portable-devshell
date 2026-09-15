@@ -15,18 +15,18 @@ export class WorkerBinary {
     buildCommand(
         subcommand: WorkerCommandName | "rpc",
         instanceName: string,
-        extraArgs: readonly string[] = []
+        extraArgs: readonly string[] = [],
     ): WorkerBinaryCommand {
         return {
             command: this.executable,
-            args: [subcommand, "--instance", instanceName, ...extraArgs]
+            args: [subcommand, "--instance", instanceName, ...extraArgs],
         };
     }
 
     buildInstallCommand(): WorkerBinaryCommand {
         return {
             command: this.executable,
-            args: ["--version"]
+            args: ["--version"],
         };
     }
 }

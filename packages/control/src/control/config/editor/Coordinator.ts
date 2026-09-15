@@ -20,19 +20,22 @@ import {
     toConfigView,
     type ConfigDraft,
     type ControlConfig,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { InstanceFactory } from "../../instance/create/Factory.js";
 import type { InstanceRegistry } from "../../instance/registry/Registry.js";
 import { McpEndpointFactory } from "../../../composition/mcp/Endpoint.js";
 import { ControlConfigValidator } from "../Validator.js";
-import { ControlConfigMutationLock, type ControlConfigMutationRunner } from "./Lock.js";
+import {
+    ControlConfigMutationLock,
+    type ControlConfigMutationRunner,
+} from "./Lock.js";
 import { HttpEndpointPreflight } from "../../../server/endpoint/Http.js";
 import {
     buildApplyResult,
     requiresWorkerRebuild,
-    toWorkerReconfigureInput
+    toWorkerReconfigureInput,
 } from "./Result.js";
 
 interface ControlConfigWriter {
@@ -57,9 +60,20 @@ interface ConfigEditorCoordinatorOptions {
     mcpEndpointConfigMapper?: McpEndpointFactory;
     markRestartControlRequired?: () => void;
     mutationRunner?: ControlConfigMutationRunner;
-    runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig, changes: ConfigRuntimeChangeSet): Promise<boolean> };
+    runtimeApply?: {
+        apply(
+            previous: ControlConfig,
+            next: ControlConfig,
+            changes: ConfigRuntimeChangeSet,
+        ): Promise<boolean>;
+    };
     setConfig: (config: ControlConfig) => void;
-    runtimePreflight?: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
+    runtimePreflight?: {
+        assertAvailable(
+            previous: ControlConfig,
+            next: ControlConfig,
+        ): Promise<void>;
+    };
     validator?: ControlConfigValidator;
 }
 
@@ -72,30 +86,52 @@ export class ConfigEditorCoordinator {
     readonly #homeDirectory?: string;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
-    readonly #instanceDisableRetirements = new Set<(instance: ControlConfig["instances"][number]) => Promise<void>>();
-    readonly #instanceDeleteRetirements = new Set<(instance: ControlConfig["instances"][number]) => Promise<void>>();
+    readonly #instanceDisableRetirements = new Set<
+        (instance: ControlConfig["instances"][number]) => Promise<void>
+    >();
+    readonly #instanceDeleteRetirements = new Set<
+        (instance: ControlConfig["instances"][number]) => Promise<void>
+    >();
     readonly #markRestartControlRequired: () => void;
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #setConfig: (config: ControlConfig) => void;
-    readonly #runtimePreflight: { assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> };
-    readonly #runtimeApply?: { apply(previous: ControlConfig, next: ControlConfig, changes: ConfigRuntimeChangeSet): Promise<boolean> };
+    readonly #runtimePreflight: {
+        assertAvailable(
+            previous: ControlConfig,
+            next: ControlConfig,
+        ): Promise<void>;
+    };
+    readonly #runtimeApply?: {
+        apply(
+            previous: ControlConfig,
+            next: ControlConfig,
+            changes: ConfigRuntimeChangeSet,
+        ): Promise<boolean>;
+    };
     readonly #validator: ControlConfigValidator;
 
     constructor(options: ConfigEditorCoordinatorOptions) {
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#getMcpHost = options.getMcpHost ?? (() => undefined);
-        this.#getMcpInstanceGateway = options.getMcpInstanceGateway ?? (() => undefined);
-        this.#getRestartControlRequired = options.getRestartControlRequired ?? (() => false);
+        this.#getMcpInstanceGateway =
+            options.getMcpInstanceGateway ?? (() => undefined);
+        this.#getRestartControlRequired =
+            options.getRestartControlRequired ?? (() => false);
         this.#homeDirectory = options.homeDirectory;
-        this.#instanceConfigMapper = options.instanceConfigMapper ?? new InstanceFactory();
+        this.#instanceConfigMapper =
+            options.instanceConfigMapper ?? new InstanceFactory();
         this.#instanceRegistry = options.instanceRegistry;
-        this.#markRestartControlRequired = options.markRestartControlRequired ?? (() => undefined);
-        this.#mcpEndpointConfigMapper = options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
-        this.#mutationRunner = options.mutationRunner ?? new ControlConfigMutationLock();
+        this.#markRestartControlRequired =
+            options.markRestartControlRequired ?? (() => undefined);
+        this.#mcpEndpointConfigMapper =
+            options.mcpEndpointConfigMapper ?? new McpEndpointFactory();
+        this.#mutationRunner =
+            options.mutationRunner ?? new ControlConfigMutationLock();
         this.#setConfig = options.setConfig;
-        this.#runtimePreflight = options.runtimePreflight ?? new HttpEndpointPreflight();
+        this.#runtimePreflight =
+            options.runtimePreflight ?? new HttpEndpointPreflight();
         this.#runtimeApply = options.runtimeApply;
         this.#validator = options.validator ?? new ControlConfigValidator();
     }
@@ -115,43 +151,80 @@ export class ConfigEditorCoordinator {
     }
 
     getConfigView(): JsonValue {
-        return toConfigView(this.#getConfig(), this.#getRestartControlRequired()) as unknown as JsonValue;
+        return toConfigView(
+            this.#getConfig(),
+            this.#getRestartControlRequired(),
+        ) as unknown as JsonValue;
     }
 
     validateConfigDraft(params: JsonValue | undefined): JsonValue {
-        const draft = this.#readConfigInput(() => parseConfigDraft(stripConfigViewMetadata(params)));
-        const config = this.#readConfigInput(() => normalizeConfigDraft(this.#resolveMaskedTokens(draft)));
-        return toConfigView(this.#validateConfig(config), this.#getRestartControlRequired()) as unknown as JsonValue;
+        const draft = this.#readConfigInput(() =>
+            parseConfigDraft(stripConfigViewMetadata(params)),
+        );
+        const config = this.#readConfigInput(() =>
+            normalizeConfigDraft(this.#resolveMaskedTokens(draft)),
+        );
+        return toConfigView(
+            this.#validateConfig(config),
+            this.#getRestartControlRequired(),
+        ) as unknown as JsonValue;
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#mutationRunner.runExclusive(async () => await this.#updateConfig(params));
+        return await this.#mutationRunner.runExclusive(
+            async () => await this.#updateConfig(params),
+        );
     }
 
     async #updateConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        const request = this.#readConfigInput(() => parseConfigBatchUpdateRequest(params));
+        const request = this.#readConfigInput(() =>
+            parseConfigBatchUpdateRequest(params),
+        );
         const currentConfig = this.#getConfig();
         const instanceRequest = request.instance;
-        const existing = instanceRequest === undefined
-            ? undefined
-            : currentConfig.instances.find((entry) => entry.name === instanceRequest.instanceName);
+        const existing =
+            instanceRequest === undefined
+                ? undefined
+                : currentConfig.instances.find(
+                      (entry) => entry.name === instanceRequest.instanceName,
+                  );
         if (instanceRequest !== undefined && existing === undefined) {
             throw missingInstance(instanceRequest.instanceName);
         }
 
-        const instance = existing === undefined || instanceRequest === undefined
-            ? undefined
-            : this.#readConfigInput(() =>
-                  normalizeConfigInstanceDraft(applyConfigInstancePatch(existing, instanceRequest.patch))
-              );
-        const descriptor = instanceRequest === undefined ? undefined : this.#instanceRegistry.get(instanceRequest.instanceName);
-        const rebuildRequired = existing !== undefined && instance !== undefined && descriptor !== undefined
-            && requiresWorkerRebuild(existing, instance);
-        const preparedDescriptor = instance === undefined
-            ? undefined
-            : this.#prepareInstanceDescriptor(instance, descriptor, rebuildRequired);
-        const authChanged = existing !== undefined && instance !== undefined
-            && JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
+        const instance =
+            existing === undefined || instanceRequest === undefined
+                ? undefined
+                : this.#readConfigInput(() =>
+                      normalizeConfigInstanceDraft(
+                          applyConfigInstancePatch(
+                              existing,
+                              instanceRequest.patch,
+                          ),
+                      ),
+                  );
+        const descriptor =
+            instanceRequest === undefined
+                ? undefined
+                : this.#instanceRegistry.get(instanceRequest.instanceName);
+        const rebuildRequired =
+            existing !== undefined &&
+            instance !== undefined &&
+            descriptor !== undefined &&
+            requiresWorkerRebuild(existing, instance);
+        const preparedDescriptor =
+            instance === undefined
+                ? undefined
+                : this.#prepareInstanceDescriptor(
+                      instance,
+                      descriptor,
+                      rebuildRequired,
+                  );
+        const authChanged =
+            existing !== undefined &&
+            instance !== undefined &&
+            JSON.stringify(existing.mcp.auth) !==
+                JSON.stringify(instance.mcp.auth);
         if (rebuildRequired && instanceRequest !== undefined) {
             this.#assertInstanceStopped(instanceRequest.instanceName, "update");
         }
@@ -160,33 +233,47 @@ export class ConfigEditorCoordinator {
             normalizeConfigGlobalDraft({
                 control: currentConfig.control,
                 mcp: applyConfigMcpPatch(currentConfig.mcp, request.mcp ?? {}),
-                web: applyConfigWebPatch(currentConfig.web, request.web ?? {})
-            })
+                web: applyConfigWebPatch(currentConfig.web, request.web ?? {}),
+            }),
         );
         const nextConfig = this.#validateConfig({
             ...currentConfig,
-            instances: instanceRequest === undefined || instance === undefined
-                ? currentConfig.instances
-                : currentConfig.instances.map((entry) =>
-                      entry.name === instanceRequest.instanceName ? instance : entry
-                  ),
+            instances:
+                instanceRequest === undefined || instance === undefined
+                    ? currentConfig.instances
+                    : currentConfig.instances.map((entry) =>
+                          entry.name === instanceRequest.instanceName
+                              ? instance
+                              : entry,
+                      ),
             mcp: global.mcp,
-            web: global.web
+            web: global.web,
         });
 
         if (request.mcp !== undefined || request.web !== undefined) {
-            await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
+            await this.#runtimePreflight.assertAvailable(
+                currentConfig,
+                nextConfig,
+            );
         }
-        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        const stoppedForDisable = await this.#stopForDisable(
+            existing,
+            instance,
+            descriptor,
+        );
         let hotApplied = false;
         try {
-            await this.#retireInteractionsForDisable(existing, instance, descriptor);
+            await this.#retireInteractionsForDisable(
+                existing,
+                instance,
+                descriptor,
+            );
             await this.#persistConfig(nextConfig);
 
             const runtimeChanges: ConfigRuntimeChangeSet = {
                 instanceAuth: authChanged,
                 mcp: request.mcp !== undefined,
-                web: request.web !== undefined
+                web: request.web !== undefined,
             };
             hotApplied = await this.#applyPersistedChanges({
                 currentConfig,
@@ -196,53 +283,98 @@ export class ConfigEditorCoordinator {
                 nextConfig,
                 preparedDescriptor,
                 rebuildRequired,
-                runtimeChanges
+                runtimeChanges,
             });
         } catch (error) {
-            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
+            await this.#restoreAfterFailedDisable(
+                descriptor,
+                stoppedForDisable,
+                error,
+            );
         }
 
         const changes = [
             ...(instanceRequest === undefined
                 ? []
-                : [{ kind: "instance.updated" as const, target: instanceRequest.instanceName }]),
+                : [
+                      {
+                          kind: "instance.updated" as const,
+                          target: instanceRequest.instanceName,
+                      },
+                  ]),
             ...(request.mcp === undefined
                 ? []
                 : [{ kind: "mcp.endpoint.updated" as const, target: "mcp" }]),
             ...(request.web === undefined
                 ? []
-                : [{ kind: "web.updated" as const, target: "web" }])
+                : [{ kind: "web.updated" as const, target: "web" }]),
         ];
-        return this.#finalizeApplyResult(currentConfig, nextConfig, changes, hotApplied);
+        return this.#finalizeApplyResult(
+            currentConfig,
+            nextConfig,
+            changes,
+            hotApplied,
+        );
     }
 
-    async updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#mutationRunner.runExclusive(async () => await this.#updateInstanceConfig(params));
+    async updateInstanceConfig(
+        params: JsonValue | undefined,
+    ): Promise<JsonValue> {
+        return await this.#mutationRunner.runExclusive(
+            async () => await this.#updateInstanceConfig(params),
+        );
     }
 
-    async #updateInstanceConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        const request = this.#readConfigInput(() => parseConfigUpdateInstanceRequest(params));
+    async #updateInstanceConfig(
+        params: JsonValue | undefined,
+    ): Promise<JsonValue> {
+        const request = this.#readConfigInput(() =>
+            parseConfigUpdateInstanceRequest(params),
+        );
         const currentConfig = this.#getConfig();
-        const existing = currentConfig.instances.find((entry) => entry.name === request.instanceName);
+        const existing = currentConfig.instances.find(
+            (entry) => entry.name === request.instanceName,
+        );
         if (existing === undefined) throw missingInstance(request.instanceName);
 
         const instance = this.#readConfigInput(() =>
-            normalizeConfigInstanceDraft(applyConfigInstancePatch(existing, request.patch))
+            normalizeConfigInstanceDraft(
+                applyConfigInstancePatch(existing, request.patch),
+            ),
         );
         const nextConfig = this.#validateConfig({
             ...currentConfig,
-            instances: currentConfig.instances.map((entry) => (entry.name === request.instanceName ? instance : entry))
+            instances: currentConfig.instances.map((entry) =>
+                entry.name === request.instanceName ? instance : entry,
+            ),
         });
         const descriptor = this.#instanceRegistry.get(request.instanceName);
-        const rebuildRequired = descriptor !== undefined && requiresWorkerRebuild(existing, instance);
-        const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, rebuildRequired);
-        const authChanged = JSON.stringify(existing.mcp.auth) !== JSON.stringify(instance.mcp.auth);
-        if (rebuildRequired) this.#assertInstanceStopped(request.instanceName, "update");
+        const rebuildRequired =
+            descriptor !== undefined &&
+            requiresWorkerRebuild(existing, instance);
+        const preparedDescriptor = this.#prepareInstanceDescriptor(
+            instance,
+            descriptor,
+            rebuildRequired,
+        );
+        const authChanged =
+            JSON.stringify(existing.mcp.auth) !==
+            JSON.stringify(instance.mcp.auth);
+        if (rebuildRequired)
+            this.#assertInstanceStopped(request.instanceName, "update");
 
-        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        const stoppedForDisable = await this.#stopForDisable(
+            existing,
+            instance,
+            descriptor,
+        );
         let hotApplied = false;
         try {
-            await this.#retireInteractionsForDisable(existing, instance, descriptor);
+            await this.#retireInteractionsForDisable(
+                existing,
+                instance,
+                descriptor,
+            );
             await this.#persistConfig(nextConfig);
             hotApplied = await this.#applyPersistedChanges({
                 currentConfig,
@@ -255,141 +387,202 @@ export class ConfigEditorCoordinator {
                 runtimeChanges: {
                     instanceAuth: authChanged,
                     mcp: false,
-                    web: false
-                }
+                    web: false,
+                },
             });
         } catch (error) {
-            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
+            await this.#restoreAfterFailedDisable(
+                descriptor,
+                stoppedForDisable,
+                error,
+            );
         }
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "instance.updated", target: request.instanceName }],
-            hotApplied
+            hotApplied,
         );
     }
 
     async updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#mutationRunner.runExclusive(async () => await this.#updateMcpConfig(params));
+        return await this.#mutationRunner.runExclusive(
+            async () => await this.#updateMcpConfig(params),
+        );
     }
 
     async #updateMcpConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        const request = this.#readConfigInput(() => parseConfigUpdateMcpRequest(params));
+        const request = this.#readConfigInput(() =>
+            parseConfigUpdateMcpRequest(params),
+        );
         const currentConfig = this.#getConfig();
         const global = this.#readConfigInput(() =>
             normalizeConfigGlobalDraft({
                 control: currentConfig.control,
-                mcp: applyConfigMcpPatch(currentConfig.mcp, request.patch)
-            })
+                mcp: applyConfigMcpPatch(currentConfig.mcp, request.patch),
+            }),
         );
-        const nextConfig = this.#validateConfig({ ...currentConfig, mcp: global.mcp });
+        const nextConfig = this.#validateConfig({
+            ...currentConfig,
+            mcp: global.mcp,
+        });
 
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        const hotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig, {
-            instanceAuth: false,
-            mcp: true,
-            web: false
-        });
+        const hotApplied = await this.#applyRuntimeOrRestore(
+            currentConfig,
+            nextConfig,
+            {
+                instanceAuth: false,
+                mcp: true,
+                web: false,
+            },
+        );
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "mcp.endpoint.updated", target: "mcp" }],
-            hotApplied
+            hotApplied,
         );
     }
 
     async updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#mutationRunner.runExclusive(async () => await this.#updateWebConfig(params));
+        return await this.#mutationRunner.runExclusive(
+            async () => await this.#updateWebConfig(params),
+        );
     }
 
     async #updateWebConfig(params: JsonValue | undefined): Promise<JsonValue> {
-        const request = this.#readConfigInput(() => parseConfigUpdateWebRequest(params));
+        const request = this.#readConfigInput(() =>
+            parseConfigUpdateWebRequest(params),
+        );
         const currentConfig = this.#getConfig();
         const global = this.#readConfigInput(() =>
             normalizeConfigGlobalDraft({
                 control: currentConfig.control,
                 mcp: currentConfig.mcp,
-                web: applyConfigWebPatch(currentConfig.web, request.patch)
-            })
+                web: applyConfigWebPatch(currentConfig.web, request.patch),
+            }),
         );
-        const nextConfig = this.#validateConfig({ ...currentConfig, web: global.web });
+        const nextConfig = this.#validateConfig({
+            ...currentConfig,
+            web: global.web,
+        });
         await this.#runtimePreflight.assertAvailable(currentConfig, nextConfig);
         await this.#persistConfig(nextConfig);
-        const webHotApplied = await this.#applyRuntimeOrRestore(currentConfig, nextConfig, {
-            instanceAuth: false,
-            mcp: false,
-            web: true
-        });
+        const webHotApplied = await this.#applyRuntimeOrRestore(
+            currentConfig,
+            nextConfig,
+            {
+                instanceAuth: false,
+                mcp: false,
+                web: true,
+            },
+        );
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
             [{ kind: "web.updated", target: "web" }],
-            webHotApplied
+            webHotApplied,
         );
     }
 
     async deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
-        return await this.#mutationRunner.runExclusive(async () => await this.#deleteInstance(params));
+        return await this.#mutationRunner.runExclusive(
+            async () => await this.#deleteInstance(params),
+        );
     }
 
     async #deleteInstance(params: JsonValue | undefined): Promise<JsonValue> {
-        const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
+        const { instanceName } = this.#readConfigInput(() =>
+            parseConfigInstanceTargetRequest(params),
+        );
         const currentConfig = this.#getConfig();
-        const existing = currentConfig.instances.find((entry) => entry.name === instanceName);
+        const existing = currentConfig.instances.find(
+            (entry) => entry.name === instanceName,
+        );
         if (existing === undefined) throw missingInstance(instanceName);
 
-        const skipRuntimeRetirement = this.#assertInstanceDeletable(instanceName);
+        const skipRuntimeRetirement =
+            this.#assertInstanceDeletable(instanceName);
         const nextConfig = this.#validateConfig({
             ...currentConfig,
-            instances: currentConfig.instances.filter((entry) => entry.name !== instanceName)
+            instances: currentConfig.instances.filter(
+                (entry) => entry.name !== instanceName,
+            ),
         });
 
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing);
         }
-        await this.#retireStateForDelete(this.#instanceRegistry.get(instanceName), skipRuntimeRetirement);
+        await this.#retireStateForDelete(
+            this.#instanceRegistry.get(instanceName),
+            skipRuntimeRetirement,
+        );
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         this.#instanceRegistry.get(instanceName)?.conversation.close();
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
-        return this.#finalizeApplyResult(
-            currentConfig,
-            nextConfig,
-            [{ kind: "instance.deleted", target: instanceName }]
-        );
+        return this.#finalizeApplyResult(currentConfig, nextConfig, [
+            { kind: "instance.deleted", target: instanceName },
+        ]);
     }
 
     async enableInstance(params: JsonValue | undefined): Promise<JsonValue> {
         return await this.#mutationRunner.runExclusive(async () => {
-            const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
+            const { instanceName } = this.#readConfigInput(() =>
+                parseConfigInstanceTargetRequest(params),
+            );
             return await this.#setInstanceEnabled(instanceName, true);
         });
     }
 
     async disableInstance(params: JsonValue | undefined): Promise<JsonValue> {
         return await this.#mutationRunner.runExclusive(async () => {
-            const { instanceName } = this.#readConfigInput(() => parseConfigInstanceTargetRequest(params));
+            const { instanceName } = this.#readConfigInput(() =>
+                parseConfigInstanceTargetRequest(params),
+            );
             return await this.#setInstanceEnabled(instanceName, false);
         });
     }
 
-    async #setInstanceEnabled(instanceName: string, enabled: boolean): Promise<JsonValue> {
+    async #setInstanceEnabled(
+        instanceName: string,
+        enabled: boolean,
+    ): Promise<JsonValue> {
         const currentConfig = this.#getConfig();
-        const existing = currentConfig.instances.find((entry) => entry.name === instanceName);
+        const existing = currentConfig.instances.find(
+            (entry) => entry.name === instanceName,
+        );
         if (existing === undefined) throw missingInstance(instanceName);
 
-        const instance = normalizeConfigInstanceDraft(applyConfigInstancePatch(existing, { enabled }));
+        const instance = normalizeConfigInstanceDraft(
+            applyConfigInstancePatch(existing, { enabled }),
+        );
         const nextConfig = this.#validateConfig({
             ...currentConfig,
-            instances: currentConfig.instances.map((entry) => (entry.name === instanceName ? instance : entry))
+            instances: currentConfig.instances.map((entry) =>
+                entry.name === instanceName ? instance : entry,
+            ),
         });
         const descriptor = this.#instanceRegistry.get(instanceName);
-        const preparedDescriptor = this.#prepareInstanceDescriptor(instance, descriptor, false);
-        const stoppedForDisable = await this.#stopForDisable(existing, instance, descriptor);
+        const preparedDescriptor = this.#prepareInstanceDescriptor(
+            instance,
+            descriptor,
+            false,
+        );
+        const stoppedForDisable = await this.#stopForDisable(
+            existing,
+            instance,
+            descriptor,
+        );
         try {
-            await this.#retireInteractionsForDisable(existing, instance, descriptor);
+            await this.#retireInteractionsForDisable(
+                existing,
+                instance,
+                descriptor,
+            );
             await this.#persistConfig(nextConfig);
             await this.#applyPersistedChanges({
                 currentConfig,
@@ -399,16 +592,21 @@ export class ConfigEditorCoordinator {
                 nextConfig,
                 preparedDescriptor,
                 rebuildRequired: false,
-                runtimeChanges: { instanceAuth: false, mcp: false, web: false }
+                runtimeChanges: { instanceAuth: false, mcp: false, web: false },
             });
         } catch (error) {
-            await this.#restoreAfterFailedDisable(descriptor, stoppedForDisable, error);
+            await this.#restoreAfterFailedDisable(
+                descriptor,
+                stoppedForDisable,
+                error,
+            );
         }
-        return this.#finalizeApplyResult(
-            currentConfig,
-            nextConfig,
-            [{ kind: enabled ? "instance.enabled" : "instance.disabled", target: instanceName }]
-        );
+        return this.#finalizeApplyResult(currentConfig, nextConfig, [
+            {
+                kind: enabled ? "instance.enabled" : "instance.disabled",
+                target: instanceName,
+            },
+        ]);
     }
 
     async #retireStateForDelete(
@@ -420,7 +618,10 @@ export class ConfigEditorCoordinator {
 
         for (const approval of await descriptor.worker.listApprovals()) {
             if (approval.status === "pending") {
-                await descriptor.worker.cancelApproval(approval.approvalId, reason);
+                await descriptor.worker.cancelApproval(
+                    approval.approvalId,
+                    reason,
+                );
             }
         }
 
@@ -432,9 +633,12 @@ export class ConfigEditorCoordinator {
                     } catch (error) {
                         const current = await descriptor.wait.get(wait.waitId);
                         if (
-                            current === undefined || current.status === "cancelled" ||
-                            current.status === "consumed" || current.status === "resolved"
-                        ) continue;
+                            current === undefined ||
+                            current.status === "cancelled" ||
+                            current.status === "consumed" ||
+                            current.status === "resolved"
+                        )
+                            continue;
                         throw error;
                     }
                 } else if (wait.status === "resolved") {
@@ -443,9 +647,11 @@ export class ConfigEditorCoordinator {
                     } catch (error) {
                         const current = await descriptor.wait.get(wait.waitId);
                         if (
-                            current === undefined || current.status === "cancelled" ||
+                            current === undefined ||
+                            current.status === "cancelled" ||
                             current.status === "consumed"
-                        ) continue;
+                        )
+                            continue;
                         throw error;
                     }
                 }
@@ -460,7 +666,9 @@ export class ConfigEditorCoordinator {
         if (!skipRuntimeRetirement) {
             await descriptor.worker.retireRuntime().catch(() => undefined);
         }
-        await descriptor.worker.retireProviderResources().catch(() => undefined);
+        await descriptor.worker
+            .retireProviderResources()
+            .catch(() => undefined);
     }
 
     async #retireInteractionsForDisable(
@@ -468,10 +676,17 @@ export class ConfigEditorCoordinator {
         next: ControlConfig["instances"][number] | undefined,
         descriptor: ReturnType<InstanceRegistry["get"]>,
     ): Promise<void> {
-        if (existing === undefined || next === undefined || descriptor === undefined || !existing.enabled) return;
+        if (
+            existing === undefined ||
+            next === undefined ||
+            descriptor === undefined ||
+            !existing.enabled
+        )
+            return;
 
         const instanceDisabled = !next.enabled;
-        const workspaceDisabled = existing.workspace.enabled && !next.workspace.enabled;
+        const workspaceDisabled =
+            existing.workspace.enabled && !next.workspace.enabled;
         if (!instanceDisabled && !workspaceDisabled) return;
 
         if (workspaceDisabled || instanceDisabled) {
@@ -494,15 +709,19 @@ export class ConfigEditorCoordinator {
 
         if (descriptor.wait === undefined) return;
         for (const wait of await descriptor.wait.list()) {
-            if (wait.status !== "waiting" && wait.status !== "detached") continue;
+            if (wait.status !== "waiting" && wait.status !== "detached")
+                continue;
             try {
                 await descriptor.wait.cancel(wait.waitId);
             } catch (error) {
                 const current = await descriptor.wait.get(wait.waitId);
                 if (
-                    current === undefined || current.status === "cancelled" ||
-                    current.status === "consumed" || current.status === "resolved"
-                ) continue;
+                    current === undefined ||
+                    current.status === "cancelled" ||
+                    current.status === "consumed" ||
+                    current.status === "resolved"
+                )
+                    continue;
                 throw error;
             }
         }
@@ -514,10 +733,16 @@ export class ConfigEditorCoordinator {
         descriptor: ReturnType<InstanceRegistry["get"]>,
     ): Promise<boolean> {
         if (
-            existing === undefined || next === undefined || descriptor === undefined ||
-            !existing.enabled || next.enabled || descriptor.worker.managementMode === "selfManaged"
-        ) return false;
-        if (descriptor.worker.snapshot().daemonState === "stopped") return false;
+            existing === undefined ||
+            next === undefined ||
+            descriptor === undefined ||
+            !existing.enabled ||
+            next.enabled ||
+            descriptor.worker.managementMode === "selfManaged"
+        )
+            return false;
+        if (descriptor.worker.snapshot().daemonState === "stopped")
+            return false;
         await descriptor.worker.stop();
         return true;
     }
@@ -551,16 +776,23 @@ export class ConfigEditorCoordinator {
     }): Promise<boolean> {
         let hotApplied = false;
         try {
-            const runtimeChanged = input.runtimeChanges.instanceAuth || input.runtimeChanges.mcp || input.runtimeChanges.web;
+            const runtimeChanged =
+                input.runtimeChanges.instanceAuth ||
+                input.runtimeChanges.mcp ||
+                input.runtimeChanges.web;
             hotApplied = runtimeChanged
-                ? await this.#applyRuntimeOrRestore(input.currentConfig, input.nextConfig, input.runtimeChanges)
+                ? await this.#applyRuntimeOrRestore(
+                      input.currentConfig,
+                      input.nextConfig,
+                      input.runtimeChanges,
+                  )
                 : false;
             if (input.existing !== undefined && input.instance !== undefined) {
                 await this.#applyInstanceConfig(
                     input.instance,
                     input.descriptor,
                     input.rebuildRequired,
-                    input.preparedDescriptor
+                    input.preparedDescriptor,
                 );
                 await this.#syncMcpEndpoint(input.instance.name);
             }
@@ -568,17 +800,24 @@ export class ConfigEditorCoordinator {
         } catch (error) {
             const failures: unknown[] = [error];
             if (hotApplied && this.#runtimeApply !== undefined) {
-                await this.#runtimeApply.apply(input.nextConfig, input.currentConfig, input.runtimeChanges)
+                await this.#runtimeApply
+                    .apply(
+                        input.nextConfig,
+                        input.currentConfig,
+                        input.runtimeChanges,
+                    )
                     .catch((rollbackError) => failures.push(rollbackError));
             }
             if (this.#getConfig() !== input.currentConfig) {
-                await this.#persistConfig(input.currentConfig).catch((rollbackError) => failures.push(rollbackError));
+                await this.#persistConfig(input.currentConfig).catch(
+                    (rollbackError) => failures.push(rollbackError),
+                );
             }
             if (input.existing !== undefined && input.instance !== undefined) {
                 await this.#restoreInstanceRuntime(
                     input.existing,
                     input.descriptor,
-                    input.preparedDescriptor
+                    input.preparedDescriptor,
                 ).catch((rollbackError) => failures.push(rollbackError));
                 try {
                     await this.#syncMcpEndpoint(input.existing.name);
@@ -586,17 +825,22 @@ export class ConfigEditorCoordinator {
                     failures.push(rollbackError);
                 }
             } else if (input.preparedDescriptor !== undefined) {
-                await closeDescriptorResourcesBestEffort(input.preparedDescriptor).catch((rollbackError) => failures.push(rollbackError));
+                await closeDescriptorResourcesBestEffort(
+                    input.preparedDescriptor,
+                ).catch((rollbackError) => failures.push(rollbackError));
             }
             if (failures.length === 1) throw error;
-            throw new AggregateError(failures, "Configuration update failed and runtime rollback was incomplete.");
+            throw new AggregateError(
+                failures,
+                "Configuration update failed and runtime rollback was incomplete.",
+            );
         }
     }
 
     async #restoreInstanceRuntime(
         existing: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
     ): Promise<void> {
         const failures: unknown[] = [];
         if (descriptor === undefined) {
@@ -604,7 +848,9 @@ export class ConfigEditorCoordinator {
         } else {
             this.#instanceRegistry.add(descriptor);
             try {
-                await descriptor.worker.reconfigure(toWorkerReconfigureInput(existing));
+                await descriptor.worker.reconfigure(
+                    toWorkerReconfigureInput(existing),
+                );
                 descriptor.mcpContextMode = existing.mcp.contextMode;
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
@@ -614,19 +860,29 @@ export class ConfigEditorCoordinator {
                 failures.push(error);
             }
         }
-        if (preparedDescriptor !== undefined && preparedDescriptor !== descriptor) {
-            await closeDescriptorResourcesBestEffort(preparedDescriptor).catch((error) => failures.push(error));
+        if (
+            preparedDescriptor !== undefined &&
+            preparedDescriptor !== descriptor
+        ) {
+            await closeDescriptorResourcesBestEffort(preparedDescriptor).catch(
+                (error) => failures.push(error),
+            );
         }
-        if (failures.length > 0) throw new AggregateError(failures, `Failed to restore instance ${existing.name}.`);
+        if (failures.length > 0)
+            throw new AggregateError(
+                failures,
+                `Failed to restore instance ${existing.name}.`,
+            );
     }
 
     #prepareInstanceDescriptor(
         instance: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
-        rebuildRequired: boolean
+        rebuildRequired: boolean,
     ): ReturnType<InstanceFactory["map"]> | undefined {
         if (!instance.enabled) return undefined;
-        if (descriptor === undefined || rebuildRequired) return this.#instanceConfigMapper.map(instance);
+        if (descriptor === undefined || rebuildRequired)
+            return this.#instanceConfigMapper.map(instance);
         return undefined;
     }
 
@@ -634,20 +890,26 @@ export class ConfigEditorCoordinator {
         instance: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
         rebuildRequired: boolean,
-        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
     ): Promise<void> {
         if (descriptor === undefined) {
-            if (instance.enabled && preparedDescriptor !== undefined) this.#instanceRegistry.add(preparedDescriptor);
+            if (instance.enabled && preparedDescriptor !== undefined)
+                this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
         if (rebuildRequired) {
-            if (preparedDescriptor === undefined) throw new Error(`Missing prepared descriptor for ${instance.name}.`);
+            if (preparedDescriptor === undefined)
+                throw new Error(
+                    `Missing prepared descriptor for ${instance.name}.`,
+                );
             descriptor.conversation.close();
             this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
         if (instance.enabled) {
-            await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+            await descriptor.worker.reconfigure(
+                toWorkerReconfigureInput(instance),
+            );
         }
         descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.enabled = instance.enabled;
@@ -660,7 +922,9 @@ export class ConfigEditorCoordinator {
         const host = this.#getMcpHost();
         if (host === undefined) return;
         const config = this.#getConfig();
-        const instance = config.instances.find((entry) => entry.name === instanceName);
+        const instance = config.instances.find(
+            (entry) => entry.name === instanceName,
+        );
         const descriptor = this.#instanceRegistry.get(instanceName);
         if (
             !config.mcp.enabled ||
@@ -672,12 +936,14 @@ export class ConfigEditorCoordinator {
             host.unregisterInstance(instanceName);
             return;
         }
-        host.registerInstance(this.#mcpEndpointConfigMapper.map(
-            descriptor,
-            this.#getMcpInstanceGateway(),
-            instance.mcp.auth,
-            instance.workspace.enabled
-        ));
+        host.registerInstance(
+            this.#mcpEndpointConfigMapper.map(
+                descriptor,
+                this.#getMcpInstanceGateway(),
+                instance.mcp.auth,
+                instance.workspace.enabled,
+            ),
+        );
     }
 
     #assertInstanceDeletable(instanceName: string): boolean {
@@ -685,25 +951,40 @@ export class ConfigEditorCoordinator {
         if (descriptor === undefined) return false;
         const snapshot = descriptor.worker.snapshot();
         if (snapshot.daemonState === "stopped") return false;
-        if (snapshot.daemonState === "failed" || snapshot.daemonState === "stale") return true;
+        if (
+            snapshot.daemonState === "failed" ||
+            snapshot.daemonState === "stale"
+        )
+            return true;
         throw createError({
             code: errorCodes.instanceConflict,
-            details: { instance: instanceName, operation: "delete", status: snapshot.status },
+            details: {
+                instance: instanceName,
+                operation: "delete",
+                status: snapshot.status,
+            },
             message: `Instance ${instanceName} must be stopped before delete.`,
-            retryable: false
+            retryable: false,
         });
     }
 
-    #assertInstanceStopped(instanceName: string, operation: "disable" | "update"): void {
+    #assertInstanceStopped(
+        instanceName: string,
+        operation: "disable" | "update",
+    ): void {
         const descriptor = this.#instanceRegistry.get(instanceName);
         if (descriptor === undefined) return;
         const snapshot = descriptor.worker.snapshot();
         if (snapshot.daemonState === "stopped") return;
         throw createError({
             code: errorCodes.instanceConflict,
-            details: { instance: instanceName, operation, status: snapshot.status },
+            details: {
+                instance: instanceName,
+                operation,
+                status: snapshot.status,
+            },
             message: `Instance ${instanceName} must be stopped before ${operation}.`,
-            retryable: false
+            retryable: false,
         });
     }
 
@@ -715,7 +996,7 @@ export class ConfigEditorCoordinator {
     async #applyRuntimeOrRestore(
         previous: ControlConfig,
         next: ControlConfig,
-        changes: ConfigRuntimeChangeSet
+        changes: ConfigRuntimeChangeSet,
     ): Promise<boolean> {
         if (this.#runtimeApply === undefined) return false;
         try {
@@ -730,7 +1011,7 @@ export class ConfigEditorCoordinator {
         previous: ControlConfig,
         next: ControlConfig,
         changes: Parameters<typeof buildApplyResult>[2],
-        hotApplied = false
+        hotApplied = false,
     ): JsonValue {
         const result = buildApplyResult(previous, next, changes, hotApplied);
         if (result.restartControlRequired) this.#markRestartControlRequired();
@@ -744,14 +1025,20 @@ export class ConfigEditorCoordinator {
     #resolveMaskedTokens(draft: ConfigDraft): ConfigDraft {
         const current = this.#getConfig();
         const webAuth = current.web.auth;
-        const web = draft.web?.token === MASKED_CONFIG_TOKEN && webAuth.mode === "token"
-            ? { ...draft.web, token: webAuth.token }
-            : draft.web;
+        const web =
+            draft.web?.token === MASKED_CONFIG_TOKEN && webAuth.mode === "token"
+                ? { ...draft.web, token: webAuth.token }
+                : draft.web;
         const instances = draft.instances?.map((instance) => {
             if (instance.mcp?.token !== MASKED_CONFIG_TOKEN) return instance;
-            const existing = current.instances.find((candidate) => candidate.name === instance.name);
+            const existing = current.instances.find(
+                (candidate) => candidate.name === instance.name,
+            );
             if (existing?.mcp.auth.mode !== "token") return instance;
-            return { ...instance, mcp: { ...instance.mcp, token: existing.mcp.auth.token } };
+            return {
+                ...instance,
+                mcp: { ...instance.mcp, token: existing.mcp.auth.token },
+            };
         });
         return { ...draft, web, instances };
     }
@@ -767,18 +1054,18 @@ export class ConfigEditorCoordinator {
                 details: {
                     fieldPath: formatConfigPath(error.issue.path),
                     issueCode: error.issue.code,
-                    phase: error.issue.phase
+                    phase: error.issue.phase,
                 },
                 message: error.message,
-                retryable: false
+                retryable: false,
             });
         }
     }
-
-
 }
 
-async function closeDescriptorResourcesBestEffort(descriptor: ReturnType<InstanceFactory["map"]>): Promise<void> {
+async function closeDescriptorResourcesBestEffort(
+    descriptor: ReturnType<InstanceFactory["map"]>,
+): Promise<void> {
     const failures: unknown[] = [];
     try {
         descriptor.conversation.close();
@@ -787,16 +1074,25 @@ async function closeDescriptorResourcesBestEffort(descriptor: ReturnType<Instanc
     }
     const close = (descriptor.worker as { close?: () => Promise<void> }).close;
     if (close !== undefined) {
-        await close.call(descriptor.worker).catch((error) => failures.push(error));
+        await close
+            .call(descriptor.worker)
+            .catch((error) => failures.push(error));
     }
     if (failures.length > 0) {
-        throw new AggregateError(failures, `Failed to close instance ${descriptor.name} resources.`);
+        throw new AggregateError(
+            failures,
+            `Failed to close instance ${descriptor.name} resources.`,
+        );
     }
 }
 
-function stripConfigViewMetadata(value: JsonValue | undefined): JsonValue | undefined {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-    const { restartControlRequired: _restartControlRequired, ...config } = value;
+function stripConfigViewMetadata(
+    value: JsonValue | undefined,
+): JsonValue | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return value;
+    const { restartControlRequired: _restartControlRequired, ...config } =
+        value;
     return config;
 }
 
@@ -805,6 +1101,6 @@ function missingInstance(instanceName: string): Error {
         code: errorCodes.instanceMissing,
         details: { instance: instanceName },
         message: `Instance ${instanceName} was not found.`,
-        retryable: false
+        retryable: false,
     });
 }

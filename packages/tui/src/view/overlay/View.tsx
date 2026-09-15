@@ -55,14 +55,15 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
             );
         case "approval": {
             const approval = (
-                props.state.readModel.instanceState[overlay.instance]?.approvals ?? []
+                props.state.readModel.instanceState[overlay.instance]
+                    ?.approvals ?? []
             ).find((candidate) => candidate.approvalId === overlay.approvalId);
             const toolCall =
                 approval === undefined
                     ? undefined
                     : (
-                          props.state.readModel.instanceState[overlay.instance]?.toolCalls ??
-                          []
+                          props.state.readModel.instanceState[overlay.instance]
+                              ?.toolCalls ?? []
                       ).find(
                           (candidate) => candidate.callId === approval.callId,
                       );
@@ -134,7 +135,9 @@ function ApprovalOverlay(props: {
                             props.selectedAction === action ? "cyan" : undefined
                         }
                         key={action}
-                    >{tuiApprovalActionText(action)}</Text>
+                    >
+                        {tuiApprovalActionText(action)}
+                    </Text>
                 ))}
             </Box>
         </Box>

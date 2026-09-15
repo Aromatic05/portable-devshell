@@ -55,7 +55,10 @@ import {
 } from "./testspace/TestspaceNamespace.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-const root = resolveTestspaceRoot(repoRoot, process.env.DEVSHELL_TESTSPACE_ROOT);
+const root = resolveTestspaceRoot(
+    repoRoot,
+    process.env.DEVSHELL_TESTSPACE_ROOT,
+);
 const paths = {
     connectorHealth: join(root, "connector-health.json"),
     connectorLog: join(root, "connector.jsonl"),
@@ -63,8 +66,21 @@ const paths = {
     connectorProcessLog: join(root, "connector-process.log"),
     controlConfig: join(root, "home", ".devshell", "control", "config.toml"),
     home: join(root, "home"),
-    instanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_INSTANCE}.toml`),
-    instanceConfigDirectory: join(root, "home", ".devshell", "control", "instances"),
+    instanceConfig: join(
+        root,
+        "home",
+        ".devshell",
+        "control",
+        "instances",
+        `${TESTSPACE_INSTANCE}.toml`,
+    ),
+    instanceConfigDirectory: join(
+        root,
+        "home",
+        ".devshell",
+        "control",
+        "instances",
+    ),
     legacyRuntime: join(root, "runtime"),
     reverseDevshellHome: join(root, "reverse-home", ".devshell"),
     reverseConnectorHealth: join(root, "reverse-connector-health.json"),
@@ -73,7 +89,14 @@ const paths = {
     reverseConnectorProcessLog: join(root, "reverse-connector-process.log"),
     reverseConnectorStopFile: join(root, "reverse-connector.stop"),
     reverseHome: join(root, "reverse-home"),
-    reverseInstanceConfig: join(root, "home", ".devshell", "control", "instances", `${TESTSPACE_REVERSE_INSTANCE}.toml`),
+    reverseInstanceConfig: join(
+        root,
+        "home",
+        ".devshell",
+        "control",
+        "instances",
+        `${TESTSPACE_REVERSE_INSTANCE}.toml`,
+    ),
     reverseRuntime: join(root, "reverse-runtime"),
     reverseWorkspace: join(root, "reverse-workspace"),
     runtime: resolveTestspaceRuntimeDirectory(root),
@@ -140,7 +163,10 @@ async function start(argv) {
                 await readTestspaceInstanceSnapshot(runtimeDirectory, instance),
             startInstance: async (instance) => {
                 runCli(["instance", "start", instance], env);
-                return await readTestspaceInstanceSnapshot(runtimeDirectory, instance);
+                return await readTestspaceInstanceSnapshot(
+                    runtimeDirectory,
+                    instance,
+                );
             },
         });
         if (local.restarted) {
@@ -168,20 +194,27 @@ async function start(argv) {
             stateChanged = true;
             process.stdout.write("testspace reverse Worker was restarted.\n");
         }
-        const connectors = await ensureConnectorProcesses(connectorTargets(existing), {
-            isProcessAlive,
-            readHealth: async (target) => await readTestspaceConnectorHealth(target.healthFile),
-            readPid: readOptionalConnectorPid,
-            restartConnector: async (target, pid) => {
-                await stopConnector(target, pid);
-                return await startConnector(target, env);
+        const connectors = await ensureConnectorProcesses(
+            connectorTargets(existing),
+            {
+                isProcessAlive,
+                readHealth: async (target) =>
+                    await readTestspaceConnectorHealth(target.healthFile),
+                readPid: readOptionalConnectorPid,
+                restartConnector: async (target, pid) => {
+                    await stopConnector(target, pid);
+                    return await startConnector(target, env);
+                },
+                startConnector: async (target) =>
+                    await startConnector(target, env),
             },
-            startConnector: async (target) => await startConnector(target, env),
-        });
+        );
         for (const [instance, connector] of Object.entries(connectors)) {
             if (!connector.restarted) continue;
             repaired = true;
-            process.stdout.write(`testspace activity connector was restarted for ${instance}.\n`);
+            process.stdout.write(
+                `testspace activity connector was restarted for ${instance}.\n`,
+            );
         }
         if (!repaired) {
             process.stdout.write("testspace is already running.\n");
@@ -226,18 +259,23 @@ async function start(argv) {
     removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, previousRuntime);
     await removeOwnedTestspaceRoot(repoRoot, root);
-    await Promise.all(runtimeDirectories(previousRuntime).map(async (directory) =>
-        await rm(directory, { force: true, recursive: true })
-    ));
+    await Promise.all(
+        runtimeDirectories(previousRuntime).map(
+            async (directory) =>
+                await rm(directory, { force: true, recursive: true }),
+        ),
+    );
 
     await markTestspaceRootOwned(repoRoot, root);
     await Promise.all(
-        connectorProcessTargets().map(async (target) =>
-            await rm(target.stopFile, { force: true })
+        connectorProcessTargets().map(
+            async (target) => await rm(target.stopFile, { force: true }),
         ),
     );
     await Promise.all([
-        mkdir(join(paths.home, ".devshell", "control", "instances"), { recursive: true }),
+        mkdir(join(paths.home, ".devshell", "control", "instances"), {
+            recursive: true,
+        }),
         mkdir(paths.reverseHome, { recursive: true }),
         mkdir(paths.reverseRuntime, { recursive: true }),
         mkdir(paths.reverseWorkspace, { recursive: true }),
@@ -251,8 +289,16 @@ async function start(argv) {
 
     const mcpPort = await reservePort(18790);
     const webPort = await reservePort(mcpPort === 18791 ? 18792 : 18791);
-    await writeFile(paths.controlConfig, buildTestspaceGlobalConfig({ mcpPort, webPort }), "utf8");
-    await writeFile(paths.instanceConfig, buildTestspaceInstanceConfig(), "utf8");
+    await writeFile(
+        paths.controlConfig,
+        buildTestspaceGlobalConfig({ mcpPort, webPort }),
+        "utf8",
+    );
+    await writeFile(
+        paths.instanceConfig,
+        buildTestspaceInstanceConfig(),
+        "utf8",
+    );
     await writeFile(
         paths.reverseInstanceConfig,
         buildTestspaceReverseInstanceConfig(),
@@ -273,7 +319,9 @@ async function start(argv) {
             workerPath: workerPath(),
         });
     } catch (error) {
-        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true });
+        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, {
+            allowFailure: true,
+        });
         runCli(["stop"], env, { allowFailure: true });
         try {
             stopTestspaceWorkerProcesses(paths.runtime);
@@ -281,7 +329,9 @@ async function start(argv) {
             throw new AggregateError(
                 [
                     error instanceof Error ? error : new Error(String(error)),
-                    cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+                    cleanupError instanceof Error
+                        ? cleanupError
+                        : new Error(String(cleanupError)),
                 ],
                 "Reverse Testspace startup failed and Worker cleanup was incomplete.",
             );
@@ -305,11 +355,14 @@ async function start(argv) {
         await ensureConnectorProcesses(connectorTargets(state), {
             isProcessAlive,
             readPid: readOptionalConnectorPid,
-            rollbackConnector: async (target, pid) => await stopConnector(target, pid),
+            rollbackConnector: async (target, pid) =>
+                await stopConnector(target, pid),
             startConnector: async (target) => await startConnector(target, env),
         });
     } catch (error) {
-        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true });
+        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, {
+            allowFailure: true,
+        });
         runCli(["stop"], env, { allowFailure: true });
         try {
             stopTestspaceWorkerProcesses(paths.runtime);
@@ -317,7 +370,9 @@ async function start(argv) {
             throw new AggregateError(
                 [
                     error instanceof Error ? error : new Error(String(error)),
-                    cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+                    cleanupError instanceof Error
+                        ? cleanupError
+                        : new Error(String(cleanupError)),
                 ],
                 "Testspace connector startup failed and Worker cleanup was incomplete.",
             );
@@ -325,7 +380,9 @@ async function start(argv) {
         throw error;
     }
 
-    process.stdout.write("testspace started with local and reverse Workers, Control, MCP and Web.\n");
+    process.stdout.write(
+        "testspace started with local and reverse Workers, Control, MCP and Web.\n",
+    );
     printCommands(state);
 }
 
@@ -347,14 +404,20 @@ async function web(argv) {
     const url = testspaceUrls(state).web;
     process.stdout.write(`${url}\n`);
     if (argv.includes("--print")) return;
-    const opener = process.platform === "darwin"
-        ? ["open", [url]]
-        : process.platform === "win32"
-          ? [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "start", "", url]]
-          : ["xdg-open", [url]];
+    const opener =
+        process.platform === "darwin"
+            ? ["open", [url]]
+            : process.platform === "win32"
+              ? [
+                    process.env.ComSpec ?? "cmd.exe",
+                    ["/d", "/s", "/c", "start", "", url],
+                ]
+              : ["xdg-open", [url]];
     const result = spawnSync(opener[0], opener[1], { stdio: "ignore" });
     if (result.status !== 0) {
-        process.stdout.write("Browser opener is unavailable; open the URL above manually.\n");
+        process.stdout.write(
+            "Browser opener is unavailable; open the URL above manually.\n",
+        );
     }
 }
 
@@ -412,20 +475,33 @@ async function status() {
         runtimeDirectory,
         async (_shared, connection) => {
             const result = {};
-            for (const instance of [TESTSPACE_INSTANCE, TESTSPACE_REVERSE_INSTANCE]) {
-                const snapshot = await connection.request(instance, "runtime", "snapshot");
+            for (const instance of [
+                TESTSPACE_INSTANCE,
+                TESTSPACE_REVERSE_INSTANCE,
+            ]) {
+                const snapshot = await connection.request(
+                    instance,
+                    "runtime",
+                    "snapshot",
+                );
                 result[instance] = snapshot.snapshot;
             }
             return result;
         },
     );
-    process.stdout.write(`${JSON.stringify({
-        connectors,
-        controlPid: state.controlPid,
-        instances,
-        reverse,
-        urls: testspaceUrls(state),
-    }, null, 2)}\n`);
+    process.stdout.write(
+        `${JSON.stringify(
+            {
+                connectors,
+                controlPid: state.controlPid,
+                instances,
+                reverse,
+                urls: testspaceUrls(state),
+            },
+            null,
+            2,
+        )}\n`,
+    );
 }
 
 async function smoke() {
@@ -436,13 +512,18 @@ async function smoke() {
         runtimeDirectory,
     });
     if (!reverse.ready || !reverse.connected) {
-        throw new Error(`reverse testspace instance is not connected: ${JSON.stringify(reverse)}`);
+        throw new Error(
+            `reverse testspace instance is not connected: ${JSON.stringify(reverse)}`,
+        );
     }
     const terminals = await runTestspaceTerminalSmoke({
         runtimeDirectory,
         targets: [
             { instance: TESTSPACE_INSTANCE, workspace: paths.workspace },
-            { instance: TESTSPACE_REVERSE_INSTANCE, workspace: paths.reverseWorkspace },
+            {
+                instance: TESTSPACE_REVERSE_INSTANCE,
+                workspace: paths.reverseWorkspace,
+            },
         ],
     });
     const comment = await runTestspaceCommentSmoke({
@@ -464,7 +545,9 @@ async function smoke() {
         workspace: paths.workspace,
     });
     const web = await runTestspaceWebSmoke({ webPort: state.webPort });
-    process.stdout.write(`${JSON.stringify({ comment, modelDevshell, reverse, terminals, web, workspace }, null, 2)}\n`);
+    process.stdout.write(
+        `${JSON.stringify({ comment, modelDevshell, reverse, terminals, web, workspace }, null, 2)}\n`,
+    );
 }
 
 async function longSmoke() {
@@ -486,18 +569,26 @@ async function stop() {
         controlPid = orphanControlPid;
         if (isProcessAlive(orphanControlPid)) {
             const env = testspaceEnvironment(runtimeDirectory);
-            runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true, inherit: true });
+            runCli(["instance", "stop", TESTSPACE_INSTANCE], env, {
+                allowFailure: true,
+                inherit: true,
+            });
             runCli(["stop"], env, { allowFailure: true, inherit: true });
         }
     } else {
         const env = testspaceEnvironment(runtimeDirectory);
-        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, { allowFailure: true, inherit: true });
+        runCli(["instance", "stop", TESTSPACE_INSTANCE], env, {
+            allowFailure: true,
+            inherit: true,
+        });
         runCli(["stop"], env, { allowFailure: true, inherit: true });
     }
     stopTestspaceWorkerProcesses(runtimeDirectory);
     await waitForProcessExit(controlPid, 3_000);
     if (isProcessAlive(controlPid)) {
-        throw new Error(`testspace control process ${String(controlPid)} is still running`);
+        throw new Error(
+            `testspace control process ${String(controlPid)} is still running`,
+        );
     }
     await stopTestspaceTmux({
         devshellHome: join(paths.home, ".devshell"),
@@ -514,9 +605,12 @@ async function stop() {
     removeTestspaceDockerContainers(paths.instanceConfigDirectory);
     resetTestspacePodmanStorage(paths.home, runtimeDirectory);
     await removeOwnedTestspaceRoot(repoRoot, root);
-    await Promise.all(runtimeDirectories(runtimeDirectory).map(async (directory) =>
-        await rm(directory, { force: true, recursive: true })
-    ));
+    await Promise.all(
+        runtimeDirectories(runtimeDirectory).map(
+            async (directory) =>
+                await rm(directory, { force: true, recursive: true }),
+        ),
+    );
     process.stdout.write("testspace stopped and removed.\n");
 }
 
@@ -526,16 +620,16 @@ async function startConnector(target, env) {
         rm(target.stopFile, { force: true }),
     ]);
     const logFd = openSync(target.processLog, "a");
-    const connector = spawn(process.execPath, [
-        fileURLToPath(import.meta.url),
-        "connector-loop",
-        target.instance,
-    ], {
-        cwd: repoRoot,
-        detached: true,
-        env,
-        stdio: ["ignore", logFd, logFd],
-    });
+    const connector = spawn(
+        process.execPath,
+        [fileURLToPath(import.meta.url), "connector-loop", target.instance],
+        {
+            cwd: repoRoot,
+            detached: true,
+            env,
+            stdio: ["ignore", logFd, logFd],
+        },
+    );
     connector.unref();
     closeSync(logFd);
     await writeFile(target.pidFile, `${connector.pid}\n`, "utf8");
@@ -561,7 +655,9 @@ async function stopConnector(target, pid) {
             await delay(25);
         }
         if (isProcessAlive(pid)) {
-            throw new Error(`testspace connector process ${String(pid)} did not stop`);
+            throw new Error(
+                `testspace connector process ${String(pid)} did not stop`,
+            );
         }
     }
     await rm(target.pidFile, { force: true });
@@ -577,8 +673,11 @@ async function connectorLoop(argv) {
     const state = await readState();
     if (state === undefined) throw new Error("missing testspace state");
     const instance = argv[0] ?? TESTSPACE_INSTANCE;
-    const target = connectorTargets(state).find((candidate) => candidate.instance === instance);
-    if (target === undefined) throw new Error(`unknown testspace connector instance: ${instance}`);
+    const target = connectorTargets(state).find(
+        (candidate) => candidate.instance === instance,
+    );
+    if (target === undefined)
+        throw new Error(`unknown testspace connector instance: ${instance}`);
     await runConnectorLoop({
         endpoint: target.endpoint,
         healthFile: target.healthFile,
@@ -593,22 +692,28 @@ async function connectorLoop(argv) {
 
 function runCli(cliArgs, env, options = {}) {
     assertTestspaceLifecycleEnvironment(root, env);
-    const result = spawnSync(process.execPath, [
-        "--import",
-        "tsx",
-        "--import",
-        pathToFileURL(sourceLoader()).href,
-        cliEntry(),
-        ...cliArgs,
-    ], {
-        cwd: repoRoot,
-        encoding: options.inherit ? undefined : "utf8",
-        env,
-        stdio: options.inherit ? "inherit" : "pipe",
-        timeout: 60000,
-    });
+    const result = spawnSync(
+        process.execPath,
+        [
+            "--import",
+            "tsx",
+            "--import",
+            pathToFileURL(sourceLoader()).href,
+            cliEntry(),
+            ...cliArgs,
+        ],
+        {
+            cwd: repoRoot,
+            encoding: options.inherit ? undefined : "utf8",
+            env,
+            stdio: options.inherit ? "inherit" : "pipe",
+            timeout: 60000,
+        },
+    );
     if (!options.allowFailure && result.status !== 0) {
-        throw new Error(`devshell ${cliArgs.join(" ")} failed\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+        throw new Error(
+            `devshell ${cliArgs.join(" ")} failed\n${result.stdout ?? ""}${result.stderr ?? ""}`,
+        );
     }
     return result;
 }
@@ -619,7 +724,8 @@ function run(executable, commandArgs) {
         env: process.env,
         stdio: "inherit",
     });
-    if (result.status !== 0) throw new Error(`${executable} ${commandArgs.join(" ")} failed`);
+    if (result.status !== 0)
+        throw new Error(`${executable} ${commandArgs.join(" ")} failed`);
 }
 
 function testspaceEnvironment(runtimeDirectory = paths.runtime) {
@@ -631,13 +737,21 @@ function testspaceEnvironment(runtimeDirectory = paths.runtime) {
 }
 
 function stateRuntimeDirectory(state) {
-    return typeof state?.runtimeDirectory === "string" && state.runtimeDirectory.length > 0
+    return typeof state?.runtimeDirectory === "string" &&
+        state.runtimeDirectory.length > 0
         ? state.runtimeDirectory
         : paths.legacyRuntime;
 }
 
 function runtimeDirectories(primary) {
-    return [...new Set([primary, paths.runtime, paths.reverseRuntime, paths.legacyRuntime])];
+    return [
+        ...new Set([
+            primary,
+            paths.runtime,
+            paths.reverseRuntime,
+            paths.legacyRuntime,
+        ]),
+    ];
 }
 
 function connectorProcessTargets() {
@@ -665,16 +779,27 @@ function connectorTargets(state) {
     const urls = testspaceUrls(state);
     return connectorProcessTargets().map((target) => ({
         ...target,
-        endpoint: target.instance === TESTSPACE_INSTANCE ? urls.mcp : urls.reverseMcp,
-        workspace: target.instance === TESTSPACE_INSTANCE ? paths.workspace : paths.reverseWorkspace,
+        endpoint:
+            target.instance === TESTSPACE_INSTANCE ? urls.mcp : urls.reverseMcp,
+        workspace:
+            target.instance === TESTSPACE_INSTANCE
+                ? paths.workspace
+                : paths.reverseWorkspace,
     }));
 }
 
 async function readTestspaceInstanceSnapshot(runtimeDirectory, instance) {
-    return await withTestspaceControlConnection(runtimeDirectory, async (_shared, connection) => {
-        const response = await connection.request(instance, "runtime", "snapshot");
-        return response.snapshot;
-    });
+    return await withTestspaceControlConnection(
+        runtimeDirectory,
+        async (_shared, connection) => {
+            const response = await connection.request(
+                instance,
+                "runtime",
+                "snapshot",
+            );
+            return response.snapshot;
+        },
+    );
 }
 
 function stopTestspaceWorkerProcesses(runtimeDirectory) {
@@ -686,21 +811,26 @@ function stopTestspaceWorkerProcesses(runtimeDirectory) {
         },
         {
             instance: TESTSPACE_REVERSE_INSTANCE,
-            stop: () => stopTestspaceReverse({
-                environment,
-                paths,
-                workerPath: workerPath(),
-            }),
+            stop: () =>
+                stopTestspaceReverse({
+                    environment,
+                    paths,
+                    workerPath: workerPath(),
+                }),
         },
     ]);
 }
 
 function stopTestspaceLocalWorker(environment) {
     assertTestspaceLifecycleEnvironment(root, environment);
-    const result = spawnSync(workerPath(), ["stop", "--instance", TESTSPACE_INSTANCE], {
-        encoding: "utf8",
-        env: environment,
-    });
+    const result = spawnSync(
+        workerPath(),
+        ["stop", "--instance", TESTSPACE_INSTANCE],
+        {
+            encoding: "utf8",
+            env: environment,
+        },
+    );
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.toLowerCase();
     if (
         result.status !== 0 &&
@@ -711,9 +841,9 @@ function stopTestspaceLocalWorker(environment) {
     ) {
         throw new Error(
             result.stderr ||
-            result.stdout ||
-            result.error?.message ||
-            `failed to stop local worker ${TESTSPACE_INSTANCE}`,
+                result.stdout ||
+                result.error?.message ||
+                `failed to stop local worker ${TESTSPACE_INSTANCE}`,
         );
     }
     return result.status === 0;
@@ -727,9 +857,14 @@ async function waitForProcessExit(pid, timeoutMs) {
 }
 
 function workerEnvironmentName() {
-    const os = { darwin: "DARWIN", linux: "LINUX", win32: "WINDOWS" }[process.platform];
+    const os = { darwin: "DARWIN", linux: "LINUX", win32: "WINDOWS" }[
+        process.platform
+    ];
     const arch = { arm64: "ARM64", x64: "X64" }[process.arch];
-    if (os === undefined || arch === undefined) throw new Error(`unsupported host: ${process.platform}-${process.arch}`);
+    if (os === undefined || arch === undefined)
+        throw new Error(
+            `unsupported host: ${process.platform}-${process.arch}`,
+        );
     return `PORTABLE_DEVSHELL_WORKER_${os}_${arch}_PATH`;
 }
 
@@ -738,7 +873,10 @@ function workerPath() {
     if (configured !== undefined && configured.length > 0) {
         return resolve(repoRoot, configured);
     }
-    const targetDirectory = resolve(repoRoot, process.env.CARGO_TARGET_DIR ?? "target");
+    const targetDirectory = resolve(
+        repoRoot,
+        process.env.CARGO_TARGET_DIR ?? "target",
+    );
     return resolve(
         targetDirectory,
         "debug",
@@ -751,7 +889,13 @@ function cliEntry() {
 }
 
 function sourceLoader() {
-    return resolve(repoRoot, "packages", "mcp", "test", "RegisterWorkspacePackages.mjs");
+    return resolve(
+        repoRoot,
+        "packages",
+        "mcp",
+        "test",
+        "RegisterWorkspacePackages.mjs",
+    );
 }
 
 function tuiEntry() {
@@ -768,7 +912,11 @@ async function ensureWorkspace(directory, role) {
         "",
     ].join("\n");
     await writeFile(join(directory, "README.md"), readme, "utf8");
-    await writeFile(join(directory, "activity.txt"), `${role} testspace activity\n`, "utf8");
+    await writeFile(
+        join(directory, "activity.txt"),
+        `${role} testspace activity\n`,
+        "utf8",
+    );
 }
 
 async function reservePort(preferred) {
@@ -782,7 +930,9 @@ function portAvailable(port) {
     return new Promise((resolvePromise) => {
         const server = createServer();
         server.once("error", () => resolvePromise(false));
-        server.listen(port, "127.0.0.1", () => server.close(() => resolvePromise(true)));
+        server.listen(port, "127.0.0.1", () =>
+            server.close(() => resolvePromise(true)),
+        );
     });
 }
 
@@ -805,23 +955,36 @@ async function readOptionalControlPid() {
 
 async function readOptionalConnectorPid(target) {
     try {
-        return Number.parseInt((await readFile(target.pidFile, "utf8")).trim(), 10);
+        return Number.parseInt(
+            (await readFile(target.pidFile, "utf8")).trim(),
+            10,
+        );
     } catch {
         return undefined;
     }
 }
 
 async function writeState(state) {
-    await writeFile(paths.state, `${JSON.stringify({
-        ...state,
-        namespaceToken: process.env[TESTSPACE_TOKEN_ENV],
-    }, null, 2)}\n`, "utf8");
+    await writeFile(
+        paths.state,
+        `${JSON.stringify(
+            {
+                ...state,
+                namespaceToken: process.env[TESTSPACE_TOKEN_ENV],
+            },
+            null,
+            2,
+        )}\n`,
+        "utf8",
+    );
 }
 
 async function readState() {
     try {
         const state = JSON.parse(await readFile(paths.state, "utf8"));
-        return state?.namespaceToken === process.env[TESTSPACE_TOKEN_ENV] ? state : undefined;
+        return state?.namespaceToken === process.env[TESTSPACE_TOKEN_ENV]
+            ? state
+            : undefined;
     } catch {
         return undefined;
     }
@@ -862,24 +1025,28 @@ function readIntegerFlag(argv, name, fallback, minimum, maximum) {
     if (index === -1) return fallback;
     const value = Number.parseInt(argv[index + 1] ?? "", 10);
     if (!Number.isInteger(value) || value < minimum || value > maximum) {
-        throw new Error(`${name} must be an integer from ${minimum} to ${maximum}`);
+        throw new Error(
+            `${name} must be an integer from ${minimum} to ${maximum}`,
+        );
     }
     return value;
 }
 
 function printCommands(state) {
     printUrls(state);
-    process.stdout.write([
-        "Observe TUI:  pnpm testspace tui",
-        "Open Web:     pnpm testspace web",
-        "Smoke Web:    pnpm testspace web-smoke",
-        "Smoke Comment: pnpm testspace comment-smoke",
-        "Long wait:     pnpm testspace long-smoke",
-        "Status:       pnpm testspace status",
-        "Protocol probes: pnpm testspace smoke",
-        "Stop/remove:   pnpm testspace stop",
-        "",
-    ].join("\n"));
+    process.stdout.write(
+        [
+            "Observe TUI:  pnpm testspace tui",
+            "Open Web:     pnpm testspace web",
+            "Smoke Web:    pnpm testspace web-smoke",
+            "Smoke Comment: pnpm testspace comment-smoke",
+            "Long wait:     pnpm testspace long-smoke",
+            "Status:       pnpm testspace status",
+            "Protocol probes: pnpm testspace smoke",
+            "Stop/remove:   pnpm testspace stop",
+            "",
+        ].join("\n"),
+    );
 }
 
 function printUrls(state) {
@@ -891,6 +1058,8 @@ function printUrls(state) {
 
 function usage(message) {
     process.stderr.write(`${message}\n`);
-    process.stderr.write("Usage: pnpm testspace [start|comment-smoke|exec|long-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n");
+    process.stderr.write(
+        "Usage: pnpm testspace [start|comment-smoke|exec|long-smoke|status|smoke|tui|web|web-smoke|stop] [options]\n",
+    );
     process.exit(2);
 }

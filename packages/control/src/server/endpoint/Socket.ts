@@ -1,10 +1,21 @@
 import { ControlChannelServer } from "./Channel.js";
-import type { ControlAcceptedChannel, ControlChannelListener, ControlChannelRouteProvider } from "./Channel.js";
+import type {
+    ControlAcceptedChannel,
+    ControlChannelListener,
+    ControlChannelRouteProvider,
+} from "./Channel.js";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { chmod } from "node:fs/promises";
-import { SocketChannel, isWindowsNamedPipePath, removeControlIpcEndpoint } from "@portable-devshell/shared";
-import type { ControlClientKind, PrefixRouteSubject } from "@portable-devshell/shared";
+import {
+    SocketChannel,
+    isWindowsNamedPipePath,
+    removeControlIpcEndpoint,
+} from "@portable-devshell/shared";
+import type {
+    ControlClientKind,
+    PrefixRouteSubject,
+} from "@portable-devshell/shared";
 
 export type ControlRouteProvider = ControlChannelRouteProvider;
 
@@ -18,10 +29,12 @@ export class ControlSocketServer {
     readonly #server: ControlChannelServer;
 
     constructor(options: ControlSocketServerOptions) {
-        this.#listener = new ControlSocketListener({ socketPath: options.socketPath });
+        this.#listener = new ControlSocketListener({
+            socketPath: options.socketPath,
+        });
         this.#server = new ControlChannelServer({
             listeners: [this.#listener],
-            routes: options.routes
+            routes: options.routes,
         });
     }
 
@@ -61,7 +74,9 @@ export class ControlSocketListener implements ControlChannelListener {
         this.#subject = options.subject ?? localControlSubject();
     }
 
-    async start(accept: (connection: ControlAcceptedChannel) => void): Promise<void> {
+    async start(
+        accept: (connection: ControlAcceptedChannel) => void,
+    ): Promise<void> {
         if (this.#server !== undefined) {
             return;
         }
@@ -93,7 +108,9 @@ export class ControlSocketListener implements ControlChannelListener {
             return;
         }
         await new Promise<void>((resolve, reject) => {
-            server.close((error) => error === undefined ? resolve() : reject(error));
+            server.close((error) =>
+                error === undefined ? resolve() : reject(error),
+            );
         });
     }
 
@@ -115,8 +132,9 @@ export class ControlSocketListener implements ControlChannelListener {
 function localControlSubject(
     environment: NodeJS.ProcessEnv = process.env,
 ): PrefixRouteSubject {
-    const identity = typeof process.getuid === "function"
-        ? `uid:${process.getuid()}`
-        : `user:${environment.USERDOMAIN ?? "local"}\\${environment.USERNAME ?? environment.USER ?? "unknown"}`;
+    const identity =
+        typeof process.getuid === "function"
+            ? `uid:${process.getuid()}`
+            : `user:${environment.USERDOMAIN ?? "local"}\\${environment.USERNAME ?? environment.USER ?? "unknown"}`;
     return { id: identity, kind: "local-owner" };
 }

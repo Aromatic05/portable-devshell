@@ -21,7 +21,7 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
     const snapshot = useSyncExternalStore(
         (listener) => props.source.subscribe(listener),
         () => props.source.getSnapshot(),
-        () => props.source.getSnapshot()
+        () => props.source.getSnapshot(),
     );
 
     useEffect(() => {
@@ -38,12 +38,21 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
         return () => props.onGraphicsVisibility(false);
     }, [props.onGraphicsVisibility]);
 
-    const status = snapshot.error ?? snapshot.message ?? `${snapshot.status}${snapshot.exitCode === undefined ? "" : ` (${snapshot.exitCode})`}`;
-    const scroll = snapshot.scroll.atBottom ? "" : ` · scroll -${snapshot.scroll.offsetFromBottom}`;
-    const selection = snapshot.selection === undefined ? "" : ` · selected ${snapshot.selection.characters}`;
-    const graphics = snapshot.graphics.count === 0
+    const status =
+        snapshot.error ??
+        snapshot.message ??
+        `${snapshot.status}${snapshot.exitCode === undefined ? "" : ` (${snapshot.exitCode})`}`;
+    const scroll = snapshot.scroll.atBottom
         ? ""
-        : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
+        : ` · scroll -${snapshot.scroll.offsetFromBottom}`;
+    const selection =
+        snapshot.selection === undefined
+            ? ""
+            : ` · selected ${snapshot.selection.characters}`;
+    const graphics =
+        snapshot.graphics.count === 0
+            ? ""
+            : ` · graphics ${snapshot.graphics.count} ${snapshot.graphics.protocols.join("+")}`;
     const controls = props.focused
         ? "drag copy · Shift+PgUp/PgDn · Ctrl+] sidebar"
         : "→/Tab focus · r replay · K kill";
@@ -53,7 +62,12 @@ export function TuiComponentTerminal(props: TuiComponentTerminalProps) {
                 {`terminal · ${props.instance ?? "no instance"} · ${status}${scroll}${selection}${graphics} · ${controls}`}
             </Text>
             {snapshot.lines.slice(0, props.rows).map((line, row) => (
-                <Box height={1} key={row} overflow="hidden" width={props.columns}>
+                <Box
+                    height={1}
+                    key={row}
+                    overflow="hidden"
+                    width={props.columns}
+                >
                     <Text wrap="truncate-end">
                         {line.segments.map((segment, index) => (
                             <Text

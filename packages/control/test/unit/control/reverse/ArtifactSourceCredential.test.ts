@@ -9,27 +9,36 @@ import {
     readTransferPayloadSourceInput,
     sourceDescriptor,
     sourceTypeFromPayload,
-    validateTransferStart
+    validateTransferStart,
 } from "../../../../src/control/artifact/Source.ts";
 import { ReverseCredentialService } from "../../../../src/control/reverse/credential/Service.ts";
 
 test("artifact source helpers preserve handle and path variants", () => {
-    assert.deepEqual(readSharePayloadSourceInput({ handle: "artifact:stdout:1" }), {
-        handle: "artifact:stdout:1"
-    });
-    assert.deepEqual(readSharePayloadSourceInput({ path: "./result.bin", workspace: "/workspace" }), {
-        path: "./result.bin",
-        workspace: "/workspace"
-    });
+    assert.deepEqual(
+        readSharePayloadSourceInput({ handle: "artifact:stdout:1" }),
+        {
+            handle: "artifact:stdout:1",
+        },
+    );
+    assert.deepEqual(
+        readSharePayloadSourceInput({
+            path: "./result.bin",
+            workspace: "/workspace",
+        }),
+        {
+            path: "./result.bin",
+            workspace: "/workspace",
+        },
+    );
     assert.deepEqual(
         readTransferPayloadSourceInput({
             handle: "artifact:stdout:1",
             operation: "start",
             targetInstance: "target-one",
             targetPath: "/tmp/result.bin",
-            targetWorkspace: "/tmp"
+            targetWorkspace: "/tmp",
         }),
-        { handle: "artifact:stdout:1" }
+        { handle: "artifact:stdout:1" },
     );
     assert.deepEqual(
         readTransferPayloadSourceInput({
@@ -38,36 +47,47 @@ test("artifact source helpers preserve handle and path variants", () => {
             sourceWorkspace: "/source",
             targetInstance: "target-one",
             targetPath: "/tmp/result.bin",
-            targetWorkspace: "/tmp"
+            targetWorkspace: "/tmp",
         }),
-        { path: "./result.bin", workspace: "/source" }
+        { path: "./result.bin", workspace: "/source" },
     );
 });
 
 test("artifact source helpers reject ambiguous or empty sources and missing targets", () => {
     for (const action of [
-        () => readSharePayloadSourceInput({ handle: "", path: undefined } as never),
-        () => readSharePayloadSourceInput({ handle: "one", path: "./two" } as never),
-        () => readTransferPayloadSourceInput({
-            handle: "one",
-            operation: "start",
-            sourcePath: "./two",
-            targetInstance: "target",
-            targetPath: "/target"
-        } as never),
-        () => validateTransferStart({
-            handle: "one",
-            operation: "status",
-            targetInstance: "target",
-            targetPath: "/target"
-        } as never),
-        () => validateTransferStart({
-            handle: "one",
-            operation: "start",
-            targetInstance: "",
-            targetPath: "/target",
-            targetWorkspace: "/target"
-        })
+        () =>
+            readSharePayloadSourceInput({
+                handle: "",
+                path: undefined,
+            } as never),
+        () =>
+            readSharePayloadSourceInput({
+                handle: "one",
+                path: "./two",
+            } as never),
+        () =>
+            readTransferPayloadSourceInput({
+                handle: "one",
+                operation: "start",
+                sourcePath: "./two",
+                targetInstance: "target",
+                targetPath: "/target",
+            } as never),
+        () =>
+            validateTransferStart({
+                handle: "one",
+                operation: "status",
+                targetInstance: "target",
+                targetPath: "/target",
+            } as never),
+        () =>
+            validateTransferStart({
+                handle: "one",
+                operation: "start",
+                targetInstance: "",
+                targetPath: "/target",
+                targetWorkspace: "/target",
+            }),
     ]) {
         assertTargetInvalid(action);
     }
@@ -83,7 +103,7 @@ test("artifact source instance resolution and descriptors retain authority and s
         name: "stdout.bin",
         payloadBlake3: "a".repeat(64),
         payloadBytes: 3,
-        type: "stdout" as const
+        type: "stdout" as const,
     };
     const directoryPayload = {
         entryCount: 2,
@@ -93,24 +113,44 @@ test("artifact source instance resolution and descriptors retain authority and s
         name: "workspace.tar.zst",
         payloadBlake3: "c".repeat(64),
         payloadBytes: 5,
-        type: "directoryArchive" as const
+        type: "directoryArchive" as const,
     };
 
     assert.equal(sourceTypeFromPayload(bytePayload), "artifact");
-    assert.equal(sourceTypeFromPayload({ ...bytePayload, type: "stderr" }), "artifact");
-    assert.equal(sourceTypeFromPayload({ ...bytePayload, type: "file" }), "file");
+    assert.equal(
+        sourceTypeFromPayload({ ...bytePayload, type: "stderr" }),
+        "artifact",
+    );
+    assert.equal(
+        sourceTypeFromPayload({ ...bytePayload, type: "file" }),
+        "file",
+    );
     assert.equal(sourceTypeFromPayload(directoryPayload), "directory");
-    assert.deepEqual(sourceDescriptor("source-one", { handle: "artifact:stdout:1" }, bytePayload), {
-        handle: "artifact:stdout:1",
-        instance: "source-one",
-        type: "artifact"
-    });
-    assert.deepEqual(sourceDescriptor("source-one", { path: "./workspace", workspace: "/source" }, directoryPayload), {
-        instance: "source-one",
-        path: "./workspace",
-        type: "directory",
-        workspace: "/source"
-    });
+    assert.deepEqual(
+        sourceDescriptor(
+            "source-one",
+            { handle: "artifact:stdout:1" },
+            bytePayload,
+        ),
+        {
+            handle: "artifact:stdout:1",
+            instance: "source-one",
+            type: "artifact",
+        },
+    );
+    assert.deepEqual(
+        sourceDescriptor(
+            "source-one",
+            { path: "./workspace", workspace: "/source" },
+            directoryPayload,
+        ),
+        {
+            instance: "source-one",
+            path: "./workspace",
+            type: "directory",
+            workspace: "/source",
+        },
+    );
 });
 
 test("reverse credential service validates instance existence and provider before touching credentials", async () => {
@@ -123,21 +163,34 @@ test("reverse credential service validates instance existence and provider befor
                     return { provider: "local" };
                 }
                 return undefined;
-            }
+            },
         } as never,
-        publicBaseUrl: "https://controller.example/base"
+        publicBaseUrl: "https://controller.example/base",
     });
 
-    await assert.rejects(service.createDeviceCode("missing-one"), (error: unknown) => {
-        assert.equal(readField(error, "code"), errorCodes.instanceMissing);
-        assert.deepEqual(readField(error, "details"), { instance: "missing-one" });
-        return true;
-    });
-    await assert.rejects(service.rotateDeviceToken("local-one"), (error: unknown) => {
-        assert.equal(readField(error, "code"), errorCodes.reverseInstanceNotReverse);
-        assert.deepEqual(readField(error, "details"), { instance: "local-one" });
-        return true;
-    });
+    await assert.rejects(
+        service.createDeviceCode("missing-one"),
+        (error: unknown) => {
+            assert.equal(readField(error, "code"), errorCodes.instanceMissing);
+            assert.deepEqual(readField(error, "details"), {
+                instance: "missing-one",
+            });
+            return true;
+        },
+    );
+    await assert.rejects(
+        service.rotateDeviceToken("local-one"),
+        (error: unknown) => {
+            assert.equal(
+                readField(error, "code"),
+                errorCodes.reverseInstanceNotReverse,
+            );
+            assert.deepEqual(readField(error, "details"), {
+                instance: "local-one",
+            });
+            return true;
+        },
+    );
     assert.deepEqual(calls, []);
 });
 
@@ -146,7 +199,7 @@ test("reverse credential service coordinates enrollment, rotation, revocation, a
     const worker = {
         async setReverseEnrollmentState(state: string) {
             calls.push(`worker:${state}`);
-        }
+        },
     };
     const service = new ReverseCredentialService({
         credentialStore: credentialStore(calls),
@@ -155,25 +208,27 @@ test("reverse credential service coordinates enrollment, rotation, revocation, a
                 return instance === "reverse-one"
                     ? { provider: "reverse", worker }
                     : undefined;
-            }
+            },
         } as never,
-        publicBaseUrl: "https://controller.example/base"
+        publicBaseUrl: "https://controller.example/base",
     });
-    service.setDisconnectHandler((instance) => calls.push(`disconnect:${instance}`));
+    service.setDisconnectHandler((instance) =>
+        calls.push(`disconnect:${instance}`),
+    );
 
     assert.deepEqual(await service.createDeviceCode("reverse-one"), {
         controllerUrl: "https://controller.example/base",
         deviceCode: "ABCDE-FGHIJ",
         expiresAt: "2026-07-16T12:00:00.000Z",
-        instance: "reverse-one"
+        instance: "reverse-one",
     });
     assert.deepEqual(await service.rotateDeviceToken("reverse-one"), {
         deviceToken: "rotated-token",
-        instance: "reverse-one"
+        instance: "reverse-one",
     });
     assert.deepEqual(await service.revokeDeviceToken("reverse-one"), {
         instance: "reverse-one",
-        revoked: true
+        revoked: true,
     });
     await service.retireInstance("reverse-one");
     assert.deepEqual(calls, [
@@ -186,7 +241,7 @@ test("reverse credential service coordinates enrollment, rotation, revocation, a
         "worker:revoked",
         "store:retire:reverse-one",
         "disconnect:reverse-one",
-        "worker:revoked"
+        "worker:revoked",
     ]);
 });
 
@@ -197,7 +252,7 @@ function credentialStore(calls: string[]) {
             return {
                 deviceCode: "ABCDE-FGHIJ",
                 expiresAt: "2026-07-16T12:00:00.000Z",
-                instance
+                instance,
             };
         },
         async revoke(instance: string) {
@@ -210,7 +265,7 @@ function credentialStore(calls: string[]) {
         async rotateToken(instance: string) {
             calls.push(`store:rotate:${instance}`);
             return "rotated-token";
-        }
+        },
     } as never;
 }
 

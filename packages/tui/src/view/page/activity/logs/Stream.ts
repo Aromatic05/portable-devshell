@@ -6,11 +6,7 @@ import {
 } from "../../../../state/store/Model.js";
 import type { TuiLogContextKey } from "./Sources.js";
 import { buttonLine } from "../../../component/Editor.js";
-import {
-    compactSummary,
-    makeBox,
-    renderLogLine,
-} from "../../Support.js";
+import { compactSummary, makeBox, renderLogLine } from "../../Support.js";
 
 export function buildLogContextBoxes(
     state: TuiAppState,

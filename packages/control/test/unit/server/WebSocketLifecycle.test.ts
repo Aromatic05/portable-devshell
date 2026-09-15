@@ -28,11 +28,18 @@ class FakeServerResponse extends EventEmitter {
 
 test("reverse SSE commits upstream sequence only after frame decoding succeeds", () => {
     const response = new FakeServerResponse();
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+    );
     const frames: string[] = [];
-    channel.onFrame((frame) => frames.push(Buffer.from(frame).toString("utf8")));
+    channel.onFrame((frame) =>
+        frames.push(Buffer.from(frame).toString("utf8")),
+    );
 
-    assert.throws(() => channel.acceptUpstream(1, "invalid-frame"), /frame|payload|length/iu);
+    assert.throws(
+        () => channel.acceptUpstream(1, "invalid-frame"),
+        /frame|payload|length/iu,
+    );
     assert.equal(channel.acceptedUpstreamSeq, 0);
 
     const encoded = encodeFrame(Buffer.from("response")).toString("base64");
@@ -44,22 +51,38 @@ test("reverse SSE commits upstream sequence only after frame decoding succeeds",
 test("reverse SSE write failures close the channel", async () => {
     const response = new FakeServerResponse();
     response.writeError = new Error("SSE write failed");
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
-    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+    );
+    const closed = new Promise<Error | undefined>((resolve) =>
+        channel.onClose(resolve),
+    );
 
-    await assert.rejects(channel.send(Buffer.from("request")), /SSE write failed/iu);
+    await assert.rejects(
+        channel.send(Buffer.from("request")),
+        /SSE write failed/iu,
+    );
     assert.match((await closed)?.message ?? "", /SSE write failed/iu);
-    await assert.rejects(channel.send(Buffer.from("request")), /disconnected/iu);
+    await assert.rejects(
+        channel.send(Buffer.from("request")),
+        /disconnected/iu,
+    );
 });
 
 test("reverse SSE heartbeat write failures close the channel", async () => {
     const response = new FakeServerResponse();
     response.writeError = new Error("heartbeat write failed");
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse, 0, {
-        heartbeatIntervalMs: 1,
-        now: () => 42,
-    });
-    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+        0,
+        {
+            heartbeatIntervalMs: 1,
+            now: () => 42,
+        },
+    );
+    const closed = new Promise<Error | undefined>((resolve) =>
+        channel.onClose(resolve),
+    );
 
     assert.match((await closed)?.message ?? "", /heartbeat write failed/iu);
 });
@@ -67,8 +90,12 @@ test("reverse SSE heartbeat write failures close the channel", async () => {
 test("reverse SSE close reports response.end failures", async () => {
     const response = new FakeServerResponse();
     response.endError = new Error("SSE end failed");
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
-    const closed = new Promise<Error | undefined>((resolve) => channel.onClose(resolve));
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+    );
+    const closed = new Promise<Error | undefined>((resolve) =>
+        channel.onClose(resolve),
+    );
 
     channel.close();
 
@@ -78,7 +105,9 @@ test("reverse SSE close reports response.end failures", async () => {
 test("reverse SSE removes temporary drain listeners after backpressure clears", async () => {
     const response = new FakeServerResponse();
     response.writeResult = false;
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+    );
 
     const sent = channel.send(Buffer.from("request"));
     assert.equal(response.listenerCount("drain"), 1);
@@ -94,7 +123,9 @@ test("reverse SSE removes temporary drain listeners after backpressure clears", 
 test("reverse SSE rejects a backpressured send when the response closes", async () => {
     const response = new FakeServerResponse();
     response.writeResult = false;
-    const channel = new ReverseRpcSseChannel(response as unknown as ServerResponse);
+    const channel = new ReverseRpcSseChannel(
+        response as unknown as ServerResponse,
+    );
 
     const sent = channel.send(Buffer.from("request"));
     assert.equal(response.listenerCount("close"), 2);

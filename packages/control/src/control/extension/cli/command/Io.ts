@@ -3,9 +3,12 @@ import {
     errorCodes,
     type JsonValue,
     type PrefixRouteEvent,
-    type PrefixRouteStream
+    type PrefixRouteStream,
 } from "@portable-devshell/shared";
-import type { CliCommandInputOptions, CliCommandIo } from "@portable-devshell/extension/cli";
+import type {
+    CliCommandInputOptions,
+    CliCommandIo,
+} from "@portable-devshell/extension/cli";
 
 export class CliCommandStreamIo implements CliCommandIo {
     readonly #queue: Buffer[] = [];
@@ -30,7 +33,7 @@ export class CliCommandStreamIo implements CliCommandIo {
             throw createError({
                 code: errorCodes.envelopeInvalid,
                 message: `CLI command stream does not accept ${event.name}.`,
-                retryable: false
+                retryable: false,
             });
         }
         const payload = record(event.payload);
@@ -38,7 +41,7 @@ export class CliCommandStreamIo implements CliCommandIo {
             throw createError({
                 code: errorCodes.targetInvalid,
                 message: "cli.input requires base64 data.",
-                retryable: false
+                retryable: false,
             });
         }
         this.#push(Buffer.from(payload.data, "base64"));
@@ -54,11 +57,15 @@ export class CliCommandStreamIo implements CliCommandIo {
         const chunk = this.#queue.shift();
         if (chunk !== undefined) return chunk;
         if (this.#closed) return undefined;
-        return await new Promise<Buffer | undefined>((resolve) => this.#waiters.push(resolve));
+        return await new Promise<Buffer | undefined>((resolve) =>
+            this.#waiters.push(resolve),
+        );
     }
 
     async requestInput(options: CliCommandInputOptions = {}): Promise<void> {
-        await this.#requireStream().emit("terminal", { raw: options.raw === true });
+        await this.#requireStream().emit("terminal", {
+            raw: options.raw === true,
+        });
     }
 
     async writeStderr(chunk: string): Promise<void> {
@@ -81,12 +88,15 @@ export class CliCommandStreamIo implements CliCommandIo {
     }
 
     #requireStream(): PrefixRouteStream {
-        if (this.#stream === undefined) throw new Error("CLI command stream I/O is not bound.");
+        if (this.#stream === undefined)
+            throw new Error("CLI command stream I/O is not bound.");
         return this.#stream;
     }
 }
 
-function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function record(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;

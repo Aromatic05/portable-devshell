@@ -1,4 +1,8 @@
-import { createError, errorCodes, type Channel } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type Channel,
+} from "@portable-devshell/shared";
 
 import type { WorkerRpcConnector } from "./Bridge.js";
 import { WorkerRpcLaneChannel, type WorkerRpcLane } from "./LaneChannel.js";
@@ -8,8 +12,15 @@ export class WorkerRpcInboundConnector implements WorkerRpcConnector {
     #physical = new Map<Channel, WorkerRpcLane>();
 
     attach(channel: Channel, lane: WorkerRpcLane = "control"): void {
-        if (lane === "control" || this.#channel === undefined || this.#channel.closed) {
-            if (lane === "bulk" && (this.#channel === undefined || this.#channel.closed)) {
+        if (
+            lane === "control" ||
+            this.#channel === undefined ||
+            this.#channel.closed
+        ) {
+            if (
+                lane === "bulk" &&
+                (this.#channel === undefined || this.#channel.closed)
+            ) {
                 channel.close();
                 return;
             }
@@ -53,7 +64,7 @@ export class WorkerRpcInboundConnector implements WorkerRpcConnector {
         throw createError({
             code: errorCodes.reverseTransportUnavailable,
             message: "Reverse worker is offline.",
-            retryable: true
+            retryable: true,
         });
     }
 }

@@ -4,7 +4,11 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import test from "node:test";
 
-import { asInstanceName, type ContextMessageRecord, type ToolCallRecord } from "@portable-devshell/shared";
+import {
+    asInstanceName,
+    type ContextMessageRecord,
+    type ToolCallRecord,
+} from "@portable-devshell/shared";
 
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 import {
@@ -15,7 +19,9 @@ import {
 import { ConversationService } from "../../../../src/instance/conversation/Service.ts";
 
 test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the source as a backup", async () => {
-    const root = await createTestTempDirectory("conversation-comment-migration");
+    const root = await createTestTempDirectory(
+        "conversation-comment-migration",
+    );
     const legacyFile = join(root, "context-messages.json");
     const databaseFile = join(root, "conversation.sqlite3");
     const legacy: ContextMessageRecord = {
@@ -37,7 +43,10 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
         legacyContextMessagesFile: legacyFile,
     });
     assert.deepEqual(store.listComments(), [legacy]);
-    assert.equal(readUserVersion(databaseFile), CONVERSATION_DATABASE_SCHEMA_VERSION);
+    assert.equal(
+        readUserVersion(databaseFile),
+        CONVERSATION_DATABASE_SCHEMA_VERSION,
+    );
     assert.equal(existsSync(legacyFile), false);
     assert.equal(readFileSync(`${legacyFile}.migrated-v1.bak`, "utf8"), source);
     store.close();
@@ -54,7 +63,10 @@ test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the 
 test("ConversationStore backfills durable control state from pre-metadata history once", async () => {
     const root = await createTestTempDirectory("conversation-control-backfill");
     const databaseFile = join(root, "conversation.sqlite3");
-    const store = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
+    const store = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
     store.insertComment({
         createdAt: "2026-09-10T10:00:00.000Z",
         ctxId: "ctx-a",
@@ -65,26 +77,48 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         text: "#stop Preserve this fence",
     });
     store.close();
-    mutateConversationDatabase(databaseFile, `
+    mutateConversationDatabase(
+        databaseFile,
+        `
         DELETE FROM conversation_metadata
         WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v1'
-    `);
+    `,
+    );
 
-    const backfilled = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
-    assert.deepEqual(backfilled.readControlState("ctx-a"), { stoppedByCommentId: "legacy-stop" });
+    const backfilled = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    assert.deepEqual(backfilled.readControlState("ctx-a"), {
+        stoppedByCommentId: "legacy-stop",
+    });
     backfilled.close();
-    mutateConversationDatabase(databaseFile, "DELETE FROM conversation_entries WHERE ctx_id = 'ctx-a'");
-    const withoutHistory = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
-    assert.deepEqual(withoutHistory.readControlState("ctx-a"), { stoppedByCommentId: "legacy-stop" });
+    mutateConversationDatabase(
+        databaseFile,
+        "DELETE FROM conversation_entries WHERE ctx_id = 'ctx-a'",
+    );
+    const withoutHistory = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    assert.deepEqual(withoutHistory.readControlState("ctx-a"), {
+        stoppedByCommentId: "legacy-stop",
+    });
     withoutHistory.close();
 });
 
 test("ConversationStore rejects a newer schema without modifying it", async () => {
     const root = await createTestTempDirectory("conversation-future-schema");
     const databaseFile = join(root, "conversation.sqlite3");
-    createFutureDatabase(databaseFile, CONVERSATION_DATABASE_SCHEMA_VERSION + 1);
+    createFutureDatabase(
+        databaseFile,
+        CONVERSATION_DATABASE_SCHEMA_VERSION + 1,
+    );
     const before = readFutureDatabase(databaseFile);
-    const store = new ConversationStore({ filePath: databaseFile, instanceName: "alpha" });
+    const store = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
 
     assert.throws(
         () => store.list(),
@@ -153,11 +187,10 @@ test("ConversationStore retention removes old terminal history but never old pen
         text: "recent report",
     });
 
-    assert.deepEqual((store.list()).map((entry) => entry.id), [
-        "old-sent",
-        "recently-delivered",
-        "recent-report",
-    ]);
+    assert.deepEqual(
+        store.list().map((entry) => entry.id),
+        ["old-sent", "recently-delivered", "recent-report"],
+    );
     assert.equal(store.stats().protectedComments, 1);
     store.close();
 });
@@ -184,7 +217,10 @@ test("ConversationStore capacity evicts oldest terminal history before protected
         ctxId: "ctx-a",
         text: "b".repeat(8_000),
     });
-    assert.deepEqual(store.list().map((entry) => entry.id), ["report-new"]);
+    assert.deepEqual(
+        store.list().map((entry) => entry.id),
+        ["report-new"],
+    );
 
     store.insertComment({
         createdAt: "2026-09-11T00:00:00.000Z",
@@ -194,7 +230,10 @@ test("ConversationStore capacity evicts oldest terminal history before protected
         status: "sent",
         text: "c".repeat(20_000),
     });
-    assert.deepEqual(store.list().map((entry) => entry.id), ["protected-comment"]);
+    assert.deepEqual(
+        store.list().map((entry) => entry.id),
+        ["protected-comment"],
+    );
     const stats = store.stats();
     assert.equal(stats.entries, 1);
     assert.equal(stats.protectedComments, 1);
@@ -230,37 +269,43 @@ test("ConversationService imports historical todo_report calls and records new r
         store,
     });
 
-    assert.deepEqual(await service.list(), [{
-        callId: "call-old",
-        createdAt: "2026-09-10T10:02:00.000Z",
-        ctxId: "ctx-a",
-        id: "call-old",
-        kind: "report",
-        text: "Historical report",
-    }]);
-    await service.recordReport({
-        callId: "call-new",
-        createdAt: "2026-09-10T10:03:00.000Z",
-        ctxId: "ctx-a",
-        text: "New report",
-    });
-    await service.recordReport({
-        callId: "call-new",
-        createdAt: "2026-09-10T10:03:00.000Z",
-        ctxId: "ctx-a",
-        text: "New report",
-    });
-    assert.deepEqual((await service.list()).map((entry) => [entry.id, entry.text]), [
-        ["call-old", "Historical report"],
-        ["call-new", "New report"],
+    assert.deepEqual(await service.list(), [
+        {
+            callId: "call-old",
+            createdAt: "2026-09-10T10:02:00.000Z",
+            ctxId: "ctx-a",
+            id: "call-old",
+            kind: "report",
+            text: "Historical report",
+        },
     ]);
+    await service.recordReport({
+        callId: "call-new",
+        createdAt: "2026-09-10T10:03:00.000Z",
+        ctxId: "ctx-a",
+        text: "New report",
+    });
+    await service.recordReport({
+        callId: "call-new",
+        createdAt: "2026-09-10T10:03:00.000Z",
+        ctxId: "ctx-a",
+        text: "New report",
+    });
+    assert.deepEqual(
+        (await service.list()).map((entry) => [entry.id, entry.text]),
+        [
+            ["call-old", "Historical report"],
+            ["call-new", "New report"],
+        ],
+    );
     assert.equal(migrations, 1);
     service.close();
 });
 
 function createFutureDatabase(filePath: string, version: number): void {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     const database = new DatabaseSync(filePath);
     try {
         database.exec(`
@@ -275,7 +320,8 @@ function createFutureDatabase(filePath: string, version: number): void {
 
 function mutateConversationDatabase(filePath: string, sql: string): void {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     const database = new DatabaseSync(filePath);
     try {
         database.exec(sql);
@@ -284,16 +330,33 @@ function mutateConversationDatabase(filePath: string, sql: string): void {
     }
 }
 
-function readFutureDatabase(filePath: string): { sentinel: string; tables: string[]; userVersion: number } {
+function readFutureDatabase(filePath: string): {
+    sentinel: string;
+    tables: string[];
+    userVersion: number;
+} {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     const database = new DatabaseSync(filePath);
     try {
-        const tables = (database.prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
-        ).all() as Array<{ name: string }>).map((row) => row.name);
-        const sentinel = (database.prepare("SELECT value FROM future_sentinel").get() as { value: string }).value;
-        return { sentinel, tables, userVersion: readUserVersionFromDatabase(database) };
+        const tables = (
+            database
+                .prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+                )
+                .all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        const sentinel = (
+            database.prepare("SELECT value FROM future_sentinel").get() as {
+                value: string;
+            }
+        ).value;
+        return {
+            sentinel,
+            tables,
+            userVersion: readUserVersionFromDatabase(database),
+        };
     } finally {
         database.close();
     }
@@ -301,7 +364,8 @@ function readFutureDatabase(filePath: string): { sentinel: string; tables: strin
 
 function readUserVersion(filePath: string): number {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     const database = new DatabaseSync(filePath);
     try {
         return readUserVersionFromDatabase(database);
@@ -310,6 +374,15 @@ function readUserVersion(filePath: string): number {
     }
 }
 
-function readUserVersionFromDatabase(database: import("node:sqlite").DatabaseSync): number {
-    return Number(Object.values(database.prepare("PRAGMA user_version").get() as Record<string, number>)[0] ?? 0);
+function readUserVersionFromDatabase(
+    database: import("node:sqlite").DatabaseSync,
+): number {
+    return Number(
+        Object.values(
+            database.prepare("PRAGMA user_version").get() as Record<
+                string,
+                number
+            >,
+        )[0] ?? 0,
+    );
 }

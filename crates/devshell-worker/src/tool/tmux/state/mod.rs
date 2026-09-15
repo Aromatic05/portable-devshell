@@ -927,10 +927,10 @@ impl TmuxState {
         if became_terminal {
             self.persist_task_record(task_id)?;
         }
-        if let Some(pane) = completed_pane {
-            if let Err(error) = self.cleanup_task_pane(task_id, &pane) {
-                self.push_task_cleanup_warning(task_id, &error)?;
-            }
+        if let Some(pane) = completed_pane
+            && let Err(error) = self.cleanup_task_pane(task_id, &pane)
+        {
+            self.push_task_cleanup_warning(task_id, &error)?;
         }
         Ok(())
     }
@@ -1065,12 +1065,17 @@ impl TmuxState {
                 }
                 tasks.insert(task);
             }
-            finalize_only.extend(tasks.tasks.values().filter_map(|task| {
-                (!task.state.is_active()
-                    && task.last_pane.is_none()
-                    && self.backend.task_runtime_pending(&task.id))
-                .then(|| task.id.clone())
-            }));
+            finalize_only.extend(
+                tasks
+                    .tasks
+                    .values()
+                    .filter(|&task| {
+                        !task.state.is_active()
+                            && task.last_pane.is_none()
+                            && self.backend.task_runtime_pending(&task.id)
+                    })
+                    .map(|task| task.id.clone()),
+            );
             tasks.prune();
         }
         let changed = !cleanup.is_empty();
@@ -1135,12 +1140,12 @@ impl TmuxState {
         self.backend.remove_pane_metadata(&pane.id);
         {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
-            if let Some(task) = tasks.tasks.get_mut(task_id) {
-                if task.last_pane.as_ref().is_some_and(|last| {
+            if let Some(task) = tasks.tasks.get_mut(task_id)
+                && task.last_pane.as_ref().is_some_and(|last| {
                     last.id == pane.id && last.pane_incarnation_id == pane.pane_incarnation_id
-                }) {
-                    task.last_pane = None;
-                }
+                })
+            {
+                task.last_pane = None;
             }
         }
         self.pane_locks

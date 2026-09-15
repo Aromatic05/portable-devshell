@@ -5,12 +5,16 @@ import { tuiRouteIdentity, type TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 
 export class TuiRouteDataLoader {
-    constructor(private readonly options: {
-        session: TuiControlSession;
-        store: TuiAppStore;
-    }) {}
+    constructor(
+        private readonly options: {
+            session: TuiControlSession;
+            store: TuiAppStore;
+        },
+    ) {}
 
-    async enter(context: TuiRouteLifecycleContext): Promise<void | (() => void)> {
+    async enter(
+        context: TuiRouteLifecycleContext,
+    ): Promise<void | (() => void)> {
         const { instance, route, signal } = context;
         switch (route.page) {
             case "overview":
@@ -23,30 +27,58 @@ export class TuiRouteDataLoader {
             case "connections":
                 await Promise.all([
                     this.options.session.refreshConfig(undefined, signal),
-                    this.options.session.refreshOAuth(undefined, signal)
+                    this.options.session.refreshOAuth(undefined, signal),
                 ]);
                 return;
             case "audit":
-                if (instance !== undefined) await this.options.session.refreshAudit(instance, undefined, signal);
+                if (instance !== undefined)
+                    await this.options.session.refreshAudit(
+                        instance,
+                        undefined,
+                        signal,
+                    );
                 return;
             case "messages":
-                if (instance !== undefined) await this.options.session.refreshMessages(instance, undefined, signal);
+                if (instance !== undefined)
+                    await this.options.session.refreshMessages(
+                        instance,
+                        undefined,
+                        signal,
+                    );
                 return;
             case "todo":
                 if (instance !== undefined) {
-                    const input = route.view === "detail" ? { taskId: route.todoId } : undefined;
-                    await this.options.session.refreshTodo(instance, undefined, signal, input);
+                    const input =
+                        route.view === "detail"
+                            ? { taskId: route.todoId }
+                            : undefined;
+                    await this.options.session.refreshTodo(
+                        instance,
+                        undefined,
+                        signal,
+                        input,
+                    );
                 }
                 return;
             case "logs":
                 if (instance === undefined) return;
-                await this.options.session.refreshLogsForInstance(instance, undefined, signal);
+                await this.options.session.refreshLogsForInstance(
+                    instance,
+                    undefined,
+                    signal,
+                );
                 if (route.view === "context") {
                     this.options.store.setLogsFollow(instance, true);
                     return () => {
-                        const logs = selectTuiLogs(this.options.store.getState(), instance);
+                        const logs = selectTuiLogs(
+                            this.options.store.getState(),
+                            instance,
+                        );
                         this.options.store.setLogsFollow(instance, false);
-                        this.options.store.setLogsPausedAtSeq(instance, logs.at(-1)?.seq);
+                        this.options.store.setLogsPausedAtSeq(
+                            instance,
+                            logs.at(-1)?.seq,
+                        );
                     };
                 }
                 return;
@@ -65,7 +97,10 @@ export interface TuiRouteLifecycleContext {
 
 export interface TuiRouteLifecycleControllerOptions {
     onEnter(context: TuiRouteLifecycleContext): Promise<void | (() => void)>;
-    onError?(context: Omit<TuiRouteLifecycleContext, "signal">, error: unknown): void;
+    onError?(
+        context: Omit<TuiRouteLifecycleContext, "signal">,
+        error: unknown,
+    ): void;
     store: TuiAppStore;
 }
 
@@ -115,15 +150,21 @@ export class TuiRouteLifecycleController {
         const context = { instance, route, signal: abort.signal };
         void this.#options.onEnter(context).then(
             (cleanup) => {
-                if (!this.#running || this.#abort !== abort || abort.signal.aborted) {
+                if (
+                    !this.#running ||
+                    this.#abort !== abort ||
+                    abort.signal.aborted
+                ) {
                     cleanup?.();
                     return;
                 }
-                this.#cleanup = typeof cleanup === "function" ? cleanup : undefined;
+                this.#cleanup =
+                    typeof cleanup === "function" ? cleanup : undefined;
             },
             (error: unknown) => {
-                if (!abort.signal.aborted) this.#options.onError?.({ instance, route }, error);
-            }
+                if (!abort.signal.aborted)
+                    this.#options.onError?.({ instance, route }, error);
+            },
         );
     }
 

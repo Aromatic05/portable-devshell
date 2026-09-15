@@ -3,7 +3,10 @@ import type { TuiAppState } from "../../state/store/Model.js";
 import { currentTuiRoute } from "../../state/route/State.js";
 import type { TuiTerminalTab } from "../../state/route/Model.js";
 import { renderExpandableBoxLines } from "../component/content/Box.js";
-import { tuiTerminalTabLabel, tuiTerminalTabs } from "../../terminal/tmux/Model.js";
+import {
+    tuiTerminalTabLabel,
+    tuiTerminalTabs,
+} from "../../terminal/tmux/Model.js";
 import {
     selectErrorMessage,
     selectMainBoxFlowMetrics,
@@ -25,9 +28,7 @@ import {
     selectTuiOverviewInstanceViewport,
     selectTuiOverviewPresentation,
 } from "../page/overview/Presentation.js";
-import {
-    tuiMessagesHistoryRows,
-} from "../page/activity/messages/Projection.js";
+import { tuiMessagesHistoryRows } from "../page/activity/messages/Projection.js";
 import {
     projectTuiApprovalActions,
     projectTuiConfirmationActions,
@@ -43,7 +44,11 @@ export type TuiHitTarget =
     | { id: string; kind: "instance" }
     | { kind: "messagesViewport" }
     | { action: TuiApprovalAction; kind: "overlayAction"; overlay: "approval" }
-    | { action: TuiConfirmationAction; kind: "overlayAction"; overlay: "confirmation" }
+    | {
+          action: TuiConfirmationAction;
+          kind: "overlayAction";
+          overlay: "confirmation";
+      }
     | { instance: string; kind: "overviewInstance" }
     | { kind: "scrollViewport" }
     | { kind: "terminalTab"; tab: TuiTerminalTab };
@@ -259,10 +264,7 @@ export function buildTuiHitRegions(
             overviewRows,
         );
         const mainY =
-            contentY +
-            globalErrorHeight +
-            pageErrorHeight +
-            stateRows;
+            contentY + globalErrorHeight + pageErrorHeight + stateRows;
         const firstInstanceY = mainY + 4 + overview.meters.length;
         regions.push({
             height: Math.max(1, overviewRows),
@@ -332,7 +334,11 @@ export function buildTuiHitRegions(
             lines.length - 1,
             visibleEnd - range.start,
         );
-        for (let offset = firstBodyOffset; offset < endBodyOffset; offset += 1) {
+        for (
+            let offset = firstBodyOffset;
+            offset < endBodyOffset;
+            offset += 1
+        ) {
             const line = lines[offset];
             if (line === undefined) continue;
             regions.push({
@@ -340,7 +346,9 @@ export function buildTuiHitRegions(
                 target: {
                     boxId: box.id,
                     kind: "boxBody",
-                    ...(line.lineId === undefined ? {} : { lineId: line.lineId }),
+                    ...(line.lineId === undefined
+                        ? {}
+                        : { lineId: line.lineId }),
                 },
                 width: mainWidth,
                 x: mainX,
@@ -350,7 +358,11 @@ export function buildTuiHitRegions(
     }
 
     if (state.ui.selectedPage === "terminal") {
-        pushTerminalTabRegions(regions, mainX, contentY + globalErrorHeight + 1);
+        pushTerminalTabRegions(
+            regions,
+            mainX,
+            contentY + globalErrorHeight + 1,
+        );
     }
 
     return regions;
@@ -392,17 +404,19 @@ function buildTuiOverlayHitRegions(
     const toolCall = instanceState?.toolCalls.find(
         (candidate) => candidate.callId === approval.callId,
     );
-    return projectTuiApprovalActions(approval, toolCall, frame).map((action) => ({
-        height: 1,
-        target: {
-            action: action.action,
-            kind: "overlayAction" as const,
-            overlay: "approval" as const,
-        },
-        width: action.width,
-        x: action.x,
-        y: action.y,
-    }));
+    return projectTuiApprovalActions(approval, toolCall, frame).map(
+        (action) => ({
+            height: 1,
+            target: {
+                action: action.action,
+                kind: "overlayAction" as const,
+                overlay: "approval" as const,
+            },
+            width: action.width,
+            x: action.x,
+            y: action.y,
+        }),
+    );
 }
 
 export function tuiScreenSelectionColumnBounds(

@@ -12,7 +12,7 @@ import {
     ControlPidFile,
     type ControlLifecycleRpcClient,
     type ControlPidFilePort,
-    type ControlSocketFilePort
+    type ControlSocketFilePort,
 } from "@portable-devshell/shared";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -47,7 +47,11 @@ test("control daemon launcher preserves bootstrap loaders and captures this star
         | {
               args: string[];
               command: string;
-              options: { detached?: boolean; env?: NodeJS.ProcessEnv; stdio?: unknown };
+              options: {
+                  detached?: boolean;
+                  env?: NodeJS.ProcessEnv;
+                  stdio?: unknown;
+              };
           }
         | undefined;
     let unrefCount = 0;
@@ -55,18 +59,21 @@ test("control daemon launcher preserves bootstrap loaders and captures this star
         await writeFile(startupLogPath, "stale startup output\n", "utf8");
         const child = ControlDaemonLauncher.spawnDetached({
             daemonModulePath: "/app/ControlDaemon.js",
-            env: { NODE_TEST_CONTEXT: "child-v8", PORTABLE_DEVSHELL_TEST: "yes" },
+            env: {
+                NODE_TEST_CONTEXT: "child-v8",
+                PORTABLE_DEVSHELL_TEST: "yes",
+            },
             homeDirectory: "/home/tester",
             spawnFunction(command, args, options) {
                 recorded = { args, command, options };
                 return Object.assign(new EventEmitter(), {
                     unref() {
                         unrefCount += 1;
-                    }
+                    },
                 }) as never;
             },
             startupLogPath,
-            xdgRuntimeDir: "/run/tester"
+            xdgRuntimeDir: "/run/tester",
         });
 
         assert.notEqual(child, undefined);
@@ -82,9 +89,15 @@ test("control daemon launcher preserves bootstrap loaders and captures this star
         assert.equal(await readFile(startupLogPath, "utf8"), "");
 
         const bootstrap = recorded?.args.slice(0, -1) ?? [];
-        assert.equal(bootstrap.includes("--experimental-transform-types"), process.execArgv.includes("--experimental-transform-types"));
+        assert.equal(
+            bootstrap.includes("--experimental-transform-types"),
+            process.execArgv.includes("--experimental-transform-types"),
+        );
         for (const argument of bootstrap) {
-            assert.match(argument, /^(--experimental-transform-types|--import|--loader)(=|$)|^\.\/?|^file:|^[A-Za-z@][A-Za-z0-9@/._+-]*$/u);
+            assert.match(
+                argument,
+                /^(--experimental-transform-types|--import|--loader)(=|$)|^\.\/?|^file:|^[A-Za-z@][A-Za-z0-9@/._+-]*$/u,
+            );
         }
     } finally {
         await rm(root, { force: true, recursive: true });
@@ -109,7 +122,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
                 throw new Error("control unavailable");
             }
             return { instanceCount: 3 };
-        }
+        },
     };
     const pidFile: ControlPidFilePort = {
         path: "/tmp/control.pid",
@@ -121,7 +134,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         },
         async write(pid) {
             pidActions.push(`write:${pid ?? "default"}`);
-        }
+        },
     };
     const socketFile: ControlSocketFilePort = {
         path: "/tmp/control.sock",
@@ -131,7 +144,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         },
         async remove() {
             socketActions.push("remove");
-        }
+        },
     };
 
     const lifecycle = new ControlLifecycleManager({
@@ -142,7 +155,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
             async info() {},
             async readAll() {
                 return "";
-            }
+            },
         },
         pidFile,
         processIsRunning: (pid) => pid === 4321 && running,
@@ -151,20 +164,23 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
         spawnFunction() {
             spawnCount += 1;
             running = true;
-            return Object.assign(new EventEmitter(), { pid: 4321, unref() {} }) as never;
+            return Object.assign(new EventEmitter(), {
+                pid: 4321,
+                unref() {},
+            }) as never;
         },
-        waitTimeoutMs: 100
+        waitTimeoutMs: 100,
     });
 
     assert.deepEqual(await lifecycle.start(), {
         instanceCount: 3,
         pid: 4321,
-        running: true
+        running: true,
     });
     assert.deepEqual(await lifecycle.start(), {
         instanceCount: 3,
         pid: 4321,
-        running: true
+        running: true,
     });
     assert.equal(spawnCount, 1);
     assert.deepEqual(pidActions, ["remove", "write:4321"]);
@@ -173,7 +189,7 @@ test("control lifecycle start is idempotent and stop tolerates the shutdown sock
     assert.deepEqual(await lifecycle.stop(), {
         instanceCount: 0,
         pid: undefined,
-        running: false
+        running: false,
     });
     assert.equal(shutdownCount, 1);
     assert.deepEqual(pidActions, ["remove", "write:4321", "remove"]);
@@ -198,16 +214,17 @@ test("control lifecycle performs one final readiness probe at the wait deadline"
                 },
                 async write(pid) {
                     recordedPid = pid;
-                }
+                },
             },
             processIsRunning: (pid) => pid === 4321 && childRunning,
             rpcClient: {
                 async request(operation) {
-                    if (operation !== "status") throw new Error("unexpected operation");
+                    if (operation !== "status")
+                        throw new Error("unexpected operation");
                     statusCalls += 1;
                     if (statusCalls < 3) throw new Error("not ready yet");
                     return { instanceCount: 1, pid: 4321 };
-                }
+                },
             },
             signalProcess() {
                 childRunning = false;
@@ -216,20 +233,23 @@ test("control lifecycle performs one final readiness probe at the wait deadline"
                 path: resolve(root, "control.sock"),
                 runtimeDir: root,
                 async ensureRuntimeDir() {},
-                async remove() {}
+                async remove() {},
             },
             spawnFunction() {
                 childRunning = true;
-                return Object.assign(new EventEmitter(), { pid: 4321, unref() {} }) as never;
+                return Object.assign(new EventEmitter(), {
+                    pid: 4321,
+                    unref() {},
+                }) as never;
             },
             startupLogPath: resolve(root, "control.startup.log"),
-            waitTimeoutMs: 1
+            waitTimeoutMs: 1,
         });
 
         assert.deepEqual(await lifecycle.start(), {
             instanceCount: 1,
             pid: 4321,
-            running: true
+            running: true,
         });
         assert.equal(statusCalls, 3);
     } finally {
@@ -253,7 +273,7 @@ test("control lifecycle start failure includes only this startup attempt", async
                 async info() {},
                 async readAll() {
                     return "stale historical diagnostic\n";
-                }
+                },
             },
             pidFile: {
                 path: pidPath,
@@ -261,39 +281,39 @@ test("control lifecycle start failure includes only this startup attempt", async
                     return undefined;
                 },
                 async remove() {},
-                async write() {}
+                async write() {},
             },
             rpcClient: {
                 async request() {
                     throw new Error("offline");
-                }
+                },
             },
             socketFile: {
                 path: socketPath,
                 runtimeDir: root,
                 async ensureRuntimeDir() {},
-                async remove() {}
+                async remove() {},
             },
             processIsRunning: () => true,
             spawnFunction(_command, _args, options) {
                 const stdio = options.stdio as [unknown, number, number];
                 writeSync(stdio[1], "current attempt failed before ready\n");
-                return Object.assign(new EventEmitter(), { pid: 999_999_999, unref() {} }) as never;
+                return Object.assign(new EventEmitter(), {
+                    pid: 999_999_999,
+                    unref() {},
+                }) as never;
             },
             startupLogPath,
-            waitTimeoutMs: 100
+            waitTimeoutMs: 100,
         });
 
-        await assert.rejects(
-            lifecycle.start(),
-            (error: unknown) => {
-                assert.match(String(error), /control server did not become ready/u);
-                assert.match(String(error), /control startup log/u);
-                assert.match(String(error), /current attempt failed before ready/u);
-                assert.doesNotMatch(String(error), /stale historical diagnostic/u);
-                return true;
-            }
-        );
+        await assert.rejects(lifecycle.start(), (error: unknown) => {
+            assert.match(String(error), /control server did not become ready/u);
+            assert.match(String(error), /control startup log/u);
+            assert.match(String(error), /current attempt failed before ready/u);
+            assert.doesNotMatch(String(error), /stale historical diagnostic/u);
+            return true;
+        });
     } finally {
         await rm(root, { force: true, recursive: true });
     }

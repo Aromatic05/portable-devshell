@@ -98,18 +98,18 @@ legacy = stateless
 
 通用 MCP client 默认使用：
 
-* `environ_info` 可以返回 `ctxId`；
-* 后续需要 Context 的 model-facing 工具显式携带它；
-* server 仍校验 principal 与 Context 生命周期。
+- `environ_info` 可以返回 `ctxId`；
+- 后续需要 Context 的 model-facing 工具显式携带它；
+- server 仍校验 principal 与 Context 生命周期。
 
 ### `openai-session`
 
 适用于会给 model-facing tool call 提供稳定 Host metadata 的 ChatGPT 集成：
 
-* model-facing schema 不包含内部 `ctxId`；
-* server 从 external binding 找到内部 Context；
-* App-only Workspace helper 仍可使用 `ctxId` + 隐藏 capability；
-* 如果当前请求没有可解析 binding，调用 fail closed。
+- model-facing schema 不包含内部 `ctxId`；
+- server 从 external binding 找到内部 Context；
+- App-only Workspace helper 仍可使用 `ctxId` + 隐藏 capability；
+- 如果当前请求没有可解析 binding，调用 fail closed。
 
 `openai-session` 只负责 Context 选择，不负责授权。
 
@@ -137,15 +137,15 @@ MCP endpoint 不再用 instance 配置中的 group/capability 去动态裁剪 `t
 
 主要边界是：
 
-| Domain | MCP model-facing surface |
-| --- | --- |
-| Environment | `environ_info`、`environ_remote` |
-| Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive |
-| Artifact | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具 |
-| tmux | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage` |
-| Todo | `todo_read`、`todo_write` |
-| Workspace | 小型 model-facing surface + App-only wire protocol |
-| Instance | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
+| Domain            | MCP model-facing surface                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| Environment       | `environ_info`、`environ_remote`                                                               |
+| Worker shell/file | `bash_run`、`file_read`、`file_edit`、`file_glob`、`file_grep` 等 Worker primitive             |
+| Artifact          | Control `artifact_viewImage`；Worker 不暴露独立 Artifact 读取工具                              |
+| tmux              | `tmux_run`、`tmux_input`、`tmux_read`、`tmux_inspect`、`tmux_manage`                           |
+| Todo              | `todo_read`、`todo_write`                                                                      |
+| Workspace         | 小型 model-facing surface + App-only wire protocol                                             |
+| Instance          | 无固定 MCP 管理 tool；model Extension 只负责 discovery/status/logs 与 opaque handle projection |
 
 Worker catalog 的 description 只描述 canonical capability 契约；MCP endpoint 在暴露 Worker tool 时独立投影面向 ChatGPT/MCP consumer 的使用说明。这个投影不回写 Worker，也不与 Agent Extension 的 model description 共用实现。
 
@@ -244,9 +244,9 @@ curl -i -N http://127.0.0.1:17890/demo-local/mcp \
 
 Control 不根据 `listenHost` / `publicBaseUrl` 推断防火墙和网络信任边界。
 
-* 本机测试可以使用 loopback + `auth = "none"`；
-* 公网 endpoint 应使用 HTTPS；
-* `publicBaseUrl` 必须与外部实际 URL 一致，尤其是 OAuth metadata、callback 和 Workspace App origin；
-* 反向代理必须允许长时间 SSE response，不应缓存 MCP/OAuth 响应。
+- 本机测试可以使用 loopback + `auth = "none"`；
+- 公网 endpoint 应使用 HTTPS；
+- `publicBaseUrl` 必须与外部实际 URL 一致，尤其是 OAuth metadata、callback 和 Workspace App origin；
+- 反向代理必须允许长时间 SSE response，不应缓存 MCP/OAuth 响应。
 
 部署说明见 [OAuth](../operations/oauth.md) 和 [ChatGPT 公网隧道](../operations/chatgpt-tunnels.md)。

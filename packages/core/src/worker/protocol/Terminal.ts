@@ -71,9 +71,14 @@ export class WorkerTerminalClient {
         this.#rpcClient = rpcClient;
     }
 
-    async open(input: WorkerTerminalOpenInput): Promise<WorkerTerminalDescriptor> {
+    async open(
+        input: WorkerTerminalOpenInput,
+    ): Promise<WorkerTerminalDescriptor> {
         return asResult<WorkerTerminalDescriptor>(
-            await this.#rpcClient.request("terminal.open", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "terminal.open",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
@@ -83,41 +88,60 @@ export class WorkerTerminalClient {
         terminalId: string;
     }): Promise<WorkerTerminalAttachResult> {
         return asResult<WorkerTerminalAttachResult>(
-            await this.#rpcClient.request("terminal.attach", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "terminal.attach",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
     async write(
-        input: WorkerTerminalIdentity & { data: string }
+        input: WorkerTerminalIdentity & { data: string },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
         return asResult<WorkerTerminalIdentity & { accepted: boolean }>(
-            await this.#rpcClient.request("terminal.write", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "terminal.write",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
     async resize(
-        input: WorkerTerminalIdentity & { cols: number; rows: number }
+        input: WorkerTerminalIdentity & { cols: number; rows: number },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
         return asResult<WorkerTerminalIdentity & { accepted: boolean }>(
-            await this.#rpcClient.request("terminal.resize", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "terminal.resize",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
-    async kill(input: WorkerTerminalIdentity): Promise<WorkerTerminalDescriptor> {
+    async kill(
+        input: WorkerTerminalIdentity,
+    ): Promise<WorkerTerminalDescriptor> {
         return asResult<WorkerTerminalDescriptor>(
-            await this.#rpcClient.request("terminal.kill", input as unknown as JsonValue)
+            await this.#rpcClient.request(
+                "terminal.kill",
+                input as unknown as JsonValue,
+            ),
         );
     }
 
     async list(): Promise<WorkerTerminalDescriptor[]> {
         return asResult<WorkerTerminalDescriptor[]>(
-            await this.#rpcClient.request("terminal.list", {})
+            await this.#rpcClient.request("terminal.list", {}),
         );
     }
 
-    onNotification(listener: (notification: WorkerTerminalNotification) => void): () => void {
+    onNotification(
+        listener: (notification: WorkerTerminalNotification) => void,
+    ): () => void {
         return this.#bridge.onNotification((notification) => {
-            const parsed = parseNotification(notification.method, notification.params);
+            const parsed = parseNotification(
+                notification.method,
+                notification.params,
+            );
             if (parsed !== undefined) listener(parsed);
         });
     }
@@ -133,10 +157,12 @@ export class WorkerTerminalClient {
 
 function parseNotification(
     method: string,
-    params: JsonValue
+    params: JsonValue,
 ): WorkerTerminalNotification | undefined {
-    if (method !== "terminal.output" && method !== "terminal.exit") return undefined;
-    if (typeof params !== "object" || params === null || Array.isArray(params)) return undefined;
+    if (method !== "terminal.output" && method !== "terminal.exit")
+        return undefined;
+    if (typeof params !== "object" || params === null || Array.isArray(params))
+        return undefined;
     const value = params as Record<string, JsonValue>;
     const terminalId = readString(value.terminalId);
     const generation = readInteger(value.generation);
@@ -148,22 +174,26 @@ function parseNotification(
             ? undefined
             : {
                   method,
-                  params: { dataBase64, generation, seq, terminalId }
+                  params: { dataBase64, generation, seq, terminalId },
               };
     }
     const version = readInteger(value.version);
     const exitCode = readInteger(value.exitCode);
     const signal = readInteger(value.signal);
-    return version === undefined || exitCode === undefined || signal === undefined
+    return version === undefined ||
+        exitCode === undefined ||
+        signal === undefined
         ? undefined
         : {
               method,
-              params: { exitCode, generation, signal, terminalId, version }
+              params: { exitCode, generation, signal, terminalId, version },
           };
 }
 
 function readInteger(value: JsonValue | undefined): number | undefined {
-    return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
+    return typeof value === "number" && Number.isSafeInteger(value)
+        ? value
+        : undefined;
 }
 
 function readString(value: JsonValue | undefined): string | undefined {

@@ -1,7 +1,7 @@
 import type { JsonValue } from "@portable-devshell/shared";
 import type {
     AgentModelToolDefinition,
-    AgentToolDefinition
+    AgentToolDefinition,
 } from "../../builtin/provider/AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 
@@ -23,7 +23,8 @@ export interface PiChildAgentStartMessage {
     type: "agent.start";
 }
 
-export type PiChildCommandName = "abort" | "followUp" | "prompt" | "reload" | "steer" | "stop" | "wait";
+export type PiChildCommandName =
+    "abort" | "followUp" | "prompt" | "reload" | "steer" | "stop" | "wait";
 
 export interface PiChildAgentCommandMessage {
     agentId: string;
@@ -58,7 +59,8 @@ export interface PiParentToolProgressMessage {
     type: "tool.progress";
 }
 
-export type PiParentMessage = PiChildInitMessage
+export type PiParentMessage =
+    | PiChildInitMessage
     | PiChildAgentStartMessage
     | PiChildAgentCommandMessage
     | PiChildShutdownMessage
@@ -101,7 +103,8 @@ export interface PiChildToolCloseMessage {
     type: "tool.close";
 }
 
-export type PiChildMessage = PiChildReadyMessage
+export type PiChildMessage =
+    | PiChildReadyMessage
     | PiChildResultMessage
     | PiChildToolCallMessage
     | PiChildToolCancelMessage

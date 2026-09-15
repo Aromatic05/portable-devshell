@@ -5,7 +5,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const options = parseArguments(process.argv.slice(2));
 const cwd = process.cwd();
-const testTsconfig = fileURLToPath(new URL("../tsconfig.test.json", import.meta.url));
+const testTsconfig = fileURLToPath(
+    new URL("../tsconfig.test.json", import.meta.url),
+);
 const files = [];
 const seenFiles = new Set();
 for (const pattern of options.patterns) {
@@ -26,18 +28,19 @@ const args = [
     "--import",
     pathToFileURL(resolve(cwd, options.loader)).href,
     "--test",
-    ...(options.concurrency === undefined ? [] : [`--test-concurrency=${options.concurrency}`]),
-    ...files
+    ...(options.concurrency === undefined
+        ? []
+        : [`--test-concurrency=${options.concurrency}`]),
+    ...files,
 ];
 const result = spawnSync(process.execPath, args, {
     cwd,
     env: {
         ...process.env,
-        TSX_TSCONFIG_PATH:
-            process.env.TSX_TSCONFIG_PATH ?? testTsconfig
+        TSX_TSCONFIG_PATH: process.env.TSX_TSCONFIG_PATH ?? testTsconfig,
     },
     stdio: "inherit",
-    windowsHide: true
+    windowsHide: true,
 });
 
 if (result.error !== undefined) {
@@ -56,7 +59,10 @@ function parseArguments(args) {
             continue;
         }
         if (argument === "--concurrency") {
-            const value = Number.parseInt(requireValue(args, ++index, argument), 10);
+            const value = Number.parseInt(
+                requireValue(args, ++index, argument),
+                10,
+            );
             if (!Number.isSafeInteger(value) || value < 1) {
                 throw new Error("--concurrency must be a positive integer");
             }

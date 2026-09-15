@@ -8,27 +8,30 @@ test("install home follows Unix HOME precedence", () => {
         resolveInstallHome(
             { HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" },
             "linux",
-            "/fallback"
+            "/fallback",
         ),
-        "/home/alice"
+        "/home/alice",
     );
 });
 
 test("install home follows Windows worker home precedence", () => {
     assert.equal(
         resolveInstallHome(
-            { HOME: "C:\\msys64\\home\\alice", USERPROFILE: "C:\\Users\\alice" },
+            {
+                HOME: "C:\\msys64\\home\\alice",
+                USERPROFILE: "C:\\Users\\alice",
+            },
             "win32",
-            "C:\\fallback"
+            "C:\\fallback",
         ),
-        "C:\\Users\\alice"
+        "C:\\Users\\alice",
     );
     assert.equal(
         resolveInstallHome(
             { HOMEDRIVE: "D:", HOMEPATH: "\\Users\\alice" },
             "win32",
-            "C:\\fallback"
+            "C:\\fallback",
         ),
-        "D:\\Users\\alice"
+        "D:\\Users\\alice",
     );
 });

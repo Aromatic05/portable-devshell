@@ -1,6 +1,6 @@
 import {
     cliModelCommandsExtensionPointDefinition,
-    cliNativeCommandsExtensionPointDefinition
+    cliNativeCommandsExtensionPointDefinition,
 } from "../control/extension/cli/Point.js";
 import { ExtensionPointRegistry } from "../control/extension/generation/registration/PointRegistry.js";
 import type { ExtensionSandboxPointCodecRegistry } from "../control/extension/generation/sandbox/bridge/PointCodec.js";
@@ -11,15 +11,18 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
     const points = new ExtensionPointRegistry([
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
-        webApplicationsExtensionPointDefinition
+        webApplicationsExtensionPointDefinition,
     ]);
-    assertControlExtensionPointRegistryParity(points, createControlExtensionSandboxPointRegistry());
+    assertControlExtensionPointRegistryParity(
+        points,
+        createControlExtensionSandboxPointRegistry(),
+    );
     return points;
 }
 
 export function assertControlExtensionPointRegistryParity(
     points: Pick<ExtensionPointRegistry, "ids">,
-    sandbox: Pick<ExtensionSandboxPointCodecRegistry, "ids">
+    sandbox: Pick<ExtensionSandboxPointCodecRegistry, "ids">,
 ): void {
     const pointIds = points.ids();
     const sandboxIds = sandbox.ids();
@@ -30,7 +33,7 @@ export function assertControlExtensionPointRegistryParity(
         return;
     }
     throw new TypeError(
-        `Control Extension Point registry and sandbox codec registry are out of sync: `
-        + `points=[${pointIds.join(", ")}], sandbox=[${sandboxIds.join(", ")}].`
+        `Control Extension Point registry and sandbox codec registry are out of sync: ` +
+            `points=[${pointIds.join(", ")}], sandbox=[${sandboxIds.join(", ")}].`,
     );
 }

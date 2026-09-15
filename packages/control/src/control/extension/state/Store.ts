@@ -6,7 +6,7 @@ import {
     cloneExtensionRegistry,
     emptyExtensionRegistry,
     parseExtensionRegistry,
-    type ExtensionRegistrySnapshot
+    type ExtensionRegistrySnapshot,
 } from "./Model.js";
 
 export interface ExtensionRegistryPort {
@@ -22,22 +22,29 @@ export class ExtensionRegistryStore implements ExtensionRegistryPort {
     }
 
     async read(): Promise<ExtensionRegistrySnapshot> {
-        const source = await readFile(this.#filePath, "utf8").catch((error: unknown) => {
-            if (isMissing(error)) return undefined;
-            throw error;
-        });
+        const source = await readFile(this.#filePath, "utf8").catch(
+            (error: unknown) => {
+                if (isMissing(error)) return undefined;
+                throw error;
+            },
+        );
         if (source === undefined) return emptyExtensionRegistry();
         return parseExtensionRegistry(JSON.parse(source) as unknown);
     }
 
     async write(snapshot: ExtensionRegistrySnapshot): Promise<void> {
-        const validated = parseExtensionRegistry(cloneExtensionRegistry(snapshot));
+        const validated = parseExtensionRegistry(
+            cloneExtensionRegistry(snapshot),
+        );
         const directory = dirname(this.#filePath);
         await mkdir(directory, { mode: 0o700, recursive: true });
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
         const handle = await open(temporary, "wx", 0o600);
         try {
-            await handle.writeFile(`${JSON.stringify(validated, null, 2)}\n`, "utf8");
+            await handle.writeFile(
+                `${JSON.stringify(validated, null, 2)}\n`,
+                "utf8",
+            );
             await handle.sync();
         } catch (error) {
             await handle.close().catch(() => undefined);
@@ -63,5 +70,10 @@ export class ExtensionRegistryStore implements ExtensionRegistryPort {
 }
 
 function isMissing(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
 }

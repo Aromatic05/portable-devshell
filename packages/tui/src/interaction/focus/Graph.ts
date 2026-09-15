@@ -1,6 +1,11 @@
-import { tuiFocusItemKey, isSameTuiFocusItem, type TuiFocusItem } from "./Item.js";
+import {
+    tuiFocusItemKey,
+    isSameTuiFocusItem,
+    type TuiFocusItem,
+} from "./Item.js";
 
-export type TuiFocusDirection = "next" | "previous" | "up" | "down" | "left" | "right";
+export type TuiFocusDirection =
+    "next" | "previous" | "up" | "down" | "left" | "right";
 
 export interface TuiFocusNode {
     down?: TuiFocusItem;
@@ -55,13 +60,18 @@ export class TuiFocusGraph {
         return this.#nodes.has(tuiFocusItemKey(item));
     }
 
-    move(current: TuiFocusItem | undefined, direction: TuiFocusDirection): TuiFocusItem | undefined {
+    move(
+        current: TuiFocusItem | undefined,
+        direction: TuiFocusDirection,
+    ): TuiFocusItem | undefined {
         if (this.#order.length === 0) {
             return undefined;
         }
 
         if (current === undefined || !this.includes(current)) {
-            return direction === "previous" ? this.#order.at(-1) : this.#order[0];
+            return direction === "previous"
+                ? this.#order.at(-1)
+                : this.#order[0];
         }
 
         const node = this.#nodes.get(tuiFocusItemKey(current));
@@ -84,13 +94,16 @@ export class TuiFocusGraph {
     }
 
     #moveSequential(current: TuiFocusItem, offset: 1 | -1): TuiFocusItem {
-        const currentIndex = this.#order.findIndex((item) => isSameTuiFocusItem(item, current));
+        const currentIndex = this.#order.findIndex((item) =>
+            isSameTuiFocusItem(item, current),
+        );
 
         if (currentIndex === -1) {
             return this.#order[0] ?? current;
         }
 
-        const nextIndex = (currentIndex + offset + this.#order.length) % this.#order.length;
+        const nextIndex =
+            (currentIndex + offset + this.#order.length) % this.#order.length;
         return this.#order[nextIndex] ?? current;
     }
 }

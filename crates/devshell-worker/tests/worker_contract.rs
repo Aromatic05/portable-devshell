@@ -1756,10 +1756,11 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
             assert_eq!(frame["ok"], true, "{frame}");
             write_accepted = true;
         }
-        if frame["type"] == "notification" && frame["method"] == "terminal.output" {
-            if let Some(data) = frame["params"]["dataBase64"].as_str() {
-                output.push_str(&String::from_utf8_lossy(&BASE64.decode(data).unwrap()));
-            }
+        if frame["type"] == "notification"
+            && frame["method"] == "terminal.output"
+            && let Some(data) = frame["params"]["dataBase64"].as_str()
+        {
+            output.push_str(&String::from_utf8_lossy(&BASE64.decode(data).unwrap()));
         }
     }
     assert!(write_accepted, "terminal.write response was not forwarded");

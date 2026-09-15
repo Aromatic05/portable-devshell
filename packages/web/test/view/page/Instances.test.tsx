@@ -1,5 +1,14 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { asInstanceName, createInitialControlReadModelState } from "@portable-devshell/shared/browser";
+import {
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
+import {
+    asInstanceName,
+    createInitialControlReadModelState,
+} from "@portable-devshell/shared/browser";
 import { expect, it, vi } from "vitest";
 
 import { Instances } from "../../../src/view/page/Instances.js";
@@ -13,24 +22,30 @@ function reverseStore(availability: "offline" | "online"): WebStore {
             operations: {},
             readModel: {
                 ...createInitialControlReadModelState(),
-                instances: [{
-                    mcpEnabled: true,
-                    name: "reverse-mac",
-                    snapshot: {
-                        connectionState: online ? "connected" : "disconnected",
-                        daemonState: online ? "running" : "stopped",
-                        lastSeq: 1,
-                        name: asInstanceName("reverse-mac"),
-                        ready: online,
-                        reverse: {
-                            availability,
-                            enrollmentState: "enrolled",
-                            managementMode: "selfManaged",
-                            ...(online ? { transport: "sse" as const } : {}),
+                instances: [
+                    {
+                        mcpEnabled: true,
+                        name: "reverse-mac",
+                        snapshot: {
+                            connectionState: online
+                                ? "connected"
+                                : "disconnected",
+                            daemonState: online ? "running" : "stopped",
+                            lastSeq: 1,
+                            name: asInstanceName("reverse-mac"),
+                            ready: online,
+                            reverse: {
+                                availability,
+                                enrollmentState: "enrolled",
+                                managementMode: "selfManaged",
+                                ...(online
+                                    ? { transport: "sse" as const }
+                                    : {}),
+                            },
+                            status: online ? "ready" : "stopped",
                         },
-                        status: online ? "ready" : "stopped",
                     },
-                }],
+                ],
             },
         },
         refreshInstance: vi.fn(async () => undefined),
@@ -47,18 +62,22 @@ function localStore(status: "ready" | "stopped"): WebStore {
             operations: {},
             readModel: {
                 ...createInitialControlReadModelState(),
-                instances: [{
-                    mcpEnabled: true,
-                    name: "local-one",
-                    snapshot: {
-                        connectionState: ready ? "connected" : "disconnected",
-                        daemonState: ready ? "running" : "stopped",
-                        lastSeq: 1,
-                        name: asInstanceName("local-one"),
-                        ready,
-                        status,
+                instances: [
+                    {
+                        mcpEnabled: true,
+                        name: "local-one",
+                        snapshot: {
+                            connectionState: ready
+                                ? "connected"
+                                : "disconnected",
+                            daemonState: ready ? "running" : "stopped",
+                            lastSeq: 1,
+                            name: asInstanceName("local-one"),
+                            ready,
+                            status,
+                        },
                     },
-                }],
+                ],
             },
         },
         refreshInstance: vi.fn(async () => undefined),
@@ -71,8 +90,12 @@ it("does not offer Start or Stop for an offline self-managed reverse instance", 
     render(<Instances store={reverseStore("offline")} />);
     fireEvent.click(screen.getByRole("button", { name: /reverse-mac/u }));
 
-    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(
+        screen.queryByRole("button", { name: "Start" }),
+    ).not.toBeInTheDocument();
+    expect(
+        screen.queryByRole("button", { name: "Stop" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/self-managed.*offline/iu)).toBeInTheDocument();
 });
 
@@ -80,9 +103,15 @@ it("does not offer Control lifecycle actions for an online self-managed reverse 
     render(<Instances store={reverseStore("online")} />);
     fireEvent.click(screen.getByRole("button", { name: /reverse-mac/u }));
 
-    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
-    expect(screen.getByText(/self-managed.*remote machine/iu)).toBeInTheDocument();
+    expect(
+        screen.queryByRole("button", { name: "Stop" }),
+    ).not.toBeInTheDocument();
+    expect(
+        screen.queryByRole("button", { name: "Start" }),
+    ).not.toBeInTheDocument();
+    expect(
+        screen.getByText(/self-managed.*remote machine/iu),
+    ).toBeInTheDocument();
 });
 
 it("starts a stopped local instance directly and marks the selected card", () => {
@@ -117,7 +146,12 @@ it("keeps a failed Stop confirmation open and shows the failure in place", async
     render(<Instances store={store} />);
     fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm stop" })).getByRole("button", { name: "Stop" }));
+    fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Confirm stop" })).getByRole(
+            "button",
+            { name: "Stop" },
+        ),
+    );
 
     await waitFor(() => expect(store.stop).toHaveBeenCalledOnce());
     const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
@@ -126,11 +160,17 @@ it("keeps a failed Stop confirmation open and shows the failure in place", async
 
 it("shows instance refresh failures beside the selected detail instead of failing silently", async () => {
     const store = localStore("ready");
-    store.refreshInstance = vi.fn(async () => { throw new Error("Instance refresh failed."); });
+    store.refreshInstance = vi.fn(async () => {
+        throw new Error("Instance refresh failed.");
+    });
     render(<Instances store={store} />);
 
     fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Instance refresh failed.");
-    expect(screen.getByRole("heading", { name: "local-one", level: 3 })).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Instance refresh failed.",
+    );
+    expect(
+        screen.getByRole("heading", { name: "local-one", level: 3 }),
+    ).toBeInTheDocument();
 });

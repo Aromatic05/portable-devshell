@@ -12,7 +12,7 @@ import type {
     WorkerArtifactReceiveFinishResult,
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult,
-    WorkerProtocolClient
+    WorkerProtocolClient,
 } from "../../protocol/Client.js";
 
 interface WorkerInstanceArtifactOptions {
@@ -29,12 +29,18 @@ export class WorkerInstanceArtifact {
         this.#protocolClient = options.protocolClient;
     }
 
-    async openPayload(input: WorkerArtifactPayloadOpenInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadOpenResult> {
+    async openPayload(
+        input: WorkerArtifactPayloadOpenInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadOpenResult> {
         this.#assertReady();
         return await this.#protocolClient.openArtifactPayload(input, signal);
     }
 
-    async readPayload(input: WorkerArtifactPayloadReadInput, signal?: AbortSignal): Promise<WorkerArtifactPayloadReadResult> {
+    async readPayload(
+        input: WorkerArtifactPayloadReadInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadReadResult> {
         this.#assertReady();
         return await this.#protocolClient.readArtifactPayload(input, signal);
     }
@@ -44,17 +50,25 @@ export class WorkerInstanceArtifact {
         await this.#protocolClient.closeArtifactPayload(payloadId);
     }
 
-    async beginReceive(input: WorkerArtifactReceiveBeginInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveBeginResult> {
+    async beginReceive(
+        input: WorkerArtifactReceiveBeginInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveBeginResult> {
         this.#assertReady();
         return await this.#protocolClient.beginArtifactReceive(input, signal);
     }
 
-    async writeReceive(input: WorkerArtifactReceiveWriteInput, signal?: AbortSignal): Promise<WorkerArtifactReceiveWriteResult> {
+    async writeReceive(
+        input: WorkerArtifactReceiveWriteInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveWriteResult> {
         this.#assertReady();
         return await this.#protocolClient.writeArtifactReceive(input, signal);
     }
 
-    async finishReceive(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
+    async finishReceive(
+        receiveId: string,
+    ): Promise<WorkerArtifactReceiveFinishResult> {
         this.#assertReady();
         return await this.#protocolClient.finishArtifactReceive(receiveId);
     }
@@ -66,10 +80,13 @@ export class WorkerInstanceArtifact {
 
     async openDirectReceive(
         input: WorkerArtifactDirectReceiveOpenInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         this.#assertReady();
-        return await this.#protocolClient.openArtifactDirectReceive(input, signal);
+        return await this.#protocolClient.openArtifactDirectReceive(
+            input,
+            signal,
+        );
     }
 
     async closeDirectReceive(receiverId: string): Promise<void> {
@@ -77,7 +94,9 @@ export class WorkerInstanceArtifact {
         await this.#protocolClient.closeArtifactDirectReceive(receiverId);
     }
 
-    async pushPayloadDirect(input: WorkerArtifactDirectPushInput): Promise<WorkerArtifactDirectPushResult> {
+    async pushPayloadDirect(
+        input: WorkerArtifactDirectPushInput,
+    ): Promise<WorkerArtifactDirectPushResult> {
         this.#assertReady();
         return await this.#protocolClient.pushArtifactPayloadDirect(input);
     }

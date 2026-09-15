@@ -4,7 +4,7 @@ import type { ExtensionProcessCapability } from "@portable-devshell/extension";
 
 import type {
     AgentProvider,
-    AgentProviderHandle
+    AgentProviderHandle,
 } from "../provider/AgentProvider.js";
 import type { AgentToolSession } from "../provider/AgentToolSession.js";
 import { AgentProviderRuntimePaths } from "../provider/AgentProviderRuntimePaths.js";
@@ -59,7 +59,8 @@ export class AgentHost {
     constructor(options: AgentHostOptions) {
         this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
         this.#processes = options.processes;
-        this.#registry = options.registry ?? new AgentProviderRegistry(options.providers);
+        this.#registry =
+            options.registry ?? new AgentProviderRegistry(options.providers);
         this.#runtimeRootDirectory = options.runtimeRootDirectory;
         this.#webBasePath = normalizeBasePath(options.webBasePath ?? "/agent");
     }
@@ -69,7 +70,9 @@ export class AgentHost {
     }
 
     list(): AgentHostRecord[] {
-        return [...this.#runtimes.values()].map((runtime) => cloneRecord(runtime.record));
+        return [...this.#runtimes.values()].map((runtime) =>
+            cloneRecord(runtime.record),
+        );
     }
 
     get(agentId: string): AgentHostRecord | undefined {
@@ -78,8 +81,12 @@ export class AgentHost {
     }
 
     isProviderInUse(providerId: string): boolean {
-        return [...this.#startingProviders.values()].includes(providerId)
-            || [...this.#runtimes.values()].some((runtime) => runtime.record.provider === providerId);
+        return (
+            [...this.#startingProviders.values()].includes(providerId) ||
+            [...this.#runtimes.values()].some(
+                (runtime) => runtime.record.provider === providerId,
+            )
+        );
     }
 
     webEndpoint(): AgentHostWebEndpoint | undefined {
@@ -89,11 +96,13 @@ export class AgentHost {
         if (endpoints.length === 0) return undefined;
         const upstream = endpoints[0]!;
         if (endpoints.some((candidate) => candidate !== upstream)) {
-            throw new Error("Running Agent providers expose multiple Web endpoints; one /agent hub is required.");
+            throw new Error(
+                "Running Agent providers expose multiple Web endpoints; one /agent hub is required.",
+            );
         }
         return {
             basePath: `${this.#webBasePath}/`,
-            upstream
+            upstream,
         };
     }
 
@@ -104,7 +113,9 @@ export class AgentHost {
     async steer(agentId: string, message: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.steer === undefined) {
-            throw new Error(`Agent provider ${runtime.record.provider} does not support steering.`);
+            throw new Error(
+                `Agent provider ${runtime.record.provider} does not support steering.`,
+            );
         }
         await runtime.handle.steer(message);
     }
@@ -112,7 +123,9 @@ export class AgentHost {
     async followUp(agentId: string, message: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.followUp === undefined) {
-            throw new Error(`Agent provider ${runtime.record.provider} does not support follow-up messages.`);
+            throw new Error(
+                `Agent provider ${runtime.record.provider} does not support follow-up messages.`,
+            );
         }
         await runtime.handle.followUp(message);
     }
@@ -120,7 +133,9 @@ export class AgentHost {
     async waitForIdle(agentId: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.waitForIdle === undefined) {
-            throw new Error(`Agent provider ${runtime.record.provider} does not support waiting for idle.`);
+            throw new Error(
+                `Agent provider ${runtime.record.provider} does not support waiting for idle.`,
+            );
         }
         await runtime.handle.waitForIdle();
     }
@@ -128,7 +143,9 @@ export class AgentHost {
     async reload(agentId: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.reload === undefined) {
-            throw new Error(`Agent provider ${runtime.record.provider} does not support reload.`);
+            throw new Error(
+                `Agent provider ${runtime.record.provider} does not support reload.`,
+            );
         }
         await runtime.handle.reload();
     }
@@ -136,14 +153,19 @@ export class AgentHost {
     async abort(agentId: string): Promise<void> {
         const runtime = this.#requireRuntime(agentId);
         if (runtime.handle.abort === undefined) {
-            throw new Error(`Agent provider ${runtime.record.provider} does not support abort.`);
+            throw new Error(
+                `Agent provider ${runtime.record.provider} does not support abort.`,
+            );
         }
         await runtime.handle.abort();
     }
 
     async start(options: AgentHostStartOptions): Promise<AgentHostRecord> {
         const agentId = this.#idFactory();
-        if (this.#runtimes.has(agentId) || this.#startingProviders.has(agentId)) {
+        if (
+            this.#runtimes.has(agentId) ||
+            this.#startingProviders.has(agentId)
+        ) {
             throw new Error(`Agent id already exists: ${agentId}`);
         }
 
@@ -158,17 +180,20 @@ export class AgentHost {
                 runtime: new AgentProviderRuntimePaths({
                     provider: provider.id,
                     rootDirectory: this.#runtimeRootDirectory,
-                    version: provider.version
+                    version: provider.version,
                 }),
                 target: options.target,
                 tools: options.tools,
-                web: { basePath: `${this.#webBasePath}/` }
+                web: { basePath: `${this.#webBasePath}/` },
             });
         } catch (error) {
             this.#startingProviders.delete(agentId);
             const cleanup = await settleCleanup(options.tools);
             if (cleanup !== undefined) {
-                throw new AggregateError([error, cleanup], `Agent ${agentId} failed to start and release its tool session.`);
+                throw new AggregateError(
+                    [error, cleanup],
+                    `Agent ${agentId} failed to start and release its tool session.`,
+                );
             }
             throw error;
         }
@@ -178,24 +203,32 @@ export class AgentHost {
             provider: provider.id,
             providerVersion: provider.version,
             state: "running",
-            target: { ...options.target }
+            target: { ...options.target },
         };
         const runtime = { handle, record, tools: options.tools };
         this.#runtimes.set(agentId, runtime);
-        void handle.closed.then(async () => {
-            if (this.#runtimes.get(agentId) !== runtime) return;
-            runtime.record.state = "stopped";
-            this.#runtimes.delete(agentId);
-            await runtime.tools.close();
-        }).catch(() => undefined);
-        void options.tools.closed.then(async () => {
-            if (this.#runtimes.get(agentId) !== runtime || runtime.record.state !== "running") return;
-            runtime.record.state = "stopping";
-            await runtime.handle.stop().catch(() => undefined);
-            if (this.#runtimes.get(agentId) !== runtime) return;
-            runtime.record.state = "stopped";
-            this.#runtimes.delete(agentId);
-        }).catch(() => undefined);
+        void handle.closed
+            .then(async () => {
+                if (this.#runtimes.get(agentId) !== runtime) return;
+                runtime.record.state = "stopped";
+                this.#runtimes.delete(agentId);
+                await runtime.tools.close();
+            })
+            .catch(() => undefined);
+        void options.tools.closed
+            .then(async () => {
+                if (
+                    this.#runtimes.get(agentId) !== runtime ||
+                    runtime.record.state !== "running"
+                )
+                    return;
+                runtime.record.state = "stopping";
+                await runtime.handle.stop().catch(() => undefined);
+                if (this.#runtimes.get(agentId) !== runtime) return;
+                runtime.record.state = "stopped";
+                this.#runtimes.delete(agentId);
+            })
+            .catch(() => undefined);
         return cloneRecord(record);
     }
 
@@ -216,7 +249,10 @@ export class AgentHost {
         const stopped = cloneRecord(runtime.record);
         this.#runtimes.delete(agentId);
         if (failure !== undefined && toolFailure !== undefined) {
-            throw new AggregateError([failure, toolFailure], `Agent ${agentId} failed to stop cleanly.`);
+            throw new AggregateError(
+                [failure, toolFailure],
+                `Agent ${agentId} failed to stop cleanly.`,
+            );
         }
         if (failure !== undefined) throw failure;
         if (toolFailure !== undefined) throw toolFailure;
@@ -230,7 +266,10 @@ export class AgentHost {
             await this.stop(agentId).catch((error) => failures.push(error));
         }
         if (failures.length > 0) {
-            throw new AggregateError(failures, "One or more Agents failed to stop cleanly.");
+            throw new AggregateError(
+                failures,
+                "One or more Agents failed to stop cleanly.",
+            );
         }
     }
 
@@ -254,11 +293,13 @@ function normalizeBasePath(value: string): string {
 function cloneRecord(record: AgentHostRecord): AgentHostRecord {
     return {
         ...record,
-        target: { ...record.target }
+        target: { ...record.target },
     };
 }
 
-async function settleCleanup(session: AgentToolSession): Promise<unknown | undefined> {
+async function settleCleanup(
+    session: AgentToolSession,
+): Promise<unknown | undefined> {
     try {
         await session.close();
         return undefined;

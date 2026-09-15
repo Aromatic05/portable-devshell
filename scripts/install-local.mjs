@@ -1,13 +1,36 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    copyFile,
+    lstat,
+    mkdir,
+    readFile,
+    readlink,
+    realpath,
+    rename,
+    rm,
+    symlink,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertPackageBinFile, materializeApplicationTree, readPackageBinPath, writePortableApplicationManifest, tryReadPackageBinPath } from "./application-layout.mjs";
+import {
+    assertPackageBinFile,
+    materializeApplicationTree,
+    readPackageBinPath,
+    writePortableApplicationManifest,
+    tryReadPackageBinPath,
+} from "./application-layout.mjs";
 import { resolveInstallHome } from "./install-home.mjs";
-import { captureInstalledRuntimeState, restoreInstalledControl, restoreInstalledInstances, restoreInstalledRuntimeState } from "./install-runtime-state.mjs";
+import {
+    captureInstalledRuntimeState,
+    restoreInstalledControl,
+    restoreInstalledInstances,
+    restoreInstalledRuntimeState,
+} from "./install-runtime-state.mjs";
 import { assertRunningControlMatchesApplication } from "./install-runtime-identity.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
@@ -31,9 +54,12 @@ class WorkerReleaseIntegrityError extends Error {
 }
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
-const packageJson = JSON.parse(await readFile(resolve(repoRoot, "package.json"), "utf8"));
+const packageJson = JSON.parse(
+    await readFile(resolve(repoRoot, "package.json"), "utf8"),
+);
 const version = requireString(packageJson.version, "package.json version");
-const releaseTag = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG || `v${version}`;
+const releaseTag =
+    process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_TAG || `v${version}`;
 const releaseBaseUrl = resolveReleaseBaseUrl();
 const home = resolveInstallHome();
 const dataHome =
@@ -41,24 +67,43 @@ const dataHome =
     (process.platform === "win32"
         ? process.env.LOCALAPPDATA || resolve(home, "AppData", "Local")
         : resolve(home, ".local", "share"));
-const installRoot = process.env.PORTABLE_DEVSHELL_INSTALL_ROOT || resolve(dataHome, "portable-devshell");
-const binDirectory = process.env.PORTABLE_DEVSHELL_BIN_DIR || resolve(home, ".local", "bin");
-const devshellHome = process.env.PORTABLE_DEVSHELL_HOME || resolve(home, ".devshell");
+const installRoot =
+    process.env.PORTABLE_DEVSHELL_INSTALL_ROOT ||
+    resolve(dataHome, "portable-devshell");
+const binDirectory =
+    process.env.PORTABLE_DEVSHELL_BIN_DIR || resolve(home, ".local", "bin");
+const devshellHome =
+    process.env.PORTABLE_DEVSHELL_HOME || resolve(home, ".devshell");
 const versionsDirectory = resolve(installRoot, "versions");
 const versionDirectory = resolve(versionsDirectory, version);
-const deployDirectory = resolve(installRoot, `.deploy-${version}-${process.pid}`);
-const stagingDirectory = resolve(installRoot, `.staging-${version}-${process.pid}`);
-const backupDirectory = resolve(installRoot, `.backup-${version}-${process.pid}`);
-const workerBackupDirectory = resolve(installRoot, `.worker-activation-backup-${process.pid}`);
+const deployDirectory = resolve(
+    installRoot,
+    `.deploy-${version}-${process.pid}`,
+);
+const stagingDirectory = resolve(
+    installRoot,
+    `.staging-${version}-${process.pid}`,
+);
+const backupDirectory = resolve(
+    installRoot,
+    `.backup-${version}-${process.pid}`,
+);
+const workerBackupDirectory = resolve(
+    installRoot,
+    `.worker-activation-backup-${process.pid}`,
+);
 const currentLink = resolve(installRoot, "current");
-const commandLink = resolve(binDirectory, process.platform === "win32" ? "devshell.cmd" : "devshell");
+const commandLink = resolve(
+    binDirectory,
+    process.platform === "win32" ? "devshell.cmd" : "devshell",
+);
 const allTargets = [
     { key: "linux-x64", rustTarget: "x86_64-unknown-linux-musl" },
     { key: "linux-arm64", rustTarget: "aarch64-unknown-linux-musl" },
     { key: "darwin-x64", rustTarget: "x86_64-apple-darwin" },
     { key: "darwin-arm64", rustTarget: "aarch64-apple-darwin" },
     { key: "windows-x64", rustTarget: "x86_64-pc-windows-msvc" },
-    { key: "windows-arm64", rustTarget: "aarch64-pc-windows-msvc" }
+    { key: "windows-arm64", rustTarget: "aarch64-pc-windows-msvc" },
 ];
 const hostTarget = resolveHostTarget();
 const targets = allTargets.filter((target) => target.key === hostTarget);
@@ -73,7 +118,9 @@ try {
     beginStep("检查安装环境");
     writeDetail(`Node.js ${process.version}`);
     writeDetail(`宿主平台 ${hostTarget}`);
-    writeDetail(`预装 Worker：${targets.map((target) => target.key).join(", ")}`);
+    writeDetail(
+        `预装 Worker：${targets.map((target) => target.key).join(", ")}`,
+    );
     writeDetail("其他平台将在首次连接时按需下载");
 
     beginStep("构建并验证应用");
@@ -86,7 +133,7 @@ try {
             "--prod",
             "deploy",
             "--legacy",
-            deployDirectory
+            deployDirectory,
         ]);
         await materializeApplicationTree(deployDirectory, stagingDirectory);
     } finally {
@@ -94,9 +141,11 @@ try {
     }
     await writePortableApplicationManifest(stagingDirectory, {
         minimumNodeMajor: 24,
-        version
+        version,
     });
-    const stagingCli = await assertPackageBinFile(await readPackageBinPath(stagingDirectory, "devshell"));
+    const stagingCli = await assertPackageBinFile(
+        await readPackageBinPath(stagingDirectory, "devshell"),
+    );
     if (process.platform !== "win32") {
         await chmod(stagingCli.absolutePath, 0o755);
     }
@@ -113,34 +162,49 @@ try {
     beginStep("停止旧版本并切换安装");
     const previousActivation = await captureApplicationActivation();
     const currentCli = await tryReadPackageBinPath(currentLink, "devshell");
-    const frozenCurrentCli = currentCli !== undefined && await pathExists(currentCli.absolutePath)
-        ? { ...currentCli, absolutePath: await realpath(currentCli.absolutePath) }
-        : undefined;
-    const activatedApplicationDirectory = frozenCurrentCli === undefined
-        ? undefined
-        : await realpath(currentLink);
-    const runtimeState = frozenCurrentCli === undefined
-        ? { controlRunning: false, instances: [] }
-        : captureInstalledRuntimeState((args) => runInstalledCli(frozenCurrentCli.absolutePath, args));
+    const frozenCurrentCli =
+        currentCli !== undefined && (await pathExists(currentCli.absolutePath))
+            ? {
+                  ...currentCli,
+                  absolutePath: await realpath(currentCli.absolutePath),
+              }
+            : undefined;
+    const activatedApplicationDirectory =
+        frozenCurrentCli === undefined
+            ? undefined
+            : await realpath(currentLink);
+    const runtimeState =
+        frozenCurrentCli === undefined
+            ? { controlRunning: false, instances: [] }
+            : captureInstalledRuntimeState((args) =>
+                  runInstalledCli(frozenCurrentCli.absolutePath, args),
+              );
     const recordedControlPid = await readRecordedControlPid();
     const runtimePid = runtimeState.pid ?? recordedControlPid;
     if (runtimeState.controlRunning) {
         if (activatedApplicationDirectory === undefined) {
-            throw new Error("Cannot verify the activated application generation for the running Control; installation is cancelled before shutdown.");
+            throw new Error(
+                "Cannot verify the activated application generation for the running Control; installation is cancelled before shutdown.",
+            );
         }
         assertRunningControlMatchesApplication({
             applicationDirectory: activatedApplicationDirectory,
-            commandLine: runtimePid === undefined ? "" : readProcessCommandLine(runtimePid),
+            commandLine:
+                runtimePid === undefined
+                    ? ""
+                    : readProcessCommandLine(runtimePid),
             controlRunning: true,
             pid: runtimePid,
         });
     } else if (runtimePid !== undefined && isProcessRunning(runtimePid)) {
         throw new Error(
-            `Control PID ${runtimePid} is still running while Control RPC is unavailable; installation is cancelled before shutdown.`
+            `Control PID ${runtimePid} is still running while Control RPC is unavailable; installation is cancelled before shutdown.`,
         );
     }
     await mkdir(versionsDirectory, { mode: 0o700, recursive: true });
-    const previousWorkerActivation = await backupHostWorkerActivation(workerBackupDirectory);
+    const previousWorkerActivation = await backupHostWorkerActivation(
+        workerBackupDirectory,
+    );
     let previousVersionBackedUp = false;
     let candidateVersionMoved = false;
     let applicationActivationAttempted = false;
@@ -151,18 +215,25 @@ try {
         const installedWorkers = {};
         workerTransactionStarted = true;
         for (const target of targets) {
-            installedWorkers[target.key] = await installPreparedWorker(target, preparedWorkers[target.key]);
+            installedWorkers[target.key] = await installPreparedWorker(
+                target,
+                preparedWorkers[target.key],
+            );
         }
         await activateHostWorker();
         await writeFile(
             resolve(stagingDirectory, "portable-devshell-install.json"),
-            `${JSON.stringify({
-                releaseTag,
-                version,
-                workerReleaseDirectoryUrl: `${releaseBaseUrl}/${releaseTag}`,
-                workers: installedWorkers
-            }, null, 2)}\n`,
-            { mode: 0o600 }
+            `${JSON.stringify(
+                {
+                    releaseTag,
+                    version,
+                    workerReleaseDirectoryUrl: `${releaseBaseUrl}/${releaseTag}`,
+                    workers: installedWorkers,
+                },
+                null,
+                2,
+            )}\n`,
+            { mode: 0o600 },
         );
 
         if (await pathExists(versionDirectory)) {
@@ -175,7 +246,9 @@ try {
         await activateApplication(versionDirectory);
         beginStep("验证安装结果");
         await assertInstalledCommandStarts();
-        installedCli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
+        installedCli = await assertPackageBinFile(
+            await readPackageBinPath(versionDirectory, "devshell"),
+        );
         restoreInstalledControl(
             (args) => runInstalledCli(installedCli.absolutePath, args),
             runtimeState,
@@ -189,10 +262,17 @@ try {
                 rollbackFailures.push(rollbackError);
             }
         }
-        if (candidateVersionMoved || previousVersionBackedUp || applicationActivationAttempted) {
+        if (
+            candidateVersionMoved ||
+            previousVersionBackedUp ||
+            applicationActivationAttempted
+        ) {
             try {
                 if (candidateVersionMoved) {
-                    await rm(versionDirectory, { force: true, recursive: true });
+                    await rm(versionDirectory, {
+                        force: true,
+                        recursive: true,
+                    });
                 }
                 if (previousVersionBackedUp) {
                     await rename(backupDirectory, versionDirectory);
@@ -245,7 +325,9 @@ try {
     await rm(workerBackupDirectory, { force: true, recursive: true });
     writeDetail("已安装命令可以正常启动");
     if (runtimeState.controlRunning) {
-        writeDetail(`已恢复 Control 和 ${runtimeState.instances.length} 个安装前运行的实例`);
+        writeDetail(
+            `已恢复 Control 和 ${runtimeState.instances.length} 个安装前运行的实例`,
+        );
     }
     process.stdout.write(
         [
@@ -259,10 +341,10 @@ try {
             `  ${commandLink} tui`,
             process.env.PATH?.split(delimiter).includes(binDirectory)
                 ? ""
-                : `PATH 尚未包含 ${binDirectory}，请将它加入 shell 配置。`
+                : `PATH 尚未包含 ${binDirectory}，请将它加入 shell 配置。`,
         ]
             .filter(Boolean)
-            .join("\n") + "\n"
+            .join("\n") + "\n",
     );
 } catch (error) {
     await rm(deployDirectory, { force: true, recursive: true });
@@ -279,7 +361,7 @@ async function prepareWorkerRemoteFirst(target) {
         }
 
         process.stderr.write(
-            `Release 中无法取得 ${target.key}，尝试本地构建。\n${formatError(releaseError)}\n`
+            `Release 中无法取得 ${target.key}，尝试本地构建。\n${formatError(releaseError)}\n`,
         );
 
         try {
@@ -289,9 +371,9 @@ async function prepareWorkerRemoteFirst(target) {
                 [
                     `无法安装 ${target.key} worker。`,
                     `Release 下载失败：${formatError(releaseError)}`,
-                    `本地构建失败：${formatError(buildError)}`
+                    `本地构建失败：${formatError(buildError)}`,
                 ].join("\n"),
-                { cause: buildError }
+                { cause: buildError },
             );
         }
     }
@@ -301,13 +383,17 @@ async function prepareReleaseWorker(target) {
     const assetName = workerAssetName(target);
     const releaseDirectory = `${releaseBaseUrl}/${releaseTag}`;
     writeDetail(`下载 ${assetName}.sha256`);
-    const expectedSha = await fetchSha256(`${releaseDirectory}/${assetName}.sha256`);
+    const expectedSha = await fetchSha256(
+        `${releaseDirectory}/${assetName}.sha256`,
+    );
     writeDetail(`下载 ${assetName}`);
-    const payload = Buffer.from(await fetchBytes(`${releaseDirectory}/${assetName}`));
+    const payload = Buffer.from(
+        await fetchBytes(`${releaseDirectory}/${assetName}`),
+    );
     const actualSha = createHash("sha256").update(payload).digest("hex");
     if (actualSha !== expectedSha) {
         throw new WorkerReleaseIntegrityError(
-            `Checksum mismatch for ${assetName}: expected ${expectedSha}, got ${actualSha}.`
+            `Checksum mismatch for ${assetName}: expected ${expectedSha}, got ${actualSha}.`,
         );
     }
 
@@ -315,7 +401,10 @@ async function prepareReleaseWorker(target) {
 }
 
 async function prepareSourceWorker(target) {
-    const outputDirectory = resolve(installRoot, `.worker-build-${target.key}-${process.pid}`);
+    const outputDirectory = resolve(
+        installRoot,
+        `.worker-build-${target.key}-${process.pid}`,
+    );
     await rm(outputDirectory, { force: true, recursive: true });
 
     try {
@@ -324,7 +413,7 @@ async function prepareSourceWorker(target) {
             "./scripts/build-worker.mjs",
             target.key,
             "--output-dir",
-            outputDirectory
+            outputDirectory,
         ]);
 
         const assetName = workerAssetName(target);
@@ -340,14 +429,25 @@ async function prepareSourceWorker(target) {
 }
 
 async function installPreparedWorker(target, prepared) {
-    return await installWorkerBytes(target, prepared.payload, prepared.sha256, prepared.source);
+    return await installWorkerBytes(
+        target,
+        prepared.payload,
+        prepared.sha256,
+        prepared.source,
+    );
 }
 
 async function installWorkerBytes(target, payload, expectedSha, source) {
-    const sha256 = expectedSha ?? createHash("sha256").update(payload).digest("hex");
+    const sha256 =
+        expectedSha ?? createHash("sha256").update(payload).digest("hex");
     const assetName = workerAssetName(target);
     const binaryName = workerBinaryName(target);
-    const installDirectory = resolve(devshellHome, "workers", target.key, sha256);
+    const installDirectory = resolve(
+        devshellHome,
+        "workers",
+        target.key,
+        sha256,
+    );
     const binaryPath = resolve(installDirectory, binaryName);
     const shaPath = resolve(installDirectory, `${binaryName}.sha256`);
 
@@ -355,9 +455,18 @@ async function installWorkerBytes(target, payload, expectedSha, source) {
     if ((await readInstalledSha(binaryPath, shaPath)) !== sha256) {
         const temporaryBinary = `${binaryPath}.tmp-${process.pid}`;
         const temporarySha = `${shaPath}.tmp-${process.pid}`;
-        await writeFile(temporaryBinary, payload, target.key.startsWith("windows-") ? {} : { mode: 0o755 });
-        if (!target.key.startsWith("windows-")) await chmod(temporaryBinary, 0o755);
-        await writeFile(temporarySha, `${sha256}\n`, target.key.startsWith("windows-") ? {} : { mode: 0o600 });
+        await writeFile(
+            temporaryBinary,
+            payload,
+            target.key.startsWith("windows-") ? {} : { mode: 0o755 },
+        );
+        if (!target.key.startsWith("windows-"))
+            await chmod(temporaryBinary, 0o755);
+        await writeFile(
+            temporarySha,
+            `${sha256}\n`,
+            target.key.startsWith("windows-") ? {} : { mode: 0o600 },
+        );
         await rename(temporaryBinary, binaryPath);
         await rename(temporarySha, shaPath);
     }
@@ -368,7 +477,10 @@ async function installWorkerBytes(target, payload, expectedSha, source) {
     if (process.platform === "win32") {
         await copyFile(binaryPath, activePath);
     } else {
-        await replaceSymlink(activePath, `../workers/${target.key}/${sha256}/${binaryName}`);
+        await replaceSymlink(
+            activePath,
+            `../workers/${target.key}/${sha256}/${binaryName}`,
+        );
     }
 
     return { path: binaryPath, sha256, source };
@@ -385,7 +497,12 @@ async function backupHostWorkerActivation(backupDirectory) {
             resolve(backupDirectory, "host-worker"),
         ),
         default: await backupPathActivation(
-            resolve(workerBinDirectory, process.platform === "win32" ? "devshell-worker.exe" : "devshell-worker"),
+            resolve(
+                workerBinDirectory,
+                process.platform === "win32"
+                    ? "devshell-worker.exe"
+                    : "devshell-worker",
+            ),
             resolve(backupDirectory, "default-worker"),
         ),
     };
@@ -405,7 +522,12 @@ async function restoreHostWorkerActivation(previous) {
         previous.host,
     );
     await restorePathActivation(
-        resolve(workerBinDirectory, process.platform === "win32" ? "devshell-worker.exe" : "devshell-worker"),
+        resolve(
+            workerBinDirectory,
+            process.platform === "win32"
+                ? "devshell-worker.exe"
+                : "devshell-worker",
+        ),
         previous.default,
     );
 }
@@ -445,37 +567,56 @@ async function activateHostWorker() {
     if (process.platform === "win32") {
         await copyFile(
             resolve(workerBinDirectory, workerAssetName({ key: hostTarget })),
-            resolve(workerBinDirectory, "devshell-worker.exe")
+            resolve(workerBinDirectory, "devshell-worker.exe"),
         );
     } else {
-        await replaceSymlink(resolve(workerBinDirectory, "devshell-worker"), `devshell-worker-${hostTarget}`);
+        await replaceSymlink(
+            resolve(workerBinDirectory, "devshell-worker"),
+            `devshell-worker-${hostTarget}`,
+        );
     }
 }
 
 async function activateApplication(versionDirectory) {
-    const cli = await assertPackageBinFile(await readPackageBinPath(versionDirectory, "devshell"));
+    const cli = await assertPackageBinFile(
+        await readPackageBinPath(versionDirectory, "devshell"),
+    );
     await mkdir(binDirectory, { recursive: true });
     if (process.platform === "win32") {
         await replaceSymlink(currentLink, versionDirectory, "junction");
         const cliPath = resolve(currentLink, cli.relativePath);
-        await writeFile(commandLink, `@echo off\r\nnode "${cliPath}" %*\r\n`, "utf8");
+        await writeFile(
+            commandLink,
+            `@echo off\r\nnode "${cliPath}" %*\r\n`,
+            "utf8",
+        );
     } else {
         await replaceSymlink(currentLink, `versions/${version}`);
-        await replaceSymlink(commandLink, resolve(currentLink, cli.relativePath));
+        await replaceSymlink(
+            commandLink,
+            resolve(currentLink, cli.relativePath),
+        );
     }
 }
 
 async function captureApplicationActivation() {
     return {
         command: await captureCommandActivation(commandLink),
-        currentTarget: await readlinkIfExists(currentLink)
+        currentTarget: await readlinkIfExists(currentLink),
     };
 }
 
 async function restoreApplicationActivation(previous) {
-    await rm(currentLink, { force: true, recursive: process.platform === "win32" });
+    await rm(currentLink, {
+        force: true,
+        recursive: process.platform === "win32",
+    });
     if (previous.currentTarget !== undefined) {
-        await symlink(previous.currentTarget, currentLink, process.platform === "win32" ? "junction" : undefined);
+        await symlink(
+            previous.currentTarget,
+            currentLink,
+            process.platform === "win32" ? "junction" : undefined,
+        );
     }
     await restoreCommandActivation(commandLink, previous.command);
 }
@@ -483,8 +624,14 @@ async function restoreApplicationActivation(previous) {
 async function captureCommandActivation(path) {
     try {
         const metadata = await lstat(path);
-        if (metadata.isSymbolicLink()) return { kind: "symlink", target: await readlink(path) };
-        if (metadata.isFile()) return { content: await readFile(path), kind: "file", mode: metadata.mode & 0o777 };
+        if (metadata.isSymbolicLink())
+            return { kind: "symlink", target: await readlink(path) };
+        if (metadata.isFile())
+            return {
+                content: await readFile(path),
+                kind: "file",
+                mode: metadata.mode & 0o777,
+            };
         throw new Error(`Unsupported active installation entry: ${path}`);
     } catch (error) {
         if (error?.code === "ENOENT") return { kind: "missing" };
@@ -505,11 +652,21 @@ async function restoreCommandActivation(path, previous) {
 }
 
 async function assertCliStarts(cliPath, failureLabel) {
-    await assertCommandStarts(process.execPath, [cliPath, "status"], false, failureLabel);
+    await assertCommandStarts(
+        process.execPath,
+        [cliPath, "status"],
+        false,
+        failureLabel,
+    );
 }
 
 async function assertInstalledCommandStarts() {
-    await assertCommandStarts(commandLink, ["status"], process.platform === "win32", "安装结果验证失败");
+    await assertCommandStarts(
+        commandLink,
+        ["status"],
+        process.platform === "win32",
+        "安装结果验证失败",
+    );
 }
 
 async function assertCommandStarts(command, args, shell, failureLabel) {
@@ -526,14 +683,16 @@ async function assertCommandStarts(command, args, shell, failureLabel) {
                 USERPROFILE: smokeRoot,
                 LOCALAPPDATA: resolve(smokeRoot, "AppData", "Local"),
                 PORTABLE_DEVSHELL_HOME: resolve(smokeRoot, ".devshell"),
-                XDG_RUNTIME_DIR: smokeRuntime
+                XDG_RUNTIME_DIR: smokeRuntime,
             },
             shell,
-            windowsHide: true
+            windowsHide: true,
         });
         const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
         if (result.error !== undefined || result.status !== 0) {
-            throw new Error(`${failureLabel}：CLI 无法正常执行 status。\n${result.error?.stack ?? output}`);
+            throw new Error(
+                `${failureLabel}：CLI 无法正常执行 status。\n${result.error?.stack ?? output}`,
+            );
         }
     } finally {
         await rm(smokeRoot, { force: true, recursive: true });
@@ -564,28 +723,39 @@ async function readRecordedControlPid() {
     if (source === undefined) return undefined;
     const value = source.trim();
     if (!/^[1-9][0-9]*$/u.test(value)) {
-        throw new Error(`Cannot verify Control runtime because ${pidFile} contains an invalid PID.`);
+        throw new Error(
+            `Cannot verify Control runtime because ${pidFile} contains an invalid PID.`,
+        );
     }
     const pid = Number.parseInt(value, 10);
     if (!Number.isSafeInteger(pid)) {
-        throw new Error(`Cannot verify Control runtime because ${pidFile} contains an invalid PID.`);
+        throw new Error(
+            `Cannot verify Control runtime because ${pidFile} contains an invalid PID.`,
+        );
     }
     return pid;
 }
 
 async function stopInstalledControl(currentCli) {
     const pidFile = resolve(devshellHome, "control", "control.pid");
-    if (currentCli !== undefined && await pathExists(currentCli.absolutePath)) {
-        const result = spawnSync(process.execPath, [currentCli.absolutePath, "stop"], {
-            cwd: home,
-            encoding: "utf8",
-            env: process.env
-        });
+    if (
+        currentCli !== undefined &&
+        (await pathExists(currentCli.absolutePath))
+    ) {
+        const result = spawnSync(
+            process.execPath,
+            [currentCli.absolutePath, "stop"],
+            {
+                cwd: home,
+                encoding: "utf8",
+                env: process.env,
+            },
+        );
         if (result.status === 0 && !(await pathExists(pidFile))) {
             return;
         }
         process.stderr.write(
-            `Installed CLI did not fully stop control; attempting verified PID recovery.\n${result.stderr || result.stdout || ""}`
+            `Installed CLI did not fully stop control; attempting verified PID recovery.\n${result.stderr || result.stdout || ""}`,
         );
     }
 
@@ -596,7 +766,9 @@ async function stopInstalledControl(currentCli) {
     const pidSource = (await readFile(pidFile, "utf8")).trim();
     const pid = Number.parseInt(pidSource, 10);
     if (!/^[1-9][0-9]*$/u.test(pidSource) || !Number.isSafeInteger(pid)) {
-        throw new Error(`Cannot recover control shutdown because ${pidFile} contains an invalid PID.`);
+        throw new Error(
+            `Cannot recover control shutdown because ${pidFile} contains an invalid PID.`,
+        );
     }
 
     if (!isProcessRunning(pid)) {
@@ -607,13 +779,21 @@ async function stopInstalledControl(currentCli) {
     const commandLine = readProcessCommandLine(pid);
     if (!isPortableDevshellControlCommand(commandLine)) {
         throw new Error(
-            `Refusing to terminate PID ${pid}: the process named by ${pidFile} is not a verified portable-devshell ControlDaemon.js process.`
+            `Refusing to terminate PID ${pid}: the process named by ${pidFile} is not a verified portable-devshell ControlDaemon.js process.`,
         );
     }
 
-    if (signalProcess(pid, "SIGTERM") && !(await waitForProcessExit(pid, 5_000))) {
-        if (signalProcess(pid, "SIGKILL") && !(await waitForProcessExit(pid, 2_000))) {
-            throw new Error(`Verified portable-devshell control PID ${pid} did not terminate.`);
+    if (
+        signalProcess(pid, "SIGTERM") &&
+        !(await waitForProcessExit(pid, 5_000))
+    ) {
+        if (
+            signalProcess(pid, "SIGKILL") &&
+            !(await waitForProcessExit(pid, 2_000))
+        ) {
+            throw new Error(
+                `Verified portable-devshell control PID ${pid} did not terminate.`,
+            );
         }
     }
     await cleanupControlRuntime(pidFile);
@@ -630,8 +810,13 @@ function runInstalledCli(cliPath, args) {
 
 async function restorePreviousRuntimeState(runtimeState, previousCli) {
     if (!runtimeState.controlRunning) return;
-    if (previousCli === undefined || !(await pathExists(previousCli.absolutePath))) {
-        throw new Error("The exact pre-installation CLI is unavailable after installation rollback.");
+    if (
+        previousCli === undefined ||
+        !(await pathExists(previousCli.absolutePath))
+    ) {
+        throw new Error(
+            "The exact pre-installation CLI is unavailable after installation rollback.",
+        );
     }
     restoreInstalledRuntimeState(
         (args) => runInstalledCli(previousCli.absolutePath, args),
@@ -647,19 +832,24 @@ function readProcessCommandLine(pid) {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`
+                `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`,
             ],
-            { encoding: "utf8", windowsHide: true }
+            { encoding: "utf8", windowsHide: true },
         );
         return result.status === 0 ? result.stdout.trim() : "";
     }
 
-    const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+    const result = spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+        encoding: "utf8",
+    });
     return result.status === 0 ? result.stdout.trim() : "";
 }
 
 function isPortableDevshellControlCommand(commandLine) {
-    return commandLine.includes("ControlDaemon.js") && commandLine.toLowerCase().includes("portable-devshell");
+    return (
+        commandLine.includes("ControlDaemon.js") &&
+        commandLine.toLowerCase().includes("portable-devshell")
+    );
 }
 
 function signalProcess(pid, signal) {
@@ -704,7 +894,10 @@ async function cleanupControlRuntime(pidFile) {
     }
     const runtimeDirectory = process.env.XDG_RUNTIME_DIR
         ? join(process.env.XDG_RUNTIME_DIR, "portable-devshell")
-        : join(tmpdir(), `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : process.env.USER ?? process.env.USERNAME ?? "user"}`);
+        : join(
+              tmpdir(),
+              `portable-devshell-${typeof process.getuid === "function" ? process.getuid() : (process.env.USER ?? process.env.USERNAME ?? "user")}`,
+          );
     await rm(join(runtimeDirectory, "control.sock"), { force: true });
 }
 
@@ -714,7 +907,7 @@ function runPnpm(args) {
             "/d",
             "/s",
             "/c",
-            ["pnpm", ...args].map(quoteWindowsCommandArgument).join(" ")
+            ["pnpm", ...args].map(quoteWindowsCommandArgument).join(" "),
         ]);
         return;
     }
@@ -731,18 +924,25 @@ function runNode(args) {
 }
 
 function run(command, args) {
-    const result = spawnSync(command, args, { cwd: repoRoot, env: process.env, stdio: "inherit" });
+    const result = spawnSync(command, args, {
+        cwd: repoRoot,
+        env: process.env,
+        stdio: "inherit",
+    });
     if (result.status !== 0) {
-        throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`);
+        throw new Error(
+            `${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}.`,
+        );
     }
 }
-
 
 async function fetchSha256(url) {
     const text = Buffer.from(await fetchBytes(url)).toString("utf8");
     const sha = text.trim().split(/\s+/u)[0] || "";
     if (!/^[a-f0-9]{64}$/u.test(sha)) {
-        throw new WorkerReleaseIntegrityError(`Invalid SHA-256 document from ${url}.`);
+        throw new WorkerReleaseIntegrityError(
+            `Invalid SHA-256 document from ${url}.`,
+        );
     }
     return sha;
 }
@@ -757,7 +957,10 @@ async function fetchBytes(url) {
 
 async function readInstalledSha(binaryPath, shaPath) {
     try {
-        const [binary, recorded] = await Promise.all([readFile(binaryPath), readFile(shaPath, "utf8")]);
+        const [binary, recorded] = await Promise.all([
+            readFile(binaryPath),
+            readFile(shaPath, "utf8"),
+        ]);
         const actual = createHash("sha256").update(binary).digest("hex");
         return actual === recorded.trim() ? actual : undefined;
     } catch {
@@ -766,7 +969,9 @@ async function readInstalledSha(binaryPath, shaPath) {
 }
 
 function workerBinaryName(target) {
-    return target.key.startsWith("windows-") ? "devshell-worker.exe" : "devshell-worker";
+    return target.key.startsWith("windows-")
+        ? "devshell-worker.exe"
+        : "devshell-worker";
 }
 
 function workerAssetName(target) {
@@ -805,7 +1010,9 @@ function resolveReleaseBaseUrl() {
     if (explicit) {
         return explicit.replace(/\/+$/u, "");
     }
-    const repository = process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY || "Aromatic05/portable-devshell";
+    const repository =
+        process.env.PORTABLE_DEVSHELL_WORKER_RELEASE_REPOSITORY ||
+        "Aromatic05/portable-devshell";
     return `https://github.com/${repository.replace(/^\/+|\/+$/gu, "")}/releases/download`;
 }
 
@@ -818,9 +1025,16 @@ function resolveHostTarget() {
               : process.platform === "win32"
                 ? "windows"
                 : undefined;
-    const arch = process.arch === "x64" ? "x64" : process.arch === "arm64" ? "arm64" : undefined;
+    const arch =
+        process.arch === "x64"
+            ? "x64"
+            : process.arch === "arm64"
+              ? "arm64"
+              : undefined;
     if (!os || !arch) {
-        throw new Error(`Unsupported installation host: ${process.platform}-${process.arch}.`);
+        throw new Error(
+            `Unsupported installation host: ${process.platform}-${process.arch}.`,
+        );
     }
     return `${os}-${arch}`;
 }

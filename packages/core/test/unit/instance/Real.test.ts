@@ -8,9 +8,12 @@ import {
     asInstanceName,
     errorCodes,
     toolCallOutput,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
-import { encodeFrame, FrameBuffer } from "@portable-devshell/shared/transport/frame";
+import {
+    encodeFrame,
+    FrameBuffer,
+} from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
@@ -20,100 +23,116 @@ import {
     encodeWorkerRpcMessage,
     type WorkerCommandResult,
     type WorkerCommandTransport,
-    type WorkerRpcResponseEnvelope
+    type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../../test/TestPlatformSupport.ts";
+import {
+    realWorkerTestOptions,
+    resolveTestWorkerBinary,
+} from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
 const cliToolCallContext = { source: "cli" } as const;
 
-test("WorkerInstance completes lifecycle against frozen devshell-worker", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const workspacePath = await createTestTempDirectory("instance");
-    const homeDirectory = await createTestTempDirectory("instance-home");
-    const runtimeDirectory = await createTestTempDirectory("instance-runtime");
-    const instanceName = asInstanceName(`task-6-${process.pid}`);
-    const factory = new WorkerInstanceFactory();
-    const instance = factory.create({
-        env: { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory },
-        homeDirectory,
-        name: instanceName,
-        transport: new WorkerTransportDriverLocal({
-            workerBinary: new WorkerBinary(workerBinaryPath!),
-            spawnFunction: nodeSpawn
-        })
-    });
+test(
+    "WorkerInstance completes lifecycle against frozen devshell-worker",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("instance");
+        const homeDirectory = await createTestTempDirectory("instance-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("instance-runtime");
+        const instanceName = asInstanceName(`task-6-${process.pid}`);
+        const factory = new WorkerInstanceFactory();
+        const instance = factory.create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: instanceName,
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
 
-    t.after(async () => {
-        await instance.stop();
-        await instance.close();
-        await rm(workspacePath, { force: true, recursive: true });
-        await rm(homeDirectory, { force: true, recursive: true });
-        await rm(runtimeDirectory, { force: true, recursive: true });
-    });
+        t.after(async () => {
+            await instance.stop();
+            await instance.close();
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
 
-    const started = await instance.start();
+        const started = await instance.start();
 
-    assert.equal(started.daemonState, "running");
-    assert.equal(started.connectionState, "connected");
-    assert.equal(started.ready, true);
-    assert.equal(instance.handshake?.instance, instanceName);
-    assert.equal(instance.handshake?.homeDirectory, homeDirectory);
-    const bashRun = instance.listTools().find((tool) => tool.name === "bash_run");
-    assert.notEqual(bashRun, undefined);
-    assert.notEqual(bashRun?.inputSchema, undefined);
-    const fileGlob = instance.listTools().find((tool) => tool.name === "file_glob");
-    assert.notEqual(fileGlob, undefined);
-    const fileGlobSchema = fileGlob?.inputSchema as {
-        anyOf?: unknown;
-        oneOf?: unknown;
-        properties?: Record<string, unknown>;
-        type?: unknown;
-    };
-    assert.equal(fileGlobSchema.type, "object");
-    assert.equal(fileGlobSchema.anyOf, undefined);
-    assert.equal(fileGlobSchema.oneOf, undefined);
-    assert.notEqual(fileGlobSchema.properties?.patterns, undefined);
-    assert.notEqual(fileGlobSchema.properties?.type, undefined);
-    assert.notEqual(fileGlobSchema.properties?.cursor, undefined);
+        assert.equal(started.daemonState, "running");
+        assert.equal(started.connectionState, "connected");
+        assert.equal(started.ready, true);
+        assert.equal(instance.handshake?.instance, instanceName);
+        assert.equal(instance.handshake?.homeDirectory, homeDirectory);
+        const bashRun = instance
+            .listTools()
+            .find((tool) => tool.name === "bash_run");
+        assert.notEqual(bashRun, undefined);
+        assert.notEqual(bashRun?.inputSchema, undefined);
+        const fileGlob = instance
+            .listTools()
+            .find((tool) => tool.name === "file_glob");
+        assert.notEqual(fileGlob, undefined);
+        const fileGlobSchema = fileGlob?.inputSchema as {
+            anyOf?: unknown;
+            oneOf?: unknown;
+            properties?: Record<string, unknown>;
+            type?: unknown;
+        };
+        assert.equal(fileGlobSchema.type, "object");
+        assert.equal(fileGlobSchema.anyOf, undefined);
+        assert.equal(fileGlobSchema.oneOf, undefined);
+        assert.notEqual(fileGlobSchema.properties?.patterns, undefined);
+        assert.notEqual(fileGlobSchema.properties?.type, undefined);
+        assert.notEqual(fileGlobSchema.properties?.cursor, undefined);
 
-    const replay = instance.subscribe(1);
-    assert.equal(replay.kind, "events");
-    assert.deepEqual(
-        replay.events.map((event) => event.type),
-        [
-            "instance.statusChanged",
-            "instance.connectionChanged",
-            "worker.rpcConnected",
-            "worker.schemaRefreshed",
-            "instance.started",
-            "instance.statusChanged",
-            "instance.connectionChanged",
-            "instance.readyChanged"
-        ]
-    );
-    assert.deepEqual(replay.events[0]?.data, {
-        connectionState: "disconnected",
-        daemonState: "starting",
-        previousDaemonState: "stopped",
-        previousStatus: "stopped",
-        ready: false,
-        status: "running"
-    });
-    assert.deepEqual(replay.events.at(-1)?.data, {
-        connectionState: "connected",
-        daemonState: "running",
-        previousReady: false,
-        ready: true,
-        status: "ready"
-    });
+        const replay = instance.subscribe(1);
+        assert.equal(replay.kind, "events");
+        assert.deepEqual(
+            replay.events.map((event) => event.type),
+            [
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "worker.rpcConnected",
+                "worker.schemaRefreshed",
+                "instance.started",
+                "instance.statusChanged",
+                "instance.connectionChanged",
+                "instance.readyChanged",
+            ],
+        );
+        assert.deepEqual(replay.events[0]?.data, {
+            connectionState: "disconnected",
+            daemonState: "starting",
+            previousDaemonState: "stopped",
+            previousStatus: "stopped",
+            ready: false,
+            status: "running",
+        });
+        assert.deepEqual(replay.events.at(-1)?.data, {
+            connectionState: "connected",
+            daemonState: "running",
+            previousReady: false,
+            ready: true,
+            status: "ready",
+        });
 
-    const stopped = await instance.stop();
-    assert.equal(stopped.daemonState, "stopped");
-    assert.equal(stopped.connectionState, "disconnected");
-    assert.equal(stopped.ready, false);
-});
+        const stopped = await instance.stop();
+        assert.equal(stopped.daemonState, "stopped");
+        assert.equal(stopped.connectionState, "disconnected");
+        assert.equal(stopped.ready, false);
+    },
+);
 
 test("WorkerInstance serializes start and stop lifecycle operations", async () => {
     const homeDirectory = await createTestTempDirectory("instance-serialized");
@@ -137,12 +156,12 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
                 startCompleted = true;
             }
             return await harness.transport.runWorkerCommand(command, options);
-        }
+        },
     };
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("serialized-lifecycle"),
-        transport
+        transport,
     });
 
     try {
@@ -169,45 +188,67 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("control-audit"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
         const context = {
             ctxId: "ctx-control-audit",
             requestId: "request-control-audit",
-            source: "mcp"
+            source: "mcp",
         } as const;
         const completed = await instance.auditToolCall(
             "todo_read",
             {},
             context,
-            async () => ({ revision: 7 })
+            async () => ({ revision: 7 }),
         );
         assert.deepEqual(completed, { revision: 7 });
 
         await assert.rejects(
-            instance.auditToolCall("instance_status", { instance: "missing" }, context, async () => {
-                const error = new Error("missing instance");
-                Object.assign(error, { code: errorCodes.instanceMissing, retryable: false });
-                throw error;
-            }),
+            instance.auditToolCall(
+                "instance_status",
+                { instance: "missing" },
+                context,
+                async () => {
+                    const error = new Error("missing instance");
+                    Object.assign(error, {
+                        code: errorCodes.instanceMissing,
+                        retryable: false,
+                    });
+                    throw error;
+                },
+            ),
             (error: unknown) => {
-                assert.equal((error as { code?: string }).code, errorCodes.instanceMissing);
+                assert.equal(
+                    (error as { code?: string }).code,
+                    errorCodes.instanceMissing,
+                );
                 return true;
-            }
+            },
         );
 
         await assert.rejects(
-            instance.auditToolCall("artifact_transfer", { operation: "status", transferId: "transfer-1" }, context, async () => {
-                const error = new Error("client cancelled");
-                Object.assign(error, { code: errorCodes.coreToolCallCancelled, retryable: true });
-                throw error;
-            }),
+            instance.auditToolCall(
+                "artifact_transfer",
+                { operation: "status", transferId: "transfer-1" },
+                context,
+                async () => {
+                    const error = new Error("client cancelled");
+                    Object.assign(error, {
+                        code: errorCodes.coreToolCallCancelled,
+                        retryable: true,
+                    });
+                    throw error;
+                },
+            ),
             (error: unknown) => {
-                assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+                assert.equal(
+                    (error as { code?: string }).code,
+                    errorCodes.coreToolCallCancelled,
+                );
                 return true;
-            }
+            },
         );
 
         const records = await instance.readToolCalls();
@@ -220,7 +261,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                 requestId: record.requestId,
                 source: record.source,
                 status: record.status,
-                toolName: record.toolName
+                toolName: record.toolName,
             })),
             [
                 {
@@ -231,7 +272,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "completed",
-                    toolName: "todo_read"
+                    toolName: "todo_read",
                 },
                 {
                     ctxId: "ctx-control-audit",
@@ -241,7 +282,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "failed",
-                    toolName: "instance_status"
+                    toolName: "instance_status",
                 },
                 {
                     ctxId: "ctx-control-audit",
@@ -251,20 +292,33 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                     requestId: "request-control-audit",
                     source: "mcp",
                     status: "cancelled",
-                    toolName: "artifact_transfer"
-                }
-            ]
+                    toolName: "artifact_transfer",
+                },
+            ],
         );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         const eventTypesForCall = (callId: string | undefined) =>
-            replay.events.filter((event) => jsonRecord(event.data)?.callId === callId).map((event) => event.type);
-        assert.deepEqual(eventTypesForCall(records[0]?.callId), ["toolCall.running", "toolCall.completed"]);
-        assert.deepEqual(eventTypesForCall(records[1]?.callId), ["toolCall.running", "toolCall.failed"]);
-        assert.deepEqual(eventTypesForCall(records[2]?.callId), ["toolCall.running", "toolCall.cancelled"]);
+            replay.events
+                .filter((event) => jsonRecord(event.data)?.callId === callId)
+                .map((event) => event.type);
+        assert.deepEqual(eventTypesForCall(records[0]?.callId), [
+            "toolCall.running",
+            "toolCall.completed",
+        ]);
+        assert.deepEqual(eventTypesForCall(records[1]?.callId), [
+            "toolCall.running",
+            "toolCall.failed",
+        ]);
+        assert.deepEqual(eventTypesForCall(records[2]?.callId), [
+            "toolCall.running",
+            "toolCall.cancelled",
+        ]);
         const completedEvent = replay.events.find(
-            (event) => event.type === "toolCall.completed" && jsonRecord(event.data)?.callId === records[0]?.callId
+            (event) =>
+                event.type === "toolCall.completed" &&
+                jsonRecord(event.data)?.callId === records[0]?.callId,
         );
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
         assert.deepEqual(records[0]?.output, { revision: 7 });
@@ -281,39 +335,59 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: instanceName,
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
         const stdout = "x".repeat(240);
 
-        await assert.rejects(instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreInstanceNotReady);
-            return true;
-        });
+        await assert.rejects(
+            instance.callTool(
+                "bash_run",
+                { command: "pwd" },
+                cliToolCallContext,
+            ),
+            (error: unknown) => {
+                assert.equal(
+                    (error as { code?: string }).code,
+                    errorCodes.coreInstanceNotReady,
+                );
+                return true;
+            },
+        );
 
         const started = await instance.start();
         assert.equal(started.ready, true);
 
-        const firstCall = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
-        const secondCall = instance.callTool("bash_run", { command: "ls" }, cliToolCallContext);
+        const firstCall = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            cliToolCallContext,
+        );
+        const secondCall = instance.callTool(
+            "bash_run",
+            { command: "ls" },
+            cliToolCallContext,
+        );
         await harness.waitForMethodCount("bash_run", 2);
-        const runningRecords = await instance.readToolCalls({ status: "running" });
+        const runningRecords = await instance.readToolCalls({
+            status: "running",
+        });
         assert.deepEqual(
             runningRecords.map((record) => ({
                 status: record.status,
-                toolName: record.toolName
+                toolName: record.toolName,
             })),
             [
                 { status: "running", toolName: "bash_run" },
-                { status: "running", toolName: "bash_run" }
-            ]
+                { status: "running", toolName: "bash_run" },
+            ],
         );
 
         harness.respond("bash_run", {
             exitCode: 0,
             stderr: "",
-            stdout
+            stdout,
         });
 
         const result = await firstCall;
@@ -322,34 +396,49 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         harness.respond("bash_run", {
             exitCode: 0,
             stderr: "",
-            stdout: "ls output\n"
+            stdout: "ls output\n",
         });
 
         const secondResult = await secondCall;
         assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
-        const invalidCall = instance.callTool("bash_run", { bad: true } as JsonValue, cliToolCallContext);
+        const invalidCall = instance.callTool(
+            "bash_run",
+            { bad: true } as JsonValue,
+            cliToolCallContext,
+        );
         await harness.waitForMethodCount("bash_run", 3);
         harness.fail("bash_run", "tool.invalidArguments");
         await assert.rejects(invalidCall, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "tool.invalidArguments");
+            assert.equal(
+                (error as { code?: string }).code,
+                "tool.invalidArguments",
+            );
             return true;
         });
 
         const records = await instance.readToolCalls();
-        assert.deepEqual(records.map((record) => record.status), ["completed", "completed", "failed"]);
+        assert.deepEqual(
+            records.map((record) => record.status),
+            ["completed", "completed", "failed"],
+        );
         assert.equal(records[0]?.source, "cli");
-        assert.equal(records[0]?.inputSummary, "{\"command\":\"pwd\"}");
+        assert.equal(records[0]?.inputSummary, '{"command":"pwd"}');
         assert.deepEqual(records[0]?.output, { exitCode: 0 });
         assert.equal(records[0]?.stdoutBytes, 240);
         assert.equal(records[0]?.stderrBytes, 0);
         assert.equal(records[0]?.termination, undefined);
         assert.equal(records[2]?.error, "tool.invalidArguments");
         assert.deepEqual(
-            (await instance.readToolCalls({ after: records[1]?.callId, limit: 1, status: "failed", toolName: "bash_run" })).map(
-                (record) => record.callId
-            ),
-            [records[2]?.callId]
+            (
+                await instance.readToolCalls({
+                    after: records[1]?.callId,
+                    limit: 1,
+                    status: "failed",
+                    toolName: "bash_run",
+                })
+            ).map((record) => record.callId),
+            [records[2]?.callId],
         );
 
         const logs = await instance.readLogs();
@@ -358,7 +447,10 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(logs[0]?.message, stdout);
         assert.equal(logs[1]?.stream, "stdout");
         assert.equal(logs[1]?.message, "ls output\n");
-        assert.deepEqual(toolCallOutput(records[0]!, logs), { exitCode: 0, stdout });
+        assert.deepEqual(toolCallOutput(records[0]!, logs), {
+            exitCode: 0,
+            stdout,
+        });
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
@@ -372,60 +464,70 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "instance.readyChanged"
-            ]
+                "instance.readyChanged",
+            ],
         );
 
         const eventTypesForCall = (callId: string | undefined) =>
-            replay.events.filter((event) => jsonRecord(event.data)?.callId === callId).map((event) => event.type);
+            replay.events
+                .filter((event) => jsonRecord(event.data)?.callId === callId)
+                .map((event) => event.type);
 
         assert.deepEqual(eventTypesForCall(records[0]?.callId), [
             "toolCall.queued",
             "toolCall.running",
             "log.appended",
-            "toolCall.completed"
+            "toolCall.completed",
         ]);
         assert.deepEqual(eventTypesForCall(records[1]?.callId), [
             "toolCall.queued",
             "toolCall.running",
             "log.appended",
-            "toolCall.completed"
+            "toolCall.completed",
         ]);
         assert.deepEqual(eventTypesForCall(records[2]?.callId), [
             "toolCall.queued",
             "toolCall.running",
-            "toolCall.failed"
+            "toolCall.failed",
         ]);
 
         const firstQueued = replay.events.find(
-            (event) => event.type === "toolCall.queued" && jsonRecord(event.data)?.callId === records[0]?.callId
+            (event) =>
+                event.type === "toolCall.queued" &&
+                jsonRecord(event.data)?.callId === records[0]?.callId,
         );
         const firstRunning = replay.events.find(
-            (event) => event.type === "toolCall.running" && jsonRecord(event.data)?.callId === records[0]?.callId
+            (event) =>
+                event.type === "toolCall.running" &&
+                jsonRecord(event.data)?.callId === records[0]?.callId,
         );
         const failedEvent = replay.events.find(
-            (event) => event.type === "toolCall.failed" && jsonRecord(event.data)?.callId === records[2]?.callId
+            (event) =>
+                event.type === "toolCall.failed" &&
+                jsonRecord(event.data)?.callId === records[2]?.callId,
         );
         const completedEvent = replay.events.find(
-            (event) => event.type === "toolCall.completed" && jsonRecord(event.data)?.callId === records[0]?.callId
+            (event) =>
+                event.type === "toolCall.completed" &&
+                jsonRecord(event.data)?.callId === records[0]?.callId,
         );
 
         assert.deepEqual(firstQueued?.data, {
             callId: records[0]?.callId,
-            inputSummary: "{\"command\":\"pwd\"}",
+            inputSummary: '{"command":"pwd"}',
             queuedAt: jsonRecord(firstQueued?.data)?.queuedAt,
             source: "cli",
             startedAt: jsonRecord(firstQueued?.data)?.startedAt,
             status: "queued",
-            toolName: "bash_run"
+            toolName: "bash_run",
         });
         assert.deepEqual(firstRunning?.data, {
             callId: records[0]?.callId,
-            inputSummary: "{\"command\":\"pwd\"}",
+            inputSummary: '{"command":"pwd"}',
             source: "cli",
             startedAt: jsonRecord(firstQueued?.data)?.startedAt,
             status: "running",
-            toolName: "bash_run"
+            toolName: "bash_run",
         });
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
         assert.deepEqual(records[0]?.output, { exitCode: 0 });
@@ -433,11 +535,11 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             callId: records[2]?.callId,
             completedAt: jsonRecord(failedEvent?.data)?.completedAt,
             errorCode: "tool.invalidArguments",
-            inputSummary: "{\"bad\":true}",
+            inputSummary: '{"bad":true}',
             source: "cli",
             startedAt: jsonRecord(failedEvent?.data)?.startedAt,
             status: "failed",
-            toolName: "bash_run"
+            toolName: "bash_run",
         });
 
         await instance.stop();
@@ -454,7 +556,7 @@ test("WorkerInstance waits for approval before invoking tools and records approv
         approvalPolicy: { mode: "ask" },
         homeDirectory,
         name: asInstanceName("task-6-approval"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -476,38 +578,58 @@ test("WorkerInstance waits for approval before invoking tools and records approv
 
         const approvalId = pendingApproval.approvalId;
         assert.notEqual(approvalId, "");
-        assert.equal((await instance.getApproval(approvalId)).status, "pending");
+        assert.equal(
+            (await instance.getApproval(approvalId)).status,
+            "pending",
+        );
         assert.deepEqual(
-            (await instance.readToolCalls({ status: "pendingApproval" })).map((record) => ({
-                approvalId: record.approvalId,
-                status: record.status,
-                toolName: record.toolName
-            })),
+            (await instance.readToolCalls({ status: "pendingApproval" })).map(
+                (record) => ({
+                    approvalId: record.approvalId,
+                    status: record.status,
+                    toolName: record.toolName,
+                }),
+            ),
             [
                 {
                     approvalId,
                     status: "pendingApproval",
-                    toolName: "bash_run"
-                }
-            ]
+                    toolName: "bash_run",
+                },
+            ],
         );
 
         const pendingReplay = instance.subscribe(1);
         assert.equal(pendingReplay.kind, "events");
-        assert.equal(pendingReplay.events.some((event) => event.type === "approval.requested"), true);
-        assert.equal(pendingReplay.events.some((event) => event.type === "toolCall.pendingApproval"), true);
-        assert.equal(pendingReplay.events.some((event) => event.type === "toolCall.running"), false);
+        assert.equal(
+            pendingReplay.events.some(
+                (event) => event.type === "approval.requested",
+            ),
+            true,
+        );
+        assert.equal(
+            pendingReplay.events.some(
+                (event) => event.type === "toolCall.pendingApproval",
+            ),
+            true,
+        );
+        assert.equal(
+            pendingReplay.events.some(
+                (event) => event.type === "toolCall.running",
+            ),
+            false,
+        );
 
         await instance.decideApproval(approvalId, {
             decidedBy: "cli",
             decision: "approve",
-            reason: "approved in test"
+            reason: "approved in test",
         });
         await harness.waitForMethod("bash_run");
         harness.respond("bash_run", {
             exitCode: 0,
             stderr: "",
-            stdout: "/tmp/workspace\n"
+            stdout: "/tmp/workspace\n",
         });
 
         const result = await callPromise;
@@ -538,13 +660,15 @@ test("WorkerInstance waits for approval before invoking tools and records approv
 });
 
 test("caller-recorded Worker calls keep approval enforcement without host tool audit", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-delegated-approval");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-delegated-approval",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         homeDirectory,
         name: asInstanceName("task-6-delegated-approval"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -553,35 +677,56 @@ test("caller-recorded Worker calls keep approval enforcement without host tool a
         const callPromise = instance.callTool(
             "bash_run",
             { command: "pwd" },
-            { ctxId: "agent-session", extensionId: "agent", source: "extension", workspace: homeDirectory },
+            {
+                ctxId: "agent-session",
+                extensionId: "agent",
+                source: "extension",
+                workspace: homeDirectory,
+            },
             undefined,
             undefined,
             undefined,
             undefined,
-            "caller"
+            "caller",
         );
 
         const pendingApproval = await waitForPendingApproval(instance);
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal((await instance.getApproval(pendingApproval.approvalId)).recording, "caller");
-        assert.equal((await instance.getApproval(pendingApproval.approvalId)).status, "pending");
+        assert.equal(
+            (await instance.getApproval(pendingApproval.approvalId)).recording,
+            "caller",
+        );
+        assert.equal(
+            (await instance.getApproval(pendingApproval.approvalId)).status,
+            "pending",
+        );
         assert.deepEqual(await instance.readToolCalls(), []);
 
         const pendingReplay = instance.subscribe(1);
         assert.equal(pendingReplay.kind, "events");
-        assert.equal(pendingReplay.events.some((event) => event.type === "approval.requested"), true);
-        assert.equal(pendingReplay.events.some((event) => event.type.startsWith("toolCall.")), false);
+        assert.equal(
+            pendingReplay.events.some(
+                (event) => event.type === "approval.requested",
+            ),
+            true,
+        );
+        assert.equal(
+            pendingReplay.events.some((event) =>
+                event.type.startsWith("toolCall."),
+            ),
+            false,
+        );
 
         await instance.decideApproval(pendingApproval.approvalId, {
             decidedBy: "cli",
             decision: "approve",
-            reason: "approved delegated Agent call"
+            reason: "approved delegated Agent call",
         });
         await harness.waitForMethod("bash_run");
         harness.respond("bash_run", {
             exitCode: 0,
             stderr: "",
-            stdout: "/tmp/workspace\n"
+            stdout: "/tmp/workspace\n",
         });
         const result = await callPromise;
         assert.equal(jsonRecord(result)?.stdout, "/tmp/workspace\n");
@@ -590,8 +735,14 @@ test("caller-recorded Worker calls keep approval enforcement without host tool a
         assert.deepEqual(await instance.readLogs(), []);
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
-        assert.equal(replay.events.some((event) => event.type === "approval.approved"), true);
-        assert.equal(replay.events.some((event) => event.type.startsWith("toolCall.")), false);
+        assert.equal(
+            replay.events.some((event) => event.type === "approval.approved"),
+            true,
+        );
+        assert.equal(
+            replay.events.some((event) => event.type.startsWith("toolCall.")),
+            false,
+        );
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -599,13 +750,15 @@ test("caller-recorded Worker calls keep approval enforcement without host tool a
 });
 
 test("WorkerInstance cancels a pending approval when the caller aborts", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-approval-cancel");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-approval-cancel",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         homeDirectory,
         name: asInstanceName("task-6-approval-cancel"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -615,8 +768,12 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         const callPromise = instance.callTool(
             "bash_run",
             { command: "pwd" },
-            { requestId: "req-cancel-approval", ctxId: "ctx-cancel", source: "mcp" },
-            controller.signal
+            {
+                requestId: "req-cancel-approval",
+                ctxId: "ctx-cancel",
+                source: "mcp",
+            },
+            controller.signal,
         );
 
         const approvalId = (await waitForPendingApproval(instance)).approvalId;
@@ -625,23 +782,32 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         await assert.rejects(
             instance.decideApproval(approvalId, {
                 decidedBy: "cli",
-                decision: "approve"
+                decision: "approve",
             }),
             (error: unknown) => {
-                assert.equal((error as { code?: string }).code, errorCodes.coreApprovalAlreadyDecided);
+                assert.equal(
+                    (error as { code?: string }).code,
+                    errorCodes.coreApprovalAlreadyDecided,
+                );
                 return true;
-            }
+            },
         );
 
         await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreToolCallCancelled,
+            );
             return true;
         });
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal((await instance.getApproval(approvalId)).status, "cancelled");
+        assert.equal(
+            (await instance.getApproval(approvalId)).status,
+            "cancelled",
+        );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
-            ["cancelled"]
+            ["cancelled"],
         );
 
         const replay = instance.subscribe(1);
@@ -657,13 +823,15 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
 });
 
 test("WorkerInstance stop cancels pending approvals before stopping the worker", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-stop-pending-approval");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-stop-pending-approval",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         homeDirectory,
         name: asInstanceName("task-6-stop-pending-approval"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -671,17 +839,27 @@ test("WorkerInstance stop cancels pending approvals before stopping the worker",
         const callPromise = instance.callTool(
             "bash_run",
             { command: "pwd" },
-            { requestId: "req-stop-pending", ctxId: "ctx-stop-pending", source: "mcp" },
+            {
+                requestId: "req-stop-pending",
+                ctxId: "ctx-stop-pending",
+                source: "mcp",
+            },
         );
         const approvalId = (await waitForPendingApproval(instance)).approvalId;
 
         const stopped = await instance.stop();
         assert.equal(stopped.daemonState, "stopped");
         await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreToolCallCancelled,
+            );
             return true;
         });
-        assert.equal((await instance.getApproval(approvalId)).status, "cancelled");
+        assert.equal(
+            (await instance.getApproval(approvalId)).status,
+            "cancelled",
+        );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
             ["cancelled"],
@@ -693,13 +871,15 @@ test("WorkerInstance stop cancels pending approvals before stopping the worker",
 });
 
 test("WorkerInstance cancellation API terminates a pending approval before tool execution", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-approval-admin-cancel");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-approval-admin-cancel",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         homeDirectory,
         name: asInstanceName("task-6-approval-admin-cancel"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -708,7 +888,11 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
         const callPromise = instance.callTool(
             "bash_run",
             { command: "pwd" },
-            { requestId: "req-admin-cancel", ctxId: "ctx-disabled", source: "mcp" },
+            {
+                requestId: "req-admin-cancel",
+                ctxId: "ctx-disabled",
+                source: "mcp",
+            },
         );
         const approvalId = (await waitForPendingApproval(instance)).approvalId;
 
@@ -718,11 +902,17 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
         );
         assert.equal(cancelled.status, "cancelled");
         await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreToolCallCancelled,
+            );
             return true;
         });
         assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal((await instance.getApproval(approvalId)).status, "cancelled");
+        assert.equal(
+            (await instance.getApproval(approvalId)).status,
+            "cancelled",
+        );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
             ["cancelled"],
@@ -734,30 +924,40 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
 });
 
 test("WorkerInstance denies and expires approval-gated calls without invoking tools", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-approval-fail");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-approval-fail",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         approvalPolicy: { mode: "ask" },
         approvalTimeout: { ms: 40 },
         homeDirectory,
         name: asInstanceName("task-6-approval-fail"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
         await instance.start();
 
         const beforeDeniedInvokeCount = harness.requestedMethods();
-        const deniedPromise = instance.callTool("bash_run", { command: "pwd" }, { requestId: "req-deny", source: "mcp" });
-        const deniedApprovalId = (await waitForPendingApproval(instance)).approvalId;
+        const deniedPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            { requestId: "req-deny", source: "mcp" },
+        );
+        const deniedApprovalId = (await waitForPendingApproval(instance))
+            .approvalId;
         assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
         await instance.decideApproval(deniedApprovalId, {
             decidedBy: "cli",
             decision: "deny",
-            reason: "denied in test"
+            reason: "denied in test",
         });
         await assert.rejects(deniedPromise, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreApprovalDenied);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreApprovalDenied,
+            );
             return true;
         });
         assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
@@ -768,16 +968,29 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         assert.equal(afterDenied[0]?.decision, "denied");
 
         const beforeExpiredInvokeCount = harness.requestedMethods();
-        const expiredPromise = instance.callTool("bash_run", { command: "pwd" }, cliToolCallContext);
+        const expiredPromise = instance.callTool(
+            "bash_run",
+            { command: "pwd" },
+            cliToolCallContext,
+        );
         await assert.rejects(expiredPromise, (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreApprovalExpired);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreApprovalExpired,
+            );
             return true;
         });
         assert.equal(harness.requestedMethods(), beforeExpiredInvokeCount);
 
         const records = await instance.readToolCalls();
-        assert.deepEqual(records.map((record) => record.status), ["denied", "expired"]);
-        assert.deepEqual(records.map((record) => record.decision), ["denied", "expired"]);
+        assert.deepEqual(
+            records.map((record) => record.status),
+            ["denied", "expired"],
+        );
+        assert.deepEqual(
+            records.map((record) => record.decision),
+            ["denied", "expired"],
+        );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
@@ -794,30 +1007,35 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
 });
 
 test("WorkerInstance restores a stopped disconnected snapshot when start fails", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-start-failure");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-start-failure",
+    );
     const transport: WorkerCommandTransport = {
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             assert.equal(command, "start");
             return {
                 exitCode: 1,
                 stderr: "start failed",
-                stdout: ""
+                stdout: "",
             };
         },
         async spawnWorkerRpc() {
             throw new Error("rpc must not be spawned after a failed start");
         },
-        async installWorker(): Promise<void> {}
+        async installWorker(): Promise<void> {},
     };
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-start-failure"),
-        transport
+        transport,
     });
 
     try {
         await assert.rejects(instance.start(), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreWorkerStartFailed);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreWorkerStartFailed,
+            );
             return true;
         });
 
@@ -828,15 +1046,15 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
         assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStartFailed);
         assert.equal(
             snapshot.lastErrorMessage,
-            "Worker start failed for instance task-6-start-failure."
+            "Worker start failed for instance task-6-start-failure.",
         );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
-        assert.deepEqual(replay.events.map((event) => event.type), [
-            "instance.statusChanged",
-            "instance.statusChanged"
-        ]);
+        assert.deepEqual(
+            replay.events.map((event) => event.type),
+            ["instance.statusChanged", "instance.statusChanged"],
+        );
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -844,7 +1062,9 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
 });
 
 test("WorkerInstance refreshes actual daemon state when stop fails", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-stop-failure");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-stop-failure",
+    );
     const harness = createWorkerInstanceHarness();
     const transport: WorkerCommandTransport = {
         ...harness.transport,
@@ -853,16 +1073,16 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
                 return {
                     exitCode: 1,
                     stderr: "stop failed",
-                    stdout: ""
+                    stdout: "",
                 };
             }
             return await harness.transport.runWorkerCommand(command, options);
-        }
+        },
     };
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-stop-failure"),
-        transport
+        transport,
     });
 
     try {
@@ -870,7 +1090,10 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         harness.setStatus("running");
 
         await assert.rejects(instance.stop(), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreWorkerStopFailed);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreWorkerStopFailed,
+            );
             return true;
         });
 
@@ -881,7 +1104,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         assert.equal(snapshot.lastErrorCode, errorCodes.coreWorkerStopFailed);
         assert.equal(
             snapshot.lastErrorMessage,
-            "Worker stop failed for instance task-6-stop-failure."
+            "Worker stop failed for instance task-6-stop-failure.",
         );
     } finally {
         await instance.close();
@@ -895,7 +1118,7 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-refresh"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -930,8 +1153,8 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
                 "instance.readyChanged",
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "instance.readyChanged"
-            ]
+                "instance.readyChanged",
+            ],
         );
     } finally {
         await instance.close();
@@ -940,12 +1163,14 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
 });
 
 test("WorkerInstance refreshStatus on a connected instance keeps ready without a transient not-ready", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-refresh-connected");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-refresh-connected",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-refresh-connected"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -965,9 +1190,16 @@ test("WorkerInstance refreshStatus on a connected instance keeps ready without a
         const after = instance.subscribe(beforeSeq + 1);
         assert.equal(after.kind, "events");
         const transientReadyChanged = after.events.find(
-            (event) => event.type === "instance.readyChanged" && (event.data as { ready?: boolean } | undefined)?.ready === false
+            (event) =>
+                event.type === "instance.readyChanged" &&
+                (event.data as { ready?: boolean } | undefined)?.ready ===
+                    false,
         );
-        assert.equal(transientReadyChanged, undefined, "refreshStatus must not transiently flip ready to false");
+        assert.equal(
+            transientReadyChanged,
+            undefined,
+            "refreshStatus must not transiently flip ready to false",
+        );
     } finally {
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
@@ -980,12 +1212,15 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-reconnect"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
         await instance.start();
-        assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("command"));
+        assert.deepEqual(
+            instance.listTools()[0]?.inputSchema,
+            toolSchemaFor("command"),
+        );
 
         harness.setTools([
             {
@@ -994,15 +1229,20 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
                 group: "bash",
                 inputSchema: toolSchemaFor("cwd"),
                 name: "bash_run",
-                outputSchema: { type: "object" }
-            }
+                outputSchema: { type: "object" },
+            },
         ]);
         harness.disconnect();
         await harness.waitForMethodCount("tools.list", 2);
-        await waitFor(() => instance.snapshot().connectionState === "connected");
+        await waitFor(
+            () => instance.snapshot().connectionState === "connected",
+        );
 
         assert.equal(instance.snapshot().connectionState, "connected");
-        assert.deepEqual(instance.listTools()[0]?.inputSchema, toolSchemaFor("cwd"));
+        assert.deepEqual(
+            instance.listTools()[0]?.inputSchema,
+            toolSchemaFor("cwd"),
+        );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
@@ -1023,8 +1263,8 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
                 "worker.rpcConnected",
                 "worker.schemaRefreshed",
                 "instance.connectionChanged",
-                "instance.readyChanged"
-            ]
+                "instance.readyChanged",
+            ],
         );
     } finally {
         await instance.close();
@@ -1033,12 +1273,14 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
 });
 
 test("WorkerInstance keeps retrying automatic rpc reconnect after a transient failure", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-reconnect-retry");
+    const homeDirectory = await createTestTempDirectory(
+        "instance-reconnect-retry",
+    );
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
         homeDirectory,
         name: asInstanceName("task-6-reconnect-retry"),
-        transport: harness.transport
+        transport: harness.transport,
     });
 
     try {
@@ -1047,7 +1289,9 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
         harness.disconnect();
 
         await harness.waitForMethodCount("tools.list", 2);
-        await waitFor(() => instance.snapshot().connectionState === "connected");
+        await waitFor(
+            () => instance.snapshot().connectionState === "connected",
+        );
         assert.equal(instance.snapshot().connectionState, "connected");
     } finally {
         await instance.close();
@@ -1088,12 +1332,15 @@ function createWorkerInstanceHarness(): {
             group: "bash",
             inputSchema: toolSchemaFor("command"),
             name: "bash_run",
-            outputSchema: { type: "object" }
-        }
+            outputSchema: { type: "object" },
+        },
     ];
     let activeProcess:
         | {
-              exitResolve?: (value: { code: number | null; signal: NodeJS.Signals | null }) => void;
+              exitResolve?: (value: {
+                  code: number | null;
+                  signal: NodeJS.Signals | null;
+              }) => void;
               stdout: PassThrough;
               write(value: JsonValue): void;
           }
@@ -1111,8 +1358,11 @@ function createWorkerInstanceHarness(): {
                         pid: commandStatus === "stopped" ? null : 4321,
                         running: commandStatus === "running",
                         state: commandStatus,
-                        workspace: commandStatus === "running" ? "/tmp/workspace" : null
-                    })
+                        workspace:
+                            commandStatus === "running"
+                                ? "/tmp/workspace"
+                                : null,
+                    }),
                 };
             }
 
@@ -1121,8 +1371,11 @@ function createWorkerInstanceHarness(): {
                 stderr: "",
                 stdout:
                     command === "start"
-                        ? JSON.stringify({ running: true, workspace: "/tmp/workspace" })
-                        : JSON.stringify({ running: false })
+                        ? JSON.stringify({
+                              running: true,
+                              workspace: "/tmp/workspace",
+                          })
+                        : JSON.stringify({ running: false }),
             };
         },
         async spawnWorkerRpc() {
@@ -1137,7 +1390,12 @@ function createWorkerInstanceHarness(): {
             const write = (value: JsonValue) => {
                 stdout.write(encodeFrame(encodeWorkerRpcMessage(value)));
             };
-            let exitResolve: ((value: { code: number | null; signal: NodeJS.Signals | null }) => void) | undefined;
+            let exitResolve:
+                | ((value: {
+                      code: number | null;
+                      signal: NodeJS.Signals | null;
+                  }) => void)
+                | undefined;
 
             stdin.on("data", (chunk: Uint8Array) => {
                 const frames = reader.push(chunk);
@@ -1152,10 +1410,23 @@ function createWorkerInstanceHarness(): {
                     pendingIds.push(frame.id);
                     pending.set(frame.method, pendingIds);
                     requestMethods.push(frame.method);
-                    methodWaiters.get(frame.method)?.splice(0).forEach((resolve) => resolve());
+                    methodWaiters
+                        .get(frame.method)
+                        ?.splice(0)
+                        .forEach((resolve) => resolve());
 
-                    if (frame.method === "worker.ping" || frame.method === "worker.handshake" || frame.method === "tools.list") {
-                        write(createLifecycleResponse(frame.method, frame.id, tools) as unknown as JsonValue);
+                    if (
+                        frame.method === "worker.ping" ||
+                        frame.method === "worker.handshake" ||
+                        frame.method === "tools.list"
+                    ) {
+                        write(
+                            createLifecycleResponse(
+                                frame.method,
+                                frame.id,
+                                tools,
+                            ) as unknown as JsonValue,
+                        );
                     }
                 }
             });
@@ -1175,10 +1446,10 @@ function createWorkerInstanceHarness(): {
                     if (activeProcess !== undefined) {
                         activeProcess.exitResolve = resolve;
                     }
-                })
+                }),
             };
         },
-        async installWorker(): Promise<void> {}
+        async installWorker(): Promise<void> {},
     };
 
     return {
@@ -1202,11 +1473,11 @@ function createWorkerInstanceHarness(): {
                 error: {
                     code,
                     message: `worker rejected ${method}`,
-                    retryable: false
+                    retryable: false,
                 },
                 id: requestId,
                 ok: false,
-                type: "response"
+                type: "response",
             } as unknown as JsonValue);
         },
         failNextRpcStarts(count = 1) {
@@ -1237,7 +1508,7 @@ function createWorkerInstanceHarness(): {
                 id: requestId,
                 ok: true,
                 result,
-                type: "response"
+                type: "response",
             } as unknown as JsonValue);
         },
         setStatus(status) {
@@ -1255,13 +1526,19 @@ function createWorkerInstanceHarness(): {
             });
         },
         waitForMethodCount(method, count) {
-            if (requestMethods.filter((value) => value === method).length >= count) {
+            if (
+                requestMethods.filter((value) => value === method).length >=
+                count
+            ) {
                 return Promise.resolve();
             }
 
             return new Promise<void>((resolve) => {
                 const observe = () => {
-                    if (requestMethods.filter((value) => value === method).length >= count) {
+                    if (
+                        requestMethods.filter((value) => value === method)
+                            .length >= count
+                    ) {
                         resolve();
                         return;
                     }
@@ -1273,37 +1550,44 @@ function createWorkerInstanceHarness(): {
 
                 observe();
             });
-        }
+        },
     };
 }
 
-
-function jsonRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function jsonRecord(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
 }
 
-function isRequestFrame(value: unknown): value is { id: string; method: string } {
+function isRequestFrame(
+    value: unknown,
+): value is { id: string; method: string } {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return false;
     }
 
     const candidate = value as Record<string, unknown>;
-    return candidate.type === "request" && typeof candidate.id === "string" && typeof candidate.method === "string";
+    return (
+        candidate.type === "request" &&
+        typeof candidate.id === "string" &&
+        typeof candidate.method === "string"
+    );
 }
 
 function createLifecycleResponse(
     method: string,
     id: string,
-    tools: HarnessTool[]
+    tools: HarnessTool[],
 ): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {
             id,
             ok: true,
             result: { pong: true },
-            type: "response"
+            type: "response",
         };
     }
 
@@ -1317,9 +1601,9 @@ function createLifecycleResponse(
                 platform: { arch: "x64", os: "linux" },
                 protocolVersion: WORKER_PROTOCOL_VERSION,
                 workerVersion: "0.1.0",
-                workspace: "/tmp/workspace"
+                workspace: "/tmp/workspace",
             },
-            type: "response"
+            type: "response",
         };
     }
 
@@ -1327,19 +1611,19 @@ function createLifecycleResponse(
         id,
         ok: true,
         result: {
-            tools
+            tools,
         },
-        type: "response"
+        type: "response",
     };
 }
 
 function toolSchemaFor(field: string): JsonValue {
     return {
         properties: {
-            [field]: { type: "string" }
+            [field]: { type: "string" },
         },
         required: [field],
-        type: "object"
+        type: "object",
     };
 }
 

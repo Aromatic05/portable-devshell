@@ -2,11 +2,14 @@ import type { InstanceContainerConfig } from "@portable-devshell/shared";
 
 import {
     type WorkerTransportContainerProvision,
-    type WorkerTransportContainerProvisionOperations
+    type WorkerTransportContainerProvisionOperations,
 } from "../Provision.js";
 import { workerTransportContainerEnvironmentArgs } from "../Environment.js";
 
-type ComposeContainerConfig = Extract<InstanceContainerConfig, { mode: "compose" }>;
+type ComposeContainerConfig = Extract<
+    InstanceContainerConfig,
+    { mode: "compose" }
+>;
 
 interface WorkerTransportContainerProvisionComposeOptions {
     config: ComposeContainerConfig;
@@ -30,7 +33,7 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
 
         await this.#operations.runProviderCommand(
             "composeUp",
-            this.#buildComposeArgs(["up", "-d", this.#config.compose.service])
+            this.#buildComposeArgs(["up", "-d", this.#config.compose.service]),
         );
     }
 
@@ -38,7 +41,7 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
         const result = await this.#operations.runProviderCommand(
             "composePs",
             this.#buildComposeArgs(["ps", "-q", this.#config.compose.service]),
-            { allowNonZeroExit: true }
+            { allowNonZeroExit: true },
         );
         return result.exitCode === 0 && result.stdout.trim().length > 0;
     }
@@ -47,13 +50,19 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
         if (await this.isAvailable()) return true;
         const existing = await this.#operations.runProviderCommand(
             "composePsAll",
-            this.#buildComposeArgs(["ps", "-a", "-q", this.#config.compose.service]),
-            { allowNonZeroExit: true }
+            this.#buildComposeArgs([
+                "ps",
+                "-a",
+                "-q",
+                this.#config.compose.service,
+            ]),
+            { allowNonZeroExit: true },
         );
-        if (existing.exitCode !== 0 || existing.stdout.trim().length === 0) return false;
+        if (existing.exitCode !== 0 || existing.stdout.trim().length === 0)
+            return false;
         await this.#operations.runProviderCommand(
             "composeStartForRetire",
-            this.#buildComposeArgs(["start", this.#config.compose.service])
+            this.#buildComposeArgs(["start", this.#config.compose.service]),
         );
         this.#startedForRuntimeRetire = true;
         return true;
@@ -64,7 +73,7 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
         try {
             await this.#operations.runProviderCommand(
                 "composeStopAfterRetire",
-                this.#buildComposeArgs(["stop", this.#config.compose.service])
+                this.#buildComposeArgs(["stop", this.#config.compose.service]),
             );
         } finally {
             this.#startedForRuntimeRetire = false;
@@ -77,14 +86,14 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
 
     buildExecArgs(
         command: readonly string[],
-        environmentKeys: readonly string[] = []
+        environmentKeys: readonly string[] = [],
     ): string[] {
         return this.#buildComposeArgs([
             "exec",
             "-T",
             ...workerTransportContainerEnvironmentArgs(environmentKeys),
             this.#config.compose.service,
-            ...command
+            ...command,
         ]);
     }
 
@@ -95,7 +104,7 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
             this.#config.compose.service,
             "sh",
             "-lc",
-            commandLine
+            commandLine,
         ]);
     }
 
@@ -104,8 +113,10 @@ export class WorkerTransportContainerProvisionCompose implements WorkerTransport
             "compose",
             "-f",
             this.#config.compose.file,
-            ...(this.#config.compose.projectName === undefined ? [] : ["-p", this.#config.compose.projectName]),
-            ...args
+            ...(this.#config.compose.projectName === undefined
+                ? []
+                : ["-p", this.#config.compose.projectName]),
+            ...args,
         ];
     }
 }

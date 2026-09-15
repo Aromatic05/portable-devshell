@@ -22,7 +22,13 @@ export type WebRoute =
     | { page: "messages"; view: "contexts" }
     | { page: "messages"; view: "thread"; instance: string; ctxId: string }
     | { page: "audit"; view: "timeline"; scope: AuditScope }
-    | { page: "audit"; view: "call"; instance: string; ctxId?: string; callId: string }
+    | {
+          page: "audit";
+          view: "call";
+          instance: string;
+          ctxId?: string;
+          callId: string;
+      }
     | { page: "approvals" }
     | { page: "todos" };
 
@@ -38,7 +44,11 @@ export function pageRoute(page: WebPage): WebRoute {
 }
 
 export function readHashRoute(hash = window.location.hash): WebRoute {
-    const segments = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeSegment);
+    const segments = hash
+        .replace(/^#\/?/, "")
+        .split("/")
+        .filter(Boolean)
+        .map(decodeSegment);
     const [page, first, second, third, fourth] = segments;
     if (page === "activity") return pageRoute("audit");
     if (page === "messages") {
@@ -47,7 +57,11 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
             : pageRoute(page);
     }
     if (page === "audit") {
-        if (first === "context" && second !== undefined && third !== undefined) {
+        if (
+            first === "context" &&
+            second !== undefined &&
+            third !== undefined
+        ) {
             if (segments[4] === "call" && segments[5] !== undefined) {
                 return {
                     page,
@@ -75,7 +89,9 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
         }
         return pageRoute(page);
     }
-    return webPages.includes(page as WebPage) && page !== "messages" && page !== "audit"
+    return webPages.includes(page as WebPage) &&
+        page !== "messages" &&
+        page !== "audit"
         ? pageRoute(page as Exclude<WebPage, "messages" | "audit">)
         : pageRoute("overview");
 }
@@ -123,10 +139,13 @@ export function useHashRoute(): [WebRoute, (route: WebRoute) => void] {
         };
     }, []);
 
-    return [route, (nextRoute) => {
-        navigate(nextRoute);
-        setRoute(nextRoute);
-    }];
+    return [
+        route,
+        (nextRoute) => {
+            navigate(nextRoute);
+            setRoute(nextRoute);
+        },
+    ];
 }
 
 function encodeSegment(value: string): string {

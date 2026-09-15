@@ -4,14 +4,14 @@ import type { DevshellPiToolSession } from "./extension/index.js";
 import type { JsonValue } from "@portable-devshell/shared";
 import type {
     AgentModelToolDefinition,
-    AgentToolDefinition
+    AgentToolDefinition,
 } from "../../builtin/provider/AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 import type {
     PiChildMessage,
     PiParentMessage,
     PiParentToolProgressMessage,
-    PiParentToolResultMessage
+    PiParentToolResultMessage,
 } from "./PiProcessProtocol.js";
 
 interface PendingToolRequest {
@@ -48,9 +48,12 @@ export class PiChildToolSession implements DevshellPiToolSession {
         input: JsonValue,
         operationId: string,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
-        if (this.#closed) throw new Error(`Pi Agent ${this.#agentId} tool session is closed.`);
+        if (this.#closed)
+            throw new Error(
+                `Pi Agent ${this.#agentId} tool session is closed.`,
+            );
         signal?.throwIfAborted();
         const callId = randomUUID();
         const response = new Promise<JsonValue>((resolve, reject) => {
@@ -60,7 +63,13 @@ export class PiChildToolSession implements DevshellPiToolSession {
             const pending = this.#pending.get(callId);
             if (pending === undefined) return;
             this.#pending.delete(callId);
-            void Promise.resolve(this.#send({ agentId: this.#agentId, callId, type: "tool.cancel" })).catch(() => undefined);
+            void Promise.resolve(
+                this.#send({
+                    agentId: this.#agentId,
+                    callId,
+                    type: "tool.cancel",
+                }),
+            ).catch(() => undefined);
             pending.reject(abortError(signal));
         };
         signal?.addEventListener("abort", abort, { once: true });
@@ -71,7 +80,7 @@ export class PiChildToolSession implements DevshellPiToolSession {
                 input,
                 operationId,
                 toolName,
-                type: "tool.call"
+                type: "tool.call",
             });
             return await response;
         } catch (error) {
@@ -88,15 +97,27 @@ export class PiChildToolSession implements DevshellPiToolSession {
         const active = [...this.#pending.entries()];
         this.#pending.clear();
         for (const [callId, pending] of active) {
-            void Promise.resolve(this.#send({ agentId: this.#agentId, callId, type: "tool.cancel" })).catch(() => undefined);
-            pending.reject(new Error(`Pi Agent ${this.#agentId} tool session closed.`));
+            void Promise.resolve(
+                this.#send({
+                    agentId: this.#agentId,
+                    callId,
+                    type: "tool.cancel",
+                }),
+            ).catch(() => undefined);
+            pending.reject(
+                new Error(`Pi Agent ${this.#agentId} tool session closed.`),
+            );
         }
         const callId = randomUUID();
         const response = new Promise<JsonValue>((resolve, reject) => {
             this.#pending.set(callId, { resolve, reject });
         });
         try {
-            await this.#send({ agentId: this.#agentId, callId, type: "tool.close" });
+            await this.#send({
+                agentId: this.#agentId,
+                callId,
+                type: "tool.close",
+            });
             await response;
         } finally {
             this.#pending.delete(callId);
@@ -104,7 +125,8 @@ export class PiChildToolSession implements DevshellPiToolSession {
     }
 
     accept(message: PiParentMessage): boolean {
-        if (!("agentId" in message) || message.agentId !== this.#agentId) return false;
+        if (!("agentId" in message) || message.agentId !== this.#agentId)
+            return false;
         if (message.type === "tool.progress") {
             this.#acceptProgress(message);
             return true;
@@ -127,7 +149,9 @@ export class PiChildToolSession implements DevshellPiToolSession {
         if (pending === undefined) return;
         this.#pending.delete(message.callId);
         if (!message.ok) {
-            pending.reject(new Error(message.error ?? "Pi tool request failed."));
+            pending.reject(
+                new Error(message.error ?? "Pi tool request failed."),
+            );
             return;
         }
         pending.resolve(message.result ?? null);
@@ -139,11 +163,15 @@ export class PiChildToolSession implements DevshellPiToolSession {
         try {
             pending.onProgress(message.progress);
         } catch (error) {
-            console.warn(error instanceof Error ? error : new Error(String(error)));
+            console.warn(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
 }
 
 function abortError(signal: AbortSignal | undefined): Error {
-    return signal?.reason instanceof Error ? signal.reason : new Error("Pi tool call was aborted.");
+    return signal?.reason instanceof Error
+        ? signal.reason
+        : new Error("Pi tool call was aborted.");
 }

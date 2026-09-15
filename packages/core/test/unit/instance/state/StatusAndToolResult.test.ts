@@ -5,19 +5,19 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 import {
     normalizeLifecycleStatus,
-    parseWorkerStatus
+    parseWorkerStatus,
 } from "../../../../src/worker/instance/lifecycle/Status.ts";
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
-    throwIfToolCallAborted
+    throwIfToolCallAborted,
 } from "../../../../src/worker/instance/tool/Error.ts";
 import {
     asBashToolResult,
     asCommandResult,
     commandResultOutput,
     readByteLength,
-    stripCommandStreams
+    stripCommandStreams,
 } from "../../../../src/worker/instance/tool/record/Result.ts";
 
 test("worker lifecycle status normalization maps ready to running and preserves terminal states", () => {
@@ -35,23 +35,26 @@ test("worker status parser accepts canonical status and ignores malformed option
                 pid: 1234,
                 state: "running",
                 workerSha256: "abc",
-                workspace: "/workspace"
+                workspace: "/workspace",
             }),
-            "local-one"
+            "local-one",
         ),
         {
             daemonState: "running",
             pid: 1234,
-            workerSha256: "abc"
-        }
+            workerSha256: "abc",
+        },
     );
     assert.deepEqual(
-        parseWorkerStatus(JSON.stringify({ pid: "1234", state: "stopped", workspace: null }), "local-one"),
+        parseWorkerStatus(
+            JSON.stringify({ pid: "1234", state: "stopped", workspace: null }),
+            "local-one",
+        ),
         {
             daemonState: "stopped",
             pid: undefined,
-            workerSha256: undefined
-        }
+            workerSha256: undefined,
+        },
     );
 });
 
@@ -60,55 +63,85 @@ test("worker status parser returns structured diagnostics for malformed and unkn
     assert.throws(
         () => parseWorkerStatus(largePayload, "local-one"),
         (error: unknown) => {
-            assert.equal(readField(error, "code"), errorCodes.coreWorkerStatusFailed);
-            const details = readField(error, "details") as Record<string, unknown>;
+            assert.equal(
+                readField(error, "code"),
+                errorCodes.coreWorkerStatusFailed,
+            );
+            const details = readField(error, "details") as Record<
+                string,
+                unknown
+            >;
             assert.equal(details.instance, "local-one");
             assert.equal((details.stdoutTail as string).length, 4000);
             assert.match(details.stdoutTail as string, /TAIL$/u);
             return true;
-        }
+        },
     );
     assert.throws(
         () => parseWorkerStatus("[]", "local-one"),
-        (error: unknown) => readField(error, "code") === errorCodes.coreWorkerStatusFailed
+        (error: unknown) =>
+            readField(error, "code") === errorCodes.coreWorkerStatusFailed,
     );
     assert.throws(
         () => parseWorkerStatus('{"state":"paused"}', "local-one"),
         (error: unknown) => {
-            assert.equal(readField(error, "code"), errorCodes.coreWorkerStatusFailed);
-            const details = readField(error, "details") as Record<string, unknown>;
+            assert.equal(
+                readField(error, "code"),
+                errorCodes.coreWorkerStatusFailed,
+            );
+            const details = readField(error, "details") as Record<
+                string,
+                unknown
+            >;
             assert.equal(details.state, "paused");
             return true;
-        }
+        },
     );
 });
 
 test("tool scheduler error classification covers queue timeout and both cancellation codes", () => {
-    assert.equal(readNonRunningSchedulerStatus(errorCodes.coreToolQueueTimeout), "queueTimeout");
-    assert.equal(readNonRunningSchedulerStatus(errorCodes.coreToolCallCancelled), "cancelled");
+    assert.equal(
+        readNonRunningSchedulerStatus(errorCodes.coreToolQueueTimeout),
+        "queueTimeout",
+    );
+    assert.equal(
+        readNonRunningSchedulerStatus(errorCodes.coreToolCallCancelled),
+        "cancelled",
+    );
     assert.equal(readNonRunningSchedulerStatus("tool.cancelled"), "cancelled");
-    assert.equal(readNonRunningSchedulerStatus(errorCodes.coreToolSchedulerFull), undefined);
+    assert.equal(
+        readNonRunningSchedulerStatus(errorCodes.coreToolSchedulerFull),
+        undefined,
+    );
 });
 
 test("tool scheduler normalization canonicalizes retryable scheduler failures and preserves other errors", () => {
     const cancelled = Object.assign(new Error("worker cancelled"), {
         code: "tool.cancelled",
-        details: { operationId: "operation-1" }
+        details: { operationId: "operation-1" },
     });
     const normalized = normalizeToolSchedulerError(cancelled);
     assert.notEqual(normalized, cancelled);
-    assert.equal(readField(normalized, "code"), errorCodes.coreToolCallCancelled);
+    assert.equal(
+        readField(normalized, "code"),
+        errorCodes.coreToolCallCancelled,
+    );
     assert.equal(readField(normalized, "retryable"), true);
-    assert.deepEqual(readField(normalized, "details"), { operationId: "operation-1" });
+    assert.deepEqual(readField(normalized, "details"), {
+        operationId: "operation-1",
+    });
 
     const full = createError({
         code: errorCodes.coreToolSchedulerFull,
         details: { queueDepth: 4 },
         message: "full",
-        retryable: false
+        retryable: false,
     });
     const normalizedFull = normalizeToolSchedulerError(full);
-    assert.equal(readField(normalizedFull, "code"), errorCodes.coreToolSchedulerFull);
+    assert.equal(
+        readField(normalizedFull, "code"),
+        errorCodes.coreToolSchedulerFull,
+    );
     assert.equal(readField(normalizedFull, "retryable"), true);
 
     const unrelated = new Error("unrelated");
@@ -125,11 +158,16 @@ test("tool cancellation guard ignores active signals and reports client cancella
     assert.throws(
         () => throwIfToolCallAborted(cancelled.signal),
         (error: unknown) => {
-            assert.equal(readField(error, "code"), errorCodes.coreToolCallCancelled);
+            assert.equal(
+                readField(error, "code"),
+                errorCodes.coreToolCallCancelled,
+            );
             assert.equal(readField(error, "retryable"), true);
-            assert.deepEqual(readField(error, "details"), { reason: "user stopped" });
+            assert.deepEqual(readField(error, "details"), {
+                reason: "user stopped",
+            });
             return true;
-        }
+        },
     );
 
     const generic = new AbortController();
@@ -137,9 +175,11 @@ test("tool cancellation guard ignores active signals and reports client cancella
     assert.throws(
         () => throwIfToolCallAborted(generic.signal),
         (error: unknown) => {
-            assert.deepEqual(readField(error, "details"), { reason: "client cancelled" });
+            assert.deepEqual(readField(error, "details"), {
+                reason: "client cancelled",
+            });
             return true;
-        }
+        },
     );
 });
 
@@ -149,50 +189,53 @@ test("command result extraction supports direct process fields and diagnostic-on
             details: {
                 command: ["ssh", 2, "host"],
                 cwd: "/workspace",
-                exitCode: 7
+                exitCode: 7,
             },
             exitCode: 7,
             signal: "SIGTERM",
             stderr: "failed",
             stdout: "partial",
-            timedOut: true
+            timedOut: true,
         }),
         {
             details: {
                 command: ["ssh", "host"],
                 cwd: "/workspace",
-                exitCode: 7
+                exitCode: 7,
             },
             exitCode: 7,
             signal: "SIGTERM",
             stderr: "failed",
             stdout: "partial",
-            timedOut: true
-        }
+            timedOut: true,
+        },
     );
     assert.deepEqual(
         asCommandResult({
             details: {
                 causeMessage: "spawn failed",
                 exitCode: null,
-                stderrTail: "missing binary"
-            }
+                stderrTail: "missing binary",
+            },
         }),
         {
             details: {
                 causeMessage: "spawn failed",
                 exitCode: null,
-                stderrTail: "missing binary"
+                stderrTail: "missing binary",
             },
             exitCode: null,
             signal: undefined,
             stderr: "",
             stdout: "",
-            timedOut: false
-        }
+            timedOut: false,
+        },
     );
     assert.equal(asCommandResult(null), undefined);
-    assert.equal(asCommandResult({ details: { causeMessage: "no exit code" } }), undefined);
+    assert.equal(
+        asCommandResult({ details: { causeMessage: "no exit code" } }),
+        undefined,
+    );
 });
 
 test("command and bash result serializers omit invalid optionals and calculate UTF-8 byte lengths", () => {
@@ -203,14 +246,14 @@ test("command and bash result serializers omit invalid optionals and calculate U
             signal: undefined,
             stderr: "",
             stdout: "ok",
-            timedOut: false
+            timedOut: false,
         }),
         {
             exitCode: 0,
             stderr: "",
             stdout: "ok",
-            timedOut: false
-        }
+            timedOut: false,
+        },
     );
 
     assert.deepEqual(
@@ -218,12 +261,12 @@ test("command and bash result serializers omit invalid optionals and calculate U
             comment: ["keep me"],
             exitCode: 0,
             stderr: "diagnostic",
-            stdout: "large output"
+            stdout: "large output",
         }),
         {
             comment: ["keep me"],
-            exitCode: 0
-        }
+            exitCode: 0,
+        },
     );
 
     assert.deepEqual(
@@ -232,7 +275,7 @@ test("command and bash result serializers omit invalid optionals and calculate U
             stderr: "错",
             stdout: "ok",
             termSignal: 9,
-            termination: "signaled"
+            termination: "signaled",
         }),
         {
             exitCode: null,
@@ -241,8 +284,8 @@ test("command and bash result serializers omit invalid optionals and calculate U
             stdout: "ok",
             stdoutBytes: 2,
             termSignal: 9,
-            termination: "signaled"
-        }
+            termination: "signaled",
+        },
     );
     assert.deepEqual(
         asBashToolResult({
@@ -250,14 +293,14 @@ test("command and bash result serializers omit invalid optionals and calculate U
             stderrBytes: 10,
             stdout: "x",
             stdoutBytes: 20,
-            termination: "unknown"
+            termination: "unknown",
         }),
         {
             stderr: "",
             stderrBytes: 10,
             stdout: "x",
-            stdoutBytes: 20
-        }
+            stdoutBytes: 20,
+        },
     );
     assert.equal(asBashToolResult("invalid"), undefined);
     assert.equal(asBashToolResult({ stderr: "", stdout: 1 }), undefined);

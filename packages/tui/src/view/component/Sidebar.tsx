@@ -17,9 +17,22 @@ export interface TuiComponentSidebarProps {
 export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     if (props.compact === true) {
         return (
-            <Box flexDirection="column" height={2} overflow="hidden" width="100%">
-                <CompactSidebarLine columns={props.columns} items={props.model.context.items} kind="context" />
-                <CompactSidebarLine columns={props.columns} items={props.model.instances} kind="instance" />
+            <Box
+                flexDirection="column"
+                height={2}
+                overflow="hidden"
+                width="100%"
+            >
+                <CompactSidebarLine
+                    columns={props.columns}
+                    items={props.model.context.items}
+                    kind="context"
+                />
+                <CompactSidebarLine
+                    columns={props.columns}
+                    items={props.model.instances}
+                    kind="instance"
+                />
             </Box>
         );
     }
@@ -27,7 +40,13 @@ export function TuiComponentSidebar(props: TuiComponentSidebarProps) {
     const sectionRows = tuiSidebarSectionRows(props.rows);
 
     return (
-        <Box borderStyle="single" flexDirection="column" height={props.rows} paddingX={1} width="100%">
+        <Box
+            borderStyle="single"
+            flexDirection="column"
+            height={props.rows}
+            paddingX={1}
+            width="100%"
+        >
             <SidebarViewport
                 items={props.model.context.items}
                 kind="context"
@@ -58,12 +77,21 @@ function SidebarViewport(props: {
 }) {
     const viewport = selectTuiSidebarViewport(props.items, props.rows);
     return (
-        <Box flexDirection="column" height={props.rows} overflow="hidden" width="100%">
+        <Box
+            flexDirection="column"
+            height={props.rows}
+            overflow="hidden"
+            width="100%"
+        >
             {viewport.items.map((item, visibleIndex) => {
                 const index = viewport.startIndex + visibleIndex;
-                const shortcut = props.kind === "context"
-                    ? (item as TuiSidebarModel["context"]["items"][number]).shortcut
-                    : index < 9 ? `⇧${index + 1}` : undefined;
+                const shortcut =
+                    props.kind === "context"
+                        ? (item as TuiSidebarModel["context"]["items"][number])
+                              .shortcut
+                        : index < 9
+                          ? `⇧${index + 1}`
+                          : undefined;
                 return (
                     <Text
                         bold={item.selected}
@@ -91,13 +119,17 @@ function CompactSidebarLine(props: {
     );
     return (
         <Box height={1} overflow="hidden" width="100%">
-        <Text>
-            {line.map(({ item, text }) => (
-                <Text bold={item.selected} inverse={item.focused} key={item.id}>
-                    {text}
-                </Text>
-            ))}
-        </Text>
+            <Text>
+                {line.map(({ item, text }) => (
+                    <Text
+                        bold={item.selected}
+                        inverse={item.focused}
+                        key={item.id}
+                    >
+                        {text}
+                    </Text>
+                ))}
+            </Text>
         </Box>
     );
 }

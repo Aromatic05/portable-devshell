@@ -10,11 +10,12 @@ test("CliMain prints the application version without contacting Control", async 
     const stderr = createBuffer();
     let closeCalls = 0;
     const cli = new CliMain({
-        createCliClients: () => ({
-            close() {
-                closeCalls += 1;
-            },
-        } as never),
+        createCliClients: () =>
+            ({
+                close() {
+                    closeCalls += 1;
+                },
+            }) as never,
         stderr,
         stdout,
     });
@@ -45,61 +46,62 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
         async stop() {
             lifecycleCalls.push("stop");
             return { instanceCount: 0, running: false };
-        }
+        },
     };
 
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            close() {
-                clientCalls.push("close");
-            },
-            async hello() {
-                clientCalls.push("hello");
-                return {
-                    capabilities: ["request", "stream", "streamResume"],
-                    protocolVersion: 1,
-                };
-            },
-            async listInstances() {
-                return [
-                    {
-                        mcpEnabled: true,
-                        name: "running-local",
-                        snapshot: {
-                            connectionState: "connected",
-                            daemonState: "running",
-                            lastSeq: 1,
+        createCliClients: () =>
+            testClients({
+                close() {
+                    clientCalls.push("close");
+                },
+                async hello() {
+                    clientCalls.push("hello");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
+                async listInstances() {
+                    return [
+                        {
+                            mcpEnabled: true,
                             name: "running-local",
-                            ready: true,
-                            status: "ready"
-                        }
-                    },
-                    {
-                        mcpEnabled: true,
-                        name: "stopped-local",
-                        snapshot: {
-                            connectionState: "disconnected",
-                            daemonState: "stopped",
-                            lastSeq: 0,
+                            snapshot: {
+                                connectionState: "connected",
+                                daemonState: "running",
+                                lastSeq: 1,
+                                name: "running-local",
+                                ready: true,
+                                status: "ready",
+                            },
+                        },
+                        {
+                            mcpEnabled: true,
                             name: "stopped-local",
-                            ready: false,
-                            status: "stopped"
-                        }
-                    }
-                ];
-            },
-            async startInstance(instance: string) {
-                clientCalls.push(`start:${instance}`);
-                restoredInstances.push(instance);
-                return { name: instance };
-            },
-            async reconnect() {
-                clientCalls.push("reconnect");
-            }
-        }),
+                            snapshot: {
+                                connectionState: "disconnected",
+                                daemonState: "stopped",
+                                lastSeq: 0,
+                                name: "stopped-local",
+                                ready: false,
+                                status: "stopped",
+                            },
+                        },
+                    ];
+                },
+                async startInstance(instance: string) {
+                    clientCalls.push(`start:${instance}`);
+                    restoredInstances.push(instance);
+                    return { name: instance };
+                },
+                async reconnect() {
+                    clientCalls.push("reconnect");
+                },
+            }),
         createLifecycleManager: async () => lifecycle,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["start"]), 0);
@@ -129,47 +131,51 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(stdout.flush(), "control: stopped\n");
 
     const failureCli = new CliMain({
-        createCliClients: () => testClients({
-            async callTool() {
-                throw new Error("unused");
-            },
-            async createInstance() {
-                throw new Error("unused");
-            },
-            async getInstanceCreateSchema() {
-                throw new Error("unused");
-            },
-            async getSnapshot() {
-                throw { code: "control.instanceNotFound", message: "missing" };
-            },
-            async listInstances() {
-                return [];
-            },
-            async readLogs() {
-                return [];
-            },
-            async readToolCalls() {
-                return [];
-            },
-            async refreshStatus() {
-                throw new Error("unused");
-            },
-            async startInstance() {
-                throw new Error("unused");
-            },
-            async stopInstance() {
-                throw new Error("unused");
-            },
-            async subscribe() {
-                throw new Error("unused");
-            },
-            async validateInstanceCreateDraft() {
-                throw new Error("unused");
-            }
-        }),
+        createCliClients: () =>
+            testClients({
+                async callTool() {
+                    throw new Error("unused");
+                },
+                async createInstance() {
+                    throw new Error("unused");
+                },
+                async getInstanceCreateSchema() {
+                    throw new Error("unused");
+                },
+                async getSnapshot() {
+                    throw {
+                        code: "control.instanceNotFound",
+                        message: "missing",
+                    };
+                },
+                async listInstances() {
+                    return [];
+                },
+                async readLogs() {
+                    return [];
+                },
+                async readToolCalls() {
+                    return [];
+                },
+                async refreshStatus() {
+                    throw new Error("unused");
+                },
+                async startInstance() {
+                    throw new Error("unused");
+                },
+                async stopInstance() {
+                    throw new Error("unused");
+                },
+                async subscribe() {
+                    throw new Error("unused");
+                },
+                async validateInstanceCreateDraft() {
+                    throw new Error("unused");
+                },
+            }),
         createLifecycleManager: async () => lifecycle,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await failureCli.run(["instance", "status", "missing"]), 4);
@@ -180,11 +186,12 @@ test("CliMain keeps static help available without depending on Control business 
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async listInstances() {
-                throw new Error("help must not contact Control");
-            },
-        }),
+        createCliClients: () =>
+            testClients({
+                async listInstances() {
+                    throw new Error("help must not contact Control");
+                },
+            }),
         createLifecycleManager: async () => {
             throw new Error("help must not use Control lifecycle");
         },
@@ -200,7 +207,14 @@ test("CliMain keeps static help available without depending on Control business 
     assert.notEqual(stdout.flush().length, 0);
     assert.equal(await cli.run(["extension", "--help"]), 0);
     assert.match(stdout.flush(), /extension list/iu);
-    for (const topic of ["config", "approval", "oauth", "context", "tool", "todo"]) {
+    for (const topic of [
+        "config",
+        "approval",
+        "oauth",
+        "context",
+        "tool",
+        "todo",
+    ]) {
         assert.equal(await cli.run([topic, "--help"]), 0);
         assert.match(stdout.flush(), new RegExp(topic, "iu"));
     }
@@ -214,20 +228,26 @@ test("CliMain root help discovers installed Extension commands when Control is o
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async hello() {
-                return { capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 };
-            },
-            async cliCommands() {
-                return [{
-                    extensionId: "agent",
-                    id: "agent",
-                    summary: "Run and manage Agent providers",
-                    title: "Agent",
-                    usage: "agent <command>",
-                }];
-            },
-        }),
+        createCliClients: () =>
+            testClients({
+                async hello() {
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
+                async cliCommands() {
+                    return [
+                        {
+                            extensionId: "agent",
+                            id: "agent",
+                            summary: "Run and manage Agent providers",
+                            title: "Agent",
+                            usage: "agent <command>",
+                        },
+                    ];
+                },
+            }),
         stderr,
         stdout,
     });
@@ -244,27 +264,36 @@ test("CliMain suggests a nearby command instead of treating a typo as an Extensi
     const stderr = createBuffer();
     const calls: string[] = [];
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async hello() {
-                calls.push("hello");
-                return { capabilities: ["request", "stream", "streamResume"], protocolVersion: 1 };
-            },
-            async cliCommand() {
-                calls.push("cli.command");
-                return { kind: "text", text: "unexpected" };
-            },
-            async cliCommands() {
-                calls.push("cli.commands");
-                return [{ extensionId: "agent", id: "agent", title: "Agent" }];
-            },
-        }),
+        createCliClients: () =>
+            testClients({
+                async hello() {
+                    calls.push("hello");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
+                async cliCommand() {
+                    calls.push("cli.command");
+                    return { kind: "text", text: "unexpected" };
+                },
+                async cliCommands() {
+                    calls.push("cli.commands");
+                    return [
+                        { extensionId: "agent", id: "agent", title: "Agent" },
+                    ];
+                },
+            }),
         stderr,
         stdout,
     });
 
     assert.equal(await cli.run(["insance"]), 2);
     assert.equal(stdout.flush(), "");
-    assert.match(stderr.flush(), /Unknown command "insance"\. Did you mean "instance"\?/u);
+    assert.match(
+        stderr.flush(),
+        /Unknown command "insance"\. Did you mean "instance"\?/u,
+    );
     assert.deepEqual(calls, ["hello", "cli.commands"]);
 });
 
@@ -279,66 +308,77 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
         retired: [],
         selectedGeneration: "0.1.0-a",
         state: "active" as const,
-        version: "0.1.0"
+        version: "0.1.0",
     };
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async cliCommands() {
-                calls.push("cli.commands");
-                return [{
-                    extensionId: "agent",
-                    id: "agent",
-                    summary: "Run and manage Agent providers",
-                    title: "Agent",
-                    usage: "agent <command>"
-                }];
-            },
-            async cliCommand(commandId: string, argv: readonly string[]) {
-                calls.push(`command:${commandId}:${argv.join("|")}`);
-                if (commandId === "agent" && argv.length === 1 && argv[0] === "help") {
+        createCliClients: () =>
+            testClients({
+                async cliCommands() {
+                    calls.push("cli.commands");
+                    return [
+                        {
+                            extensionId: "agent",
+                            id: "agent",
+                            summary: "Run and manage Agent providers",
+                            title: "Agent",
+                            usage: "agent <command>",
+                        },
+                    ];
+                },
+                async cliCommand(commandId: string, argv: readonly string[]) {
+                    calls.push(`command:${commandId}:${argv.join("|")}`);
+                    if (
+                        commandId === "agent" &&
+                        argv.length === 1 &&
+                        argv[0] === "help"
+                    ) {
+                        return {
+                            kind: "text",
+                            text: [
+                                "Usage:",
+                                "  devshell agent [--provider <id>] <instance:/workspace>",
+                                "  devshell agent provider list",
+                                "  devshell agent stop <agentId>",
+                            ].join("\n"),
+                        };
+                    }
+                    return { kind: "json", value: { commandId } };
+                },
+                async extensionDisable(extensionId: string) {
+                    calls.push(`disable:${extensionId}`);
                     return {
-                        kind: "text",
-                        text: [
-                            "Usage:",
-                            "  devshell agent [--provider <id>] <instance:/workspace>",
-                            "  devshell agent provider list",
-                            "  devshell agent stop <agentId>"
-                        ].join("\n")
+                        ...record,
+                        enabled: false,
+                        state: "disabled" as const,
                     };
-                }
-                return { kind: "json", value: { commandId } };
-            },
-            async extensionDisable(extensionId: string) {
-                calls.push(`disable:${extensionId}`);
-                return { ...record, enabled: false, state: "disabled" as const };
-            },
-            async extensionEnable(extensionId: string) {
-                calls.push(`enable:${extensionId}`);
-                return record;
-            },
-            async extensionGet(extensionId: string) {
-                calls.push(`get:${extensionId}`);
-                return record;
-            },
-            async extensionInstall(sourcePath: string) {
-                calls.push(`install:${sourcePath}`);
-                return record;
-            },
-            async extensionList() {
-                calls.push("list");
-                return [record];
-            },
-            async extensionReload(extensionId: string) {
-                calls.push(`reload:${extensionId}`);
-                return record;
-            },
-            async extensionRemove(extensionId: string, purge: boolean) {
-                calls.push(`remove:${extensionId}:${purge}`);
-                return { id: extensionId, purged: purge, removed: true };
-            }
-        }),
+                },
+                async extensionEnable(extensionId: string) {
+                    calls.push(`enable:${extensionId}`);
+                    return record;
+                },
+                async extensionGet(extensionId: string) {
+                    calls.push(`get:${extensionId}`);
+                    return record;
+                },
+                async extensionInstall(sourcePath: string) {
+                    calls.push(`install:${sourcePath}`);
+                    return record;
+                },
+                async extensionList() {
+                    calls.push("list");
+                    return [record];
+                },
+                async extensionReload(extensionId: string) {
+                    calls.push(`reload:${extensionId}`);
+                    return record;
+                },
+                async extensionRemove(extensionId: string, purge: boolean) {
+                    calls.push(`remove:${extensionId}:${purge}`);
+                    return { id: extensionId, purged: purge, removed: true };
+                },
+            }),
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["extension", "list"]), 0);
@@ -347,7 +387,10 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     assert.match(stdout.flush(), /"id": "agent"/u);
     assert.equal(await cli.run(["extension", "install", "./bundle.dsext"]), 0);
     stdout.flush();
-    assert.equal(await cli.run(["extension", "update", "./bundle-v2.dsext"]), 0);
+    assert.equal(
+        await cli.run(["extension", "update", "./bundle-v2.dsext"]),
+        0,
+    );
     stdout.flush();
     assert.equal(await cli.run(["extension", "remove", "agent", "--purge"]), 0);
     stdout.flush();
@@ -360,32 +403,38 @@ test("CliMain keeps Extension management separate from cli.commands dispatch", a
     assert.equal(await cli.run(["extension", "reload", "agent"]), 0);
     stdout.flush();
     assert.equal(await cli.run(["agent", "--help"]), 0);
-    assert.equal(stdout.flush(), [
-        "Usage:",
-        "  devshell agent [--provider <id>] <instance:/workspace>",
-        "  devshell agent provider list",
-        "  devshell agent stop <agentId>",
-        ""
-    ].join("\n"));
+    assert.equal(
+        stdout.flush(),
+        [
+            "Usage:",
+            "  devshell agent [--provider <id>] <instance:/workspace>",
+            "  devshell agent provider list",
+            "  devshell agent stop <agentId>",
+            "",
+        ].join("\n"),
+    );
     assert.equal(await cli.run(["agent", "provider", "list", "--help"]), 0);
     assert.match(stdout.flush(), /devshell agent provider list/u);
     assert.equal(await cli.run(["agent", "json"]), 0);
     assert.match(stdout.flush(), /"commandId": "agent"/u);
 
-    assert.deepEqual(calls.filter((call) => call !== "cli.commands"), [
-        "list",
-        "list",
-        `install:${resolve("./bundle.dsext")}`,
-        `install:${resolve("./bundle-v2.dsext")}`,
-        "remove:agent:true",
-        "get:agent",
-        "enable:agent",
-        "disable:agent",
-        "reload:agent",
-        "command:agent:help",
-        "command:agent:help",
-        "command:agent:json"
-    ]);
+    assert.deepEqual(
+        calls.filter((call) => call !== "cli.commands"),
+        [
+            "list",
+            "list",
+            `install:${resolve("./bundle.dsext")}`,
+            `install:${resolve("./bundle-v2.dsext")}`,
+            "remove:agent:true",
+            "get:agent",
+            "enable:agent",
+            "disable:agent",
+            "reload:agent",
+            "command:agent:help",
+            "command:agent:help",
+            "command:agent:json",
+        ],
+    );
     assert.equal(calls.filter((call) => call === "cli.commands").length, 12);
     assert.equal(stderr.flush(), "");
 });
@@ -395,21 +444,22 @@ test("CliMain negotiates Control before cli.commands invocation", async () => {
     const stderr = createBuffer();
     const calls: string[] = [];
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async hello() {
-                calls.push("hello");
-                return {
-                    capabilities: ["request", "stream", "streamResume"],
-                    protocolVersion: 1,
-                };
-            },
-            async cliCommand(commandId: string, argv: readonly string[]) {
-                calls.push(`command:${commandId}:${argv.join("|")}`);
-                return { kind: "text", text: "ok" };
-            }
-        }),
+        createCliClients: () =>
+            testClients({
+                async hello() {
+                    calls.push("hello");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: 1,
+                    };
+                },
+                async cliCommand(commandId: string, argv: readonly string[]) {
+                    calls.push(`command:${commandId}:${argv.join("|")}`);
+                    return { kind: "text", text: "ok" };
+                },
+            }),
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["agent", "run"]), 0);
@@ -423,31 +473,42 @@ test("CliMain lets a native Extension overlay a builtin command root before buil
     const stderr = createBuffer();
     const calls: string[] = [];
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async cliCommands() {
-                calls.push("catalog");
-                return [{
-                    extensionId: "instance-ui",
-                    id: "instance",
-                    title: "Enhanced Instance"
-                }];
-            },
-            async cliCommand(commandId: string, argv: readonly string[]) {
-                calls.push(`overlay:${commandId}:${argv.join("|")}`);
-                return { kind: "text", text: "enhanced instance output" };
-            },
-            async getSnapshot() {
-                throw new Error("builtin instance command must not run when overlaid");
-            }
-        }),
+        createCliClients: () =>
+            testClients({
+                async cliCommands() {
+                    calls.push("catalog");
+                    return [
+                        {
+                            extensionId: "instance-ui",
+                            id: "instance",
+                            title: "Enhanced Instance",
+                        },
+                    ];
+                },
+                async cliCommand(commandId: string, argv: readonly string[]) {
+                    calls.push(`overlay:${commandId}:${argv.join("|")}`);
+                    return { kind: "text", text: "enhanced instance output" };
+                },
+                async getSnapshot() {
+                    throw new Error(
+                        "builtin instance command must not run when overlaid",
+                    );
+                },
+            }),
         stderr,
-        stdout
+        stdout,
     });
 
-    assert.equal(await cli.run(["instance", "status", "demo", "--enhanced"]), 0);
+    assert.equal(
+        await cli.run(["instance", "status", "demo", "--enhanced"]),
+        0,
+    );
     assert.equal(stdout.flush(), "enhanced instance output\n");
     assert.equal(stderr.flush(), "");
-    assert.deepEqual(calls, ["catalog", "overlay:instance:status|demo|--enhanced"]);
+    assert.deepEqual(calls, [
+        "catalog",
+        "overlay:instance:status|demo|--enhanced",
+    ]);
 });
 
 test("CliMain routes the tui command through the injected runtime", async () => {
@@ -463,7 +524,7 @@ test("CliMain routes the tui command through the injected runtime", async () => 
             started = true;
         },
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["tui"]), 0);
@@ -476,60 +537,61 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async callTool() {
-                throw new Error("unused");
-            },
-            async createInstance() {
-                throw new Error("unused");
-            },
-            async getInstanceCreateSchema() {
-                throw new Error("unused");
-            },
-            async getSnapshot() {
-                throw {
-                    causeBody: {
-                        code: "core.providerFailed",
-                        message: "ssh exited",
-                        retryable: false
-                    },
-                    code: "core.workerStartFailed",
-                    details: {
-                        commandDisplay: "ssh demo -- sh -lc pwd",
-                        exitCode: 255,
-                        operation: "start",
-                        provider: "ssh",
-                        stderrTail: "Permission denied\n"
-                    },
-                    message: "Worker start failed for instance demo-ssh.",
-                    retryable: false
-                };
-            },
-            async listInstances() {
-                return [];
-            },
-            async readLogs() {
-                return [];
-            },
-            async readToolCalls() {
-                return [];
-            },
-            async refreshStatus() {
-                throw new Error("unused");
-            },
-            async startInstance() {
-                throw new Error("unused");
-            },
-            async stopInstance() {
-                throw new Error("unused");
-            },
-            async subscribe() {
-                throw new Error("unused");
-            },
-            async validateInstanceCreateDraft() {
-                throw new Error("unused");
-            }
-        }),
+        createCliClients: () =>
+            testClients({
+                async callTool() {
+                    throw new Error("unused");
+                },
+                async createInstance() {
+                    throw new Error("unused");
+                },
+                async getInstanceCreateSchema() {
+                    throw new Error("unused");
+                },
+                async getSnapshot() {
+                    throw {
+                        causeBody: {
+                            code: "core.providerFailed",
+                            message: "ssh exited",
+                            retryable: false,
+                        },
+                        code: "core.workerStartFailed",
+                        details: {
+                            commandDisplay: "ssh demo -- sh -lc pwd",
+                            exitCode: 255,
+                            operation: "start",
+                            provider: "ssh",
+                            stderrTail: "Permission denied\n",
+                        },
+                        message: "Worker start failed for instance demo-ssh.",
+                        retryable: false,
+                    };
+                },
+                async listInstances() {
+                    return [];
+                },
+                async readLogs() {
+                    return [];
+                },
+                async readToolCalls() {
+                    return [];
+                },
+                async refreshStatus() {
+                    throw new Error("unused");
+                },
+                async startInstance() {
+                    throw new Error("unused");
+                },
+                async stopInstance() {
+                    throw new Error("unused");
+                },
+                async subscribe() {
+                    throw new Error("unused");
+                },
+                async validateInstanceCreateDraft() {
+                    throw new Error("unused");
+                },
+            }),
         createLifecycleManager: async () => ({
             async logs() {
                 return "";
@@ -542,13 +604,16 @@ test("CliMain renders structured remote errors in verbose mode", async () => {
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         stderr,
-        stdout
+        stdout,
     });
 
-    assert.equal(await cli.run(["--verbose", "instance", "status", "demo-ssh"]), 1);
+    assert.equal(
+        await cli.run(["--verbose", "instance", "status", "demo-ssh"]),
+        1,
+    );
     assert.match(stderr.flush(), /command: ssh demo -- sh -lc pwd/u);
     assert.equal(stdout.flush(), "");
 });
@@ -581,7 +646,10 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
         async refreshStatus() {
             throw new Error("unused");
         },
-        async startInstance(_instance: string, relay?: { output: { write(chunk: string): void } }) {
+        async startInstance(
+            _instance: string,
+            relay?: { output: { write(chunk: string): void } },
+        ) {
             relay?.output.write("Password: ");
             return {
                 connectionState: "connected",
@@ -589,7 +657,7 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
                 lastSeq: 1,
                 name: "demo-ssh",
                 ready: true,
-                status: "ready"
+                status: "ready",
             };
         },
         async stopInstance() {
@@ -600,7 +668,7 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
         },
         async validateInstanceCreateDraft() {
             throw new Error("unused");
-        }
+        },
     };
 
     const cli = new CliMain({
@@ -617,11 +685,11 @@ test("CliMain routes interactive instance.start relay output to stderr", async (
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         stdin: Readable.from(["secret\n"]),
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["instance", "start", "demo-ssh"]), 0);
@@ -634,9 +702,14 @@ test("CliMain handles instance logs follow and tool call through injected client
     const stderr = createBuffer();
     const stream = {
         async nextEvent() {
-            return { event: "toolCall.completed", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
+            return {
+                event: "toolCall.completed",
+                seq: 2,
+                target: { instance: "demo-local", kind: "instance" },
+                type: "event",
+            };
         },
-        close() {}
+        close() {},
     };
     let readCount = 0;
     const client = {
@@ -658,8 +731,8 @@ test("CliMain handles instance logs follow and tool call through injected client
                     lastSeq: 1,
                     name: "demo-local",
                     ready: true,
-                    status: "ready"
-                }
+                    status: "ready",
+                },
             };
         },
         async listInstances() {
@@ -668,8 +741,24 @@ test("CliMain handles instance logs follow and tool call through injected client
         async readLogs() {
             readCount += 1;
             return readCount === 1
-                ? [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }]
-                : [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" as const }];
+                ? [
+                      {
+                          at: "",
+                          instanceName: "demo-local",
+                          message: "before\n",
+                          seq: 1,
+                          stream: "stdout" as const,
+                      },
+                  ]
+                : [
+                      {
+                          at: "",
+                          instanceName: "demo-local",
+                          message: "after\n",
+                          seq: 2,
+                          stream: "stdout" as const,
+                      },
+                  ];
         },
         async readToolCalls() {
             return [];
@@ -688,7 +777,7 @@ test("CliMain handles instance logs follow and tool call through injected client
         },
         async validateInstanceCreateDraft() {
             throw new Error("unused");
-        }
+        },
     };
 
     const cli = new CliMain({
@@ -705,17 +794,27 @@ test("CliMain handles instance logs follow and tool call through injected client
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         followEventLimit: 1,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
     assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
 
-    assert.equal(await cli.run(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"]), 0);
+    assert.equal(
+        await cli.run([
+            "instance",
+            "call",
+            "demo-local",
+            "/tmp/ws",
+            "bash_run",
+            '{"command":"pwd","timeoutMs":30000}',
+        ]),
+        0,
+    );
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
@@ -734,8 +833,13 @@ test("CliMain follows instance logs without skipping events between initial pull
             }
 
             this.delivered = true;
-            return { event: "toolCall.completed", seq: 2, target: { instance: "demo-local", kind: "instance" }, type: "event" };
-        }
+            return {
+                event: "toolCall.completed",
+                seq: 2,
+                target: { instance: "demo-local", kind: "instance" },
+                type: "event",
+            };
+        },
     };
     let initialLogsRead = false;
     const client = {
@@ -757,20 +861,39 @@ test("CliMain follows instance logs without skipping events between initial pull
                     lastSeq: initialLogsRead ? 2 : 1,
                     name: "demo-local",
                     ready: true,
-                    status: "ready"
-                }
+                    status: "ready",
+                },
             };
         },
         async listInstances() {
             return [];
         },
-        async readLogs(_: string, query?: { fromSeq?: number; limit?: number }) {
+        async readLogs(
+            _: string,
+            query?: { fromSeq?: number; limit?: number },
+        ) {
             if (query?.fromSeq === 2) {
-                return [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" as const }];
+                return [
+                    {
+                        at: "",
+                        instanceName: "demo-local",
+                        message: "after\n",
+                        seq: 2,
+                        stream: "stdout" as const,
+                    },
+                ];
             }
 
             initialLogsRead = true;
-            return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
+            return [
+                {
+                    at: "",
+                    instanceName: "demo-local",
+                    message: "before\n",
+                    seq: 1,
+                    stream: "stdout" as const,
+                },
+            ];
         },
         async readToolCalls() {
             return [];
@@ -790,7 +913,7 @@ test("CliMain follows instance logs without skipping events between initial pull
         },
         async validateInstanceCreateDraft() {
             throw new Error("unused");
-        }
+        },
     };
 
     const cli = new CliMain({
@@ -807,11 +930,11 @@ test("CliMain follows instance logs without skipping events between initial pull
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         followEventLimit: 1,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
@@ -825,8 +948,13 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
     const stream = {
         close() {},
         async nextEvent() {
-            return { event: "toolCall.completed", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
-        }
+            return {
+                event: "toolCall.completed",
+                seq: 4,
+                target: { instance: "demo-local", kind: "instance" },
+                type: "event",
+            };
+        },
     };
     let snapshotCount = 0;
     let subscribeCount = 0;
@@ -851,26 +979,57 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
                     lastSeq: snapshotCount === 1 ? 1 : 3,
                     name: "demo-local",
                     ready: true,
-                    status: "ready"
-                }
+                    status: "ready",
+                },
             };
         },
         async listInstances() {
             return [];
         },
-        async readLogs(_: string, query?: { fromSeq?: number; limit?: number }) {
+        async readLogs(
+            _: string,
+            query?: { fromSeq?: number; limit?: number },
+        ) {
             if (query?.fromSeq === 2) {
                 return [
-                    { at: "", instanceName: "demo-local", message: "gap-a\n", seq: 2, stream: "stdout" as const },
-                    { at: "", instanceName: "demo-local", message: "gap-b\n", seq: 3, stream: "stdout" as const }
+                    {
+                        at: "",
+                        instanceName: "demo-local",
+                        message: "gap-a\n",
+                        seq: 2,
+                        stream: "stdout" as const,
+                    },
+                    {
+                        at: "",
+                        instanceName: "demo-local",
+                        message: "gap-b\n",
+                        seq: 3,
+                        stream: "stdout" as const,
+                    },
                 ];
             }
 
             if (query?.fromSeq === 4) {
-                return [{ at: "", instanceName: "demo-local", message: "after\n", seq: 4, stream: "stdout" as const }];
+                return [
+                    {
+                        at: "",
+                        instanceName: "demo-local",
+                        message: "after\n",
+                        seq: 4,
+                        stream: "stdout" as const,
+                    },
+                ];
             }
 
-            return [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" as const }];
+            return [
+                {
+                    at: "",
+                    instanceName: "demo-local",
+                    message: "before\n",
+                    seq: 1,
+                    stream: "stdout" as const,
+                },
+            ];
         },
         async readToolCalls() {
             return [];
@@ -897,7 +1056,7 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
         },
         async validateInstanceCreateDraft() {
             throw new Error("unused");
-        }
+        },
     };
 
     const cli = new CliMain({
@@ -914,15 +1073,18 @@ test("CliMain recovers instance log follow when subscribe returns stream.gap", a
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         followEventLimit: 1,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["instance", "logs", "demo-local", "-f"]), 0);
-    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout gap-a\n[3] stdout gap-b\n[4] stdout after\n");
+    assert.equal(
+        stdout.flush(),
+        "[1] stdout before\n[2] stdout gap-a\n[3] stdout gap-b\n[4] stdout after\n",
+    );
     assert.equal(stderr.flush(), "");
 });
 
@@ -932,8 +1094,13 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
     const stream = {
         close() {},
         async nextEvent() {
-            return { event: "toolCall.completed", seq: 4, target: { instance: "demo-local", kind: "instance" }, type: "event" };
-        }
+            return {
+                event: "toolCall.completed",
+                seq: 4,
+                target: { instance: "demo-local", kind: "instance" },
+                type: "event",
+            };
+        },
     };
     let snapshotCount = 0;
     let subscribeCount = 0;
@@ -953,13 +1120,14 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
             return {
                 lastSeq: snapshotCount === 1 ? 1 : 3,
                 snapshot: {
-                    connectionState: snapshotCount === 1 ? "disconnected" : "connected",
+                    connectionState:
+                        snapshotCount === 1 ? "disconnected" : "connected",
                     daemonState: snapshotCount === 1 ? "stopped" : "running",
                     lastSeq: snapshotCount === 1 ? 1 : 3,
                     name: "demo-local",
                     ready: snapshotCount !== 1,
-                    status: snapshotCount === 1 ? "stopped" : "ready"
-                }
+                    status: snapshotCount === 1 ? "stopped" : "ready",
+                },
             };
         },
         async listInstances() {
@@ -980,8 +1148,8 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
                     lastSeq: 4,
                     name: "demo-local",
                     ready: true,
-                    status: "ready"
-                }
+                    status: "ready",
+                },
             };
         },
         async startInstance() {
@@ -1003,7 +1171,7 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
         },
         async validateInstanceCreateDraft() {
             throw new Error("unused");
-        }
+        },
     };
 
     const cli = new CliMain({
@@ -1020,11 +1188,11 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         followEventLimit: 1,
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["watch", "status", "demo-local"]), 0);
@@ -1032,7 +1200,7 @@ test("CliMain recovers watch status when subscribe returns stream.gap", async ()
         stdout.flush(),
         "instance: demo-local\nstatus: stopped\nready: false\ndaemonState: stopped\nconnectionState: disconnected\nlastSeq: 1\nTodo: none\n" +
             "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 3\nTodo: none\n" +
-            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\nTodo: none\n"
+            "instance: demo-local\nstatus: ready\nready: true\ndaemonState: running\nconnectionState: connected\nlastSeq: 4\nTodo: none\n",
     );
     assert.equal(stderr.flush(), "");
 });
@@ -1060,8 +1228,8 @@ test("CliMain runs interactive instance create through control rpc", async () =>
                     lastSeq: 0,
                     name: "demo-local",
                     ready: false,
-                    status: "stopped"
-                }
+                    status: "stopped",
+                },
             };
         },
         async getInstanceCreateSchema() {
@@ -1072,7 +1240,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
                 defaultMcpEnabled: true,
                 defaultProvider: "local",
                 defaultSecurityMode: "disabled",
-                providers: ["local", "ssh", "docker", "podman"] as const
+                providers: ["local", "ssh", "docker", "podman"] as const,
             };
         },
         async getSnapshot() {
@@ -1099,24 +1267,24 @@ test("CliMain runs interactive instance create through control rpc", async () =>
         async subscribe() {
             throw new Error("unused");
         },
-            async validateInstanceCreateDraft(draft: Record<string, unknown>) {
-                calls.push("validate");
-                assert.equal(draft.name, "demo-local");
-                return {
+        async validateInstanceCreateDraft(draft: Record<string, unknown>) {
+            calls.push("validate");
+            assert.equal(draft.name, "demo-local");
+            return {
+                enabled: true,
+                extensions: { model: ["instance"] },
+                mcp: {
+                    auth: { mode: "none" },
                     enabled: true,
-                    extensions: { model: ["instance"] },
-                    mcp: {
-                        auth: { mode: "none" },
-                        enabled: true,
-                        path: "/demo-local/mcp"
-                    },
-                    name: "demo-local",
-                    provider: "local",
-                    security: {
-                        mode: "disabled"
-                    }
-                };
-            }
+                    path: "/demo-local/mcp",
+                },
+                name: "demo-local",
+                provider: "local",
+                security: {
+                    mode: "disabled",
+                },
+            };
+        },
     };
 
     const cli = new CliMain({
@@ -1133,7 +1301,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             },
             async stop() {
                 return { instanceCount: 0, running: false };
-            }
+            },
         }),
         stdin: Readable.from([
             "demo-local\n",
@@ -1150,10 +1318,10 @@ test("CliMain runs interactive instance create through control rpc", async () =>
             "\n",
             "\n",
             "\n",
-            "\n"
+            "\n",
         ]),
         stderr,
-        stdout
+        stdout,
     });
 
     assert.equal(await cli.run(["instance", "create"]), 0);
@@ -1168,7 +1336,10 @@ test("CliMain runs interactive instance create through control rpc", async () =>
     assert.equal(stderr.flush(), "");
 });
 
-function createBuffer(): { flush: () => string; write: (chunk: string) => void } {
+function createBuffer(): {
+    flush: () => string;
+    write: (chunk: string) => void;
+} {
     const chunks: string[] = [];
 
     return {
@@ -1179,7 +1350,7 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
         },
         write(chunk: string) {
             chunks.push(chunk);
-        }
+        },
     };
 }
 
@@ -1189,79 +1360,102 @@ test("CliMain reads and follows Todo through control RPC", async () => {
     let reads = 0;
     let closed = false;
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async getTodo() {
-                reads += 1;
-                return reads === 1
-                    ? {
-                          lastSeq: 0,
-                          todo: {
-                              items: [{ content: "Inspect", id: "inspect", status: "in_progress" }],
-                              revision: 1,
-                              summary: { completed: 0, currentItemId: "inspect", total: 1 },
-                              taskId: "task-1",
-                              title: "Todo follow"
+        createCliClients: () =>
+            testClients({
+                async getTodo() {
+                    reads += 1;
+                    return reads === 1
+                        ? {
+                              lastSeq: 0,
+                              todo: {
+                                  items: [
+                                      {
+                                          content: "Inspect",
+                                          id: "inspect",
+                                          status: "in_progress",
+                                      },
+                                  ],
+                                  revision: 1,
+                                  summary: {
+                                      completed: 0,
+                                      currentItemId: "inspect",
+                                      total: 1,
+                                  },
+                                  taskId: "task-1",
+                                  title: "Todo follow",
+                              },
                           }
-                      }
-                    : {
-                          lastSeq: 1,
-                          todo: {
-                              items: [{ content: "Inspect", id: "inspect", status: "completed" }],
-                              revision: 2,
-                              summary: { completed: 1, total: 1 },
-                              taskId: "task-1",
-                              title: "Todo follow"
-                          }
-                      };
-            },
-            async subscribeTodo() {
-                return {
-                    close() {
-                        closed = true;
-                    },
-                    async nextEvent() {
-                        return {
-                            event: "todo.completed",
-                            payload: {},
-                            seq: 1,
-                            target: { instance: "demo-local", kind: "instance" },
-                            type: "event"
-                        };
-                    }
-                };
-            }
-        } as never),
+                        : {
+                              lastSeq: 1,
+                              todo: {
+                                  items: [
+                                      {
+                                          content: "Inspect",
+                                          id: "inspect",
+                                          status: "completed",
+                                      },
+                                  ],
+                                  revision: 2,
+                                  summary: { completed: 1, total: 1 },
+                                  taskId: "task-1",
+                                  title: "Todo follow",
+                              },
+                          };
+                },
+                async subscribeTodo() {
+                    return {
+                        close() {
+                            closed = true;
+                        },
+                        async nextEvent() {
+                            return {
+                                event: "todo.completed",
+                                payload: {},
+                                seq: 1,
+                                target: {
+                                    instance: "demo-local",
+                                    kind: "instance",
+                                },
+                                type: "event",
+                            };
+                        },
+                    };
+                },
+            } as never),
         followEventLimit: 1,
         stderr,
-        stdout
+        stdout,
     });
 
-    assert.equal(await cli.run(["instance", "todo", "demo-local", "--follow"]), 0);
+    assert.equal(
+        await cli.run(["instance", "todo", "demo-local", "--follow"]),
+        0,
+    );
     assert.match(stdout.flush(), /Progress: 0\/1[\s\S]*Progress: 1\/1/u);
     assert.equal(reads, 2);
     assert.equal(closed, true);
     assert.equal(stderr.flush(), "");
 });
 
-
 test("CliMain rejects an incompatible protocol before a business request", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
     let listCalls = 0;
     const cli = new CliMain({
-        createCliClients: () => ({
-            service: {
-                async hello() {
-                    return { capabilities: [], protocolVersion: 0 };
+        createCliClients: () =>
+            ({
+                service: {
+                    async hello() {
+                        return { capabilities: [], protocolVersion: 0 };
+                    },
                 },
-            },
-            instance: {
-                async list() {
-                    listCalls += 1;
-                    return [];
+                instance: {
+                    async list() {
+                        listCalls += 1;
+                        return [];
+                    },
                 },
-            },
-        } as never),
+            }) as never,
         stderr,
         stdout,
     });
@@ -1276,88 +1470,111 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
     const stderr = createBuffer();
     const calls: string[] = [];
     const cli = new CliMain({
-        createCliClients: () => testClients({
-            async contextDisable(ctxId: string) {
-                calls.push(`context.disable:${ctxId}`);
-                return { ctxId };
-            },
-            async contextList() {
-                calls.push("context.list");
-                return [];
-            },
-            async contextRenew(ctxId: string) {
-                calls.push(`context.renew:${ctxId}`);
-                return { ctxId };
-            },
-            async createContextMessage(instance: string, input: { ctxId: string; text: string }) {
-                calls.push(`context.send:${instance}:${input.ctxId}:${input.text}`);
-                return input;
-            },
-            async deleteInstance(instance: string) {
-                calls.push(`instance.delete:${instance}`);
-                return { instance };
-            },
-            async disableInstance(instance: string) {
-                calls.push(`instance.disable:${instance}`);
-                return { instance };
-            },
-            async enableInstance(instance: string) {
-                calls.push(`instance.enable:${instance}`);
-                return { instance };
-            },
-            async getConfig() {
-                calls.push("config.get");
-                return {};
-            },
-            async listContextMessages(instance: string, ctxId?: string) {
-                calls.push(`context.messages:${instance}:${ctxId ?? ""}`);
-                return [];
-            },
-            async listMcpApprovals() {
-                calls.push("oauth.list");
-                return [];
-            },
-            async listToolApprovals(instance: string) {
-                calls.push(`approval.list:${instance}`);
-                return [];
-            },
-            async mcpStatus() {
-                calls.push("oauth.status");
-                return { running: true };
-            },
-            async overview() {
-                calls.push("overview.get");
-                return {};
-            },
-            async decideMcpApproval(approvalId: string, decision: string) {
-                calls.push(`oauth.${decision}:${approvalId}`);
-                return { approvalId };
-            },
-            async decideToolApproval(instance: string, approvalId: string, decision: string, options?: unknown) {
-                calls.push(`approval.${decision}:${instance}:${approvalId}:${JSON.stringify(options)}`);
-                return { approvalId };
-            },
-            async getToolApproval(instance: string, approvalId: string) {
-                calls.push(`approval.show:${instance}:${approvalId}`);
-                return { approvalId };
-            },
-            async listToolCalls(instance: string, query?: { after?: string; before?: string; callIds?: string[]; limit?: number }) {
-                calls.push(`tool.calls:${instance}:${JSON.stringify(query ?? {})}`);
-                return [];
-            },
-            async deleteTodo(instance: string, taskId: string) {
-                calls.push(`todo.delete:${instance}:${taskId}`);
-                return {};
-            },
-            async updateConfig(request: unknown) {
-                calls.push(`config.update:${JSON.stringify(request)}`);
-                return {};
-            },
-            async validateConfig(draft: unknown) {
-                calls.push(`config.validate:${JSON.stringify(draft)}`);
-                return {};
-            },
-        } as never),
+        createCliClients: () =>
+            testClients({
+                async contextDisable(ctxId: string) {
+                    calls.push(`context.disable:${ctxId}`);
+                    return { ctxId };
+                },
+                async contextList() {
+                    calls.push("context.list");
+                    return [];
+                },
+                async contextRenew(ctxId: string) {
+                    calls.push(`context.renew:${ctxId}`);
+                    return { ctxId };
+                },
+                async createContextMessage(
+                    instance: string,
+                    input: { ctxId: string; text: string },
+                ) {
+                    calls.push(
+                        `context.send:${instance}:${input.ctxId}:${input.text}`,
+                    );
+                    return input;
+                },
+                async deleteInstance(instance: string) {
+                    calls.push(`instance.delete:${instance}`);
+                    return { instance };
+                },
+                async disableInstance(instance: string) {
+                    calls.push(`instance.disable:${instance}`);
+                    return { instance };
+                },
+                async enableInstance(instance: string) {
+                    calls.push(`instance.enable:${instance}`);
+                    return { instance };
+                },
+                async getConfig() {
+                    calls.push("config.get");
+                    return {};
+                },
+                async listContextMessages(instance: string, ctxId?: string) {
+                    calls.push(`context.messages:${instance}:${ctxId ?? ""}`);
+                    return [];
+                },
+                async listMcpApprovals() {
+                    calls.push("oauth.list");
+                    return [];
+                },
+                async listToolApprovals(instance: string) {
+                    calls.push(`approval.list:${instance}`);
+                    return [];
+                },
+                async mcpStatus() {
+                    calls.push("oauth.status");
+                    return { running: true };
+                },
+                async overview() {
+                    calls.push("overview.get");
+                    return {};
+                },
+                async decideMcpApproval(approvalId: string, decision: string) {
+                    calls.push(`oauth.${decision}:${approvalId}`);
+                    return { approvalId };
+                },
+                async decideToolApproval(
+                    instance: string,
+                    approvalId: string,
+                    decision: string,
+                    options?: unknown,
+                ) {
+                    calls.push(
+                        `approval.${decision}:${instance}:${approvalId}:${JSON.stringify(options)}`,
+                    );
+                    return { approvalId };
+                },
+                async getToolApproval(instance: string, approvalId: string) {
+                    calls.push(`approval.show:${instance}:${approvalId}`);
+                    return { approvalId };
+                },
+                async listToolCalls(
+                    instance: string,
+                    query?: {
+                        after?: string;
+                        before?: string;
+                        callIds?: string[];
+                        limit?: number;
+                    },
+                ) {
+                    calls.push(
+                        `tool.calls:${instance}:${JSON.stringify(query ?? {})}`,
+                    );
+                    return [];
+                },
+                async deleteTodo(instance: string, taskId: string) {
+                    calls.push(`todo.delete:${instance}:${taskId}`);
+                    return {};
+                },
+                async updateConfig(request: unknown) {
+                    calls.push(`config.update:${JSON.stringify(request)}`);
+                    return {};
+                },
+                async validateConfig(draft: unknown) {
+                    calls.push(`config.validate:${JSON.stringify(draft)}`);
+                    return {};
+                },
+            } as never),
         stderr,
         stdout,
     });
@@ -1372,7 +1589,17 @@ test("CliMain routes control-plane commands to their matching RPC clients", asyn
         ["instance", "disable", "demo"],
         ["approval", "list", "demo"],
         ["approval", "show", "demo", "approval-1"],
-        ["approval", "approve", "demo", "approval-1", "--reason", "verified", "--remember", "--policy-patch", '{"mode":"allow"}'],
+        [
+            "approval",
+            "approve",
+            "demo",
+            "approval-1",
+            "--reason",
+            "verified",
+            "--remember",
+            "--policy-patch",
+            '{"mode":"allow"}',
+        ],
         ["oauth", "status"],
         ["oauth", "list"],
         ["oauth", "deny", "oauth-1"],
@@ -1443,13 +1670,16 @@ function testClients(client: Record<string, unknown>) {
             },
         },
         artifact: {
-            cancelTransfer: (...args: unknown[]) => invoke("cancelTransfer", args),
+            cancelTransfer: (...args: unknown[]) =>
+                invoke("cancelTransfer", args),
             createShare: (...args: unknown[]) => invoke("createShare", args),
             getTransfer: (...args: unknown[]) => invoke("getTransfer", args),
             listShares: (...args: unknown[]) => invoke("listShares", args),
-            listTransfers: (...args: unknown[]) => invoke("listTransfers", args),
+            listTransfers: (...args: unknown[]) =>
+                invoke("listTransfers", args),
             revokeShare: (...args: unknown[]) => invoke("revokeShare", args),
-            startTransfer: (...args: unknown[]) => invoke("startTransfer", args)
+            startTransfer: (...args: unknown[]) =>
+                invoke("startTransfer", args),
         },
         cli: {
             command: (...args: unknown[]) => invoke("cliCommand", args),
@@ -1483,25 +1713,32 @@ function testClients(client: Record<string, unknown>) {
         },
         instance: {
             create: (...args: unknown[]) => invoke("createInstance", args),
-            createSchema: (...args: unknown[]) => invoke("getInstanceCreateSchema", args),
+            createSchema: (...args: unknown[]) =>
+                invoke("getInstanceCreateSchema", args),
             delete: (...args: unknown[]) => invoke("deleteInstance", args),
             disable: (...args: unknown[]) => invoke("disableInstance", args),
             enable: (...args: unknown[]) => invoke("enableInstance", args),
             list: (...args: unknown[]) => invoke("listInstances", args),
-            validateCreate: (...args: unknown[]) => invoke("validateInstanceCreateDraft", args)
+            validateCreate: (...args: unknown[]) =>
+                invoke("validateInstanceCreateDraft", args),
         },
         mcp: {
-            decideApproval: (...args: unknown[]) => invoke("decideMcpApproval", args),
-            listApprovals: (...args: unknown[]) => invoke("listMcpApprovals", args),
+            decideApproval: (...args: unknown[]) =>
+                invoke("decideMcpApproval", args),
+            listApprovals: (...args: unknown[]) =>
+                invoke("listMcpApprovals", args),
             status: (...args: unknown[]) => invoke("mcpStatus", args),
         },
         overview: {
             get: (...args: unknown[]) => invoke("overview", args),
         },
         reverse: {
-            createCode: (...args: unknown[]) => invoke("createReverseDeviceCode", args),
-            revokeToken: (...args: unknown[]) => invoke("revokeReverseDeviceToken", args),
-            rotateToken: (...args: unknown[]) => invoke("rotateReverseDeviceToken", args)
+            createCode: (...args: unknown[]) =>
+                invoke("createReverseDeviceCode", args),
+            revokeToken: (...args: unknown[]) =>
+                invoke("revokeReverseDeviceToken", args),
+            rotateToken: (...args: unknown[]) =>
+                invoke("rotateReverseDeviceToken", args),
         },
         runtime: {
             refresh: (...args: unknown[]) => invoke("refreshStatus", args),
@@ -1509,25 +1746,32 @@ function testClients(client: Record<string, unknown>) {
             start: (...args: unknown[]) => invoke("startInstance", args),
             stop: (...args: unknown[]) => invoke("stopInstance", args),
             readLogs: (...args: unknown[]) => invoke("readLogs", args),
-            subscribe: (...args: unknown[]) => invoke("subscribe", args)
+            subscribe: (...args: unknown[]) => invoke("subscribe", args),
         },
         todo: {
             delete: (...args: unknown[]) => invoke("deleteTodo", args),
             get: (...args: unknown[]) => invoke("getTodo", args),
-            subscribe: (...args: unknown[]) => invoke(
-                typeof client.subscribeTodo === "function" ? "subscribeTodo" : "subscribe",
-                args
-            )
+            subscribe: (...args: unknown[]) =>
+                invoke(
+                    typeof client.subscribeTodo === "function"
+                        ? "subscribeTodo"
+                        : "subscribe",
+                    args,
+                ),
         },
         web: {
-            applications: (...args: unknown[]) => invoke("webApplications", args),
+            applications: (...args: unknown[]) =>
+                invoke("webApplications", args),
         },
         tool: {
             call: (...args: unknown[]) => invoke("callTool", args),
-            decideApproval: (...args: unknown[]) => invoke("decideToolApproval", args),
-            getApproval: (...args: unknown[]) => invoke("getToolApproval", args),
-            listApprovals: (...args: unknown[]) => invoke("listToolApprovals", args),
+            decideApproval: (...args: unknown[]) =>
+                invoke("decideToolApproval", args),
+            getApproval: (...args: unknown[]) =>
+                invoke("getToolApproval", args),
+            listApprovals: (...args: unknown[]) =>
+                invoke("listToolApprovals", args),
             listCalls: (...args: unknown[]) => invoke("listToolCalls", args),
-        }
+        },
     } as never;
 }

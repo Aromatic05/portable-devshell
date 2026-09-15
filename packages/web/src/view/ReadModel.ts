@@ -28,32 +28,42 @@ export interface TodoSummary {
 export function pendingApprovals(state: WebState): number {
     return (
         toolApprovals(state).length +
-        state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length
+        state.readModel.oauthApprovals.filter(
+            (approval) => approval.status === "pending",
+        ).length
     );
 }
 
 export function toolApprovals(state: WebState): ApprovalRequest[] {
-    return Object.values(state.readModel.instanceState).map((instance) => instance.approvals).flatMap((approvals) =>
-        approvals.filter((approval) => approval.status === "pending"),
-    );
+    return Object.values(state.readModel.instanceState)
+        .map((instance) => instance.approvals)
+        .flatMap((approvals) =>
+            approvals.filter((approval) => approval.status === "pending"),
+        );
 }
 
 export function todoSummaries(state: WebState): TodoSummary[] {
-    return Object.entries(state.readModel.instanceState).flatMap(([instance, value]) => value.todo === undefined ? [] : [[instance, value.todo] as const]).flatMap(([instance, todo]) =>
-        projectTodoTaskSummaries(todo).map((task) => ({
-            completed: task.completed,
-            ...(task.checkpoint === undefined && todo.taskId !== task.taskId
-                ? {}
-                : { checkpoint: task.checkpoint ?? todo.checkpoint }),
-            ...(task.currentItem === undefined ? {} : { currentItem: task.currentItem }),
-            instance,
-            revision: task.revision,
-            status: task.status,
-            taskId: task.taskId,
-            title: task.title,
-            total: task.total,
-        })),
-    );
+    return Object.entries(state.readModel.instanceState)
+        .flatMap(([instance, value]) =>
+            value.todo === undefined ? [] : [[instance, value.todo] as const],
+        )
+        .flatMap(([instance, todo]) =>
+            projectTodoTaskSummaries(todo).map((task) => ({
+                completed: task.completed,
+                ...(task.checkpoint === undefined && todo.taskId !== task.taskId
+                    ? {}
+                    : { checkpoint: task.checkpoint ?? todo.checkpoint }),
+                ...(task.currentItem === undefined
+                    ? {}
+                    : { currentItem: task.currentItem }),
+                instance,
+                revision: task.revision,
+                status: task.status,
+                taskId: task.taskId,
+                title: task.title,
+                total: task.total,
+            })),
+        );
 }
 
 export function openTodos(state: WebState): number {
@@ -74,7 +84,9 @@ export function overviewToolCalls(
     return overview.activity.slice(0, 6);
 }
 
-export function overviewAlertRoute(kind: OperationalOverviewAlert["kind"]): string {
+export function overviewAlertRoute(
+    kind: OperationalOverviewAlert["kind"],
+): string {
     if (kind.startsWith("approval.")) return "#/approvals";
     if (kind.startsWith("todo.")) return "#/todos";
     if (kind.startsWith("activity.")) return "#/audit";

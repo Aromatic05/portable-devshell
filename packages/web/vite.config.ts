@@ -8,8 +8,14 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
         alias: {
-            "@portable-devshell/shared/browser": resolve(import.meta.dirname, "../shared/src/browser.ts"),
-            "@portable-devshell/shared": resolve(import.meta.dirname, "../shared/src/index.ts"),
+            "@portable-devshell/shared/browser": resolve(
+                import.meta.dirname,
+                "../shared/src/browser.ts",
+            ),
+            "@portable-devshell/shared": resolve(
+                import.meta.dirname,
+                "../shared/src/index.ts",
+            ),
         },
     },
     test: {

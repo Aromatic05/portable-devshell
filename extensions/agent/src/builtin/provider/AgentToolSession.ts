@@ -34,7 +34,7 @@ export interface AgentToolSession {
         input: ExtensionJsonValue,
         operationId: string,
         signal?: AbortSignal,
-        onProgress?: (progress: ExtensionJsonValue) => void
+        onProgress?: (progress: ExtensionJsonValue) => void,
     ): Promise<ExtensionJsonValue>;
     /** Close is required to be idempotent. */
     close(): Promise<void> | void;

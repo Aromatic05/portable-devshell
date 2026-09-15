@@ -1,6 +1,9 @@
 import type { JsonValue } from "./JsonValue.js";
 
-export interface CommandDiagnostic extends Record<string, JsonValue | undefined> {
+export interface CommandDiagnostic extends Record<
+    string,
+    JsonValue | undefined
+> {
     causeCode?: string;
     causeMessage?: string;
     command?: string[];

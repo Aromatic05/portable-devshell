@@ -3,9 +3,15 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ExtensionAssetProjectionInput, ExtensionAssetProjectionResult } from "@portable-devshell/extension";
+import type {
+    ExtensionAssetProjectionInput,
+    ExtensionAssetProjectionResult,
+} from "@portable-devshell/extension";
 
-import { ArtifactHttpRoute, artifactShareRoute } from "../../../control/artifact/route/Http.js";
+import {
+    ArtifactHttpRoute,
+    artifactShareRoute,
+} from "../../../control/artifact/route/Http.js";
 import { ArtifactHostBridge } from "../../../control/artifact/host/Bridge.js";
 import { ArtifactService } from "../../../control/artifact/Service.js";
 import type { InstanceRegistry } from "../../../control/instance/registry/Registry.js";
@@ -35,30 +41,34 @@ export class ControlRuntimeArtifact {
     }
 
     get service(): ArtifactService {
-        if (this.#service === undefined) throw new Error("Artifact runtime is not started.");
+        if (this.#service === undefined)
+            throw new Error("Artifact runtime is not started.");
         return this.#service;
     }
 
     async start(): Promise<void> {
         const bridge = new ArtifactHostBridge({
             homeDirectory: this.#homeDirectory,
-            storageDir: join(this.#controlPaths.artifactsDir, "host")
+            storageDir: join(this.#controlPaths.artifactsDir, "host"),
         });
         await bridge.initialize();
         this.#bridge = bridge;
         const service = new ArtifactService({
             directTransfer: this.#config().control.artifactDirectTransfer,
-            resolveEndpoint: (name, authorityInstance) => this.#resolveEndpoint(name, authorityInstance),
+            resolveEndpoint: (name, authorityInstance) =>
+                this.#resolveEndpoint(name, authorityInstance),
             shareUrl: (token) => artifactShareUrl(this.#config(), token),
-            storageDir: this.#controlPaths.artifactsDir
+            storageDir: this.#controlPaths.artifactsDir,
         });
         await service.initialize();
         this.#service = service;
     }
 
-    installHttpRoute(server: Parameters<ArtifactHttpRoute["install"]>[0]): void {
+    installHttpRoute(
+        server: Parameters<ArtifactHttpRoute["install"]>[0],
+    ): void {
         new ArtifactHttpRoute(this.service, {
-            publicBaseUrl: this.#config().mcp.publicBaseUrl
+            publicBaseUrl: this.#config().mcp.publicBaseUrl,
         }).install(server);
     }
 
@@ -75,37 +85,47 @@ export class ControlRuntimeArtifact {
             signal?: AbortSignal;
             sourcePath: string;
             target: { instance: string; path: string; workspace: string };
-        }
+        },
     ): Promise<ExtensionAssetProjectionResult> {
         input.signal?.throwIfAborted();
         const authority = `@extension-asset:${randomUUID()}`;
         this.#extensionAssetAuthorities.add(authority);
         try {
-            const started = await this.service.startTransfer({
-                instance: "host",
-                operation: "start",
-                ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
-                sourcePath: input.sourcePath,
-                sourceWorkspace: input.sourcePath,
-                targetInstance: input.target.instance,
-                targetPath: input.target.path,
-                targetWorkspace: input.target.workspace
-            }, authority);
+            const started = await this.service.startTransfer(
+                {
+                    instance: "host",
+                    operation: "start",
+                    ...(input.overwrite === undefined
+                        ? {}
+                        : { overwrite: input.overwrite }),
+                    sourcePath: input.sourcePath,
+                    sourceWorkspace: input.sourcePath,
+                    targetInstance: input.target.instance,
+                    targetPath: input.target.path,
+                    targetWorkspace: input.target.workspace,
+                },
+                authority,
+            );
             const transferId = started.transfer.transferId;
             const abort = () => {
-                void this.service.cancelTransfer(transferId).catch(() => undefined);
+                void this.service
+                    .cancelTransfer(transferId)
+                    .catch(() => undefined);
             };
             input.signal?.addEventListener("abort", abort, { once: true });
             try {
-                const completed = await this.service.waitForTransfer(transferId);
+                const completed =
+                    await this.service.waitForTransfer(transferId);
                 input.signal?.throwIfAborted();
                 if (completed.status !== "completed") {
                     throw new Error(
-                        completed.failure?.message
-                            ?? `Extension ${extensionId} asset transfer ${transferId} ended with status ${completed.status}.`
+                        completed.failure?.message ??
+                            `Extension ${extensionId} asset transfer ${transferId} ended with status ${completed.status}.`,
                     );
                 }
-                return Object.freeze({ transferredBytes: completed.transferredBytes });
+                return Object.freeze({
+                    transferredBytes: completed.transferredBytes,
+                });
             } finally {
                 input.signal?.removeEventListener("abort", abort);
             }
@@ -121,48 +141,54 @@ export class ControlRuntimeArtifact {
             signal?: AbortSignal;
             sourcePath: string;
             target: ExtensionAssetProjectionInput["target"];
-        }
+        },
     ): Promise<ExtensionAssetProjectionResult> {
         input.signal?.throwIfAborted();
         const descriptor = this.#instances.get(input.target.instance);
         if (descriptor === undefined) {
-            throw new Error(`Unknown Extension asset projection instance: ${input.target.instance}.`);
+            throw new Error(
+                `Unknown Extension asset projection instance: ${input.target.instance}.`,
+            );
         }
         const resource = await descriptor.worker.prepareExtensionResource({
             collection: input.target.collection,
-            extensionId
+            extensionId,
         });
         return await this.transferExtensionAsset(extensionId, {
-            ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+            ...(input.overwrite === undefined
+                ? {}
+                : { overwrite: input.overwrite }),
             ...(input.signal === undefined ? {} : { signal: input.signal }),
             sourcePath: input.sourcePath,
             target: {
                 instance: input.target.instance,
                 path: `./${input.target.key}`,
-                workspace: resource.directory
-            }
+                workspace: resource.directory,
+            },
         });
     }
 
     #resolveEndpoint(name: string, authorityInstance?: string) {
         if (name !== "host") return this.#instances.get(name)?.worker;
-        if (authorityInstance === undefined || this.#bridge === undefined) return undefined;
+        if (authorityInstance === undefined || this.#bridge === undefined)
+            return undefined;
         if (this.#extensionAssetAuthorities.has(authorityInstance)) {
             return this.#bridge.endpointFor({
                 appendControlEvent: async () => undefined,
                 authorityInstance,
                 provider: "local",
-                securityMode: "disabled"
+                securityMode: "disabled",
             });
         }
         const authority = this.#instances.get(authorityInstance);
         if (authority === undefined) return undefined;
         const snapshot = authority.worker.snapshot();
         return this.#bridge.endpointFor({
-            appendControlEvent: async (type, data) => await authority.worker.appendControlEvent(type, data),
+            appendControlEvent: async (type, data) =>
+                await authority.worker.appendControlEvent(type, data),
             authorityInstance,
             provider: authority.provider,
-            securityMode: snapshot.effectiveSecurityMode ?? "disabled"
+            securityMode: snapshot.effectiveSecurityMode ?? "disabled",
         });
     }
 }
@@ -171,12 +197,16 @@ function artifactShareUrl(config: ControlConfig, token: string): string {
     if (!config.mcp.enabled) {
         throw createError({
             code: errorCodes.controlConfigValidationFailed,
-            message: "Artifact sharing requires the MCP HTTP host to be enabled.",
-            retryable: false
+            message:
+                "Artifact sharing requires the MCP HTTP host to be enabled.",
+            retryable: false,
         });
     }
     const localHost = normalizeArtifactHttpHost(config.mcp.listenHost);
-    const base = new URL(config.mcp.publicBaseUrl ?? `http://${localHost}:${config.mcp.listenPort}`);
+    const base = new URL(
+        config.mcp.publicBaseUrl ??
+            `http://${localHost}:${config.mcp.listenPort}`,
+    );
     base.pathname = `${artifactShareRoute(base.toString())}/${encodeURIComponent(token)}`;
     base.search = "";
     base.hash = "";

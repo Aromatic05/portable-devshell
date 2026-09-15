@@ -1,10 +1,7 @@
 import type { InstanceName } from "../instance/Identity.js";
 import type { InstanceSnapshot } from "../instance/activity/State.js";
 import type { ActiveTodoSummary } from "../instance/task/Todo.js";
-import type {
-    ToolCallSource,
-    ToolCallStatus
-} from "../tool/Call.js";
+import type { ToolCallSource, ToolCallStatus } from "../tool/Call.js";
 
 export type OperationalHealth = "healthy" | "attention" | "critical";
 export type OperationalAlertSeverity = "attention" | "critical";

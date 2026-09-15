@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { type OAuthApprovalDecision, type OAuthApprovalKind, type OAuthApprovalRequest } from "@portable-devshell/shared";
+import {
+    type OAuthApprovalDecision,
+    type OAuthApprovalKind,
+    type OAuthApprovalRequest,
+} from "@portable-devshell/shared";
 
 const approvalTimeoutMs = 300_000;
 const defaultMaxEntries = 2048;
@@ -31,7 +35,10 @@ export interface McpOAuthApprovalServiceOptions {
 
 interface OAuthApprovalMemorySnapshot {
     authorizationByInteraction: Map<string, string>;
-    authorizationByTransaction: Map<string, { approvalId: string; requestKey: string }>;
+    authorizationByTransaction: Map<
+        string,
+        { approvalId: string; requestKey: string }
+    >;
     requests: Map<string, OAuthApprovalRequest>;
 }
 
@@ -46,24 +53,42 @@ export class McpOAuthApprovalService {
     readonly #timeoutMs: number;
     readonly #requests = new Map<string, OAuthApprovalRequest>();
     readonly #authorizationByInteraction = new Map<string, string>();
-    readonly #authorizationByTransaction = new Map<string, { approvalId: string; requestKey: string }>();
+    readonly #authorizationByTransaction = new Map<
+        string,
+        { approvalId: string; requestKey: string }
+    >();
 
-    constructor(storageDir: string, options: McpOAuthApprovalServiceOptions = {}) {
+    constructor(
+        storageDir: string,
+        options: McpOAuthApprovalServiceOptions = {},
+    ) {
         this.#filePath = join(storageDir, "approvals.jsonl");
-        this.#maxEntries = positiveInteger(options.maxEntries, defaultMaxEntries, "maxEntries");
-        this.#maxInputBytes = positiveInteger(options.maxInputBytes, defaultMaxInputBytes, "maxInputBytes");
+        this.#maxEntries = positiveInteger(
+            options.maxEntries,
+            defaultMaxEntries,
+            "maxEntries",
+        );
+        this.#maxInputBytes = positiveInteger(
+            options.maxInputBytes,
+            defaultMaxInputBytes,
+            "maxInputBytes",
+        );
         this.#maxPendingRegistrations = positiveInteger(
             options.maxPendingRegistrations,
             defaultMaxPendingRegistrations,
-            "maxPendingRegistrations"
+            "maxPendingRegistrations",
         );
         this.#maxTerminalEntries = positiveInteger(
             options.maxTerminalEntries,
             defaultMaxTerminalEntries,
-            "maxTerminalEntries"
+            "maxTerminalEntries",
         );
         this.#now = options.now ?? Date.now;
-        this.#timeoutMs = positiveInteger(options.timeoutMs, approvalTimeoutMs, "timeoutMs");
+        this.#timeoutMs = positiveInteger(
+            options.timeoutMs,
+            approvalTimeoutMs,
+            "timeoutMs",
+        );
     }
 
     async warmup(): Promise<void> {
@@ -85,7 +110,9 @@ export class McpOAuthApprovalService {
         });
     }
 
-    async registerClient(input: OAuthApprovalInput): Promise<OAuthApprovalRequest> {
+    async registerClient(
+        input: OAuthApprovalInput,
+    ): Promise<OAuthApprovalRequest> {
         this.#validateInput(input);
         return await this.#mutex.runExclusive(async () => {
             const previous = this.#snapshotLocked();
@@ -98,11 +125,15 @@ export class McpOAuthApprovalService {
                 return existing;
             }
             const pendingRegistrations = [...this.#requests.values()].filter(
-                (request) => request.kind === "registration" && request.status === "pending"
+                (request) =>
+                    request.kind === "registration" &&
+                    request.status === "pending",
             ).length;
             if (pendingRegistrations >= this.#maxPendingRegistrations) {
                 if (changed) await this.#persistLockedWithRollback(previous);
-                throw new OAuthApprovalCapacityError(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
+                throw new OAuthApprovalCapacityError(
+                    `The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`,
+                );
             }
             const request = this.#createLocked("registration", input);
             await this.#persistLockedWithRollback(previous);
@@ -113,7 +144,7 @@ export class McpOAuthApprovalService {
     async requestAuthorization(
         interactionId: string,
         transactionId: string,
-        input: OAuthApprovalInput
+        input: OAuthApprovalInput,
     ): Promise<OAuthApprovalRequest> {
         this.#validateInput(input);
         return await this.#mutex.runExclusive(async () => {
@@ -123,12 +154,18 @@ export class McpOAuthApprovalService {
             const changed = expiredPending || compacted;
             let registration = this.#findRegistration(input.clientId);
             if (registration === undefined) {
-                const pendingRegistrations = [...this.#requests.values()].filter(
-                    (request) => request.kind === "registration" && request.status === "pending"
+                const pendingRegistrations = [
+                    ...this.#requests.values(),
+                ].filter(
+                    (request) =>
+                        request.kind === "registration" &&
+                        request.status === "pending",
                 ).length;
                 if (pendingRegistrations >= this.#maxPendingRegistrations) {
                     await this.#persistLockedWithRollback(previous);
-                    throw new OAuthApprovalCapacityError(`The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`);
+                    throw new OAuthApprovalCapacityError(
+                        `The pending OAuth registration limit of ${this.#maxPendingRegistrations} was reached.`,
+                    );
                 }
                 registration = this.#createLocked("registration", input);
                 await this.#persistLockedWithRollback(previous);
@@ -141,7 +178,8 @@ export class McpOAuthApprovalService {
                 return registration;
             }
 
-            const interactionApproval = this.#authorizationByInteraction.get(interactionId);
+            const interactionApproval =
+                this.#authorizationByInteraction.get(interactionId);
             if (interactionApproval !== undefined) {
                 const existing = this.#requests.get(interactionApproval);
                 if (existing !== undefined) {
@@ -153,11 +191,20 @@ export class McpOAuthApprovalService {
             }
 
             const requestKey = authorizationRequestKey(input);
-            const transactionApproval = this.#authorizationByTransaction.get(transactionId);
-            if (transactionApproval !== undefined && transactionApproval.requestKey === requestKey) {
-                const existing = this.#requests.get(transactionApproval.approvalId);
+            const transactionApproval =
+                this.#authorizationByTransaction.get(transactionId);
+            if (
+                transactionApproval !== undefined &&
+                transactionApproval.requestKey === requestKey
+            ) {
+                const existing = this.#requests.get(
+                    transactionApproval.approvalId,
+                );
                 if (existing !== undefined) {
-                    this.#authorizationByInteraction.set(interactionId, existing.approvalId);
+                    this.#authorizationByInteraction.set(
+                        interactionId,
+                        existing.approvalId,
+                    );
                     if (changed) {
                         await this.#persistLockedWithRollback(previous);
                     }
@@ -166,8 +213,14 @@ export class McpOAuthApprovalService {
             }
 
             const request = this.#createLocked("authorization", input);
-            this.#authorizationByInteraction.set(interactionId, request.approvalId);
-            this.#authorizationByTransaction.set(transactionId, { approvalId: request.approvalId, requestKey });
+            this.#authorizationByInteraction.set(
+                interactionId,
+                request.approvalId,
+            );
+            this.#authorizationByTransaction.set(transactionId, {
+                approvalId: request.approvalId,
+                requestKey,
+            });
             await this.#persistLockedWithRollback(previous);
             return request;
         });
@@ -177,28 +230,41 @@ export class McpOAuthApprovalService {
         return await this.#mutex.runExclusive(async () => {
             return [...this.#requests.values()]
                 .map((request) => this.#readRequestLocked(request))
-                .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+                .sort((left, right) =>
+                    right.createdAt.localeCompare(left.createdAt),
+                );
         });
     }
 
     async get(approvalId: string): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
             const request = this.#requests.get(approvalId);
-            return request === undefined ? undefined : this.#readRequestLocked(request);
+            return request === undefined
+                ? undefined
+                : this.#readRequestLocked(request);
         });
     }
 
-    async getAuthorization(interactionId: string): Promise<OAuthApprovalRequest | undefined> {
+    async getAuthorization(
+        interactionId: string,
+    ): Promise<OAuthApprovalRequest | undefined> {
         return await this.#mutex.runExclusive(async () => {
-            const approvalId = this.#authorizationByInteraction.get(interactionId);
-            const request = approvalId === undefined ? undefined : this.#requests.get(approvalId);
-            return request === undefined ? undefined : this.#readRequestLocked(request);
+            const approvalId =
+                this.#authorizationByInteraction.get(interactionId);
+            const request =
+                approvalId === undefined
+                    ? undefined
+                    : this.#requests.get(approvalId);
+            return request === undefined
+                ? undefined
+                : this.#readRequestLocked(request);
         });
     }
 
     async completeAuthorization(interactionId: string): Promise<void> {
         await this.#mutex.runExclusive(async () => {
-            const approvalId = this.#authorizationByInteraction.get(interactionId);
+            const approvalId =
+                this.#authorizationByInteraction.get(interactionId);
             if (approvalId === undefined) return;
             this.#removeApprovalBindingsLocked(approvalId);
         });
@@ -207,7 +273,7 @@ export class McpOAuthApprovalService {
     async decide(
         approvalId: string,
         decision: OAuthApprovalDecision,
-        decidedBy: "cli" | "tui" | "web"
+        decidedBy: "cli" | "tui" | "web",
     ): Promise<OAuthApprovalRequest> {
         return await this.#mutex.runExclusive(async () => {
             const previous = this.#snapshotLocked();
@@ -221,14 +287,16 @@ export class McpOAuthApprovalService {
             }
             if (request.status !== "pending") {
                 if (changed) await this.#persistLockedWithRollback(previous);
-                throw new Error(`OAuth approval ${approvalId} is already ${request.status}.`);
+                throw new Error(
+                    `OAuth approval ${approvalId} is already ${request.status}.`,
+                );
             }
 
             const next: OAuthApprovalRequest = {
                 ...request,
                 decidedAt: new Date(this.#now()).toISOString(),
                 decidedBy,
-                status: decision === "approve" ? "approved" : "denied"
+                status: decision === "approve" ? "approved" : "denied",
             };
             this.#requests.set(next.approvalId, next);
             this.#compactLocked();
@@ -237,7 +305,10 @@ export class McpOAuthApprovalService {
         });
     }
 
-    #createLocked(kind: OAuthApprovalKind, input: OAuthApprovalInput): OAuthApprovalRequest {
+    #createLocked(
+        kind: OAuthApprovalKind,
+        input: OAuthApprovalInput,
+    ): OAuthApprovalRequest {
         this.#makeRoomLocked();
         const createdAt = new Date(this.#now()).toISOString();
         const request: OAuthApprovalRequest = {
@@ -250,7 +321,7 @@ export class McpOAuthApprovalService {
             redirectUris: [...input.redirectUris],
             requestedResources: [...(input.requestedResources ?? [])],
             requestedScopes: [...(input.requestedScopes ?? [])],
-            status: "pending"
+            status: "pending",
         };
         this.#requests.set(request.approvalId, request);
         return request;
@@ -258,12 +329,16 @@ export class McpOAuthApprovalService {
 
     #findRegistration(clientId: string): OAuthApprovalRequest | undefined {
         return [...this.#requests.values()].find(
-            (request) => request.kind === "registration" && request.clientId === clientId && request.status !== "expired"
+            (request) =>
+                request.kind === "registration" &&
+                request.clientId === clientId &&
+                request.status !== "expired",
         );
     }
 
     #readRequestLocked(request: OAuthApprovalRequest): OAuthApprovalRequest {
-        return request.status === "pending" && Date.parse(request.expiresAt) <= this.#now()
+        return request.status === "pending" &&
+            Date.parse(request.expiresAt) <= this.#now()
             ? { ...request, status: "expired" }
             : request;
     }
@@ -272,10 +347,16 @@ export class McpOAuthApprovalService {
         const now = this.#now();
         let changed = false;
         for (const request of this.#requests.values()) {
-            if (request.status !== "pending" || Date.parse(request.expiresAt) > now) {
+            if (
+                request.status !== "pending" ||
+                Date.parse(request.expiresAt) > now
+            ) {
                 continue;
             }
-            this.#requests.set(request.approvalId, { ...request, status: "expired" });
+            this.#requests.set(request.approvalId, {
+                ...request,
+                status: "expired",
+            });
             changed = true;
         }
         return changed;
@@ -307,7 +388,9 @@ export class McpOAuthApprovalService {
         while (this.#requests.size >= this.#maxEntries) {
             const removable = this.#oldestTerminalRequest();
             if (removable === undefined) {
-                throw new OAuthApprovalCapacityError(`The OAuth approval storage limit of ${this.#maxEntries} entries was reached.`);
+                throw new OAuthApprovalCapacityError(
+                    `The OAuth approval storage limit of ${this.#maxEntries} entries was reached.`,
+                );
             }
             this.#requests.delete(removable.approvalId);
             this.#removeApprovalBindingsLocked(removable.approvalId);
@@ -315,56 +398,77 @@ export class McpOAuthApprovalService {
     }
 
     #removeApprovalBindingsLocked(approvalId: string): void {
-        for (const [interactionId, candidate] of this.#authorizationByInteraction) {
-            if (candidate === approvalId) this.#authorizationByInteraction.delete(interactionId);
+        for (const [interactionId, candidate] of this
+            .#authorizationByInteraction) {
+            if (candidate === approvalId)
+                this.#authorizationByInteraction.delete(interactionId);
         }
-        for (const [transactionId, candidate] of this.#authorizationByTransaction) {
-            if (candidate.approvalId === approvalId) this.#authorizationByTransaction.delete(transactionId);
+        for (const [transactionId, candidate] of this
+            .#authorizationByTransaction) {
+            if (candidate.approvalId === approvalId)
+                this.#authorizationByTransaction.delete(transactionId);
         }
     }
 
     #oldestTerminalRequest(): OAuthApprovalRequest | undefined {
         return [...this.#requests.values()]
             .filter((request) => request.status !== "pending")
-            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0];
+            .sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            )[0];
     }
 
     #removableTerminalRequests(): OAuthApprovalRequest[] {
         return [...this.#requests.values()]
-            .filter((request) => request.status !== "pending" && !isApprovedRegistration(request))
-            .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+            .filter(
+                (request) =>
+                    request.status !== "pending" &&
+                    !isApprovedRegistration(request),
+            )
+            .sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            );
     }
 
     #validateInput(input: OAuthApprovalInput): void {
-        const bytes = Buffer.byteLength(JSON.stringify({
-            clientId: input.clientId,
-            clientName: input.clientName,
-            redirectUris: input.redirectUris,
-            requestedResources: input.requestedResources ?? [],
-            requestedScopes: input.requestedScopes ?? []
-        }), "utf8");
+        const bytes = Buffer.byteLength(
+            JSON.stringify({
+                clientId: input.clientId,
+                clientName: input.clientName,
+                redirectUris: input.redirectUris,
+                requestedResources: input.requestedResources ?? [],
+                requestedScopes: input.requestedScopes ?? [],
+            }),
+            "utf8",
+        );
         if (bytes > this.#maxInputBytes) {
             throw new OAuthApprovalCapacityError(
-                `OAuth approval input exceeds the ${this.#maxInputBytes} byte storage limit.`
+                `OAuth approval input exceeds the ${this.#maxInputBytes} byte storage limit.`,
             );
         }
     }
 
     #snapshotLocked(): OAuthApprovalMemorySnapshot {
         return {
-            authorizationByInteraction: new Map(this.#authorizationByInteraction),
+            authorizationByInteraction: new Map(
+                this.#authorizationByInteraction,
+            ),
             authorizationByTransaction: new Map(
-                [...this.#authorizationByTransaction].map(([key, value]) => [key, { ...value }])
+                [...this.#authorizationByTransaction].map(([key, value]) => [
+                    key,
+                    { ...value },
+                ]),
             ),
             requests: new Map(
-                [...this.#requests].map(([key, value]) => [key, { ...value }])
-            )
+                [...this.#requests].map(([key, value]) => [key, { ...value }]),
+            ),
         };
     }
 
     #restoreLocked(snapshot: OAuthApprovalMemorySnapshot): void {
         this.#requests.clear();
-        for (const [key, value] of snapshot.requests) this.#requests.set(key, { ...value });
+        for (const [key, value] of snapshot.requests)
+            this.#requests.set(key, { ...value });
         this.#authorizationByInteraction.clear();
         for (const [key, value] of snapshot.authorizationByInteraction) {
             this.#authorizationByInteraction.set(key, value);
@@ -375,7 +479,9 @@ export class McpOAuthApprovalService {
         }
     }
 
-    async #persistLockedWithRollback(previous: OAuthApprovalMemorySnapshot): Promise<void> {
+    async #persistLockedWithRollback(
+        previous: OAuthApprovalMemorySnapshot,
+    ): Promise<void> {
         try {
             await this.#persistLocked();
         } catch (error) {
@@ -392,12 +498,17 @@ export class McpOAuthApprovalService {
         }
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
         const contents = [...this.#requests.values()]
-            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+            .sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            )
             .map((request) => JSON.stringify(request))
             .join("\n");
         const file = await open(temporary, "wx", 0o600);
         try {
-            await file.writeFile(contents.length === 0 ? "" : `${contents}\n`, "utf8");
+            await file.writeFile(
+                contents.length === 0 ? "" : `${contents}\n`,
+                "utf8",
+            );
             await file.sync();
         } catch (error) {
             await file.close().catch(() => undefined);
@@ -455,7 +566,7 @@ function authorizationRequestKey(input: OAuthApprovalInput): string {
         clientName: input.clientName,
         redirectUris: normalizedStringSet(input.redirectUris),
         requestedResources: normalizedStringSet(input.requestedResources ?? []),
-        requestedScopes: normalizedStringSet(input.requestedScopes ?? [])
+        requestedScopes: normalizedStringSet(input.requestedScopes ?? []),
     });
 }
 
@@ -464,7 +575,9 @@ function isApprovedRegistration(request: OAuthApprovalRequest): boolean {
 }
 
 function normalizedStringSet(values: readonly string[]): string[] {
-    return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+    return [...new Set(values)].sort((left, right) =>
+        left.localeCompare(right),
+    );
 }
 
 class AsyncMutex {
@@ -485,7 +598,11 @@ class AsyncMutex {
     }
 }
 
-function positiveInteger(value: number | undefined, fallback: number, name: string): number {
+function positiveInteger(
+    value: number | undefined,
+    fallback: number,
+    name: string,
+): number {
     const resolved = value ?? fallback;
     if (!Number.isSafeInteger(resolved) || resolved <= 0) {
         throw new Error(`${name} must be a positive integer.`);
@@ -494,5 +611,10 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }

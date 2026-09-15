@@ -3,11 +3,14 @@ import {
     pushTuiRoute,
     replaceTuiRoute,
     resetTuiRoute,
-    transitionTuiRouteContext
+    transitionTuiRouteContext,
 } from "../../../route/State.js";
 import type { TuiAppAction, TuiAppState } from "../../Model.js";
 
-export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAction): TuiAppState | undefined {
+export function reduceTuiStoreReducerRoute(
+    state: TuiAppState,
+    action: TuiAppAction,
+): TuiAppState | undefined {
     switch (action.type) {
         case "ui.selectPage": {
             const sidebarLevel =
@@ -21,7 +24,11 @@ export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAct
                     ui: { ...state.ui, sidebarLevel },
                 };
             }
-            const next = transitionTuiRouteContext(state, action.page, state.ui.selectedInstance);
+            const next = transitionTuiRouteContext(
+                state,
+                action.page,
+                state.ui.selectedInstance,
+            );
             return {
                 ...next,
                 ui: {
@@ -32,7 +39,11 @@ export function reduceTuiStoreReducerRoute(state: TuiAppState, action: TuiAppAct
         }
         case "ui.selectInstance":
             if (state.ui.selectedInstance === action.instance) return state;
-            return transitionTuiRouteContext(state, state.ui.selectedPage, action.instance);
+            return transitionTuiRouteContext(
+                state,
+                state.ui.selectedPage,
+                action.instance,
+            );
         case "route.push":
             return pushTuiRoute(state, action.route);
         case "route.pop":

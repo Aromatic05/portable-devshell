@@ -5,29 +5,47 @@ import {
     type ArtifactShareInput,
     type ArtifactSourceDescriptor,
     type ArtifactTransferStartInput,
-    type ArtifactViewImageInput
+    type ArtifactViewImageInput,
 } from "@portable-devshell/shared";
 
 import type { ArtifactPayloadSourceInput } from "./Service.js";
 
-export function readImagePayloadSourceInput(input: ArtifactViewImageInput): ArtifactPayloadSourceInput {
+export function readImagePayloadSourceInput(
+    input: ArtifactViewImageInput,
+): ArtifactPayloadSourceInput {
     return readPathOrHandle(input, "artifact_viewImage");
 }
 
-export function readSharePayloadSourceInput(input: ArtifactShareInput): ArtifactPayloadSourceInput {
+export function readSharePayloadSourceInput(
+    input: ArtifactShareInput,
+): ArtifactPayloadSourceInput {
     return readPathOrHandle(input, "artifact_share");
 }
 
-export function readTransferPayloadSourceInput(input: ArtifactTransferStartInput): ArtifactPayloadSourceInput {
-    if (typeof input.handle === "string" && input.handle.length > 0 && input.sourcePath === undefined) {
+export function readTransferPayloadSourceInput(
+    input: ArtifactTransferStartInput,
+): ArtifactPayloadSourceInput {
+    if (
+        typeof input.handle === "string" &&
+        input.handle.length > 0 &&
+        input.sourcePath === undefined
+    ) {
         return { handle: input.handle };
     }
-    if (typeof input.sourcePath === "string" && input.sourcePath.length > 0 && input.handle === undefined) {
-        if (typeof input.sourceWorkspace !== "string" || input.sourceWorkspace.length === 0) {
+    if (
+        typeof input.sourcePath === "string" &&
+        input.sourcePath.length > 0 &&
+        input.handle === undefined
+    ) {
+        if (
+            typeof input.sourceWorkspace !== "string" ||
+            input.sourceWorkspace.length === 0
+        ) {
             throw createError({
                 code: errorCodes.targetInvalid,
-                message: "Artifact transfer sourcePath requires sourceWorkspace.",
-                retryable: false
+                message:
+                    "Artifact transfer sourcePath requires sourceWorkspace.",
+                retryable: false,
             });
         }
         return { path: input.sourcePath, workspace: input.sourceWorkspace };
@@ -35,17 +53,20 @@ export function readTransferPayloadSourceInput(input: ArtifactTransferStartInput
     throw createError({
         code: errorCodes.targetInvalid,
         message: "Exactly one of handle or sourcePath is required.",
-        retryable: false
+        retryable: false,
     });
 }
 
-export function readSourceInstance(instance: string | undefined, defaultInstance: string): string {
+export function readSourceInstance(
+    instance: string | undefined,
+    defaultInstance: string,
+): string {
     const resolved = instance ?? defaultInstance;
     if (resolved.length === 0) {
         throw createError({
             code: errorCodes.targetInvalid,
             message: "Artifact source instance is required.",
-            retryable: false
+            retryable: false,
         });
     }
     return resolved;
@@ -56,15 +77,20 @@ export function validateTransferStart(input: ArtifactTransferStartInput): void {
         throw createError({
             code: errorCodes.targetInvalid,
             message: "Artifact transfer start requires operation=start.",
-            retryable: false
+            retryable: false,
         });
     }
     readTransferPayloadSourceInput(input);
-    if (input.targetInstance.length === 0 || input.targetPath.length === 0 || input.targetWorkspace.length === 0) {
+    if (
+        input.targetInstance.length === 0 ||
+        input.targetPath.length === 0 ||
+        input.targetWorkspace.length === 0
+    ) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "Artifact transfer requires targetInstance, targetPath, and targetWorkspace.",
-            retryable: false
+            message:
+                "Artifact transfer requires targetInstance, targetPath, and targetWorkspace.",
+            retryable: false,
         });
     }
 }
@@ -72,22 +98,24 @@ export function validateTransferStart(input: ArtifactTransferStartInput): void {
 export function sourceDescriptor(
     instance: string,
     input: ArtifactPayloadSourceInput,
-    payload: ArtifactPayloadDescriptor
+    payload: ArtifactPayloadDescriptor,
 ): ArtifactSourceDescriptor {
     return {
         instance,
         ...(inputHasHandle(input)
             ? { handle: input.handle }
             : {
-                path: input.path,
-                ...(input.workspace === undefined ? {} : { workspace: input.workspace })
-            }),
-        type: sourceTypeFromPayload(payload)
+                  path: input.path,
+                  ...(input.workspace === undefined
+                      ? {}
+                      : { workspace: input.workspace }),
+              }),
+        type: sourceTypeFromPayload(payload),
     };
 }
 
 export function sourceTypeFromPayload(
-    payload: ArtifactPayloadDescriptor
+    payload: ArtifactPayloadDescriptor,
 ): "artifact" | "file" | "directory" {
     switch (payload.type) {
         case "stdout":
@@ -102,7 +130,7 @@ export function sourceTypeFromPayload(
 
 function readPathOrHandle(
     input: { handle?: string; path?: string; workspace?: string },
-    toolName: string
+    toolName: string,
 ): ArtifactPayloadSourceInput {
     const handle = input.handle;
     const path = input.path;
@@ -110,11 +138,14 @@ function readPathOrHandle(
         return { handle };
     }
     if (typeof path === "string" && path.length > 0 && handle === undefined) {
-        if (typeof input.workspace !== "string" || input.workspace.length === 0) {
+        if (
+            typeof input.workspace !== "string" ||
+            input.workspace.length === 0
+        ) {
             throw createError({
                 code: errorCodes.targetInvalid,
                 message: `${toolName} path requires workspace.`,
-                retryable: false
+                retryable: false,
             });
         }
         return { path, workspace: input.workspace };
@@ -122,10 +153,12 @@ function readPathOrHandle(
     throw createError({
         code: errorCodes.targetInvalid,
         message: `${toolName} requires exactly one of handle or path.`,
-        retryable: false
+        retryable: false,
     });
 }
 
-function inputHasHandle(input: ArtifactPayloadSourceInput): input is { handle: string } {
+function inputHasHandle(
+    input: ArtifactPayloadSourceInput,
+): input is { handle: string } {
     return "handle" in input;
 }

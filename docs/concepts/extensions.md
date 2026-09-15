@@ -38,9 +38,7 @@ Manifest 在 activation 前描述静态事实：
     "hostDependencies": [],
     "capabilities": ["assets", "workers"],
     "extensions": {
-        "cli.native-commands": [
-            { "id": "example", "title": "Example" }
-        ]
+        "cli.native-commands": [{ "id": "example", "title": "Example" }]
     }
 }
 ```

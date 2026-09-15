@@ -81,7 +81,12 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
 
     if (!isTerminalSizeSupported(props.columns, props.rows)) {
         return (
-            <Box alignItems="center" height={renderRows} justifyContent="center" width={props.columns}>
+            <Box
+                alignItems="center"
+                height={renderRows}
+                justifyContent="center"
+                width={props.columns}
+            >
                 <Text color="yellow">{`Terminal too small (need ${MINIMUM_TERMINAL_COLUMNS}x${MINIMUM_TERMINAL_ROWS})`}</Text>
             </Box>
         );
@@ -89,7 +94,11 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
 
     if (props.sidebar === undefined) {
         return (
-            <Box flexDirection="column" height={renderRows} width={props.columns}>
+            <Box
+                flexDirection="column"
+                height={renderRows}
+                width={props.columns}
+            >
                 {props.header}
                 <Box flexGrow={1} height={Math.max(0, renderRows - 6)}>
                     <Box
@@ -109,9 +118,17 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
 
     if (layout.mode === "compact") {
         return (
-            <Box flexDirection="column" height={renderRows} width={props.columns}>
+            <Box
+                flexDirection="column"
+                height={renderRows}
+                width={props.columns}
+            >
                 {props.header}
-                <Box flexDirection="column" flexGrow={1} height={Math.max(0, renderRows - 6)}>
+                <Box
+                    flexDirection="column"
+                    flexGrow={1}
+                    height={Math.max(0, renderRows - 6)}
+                >
                     <Box height={2} width={props.columns}>
                         {props.sidebar}
                     </Box>
@@ -135,9 +152,7 @@ export function TuiRootLayout(props: TuiRootLayoutProps) {
             {props.header}
             <Box flexGrow={1} height={Math.max(0, renderRows - 6)}>
                 <Box width={layout.outerGap} />
-                <Box width={layout.sidebarWidth}>
-                    {props.sidebar}
-                </Box>
+                <Box width={layout.sidebarWidth}>{props.sidebar}</Box>
                 <Box width={layout.panelGap} />
                 <Box
                     borderStyle="single"
@@ -168,7 +183,7 @@ export function tuiLayoutMetrics(columns: number): {
             mode: "compact",
             outerGap: 0,
             panelGap: 0,
-            sidebarWidth: 0
+            sidebarWidth: 0,
         };
     }
 
@@ -176,14 +191,23 @@ export function tuiLayoutMetrics(columns: number): {
     const usableWidth = Math.max(0, columns - totalGap);
 
     return {
-        mainPanelWidth: Math.max(0, Math.floor(usableWidth * MAIN_PANEL_WIDTH_RATIO)),
+        mainPanelWidth: Math.max(
+            0,
+            Math.floor(usableWidth * MAIN_PANEL_WIDTH_RATIO),
+        ),
         mode: "full",
         outerGap: GAP,
         panelGap: GAP,
-        sidebarWidth: Math.max(0, Math.floor(usableWidth * SIDEBAR_WIDTH_RATIO))
+        sidebarWidth: Math.max(
+            0,
+            Math.floor(usableWidth * SIDEBAR_WIDTH_RATIO),
+        ),
     };
 }
 
-export function isTerminalSizeSupported(columns: number, rows: number): boolean {
+export function isTerminalSizeSupported(
+    columns: number,
+    rows: number,
+): boolean {
     return columns >= MINIMUM_TERMINAL_COLUMNS && rows >= MINIMUM_TERMINAL_ROWS;
 }

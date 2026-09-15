@@ -5,7 +5,7 @@ import {
     adaptMcpLegacyFileToolInput,
     adaptMcpLegacyFileToolResult,
     adaptMcpLegacyTmuxToolInput,
-    resolveMcpLegacyTool
+    resolveMcpLegacyTool,
 } from "../../../../src/endpoint/domain/worker/Compatibility.ts";
 
 test("legacy MCP compatibility aliases only the semantic superset", () => {
@@ -22,10 +22,14 @@ test("legacy MCP compatibility aliases only the semantic superset", () => {
         ["workspace_goal_stop", "workspace_stop"],
         ["workspace_approval_decide", "workspace_approval"],
     ] as const) {
-        assert.deepEqual(resolveMcpLegacyTool(name), {
-            kind: "alias",
-            replacement,
-        }, name);
+        assert.deepEqual(
+            resolveMcpLegacyTool(name),
+            {
+                kind: "alias",
+                replacement,
+            },
+            name,
+        );
     }
 });
 
@@ -35,10 +39,14 @@ test("v0.6.15 Workspace app protocol remains a hidden wire compatibility surface
         ["workspace_goal_continue", "workspace_reentry"],
         ["workspace_reentry_control", "workspace_reentry"],
     ] as const) {
-        assert.deepEqual(resolveMcpLegacyTool(name), {
-            kind: "workspace-app-v0615",
-            replacement,
-        }, name);
+        assert.deepEqual(
+            resolveMcpLegacyTool(name),
+            {
+                kind: "workspace-app-v0615",
+                replacement,
+            },
+            name,
+        );
     }
 });
 
@@ -48,43 +56,70 @@ test("v0.7 file tool names remain hidden stale-schema aliases through v0.7.3", (
         ["file_info", "file_read"],
         ["file_search", "file_grep"],
     ] as const) {
-        assert.deepEqual(resolveMcpLegacyTool(name), {
-            kind: "file-v07-alias",
-            removeIn: "0.7.4",
-            replacement,
-        }, name);
+        assert.deepEqual(
+            resolveMcpLegacyTool(name),
+            {
+                kind: "file-v07-alias",
+                removeIn: "0.7.4",
+                replacement,
+            },
+            name,
+        );
     }
 });
 
 test("v0.7 file aliases adapt inputs and preserve legacy file_info detail semantics", () => {
     assert.deepEqual(
-        adaptMcpLegacyFileToolInput("file_find", { paths: ["./src/**/*.ts"], type: "file" }),
-        { patterns: ["./src/**/*.ts"], type: "file" }
+        adaptMcpLegacyFileToolInput("file_find", {
+            paths: ["./src/**/*.ts"],
+            type: "file",
+        }),
+        { patterns: ["./src/**/*.ts"], type: "file" },
     );
     assert.deepEqual(
-        adaptMcpLegacyFileToolInput("file_info", { details: false, paths: ["./a.ts"] }),
-        { files: [{ path: "./a.ts", view: "metadata" }] }
+        adaptMcpLegacyFileToolInput("file_info", {
+            details: false,
+            paths: ["./a.ts"],
+        }),
+        { files: [{ path: "./a.ts", view: "metadata" }] },
     );
     const current = {
-        files: [{
-            metadata: {
-                exists: true,
-                mode: 420,
-                modifiedAtMs: 123,
-                sizeBytes: 7,
-                type: "file"
+        files: [
+            {
+                metadata: {
+                    exists: true,
+                    mode: 420,
+                    modifiedAtMs: 123,
+                    sizeBytes: 7,
+                    type: "file",
+                },
+                path: "./a.ts",
+                view: "metadata",
             },
-            path: "./a.ts",
-            view: "metadata"
-        }]
+        ],
     };
     assert.deepEqual(
-        adaptMcpLegacyFileToolResult("file_info", current, { paths: ["./a.ts"] }),
-        { entries: [{ path: "./a.ts", type: "file" }] }
+        adaptMcpLegacyFileToolResult("file_info", current, {
+            paths: ["./a.ts"],
+        }),
+        { entries: [{ path: "./a.ts", type: "file" }] },
     );
     assert.deepEqual(
-        adaptMcpLegacyFileToolResult("file_info", current, { details: true, paths: ["./a.ts"] }),
-        { entries: [{ mode: 420, modifiedAtMs: 123, path: "./a.ts", sizeBytes: 7, type: "file" }] }
+        adaptMcpLegacyFileToolResult("file_info", current, {
+            details: true,
+            paths: ["./a.ts"],
+        }),
+        {
+            entries: [
+                {
+                    mode: 420,
+                    modifiedAtMs: 123,
+                    path: "./a.ts",
+                    sizeBytes: 7,
+                    type: "file",
+                },
+            ],
+        },
     );
 });
 
@@ -95,18 +130,25 @@ test("v0.7 tmux lifecycle names remain hidden aliases through v0.7.3", () => {
         ["tmux_close", "close"],
     ] as const) {
         const compatibility = resolveMcpLegacyTool(name);
-        assert.deepEqual(compatibility, {
-            command,
-            kind: "tmux-v07-alias",
-            removeIn: "0.7.4",
-            replacement: "tmux_manage",
-        }, name);
+        assert.deepEqual(
+            compatibility,
+            {
+                command,
+                kind: "tmux-v07-alias",
+                removeIn: "0.7.4",
+                replacement: "tmux_manage",
+            },
+            name,
+        );
         assert.deepEqual(
             compatibility?.kind === "tmux-v07-alias"
-                ? adaptMcpLegacyTmuxToolInput(compatibility, { ctxId: "ctx-a", name: "pane-a" })
+                ? adaptMcpLegacyTmuxToolInput(compatibility, {
+                      ctxId: "ctx-a",
+                      name: "pane-a",
+                  })
                 : undefined,
             { command, ctxId: "ctx-a", name: "pane-a" },
-            name
+            name,
         );
     }
 });
@@ -136,20 +178,28 @@ test("control-plane MCP tools removed in 0.6.17 point cached clients to CLI", ()
         ["instance_status", "Use devshell instance status <instance>."],
         ["instance_stop", "Use devshell instance stop <instance>."],
     ] as const) {
-        assert.deepEqual(resolveMcpLegacyTool(name), {
-            help,
-            kind: "tombstone",
-            removedIn: "0.6.17",
-        }, name);
+        assert.deepEqual(
+            resolveMcpLegacyTool(name),
+            {
+                help,
+                kind: "tombstone",
+                removedIn: "0.6.17",
+            },
+            name,
+        );
     }
 });
 
 test("legacy instance Context attachment points cached clients to environ_remote", () => {
     for (const name of ["instance_connect", "instance_start"] as const) {
-        assert.deepEqual(resolveMcpLegacyTool(name), {
-            help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
-            kind: "tombstone",
-            removedIn: "0.7.1",
-        }, name);
+        assert.deepEqual(
+            resolveMcpLegacyTool(name),
+            {
+                help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
+                kind: "tombstone",
+                removedIn: "0.7.1",
+            },
+            name,
+        );
     }
 });

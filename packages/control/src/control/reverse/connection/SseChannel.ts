@@ -1,7 +1,11 @@
 import type { ServerResponse } from "node:http";
 
 import { ChannelBase } from "@portable-devshell/shared";
-import { decodeFrame, encodeFrame, type Frame } from "@portable-devshell/shared/transport/frame";
+import {
+    decodeFrame,
+    encodeFrame,
+    type Frame,
+} from "@portable-devshell/shared/transport/frame";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -17,29 +21,43 @@ export class ReverseRpcSseChannel extends ChannelBase {
     #acceptedUpstreamSeq = 0;
     #downstreamSeq: number;
 
-    constructor(response: ServerResponse, lastDownstreamAck = 0, options: ReverseRpcSseChannelOptions = {}) {
+    constructor(
+        response: ServerResponse,
+        lastDownstreamAck = 0,
+        options: ReverseRpcSseChannelOptions = {},
+    ) {
         super();
         this.#response = response;
         this.#now = options.now ?? Date.now;
         this.#downstreamSeq = lastDownstreamAck;
-        response.once("close", () => this.#disconnect(new Error("reverse SSE connection closed")));
+        response.once("close", () =>
+            this.#disconnect(new Error("reverse SSE connection closed")),
+        );
         response.once("error", (error) => this.#disconnect(error));
         this.#heartbeat = setInterval(() => {
             if (!this.closed) {
-                try { response.write(`: ping ${this.#now()}\n\n`); }
-                catch (error) { this.#disconnect(error); }
+                try {
+                    response.write(`: ping ${this.#now()}\n\n`);
+                } catch (error) {
+                    this.#disconnect(error);
+                }
             }
         }, options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
         this.#heartbeat.unref();
     }
 
-    get acceptedUpstreamSeq(): number { return this.#acceptedUpstreamSeq; }
+    get acceptedUpstreamSeq(): number {
+        return this.#acceptedUpstreamSeq;
+    }
 
     async send(frame: Frame): Promise<void> {
-        if (this.closed || this.#response.writableEnded) throw new Error("reverse SSE channel is disconnected");
+        if (this.closed || this.#response.writableEnded)
+            throw new Error("reverse SSE channel is disconnected");
         const nextSeq = this.#downstreamSeq + 1;
         try {
-            const written = this.#response.write(`id: ${nextSeq}\nevent: frame\ndata: ${encodeFrame(frame).toString("base64")}\n\n`);
+            const written = this.#response.write(
+                `id: ${nextSeq}\nevent: frame\ndata: ${encodeFrame(frame).toString("base64")}\n\n`,
+            );
             this.#downstreamSeq = nextSeq;
             if (!written) await this.#waitForDrain();
         } catch (error) {
@@ -50,10 +68,13 @@ export class ReverseRpcSseChannel extends ChannelBase {
 
     acceptUpstream(seq: number, encodedFrame: string): number {
         if (this.closed) throw new Error("reverse SSE channel is disconnected");
-        if (!Number.isSafeInteger(seq) || seq <= 0) throw new Error("upstream sequence must be a positive integer");
+        if (!Number.isSafeInteger(seq) || seq <= 0)
+            throw new Error("upstream sequence must be a positive integer");
         if (seq <= this.#acceptedUpstreamSeq) return this.#acceptedUpstreamSeq;
         if (seq !== this.#acceptedUpstreamSeq + 1) {
-            throw new Error(`upstream sequence gap: expected ${this.#acceptedUpstreamSeq + 1}, received ${seq}`);
+            throw new Error(
+                `upstream sequence gap: expected ${this.#acceptedUpstreamSeq + 1}, received ${seq}`,
+            );
         }
         this.emitFrame(decodeFrame(Buffer.from(encodedFrame, "base64")));
         this.#acceptedUpstreamSeq = seq;
@@ -62,8 +83,12 @@ export class ReverseRpcSseChannel extends ChannelBase {
 
     close(error?: Error): void {
         if (this.closed) return;
-        try { if (!this.#response.writableEnded) this.#response.end(); }
-        catch (closeError) { this.#disconnect(closeError); return; }
+        try {
+            if (!this.#response.writableEnded) this.#response.end();
+        } catch (closeError) {
+            this.#disconnect(closeError);
+            return;
+        }
         clearInterval(this.#heartbeat);
         this.finish(error);
     }
@@ -75,9 +100,18 @@ export class ReverseRpcSseChannel extends ChannelBase {
                 this.#response.off("drain", onDrain);
                 this.#response.off("error", onError);
             };
-            const onClose = () => { cleanup(); reject(new Error("reverse SSE connection closed before drain")); };
-            const onDrain = () => { cleanup(); resolve(); };
-            const onError = (error: Error) => { cleanup(); reject(error); };
+            const onClose = () => {
+                cleanup();
+                reject(new Error("reverse SSE connection closed before drain"));
+            };
+            const onDrain = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = (error: Error) => {
+                cleanup();
+                reject(error);
+            };
             this.#response.once("close", onClose);
             this.#response.once("drain", onDrain);
             this.#response.once("error", onError);

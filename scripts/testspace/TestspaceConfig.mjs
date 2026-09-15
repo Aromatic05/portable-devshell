@@ -23,15 +23,17 @@ export function resolveTestspaceCommand(value) {
 
 export function resolveTestspaceInvocation(argv) {
     const command = resolveTestspaceCommand(argv[0]);
-    const args = command === DEFAULT_TESTSPACE_COMMAND && argv[0]?.startsWith("-")
-        ? argv
-        : argv.slice(1);
+    const args =
+        command === DEFAULT_TESTSPACE_COMMAND && argv[0]?.startsWith("-")
+            ? argv
+            : argv.slice(1);
     return { args, command };
 }
 
 export function resolveTestspaceLaunchPlan(argv) {
     const { command } = resolveTestspaceInvocation(argv);
-    const prepare = command === DEFAULT_TESTSPACE_COMMAND && !argv.includes("--skip-build");
+    const prepare =
+        command === DEFAULT_TESTSPACE_COMMAND && !argv.includes("--skip-build");
     return {
         command,
         prepare,

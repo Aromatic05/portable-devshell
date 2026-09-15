@@ -8,7 +8,7 @@ export class CliCommandWatchStatus {
         runtime: CliClientRuntime,
         instance: string,
         onSnapshot: (snapshot: InstanceSnapshot) => Promise<void> | void,
-        maxEvents?: number
+        maxEvents?: number,
     ): Promise<void> {
         await followCliCommandWatchStream({
             async loadFromSeq() {
@@ -20,7 +20,7 @@ export class CliCommandWatchStatus {
             async onEvent() {
                 await onSnapshot((await runtime.refresh(instance)).snapshot);
             },
-            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq)
+            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq),
         });
     }
 }
@@ -28,8 +28,17 @@ export class CliCommandWatchStatus {
 import type { CliParsedCommand } from "../../Parse.js";
 import type { CliDispatchContext } from "../../Dispatch.js";
 import { renderInstanceSnapshot } from "../lifecycle/Render.js";
-export async function executeWatchStatus(command: CliParsedCommand, context: CliDispatchContext): Promise<boolean> {
-    if(command.kind!=="watch.status") return false;
-    await new CliCommandWatchStatus().execute(context.clients.runtime,command.instance,async(snapshot)=>context.stdout.write(renderInstanceSnapshot(snapshot)),context.followEventLimit);
+export async function executeWatchStatus(
+    command: CliParsedCommand,
+    context: CliDispatchContext,
+): Promise<boolean> {
+    if (command.kind !== "watch.status") return false;
+    await new CliCommandWatchStatus().execute(
+        context.clients.runtime,
+        command.instance,
+        async (snapshot) =>
+            context.stdout.write(renderInstanceSnapshot(snapshot)),
+        context.followEventLimit,
+    );
     return true;
 }

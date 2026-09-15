@@ -71,7 +71,8 @@ export type TuiActivePage = {
     instance: string | undefined;
 };
 
-export type TuiBoxLineTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
+export type TuiBoxLineTone =
+    "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface TuiBoxLine {
     disabled?: boolean;

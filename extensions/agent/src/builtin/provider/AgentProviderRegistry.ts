@@ -12,7 +12,9 @@ export class AgentProviderRegistry {
     register(provider: AgentProvider): void {
         assertProviderId(provider.id);
         if (this.#providers.has(provider.id)) {
-            throw new Error(`Agent provider already registered: ${provider.id}`);
+            throw new Error(
+                `Agent provider already registered: ${provider.id}`,
+            );
         }
         this.#providers.set(provider.id, provider);
     }

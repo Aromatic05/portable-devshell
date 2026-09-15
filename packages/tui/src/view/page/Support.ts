@@ -5,17 +5,11 @@ import type {
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import type {
-    BoxLine,
-    BoxModel,
-} from "../component/content/Box.js";
+import type { BoxLine, BoxModel } from "../component/content/Box.js";
 import type { TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRouteItemKey } from "../../state/route/State.js";
 import { resolveSelectedDetailLineId } from "../../interaction/selection/Detail.js";
-import type {
-    TuiExpandableBoxStatus,
-    TuiPageId,
-} from "../../state/Ui.js";
+import type { TuiExpandableBoxStatus, TuiPageId } from "../../state/Ui.js";
 import {
     selectTuiLogs,
     type TuiAppState,
@@ -42,9 +36,9 @@ export function buildSelectedInstancePageContext(
     instanceName: string,
 ): SelectedInstancePageContext {
     return {
-        approvals: (state.readModel.instanceState[instanceName]?.approvals ?? []).filter(
-            (approval) => approval.status === "pending",
-        ),
+        approvals: (
+            state.readModel.instanceState[instanceName]?.approvals ?? []
+        ).filter((approval) => approval.status === "pending"),
         config: readConfigInstance(state, instanceName),
         instance: state.instances.find((entry) => entry.name === instanceName),
         logs: selectTuiLogs(state, instanceName),
@@ -97,7 +91,9 @@ export function makeBox(
               line.editableValue !== undefined
                   ? {
                         ...line,
-                        cursor: state.interaction.editor.cursor ?? line.editableValue.value.length,
+                        cursor:
+                            state.interaction.editor.cursor ??
+                            line.editableValue.value.length,
                         cursorVisible: state.interaction.redrawNonce % 2 === 0,
                         editing: true,
                     }

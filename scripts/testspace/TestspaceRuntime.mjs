@@ -4,9 +4,21 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { extname, isAbsolute, join, parse, posix, relative, resolve, sep, win32 } from "node:path";
+import {
+    extname,
+    isAbsolute,
+    join,
+    parse,
+    posix,
+    relative,
+    resolve,
+    sep,
+    win32,
+} from "node:path";
 
-const require = createRequire(new URL("../../packages/control/package.json", import.meta.url));
+const require = createRequire(
+    new URL("../../packages/control/package.json", import.meta.url),
+);
 const toml = require("smol-toml");
 const { blake3 } = require("hash-wasm");
 const TESTSPACE_OWNER_FILE = ".portable-devshell-testspace-owner.json";
@@ -21,16 +33,18 @@ export function resolveTestspaceRoot(repositoryRoot, configuredRoot) {
     const repositoryFromRoot = relative(root, repository);
     const rootContainsRepository =
         repositoryFromRoot === "" ||
-        (
-            repositoryFromRoot !== ".." &&
+        (repositoryFromRoot !== ".." &&
             !repositoryFromRoot.startsWith(`..${sep}`) &&
-            !isAbsolute(repositoryFromRoot)
-        );
+            !isAbsolute(repositoryFromRoot));
     if (rootContainsRepository) {
-        throw new Error("DEVSHELL_TESTSPACE_ROOT must not contain the portable-devshell repository.");
+        throw new Error(
+            "DEVSHELL_TESTSPACE_ROOT must not contain the portable-devshell repository.",
+        );
     }
     if (root === parse(root).root) {
-        throw new Error("DEVSHELL_TESTSPACE_ROOT must not be a filesystem root.");
+        throw new Error(
+            "DEVSHELL_TESTSPACE_ROOT must not be a filesystem root.",
+        );
     }
     return root;
 }
@@ -40,12 +54,16 @@ export async function markTestspaceRootOwned(repositoryRoot, root) {
     await mkdir(resolvedRoot, { recursive: true });
     await writeFile(
         join(resolvedRoot, TESTSPACE_OWNER_FILE),
-        `${JSON.stringify({
-            kind: TESTSPACE_OWNER_KIND,
-            repositoryRoot: resolve(repositoryRoot),
-            root: resolvedRoot,
-            version: 1,
-        }, null, 2)}\n`,
+        `${JSON.stringify(
+            {
+                kind: TESTSPACE_OWNER_KIND,
+                repositoryRoot: resolve(repositoryRoot),
+                root: resolvedRoot,
+                version: 1,
+            },
+            null,
+            2,
+        )}\n`,
         "utf8",
     );
 }
@@ -74,7 +92,8 @@ export async function assertTestspaceRootOwned(repositoryRoot, root) {
 
 export async function removeOwnedTestspaceRoot(repositoryRoot, root) {
     const resolvedRoot = resolve(root);
-    if (!await assertTestspaceRootOwned(repositoryRoot, resolvedRoot)) return false;
+    if (!(await assertTestspaceRootOwned(repositoryRoot, resolvedRoot)))
+        return false;
 
     await rm(resolvedRoot, { force: true, recursive: true });
     return true;
@@ -82,7 +101,9 @@ export async function removeOwnedTestspaceRoot(repositoryRoot, root) {
 
 async function readTestspaceOwner(root) {
     try {
-        return JSON.parse(await readFile(join(root, TESTSPACE_OWNER_FILE), "utf8"));
+        return JSON.parse(
+            await readFile(join(root, TESTSPACE_OWNER_FILE), "utf8"),
+        );
     } catch {
         return undefined;
     }
@@ -93,9 +114,10 @@ export function resolveTestspaceRuntimeDirectory(root, options = {}) {
     const temporaryDirectory = options.temporaryDirectory ?? tmpdir();
     const runtimeRoot = platform === "win32" ? temporaryDirectory : "/tmp";
     const joinPath = platform === "win32" ? win32.join : posix.join;
-    const userIdentity = typeof process.getuid === "function"
-        ? String(process.getuid())
-        : (process.env.USERNAME ?? process.env.USER ?? "unknown");
+    const userIdentity =
+        typeof process.getuid === "function"
+            ? String(process.getuid())
+            : (process.env.USERNAME ?? process.env.USER ?? "unknown");
     const identity = createHash("sha256")
         .update(`${userIdentity}:${root}`)
         .digest("hex")
@@ -103,7 +125,11 @@ export function resolveTestspaceRuntimeDirectory(root, options = {}) {
     return joinPath(runtimeRoot, `pds-testspace-${identity}`);
 }
 
-export function createTestspaceProcessEnvironment(homeDirectory, runtimeDirectory, baseEnvironment = process.env) {
+export function createTestspaceProcessEnvironment(
+    homeDirectory,
+    runtimeDirectory,
+    baseEnvironment = process.env,
+) {
     const environment = sanitizeWorkerEnvironment(baseEnvironment);
     const dataHome = join(homeDirectory, ".local", "share");
     return {
@@ -134,9 +160,9 @@ export function resetTestspacePodmanStorage(
     const platform = options.platform ?? process.platform;
     if (platform === "win32") return false;
     const exists = options.exists ?? existsSync;
-    const ensureRuntime = options.ensureRuntime ?? ((directory) =>
-        mkdirSync(directory, { mode: 0o700, recursive: true })
-    );
+    const ensureRuntime =
+        options.ensureRuntime ??
+        ((directory) => mkdirSync(directory, { mode: 0o700, recursive: true }));
     const spawn = options.spawn ?? spawnSync;
     const storageDirectory = join(
         homeDirectory,
@@ -150,16 +176,13 @@ export function resetTestspacePodmanStorage(
     ensureRuntime(runtimeDirectory);
     const result = spawn("podman", ["system", "reset", "--force"], {
         encoding: "utf8",
-        env: createTestspaceProcessEnvironment(
-            homeDirectory,
-            runtimeDirectory,
-        ),
+        env: createTestspaceProcessEnvironment(homeDirectory, runtimeDirectory),
     });
     if (result.status !== 0) {
         throw new Error(
             result.stderr ||
-            result.error?.message ||
-            `failed to reset testspace Podman storage at ${storageDirectory}`,
+                result.error?.message ||
+                `failed to reset testspace Podman storage at ${storageDirectory}`,
         );
     }
     return true;
@@ -175,16 +198,22 @@ export function removeTestspaceDockerContainers(
     const spawn = options.spawn ?? spawnSync;
     if (!exists(instanceConfigDirectory)) return [];
 
-    const containerNames = list(instanceConfigDirectory, { withFileTypes: true })
+    const containerNames = list(instanceConfigDirectory, {
+        withFileTypes: true,
+    })
         .filter((entry) => entry.isFile() && extname(entry.name) === ".toml")
         .flatMap((entry) => {
-            const config = toml.parse(read(join(instanceConfigDirectory, entry.name)));
+            const config = toml.parse(
+                read(join(instanceConfigDirectory, entry.name)),
+            );
             if (
                 config.provider !== "docker" ||
                 typeof config.name !== "string" ||
                 typeof config.container !== "object" ||
                 config.container === null ||
-                !["preset", "dockerfile", "existingImage"].includes(config.container.mode)
+                !["preset", "dockerfile", "existingImage"].includes(
+                    config.container.mode,
+                )
             ) {
                 return [];
             }
@@ -207,8 +236,8 @@ export function removeTestspaceDockerContainers(
         ) {
             throw new Error(
                 result.stderr ||
-                result.error?.message ||
-                `failed to remove testspace Docker container ${containerName}`,
+                    result.error?.message ||
+                    `failed to remove testspace Docker container ${containerName}`,
             );
         }
     }
@@ -221,23 +250,36 @@ export async function resolveTestspaceTmuxSockets({
     runtimeDirectory,
     workspace,
 }) {
-    const defaultRuntimeDirectory = join(runtimeDirectory, "devshell-worker", instanceName);
+    const defaultRuntimeDirectory = join(
+        runtimeDirectory,
+        "devshell-worker",
+        instanceName,
+    );
     const workerSocket = join(defaultRuntimeDirectory, "worker.sock");
-    const instanceRuntimeDirectory = Buffer.byteLength(workerSocket) <= 100
-        ? defaultRuntimeDirectory
-        : join(
-            tmpdir(),
-            `devshell-worker-${(await blake3(`${devshellHome}:${instanceName}`)).slice(0, 16)}`,
-        );
-    const workspaceKey = (await blake3(`${join(devshellHome, instanceName)}\0${workspace}`)).slice(0, 16);
-    const workspaceCandidate = join(instanceRuntimeDirectory, `tmux-${workspaceKey}.sock`);
-    const workspaceSocket = Buffer.byteLength(workspaceCandidate) <= 100
-        ? workspaceCandidate
-        : join(tmpdir(), `devshell-tmux-${workspaceKey}.sock`);
-    return [...new Set([
-        join(instanceRuntimeDirectory, "tmux.sock"),
-        workspaceSocket,
-    ])];
+    const instanceRuntimeDirectory =
+        Buffer.byteLength(workerSocket) <= 100
+            ? defaultRuntimeDirectory
+            : join(
+                  tmpdir(),
+                  `devshell-worker-${(await blake3(`${devshellHome}:${instanceName}`)).slice(0, 16)}`,
+              );
+    const workspaceKey = (
+        await blake3(`${join(devshellHome, instanceName)}\0${workspace}`)
+    ).slice(0, 16);
+    const workspaceCandidate = join(
+        instanceRuntimeDirectory,
+        `tmux-${workspaceKey}.sock`,
+    );
+    const workspaceSocket =
+        Buffer.byteLength(workspaceCandidate) <= 100
+            ? workspaceCandidate
+            : join(tmpdir(), `devshell-tmux-${workspaceKey}.sock`);
+    return [
+        ...new Set([
+            join(instanceRuntimeDirectory, "tmux.sock"),
+            workspaceSocket,
+        ]),
+    ];
 }
 
 export async function stopTestspaceTmux(options) {
@@ -255,8 +297,8 @@ export async function stopTestspaceTmux(options) {
         if (result.status !== 0) {
             throw new Error(
                 result.stderr ||
-                result.error?.message ||
-                `failed to stop testspace tmux server at ${socketPath}`,
+                    result.error?.message ||
+                    `failed to stop testspace tmux server at ${socketPath}`,
             );
         }
         stopped = true;

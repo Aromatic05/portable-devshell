@@ -1,6 +1,7 @@
 import type { ArtifactSourceDescriptor } from "./Transfer.js";
 
-export type ArtifactImageMediaType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+export type ArtifactImageMediaType =
+    "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
 export interface ArtifactImageContent {
     blake3: string;

@@ -33,9 +33,9 @@ environ_info
 
 `workspace_open` 仍保留，但职责是**重新呈现**已存在的 Workspace，例如：
 
-* 用户关闭了 App；
-* iframe remount 后需要重新挂载；
-* 某个需要人类交互的工具明确发现当前 presentation 已失活。
+- 用户关闭了 App；
+- iframe remount 后需要重新挂载；
+- 某个需要人类交互的工具明确发现当前 presentation 已失活。
 
 它不应该成为每次 Agent 工作的固定第一步。
 
@@ -58,12 +58,12 @@ Workspace UI 使用官方 MCP Apps SDK，而不是自定义 postMessage bridge�
 
 当前实现的重要约束：
 
-* render resource 使用内容 hash 生成版本化 URI，避免 Host template cache 把旧 HTML 当成新版本；
-* stable reader alias 与已发布过的历史 URI 继续可读，保证旧会话升级后仍能 remount；
-* App 使用 `snapshot` / `watch` / `reconnect` 一类 app-only helper 获取状态；
-* `watch` 基于 instance event sequence，只在当前 Context 的相关事件变化时返回新 snapshot，正常无变化时是 heartbeat，不做固定频率全量 polling；
-* 已建立 App bridge 后，单次 `tools/call`、model-context 或 Host message 请求超时只进入原 bridge 内的 `Reconnecting` / retry 路径，不能 `app.close()`、重新 `ui/initialize` 或重新申请 display mode；只有 SDK 报告真实 `app.onclose` 或初始握手失败时才执行 lifecycle reconnect；
-* app-only 写操作必须携带当前 Context 和隐藏 app capability。
+- render resource 使用内容 hash 生成版本化 URI，避免 Host template cache 把旧 HTML 当成新版本；
+- stable reader alias 与已发布过的历史 URI 继续可读，保证旧会话升级后仍能 remount；
+- App 使用 `snapshot` / `watch` / `reconnect` 一类 app-only helper 获取状态；
+- `watch` 基于 instance event sequence，只在当前 Context 的相关事件变化时返回新 snapshot，正常无变化时是 heartbeat，不做固定频率全量 polling；
+- 已建立 App bridge 后，单次 `tools/call`、model-context 或 Host message 请求超时只进入原 bridge 内的 `Reconnecting` / retry 路径，不能 `app.close()`、重新 `ui/initialize` 或重新申请 display mode；只有 SDK 报告真实 `app.onclose` 或初始握手失败时才执行 lifecycle reconnect；
+- app-only 写操作必须携带当前 Context 和隐藏 app capability。
 
 这些 helper 属于 App 协议，不应成为模型主动调用的工具。
 
@@ -132,10 +132,10 @@ Wait 把“原始 HTTP/tool call 是否还在”与“工作是否仍然有效�
 
 主要来源：
 
-* Question；
-* `tmux_run(wait=block)`；
-* `tmux_read` 的长等待；
-* 其他需要 durable recovery 的交互。
+- Question；
+- `tmux_run(wait=block)`；
+- `tmux_read` 的长等待；
+- 其他需要 durable recovery 的交互。
 
 Wait 可以经历：
 
@@ -175,9 +175,9 @@ start managed task
 
 用户选择 `Stop waiting`：
 
-* 同步阶段：原 tool call 返回 `interrupted: true`；
-* detached 阶段：停止该 Wait 的后台恢复链并让模型按 Workspace 语义继续；
-* **两种情况都不杀 tmux task。**
+- 同步阶段：原 tool call 返回 `interrupted: true`；
+- detached 阶段：停止该 Wait 的后台恢复链并让模型按 Workspace 语义继续；
+- **两种情况都不杀 tmux task。**
 
 真正停止 task 需要显式的 tmux task control。
 
@@ -199,9 +199,9 @@ resolved Wait 不会简单地“发一条消息”。服务端需要完成一组
 
 Workspace 的自动恢复必须让位于人类显式操作：
 
-* 用户中断模型后，不应该立即被旧 Goal/Wait 自动唤醒；
-* pending Approval / Question 不应被后台 tmux 完成事件覆盖；
-* Goal/Todo 已停止或 revision 已变化时，旧 recovery claim 必须失效。
+- 用户中断模型后，不应该立即被旧 Goal/Wait 自动唤醒；
+- pending Approval / Question 不应被后台 tmux 完成事件覆盖；
+- Goal/Todo 已停止或 revision 已变化时，旧 recovery claim 必须失效。
 
 这也是 Context execution state 与 re-entry state 分离的原因。
 
@@ -209,16 +209,16 @@ Workspace 的自动恢复必须让位于人类显式操作：
 
 Control / MCP / iframe 重启后：
 
-* Context 与 durable Wait 从持久化状态恢复；
-* 已失去原 held tool call 的 `waiting` Wait 会按 orphaned owner 语义转入可恢复状态，而不是假装旧 HTTP 请求仍存在；
-* App 重新读取 authoritative snapshot；
-* background tracker 对仍有效的 detached tmux Wait 继续观察。
+- Context 与 durable Wait 从持久化状态恢复；
+- 已失去原 held tool call 的 `waiting` Wait 会按 orphaned owner 语义转入可恢复状态，而不是假装旧 HTTP 请求仍存在；
+- App 重新读取 authoritative snapshot；
+- background tracker 对仍有效的 detached tmux Wait 继续观察。
 
 worker 上的 tmux task 生命周期独立于 Context 和 MCP HTTP 连接，因此 transport 重连不会重启 task。
 
 ## 相关文档
 
-* [Context](context.md)
-* [MCP](mcp.md)
-* [tmux 工具](../tools/tmux.md)
-* [系统架构](architecture.md)
+- [Context](context.md)
+- [MCP](mcp.md)
+- [tmux 工具](../tools/tmux.md)
+- [系统架构](architecture.md)

@@ -13,7 +13,11 @@ import { cleanupInOrder } from "../../../../../../test/TestCleanup.ts";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import { chromiumTestOptions } from "../../../../../../test/TestPlatformSupport.ts";
 
-import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
+import {
+    HttpHost,
+    McpOAuthProtectedResource,
+    type McpOAuthApprovalService,
+} from "@portable-devshell/mcp";
 import {
     CONTROL_PROTOCOL_VERSION,
     PrefixRoute,
@@ -33,165 +37,248 @@ const WEB_TOKEN = "browser-web-token-0123456789abcdef0123456789abcdef";
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
 const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
 
-test("real Chromium opens auth=none WebUI, establishes a session, and boots through control WebSocket RPC", BROWSER_TEST_OPTIONS, async (t) => {
-    const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
-    const browser = await launchBrowser();
-    t.after(async () => {
-        await cleanupInOrder(
-            () => browser.close(),
-            () => runtime.close(),
+test(
+    "real Chromium opens auth=none WebUI, establishes a session, and boots through control WebSocket RPC",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
+        const browser = await launchBrowser();
+        t.after(async () => {
+            await cleanupInOrder(
+                () => browser.close(),
+                () => runtime.close(),
+            );
+        });
+
+        const page = await guardedPage(browser);
+        await page.goto(`${runtime.origin}${runtime.basePath}/`, {
+            waitUntil: "domcontentloaded",
+        });
+        await assertOverview(page, runtime.calls);
+
+        assert.equal(
+            runtime.calls.hello > 0,
+            true,
+            "the SPA must complete the real control protocol handshake",
         );
-    });
-
-    const page = await guardedPage(browser);
-    await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    await assertOverview(page, runtime.calls);
-
-    assert.equal(runtime.calls.hello > 0, true, "the SPA must complete the real control protocol handshake");
-    const preferenceDeadline = Date.now() + 5_000;
-    while (runtime.calls.preferences === 0 && Date.now() < preferenceDeadline) {
-        await page.waitForTimeout(25);
-    }
-    assert.equal(runtime.calls.preferences > 0, true, "the SPA must load server-backed Conversation preferences");
-    assert.equal(
-        (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
-        true,
-        "auth=none still establishes the WebSocket session cookie",
-    );
-    assertPageHealthy(page);
-});
-
-test("real Chromium keeps the empty Messages prompt directly below its heading on mobile", BROWSER_TEST_OPTIONS, async (t) => {
-    const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
-    const browser = await launchBrowser();
-    t.after(async () => {
-        await cleanupInOrder(
-            () => browser.close(),
-            () => runtime.close(),
+        const preferenceDeadline = Date.now() + 5_000;
+        while (
+            runtime.calls.preferences === 0 &&
+            Date.now() < preferenceDeadline
+        ) {
+            await page.waitForTimeout(25);
+        }
+        assert.equal(
+            runtime.calls.preferences > 0,
+            true,
+            "the SPA must load server-backed Conversation preferences",
         );
-    });
-
-    const page = await guardedPage(browser);
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto(`${runtime.origin}${runtime.basePath}/#/messages`, {
-        waitUntil: "domcontentloaded",
-    });
-    const heading = await page.locator(".messages-thread-heading").boundingBox();
-    const prompt = await page.locator(".messages-placeholder h3").boundingBox();
-    assert.notEqual(heading, null);
-    assert.notEqual(prompt, null);
-    assert.ok(
-        prompt!.y - (heading!.y + heading!.height) < 80,
-        "the empty Messages prompt must not be vertically centered behind a large blank region",
-    );
-    assertPageHealthy(page);
-});
-
-test("real Chromium rejects a wrong Web token, accepts the configured token, and logs out", BROWSER_TEST_OPTIONS, async (t) => {
-    const runtime = await startBrowserRuntime({ auth: "token", prefix: "" });
-    const browser = await launchBrowser();
-    t.after(async () => {
-        await cleanupInOrder(
-            () => browser.close(),
-            () => runtime.close(),
+        assert.equal(
+            (await page.context().cookies()).some(
+                (cookie) => cookie.name === "devshell_web_session",
+            ),
+            true,
+            "auth=none still establishes the WebSocket session cookie",
         );
-    });
+        assertPageHealthy(page);
+    },
+);
 
-    const page = await guardedPage(browser);
-    await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    const tokenInput = page.getByLabel("Access token");
-    await tokenInput.waitFor({ state: "visible" });
-    await tokenInput.fill("wrong-token");
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("alert").filter({ hasText: "Sign-in was not accepted." }).waitFor({
-        state: "visible",
-    });
-    assert.equal(runtime.calls.hello, 0, "a rejected token must not open the control WebSocket");
-    assert.equal(
-        page.__browserFailures.every((failure) =>
-            failure.includes("401 (Unauthorized)") && failure.includes(`${runtime.basePath}/session`)
-        ),
-        true,
-        page.__browserFailures.join("\n"),
-    );
-    page.__browserFailures.length = 0;
+test(
+    "real Chromium keeps the empty Messages prompt directly below its heading on mobile",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const runtime = await startBrowserRuntime({ auth: "none", prefix: "" });
+        const browser = await launchBrowser();
+        t.after(async () => {
+            await cleanupInOrder(
+                () => browser.close(),
+                () => runtime.close(),
+            );
+        });
 
-    await tokenInput.fill(WEB_TOKEN);
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await assertOverview(page, runtime.calls);
-    assert.equal(runtime.calls.hello > 0, true);
-    assert.deepEqual(
-        await page.evaluate(() => ({
-            local: window.localStorage.getItem("token"),
-            session: window.sessionStorage.getItem("token"),
-        })),
-        { local: null, session: null },
-    );
-
-    assertPageHealthy(page);
-    page.__browserFailures.length = 0;
-    const logoutResponse = page.waitForResponse((response) =>
-        response.request().method() === "DELETE" &&
-        new URL(response.url()).pathname === `${runtime.basePath}/session`
-    );
-    await page.getByRole("button", { name: "Log out" }).click();
-    assert.equal((await logoutResponse).status(), 204);
-    await page.getByRole("button", { name: "Sign in" }).waitFor({ state: "visible" });
-    assert.equal(
-        (await page.context().cookies()).some((cookie) => cookie.name === "devshell_web_session"),
-        false,
-    );
-    assert.deepEqual(
-        page.__browserFailures.filter((failure) =>
-            !failure.includes(`requestfailed: DELETE ${runtime.origin}${runtime.basePath}/session net::ERR_ABORTED`)
-        ),
-        [],
-        page.__browserResponses.join("\n"),
-    );
-});
-
-test("real Chromium follows Web OAuth redirects, completes both approvals, and returns to the live SPA", BROWSER_TEST_OPTIONS, async (t) => {
-    const runtime = await startBrowserRuntime({ auth: "oauth2", prefix: "" });
-    const browser = await launchBrowser();
-    t.after(async () => {
-        await cleanupInOrder(
-            () => browser.close(),
-            () => runtime.close(),
+        const page = await guardedPage(browser);
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(`${runtime.origin}${runtime.basePath}/#/messages`, {
+            waitUntil: "domcontentloaded",
+        });
+        const heading = await page
+            .locator(".messages-thread-heading")
+            .boundingBox();
+        const prompt = await page
+            .locator(".messages-placeholder h3")
+            .boundingBox();
+        assert.notEqual(heading, null);
+        assert.notEqual(prompt, null);
+        assert.ok(
+            prompt!.y - (heading!.y + heading!.height) < 80,
+            "the empty Messages prompt must not be vertically centered behind a large blank region",
         );
-    });
+        assertPageHealthy(page);
+    },
+);
 
-    const page = await guardedPage(browser);
-    await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    const approvals = runtime.approvals;
-    assert.notEqual(approvals, undefined);
+test(
+    "real Chromium rejects a wrong Web token, accepts the configured token, and logs out",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const runtime = await startBrowserRuntime({
+            auth: "token",
+            prefix: "",
+        });
+        const browser = await launchBrowser();
+        t.after(async () => {
+            await cleanupInOrder(
+                () => browser.close(),
+                () => runtime.close(),
+            );
+        });
 
-    const approvedKinds = await approveBrowserFlow(page, approvals!, `${runtime.origin}${runtime.basePath}/`);
-    assert.deepEqual([...approvedKinds].sort(), ["authorization", "registration"]);
-    await assertOverview(page, runtime.calls);
-
-    assert.equal(runtime.calls.hello > 0, true, "the OAuth callback must boot the real control WebSocket client");
-    assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
-    assertPageHealthy(page);
-});
-
-test("real Chromium preserves a public URL prefix through session bootstrap and WebSocket RPC", BROWSER_TEST_OPTIONS, async (t) => {
-    const runtime = await startBrowserRuntime({ auth: "none", prefix: "/devshell" });
-    const browser = await launchBrowser();
-    t.after(async () => {
-        await cleanupInOrder(
-            () => browser.close(),
-            () => runtime.close(),
+        const page = await guardedPage(browser);
+        await page.goto(`${runtime.origin}${runtime.basePath}/`, {
+            waitUntil: "domcontentloaded",
+        });
+        const tokenInput = page.getByLabel("Access token");
+        await tokenInput.waitFor({ state: "visible" });
+        await tokenInput.fill("wrong-token");
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await page
+            .getByRole("alert")
+            .filter({ hasText: "Sign-in was not accepted." })
+            .waitFor({
+                state: "visible",
+            });
+        assert.equal(
+            runtime.calls.hello,
+            0,
+            "a rejected token must not open the control WebSocket",
         );
-    });
+        assert.equal(
+            page.__browserFailures.every(
+                (failure) =>
+                    failure.includes("401 (Unauthorized)") &&
+                    failure.includes(`${runtime.basePath}/session`),
+            ),
+            true,
+            page.__browserFailures.join("\n"),
+        );
+        page.__browserFailures.length = 0;
 
-    const page = await guardedPage(browser);
-    await page.goto(`${runtime.origin}${runtime.basePath}/`, { waitUntil: "domcontentloaded" });
-    await assertOverview(page, runtime.calls);
+        await tokenInput.fill(WEB_TOKEN);
+        await page.getByRole("button", { name: "Sign in" }).click();
+        await assertOverview(page, runtime.calls);
+        assert.equal(runtime.calls.hello > 0, true);
+        assert.deepEqual(
+            await page.evaluate(() => ({
+                local: window.localStorage.getItem("token"),
+                session: window.sessionStorage.getItem("token"),
+            })),
+            { local: null, session: null },
+        );
 
-    assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
-    assert.equal(runtime.calls.hello > 0, true);
-    assertPageHealthy(page);
-});
+        assertPageHealthy(page);
+        page.__browserFailures.length = 0;
+        const logoutResponse = page.waitForResponse(
+            (response) =>
+                response.request().method() === "DELETE" &&
+                new URL(response.url()).pathname ===
+                    `${runtime.basePath}/session`,
+        );
+        await page.getByRole("button", { name: "Log out" }).click();
+        assert.equal((await logoutResponse).status(), 204);
+        await page
+            .getByRole("button", { name: "Sign in" })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            (await page.context().cookies()).some(
+                (cookie) => cookie.name === "devshell_web_session",
+            ),
+            false,
+        );
+        assert.deepEqual(
+            page.__browserFailures.filter(
+                (failure) =>
+                    !failure.includes(
+                        `requestfailed: DELETE ${runtime.origin}${runtime.basePath}/session net::ERR_ABORTED`,
+                    ),
+            ),
+            [],
+            page.__browserResponses.join("\n"),
+        );
+    },
+);
+
+test(
+    "real Chromium follows Web OAuth redirects, completes both approvals, and returns to the live SPA",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const runtime = await startBrowserRuntime({
+            auth: "oauth2",
+            prefix: "",
+        });
+        const browser = await launchBrowser();
+        t.after(async () => {
+            await cleanupInOrder(
+                () => browser.close(),
+                () => runtime.close(),
+            );
+        });
+
+        const page = await guardedPage(browser);
+        await page.goto(`${runtime.origin}${runtime.basePath}/`, {
+            waitUntil: "domcontentloaded",
+        });
+        const approvals = runtime.approvals;
+        assert.notEqual(approvals, undefined);
+
+        const approvedKinds = await approveBrowserFlow(
+            page,
+            approvals!,
+            `${runtime.origin}${runtime.basePath}/`,
+        );
+        assert.deepEqual([...approvedKinds].sort(), [
+            "authorization",
+            "registration",
+        ]);
+        await assertOverview(page, runtime.calls);
+
+        assert.equal(
+            runtime.calls.hello > 0,
+            true,
+            "the OAuth callback must boot the real control WebSocket client",
+        );
+        assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
+        assertPageHealthy(page);
+    },
+);
+
+test(
+    "real Chromium preserves a public URL prefix through session bootstrap and WebSocket RPC",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const runtime = await startBrowserRuntime({
+            auth: "none",
+            prefix: "/devshell",
+        });
+        const browser = await launchBrowser();
+        t.after(async () => {
+            await cleanupInOrder(
+                () => browser.close(),
+                () => runtime.close(),
+            );
+        });
+
+        const page = await guardedPage(browser);
+        await page.goto(`${runtime.origin}${runtime.basePath}/`, {
+            waitUntil: "domcontentloaded",
+        });
+        await assertOverview(page, runtime.calls);
+
+        assert.equal(new URL(page.url()).pathname, `${runtime.basePath}/`);
+        assert.equal(runtime.calls.hello > 0, true);
+        assertPageHealthy(page);
+    },
+);
 
 interface BrowserRuntime {
     approvals?: McpOAuthApprovalService;
@@ -214,14 +301,18 @@ async function startBrowserRuntime(options: {
     const publicBaseUrl = `${origin}${options.prefix}`;
     const basePath = controlWebBasePath(publicBaseUrl);
     const sessions = new ControlWebSessionService({
-        auth: options.auth === "none"
-            ? { mode: "none" }
-            : options.auth === "token"
-              ? { mode: "token", token: WEB_TOKEN }
-              : {
-                    mode: "oauth2",
-                    oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
-                },
+        auth:
+            options.auth === "none"
+                ? { mode: "none" }
+                : options.auth === "token"
+                  ? { mode: "token", token: WEB_TOKEN }
+                  : {
+                        mode: "oauth2",
+                        oauth2: {
+                            requiredScopes: WEB_SCOPES,
+                            resourceName: WEB_RESOURCE_NAME,
+                        },
+                    },
         basePath,
     });
     const calls = { hello: 0, overview: 0, preferences: 0 };
@@ -252,7 +343,10 @@ async function startBrowserRuntime(options: {
         );
         flow = new ControlWebOAuthFlow({
             basePath,
-            config: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+            config: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
             ownsProvider: true,
             protectedResource,
             publicBaseUrl,
@@ -318,7 +412,11 @@ async function buildBrowserAssets(outputDirectory: string): Promise<void> {
     });
 }
 
-function createRouteSnapshot(calls: { hello: number; overview: number; preferences: number }): PrefixRouteSnapshot {
+function createRouteSnapshot(calls: {
+    hello: number;
+    overview: number;
+    preferences: number;
+}): PrefixRouteSnapshot {
     return PrefixRoute.snapshot([
         {
             destination: "@control",
@@ -331,12 +429,23 @@ function createRouteSnapshot(calls: { hello: number; overview: number; preferenc
                             handle: () => {
                                 calls.hello += 1;
                                 return {
-                                    capabilities: ["request", "stream", "streamResume"],
+                                    capabilities: [
+                                        "request",
+                                        "stream",
+                                        "streamResume",
+                                    ],
                                     protocolVersion: CONTROL_PROTOCOL_VERSION,
                                 };
                             },
                         },
-                        { name: "status", handle: () => ({ instanceCount: 0, ok: true, pid: process.pid }) },
+                        {
+                            name: "status",
+                            handle: () => ({
+                                instanceCount: 0,
+                                ok: true,
+                                pid: process.pid,
+                            }),
+                        },
                         { name: "ping", handle: () => ({ pong: true }) },
                     ],
                 },
@@ -372,7 +481,9 @@ function createRouteSnapshot(calls: { hello: number; overview: number; preferenc
                 },
                 {
                     name: "mcp",
-                    operations: [{ name: "status", handle: () => ({ running: false }) }],
+                    operations: [
+                        { name: "status", handle: () => ({ running: false }) },
+                    ],
                 },
                 {
                     name: "overview",
@@ -414,7 +525,9 @@ function overviewPayload(): JsonValue {
 
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
-        throw new Error("A Chromium executable is required for this browser test.");
+        throw new Error(
+            "A Chromium executable is required for this browser test.",
+        );
     }
     return await chromium.launch({
         executablePath: CHROMIUM_EXECUTABLE,
@@ -432,7 +545,10 @@ function resolveChromiumExecutable(): string | undefined {
         "/usr/bin/google-chrome",
         "/usr/bin/google-chrome-stable",
         "/opt/google/chrome/chrome",
-    ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
+    ].filter(
+        (candidate): candidate is string =>
+            candidate !== undefined && candidate.length > 0,
+    );
     return candidates.find((candidate) => existsSync(candidate));
 }
 
@@ -443,7 +559,7 @@ interface GuardedPage extends Page {
 
 async function guardedPage(browser: Browser): Promise<GuardedPage> {
     const context = await browser.newContext();
-    const page = await context.newPage() as GuardedPage;
+    const page = (await context.newPage()) as GuardedPage;
     page.__browserFailures = [];
     page.__browserResponses = [];
     page.on("console", (message) => {
@@ -454,18 +570,28 @@ async function guardedPage(browser: Browser): Promise<GuardedPage> {
             );
         }
     });
-    page.on("pageerror", (error) => page.__browserFailures.push(`pageerror: ${error.message}`));
+    page.on("pageerror", (error) =>
+        page.__browserFailures.push(`pageerror: ${error.message}`),
+    );
     page.on("requestfailed", (request) => {
-        page.__browserFailures.push(`requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`);
+        page.__browserFailures.push(
+            `requestfailed: ${request.method()} ${request.url()} ${request.failure()?.errorText ?? ""}`,
+        );
     });
     page.on("response", (response) => {
-        page.__browserResponses.push(`${response.request().method()} ${response.status()} ${response.url()}`);
+        page.__browserResponses.push(
+            `${response.request().method()} ${response.status()} ${response.url()}`,
+        );
     });
     return page;
 }
 
 function assertPageHealthy(page: GuardedPage): void {
-    assert.deepEqual(page.__browserFailures, [], page.__browserResponses.join("\n"));
+    assert.deepEqual(
+        page.__browserFailures,
+        [],
+        page.__browserResponses.join("\n"),
+    );
 }
 
 async function assertOverview(
@@ -480,18 +606,28 @@ async function assertOverview(
     } catch (error) {
         const failures = (page as GuardedPage).__browserFailures ?? [];
         const responses = (page as GuardedPage).__browserResponses ?? [];
-        const body = await page.locator("body").innerText().catch(() => "<body unavailable>");
+        const body = await page
+            .locator("body")
+            .innerText()
+            .catch(() => "<body unavailable>");
         throw new Error(
             `WebUI did not render Overview. url=${page.url()} body=${JSON.stringify(body)} failures=${JSON.stringify(failures)} responses=${JSON.stringify(responses)}`,
             { cause: error },
         );
     }
-    await page.getByText("Checking session…").waitFor({ state: "detached" }).catch(() => undefined);
+    await page
+        .getByText("Checking session…")
+        .waitFor({ state: "detached" })
+        .catch(() => undefined);
     const deadline = Date.now() + 5_000;
     while (calls.overview === 0 && Date.now() < deadline) {
         await page.waitForTimeout(25);
     }
-    assert.equal(calls.overview > 0, true, "the SPA must load the real Overview read model");
+    assert.equal(
+        calls.overview > 0,
+        true,
+        "the SPA must load the real Overview read model",
+    );
 }
 
 async function approveBrowserFlow(
@@ -508,16 +644,32 @@ async function approveBrowserFlow(
         const url = page.url();
         if (url.includes("/interaction/")) sawInteraction = true;
         for (const approval of await approvals.list()) {
-            if (approval.status !== "pending" || approvedIds.has(approval.approvalId)) continue;
+            if (
+                approval.status !== "pending" ||
+                approvedIds.has(approval.approvalId)
+            )
+                continue;
             await approvals.decide(approval.approvalId, "approve", "web");
             approvedIds.add(approval.approvalId);
             kinds.add(approval.kind);
         }
-        if (page.url() === expectedReturnUrl && await page.getByRole("heading", { name: "Overview" }).isVisible().catch(() => false)) {
-            assert.equal(sawInteraction, true, "the SPA must actually navigate through the OAuth interaction page");
+        if (
+            page.url() === expectedReturnUrl &&
+            (await page
+                .getByRole("heading", { name: "Overview" })
+                .isVisible()
+                .catch(() => false))
+        ) {
+            assert.equal(
+                sawInteraction,
+                true,
+                "the SPA must actually navigate through the OAuth interaction page",
+            );
             return kinds;
         }
         await page.waitForTimeout(100);
     }
-    throw new Error(`Web OAuth browser flow did not return to ${expectedReturnUrl}; current URL is ${page.url()}`);
+    throw new Error(
+        `Web OAuth browser flow did not return to ${expectedReturnUrl}; current URL is ${page.url()}`,
+    );
 }

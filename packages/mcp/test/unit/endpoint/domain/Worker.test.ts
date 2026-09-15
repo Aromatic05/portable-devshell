@@ -4,15 +4,18 @@ import test from "node:test";
 import type {
     JsonValue,
     ToolCallContext,
-    ToolDefinition
+    ToolDefinition,
 } from "@portable-devshell/shared";
 import {
     McpContextRemoteEnvironment,
     McpContextRegistry,
     McpEndpointWorker,
-    type McpInstanceGateway
+    type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
-import { withMcpContextId, withMcpInstanceTarget } from "../../../../src/endpoint/dispatch/Input.ts";
+import {
+    withMcpContextId,
+    withMcpInstanceTarget,
+} from "../../../../src/endpoint/dispatch/Input.ts";
 
 const bashTool: ToolDefinition = {
     requiredCapabilities: ["execute"],
@@ -21,13 +24,13 @@ const bashTool: ToolDefinition = {
     inputSchema: {
         additionalProperties: false,
         properties: {
-            command: { type: "string" }
+            command: { type: "string" },
         },
         required: ["command"],
-        type: "object"
+        type: "object",
     },
     name: "bash_run",
-    outputSchema: { type: "object" }
+    outputSchema: { type: "object" },
 };
 
 const fileReadTool: ToolDefinition = {
@@ -38,22 +41,26 @@ const fileReadTool: ToolDefinition = {
         additionalProperties: false,
         properties: { files: { type: "array" } },
         required: ["files"],
-        type: "object"
+        type: "object",
     },
     name: "file_read",
-    outputSchema: { type: "object" }
+    outputSchema: { type: "object" },
 };
 
 const context = { principal: "local", requestId: "request-1" } as const;
-const contextRegistry = new McpContextRegistry({ idFactory: () => "ctx-instance-test" });
+const contextRegistry = new McpContextRegistry({
+    idFactory: () => "ctx-instance-test",
+});
 const activeContext = await contextRegistry.create({
     instance: "main-pc",
     principal: "local",
-    workspace: "/workspace"
+    workspace: "/workspace",
 });
-const withContext = <T extends Record<string, unknown>>(input: T): T & { ctxId: string } => ({
+const withContext = <T extends Record<string, unknown>>(
+    input: T,
+): T & { ctxId: string } => ({
     ...input,
-    ctxId: activeContext.ctxId
+    ctxId: activeContext.ctxId,
 });
 
 test("instance attachment is absent from MCP while gateway routing remains available", () => {
@@ -63,12 +70,22 @@ test("instance attachment is absent from MCP while gateway routing remains avail
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        worker
+        worker,
     });
     const tools = endpoint.listTools();
 
-    for (const name of ["instance_connect", "instance_list", "instance_status", "instance_create", "instance_stop"]) {
-        assert.equal(tools.some((tool) => tool.name === name), false, name);
+    for (const name of [
+        "instance_connect",
+        "instance_list",
+        "instance_status",
+        "instance_create",
+        "instance_stop",
+    ]) {
+        assert.equal(
+            tools.some((tool) => tool.name === name),
+            false,
+            name,
+        );
     }
     const remote = tools.find((tool) => tool.name === "environ_remote");
     assert.notEqual(remote, undefined);
@@ -86,8 +103,12 @@ test("instance attachment is absent from MCP while gateway routing remains avail
     assert.equal(remoteSchema.properties?.command?.enum, undefined);
     assert.deepEqual(remoteSchema.required, ["command", "ctxId"]);
     assert.notEqual(
-        (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
-        undefined
+        (
+            tools.find((tool) => tool.name === "bash_run")?.inputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.instance,
+        undefined,
     );
 });
 
@@ -96,15 +117,33 @@ test("gateway-enabled endpoint augments worker schemas without exposing instance
     const tools = endpoint.listTools();
 
     assert.notEqual(
-        (tools.find((tool) => tool.name === "bash_run")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
-        undefined
+        (
+            tools.find((tool) => tool.name === "bash_run")?.inputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.instance,
+        undefined,
     );
     assert.equal(
-        (tools.find((tool) => tool.name === "environ_info")?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
-        undefined
+        (
+            tools.find((tool) => tool.name === "environ_info")?.inputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.instance,
+        undefined,
     );
-    for (const name of ["instance_connect", "instance_list", "instance_status", "instance_create", "instance_stop"]) {
-        assert.equal(tools.some((tool) => tool.name === name), false, name);
+    for (const name of [
+        "instance_connect",
+        "instance_list",
+        "instance_status",
+        "instance_create",
+        "instance_stop",
+    ]) {
+        assert.equal(
+            tools.some((tool) => tool.name === name),
+            false,
+            name,
+        );
     }
 });
 
@@ -113,38 +152,52 @@ test("environ_info never accepts a cross-instance target", async () => {
         createManagedEndpoint().callTool(
             "environ_info",
             { instance: "remote-server", workspace: "/remote-workspace" },
-            context
+            context,
         ),
-        /environ_info accepts only optional ctxId and workspace/u
+        /environ_info accepts only optional ctxId and workspace/u,
     );
 });
 
 test("environ_remote attach remains callable without a ready owner Worker", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-remote-bootstrap" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-environ-remote-bootstrap",
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         gateway: createGateway(),
         instanceName: "main-pc",
-        worker: createWorker({ hasSchema: false, ready: false })
+        worker: createWorker({ hasSchema: false, ready: false }),
     });
-    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
-    const attached = await endpoint.callTool(
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+    const attached = (await endpoint.callTool(
         "environ_remote",
-        { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
-        context
-    ) as { details?: { instance?: string; workspace?: string } };
+        {
+            command: "attach",
+            ctxId: created.ctxId,
+            handle,
+            workspace: "/remote-workspace",
+        },
+        context,
+    )) as { details?: { instance?: string; workspace?: string } };
 
     assert.equal(attached.details?.instance, "remote-server");
     assert.equal(attached.details?.workspace, "/remote-workspace");
     assert.equal(
-        (await registry.validateForInstance(created.ctxId, "remote-server")).environments
-            .find((environment) => environment.instance === "remote-server")?.workspace,
-        "/remote-workspace"
+        (
+            await registry.validateForInstance(created.ctxId, "remote-server")
+        ).environments.find(
+            (environment) => environment.instance === "remote-server",
+        )?.workspace,
+        "/remote-workspace",
     );
 });
 
@@ -157,7 +210,7 @@ test("conversation control gate covers environ_info and environ_remote", async (
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     const guarded: string[] = [];
     let connectCalls = 0;
@@ -169,7 +222,7 @@ test("conversation control gate covers environ_info and environ_remote", async (
         async connectInstance(instance) {
             connectCalls += 1;
             return { instance };
-        }
+        },
     });
     const worker = {
         ...createWorker(),
@@ -190,45 +243,61 @@ test("conversation control gate covers environ_info and environ_remote", async (
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        worker
+        worker,
     });
-    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
-    const beforeGate = await registry.lookup(created.ctxId, { principal: "local" });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+    const beforeGate = await registry.lookup(created.ctxId, {
+        principal: "local",
+    });
     now += 1_000;
 
     await assert.rejects(
         endpoint.callTool("environ_info", { ctxId: created.ctxId }, context),
-        /reply required/u
+        /reply required/u,
     );
     await assert.rejects(
         endpoint.callTool(
             "environ_remote",
-            { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
-            context
+            {
+                command: "attach",
+                ctxId: created.ctxId,
+                handle,
+                workspace: "/remote-workspace",
+            },
+            context,
         ),
-        /reply required/u
+        /reply required/u,
     );
     assert.deepEqual(guarded, [
         `main-pc:environ_info:${created.ctxId}`,
         `main-pc:environ_remote:${created.ctxId}`,
     ]);
     assert.equal(connectCalls, 0);
-    const afterGate = await registry.lookup(created.ctxId, { principal: "local" });
+    const afterGate = await registry.lookup(created.ctxId, {
+        principal: "local",
+    });
     assert.equal(afterGate.lastAccessedAt, beforeGate.lastAccessedAt);
     assert.equal(afterGate.expiresAt, beforeGate.expiresAt);
     assert.equal(
-        afterGate.environments
-            .find((environment) => environment.instance === "remote-server")?.workspace,
-        undefined
+        afterGate.environments.find(
+            (environment) => environment.instance === "remote-server",
+        )?.workspace,
+        undefined,
     );
 });
 
 test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-environ-remote" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-environ-remote",
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     const remoteCalls: string[] = [];
     const gateway = createGateway({
@@ -238,38 +307,68 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
         },
         async releaseInstanceReference() {
             throw new Error("remote cleanup unavailable");
-        }
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker()
+        worker: createWorker(),
     });
-    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
 
-    assert.deepEqual(await endpoint.callTool(
-        "environ_remote",
-        { command: "help", ctxId: created.ctxId },
-        context
-    ), {
-        command: "help",
-        ctxId: created.ctxId,
-        details: {
-            commands: [
-                { command: "help", summary: "Return the authoritative current environ_remote command catalog.", usage: "help" },
-                { command: "attach", summary: "Attach a remote managed instance and optional absolute workspace to the current Context.", usage: "attach handle [workspace]" },
-                { command: "mask", summary: "Permanently hide a remote instance from this Context and revoke any existing attachment.", usage: "mask handle" }
-            ]
+    assert.deepEqual(
+        await endpoint.callTool(
+            "environ_remote",
+            { command: "help", ctxId: created.ctxId },
+            context,
+        ),
+        {
+            command: "help",
+            ctxId: created.ctxId,
+            details: {
+                commands: [
+                    {
+                        command: "help",
+                        summary:
+                            "Return the authoritative current environ_remote command catalog.",
+                        usage: "help",
+                    },
+                    {
+                        command: "attach",
+                        summary:
+                            "Attach a remote managed instance and optional absolute workspace to the current Context.",
+                        usage: "attach handle [workspace]",
+                    },
+                    {
+                        command: "mask",
+                        summary:
+                            "Permanently hide a remote instance from this Context and revoke any existing attachment.",
+                        usage: "mask handle",
+                    },
+                ],
+            },
+            message: "Current environ_remote command catalog.",
         },
-        message: "Current environ_remote command catalog."
-    });
+    );
 
-    const attached = await endpoint.callTool(
+    const attached = (await endpoint.callTool(
         "environ_remote",
-        { command: "attach", ctxId: created.ctxId, handle, workspace: "/remote-workspace" },
-        context
-    ) as { command?: string; details?: { instance?: string; workspace?: string } };
+        {
+            command: "attach",
+            ctxId: created.ctxId,
+            handle,
+            workspace: "/remote-workspace",
+        },
+        context,
+    )) as {
+        command?: string;
+        details?: { instance?: string; workspace?: string };
+    };
     assert.equal(attached.command, "attach");
     assert.equal(attached.details?.instance, "remote-server");
     assert.equal(attached.details?.workspace, "/remote-workspace");
@@ -277,44 +376,58 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
         await endpoint.callTool(
             "bash_run",
             { command: "pwd", ctxId: created.ctxId, instance: "remote-server" },
-            context
+            context,
         ),
-        { remote: true }
+        { remote: true },
     );
 
-    const masked = await endpoint.callTool(
+    const masked = (await endpoint.callTool(
         "environ_remote",
         { command: "mask", ctxId: created.ctxId, handle },
-        context
-    ) as { command?: string; details?: { instance?: string; masked?: boolean } };
+        context,
+    )) as {
+        command?: string;
+        details?: { instance?: string; masked?: boolean };
+    };
     assert.equal(masked.command, "mask");
-    assert.deepEqual(masked.details, { instance: "remote-server", masked: true });
-    assert.equal(await registry.referenceInstance(created.ctxId, "remote-server"), undefined);
+    assert.deepEqual(masked.details, {
+        instance: "remote-server",
+        masked: true,
+    });
+    assert.equal(
+        await registry.referenceInstance(created.ctxId, "remote-server"),
+        undefined,
+    );
     await assert.rejects(
         endpoint.callTool(
             "bash_run",
             { command: "pwd", ctxId: created.ctxId, instance: "remote-server" },
-            context
+            context,
         ),
-        (error: unknown) => (error as { code?: string }).code === "mcp.contextInstanceMasked"
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextInstanceMasked",
     );
-    assert.deepEqual(await endpoint.callTool(
-        "environ_remote",
-        { command: "mask", ctxId: created.ctxId, handle },
-        context
-    ), {
-        command: "mask",
-        ctxId: created.ctxId,
-        details: { instance: "remote-server", masked: true },
-        message: "Remote instance is permanently masked for the lifetime of the current Context."
-    });
+    assert.deepEqual(
+        await endpoint.callTool(
+            "environ_remote",
+            { command: "mask", ctxId: created.ctxId, handle },
+            context,
+        ),
+        {
+            command: "mask",
+            ctxId: created.ctxId,
+            details: { instance: "remote-server", masked: true },
+            message:
+                "Remote instance is permanently masked for the lifetime of the current Context.",
+        },
+    );
     await assert.rejects(
         endpoint.callTool(
             "environ_remote",
             { command: "unmask", ctxId: created.ctxId, handle },
-            context
+            context,
         ),
-        /Unknown environ_remote command "unmask".*command='help'/u
+        /Unknown environ_remote command "unmask".*command='help'/u,
     );
     assert.deepEqual(remoteCalls, ["remote-server"]);
 });
@@ -330,25 +443,29 @@ test("routing fields are injected into strict worker schema union branches", () 
                     additionalProperties: false,
                     properties: { pane: { type: "string" } },
                     required: ["pane"],
-                    type: "object"
+                    type: "object",
                 },
                 Task: {
                     additionalProperties: false,
                     properties: { task: { type: "string" } },
                     required: ["task"],
-                    type: "object"
-                }
+                    type: "object",
+                },
             },
-            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }]
+            anyOf: [{ $ref: "#/$defs/Task" }, { $ref: "#/$defs/Pane" }],
         },
         name: "tmux_input",
-        outputSchema: { type: "object" }
+        outputSchema: { type: "object" },
     };
-    const schema = withMcpInstanceTarget(withMcpContextId(unionTool)).inputSchema as {
-        $defs?: Record<string, {
-            properties?: Record<string, unknown>;
-            required?: string[];
-        }>;
+    const schema = withMcpInstanceTarget(withMcpContextId(unionTool))
+        .inputSchema as {
+        $defs?: Record<
+            string,
+            {
+                properties?: Record<string, unknown>;
+                required?: string[];
+            }
+        >;
     };
     for (const branch of Object.values(schema.$defs ?? {})) {
         assert.notEqual(branch.properties?.ctxId, undefined);
@@ -360,82 +477,137 @@ test("routing fields are injected into strict worker schema union branches", () 
 
 test("worker calls default to the endpoint instance and route explicit targets through the gateway", async () => {
     const localCalls: Array<{ input: JsonValue; toolName: string }> = [];
-    const remoteCalls: Array<{ context: ToolCallContext; input: JsonValue; instance: string; toolName: string }> = [];
+    const remoteCalls: Array<{
+        context: ToolCallContext;
+        input: JsonValue;
+        instance: string;
+        toolName: string;
+    }> = [];
     const worker = createWorker({
         callTool: async (toolName, input) => {
             localCalls.push({ input, toolName });
             return { local: true };
         },
-        tools: [bashTool, fileReadTool]
+        tools: [bashTool, fileReadTool],
     });
     const gateway = createGateway({
         callTool: async (instance, toolName, input, callContext) => {
-            remoteCalls.push({ context: callContext, input, instance, toolName });
+            remoteCalls.push({
+                context: callContext,
+                input,
+                instance,
+                toolName,
+            });
             return { remote: true };
         },
-        listTools: () => [bashTool, fileReadTool]
+        listTools: () => [bashTool, fileReadTool],
     });
     const endpoint = createManagedEndpoint(worker, gateway);
 
-    assert.deepEqual(await endpoint.callTool("bash_run", withContext({ command: "pwd" }), context), { local: true });
+    assert.deepEqual(
+        await endpoint.callTool(
+            "bash_run",
+            withContext({ command: "pwd" }),
+            context,
+        ),
+        { local: true },
+    );
     await assert.rejects(
-        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        endpoint.callTool(
+            "bash_run",
+            withContext({ command: "pwd", instance: "remote-server" }),
+            context,
+        ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "mcp.contextWorkspaceRequired");
+            assert.equal(
+                (error as { code?: string }).code,
+                "mcp.contextWorkspaceRequired",
+            );
             return true;
-        }
+        },
     );
     const remote = new McpContextRemoteEnvironment({
         contextRegistry,
-        gateway: () => gateway
+        gateway: () => gateway,
     });
-    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
+    const handle = await requireRemoteHandle(
+        contextRegistry,
+        activeContext.ctxId,
+        "remote-server",
+    );
     await remote.attach(activeContext.ctxId, handle, "/remote-workspace");
     assert.deepEqual(
-        await endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
-        { remote: true }
+        await endpoint.callTool(
+            "bash_run",
+            withContext({ command: "pwd", instance: "remote-server" }),
+            context,
+        ),
+        { remote: true },
     );
-    const recoveryPath = "/.devshell/tool-results/11111111-1111-1111-1111-111111111111/stdout";
+    const recoveryPath =
+        "/.devshell/tool-results/11111111-1111-1111-1111-111111111111/stdout";
     assert.deepEqual(
-        await endpoint.callTool("file_read", withContext({
-            files: [{ path: recoveryPath, selector: "2000-2002:raw", view: "content" }],
-            instance: "remote-server"
-        }), context),
-        { remote: true }
+        await endpoint.callTool(
+            "file_read",
+            withContext({
+                files: [
+                    {
+                        path: recoveryPath,
+                        selector: "2000-2002:raw",
+                        view: "content",
+                    },
+                ],
+                instance: "remote-server",
+            }),
+            context,
+        ),
+        { remote: true },
     );
-    assert.deepEqual(localCalls, [{ input: { command: "pwd" }, toolName: "bash_run" }]);
-    assert.deepEqual(remoteCalls, [{
-        context: {
-            ctxId: activeContext.ctxId,
-            requestId: "request-1",
-            source: "mcp",
-            workspace: "/remote-workspace"
+    assert.deepEqual(localCalls, [
+        { input: { command: "pwd" }, toolName: "bash_run" },
+    ]);
+    assert.deepEqual(remoteCalls, [
+        {
+            context: {
+                ctxId: activeContext.ctxId,
+                requestId: "request-1",
+                source: "mcp",
+                workspace: "/remote-workspace",
+            },
+            input: { command: "pwd" },
+            instance: "remote-server",
+            toolName: "bash_run",
         },
-        input: { command: "pwd" },
-        instance: "remote-server",
-        toolName: "bash_run"
-    }, {
-        context: {
-            ctxId: activeContext.ctxId,
-            requestId: "request-1",
-            source: "mcp",
-            workspace: "/remote-workspace"
+        {
+            context: {
+                ctxId: activeContext.ctxId,
+                requestId: "request-1",
+                source: "mcp",
+                workspace: "/remote-workspace",
+            },
+            input: {
+                files: [
+                    {
+                        path: recoveryPath,
+                        selector: "2000-2002:raw",
+                        view: "content",
+                    },
+                ],
+            },
+            instance: "remote-server",
+            toolName: "file_read",
         },
-        input: {
-            files: [{ path: recoveryPath, selector: "2000-2002:raw", view: "content" }]
-        },
-        instance: "remote-server",
-        toolName: "file_read"
-    }]);
-
+    ]);
 });
 
 test("remote environment attach reuses a live workspace attachment and releases a replaced alert lease", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-idempotent" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-idempotent",
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     let prepareCalls = 0;
     const touchedTemporary: string[] = [];
@@ -449,7 +621,7 @@ test("remote environment attach reuses a live workspace attachment and releases 
                 projectMemoryDirectory: `${workspace}/.memory`,
                 projectMemoryPresent: true,
                 temporaryDirectory: `/tmp/${instance}-${prepareCalls}`,
-                workspace
+                workspace,
             };
         },
         async releaseAlerts(_instance, workspace) {
@@ -460,14 +632,19 @@ test("remote environment attach reuses a live workspace attachment and releases 
         },
         async touchTemporaryDirectory(_instance, path) {
             touchedTemporary.push(path);
-        }
+        },
     });
     const remote = new McpContextRemoteEnvironment({
         contextRegistry: registry,
-        gateway: () => gateway
+        gateway: () => gateway,
     });
-    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
-    const call = async (workspace: string) => await remote.attach(created.ctxId, handle, workspace);
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+    const call = async (workspace: string) =>
+        await remote.attach(created.ctxId, handle, workspace);
 
     await call("/remote-a");
     await call("/remote-a");
@@ -480,11 +657,13 @@ test("remote environment attach reuses a live workspace attachment and releases 
 });
 
 test("remote environment attach cleans an unused alert lease and reference when workspace preparation fails", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-connect-failure" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-failure",
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     const releasedAlerts: string[] = [];
     const releasedReferences: string[] = [];
@@ -495,7 +674,7 @@ test("remote environment attach cleans an unused alert lease and reference when 
                 projectMemoryDirectory: `${workspace}/.memory`,
                 projectMemoryPresent: true,
                 temporaryDirectory: `/tmp/${instance}`,
-                workspace
+                workspace,
             };
         },
         async readAlerts() {
@@ -506,33 +685,39 @@ test("remote environment attach cleans an unused alert lease and reference when 
         },
         async releaseInstanceReference(instance, reference) {
             releasedReferences.push(`${instance}:${reference}`);
-        }
+        },
     });
     const remote = new McpContextRemoteEnvironment({
         contextRegistry: registry,
-        gateway: () => gateway
+        gateway: () => gateway,
     });
-    const handle = await requireRemoteHandle(registry, created.ctxId, "remote-server");
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
 
     await assert.rejects(
         remote.attach(created.ctxId, handle, "/remote-fail"),
-        /alerts failed/u
+        /alerts failed/u,
     );
     assert.deepEqual(releasedAlerts, ["/remote-fail"]);
     assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
 });
 
 test("remote bash truncation does not advertise the retired artifact_read tool", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-remote-artifact" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-remote-artifact",
+    });
     const created = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     await registry.attachEnvironment(created.ctxId, {
         instance: "remote-server",
         temporaryDirectory: "/tmp/remote-artifact",
-        workspace: "/remote-workspace"
+        workspace: "/remote-workspace",
     });
     const gateway = createGateway({
         async callTool() {
@@ -543,24 +728,28 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
                 stdout: "partial",
                 stdoutArtifact: { handle: "artifact-1" },
                 stdoutTruncated: true,
-                termination: "exited"
+                termination: "exited",
             };
-        }
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker()
+        worker: createWorker(),
     });
 
-    const result = await endpoint.callTool(
+    const result = (await endpoint.callTool(
         "bash_run",
-        { command: "produce-output", ctxId: created.ctxId, instance: "remote-server" },
-        context
-    ) as { comment?: string[] };
+        {
+            command: "produce-output",
+            ctxId: created.ctxId,
+            instance: "remote-server",
+        },
+        context,
+    )) as { comment?: string[] };
     assert.deepEqual(result.comment, [
-        "[bash.outputTruncated] stdout output is incomplete."
+        "[bash.outputTruncated] stdout output is incomplete.",
     ]);
 });
 
@@ -569,7 +758,7 @@ test("remote worker calls check target readiness before tool exposure", async ()
     const notReady = Object.assign(new Error("not ready"), {
         code: "core.instanceNotReady",
         details: { instance: "remote-server" },
-        retryable: false
+        retryable: false,
     });
     const gateway = createGateway({
         assertReady() {
@@ -578,21 +767,30 @@ test("remote worker calls check target readiness before tool exposure", async ()
         listTools() {
             listToolsCalled = true;
             return [bashTool];
-        }
+        },
     });
-    const endpoint = createManagedEndpoint(createWorker(), gateway, { readyWaitMs: 50 });
+    const endpoint = createManagedEndpoint(createWorker(), gateway, {
+        readyWaitMs: 50,
+    });
 
     await contextRegistry.attachEnvironment(activeContext.ctxId, {
         instance: "remote-server",
         temporaryDirectory: "/tmp/remote-context",
-        workspace: "/remote-workspace"
+        workspace: "/remote-workspace",
     });
     await assert.rejects(
-        endpoint.callTool("bash_run", withContext({ command: "pwd", instance: "remote-server" }), context),
+        endpoint.callTool(
+            "bash_run",
+            withContext({ command: "pwd", instance: "remote-server" }),
+            context,
+        ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "core.instanceNotReady");
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.instanceNotReady",
+            );
             return true;
-        }
+        },
     );
     assert.equal(listToolsCalled, false);
 });
@@ -607,20 +805,26 @@ test("worker tools missing from the endpoint catalog cannot be recovered from a 
         },
         listTools() {
             return [bashTool];
-        }
+        },
     });
-    const endpoint = createManagedEndpoint(createWorker({ hasSchema: false, ready: false }), gateway);
+    const endpoint = createManagedEndpoint(
+        createWorker({ hasSchema: false, ready: false }),
+        gateway,
+    );
 
     await assert.rejects(
         endpoint.callTool(
             "bash_run",
             withContext({ command: "pwd", instance: "remote-server" }),
-            context
+            context,
         ),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "core.toolSchemaUnavailable");
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.toolSchemaUnavailable",
+            );
             return true;
-        }
+        },
     );
     assert.equal(remoteCalled, false);
 });
@@ -633,15 +837,24 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
     const gateway = createGateway({
         async connectInstance() {
             return await start;
-        }
+        },
     });
     const remote = new McpContextRemoteEnvironment({
         contextRegistry,
-        gateway: () => gateway
+        gateway: () => gateway,
     });
-    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
+    const handle = await requireRemoteHandle(
+        contextRegistry,
+        activeContext.ctxId,
+        "remote-server",
+    );
     const controller = new AbortController();
-    const pending = remote.attach(activeContext.ctxId, handle, undefined, controller.signal);
+    const pending = remote.attach(
+        activeContext.ctxId,
+        handle,
+        undefined,
+        controller.signal,
+    );
 
     controller.abort(new Error("gateway timeout"));
     await assert.rejects(pending, /gateway timeout/u);
@@ -655,19 +868,27 @@ test("remote environment attach service is independent from local Worker readine
         connectInstance: async (instance) => {
             calls.push(`connect:${instance}`);
             return { instance };
-        }
+        },
     });
     const remote = new McpContextRemoteEnvironment({
         contextRegistry,
-        gateway: () => gateway
+        gateway: () => gateway,
     });
-    const handle = await requireRemoteHandle(contextRegistry, activeContext.ctxId, "remote-server");
+    const handle = await requireRemoteHandle(
+        contextRegistry,
+        activeContext.ctxId,
+        "remote-server",
+    );
 
     await remote.attach(activeContext.ctxId, handle);
     assert.deepEqual(calls, ["connect:remote-server"]);
 });
 
-async function requireRemoteHandle(registry: McpContextRegistry, ctxId: string, instance: string): Promise<string> {
+async function requireRemoteHandle(
+    registry: McpContextRegistry,
+    ctxId: string,
+    instance: string,
+): Promise<string> {
     const reference = await registry.referenceInstance(ctxId, instance);
     assert.equal(reference?.current, false);
     assert.equal(typeof reference?.handle, "string");
@@ -677,35 +898,48 @@ async function requireRemoteHandle(registry: McpContextRegistry, ctxId: string, 
 function createManagedEndpoint(
     worker = createWorker(),
     gateway = createGateway(),
-    options?: { readyWaitMs?: number }
+    options?: { readyWaitMs?: number },
 ): McpEndpointWorker {
     return new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
         readyWaitMs: options?.readyWaitMs,
-        worker
+        worker,
     });
 }
 
-function createWorker(options: {
-    callTool?: (toolName: string, input: JsonValue, context: ToolCallContext) => Promise<JsonValue>;
-    hasSchema?: boolean;
-    ready?: boolean;
-    tools?: ToolDefinition[];
-} = {}) {
+function createWorker(
+    options: {
+        callTool?: (
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+        ) => Promise<JsonValue>;
+        hasSchema?: boolean;
+        ready?: boolean;
+        tools?: ToolDefinition[];
+    } = {},
+) {
     return {
         async auditToolCall<T extends JsonValue>(
             _toolName: string,
             _input: JsonValue,
             _context: ToolCallContext,
-            operation: (callId: string) => Promise<T>
-        ): Promise<T> { return await operation("call-test"); },
+            operation: (callId: string) => Promise<T>,
+        ): Promise<T> {
+            return await operation("call-test");
+        },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callTool(toolName: string, input: JsonValue, callContext: ToolCallContext) {
-            return await (options.callTool?.(toolName, input, callContext) ?? Promise.resolve({ ok: true }));
+        async callTool(
+            toolName: string,
+            input: JsonValue,
+            callContext: ToolCallContext,
+        ) {
+            return await (options.callTool?.(toolName, input, callContext) ??
+                Promise.resolve({ ok: true }));
         },
         async readAlerts() {
             return { advice: [] };
@@ -715,11 +949,15 @@ function createWorker(options: {
             instance: "main-pc",
             platform: {
                 arch: "x86_64",
-                distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
+                distribution: {
+                    id: "arch",
+                    name: "Arch Linux",
+                    version: "rolling",
+                },
                 os: "linux",
                 packageManager: "pacman",
-                shell: { executable: "/bin/bash", kind: "bash", version: "5" }
-            }
+                shell: { executable: "/bin/bash", kind: "bash", version: "5" },
+            },
         },
         hasToolSchemaCache() {
             return options.hasSchema ?? true;
@@ -729,20 +967,30 @@ function createWorker(options: {
         },
         snapshot() {
             return { ready: options.ready ?? true };
-        }
+        },
     };
 }
 
-function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstanceGateway {
+function createGateway(
+    overrides: Partial<McpInstanceGateway> = {},
+): McpInstanceGateway {
     return {
         async appendMcpToolCalled(instance, toolName, callContext) {
-            await overrides.appendMcpToolCalled?.(instance, toolName, callContext);
+            await overrides.appendMcpToolCalled?.(
+                instance,
+                toolName,
+                callContext,
+            );
         },
         assertReady(instance) {
             overrides.assertReady?.(instance);
         },
         async beforeModelToolCall(instance, toolName, callContext) {
-            await overrides.beforeModelToolCall?.(instance, toolName, callContext);
+            await overrides.beforeModelToolCall?.(
+                instance,
+                toolName,
+                callContext,
+            );
         },
         async auditToolCall<T extends JsonValue>(
             instance: string,
@@ -750,27 +998,50 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             input: JsonValue,
             callContext: ToolCallContext,
             operation: (callId: string) => Promise<T>,
-            signal?: AbortSignal
+            signal?: AbortSignal,
         ): Promise<T> {
             if (overrides.auditToolCall !== undefined) {
-                return await overrides.auditToolCall(instance, toolName, input, callContext, operation, signal);
+                return await overrides.auditToolCall(
+                    instance,
+                    toolName,
+                    input,
+                    callContext,
+                    operation,
+                    signal,
+                );
             }
             return await operation("call-test");
         },
-        async callTool(instance, toolName, input, callContext, signal, transformResult) {
-            const result = overrides.callTool === undefined
-                ? { instance, toolName }
-                : await overrides.callTool(instance, toolName, input, callContext, signal);
+        async callTool(
+            instance,
+            toolName,
+            input,
+            callContext,
+            signal,
+            transformResult,
+        ) {
+            const result =
+                overrides.callTool === undefined
+                    ? { instance, toolName }
+                    : await overrides.callTool(
+                          instance,
+                          toolName,
+                          input,
+                          callContext,
+                          signal,
+                      );
             return transformResult === undefined
                 ? result
                 : await transformResult(result, "call-test");
         },
         environment(instance) {
-            return overrides.environment?.(instance) ?? {
-                homeDirectory: "/remote",
-                instance,
-                platform: { arch: "arm64", os: "darwin" }
-            };
+            return (
+                overrides.environment?.(instance) ?? {
+                    homeDirectory: "/remote",
+                    instance,
+                    platform: { arch: "arm64", os: "darwin" },
+                }
+            );
         },
         async listInstances() {
             return await (overrides.listInstances?.() ?? Promise.resolve([]));
@@ -779,37 +1050,52 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             return overrides.listTools?.(instance) ?? [bashTool];
         },
         async prepareWorkspace(instance, workspace) {
-            return await (overrides.prepareWorkspace?.(instance, workspace) ?? Promise.resolve({
-                projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
-                projectMemoryDirectory: `${workspace}/.memory`,
-                projectMemoryPresent: true,
-                temporaryDirectory: `/tmp/${instance}-context`,
-                workspace
-            }));
+            return await (overrides.prepareWorkspace?.(instance, workspace) ??
+                Promise.resolve({
+                    projectMemoryAgentFile: `${workspace}/.memory/AGENT.md`,
+                    projectMemoryDirectory: `${workspace}/.memory`,
+                    projectMemoryPresent: true,
+                    temporaryDirectory: `/tmp/${instance}-context`,
+                    workspace,
+                }));
         },
         async readAlerts(instance, workspace) {
-            return await (overrides.readAlerts?.(instance, workspace) ?? Promise.resolve({ advice: [] }));
+            return await (overrides.readAlerts?.(instance, workspace) ??
+                Promise.resolve({ advice: [] }));
         },
         async releaseAlerts(instance, workspace) {
             await overrides.releaseAlerts?.(instance, workspace);
         },
         async readTodo(instance, input) {
-            return await (overrides.readTodo?.(instance, input) ?? Promise.resolve({ items: [], revision: 0, summary: { completed: 0, total: 0 } }));
+            return await (overrides.readTodo?.(instance, input) ??
+                Promise.resolve({
+                    items: [],
+                    revision: 0,
+                    summary: { completed: 0, total: 0 },
+                }));
         },
         async reportTodo(instance, message, callId, callContext) {
-            await overrides.reportTodo?.(instance, message, callId, callContext);
+            await overrides.reportTodo?.(
+                instance,
+                message,
+                callId,
+                callContext,
+            );
         },
         async connectInstance(instance, reference) {
-            return await (overrides.connectInstance?.(instance, reference) ?? Promise.resolve({ instance }));
+            return await (overrides.connectInstance?.(instance, reference) ??
+                Promise.resolve({ instance }));
         },
         async releaseInstanceReference(instance, reference) {
             await overrides.releaseInstanceReference?.(instance, reference);
         },
         async statusInstance(instance) {
-            return await (overrides.statusInstance?.(instance) ?? Promise.resolve({ instance }));
+            return await (overrides.statusInstance?.(instance) ??
+                Promise.resolve({ instance }));
         },
         async stopInstance(instance) {
-            return await (overrides.stopInstance?.(instance) ?? Promise.resolve({ instance }));
+            return await (overrides.stopInstance?.(instance) ??
+                Promise.resolve({ instance }));
         },
         async touchAlerts(instance, workspace) {
             await overrides.touchAlerts?.(instance, workspace);
@@ -818,8 +1104,13 @@ function createGateway(overrides: Partial<McpInstanceGateway> = {}): McpInstance
             await overrides.touchTemporaryDirectory?.(instance, path);
         },
         async writeTodo(instance, input, callContext) {
-            return await (overrides.writeTodo?.(instance, input, callContext) ?? Promise.resolve({ items: [], revision: 1, summary: { completed: 0, total: 0 } }));
-        }
+            return await (overrides.writeTodo?.(instance, input, callContext) ??
+                Promise.resolve({
+                    items: [],
+                    revision: 1,
+                    summary: { completed: 0, total: 0 },
+                }));
+        },
     };
 }
 
@@ -827,82 +1118,137 @@ test("todo tools are fixed control-side primitives and remain available while th
     const calls: string[] = [];
     const gateway = createGateway({
         async readTodo(instance, input) {
-            calls.push(`read:${instance}:${input?.taskId ?? input?.title ?? "all"}`);
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+            calls.push(
+                `read:${instance}:${input?.taskId ?? input?.title ?? "all"}`,
+            );
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+            };
         },
         async reportTodo(instance, message, callId, callContext) {
-            calls.push(`report:${instance}:${callContext.ctxId}:${callId}:${message}`);
+            calls.push(
+                `report:${instance}:${callContext.ctxId}:${callId}:${message}`,
+            );
         },
         async writeTodo(instance, input, callContext) {
-            calls.push(`write:${instance}:${callContext.ctxId}:${String((input as { revision?: number }).revision)}`);
-            return { items: [], revision: 1, summary: { completed: 0, total: 0 } };
-        }
+            calls.push(
+                `write:${instance}:${callContext.ctxId}:${String((input as { revision?: number }).revision)}`,
+            );
+            return {
+                items: [],
+                revision: 1,
+                summary: { completed: 0, total: 0 },
+            };
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker({ hasSchema: false, ready: false })
+        worker: createWorker({ hasSchema: false, ready: false }),
     });
 
-    assert.deepEqual(await endpoint.callTool("todo_read", withContext({}), context), {
-        items: [],
-        revision: 0,
-        summary: { completed: 0, total: 0 }
-    });
-    const todoReadSchema = endpoint.listTools().find((tool) => tool.name === "todo_read")?.outputSchema;
+    assert.deepEqual(
+        await endpoint.callTool("todo_read", withContext({}), context),
+        {
+            items: [],
+            revision: 0,
+            summary: { completed: 0, total: 0 },
+        },
+    );
+    const todoReadSchema = endpoint
+        .listTools()
+        .find((tool) => tool.name === "todo_read")?.outputSchema;
     assert.deepEqual(todoReadSchema, { type: "object" });
-    const todoWriteSchema = endpoint.listTools().find((tool) => tool.name === "todo_write")?.inputSchema as {
+    const todoWriteSchema = endpoint
+        .listTools()
+        .find((tool) => tool.name === "todo_write")?.inputSchema as {
         properties?: {
             todos?: {
                 contains?: unknown;
-                items?: { allOf?: unknown; properties?: Record<string, unknown> };
+                items?: {
+                    allOf?: unknown;
+                    properties?: Record<string, unknown>;
+                };
                 maxContains?: unknown;
                 minContains?: unknown;
             };
         };
     };
     assert.deepEqual(
-        Object.keys(todoWriteSchema.properties?.todos?.items?.properties ?? {}).sort(),
-        ["content", "detail", "id", "status"]
+        Object.keys(
+            todoWriteSchema.properties?.todos?.items?.properties ?? {},
+        ).sort(),
+        ["content", "detail", "id", "status"],
     );
     assert.equal(todoWriteSchema.properties?.todos?.items?.allOf, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.contains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.minContains, undefined);
     assert.equal(todoWriteSchema.properties?.todos?.maxContains, undefined);
-    const todoReport = endpoint.listTools().find((tool) => tool.name === "todo_report");
+    const todoReport = endpoint
+        .listTools()
+        .find((tool) => tool.name === "todo_report");
     assert.match(todoReport?.description ?? "", /#push/u);
     assert.match(todoReport?.description ?? "", /#stop/u);
-    const report = await endpoint.callTool("todo_report", withContext({ message: "Finished the first acceptance stage." }), context) as {
+    const report = (await endpoint.callTool(
+        "todo_report",
+        withContext({ message: "Finished the first acceptance stage." }),
+        context,
+    )) as {
         content?: unknown;
         structuredContent?: unknown;
     };
-    assert.deepEqual(report.content, [{ type: "text", text: "Finished the first acceptance stage." }]);
+    assert.deepEqual(report.content, [
+        { type: "text", text: "Finished the first acceptance stage." },
+    ]);
     assert.deepEqual(report.structuredContent, { reported: true });
-    await endpoint.callTool("todo_read", withContext({ title: "Recover" }), context);
-    await endpoint.callTool("todo_read", withContext({ taskId: "task-recover" }), context);
-    await endpoint.callTool("todo_write", withContext({ revision: 0, title: "Recover", todos: [] }), context);
+    await endpoint.callTool(
+        "todo_read",
+        withContext({ title: "Recover" }),
+        context,
+    );
+    await endpoint.callTool(
+        "todo_read",
+        withContext({ taskId: "task-recover" }),
+        context,
+    );
+    await endpoint.callTool(
+        "todo_write",
+        withContext({ revision: 0, title: "Recover", todos: [] }),
+        context,
+    );
     assert.deepEqual(calls, [
         "read:main-pc:all",
         "report:main-pc:ctx-instance-test:call-test:Finished the first acceptance stage.",
         "read:main-pc:Recover",
         "read:main-pc:task-recover",
-        "write:main-pc:ctx-instance-test:0"
+        "write:main-pc:ctx-instance-test:0",
     ]);
 
-    assert.equal(endpoint.listTools().some((tool) => tool.name === "todo_read"), true);
+    assert.equal(
+        endpoint.listTools().some((tool) => tool.name === "todo_read"),
+        true,
+    );
 });
 
 test("openai-session binding uses the same Todo contract as explicit ctxId", async () => {
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-session-todo" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-session-todo",
+    });
     const current = await registry.create({
         instance: "main-pc",
         principal: "local",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
-    await registry.bindExternal(current.ctxId, { kind: "openai/session", value: "chat-session-todo" }, {
-        principal: "local"
-    });
+    await registry.bindExternal(
+        current.ctxId,
+        { kind: "openai/session", value: "chat-session-todo" },
+        {
+            principal: "local",
+        },
+    );
     const tasks = [
         {
             completed: 0,
@@ -912,7 +1258,7 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
             taskId: "task-current",
             title: "Current task",
             total: 1,
-            updatedAt: "2026-08-20T00:00:00.000Z"
+            updatedAt: "2026-08-20T00:00:00.000Z",
         },
         {
             completed: 0,
@@ -922,37 +1268,52 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
             taskId: "task-other",
             title: "Other task",
             total: 2,
-            updatedAt: "2026-08-19T00:00:00.000Z"
-        }
+            updatedAt: "2026-08-19T00:00:00.000Z",
+        },
     ];
     const gateway = createGateway({
         async readTodo() {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks };
-        }
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks,
+            };
+        },
     });
     const endpoint = new McpEndpointWorker({
         contextMode: "openai-session",
         contextRegistry: registry,
         gateway,
         instanceName: "main-pc",
-        worker: createWorker({ hasSchema: false, ready: false })
+        worker: createWorker({ hasSchema: false, ready: false }),
     });
     const requestContext = {
         principal: "local",
         requestId: "request-session-todo",
-        requestMeta: { "openai/session": "chat-session-todo" }
+        requestMeta: { "openai/session": "chat-session-todo" },
     } as const;
 
-    const discovered = await endpoint.callTool("todo_read", {}, requestContext) as {
+    const discovered = (await endpoint.callTool(
+        "todo_read",
+        {},
+        requestContext,
+    )) as {
         tasks?: Array<Record<string, unknown>>;
     };
-    assert.deepEqual(discovered.tasks?.map((task) => task.taskId), ["task-current", "task-other"]);
+    assert.deepEqual(
+        discovered.tasks?.map((task) => task.taskId),
+        ["task-current", "task-other"],
+    );
     assert.equal(discovered.tasks?.[0]?.ctxId, current.ctxId);
 
-    const todoTool = endpoint.listTools().find((tool) => tool.name === "todo_read");
+    const todoTool = endpoint
+        .listTools()
+        .find((tool) => tool.name === "todo_read");
     assert.deepEqual(todoTool?.outputSchema, { type: "object" });
     assert.notEqual(
-        (todoTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.title,
-        undefined
+        (todoTool?.inputSchema as { properties?: Record<string, unknown> })
+            .properties?.title,
+        undefined,
     );
 });

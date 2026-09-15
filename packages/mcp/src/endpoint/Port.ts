@@ -1,6 +1,6 @@
 import type {
     ArtifactViewImageInput,
-    ArtifactViewImageResult
+    ArtifactViewImageResult,
 } from "@portable-devshell/shared";
 import type {
     ApprovalRequest,
@@ -19,7 +19,7 @@ import type {
     ToolCallRecord,
     ToolDefinition,
     WaitCreateInput,
-    WaitRecord
+    WaitRecord,
 } from "@portable-devshell/shared";
 import type { McpEndpointCatalogWorker } from "./tool/Catalog.js";
 
@@ -29,20 +29,23 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(
         toolName: string,
-        context: { requestId?: string; ctxId?: string }
+        context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
     callTool(
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: JsonValue,
     ): Promise<JsonValue>;
     invokeToolInternal?(
@@ -105,16 +108,24 @@ export interface McpWorkspaceEventSlice {
 }
 
 export interface McpInstanceGateway {
-    appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void>;
+    appendMcpToolCalled(
+        instance: string,
+        toolName: string,
+        context: { requestId?: string; ctxId?: string },
+    ): Promise<void>;
     assertReady(instance: string): void;
-    beforeModelToolCall?(instance: string, toolName: string, context: ToolCallContext): Promise<void>;
+    beforeModelToolCall?(
+        instance: string,
+        toolName: string,
+        context: ToolCallContext,
+    ): Promise<void>;
     auditToolCall<T extends JsonValue>(
         instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T>;
     callTool(
         instance: string,
@@ -122,7 +133,10 @@ export interface McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: JsonValue,
     ): Promise<JsonValue>;
     invokeToolInternal?(
@@ -136,21 +150,69 @@ export interface McpInstanceGateway {
     environment(instance: string): McpEndpointEnvironmentHandshake | undefined;
     modelCommands?(instance: string): readonly string[];
     listInstances(): Promise<JsonValue>;
-    goalContinuation?(instance: string, input: GoalContinuationInput, ctxId: string): Promise<JsonValue>;
-    manageGoal?(instance: string, input: GoalManageInput, ctxId: string): Promise<GoalSnapshot | undefined>;
-    readGoal?(instance: string, ctxId: string): Promise<GoalSnapshot | undefined>;
-    recordGoalReentry?(instance: string, ctxId: string, progressEpoch?: number): Promise<void>;
-    touchGoal?(instance: string, ctxId: string, kind?: GoalActivityKind): Promise<void>;
+    goalContinuation?(
+        instance: string,
+        input: GoalContinuationInput,
+        ctxId: string,
+    ): Promise<JsonValue>;
+    manageGoal?(
+        instance: string,
+        input: GoalManageInput,
+        ctxId: string,
+    ): Promise<GoalSnapshot | undefined>;
+    readGoal?(
+        instance: string,
+        ctxId: string,
+    ): Promise<GoalSnapshot | undefined>;
+    recordGoalReentry?(
+        instance: string,
+        ctxId: string,
+        progressEpoch?: number,
+    ): Promise<void>;
+    touchGoal?(
+        instance: string,
+        ctxId: string,
+        kind?: GoalActivityKind,
+    ): Promise<void>;
     createWait?(instance: string, input: WaitCreateInput): Promise<WaitRecord>;
     cancelWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    claimWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
-    completeWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
-    markWaitRecoveryAttempted?(instance: string, waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord>;
+    claimWaitRecovery?(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord>;
+    completeWaitRecovery?(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord>;
+    markWaitRecoveryAttempted?(
+        instance: string,
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ): Promise<WaitRecord>;
     detachWait?(instance: string, waitId: string): Promise<WaitRecord>;
-    dismissWaitRecovery?(instance: string, waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
-    reattachWait?(instance: string, waitId: string, ownerCallId?: string): Promise<WaitRecord>;
-    releaseWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
-    rejectWaitRecovery?(instance: string, waitId: string, claimId: string): Promise<WaitRecord>;
+    dismissWaitRecovery?(
+        instance: string,
+        waitId: string,
+        recoveryMessageId: string,
+    ): Promise<WaitRecord>;
+    reattachWait?(
+        instance: string,
+        waitId: string,
+        ownerCallId?: string,
+    ): Promise<WaitRecord>;
+    releaseWaitRecovery?(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord>;
+    rejectWaitRecovery?(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord>;
     disableWaitRecovery?(instance: string, waitId: string): Promise<WaitRecord>;
     consumeWait?(instance: string, waitId: string): Promise<WaitRecord>;
     resolveWait?(
@@ -162,64 +224,122 @@ export interface McpInstanceGateway {
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
     listWaits?(instance: string): Promise<WaitRecord[]>;
     listApprovals?(instance: string): Promise<ApprovalRequest[]>;
-    listPendingApprovals?(instance: string, ctxId?: string): Promise<ApprovalRequest[]>;
-    decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
-    cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
-    readToolCalls?(instance: string, ctxId: string, limit: number): Promise<ToolCallRecord[]>;
-    hasActiveToolCalls?(instance: string, ctxId: string, excludeCallId?: string): boolean;
-    readWorkspaceEvents?(instance: string, fromSeq: number): Promise<McpWorkspaceEventSlice>;
-    controlTodo?(instance: string, taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<JsonValue>;
-    consumeContextMessages?(instance: string, ctxId: string, callId: string): Promise<ContextMessageReadResult>;
-    failContextMessages?(instance: string, ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
+    listPendingApprovals?(
+        instance: string,
+        ctxId?: string,
+    ): Promise<ApprovalRequest[]>;
+    decideApproval?(
+        instance: string,
+        approvalId: string,
+        decision: "approve" | "deny",
+    ): Promise<ApprovalRequest>;
+    cancelApproval?(
+        instance: string,
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest>;
+    readToolCalls?(
+        instance: string,
+        ctxId: string,
+        limit: number,
+    ): Promise<ToolCallRecord[]>;
+    hasActiveToolCalls?(
+        instance: string,
+        ctxId: string,
+        excludeCallId?: string,
+    ): boolean;
+    readWorkspaceEvents?(
+        instance: string,
+        fromSeq: number,
+    ): Promise<McpWorkspaceEventSlice>;
+    controlTodo?(
+        instance: string,
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string,
+        expectedRevision?: number,
+    ): Promise<JsonValue>;
+    consumeContextMessages?(
+        instance: string,
+        ctxId: string,
+        callId: string,
+    ): Promise<ContextMessageReadResult>;
+    failContextMessages?(
+        instance: string,
+        ctxId: string,
+        reason: string,
+    ): Promise<ContextMessageRecord[]>;
     readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
-    reportTodo?(instance: string, message: string, callId: string, context: ToolCallContext): Promise<void>;
+    reportTodo?(
+        instance: string,
+        message: string,
+        callId: string,
+        context: ToolCallContext,
+    ): Promise<void>;
     listTools(instance: string): ToolDefinition[];
     observeTmuxTask?(
         instance: string,
         taskId: string,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<JsonValue>;
-    prepareWorkspace(instance: string, workspace: string): Promise<{
+    prepareWorkspace(
+        instance: string,
+        workspace: string,
+    ): Promise<{
         projectMemoryAgentFile: string;
         projectMemoryDirectory: string;
         projectMemoryPresent?: boolean;
         temporaryDirectory: string;
         workspace: string;
     }>;
-    readAlerts(instance: string, workspace: string): Promise<{ advice: Array<{ code: string; text: string }> }>;
+    readAlerts(
+        instance: string,
+        workspace: string,
+    ): Promise<{ advice: Array<{ code: string; text: string }> }>;
     releaseAlerts(instance: string, workspace: string): Promise<void>;
     connectInstance(instance: string, reference: string): Promise<JsonValue>;
-    releaseInstanceReference?(instance: string, reference: string): Promise<void>;
+    releaseInstanceReference?(
+        instance: string,
+        reference: string,
+    ): Promise<void>;
     statusInstance(instance: string): Promise<JsonValue>;
     stopInstance(instance: string): Promise<JsonValue>;
     touchAlerts(instance: string, workspace: string): Promise<void>;
     touchTemporaryDirectory(instance: string, path: string): Promise<void>;
-    writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue>;
+    writeTodo(
+        instance: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue>;
 
     viewArtifactImage?(
         defaultInstance: string,
         input: ArtifactViewImageInput,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<ArtifactViewImageResult>;
 }
 
-export type McpInteractionGateway = McpInstanceGateway & Required<Pick<
-    McpInstanceGateway,
-    | "createWait"
-    | "detachWait"
-    | "consumeWait"
-    | "resolveWait"
-    | "waitForWait"
-    | "listWaits"
-    | "listApprovals"
-    | "decideApproval"
->>;
+export type McpInteractionGateway = McpInstanceGateway &
+    Required<
+        Pick<
+            McpInstanceGateway,
+            | "createWait"
+            | "detachWait"
+            | "consumeWait"
+            | "resolveWait"
+            | "waitForWait"
+            | "listWaits"
+            | "listApprovals"
+            | "decideApproval"
+        >
+    >;
 
 export function isMcpInteractionGateway(
-    gateway: McpInstanceGateway | undefined
+    gateway: McpInstanceGateway | undefined,
 ): gateway is McpInteractionGateway {
-    return gateway !== undefined &&
+    return (
+        gateway !== undefined &&
         gateway.createWait !== undefined &&
         gateway.detachWait !== undefined &&
         gateway.consumeWait !== undefined &&
@@ -227,71 +347,89 @@ export function isMcpInteractionGateway(
         gateway.waitForWait !== undefined &&
         gateway.listWaits !== undefined &&
         gateway.listApprovals !== undefined &&
-        gateway.decideApproval !== undefined;
+        gateway.decideApproval !== undefined
+    );
 }
 
-export type McpWaitRecoveryGateway = McpInteractionGateway & Required<Pick<
-    McpInstanceGateway,
-    "claimWaitRecovery" | "completeWaitRecovery" | "disableWaitRecovery" | "dismissWaitRecovery" | "markWaitRecoveryAttempted" | "rejectWaitRecovery" | "releaseWaitRecovery"
->>;
+export type McpWaitRecoveryGateway = McpInteractionGateway &
+    Required<
+        Pick<
+            McpInstanceGateway,
+            | "claimWaitRecovery"
+            | "completeWaitRecovery"
+            | "disableWaitRecovery"
+            | "dismissWaitRecovery"
+            | "markWaitRecoveryAttempted"
+            | "rejectWaitRecovery"
+            | "releaseWaitRecovery"
+        >
+    >;
 
 export function isMcpWaitRecoveryGateway(
-    gateway: McpInstanceGateway | undefined
+    gateway: McpInstanceGateway | undefined,
 ): gateway is McpWaitRecoveryGateway {
-    return isMcpInteractionGateway(gateway) &&
+    return (
+        isMcpInteractionGateway(gateway) &&
         gateway.claimWaitRecovery !== undefined &&
         gateway.completeWaitRecovery !== undefined &&
         gateway.dismissWaitRecovery !== undefined &&
         gateway.markWaitRecoveryAttempted !== undefined &&
         gateway.rejectWaitRecovery !== undefined &&
         gateway.disableWaitRecovery !== undefined &&
-        gateway.releaseWaitRecovery !== undefined;
+        gateway.releaseWaitRecovery !== undefined
+    );
 }
 
-export type McpWaitTrackingGateway = McpInteractionGateway & Required<Pick<
-    McpInstanceGateway,
-    "cancelWait" | "reattachWait"
->>;
+export type McpWaitTrackingGateway = McpInteractionGateway &
+    Required<Pick<McpInstanceGateway, "cancelWait" | "reattachWait">>;
 
 export function isMcpWaitTrackingGateway(
-    gateway: McpInstanceGateway | undefined
+    gateway: McpInstanceGateway | undefined,
 ): gateway is McpWaitTrackingGateway {
-    return isMcpInteractionGateway(gateway) &&
-        gateway.cancelWait !== undefined && gateway.reattachWait !== undefined;
+    return (
+        isMcpInteractionGateway(gateway) &&
+        gateway.cancelWait !== undefined &&
+        gateway.reattachWait !== undefined
+    );
 }
 
-export type McpTmuxWaitGateway = McpWaitTrackingGateway & Required<Pick<
-    McpInstanceGateway,
-    "observeTmuxTask"
->>;
+export type McpTmuxWaitGateway = McpWaitTrackingGateway &
+    Required<Pick<McpInstanceGateway, "observeTmuxTask">>;
 
 export function isMcpTmuxWaitGateway(
-    gateway: McpInstanceGateway | undefined
+    gateway: McpInstanceGateway | undefined,
 ): gateway is McpTmuxWaitGateway {
-    return isMcpWaitTrackingGateway(gateway) && gateway.observeTmuxTask !== undefined;
+    return (
+        isMcpWaitTrackingGateway(gateway) &&
+        gateway.observeTmuxTask !== undefined
+    );
 }
 
-export type McpWorkspaceGateway = McpInteractionGateway & Required<Pick<
-    McpInstanceGateway,
-    "readToolCalls" | "readWorkspaceEvents"
->>;
+export type McpWorkspaceGateway = McpInteractionGateway &
+    Required<Pick<McpInstanceGateway, "readToolCalls" | "readWorkspaceEvents">>;
 
 export function isMcpWorkspaceGateway(
-    gateway: McpInstanceGateway | undefined
+    gateway: McpInstanceGateway | undefined,
 ): gateway is McpWorkspaceGateway {
-    return isMcpInteractionGateway(gateway) &&
+    return (
+        isMcpInteractionGateway(gateway) &&
         gateway.readToolCalls !== undefined &&
-        gateway.readWorkspaceEvents !== undefined;
+        gateway.readWorkspaceEvents !== undefined
+    );
 }
 
-export type McpGoalGateway = McpInstanceGateway & Required<Pick<
-    McpInstanceGateway,
-    "goalContinuation" | "manageGoal" | "readGoal"
->>;
+export type McpGoalGateway = McpInstanceGateway &
+    Required<
+        Pick<McpInstanceGateway, "goalContinuation" | "manageGoal" | "readGoal">
+    >;
 
-export function isMcpGoalGateway(gateway: McpInstanceGateway | undefined): gateway is McpGoalGateway {
-    return gateway !== undefined &&
+export function isMcpGoalGateway(
+    gateway: McpInstanceGateway | undefined,
+): gateway is McpGoalGateway {
+    return (
+        gateway !== undefined &&
         gateway.goalContinuation !== undefined &&
         gateway.manageGoal !== undefined &&
-        gateway.readGoal !== undefined;
+        gateway.readGoal !== undefined
+    );
 }

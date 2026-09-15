@@ -1,4 +1,8 @@
-import type { ContextMessageRecord, JsonValue, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    ContextMessageRecord,
+    JsonValue,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 
 import type { BoxModel } from "../../../component/content/Box.js";
 import type { TuiAppState } from "../../../../state/store/Model.js";
@@ -10,11 +14,17 @@ export function buildAuditConversationBoxes(
     instance: string,
     ctxId: string,
 ): BoxModel[] {
-    const messages = (state.readModel.instanceState[instance]?.contextMessages ?? [])
+    const messages = (
+        state.readModel.instanceState[instance]?.contextMessages ?? []
+    )
         .filter((message) => message.ctxId === ctxId)
         .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-    const deliveredCalls = (state.readModel.instanceState[instance]?.commentCalls ?? [])
-        .filter((call) => call.ctxId === ctxId && readCallComments(call).length > 0)
+    const deliveredCalls = (
+        state.readModel.instanceState[instance]?.commentCalls ?? []
+    )
+        .filter(
+            (call) => call.ctxId === ctxId && readCallComments(call).length > 0,
+        )
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
     const pending = messages.filter(
         (message) => message.status === "pending" || message.status === "sent",
@@ -22,9 +32,15 @@ export function buildAuditConversationBoxes(
     const failed = messages.filter((message) => message.status === "failed");
 
     return [
-        ...deliveredCalls.map((call) => deliveredCommentBox(state, instance, call)),
-        ...(failed.length === 0 ? [] : [failedCommentBox(state, instance, failed)]),
-        ...(pending.length === 0 ? [] : [pendingCommentBox(state, instance, pending)]),
+        ...deliveredCalls.map((call) =>
+            deliveredCommentBox(state, instance, call),
+        ),
+        ...(failed.length === 0
+            ? []
+            : [failedCommentBox(state, instance, failed)]),
+        ...(pending.length === 0
+            ? []
+            : [pendingCommentBox(state, instance, pending)]),
         composerBox(state, instance, ctxId),
     ];
 }
@@ -75,7 +91,10 @@ function pendingCommentBox(
         searchText: `pending next call ${comment}`,
         status: "pending",
         summaryLines: [
-            compactSummary(["target", "next call"], ["comments", String(messages.length)]),
+            compactSummary(
+                ["target", "next call"],
+                ["comments", String(messages.length)],
+            ),
             comment,
         ],
         title: "Comment · next call",
@@ -88,19 +107,27 @@ function failedCommentBox(
     messages: readonly ContextMessageRecord[],
 ): BoxModel {
     const comment = mergeCommentText(messages);
-    const errors = [...new Set(messages.flatMap((message) => message.error ?? []))].join("; ");
+    const errors = [
+        ...new Set(messages.flatMap((message) => message.error ?? [])),
+    ].join("; ");
     return makeBox(state, "audit", instance, {
         detailLines: [
             formatField("Target", "next tool call"),
             formatField("Comments", String(messages.length)),
             formatField("Comment", comment),
-            formatField("Error", errors.length === 0 ? "delivery failed" : errors),
+            formatField(
+                "Error",
+                errors.length === 0 ? "delivery failed" : errors,
+            ),
         ],
         id: "conversation-failed",
         searchText: `failed ${comment} ${errors}`,
         status: "failed",
         summaryLines: [
-            compactSummary(["delivery", "failed"], ["comments", String(messages.length)]),
+            compactSummary(
+                ["delivery", "failed"],
+                ["comments", String(messages.length)],
+            ),
             `${comment}  error=${errors.length === 0 ? "delivery failed" : errors}`,
         ],
         title: "Comment · failed",
@@ -154,9 +181,11 @@ function readCallComments(call: ToolCallRecord): string[] {
 }
 
 function readComments(value: JsonValue | undefined): string[] {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return [];
     const comment = (value as Record<string, JsonValue>).comment;
-    return Array.isArray(comment) && comment.every((entry) => typeof entry === "string")
+    return Array.isArray(comment) &&
+        comment.every((entry) => typeof entry === "string")
         ? comment
         : [];
 }

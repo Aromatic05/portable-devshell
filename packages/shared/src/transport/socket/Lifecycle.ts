@@ -1,6 +1,19 @@
-import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+    spawn,
+    type ChildProcess,
+    type SpawnOptions,
+} from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
-import { appendFile, mkdir, open, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
+import {
+    appendFile,
+    mkdir,
+    open,
+    readFile,
+    readlink,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
 import { createConnection } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -13,14 +26,18 @@ import { SocketChannel } from "./SocketChannel.js";
 import {
     ControlPathHome,
     ControlSocketFile,
-    type ControlSocketFilePort
+    type ControlSocketFilePort,
 } from "./Endpoint.js";
 
 export interface ControlDaemonLaunchOptions {
     daemonModulePath: string;
     env?: NodeJS.ProcessEnv;
     homeDirectory?: string;
-    spawnFunction?: (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+    spawnFunction?: (
+        command: string,
+        args: string[],
+        options: SpawnOptions,
+    ) => ChildProcess;
     startupLogPath?: string;
     xdgRuntimeDir?: string;
 }
@@ -83,15 +100,24 @@ export class ControlDaemonLauncher {
         if (options.xdgRuntimeDir !== undefined) {
             env.XDG_RUNTIME_DIR = options.xdgRuntimeDir;
         }
-        const startupLogPath = options.startupLogPath ?? controlStartupLogPath(options.homeDirectory);
+        const startupLogPath =
+            options.startupLogPath ??
+            controlStartupLogPath(options.homeDirectory);
         mkdirSync(dirname(startupLogPath), { recursive: true });
         const startupLogFd = openSync(startupLogPath, "w", 0o600);
         let child: ChildProcess;
         try {
             child = spawnFunction(
                 process.execPath,
-                [...collectNodeBootstrapArgs(process.execArgv), options.daemonModulePath],
-                { detached: true, env, stdio: ["ignore", startupLogFd, startupLogFd] }
+                [
+                    ...collectNodeBootstrapArgs(process.execArgv),
+                    options.daemonModulePath,
+                ],
+                {
+                    detached: true,
+                    env,
+                    stdio: ["ignore", startupLogFd, startupLogFd],
+                },
             );
         } finally {
             closeSync(startupLogFd);
@@ -106,7 +132,10 @@ export class ControlLogger implements ControlLoggerPort {
     readonly path: string;
 
     constructor(homeDirectory?: string) {
-        this.#logsDir = join(new ControlPathHome(homeDirectory).controlHomeDir, "logs");
+        this.#logsDir = join(
+            new ControlPathHome(homeDirectory).controlHomeDir,
+            "logs",
+        );
         this.path = join(this.#logsDir, "control.log");
     }
 
@@ -131,7 +160,11 @@ export class ControlLogger implements ControlLoggerPort {
 
     async write(level: string, message: string): Promise<void> {
         await mkdir(this.#logsDir, { recursive: true });
-        await appendFile(this.path, `[${new Date().toISOString()}] ${level} ${message}\n`, "utf8");
+        await appendFile(
+            this.path,
+            `[${new Date().toISOString()}] ${level} ${message}\n`,
+            "utf8",
+        );
     }
 }
 
@@ -139,14 +172,19 @@ export class ControlPidFile implements ControlPidFilePort {
     readonly path: string;
 
     constructor(homeDirectory?: string) {
-        this.path = join(new ControlPathHome(homeDirectory).controlHomeDir, "control.pid");
+        this.path = join(
+            new ControlPathHome(homeDirectory).controlHomeDir,
+            "control.pid",
+        );
     }
 
     async read(): Promise<number | undefined> {
         try {
             const source = (await readFile(this.path, "utf8")).trim();
             const pid = Number.parseInt(source, 10);
-            return source.length > 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+            return source.length > 0 && Number.isSafeInteger(pid) && pid > 0
+                ? pid
+                : undefined;
         } catch (error) {
             if (isFileMissingError(error)) {
                 return undefined;
@@ -180,18 +218,27 @@ export class ControlLifecycleManager {
     readonly #waitTimeoutMs: number;
 
     constructor(options: ControlLifecycleManagerOptions = {}) {
-        this.#logger = options.logger ?? new ControlLogger(options.homeDirectory);
-        this.#pidFile = options.pidFile ?? new ControlPidFile(options.homeDirectory);
-        this.#socketFile = options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
-        this.#startupLogPath = options.startupLogPath ?? controlStartupLogPath(options.homeDirectory);
+        this.#logger =
+            options.logger ?? new ControlLogger(options.homeDirectory);
+        this.#pidFile =
+            options.pidFile ?? new ControlPidFile(options.homeDirectory);
+        this.#socketFile =
+            options.socketFile ?? new ControlSocketFile(options.xdgRuntimeDir);
+        this.#startupLogPath =
+            options.startupLogPath ??
+            controlStartupLogPath(options.homeDirectory);
         this.#waitTimeoutMs = options.waitTimeoutMs ?? 5_000;
-        this.#startWaitTimeoutMs = options.startWaitTimeoutMs ?? options.waitTimeoutMs ?? 15_000;
+        this.#startWaitTimeoutMs =
+            options.startWaitTimeoutMs ?? options.waitTimeoutMs ?? 15_000;
         this.#processIsRunning = options.processIsRunning ?? processIsRunning;
-        this.#processIdentity = options.processIdentity ?? ((pid) => identifyControlProcess(pid, {
-            daemonModulePath: options.daemonModulePath,
-            homeDirectory: options.homeDirectory,
-            xdgRuntimeDir: options.xdgRuntimeDir
-        }));
+        this.#processIdentity =
+            options.processIdentity ??
+            ((pid) =>
+                identifyControlProcess(pid, {
+                    daemonModulePath: options.daemonModulePath,
+                    homeDirectory: options.homeDirectory,
+                    xdgRuntimeDir: options.xdgRuntimeDir,
+                }));
         this.#signalProcess = options.signalProcess ?? sendSignal;
         this.#launchOptions = {
             daemonModulePath: options.daemonModulePath,
@@ -199,17 +246,21 @@ export class ControlLifecycleManager {
             homeDirectory: options.homeDirectory,
             spawnFunction: options.spawnFunction,
             startupLogPath: this.#startupLogPath,
-            xdgRuntimeDir: options.xdgRuntimeDir
+            xdgRuntimeDir: options.xdgRuntimeDir,
         };
-        this.#rpcClient = options.rpcClient ?? createSocketControlLifecycleRpcClient(
-            this.#socketFile.path,
-            options.requestTimeoutMs ?? Math.min(this.#waitTimeoutMs, 1_000)
-        );
-        const lifecycleLockDirectory = this.#socketFile.runtimeDir ?? dirname(this.#pidFile.path);
+        this.#rpcClient =
+            options.rpcClient ??
+            createSocketControlLifecycleRpcClient(
+                this.#socketFile.path,
+                options.requestTimeoutMs ??
+                    Math.min(this.#waitTimeoutMs, 1_000),
+            );
+        const lifecycleLockDirectory =
+            this.#socketFile.runtimeDir ?? dirname(this.#pidFile.path);
         this.#lifecycleLock = new ControlLifecycleFileLock(
             join(lifecycleLockDirectory, "control.lifecycle.lock"),
             this.#processIsRunning,
-            this.#waitTimeoutMs
+            this.#waitTimeoutMs,
         );
     }
 
@@ -219,13 +270,16 @@ export class ControlLifecycleManager {
             if (current.running) {
                 return current;
             }
-            if (current.pid !== undefined && this.#processIsRunning(current.pid)) {
+            if (
+                current.pid !== undefined &&
+                this.#processIsRunning(current.pid)
+            ) {
                 const identity = await this.#processIdentity(current.pid);
                 if (identity === "control") {
                     await this.#terminateProcess(current.pid);
                 } else if (identity === "unknown") {
                     throw new Error(
-                        `Control PID file points to live process ${current.pid}, but the control RPC endpoint is unavailable and the process identity could not be verified. Refusing to replace an unknown process.`
+                        `Control PID file points to live process ${current.pid}, but the control RPC endpoint is unavailable and the process identity could not be verified. Refusing to replace an unknown process.`,
                     );
                 }
             }
@@ -234,27 +288,40 @@ export class ControlLifecycleManager {
             await this.#socketFile.ensureRuntimeDir();
             const daemonModulePath = this.#launchOptions.daemonModulePath;
             if (daemonModulePath === undefined) {
-                throw new Error("Control lifecycle start requires daemonModulePath.");
+                throw new Error(
+                    "Control lifecycle start requires daemonModulePath.",
+                );
             }
 
-            const child = ControlDaemonLauncher.spawnDetached({ ...this.#launchOptions, daemonModulePath });
+            const child = ControlDaemonLauncher.spawnDetached({
+                ...this.#launchOptions,
+                daemonModulePath,
+            });
             const pid = child.pid;
             if (pid === undefined || !Number.isSafeInteger(pid) || pid <= 0) {
-                throw new Error("Control daemon spawn did not return a process id.");
+                throw new Error(
+                    "Control daemon spawn did not return a process id.",
+                );
             }
 
             try {
                 await this.#pidFile.write(pid);
-                return await this.#waitFor(async () => {
-                    const status = await this.status();
-                    if (status.running) {
-                        return status;
-                    }
-                    if (!this.#processIsRunning(pid)) {
-                        throw new Error(`control server process ${pid} exited before becoming ready`);
-                    }
-                    return undefined;
-                }, "control server did not become ready", this.#startWaitTimeoutMs);
+                return await this.#waitFor(
+                    async () => {
+                        const status = await this.status();
+                        if (status.running) {
+                            return status;
+                        }
+                        if (!this.#processIsRunning(pid)) {
+                            throw new Error(
+                                `control server process ${pid} exited before becoming ready`,
+                            );
+                        }
+                        return undefined;
+                    },
+                    "control server did not become ready",
+                    this.#startWaitTimeoutMs,
+                );
             } catch (error) {
                 await this.#terminateProcess(pid).catch(() => undefined);
                 await this.#cleanupRuntimeFiles(pid);
@@ -283,20 +350,23 @@ export class ControlLifecycleManager {
                         await this.#terminateProcess(pid);
                     } else if (identity === "unknown") {
                         throw new Error(
-                            `Control PID file points to live process ${pid}, but the control RPC endpoint is unavailable. Refusing to signal an unverified process.`
+                            `Control PID file points to live process ${pid}, but the control RPC endpoint is unavailable. Refusing to signal an unverified process.`,
                         );
                     }
                 }
                 if (current.running && probe.verifiedPid !== undefined) {
                     try {
-                        await this.#waitForProcessExit(pid, "control server did not stop");
+                        await this.#waitForProcessExit(
+                            pid,
+                            "control server did not stop",
+                        );
                     } catch {
                         await this.#terminateProcess(pid);
                     }
                 } else if (current.running) {
                     await this.#waitForProcessExit(
                         pid,
-                        `control server process ${pid} did not stop; its PID could not be verified over RPC`
+                        `control server process ${pid} did not stop; its PID could not be verified over RPC`,
                     );
                 }
             } else if (current.running) {
@@ -319,21 +389,26 @@ export class ControlLifecycleManager {
         const recordedPid = await this.#pidFile.read();
         try {
             const result = await this.#rpcClient.request("status");
-            if (!isJsonRecord(result) || typeof result.instanceCount !== "number") {
+            if (
+                !isJsonRecord(result) ||
+                typeof result.instanceCount !== "number"
+            ) {
                 throw new Error("Invalid service.status response.");
             }
-            const reportedPid = isPositiveInteger(result.pid) ? result.pid : undefined;
+            const reportedPid = isPositiveInteger(result.pid)
+                ? result.pid
+                : undefined;
             return {
                 status: {
                     instanceCount: result.instanceCount,
                     pid: reportedPid ?? recordedPid,
-                    running: true
+                    running: true,
                 },
-                verifiedPid: reportedPid
+                verifiedPid: reportedPid,
             };
         } catch {
             return {
-                status: { instanceCount: 0, pid: recordedPid, running: false }
+                status: { instanceCount: 0, pid: recordedPid, running: false },
             };
         }
     }
@@ -344,7 +419,11 @@ export class ControlLifecycleManager {
 
     async #cleanupRuntimeFiles(expectedPid: number | undefined): Promise<void> {
         const currentPid = await this.#pidFile.read();
-        if (expectedPid !== undefined && currentPid !== undefined && currentPid !== expectedPid) {
+        if (
+            expectedPid !== undefined &&
+            currentPid !== undefined &&
+            currentPid !== expectedPid
+        ) {
             return;
         }
         await this.#pidFile.remove();
@@ -357,18 +436,24 @@ export class ControlLifecycleManager {
         }
         this.#signalProcess(pid, "SIGTERM");
         try {
-            await this.#waitForProcessExit(pid, `control process ${pid} did not terminate`);
+            await this.#waitForProcessExit(
+                pid,
+                `control process ${pid} did not terminate`,
+            );
             return;
         } catch {
             this.#signalProcess(pid, "SIGKILL");
         }
-        await this.#waitForProcessExit(pid, `control process ${pid} did not terminate after SIGKILL`);
+        await this.#waitForProcessExit(
+            pid,
+            `control process ${pid} did not terminate after SIGKILL`,
+        );
     }
 
     async #waitFor<T>(
         factory: () => Promise<T | undefined>,
         timeoutMessage: string,
-        timeoutMs = this.#waitTimeoutMs
+        timeoutMs = this.#waitTimeoutMs,
     ): Promise<T> {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
@@ -386,13 +471,22 @@ export class ControlLifecycleManager {
         throw new Error(timeoutMessage);
     }
 
-    async #waitForProcessExit(pid: number, timeoutMessage: string): Promise<void> {
-        await this.#waitFor(async () => this.#processIsRunning(pid) ? undefined : true, timeoutMessage);
+    async #waitForProcessExit(
+        pid: number,
+        timeoutMessage: string,
+    ): Promise<void> {
+        await this.#waitFor(
+            async () => (this.#processIsRunning(pid) ? undefined : true),
+            timeoutMessage,
+        );
     }
 
     async #renderStartFailure(error: unknown): Promise<string> {
         const message = error instanceof Error ? error.message : String(error);
-        const tail = tailLines(await readOptionalFile(this.#startupLogPath), 80);
+        const tail = tailLines(
+            await readOptionalFile(this.#startupLogPath),
+            80,
+        );
         return tail.length === 0
             ? `${message}\ncontrol startup log (${this.#startupLogPath}) is empty.`
             : `${message}\ncontrol startup log (${this.#startupLogPath}):\n${tail}`;
@@ -404,7 +498,11 @@ class ControlLifecycleFileLock {
     readonly #processIsRunning: (pid: number) => boolean;
     readonly #waitTimeoutMs: number;
 
-    constructor(path: string, processIsRunningFactory: (pid: number) => boolean, waitTimeoutMs: number) {
+    constructor(
+        path: string,
+        processIsRunningFactory: (pid: number) => boolean,
+        waitTimeoutMs: number,
+    ) {
         this.#path = path;
         this.#processIsRunning = processIsRunningFactory;
         this.#waitTimeoutMs = waitTimeoutMs;
@@ -431,7 +529,9 @@ class ControlLifecycleFileLock {
                     await handle.close();
                 }
                 return async () => {
-                    if (await readPositiveInteger(this.#path) === process.pid) {
+                    if (
+                        (await readPositiveInteger(this.#path)) === process.pid
+                    ) {
                         await rm(this.#path, { force: true });
                     }
                 };
@@ -446,19 +546,24 @@ class ControlLifecycleFileLock {
                 await rm(this.#path, { force: true });
                 continue;
             }
-            if (ownerPid === undefined && await fileAgeMs(this.#path) > this.#waitTimeoutMs) {
+            if (
+                ownerPid === undefined &&
+                (await fileAgeMs(this.#path)) > this.#waitTimeoutMs
+            ) {
                 await rm(this.#path, { force: true });
                 continue;
             }
             await sleep(50);
         }
-        throw new Error(`Timed out waiting for control lifecycle lock ${this.#path}.`);
+        throw new Error(
+            `Timed out waiting for control lifecycle lock ${this.#path}.`,
+        );
     }
 }
 
 function createSocketControlLifecycleRpcClient(
     socketPath: string,
-    requestTimeoutMs: number
+    requestTimeoutMs: number,
 ): ControlLifecycleRpcClient {
     return {
         request: async (operation) => {
@@ -481,7 +586,7 @@ function createSocketControlLifecycleRpcClient(
                 mapError: toError,
                 mapRemoteError: (error) => createError(error),
                 mode: "persistent",
-                peer: "cli"
+                peer: "cli",
             });
             try {
                 await connection.request("@control", "service", "hello", {
@@ -489,11 +594,15 @@ function createSocketControlLifecycleRpcClient(
                     maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
                     minProtocolVersion: CONTROL_PROTOCOL_VERSION,
                 });
-                return await connection.request("@control", "service", operation);
+                return await connection.request(
+                    "@control",
+                    "service",
+                    operation,
+                );
             } finally {
                 connection.close();
             }
-        }
+        },
     };
 }
 
@@ -501,10 +610,16 @@ function collectNodeBootstrapArgs(execArgv: readonly string[]): string[] {
     const args: string[] = [];
     for (let index = 0; index < execArgv.length; index += 1) {
         const current = execArgv[index]!;
-        if ((current === "--import" || current === "--loader") && execArgv[index + 1] !== undefined) {
+        if (
+            (current === "--import" || current === "--loader") &&
+            execArgv[index + 1] !== undefined
+        ) {
             args.push(current, execArgv[index + 1]!);
             index += 1;
-        } else if (current.startsWith("--import=") || current.startsWith("--loader=")) {
+        } else if (
+            current.startsWith("--import=") ||
+            current.startsWith("--loader=")
+        ) {
             args.push(current);
         } else if (current === "--experimental-transform-types") {
             args.push(current);
@@ -514,7 +629,11 @@ function collectNodeBootstrapArgs(execArgv: readonly string[]): string[] {
 }
 
 function controlStartupLogPath(homeDirectory?: string): string {
-    return join(new ControlPathHome(homeDirectory).controlHomeDir, "logs", "control.startup.log");
+    return join(
+        new ControlPathHome(homeDirectory).controlHomeDir,
+        "logs",
+        "control.startup.log",
+    );
 }
 
 async function readOptionalFile(path: string): Promise<string> {
@@ -535,11 +654,21 @@ async function fileAgeMs(path: string): Promise<number> {
 }
 
 function isFileExistsError(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "EEXIST"
+    );
 }
 
 function isFileMissingError(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+    );
 }
 
 function isJsonRecord(value: JsonValue): value is { [key: string]: JsonValue } {
@@ -547,7 +676,9 @@ function isJsonRecord(value: JsonValue): value is { [key: string]: JsonValue } {
 }
 
 function isPositiveInteger(value: JsonValue | undefined): value is number {
-    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+    return (
+        typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    );
 }
 
 function processIsRunning(pid: number): boolean {
@@ -555,7 +686,12 @@ function processIsRunning(pid: number): boolean {
         process.kill(pid, 0);
         return true;
     } catch (error) {
-        return !(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH");
+        return !(
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ESRCH"
+        );
     }
 }
 
@@ -565,9 +701,12 @@ async function identifyControlProcess(
         daemonModulePath?: string;
         homeDirectory?: string;
         xdgRuntimeDir?: string;
-    }
+    },
 ): Promise<ControlProcessIdentity> {
-    if (process.platform !== "linux" || options.daemonModulePath === undefined) {
+    if (
+        process.platform !== "linux" ||
+        options.daemonModulePath === undefined
+    ) {
         return "unknown";
     }
 
@@ -575,7 +714,7 @@ async function identifyControlProcess(
         const [cmdline, executable, environment] = await Promise.all([
             readFile(`/proc/${pid}/cmdline`, "utf8"),
             readlink(`/proc/${pid}/exe`),
-            readFile(`/proc/${pid}/environ`, "utf8")
+            readFile(`/proc/${pid}/environ`, "utf8"),
         ]);
         const argv = cmdline.split("\0").filter((value) => value.length > 0);
         if (argv.length === 0) return "unknown";
@@ -583,10 +722,14 @@ async function identifyControlProcess(
         if (argv.includes("-e") || argv.includes("--eval")) return "other";
 
         const expectedModule = resolve(options.daemonModulePath);
-        const ownsModule = argv.slice(1).some((argument) =>
-            argument === options.daemonModulePath ||
-            (argument.startsWith("/") && resolve(argument) === expectedModule)
-        );
+        const ownsModule = argv
+            .slice(1)
+            .some(
+                (argument) =>
+                    argument === options.daemonModulePath ||
+                    (argument.startsWith("/") &&
+                        resolve(argument) === expectedModule),
+            );
         if (!ownsModule) return "other";
 
         const values = new Map(
@@ -596,17 +739,23 @@ async function identifyControlProcess(
                 .map((entry) => {
                     const separator = entry.indexOf("=");
                     return separator === -1
-                        ? [entry, ""] as const
-                        : [entry.slice(0, separator), entry.slice(separator + 1)] as const;
-                })
+                        ? ([entry, ""] as const)
+                        : ([
+                              entry.slice(0, separator),
+                              entry.slice(separator + 1),
+                          ] as const);
+                }),
         );
         const expectedHome = options.homeDirectory ?? process.env.HOME;
-        if (expectedHome !== undefined && values.get("HOME") !== expectedHome) return "other";
-        const expectedRuntime = options.xdgRuntimeDir ?? process.env.XDG_RUNTIME_DIR;
+        if (expectedHome !== undefined && values.get("HOME") !== expectedHome)
+            return "other";
+        const expectedRuntime =
+            options.xdgRuntimeDir ?? process.env.XDG_RUNTIME_DIR;
         if (
             expectedRuntime !== undefined &&
             values.get("XDG_RUNTIME_DIR") !== expectedRuntime
-        ) return "other";
+        )
+            return "other";
         return "control";
     } catch (error) {
         if (isFileMissingError(error)) return "other";
@@ -618,7 +767,9 @@ async function readPositiveInteger(path: string): Promise<number | undefined> {
     try {
         const source = (await readFile(path, "utf8")).trim();
         const value = Number.parseInt(source, 10);
-        return source.length > 0 && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+        return source.length > 0 && Number.isSafeInteger(value) && value > 0
+            ? value
+            : undefined;
     } catch (error) {
         if (isFileMissingError(error)) {
             return undefined;
@@ -631,14 +782,22 @@ function sendSignal(pid: number, signal: NodeJS.Signals): void {
     try {
         process.kill(pid, signal);
     } catch (error) {
-        if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH")) {
+        if (!(
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ESRCH"
+        )) {
             throw error;
         }
     }
 }
 
 function tailLines(source: string, limit: number): string {
-    const lines = source.trim().split("\n").filter((line) => line.length > 0);
+    const lines = source
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0);
     return lines.length === 0 ? "" : lines.slice(-limit).join("\n");
 }
 

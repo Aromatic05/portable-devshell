@@ -24,7 +24,8 @@ export interface TuiTerminalLine {
     segments: TuiTerminalSegment[];
 }
 
-export type TuiTerminalMouseTrackingMode = "none" | "x10" | "vt200" | "drag" | "any";
+export type TuiTerminalMouseTrackingMode =
+    "none" | "x10" | "vt200" | "drag" | "any";
 
 export interface TuiTerminalInputModes {
     applicationCursorKeys: boolean;
@@ -83,7 +84,8 @@ export interface TuiTerminalBufferSnapshot {
     title?: string;
 }
 
-export type TuiTerminalStatus = "idle" | "starting" | "running" | "exited" | "error";
+export type TuiTerminalStatus =
+    "idle" | "starting" | "running" | "exited" | "error";
 
 export interface TuiTerminalSnapshot extends TuiTerminalBufferSnapshot {
     error?: string;
@@ -96,7 +98,9 @@ export interface TuiTerminalSnapshot extends TuiTerminalBufferSnapshot {
 export interface TuiTerminalPty {
     kill(): void;
     onData(listener: (data: string) => void): TuiTerminalDisposable;
-    onExit(listener: (event: { exitCode: number; signal?: number }) => void): TuiTerminalDisposable;
+    onExit(
+        listener: (event: { exitCode: number; signal?: number }) => void,
+    ): TuiTerminalDisposable;
     resize(columns: number, rows: number): void;
     write(data: string): void;
 }
@@ -111,7 +115,7 @@ export interface TuiTerminalPtyOptions {
 export type TuiTerminalPtyFactory = (
     command: string,
     args: readonly string[],
-    options: TuiTerminalPtyOptions
+    options: TuiTerminalPtyOptions,
 ) => TuiTerminalPty;
 
 export interface TuiTerminalStartOptions {

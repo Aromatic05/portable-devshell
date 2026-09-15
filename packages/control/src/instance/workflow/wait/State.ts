@@ -35,7 +35,11 @@ export class WaitState {
     }
 
     normalizeDocument(value: unknown): WaitDocument {
-        if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.waits)) {
+        if (
+            !isRecord(value) ||
+            value.version !== 1 ||
+            !Array.isArray(value.waits)
+        ) {
             throw new Error("wait document must be version 1");
         }
         return this.#reconcileTmuxWaits({
@@ -53,8 +57,10 @@ export class WaitState {
 
     create(document: WaitDocument, input: WaitCreateInput): WaitTransition {
         if (input.kind === "tmux") {
-            const existing = document.waits.find((record) =>
-                blocksTmuxWaitCreation(record) && sameTmuxTarget(record, input)
+            const existing = document.waits.find(
+                (record) =>
+                    blocksTmuxWaitCreation(record) &&
+                    sameTmuxTarget(record, input),
             );
             if (existing !== undefined) {
                 throw new Error(
@@ -64,42 +70,107 @@ export class WaitState {
         }
         const now = this.#now();
         const record: WaitRecord = {
-            ...(input.automaticRecovery === undefined ? {} : { automaticRecovery: input.automaticRecovery }),
+            ...(input.automaticRecovery === undefined
+                ? {}
+                : { automaticRecovery: input.automaticRecovery }),
             createdAt: now,
             createdByCtxId: text(input.createdByCtxId, "createdByCtxId"),
-            ...(input.deadlineAt === undefined ? {} : { deadlineAt: storedText(input.deadlineAt, "deadlineAt") }),
-            ...(input.goalId === undefined ? {} : { goalId: text(input.goalId, "goalId") }),
-            ...(input.goalProgressAt === undefined ? {} : { goalProgressAt: storedText(input.goalProgressAt, "goalProgressAt") }),
-            ...(input.goalProgressEpoch === undefined ? {} : { goalProgressEpoch: nonNegativeInteger(input.goalProgressEpoch, "goalProgressEpoch") }),
-            ...(input.goalRevision === undefined ? {} : { goalRevision: positiveInteger(input.goalRevision, "goalRevision") }),
-            ...(input.goalStepId === undefined ? {} : { goalStepId: text(input.goalStepId, "goalStepId") }),
+            ...(input.deadlineAt === undefined
+                ? {}
+                : { deadlineAt: storedText(input.deadlineAt, "deadlineAt") }),
+            ...(input.goalId === undefined
+                ? {}
+                : { goalId: text(input.goalId, "goalId") }),
+            ...(input.goalProgressAt === undefined
+                ? {}
+                : {
+                      goalProgressAt: storedText(
+                          input.goalProgressAt,
+                          "goalProgressAt",
+                      ),
+                  }),
+            ...(input.goalProgressEpoch === undefined
+                ? {}
+                : {
+                      goalProgressEpoch: nonNegativeInteger(
+                          input.goalProgressEpoch,
+                          "goalProgressEpoch",
+                      ),
+                  }),
+            ...(input.goalRevision === undefined
+                ? {}
+                : {
+                      goalRevision: positiveInteger(
+                          input.goalRevision,
+                          "goalRevision",
+                      ),
+                  }),
+            ...(input.goalStepId === undefined
+                ? {}
+                : { goalStepId: text(input.goalStepId, "goalStepId") }),
             kind: kind(input.kind),
-            ...(input.ownerCallId === undefined ? {} : { ownerCallId: text(input.ownerCallId, "ownerCallId") }),
-            ...(input.payload === undefined ? {} : { payload: structuredClone(input.payload) }),
+            ...(input.ownerCallId === undefined
+                ? {}
+                : { ownerCallId: text(input.ownerCallId, "ownerCallId") }),
+            ...(input.payload === undefined
+                ? {}
+                : { payload: structuredClone(input.payload) }),
             status: "waiting",
-            ...(input.targetInstance === undefined ? {} : { targetInstance: text(input.targetInstance, "targetInstance") }),
+            ...(input.targetInstance === undefined
+                ? {}
+                : {
+                      targetInstance: text(
+                          input.targetInstance,
+                          "targetInstance",
+                      ),
+                  }),
             targetId: text(input.targetId, "targetId"),
-            ...(input.taskId === undefined ? {} : { taskId: text(input.taskId, "taskId") }),
-            ...(input.taskRevision === undefined ? {} : { taskRevision: positiveInteger(input.taskRevision, "taskRevision") }),
-            ...(input.todoItemId === undefined ? {} : { todoItemId: text(input.todoItemId, "todoItemId") }),
+            ...(input.taskId === undefined
+                ? {}
+                : { taskId: text(input.taskId, "taskId") }),
+            ...(input.taskRevision === undefined
+                ? {}
+                : {
+                      taskRevision: positiveInteger(
+                          input.taskRevision,
+                          "taskRevision",
+                      ),
+                  }),
+            ...(input.todoItemId === undefined
+                ? {}
+                : { todoItemId: text(input.todoItemId, "todoItemId") }),
             updatedAt: now,
             waitId: this.#waitId(),
-            ...(input.workspace === undefined ? {} : { workspace: text(input.workspace, "workspace") }),
+            ...(input.workspace === undefined
+                ? {}
+                : { workspace: text(input.workspace, "workspace") }),
         };
         return {
-            document: this.compact({ ...document, waits: [...document.waits, record] }),
+            document: this.compact({
+                ...document,
+                waits: [...document.waits, record],
+            }),
             record,
         };
     }
 
     detach(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status === "detached" || (record.status === "resolved" && record.detachedAt !== undefined)) {
+            if (
+                record.status === "detached" ||
+                (record.status === "resolved" &&
+                    record.detachedAt !== undefined)
+            ) {
                 return record;
             }
             const now = this.#now();
             if (record.status === "waiting") {
-                return { ...record, detachedAt: now, status: "detached", updatedAt: now };
+                return {
+                    ...record,
+                    detachedAt: now,
+                    status: "detached",
+                    updatedAt: now,
+                };
             }
             if (record.status === "resolved") {
                 return { ...record, detachedAt: now, updatedAt: now };
@@ -108,10 +179,19 @@ export class WaitState {
         });
     }
 
-    reattach(document: WaitDocument, waitId: string, ownerCallId?: string): WaitTransition {
+    reattach(
+        document: WaitDocument,
+        waitId: string,
+        ownerCallId?: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "detached") throw invalidTransition(record, "reattach");
-            const { detachedAt: _detachedAt, ownerCallId: _ownerCallId, ...rest } = record;
+            if (record.status !== "detached")
+                throw invalidTransition(record, "reattach");
+            const {
+                detachedAt: _detachedAt,
+                ownerCallId: _ownerCallId,
+                ...rest
+            } = record;
             const now = this.#now();
             return {
                 ...rest,
@@ -133,39 +213,65 @@ export class WaitState {
                 throw invalidTransition(record, "resolve");
             }
             const now = this.#now();
-            const consume = options.consumeIfDetached === true && record.status === "detached";
+            const consume =
+                options.consumeIfDetached === true &&
+                record.status === "detached";
             return {
                 ...record,
-                ...(result === undefined ? {} : { result: structuredClone(result) }),
+                ...(result === undefined
+                    ? {}
+                    : { result: structuredClone(result) }),
                 resolvedAt: now,
-                ...(consume ? { consumedAt: now, status: "consumed" as const } : { status: "resolved" as const }),
+                ...(consume
+                    ? { consumedAt: now, status: "consumed" as const }
+                    : { status: "resolved" as const }),
                 updatedAt: now,
             };
         });
     }
 
-    claimRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+    claimRecovery(
+        document: WaitDocument,
+        waitId: string,
+        claimId: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved" || record.detachedAt === undefined) {
+            if (
+                record.status !== "resolved" ||
+                record.detachedAt === undefined
+            ) {
                 throw invalidTransition(record, "claim recovery for");
             }
-            if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) {
-                throw new Error(`Wait ${waitId} recovery delivery is uncertain; automatic replay is disabled.`);
+            if (
+                record.recoveryMessageAttemptedAt !== undefined &&
+                record.recoveryMessageSentAt === undefined
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery delivery is uncertain; automatic replay is disabled.`,
+                );
             }
             if (record.recoveryMessageSentAt !== undefined) {
-                throw new Error(`Wait ${waitId} recovery has already been delivered.`);
+                throw new Error(
+                    `Wait ${waitId} recovery has already been delivered.`,
+                );
             }
             if (record.recoveryDisabledAt !== undefined) {
-                throw new Error(`Wait ${waitId} is not available for automatic recovery.`);
+                throw new Error(
+                    `Wait ${waitId} is not available for automatic recovery.`,
+                );
             }
             const normalizedClaimId = text(claimId, "recoveryClaimId");
             if (record.recoveryClaimId === normalizedClaimId) return record;
             const now = this.#now();
             const nowMs = Date.parse(now);
 
-            const claimedAt = record.recoveryClaimedAt === undefined ? Number.NaN : Date.parse(record.recoveryClaimedAt);
+            const claimedAt =
+                record.recoveryClaimedAt === undefined
+                    ? Number.NaN
+                    : Date.parse(record.recoveryClaimedAt);
             if (
-                record.recoveryClaimId !== undefined && Number.isFinite(claimedAt) &&
+                record.recoveryClaimId !== undefined &&
+                Number.isFinite(claimedAt) &&
                 nowMs - claimedAt < RECOVERY_CLAIM_TTL_MS
             ) {
                 throw new Error(`Wait ${waitId} recovery is already claimed.`);
@@ -182,45 +288,89 @@ export class WaitState {
         });
     }
 
-    markRecoveryAttempted(document: WaitDocument, waitId: string, claimId: string, goalProgressEpoch?: number): WaitTransition {
+    markRecoveryAttempted(
+        document: WaitDocument,
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
-                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (
+                record.status !== "resolved" ||
+                record.recoveryClaimId !== claimId
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery claim does not match.`,
+                );
             }
             if (record.recoveryMessageAttemptedAt !== undefined) return record;
             const now = this.#now();
             return {
                 ...record,
-                ...(goalProgressEpoch === undefined ? {} : {
-                    recoveryGoalProgressEpoch: nonNegativeInteger(goalProgressEpoch, "recoveryGoalProgressEpoch"),
-                }),
+                ...(goalProgressEpoch === undefined
+                    ? {}
+                    : {
+                          recoveryGoalProgressEpoch: nonNegativeInteger(
+                              goalProgressEpoch,
+                              "recoveryGoalProgressEpoch",
+                          ),
+                      }),
                 recoveryMessageAttemptedAt: now,
                 updatedAt: now,
             };
         });
     }
 
-    releaseRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+    releaseRecovery(
+        document: WaitDocument,
+        waitId: string,
+        claimId: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
-                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (
+                record.status !== "resolved" ||
+                record.recoveryClaimId !== claimId
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery claim does not match.`,
+                );
             }
             if (record.recoveryMessageAttemptedAt !== undefined) {
-                throw new Error(`Wait ${waitId} recovery delivery is uncertain and cannot be released automatically.`);
+                throw new Error(
+                    `Wait ${waitId} recovery delivery is uncertain and cannot be released automatically.`,
+                );
             }
-            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                ...rest
+            } = record;
             const now = this.#now();
             return { ...rest, updatedAt: now };
         });
     }
 
-    rejectRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+    rejectRecovery(
+        document: WaitDocument,
+        waitId: string,
+        claimId: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
-                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (
+                record.status !== "resolved" ||
+                record.recoveryClaimId !== claimId
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery claim does not match.`,
+                );
             }
-            if (record.recoveryMessageAttemptedAt === undefined || record.recoveryMessageSentAt !== undefined) {
-                throw new Error(`Wait ${waitId} recovery is not a rejectable attempted delivery.`);
+            if (
+                record.recoveryMessageAttemptedAt === undefined ||
+                record.recoveryMessageSentAt !== undefined
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery is not a rejectable attempted delivery.`,
+                );
             }
             const {
                 recoveryClaimedAt: _claimedAt,
@@ -236,23 +386,41 @@ export class WaitState {
 
     disableRecovery(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status === "consumed" || record.status === "cancelled") return record;
+            if (record.status === "consumed" || record.status === "cancelled")
+                return record;
             if (record.recoveryDisabledAt !== undefined) return record;
             const now = this.#now();
-            return { ...record, automaticRecovery: false, recoveryDisabledAt: now, updatedAt: now };
+            return {
+                ...record,
+                automaticRecovery: false,
+                recoveryDisabledAt: now,
+                updatedAt: now,
+            };
         });
     }
 
-    dismissRecovery(document: WaitDocument, waitId: string, recoveryMessageId: string): WaitTransition {
+    dismissRecovery(
+        document: WaitDocument,
+        waitId: string,
+        recoveryMessageId: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
             if (
-                record.status !== "resolved" || record.detachedAt === undefined ||
+                record.status !== "resolved" ||
+                record.detachedAt === undefined ||
                 record.recoveryMessageAttemptedAt === undefined ||
                 record.recoveryMessageId !== recoveryMessageId
             ) {
-                throw invalidTransition(record, "dismiss uncertain recovery for");
+                throw invalidTransition(
+                    record,
+                    "dismiss uncertain recovery for",
+                );
             }
-            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                ...rest
+            } = record;
             const now = this.#now();
             return {
                 ...rest,
@@ -264,13 +432,24 @@ export class WaitState {
         });
     }
 
-    completeRecovery(document: WaitDocument, waitId: string, claimId: string): WaitTransition {
+    completeRecovery(
+        document: WaitDocument,
+        waitId: string,
+        claimId: string,
+    ): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved" || record.recoveryClaimId !== claimId) {
-                throw new Error(`Wait ${waitId} recovery claim does not match.`);
+            if (
+                record.status !== "resolved" ||
+                record.recoveryClaimId !== claimId
+            ) {
+                throw new Error(
+                    `Wait ${waitId} recovery claim does not match.`,
+                );
             }
             if (record.recoveryMessageAttemptedAt === undefined) {
-                throw new Error(`Wait ${waitId} recovery was not marked attempted.`);
+                throw new Error(
+                    `Wait ${waitId} recovery was not marked attempted.`,
+                );
             }
             const now = this.#now();
             const {
@@ -290,10 +469,20 @@ export class WaitState {
 
     consume(document: WaitDocument, waitId: string): WaitTransition {
         return this.#update(document, waitId, (record) => {
-            if (record.status !== "resolved") throw invalidTransition(record, "consume");
-            const { recoveryClaimedAt: _claimedAt, recoveryClaimId: _claimId, ...rest } = record;
+            if (record.status !== "resolved")
+                throw invalidTransition(record, "consume");
+            const {
+                recoveryClaimedAt: _claimedAt,
+                recoveryClaimId: _claimId,
+                ...rest
+            } = record;
             const now = this.#now();
-            return { ...rest, consumedAt: now, status: "consumed", updatedAt: now };
+            return {
+                ...rest,
+                consumedAt: now,
+                status: "consumed",
+                updatedAt: now,
+            };
         });
     }
 
@@ -303,19 +492,33 @@ export class WaitState {
                 throw invalidTransition(record, "cancel");
             }
             const now = this.#now();
-            return { ...record, cancelledAt: now, status: "cancelled", updatedAt: now };
+            return {
+                ...record,
+                cancelledAt: now,
+                status: "cancelled",
+                updatedAt: now,
+            };
         });
     }
 
-    compact(document: WaitDocument, maxTerminalWaits = MAX_TERMINAL_WAITS): WaitDocument {
-        const active = document.waits.filter((record) => !isTerminal(record.status));
+    compact(
+        document: WaitDocument,
+        maxTerminalWaits = MAX_TERMINAL_WAITS,
+    ): WaitDocument {
+        const active = document.waits.filter(
+            (record) => !isTerminal(record.status),
+        );
         const terminal = document.waits
             .filter((record) => isTerminal(record.status))
-            .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+            .sort((left, right) =>
+                right.updatedAt.localeCompare(left.updatedAt),
+            )
             .slice(0, Math.max(0, maxTerminalWaits));
         return {
             version: 1,
-            waits: [...active, ...terminal].sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+            waits: [...active, ...terminal].sort((left, right) =>
+                left.createdAt.localeCompare(right.createdAt),
+            ),
         };
     }
 
@@ -334,7 +537,8 @@ export class WaitState {
             if (group.length < 2) continue;
             const winner = [...group].sort(compareTmuxWaitRecoveryPriority)[0]!;
             for (const record of group) {
-                if (record.waitId !== winner.waitId) superseded.add(record.waitId);
+                if (record.waitId !== winner.waitId)
+                    superseded.add(record.waitId);
             }
         }
         if (superseded.size === 0) return document;
@@ -364,7 +568,9 @@ export class WaitState {
         waitId: string,
         update: (record: WaitRecord) => WaitRecord,
     ): WaitTransition {
-        const index = document.waits.findIndex((record) => record.waitId === waitId);
+        const index = document.waits.findIndex(
+            (record) => record.waitId === waitId,
+        );
         if (index === -1) throw new Error(`Wait ${waitId} was not found.`);
         const record = update(document.waits[index]!);
         const waits = [...document.waits];
@@ -377,40 +583,120 @@ function normalizeRecord(value: unknown): WaitRecord {
     if (!isRecord(value)) throw new Error("wait record must be an object");
     const status = waitStatus(value.status);
     return {
-        ...(typeof value.automaticRecovery === "boolean" ? { automaticRecovery: value.automaticRecovery } : {}),
-        ...(typeof value.cancelledAt === "string" ? { cancelledAt: value.cancelledAt } : {}),
-        ...(typeof value.consumedAt === "string" ? { consumedAt: value.consumedAt } : {}),
+        ...(typeof value.automaticRecovery === "boolean"
+            ? { automaticRecovery: value.automaticRecovery }
+            : {}),
+        ...(typeof value.cancelledAt === "string"
+            ? { cancelledAt: value.cancelledAt }
+            : {}),
+        ...(typeof value.consumedAt === "string"
+            ? { consumedAt: value.consumedAt }
+            : {}),
         createdAt: storedText(value.createdAt, "createdAt"),
         createdByCtxId: storedText(value.createdByCtxId, "createdByCtxId"),
-        ...(typeof value.deadlineAt === "string" ? { deadlineAt: storedText(value.deadlineAt, "deadlineAt") } : {}),
-        ...(typeof value.detachedAt === "string" ? { detachedAt: value.detachedAt } : {}),
-        ...(typeof value.goalId === "string" ? { goalId: storedText(value.goalId, "goalId") } : {}),
-        ...(typeof value.goalProgressAt === "string" ? { goalProgressAt: storedText(value.goalProgressAt, "goalProgressAt") } : {}),
-        ...(typeof value.goalProgressEpoch === "number" ? { goalProgressEpoch: nonNegativeInteger(value.goalProgressEpoch, "goalProgressEpoch") } : {}),
-        ...(typeof value.goalRevision === "number" ? { goalRevision: positiveInteger(value.goalRevision, "goalRevision") } : {}),
-        ...(typeof value.goalStepId === "string" ? { goalStepId: storedText(value.goalStepId, "goalStepId") } : {}),
+        ...(typeof value.deadlineAt === "string"
+            ? { deadlineAt: storedText(value.deadlineAt, "deadlineAt") }
+            : {}),
+        ...(typeof value.detachedAt === "string"
+            ? { detachedAt: value.detachedAt }
+            : {}),
+        ...(typeof value.goalId === "string"
+            ? { goalId: storedText(value.goalId, "goalId") }
+            : {}),
+        ...(typeof value.goalProgressAt === "string"
+            ? {
+                  goalProgressAt: storedText(
+                      value.goalProgressAt,
+                      "goalProgressAt",
+                  ),
+              }
+            : {}),
+        ...(typeof value.goalProgressEpoch === "number"
+            ? {
+                  goalProgressEpoch: nonNegativeInteger(
+                      value.goalProgressEpoch,
+                      "goalProgressEpoch",
+                  ),
+              }
+            : {}),
+        ...(typeof value.goalRevision === "number"
+            ? {
+                  goalRevision: positiveInteger(
+                      value.goalRevision,
+                      "goalRevision",
+                  ),
+              }
+            : {}),
+        ...(typeof value.goalStepId === "string"
+            ? { goalStepId: storedText(value.goalStepId, "goalStepId") }
+            : {}),
         kind: kind(value.kind),
-        ...(typeof value.ownerCallId === "string" ? { ownerCallId: value.ownerCallId } : {}),
+        ...(typeof value.ownerCallId === "string"
+            ? { ownerCallId: value.ownerCallId }
+            : {}),
         ...("payload" in value ? { payload: value.payload as JsonValue } : {}),
-        ...(typeof value.recoveryClaimedAt === "string" ? { recoveryClaimedAt: value.recoveryClaimedAt } : {}),
-        ...(typeof value.recoveryClaimId === "string" ? { recoveryClaimId: value.recoveryClaimId } : {}),
-        ...(typeof value.recoveryDisabledAt === "string" ? { recoveryDisabledAt: value.recoveryDisabledAt } : {}),
-        ...(typeof value.recoveryDismissedAt === "string" ? { recoveryDismissedAt: value.recoveryDismissedAt } : {}),
-        ...(typeof value.recoveryGoalProgressEpoch === "number" ? { recoveryGoalProgressEpoch: nonNegativeInteger(value.recoveryGoalProgressEpoch, "recoveryGoalProgressEpoch") } : {}),
-        ...(typeof value.recoveryMessageAttemptedAt === "string" ? { recoveryMessageAttemptedAt: value.recoveryMessageAttemptedAt } : {}),
-        ...(typeof value.recoveryMessageId === "string" ? { recoveryMessageId: value.recoveryMessageId } : {}),
-        ...(typeof value.recoveryMessageSentAt === "string" ? { recoveryMessageSentAt: value.recoveryMessageSentAt } : {}),
-        ...(typeof value.resolvedAt === "string" ? { resolvedAt: value.resolvedAt } : {}),
+        ...(typeof value.recoveryClaimedAt === "string"
+            ? { recoveryClaimedAt: value.recoveryClaimedAt }
+            : {}),
+        ...(typeof value.recoveryClaimId === "string"
+            ? { recoveryClaimId: value.recoveryClaimId }
+            : {}),
+        ...(typeof value.recoveryDisabledAt === "string"
+            ? { recoveryDisabledAt: value.recoveryDisabledAt }
+            : {}),
+        ...(typeof value.recoveryDismissedAt === "string"
+            ? { recoveryDismissedAt: value.recoveryDismissedAt }
+            : {}),
+        ...(typeof value.recoveryGoalProgressEpoch === "number"
+            ? {
+                  recoveryGoalProgressEpoch: nonNegativeInteger(
+                      value.recoveryGoalProgressEpoch,
+                      "recoveryGoalProgressEpoch",
+                  ),
+              }
+            : {}),
+        ...(typeof value.recoveryMessageAttemptedAt === "string"
+            ? { recoveryMessageAttemptedAt: value.recoveryMessageAttemptedAt }
+            : {}),
+        ...(typeof value.recoveryMessageId === "string"
+            ? { recoveryMessageId: value.recoveryMessageId }
+            : {}),
+        ...(typeof value.recoveryMessageSentAt === "string"
+            ? { recoveryMessageSentAt: value.recoveryMessageSentAt }
+            : {}),
+        ...(typeof value.resolvedAt === "string"
+            ? { resolvedAt: value.resolvedAt }
+            : {}),
         ...("result" in value ? { result: value.result as JsonValue } : {}),
         status,
-        ...(typeof value.targetInstance === "string" ? { targetInstance: storedText(value.targetInstance, "targetInstance") } : {}),
+        ...(typeof value.targetInstance === "string"
+            ? {
+                  targetInstance: storedText(
+                      value.targetInstance,
+                      "targetInstance",
+                  ),
+              }
+            : {}),
         targetId: storedText(value.targetId, "targetId"),
-        ...(typeof value.taskId === "string" ? { taskId: storedText(value.taskId, "taskId") } : {}),
-        ...(typeof value.taskRevision === "number" ? { taskRevision: positiveInteger(value.taskRevision, "taskRevision") } : {}),
-        ...(typeof value.todoItemId === "string" ? { todoItemId: storedText(value.todoItemId, "todoItemId") } : {}),
+        ...(typeof value.taskId === "string"
+            ? { taskId: storedText(value.taskId, "taskId") }
+            : {}),
+        ...(typeof value.taskRevision === "number"
+            ? {
+                  taskRevision: positiveInteger(
+                      value.taskRevision,
+                      "taskRevision",
+                  ),
+              }
+            : {}),
+        ...(typeof value.todoItemId === "string"
+            ? { todoItemId: storedText(value.todoItemId, "todoItemId") }
+            : {}),
         updatedAt: storedText(value.updatedAt, "updatedAt"),
         waitId: storedText(value.waitId, "waitId"),
-        ...(typeof value.workspace === "string" ? { workspace: storedText(value.workspace, "workspace") } : {}),
+        ...(typeof value.workspace === "string"
+            ? { workspace: storedText(value.workspace, "workspace") }
+            : {}),
     };
 }
 
@@ -419,7 +705,11 @@ function isTerminal(status: WaitStatus): boolean {
 }
 
 function migrateDeliveredRecovery(record: WaitRecord): WaitRecord {
-    if (record.status !== "resolved" || record.recoveryMessageSentAt === undefined) return record;
+    if (
+        record.status !== "resolved" ||
+        record.recoveryMessageSentAt === undefined
+    )
+        return record;
     const {
         recoveryClaimedAt: _claimedAt,
         recoveryClaimId: _claimId,
@@ -434,23 +724,34 @@ function migrateDeliveredRecovery(record: WaitRecord): WaitRecord {
 
 function blocksTmuxWaitCreation(record: WaitRecord): boolean {
     if (record.kind !== "tmux") return false;
-    if (record.status === "waiting" || record.status === "detached") return true;
+    if (record.status === "waiting" || record.status === "detached")
+        return true;
     return record.status === "resolved";
 }
 
 function sameTmuxTarget(record: WaitRecord, input: WaitCreateInput): boolean {
-    return record.kind === "tmux" &&
+    return (
+        record.kind === "tmux" &&
         record.createdByCtxId === input.createdByCtxId &&
         record.targetId === input.targetId &&
-        (record.targetInstance ?? "") === (input.targetInstance ?? "");
+        (record.targetInstance ?? "") === (input.targetInstance ?? "")
+    );
 }
 
 function tmuxTargetKey(record: WaitRecord): string {
-    return JSON.stringify([record.createdByCtxId, record.targetInstance ?? "", record.targetId]);
+    return JSON.stringify([
+        record.createdByCtxId,
+        record.targetInstance ?? "",
+        record.targetId,
+    ]);
 }
 
-function compareTmuxWaitRecoveryPriority(left: WaitRecord, right: WaitRecord): number {
-    const priority = tmuxWaitRecoveryPriority(right) - tmuxWaitRecoveryPriority(left);
+function compareTmuxWaitRecoveryPriority(
+    left: WaitRecord,
+    right: WaitRecord,
+): number {
+    const priority =
+        tmuxWaitRecoveryPriority(right) - tmuxWaitRecoveryPriority(left);
     if (priority !== 0) return priority;
     const updated = right.updatedAt.localeCompare(left.updatedAt);
     if (updated !== 0) return updated;
@@ -460,22 +761,31 @@ function compareTmuxWaitRecoveryPriority(left: WaitRecord, right: WaitRecord): n
 }
 
 function tmuxWaitRecoveryPriority(record: WaitRecord): number {
-    if (record.recoveryMessageAttemptedAt !== undefined && record.recoveryMessageSentAt === undefined) return 3;
+    if (
+        record.recoveryMessageAttemptedAt !== undefined &&
+        record.recoveryMessageSentAt === undefined
+    )
+        return 3;
     if (record.status === "resolved") return 2;
     if (record.status === "detached") return 1;
     return 0;
 }
 
 function kind(value: unknown): WaitKind {
-    if (value === "approval" || value === "question" || value === "tmux") return value;
+    if (value === "approval" || value === "question" || value === "tmux")
+        return value;
     throw new Error("invalid wait kind");
 }
 
 function waitStatus(value: unknown): WaitStatus {
     if (
-        value === "waiting" || value === "detached" || value === "resolved" ||
-        value === "consumed" || value === "cancelled"
-    ) return value;
+        value === "waiting" ||
+        value === "detached" ||
+        value === "resolved" ||
+        value === "consumed" ||
+        value === "cancelled"
+    )
+        return value;
     throw new Error("invalid wait status");
 }
 
@@ -487,26 +797,37 @@ function text(value: unknown, field: string): string {
 }
 
 function storedText(value: unknown, field: string): string {
-    if (typeof value !== "string" || value.length === 0) throw new Error(`wait ${field} is invalid`);
+    if (typeof value !== "string" || value.length === 0)
+        throw new Error(`wait ${field} is invalid`);
     return value;
 }
 
 function nonNegativeInteger(value: unknown, field: string): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+    ) {
         throw new Error(`wait ${field} must be a non-negative integer`);
     }
     return value;
 }
 
 function positiveInteger(value: unknown, field: string): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    if (
+        typeof value !== "number" ||
+        !Number.isSafeInteger(value) ||
+        value < 1
+    ) {
         throw new Error(`wait ${field} must be a positive integer`);
     }
     return value;
 }
 
 function invalidTransition(record: WaitRecord, action: string): Error {
-    return new Error(`Cannot ${action} wait ${record.waitId} while it is ${record.status}.`);
+    return new Error(
+        `Cannot ${action} wait ${record.waitId} while it is ${record.status}.`,
+    );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

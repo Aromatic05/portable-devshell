@@ -174,12 +174,12 @@ devshell tui
 
 TUI 是同一 Control RPC 的交互式前端，适合：
 
-* instance 配置/状态；
-* tool approval；
-* OAuth approval；
-* audit/log；
-* Todo 与 Artifact 状态；
-* 长时间观察。
+- instance 配置/状态；
+- tool approval；
+- OAuth approval；
+- audit/log；
+- Todo 与 Artifact 状态；
+- 长时间观察。
 
 它不会把页面状态直接写进 worker；实际操作仍通过 Control service。
 
@@ -212,6 +212,6 @@ devshell skill ...
 
 分别见：
 
-* [运行时 Debug Patch](../tools/debug.md)
-* [安全、审批与 Secret 扫描](security.md)
-* [Agent Skills](../tools/skills.md)
+- [运行时 Debug Patch](../tools/debug.md)
+- [安全、审批与 Secret 扫描](security.md)
+- [Agent Skills](../tools/skills.md)

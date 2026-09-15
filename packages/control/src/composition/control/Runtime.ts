@@ -1,8 +1,14 @@
 import { join } from "node:path";
 
-import { controlRemoteRpcPath, controlWebBasePath } from "@portable-devshell/shared";
+import {
+    controlRemoteRpcPath,
+    controlWebBasePath,
+} from "@portable-devshell/shared";
 
-import { McpOAuthProtectedResource, type HttpHost } from "@portable-devshell/mcp";
+import {
+    McpOAuthProtectedResource,
+    type HttpHost,
+} from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { DebugPatchService } from "../../control/debug/Service.js";
 import type { ConversationPreferencePort } from "../../control/config/preference/Route.js";
@@ -16,7 +22,10 @@ import { ExtensionInstallService } from "../../control/extension/install/Service
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
-import { ControlChannelServer, type ControlChannelListener } from "../../server/endpoint/Channel.js";
+import {
+    ControlChannelServer,
+    type ControlChannelListener,
+} from "../../server/endpoint/Channel.js";
 import { ControlSocketListener } from "../../server/endpoint/Socket.js";
 import { resolveControlWebAssetsDirectory } from "../../server/web/Assets.js";
 import { ControlWebOAuthFlow } from "../../server/web/auth/OAuth.js";
@@ -70,43 +79,53 @@ export class ControlRuntime {
 
     constructor(options: ControlRuntimeOptions) {
         this.#artifact = options.artifact;
-        this.#builtinExtensionSources = Object.freeze([...(options.builtinExtensionSources ?? [])]);
+        this.#builtinExtensionSources = Object.freeze([
+            ...(options.builtinExtensionSources ?? []),
+        ]);
         this.#extensionPaths = options.extensionPaths;
         this.#extensions = options.extensions;
         this.#extensionControl = new ExtensionControlService({
             host: this.#extensions,
             installer: new ExtensionInstallService({
                 host: this.#extensions,
-                paths: this.#extensionPaths
-            })
+                paths: this.#extensionPaths,
+            }),
         });
         this.#instances = options.instances;
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
-        const runtimeSubscriptions = options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
-        const modelCliCommands = new CliExtensionCommandService(this.#extensions, {
-            surface: "model"
-        });
+        const runtimeSubscriptions =
+            options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
+        const modelCliCommands = new CliExtensionCommandService(
+            this.#extensions,
+            {
+                surface: "model",
+            },
+        );
         options.mcp.instanceGateway.setModelCommandCatalog((instance) => {
-            const allowed = options.instances.get(instance)?.modelExtensions ?? [];
-            return modelCliCommands.list()
+            const allowed =
+                options.instances.get(instance)?.modelExtensions ?? [];
+            return modelCliCommands
+                .list()
                 .filter((command) => allowed.includes(command.extensionId))
                 .map((command) => command.id);
         });
         this.#modelDevshell = new ModelDevshellBroker({
             access: {
                 allows: ({ extensionId, instance }) =>
-                    options.instances.get(instance)?.modelExtensions.includes(extensionId) === true
+                    options.instances
+                        .get(instance)
+                        ?.modelExtensions.includes(extensionId) === true,
             },
             commands: modelCliCommands,
             contextAdmin: () => options.mcp.host?.contextAdmin,
-            instances: options.instances
+            instances: options.instances,
         });
         this.#routes = new ControlRouteComposition({
             artifact: options.artifact.service,
             cliCommands: new CliExtensionCommandService(this.#extensions, {
-                surface: "native"
+                surface: "native",
             }),
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
@@ -119,56 +138,79 @@ export class ControlRuntime {
             oauthApprovals: () => options.mcp.oauthApprovals,
             overview: new OperationalOverviewService({
                 instances: options.instances,
-                oauthApprovals: () => options.mcp.oauthApprovals
+                oauthApprovals: () => options.mcp.oauthApprovals,
             }),
             restart: options.restart,
             reverse: options.reverse.service,
             runtimeSubscriptions,
             shutdown: options.shutdown,
             toolProvenance: options.mcp.toolProvenance,
-            webApplications: new WebApplicationCatalog(this.#extensions)
+            webApplications: new WebApplicationCatalog(this.#extensions),
         });
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.#extensions.retireInstanceResources(instance.name);
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+            async (instance) => {
+                await this.#extensions.retireInstanceResources(instance.name);
+            },
+        );
+        this.#mcp.configEditor.registerInstanceDisableRetirement(
+            async (instance) => {
+                await this.#extensions.retireInstanceResources(instance.name);
+            },
+        );
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+            async (instance) => {
+                await this.#debug.retireInstance(instance.name);
+            },
+        );
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+            async (instance) => {
+                await this.#routes.retireInstance(instance.name);
+            },
+        );
+        this.#socketListener = new ControlSocketListener({
+            socketPath: options.socketPath,
         });
-        this.#mcp.configEditor.registerInstanceDisableRetirement(async (instance) => {
-            await this.#extensions.retireInstanceResources(instance.name);
-        });
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.#debug.retireInstance(instance.name);
-        });
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(async (instance) => {
-            await this.#routes.retireInstance(instance.name);
-        });
-        this.#socketListener = new ControlSocketListener({ socketPath: options.socketPath });
         const listeners: ControlChannelListener[] = [this.#socketListener];
         const webRuntime = this.#createWebRuntime();
         if (webRuntime !== undefined) listeners.push(webRuntime.listener);
         this.#webListener = webRuntime?.listener;
         this.#webFlow = webRuntime?.flow;
-        this.#channels = new ControlChannelServer({ listeners, routes: this.#routes });
-        this.#mcp.setWebConfigApplier?.(async (previous, next) => await this.#replaceWebListener(previous, next));
+        this.#channels = new ControlChannelServer({
+            listeners,
+            routes: this.#routes,
+        });
+        this.#mcp.setWebConfigApplier?.(
+            async (previous, next) =>
+                await this.#replaceWebListener(previous, next),
+        );
         this.#mcp.setMcpConfigApplier?.(async (_previous, next) => {
             const retired = await this.#mcp.replaceMcpHost(_previous, next);
             try {
                 const host = this.#mcp.host;
-                if (host !== undefined) this.#reverse.install(host.server, next.mcp.publicBaseUrl);
+                if (host !== undefined)
+                    this.#reverse.install(host.server, next.mcp.publicBaseUrl);
                 await retired?.stop();
             } catch (error) {
                 const rollbackFailures: unknown[] = [];
-                await this.#mcp.restoreMcpHost(retired, _previous).catch((rollbackError) => {
-                    rollbackFailures.push(rollbackError);
-                });
+                await this.#mcp
+                    .restoreMcpHost(retired, _previous)
+                    .catch((rollbackError) => {
+                        rollbackFailures.push(rollbackError);
+                    });
                 try {
                     const host = this.#mcp.host;
-                    if (host !== undefined) this.#reverse.install(host.server, _previous.mcp.publicBaseUrl);
+                    if (host !== undefined)
+                        this.#reverse.install(
+                            host.server,
+                            _previous.mcp.publicBaseUrl,
+                        );
                 } catch (rollbackError) {
                     rollbackFailures.push(rollbackError);
                 }
                 if (rollbackFailures.length > 0) {
                     throw new AggregateError(
                         [error, ...rollbackFailures],
-                        "MCP hot replacement failed and runtime rollback was incomplete."
+                        "MCP hot replacement failed and runtime rollback was incomplete.",
                     );
                 }
                 throw error;
@@ -186,7 +228,10 @@ export class ControlRuntime {
             await this.#mcp.start();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
-                await this.#extensionControl.installBuiltin(source.id, source.path);
+                await this.#extensionControl.installBuiltin(
+                    source.id,
+                    source.path,
+                );
             }
             await this.#channels.start();
         } catch (error) {
@@ -211,15 +256,22 @@ export class ControlRuntime {
         }
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#artifact.stop().catch((error) => failures.push(error));
-        await this.#instances.stopOwned().catch((error) => failures.push(error));
+        await this.#instances
+            .stopOwned()
+            .catch((error) => failures.push(error));
         try {
             this.#routes.dispose();
         } catch (error) {
             failures.push(error);
         }
-        await this.#socketListener.removeEndpoint().catch((error) => failures.push(error));
+        await this.#socketListener
+            .removeEndpoint()
+            .catch((error) => failures.push(error));
         if (failures.length > 0) {
-            throw new AggregateError(failures, "Control runtime failed to stop cleanly.");
+            throw new AggregateError(
+                failures,
+                "Control runtime failed to stop cleanly.",
+            );
         }
     }
 
@@ -227,21 +279,29 @@ export class ControlRuntime {
         const http = this.#mcp.webHost;
         if (http === undefined || !this.#mcp.webEnabled) return undefined;
         const basePath = controlWebBasePath(this.#mcp.webPublicBaseUrl);
-        const secureCookie = this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false;
+        const secureCookie =
+            this.#mcp.webPublicBaseUrl?.startsWith("https://") ?? false;
         const sessions = new ControlWebSessionService({
             auth: this.#mcp.webAuth,
             basePath,
-            secureCookie
+            secureCookie,
         });
-        const flow = this.#createWebOAuthFlow(http, basePath, secureCookie, sessions);
+        const flow = this.#createWebOAuthFlow(
+            http,
+            basePath,
+            secureCookie,
+            sessions,
+        );
         const access = new ControlWebSocketAccessService({
             sessions,
             ...(flow === undefined
                 ? {}
                 : {
-                      onBearerRevoked: (listener) => flow.onAccessRevoked(listener),
-                      verifyBearer: async (token: string) => await flow.verifyAccessToken(token)
-                  })
+                      onBearerRevoked: (listener) =>
+                          flow.onAccessRevoked(listener),
+                      verifyBearer: async (token: string) =>
+                          await flow.verifyAccessToken(token),
+                  }),
         });
         return {
             ...(flow === undefined ? {} : { flow }),
@@ -252,14 +312,15 @@ export class ControlRuntime {
                 basePath,
                 http,
                 remotePath: controlRemoteRpcPath(this.#mcp.webPublicBaseUrl),
-                routeInstaller: (host, webSessions) => new ExtensionWebGateway({
-                    basePath: `${basePath}/extensions`,
-                    extensions: this.#extensions,
-                    loginPath: `${basePath}/`,
-                    paths: this.#extensionPaths
-                }).install(host, webSessions),
-                sessions
-            })
+                routeInstaller: (host, webSessions) =>
+                    new ExtensionWebGateway({
+                        basePath: `${basePath}/extensions`,
+                        extensions: this.#extensions,
+                        loginPath: `${basePath}/`,
+                        paths: this.#extensionPaths,
+                    }).install(host, webSessions),
+                sessions,
+            }),
         };
     }
 
@@ -267,11 +328,12 @@ export class ControlRuntime {
         http: HttpHost,
         basePath: string,
         secureCookie: boolean,
-        sessions: ControlWebSessionService
+        sessions: ControlWebSessionService,
     ): ControlWebOAuthFlow | undefined {
         const auth = this.#mcp.webAuth;
         const publicBaseUrl = this.#mcp.webPublicBaseUrl;
-        if (auth.mode !== "oauth2" || publicBaseUrl === undefined) return undefined;
+        if (auth.mode !== "oauth2" || publicBaseUrl === undefined)
+            return undefined;
 
         const mcpHost = this.#mcp.host;
         const reused = sameOrigin(publicBaseUrl, this.#mcp.publicBaseUrl)
@@ -280,14 +342,16 @@ export class ControlRuntime {
         const providerConfig = {
             documentationUrl: auth.oauth2.documentationUrl,
             requiredScopes: [...auth.oauth2.requiredScopes],
-            resourceName: auth.oauth2.resourceName
+            resourceName: auth.oauth2.resourceName,
         };
-        const protectedResource = reused ?? new McpOAuthProtectedResource(
-            providerConfig,
-            new URL(publicBaseUrl).origin,
-            this.#mcp.webOauthDir,
-            { trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl) }
-        );
+        const protectedResource =
+            reused ??
+            new McpOAuthProtectedResource(
+                providerConfig,
+                new URL(publicBaseUrl).origin,
+                this.#mcp.webOauthDir,
+                { trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl) },
+            );
 
         return new ControlWebOAuthFlow({
             basePath,
@@ -298,15 +362,18 @@ export class ControlRuntime {
             protectedResource,
             publicBaseUrl,
             secureCookie,
-            sessions
+            sessions,
         });
     }
 
     async #replaceWebListener(
         previousConfig: import("@portable-devshell/shared").ControlConfig,
-        nextConfig: import("@portable-devshell/shared").ControlConfig
+        nextConfig: import("@portable-devshell/shared").ControlConfig,
     ): Promise<void> {
-        const previousHost = await this.#mcp.replaceWebHost(previousConfig, nextConfig);
+        const previousHost = await this.#mcp.replaceWebHost(
+            previousConfig,
+            nextConfig,
+        );
         const previousListener = this.#webListener;
         const previousFlow = this.#webFlow;
         const previousFlowUninstall = this.#webFlowUninstall;
@@ -316,7 +383,9 @@ export class ControlRuntime {
         try {
             nextRuntime = this.#createWebRuntime();
             if (previousListener === undefined || nextRuntime === undefined) {
-                throw new Error("Web listener hot replacement requires Web to remain enabled.");
+                throw new Error(
+                    "Web listener hot replacement requires Web to remain enabled.",
+                );
             }
             await nextRuntime.flow?.warmup();
             if (previousFlowUninstall !== undefined) {
@@ -324,11 +393,16 @@ export class ControlRuntime {
                 previousFlowRemoved = true;
             }
             nextFlowUninstall = nextRuntime.flow?.install(nextRuntime.host);
-            await this.#channels.replaceListener(previousListener, nextRuntime.listener);
+            await this.#channels.replaceListener(
+                previousListener,
+                nextRuntime.listener,
+            );
             this.#webListener = nextRuntime.listener;
             this.#webFlow = nextRuntime.flow;
             this.#webFlowUninstall = nextFlowUninstall;
-            await this.#mcp.stopRetiredWebHost(previousHost).catch(reportRetiredWebHostFailure);
+            await this.#mcp
+                .stopRetiredWebHost(previousHost)
+                .catch(reportRetiredWebHostFailure);
         } catch (error) {
             const rollbackFailures: unknown[] = [];
             try {
@@ -336,15 +410,23 @@ export class ControlRuntime {
             } catch (rollbackError) {
                 rollbackFailures.push(rollbackError);
             }
-            await this.#mcp.restoreWebHost(previousHost, previousConfig).catch((rollbackError) => {
-                rollbackFailures.push(rollbackError);
-            });
+            await this.#mcp
+                .restoreWebHost(previousHost, previousConfig)
+                .catch((rollbackError) => {
+                    rollbackFailures.push(rollbackError);
+                });
             this.#webListener = previousListener;
             this.#webFlow = previousFlow;
-            if (previousFlowRemoved && previousFlow !== undefined && this.#mcp.webHost !== undefined) {
+            if (
+                previousFlowRemoved &&
+                previousFlow !== undefined &&
+                this.#mcp.webHost !== undefined
+            ) {
                 try {
                     await previousFlow.warmup();
-                    this.#webFlowUninstall = previousFlow.install(this.#mcp.webHost);
+                    this.#webFlowUninstall = previousFlow.install(
+                        this.#mcp.webHost,
+                    );
                 } catch (rollbackError) {
                     rollbackFailures.push(rollbackError);
                 }
@@ -354,7 +436,7 @@ export class ControlRuntime {
             if (rollbackFailures.length > 0) {
                 throw new AggregateError(
                     [error, ...rollbackFailures],
-                    "Web hot replacement failed and runtime rollback was incomplete."
+                    "Web hot replacement failed and runtime rollback was incomplete.",
                 );
             }
             throw error;
@@ -371,7 +453,10 @@ function isLoopbackPublicBaseUrl(publicBaseUrl: string): boolean {
     }
 }
 
-function sameOrigin(left: string | undefined, right: string | undefined): boolean {
+function sameOrigin(
+    left: string | undefined,
+    right: string | undefined,
+): boolean {
     if (left === undefined || right === undefined) return false;
     try {
         return new URL(left).origin === new URL(right).origin;

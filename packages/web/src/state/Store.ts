@@ -38,11 +38,16 @@ export class WebStore {
     #generation = 0;
     #ignoreTransportClose = false;
 
-    constructor(readonly clients: WebClients, options: WebStoreOptions = {}) {
+    constructor(
+        readonly clients: WebClients,
+        options: WebStoreOptions = {},
+    ) {
         this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
-        const isPageVisible = options.isPageVisible ?? (() =>
-            typeof document === "undefined" || document.visibilityState !== "hidden"
-        );
+        const isPageVisible =
+            options.isPageVisible ??
+            (() =>
+                typeof document === "undefined" ||
+                document.visibilityState !== "hidden");
         this.#operations = new WebOperationCoordinator(
             {
                 getState: () => this.#state,
@@ -54,7 +59,8 @@ export class WebStore {
         this.#model = new ControlReadModel({
             clients,
             onEvent: (event) => {
-                if (event.type !== "log.appended") this.#refreshScheduler.scheduleOverview(250);
+                if (event.type !== "log.appended")
+                    this.#refreshScheduler.scheduleOverview(250);
             },
             requestTimeoutMs: this.#requestTimeoutMs,
             retryBaseMs: options.streamRetryBaseMs,
@@ -70,12 +76,14 @@ export class WebStore {
             overviewIntervalMs: options.overviewRefreshIntervalMs,
             shouldRefreshOAuth: () => {
                 const status = this.#model.state.mcpStatus;
-                return this.#listeners.size > 0 &&
+                return (
+                    this.#listeners.size > 0 &&
                     this.#state.connection === "online" &&
                     isPageVisible() &&
                     status?.authMode === "oauth2" &&
                     status.oauthReady === true &&
-                    status.running === true;
+                    status.running === true
+                );
             },
             shouldRefreshOverview: () =>
                 this.#listeners.size > 0 &&
@@ -85,7 +93,7 @@ export class WebStore {
         this.#refreshScheduler.start();
         this.#model.subscribe(() => this.#syncModel());
         this.#offTransportClose = clients.onTransportClose((error) =>
-            this.#transportClosed(error)
+            this.#transportClosed(error),
         );
     }
 
@@ -102,32 +110,46 @@ export class WebStore {
         if (this.#stopped) return;
         if (this.#loadPromise !== undefined) return await this.#loadPromise;
         const generation = this.#generation;
-        this.#set({ ...this.#state, connection: "connecting", error: undefined });
-        const request = this.#model.load().then(
-            async () => {
-                if (!this.#current(generation)) return;
-                await this.#loadConversationPreferences(generation);
-                if (this.#current(generation)) {
-                    this.#set({ ...this.#state, connection: "online", error: undefined });
-                }
-            },
-            (error: unknown) => {
-                if (this.#current(generation)) {
-                    this.#set({
-                        ...this.#state,
-                        connection: "offline",
-                        error: errorMessage(error),
-                    });
-                }
-            },
-        ).finally(() => {
-            if (this.#loadPromise === request) this.#loadPromise = undefined;
+        this.#set({
+            ...this.#state,
+            connection: "connecting",
+            error: undefined,
         });
+        const request = this.#model
+            .load()
+            .then(
+                async () => {
+                    if (!this.#current(generation)) return;
+                    await this.#loadConversationPreferences(generation);
+                    if (this.#current(generation)) {
+                        this.#set({
+                            ...this.#state,
+                            connection: "online",
+                            error: undefined,
+                        });
+                    }
+                },
+                (error: unknown) => {
+                    if (this.#current(generation)) {
+                        this.#set({
+                            ...this.#state,
+                            connection: "offline",
+                            error: errorMessage(error),
+                        });
+                    }
+                },
+            )
+            .finally(() => {
+                if (this.#loadPromise === request)
+                    this.#loadPromise = undefined;
+            });
         this.#loadPromise = request;
         return await request;
     }
 
-    async updateConversationPreferences(patch: ConversationPreferencesPatch): Promise<boolean> {
+    async updateConversationPreferences(
+        patch: ConversationPreferencesPatch,
+    ): Promise<boolean> {
         const generation = this.#generation;
         const run = async (): Promise<boolean> => {
             if (!this.#current(generation)) return false;
@@ -155,14 +177,19 @@ export class WebStore {
             }
         };
         const request = this.#conversationPreferenceQueue.then(run, run);
-        this.#conversationPreferenceQueue = request.then(() => undefined, () => undefined);
+        this.#conversationPreferenceQueue = request.then(
+            () => undefined,
+            () => undefined,
+        );
         return await request;
     }
 
     async reconnect(): Promise<void> {
-        if (this.#reconnectPromise !== undefined) return await this.#reconnectPromise;
+        if (this.#reconnectPromise !== undefined)
+            return await this.#reconnectPromise;
         const request = this.#reconnect().finally(() => {
-            if (this.#reconnectPromise === request) this.#reconnectPromise = undefined;
+            if (this.#reconnectPromise === request)
+                this.#reconnectPromise = undefined;
         });
         this.#reconnectPromise = request;
         return await request;
@@ -171,16 +198,20 @@ export class WebStore {
     async refreshInstance(name: string): Promise<void> {
         await this.#model.refreshInstance(name, ["snapshot", "logs"]);
         const failures = webFailures(this.#model.state);
-        const errors = [failures[`instance:${name}`], failures[`logs:${name}`]]
-            .filter((value): value is string => value !== undefined);
+        const errors = [
+            failures[`instance:${name}`],
+            failures[`logs:${name}`],
+        ].filter((value): value is string => value !== undefined);
         if (errors.length > 0) throw new Error(errors.join("; "));
     }
 
     async refreshToolCall(instance: string): Promise<void> {
         await this.#model.refreshInstance(instance, ["toolCalls", "logs"]);
         const failures = webFailures(this.#model.state);
-        const errors = [failures[`toolCalls:${instance}`], failures[`logs:${instance}`]]
-            .filter((value): value is string => value !== undefined);
+        const errors = [
+            failures[`toolCalls:${instance}`],
+            failures[`logs:${instance}`],
+        ].filter((value): value is string => value !== undefined);
         if (errors.length > 0) throw new Error(errors.join("; "));
     }
 
@@ -190,16 +221,23 @@ export class WebStore {
 
     async refreshAudit(): Promise<void> {
         await this.#model.refreshControl();
-        await Promise.all(this.#model.state.instances.map(async ({ name }) => {
-            await this.#model.refreshInstance(name, ["toolCalls", "comments", "logs"]);
-        }));
+        await Promise.all(
+            this.#model.state.instances.map(async ({ name }) => {
+                await this.#model.refreshInstance(name, [
+                    "toolCalls",
+                    "comments",
+                    "logs",
+                ]);
+            }),
+        );
     }
 
-    readonly readArtifactImage = async (imageRef: string) => await withRequestTimeout(
-        this.clients.artifact.readImage(imageRef),
-        this.#requestTimeoutMs,
-        "artifact.readImage",
-    );
+    readonly readArtifactImage = async (imageRef: string) =>
+        await withRequestTimeout(
+            this.clients.artifact.readImage(imageRef),
+            this.#requestTimeoutMs,
+            "artifact.readImage",
+        );
 
     async decideTool(
         instance: string,
@@ -212,7 +250,11 @@ export class WebStore {
             "Approval recorded.",
             generation,
             async (signal) => {
-                await this.#commands.decideToolApproval(instance, approvalId, decision);
+                await this.#commands.decideToolApproval(
+                    instance,
+                    approvalId,
+                    decision,
+                );
                 if (signal.aborted || !this.#current(generation)) return;
             },
         );
@@ -264,7 +306,9 @@ export class WebStore {
     }
 
     async disableContexts(ctxIds: readonly string[]): Promise<boolean> {
-        const uniqueCtxIds = [...new Set(ctxIds)].filter((ctxId) => ctxId.length > 0);
+        const uniqueCtxIds = [...new Set(ctxIds)].filter(
+            (ctxId) => ctxId.length > 0,
+        );
         if (uniqueCtxIds.length === 0) return true;
         const generation = this.#generation;
         return await this.#operations.run(
@@ -273,21 +317,26 @@ export class WebStore {
             generation,
             async (signal) => {
                 if (signal.aborted || !this.#current(generation)) return;
-                const results = await Promise.all(uniqueCtxIds.map(async (ctxId) => {
-                    try {
-                        await withRequestTimeout(
-                            this.clients.context.disable(ctxId),
-                            this.#requestTimeoutMs,
-                            `context.disable:${ctxId}`,
-                        );
-                        return undefined;
-                    } catch (error) {
-                        return `${ctxId}: ${errorMessage(error)}`;
-                    }
-                }));
-                const failures = results.filter((result): result is string => result !== undefined);
+                const results = await Promise.all(
+                    uniqueCtxIds.map(async (ctxId) => {
+                        try {
+                            await withRequestTimeout(
+                                this.clients.context.disable(ctxId),
+                                this.#requestTimeoutMs,
+                                `context.disable:${ctxId}`,
+                            );
+                            return undefined;
+                        } catch (error) {
+                            return `${ctxId}: ${errorMessage(error)}`;
+                        }
+                    }),
+                );
+                const failures = results.filter(
+                    (result): result is string => result !== undefined,
+                );
                 if (signal.aborted || !this.#current(generation)) return;
-                if (this.#current(generation)) await this.#model.refreshContexts();
+                if (this.#current(generation))
+                    await this.#model.refreshContexts();
                 if (failures.length > 0) {
                     throw new Error(`Failed to disable ${failures.join("; ")}`);
                 }
@@ -316,7 +365,8 @@ export class WebStore {
             generation,
             async () => {
                 await this.clients.todo.delete(instance, taskId);
-                if (this.#current(generation)) await this.#model.refreshInstance(instance, ["todo"]);
+                if (this.#current(generation))
+                    await this.#model.refreshInstance(instance, ["todo"]);
             },
         );
     }
@@ -351,7 +401,10 @@ export class WebStore {
         this.clients.close();
     }
 
-    async #lifecycle(instance: string, action: "start" | "stop"): Promise<boolean> {
+    async #lifecycle(
+        instance: string,
+        action: "start" | "stop",
+    ): Promise<boolean> {
         const generation = this.#generation;
         return await this.#operations.run(
             `${action}:${instance}`,
@@ -393,7 +446,9 @@ export class WebStore {
     async #reconnect(): Promise<void> {
         this.#generation += 1;
         const generation = this.#generation;
-        this.#operations.cancelAll(new Error("Web connection is reconnecting."));
+        this.#operations.cancelAll(
+            new Error("Web connection is reconnecting."),
+        );
         this.#commands.reset();
         this.#model.reset();
         this.#set({
@@ -413,7 +468,11 @@ export class WebStore {
             );
         } catch (error) {
             if (this.#current(generation)) {
-                this.#set({ ...this.#state, connection: "offline", error: errorMessage(error) });
+                this.#set({
+                    ...this.#state,
+                    connection: "offline",
+                    error: errorMessage(error),
+                });
             }
             return;
         } finally {

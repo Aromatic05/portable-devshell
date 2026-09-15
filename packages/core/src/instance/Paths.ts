@@ -23,14 +23,26 @@ export class InstancePaths {
     constructor(instanceName: InstanceName, homeDirectory = homedir()) {
         this.instanceRootDir = join(homeDirectory, ".devshell", instanceName);
         this.controlWorkerDir = join(this.instanceRootDir, "control-worker");
-        this.conversationDatabaseFile = join(this.controlWorkerDir, "conversation.sqlite3");
-        this.contextMessagesFile = join(this.controlWorkerDir, "context-messages.json");
+        this.conversationDatabaseFile = join(
+            this.controlWorkerDir,
+            "conversation.sqlite3",
+        );
+        this.contextMessagesFile = join(
+            this.controlWorkerDir,
+            "context-messages.json",
+        );
         this.goalsFile = join(this.controlWorkerDir, "goals.json");
         this.auditDatabaseFile = join(this.controlWorkerDir, "audit.sqlite3");
-        this.legacyApprovalsFile = join(this.controlWorkerDir, "approvals.jsonl");
+        this.legacyApprovalsFile = join(
+            this.controlWorkerDir,
+            "approvals.jsonl",
+        );
         this.legacyEventsFile = join(this.controlWorkerDir, "events.jsonl");
         this.legacyLogsFile = join(this.controlWorkerDir, "logs.jsonl");
-        this.legacyToolCallsFile = join(this.controlWorkerDir, "tool-calls.jsonl");
+        this.legacyToolCallsFile = join(
+            this.controlWorkerDir,
+            "tool-calls.jsonl",
+        );
         this.todoFile = join(this.controlWorkerDir, "todo.json");
         this.waitsFile = join(this.controlWorkerDir, "waits.json");
         this.workerConfigFile = join(this.instanceRootDir, "config.toml");

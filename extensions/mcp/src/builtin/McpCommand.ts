@@ -2,10 +2,13 @@ import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
     CliCommandResult,
     CliModelCommandInvocationContext,
-    CliNativeCommandInvocationContext
+    CliNativeCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 
-import { McpHttpClientFactory, type McpClientFactory } from "./McpClientRuntime.js";
+import {
+    McpHttpClientFactory,
+    type McpClientFactory,
+} from "./McpClientRuntime.js";
 import { McpProfileStore, validateMcpProfile } from "./McpProfileStore.js";
 
 export const MCP_USAGE = [
@@ -17,7 +20,7 @@ export const MCP_USAGE = [
     "  devshell mcp tools <name>",
     "  devshell mcp call <name> <tool> [json-arguments]",
     "",
-    "Profiles are Extension-owned Streamable HTTP endpoints. Authentication is not configured in this first client slice."
+    "Profiles are Extension-owned Streamable HTTP endpoints. Authentication is not configured in this first client slice.",
 ].join("\n");
 
 export const MCP_MODEL_USAGE = [
@@ -27,7 +30,7 @@ export const MCP_MODEL_USAGE = [
     "  devshell mcp tools <name>",
     "  devshell mcp call <name> <tool> [json-arguments]",
     "",
-    "Profile add/remove is available only from the native owner CLI."
+    "Profile add/remove is available only from the native owner CLI.",
 ].join("\n");
 
 export interface McpCommandRuntime {
@@ -35,21 +38,25 @@ export interface McpCommandRuntime {
     profiles: McpProfileStore;
 }
 
-export function createMcpCommandRuntime(stateDirectory: string, version: string): McpCommandRuntime {
+export function createMcpCommandRuntime(
+    stateDirectory: string,
+    version: string,
+): McpCommandRuntime {
     return {
         clients: new McpHttpClientFactory(version),
-        profiles: new McpProfileStore(stateDirectory)
+        profiles: new McpProfileStore(stateDirectory),
     };
 }
 
 export async function executeMcpCommand(
     runtime: McpCommandRuntime,
     argv: readonly string[],
-    invocation: CliNativeCommandInvocationContext
+    invocation: CliNativeCommandInvocationContext,
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     if (help(argv)) {
-        if (argv.length > 1) throw usageError("mcp help does not accept extra arguments");
+        if (argv.length > 1)
+            throw usageError("mcp help does not accept extra arguments");
         return { kind: "text", text: MCP_USAGE };
     }
     switch (argv[0]) {
@@ -62,7 +69,11 @@ export async function executeMcpCommand(
         case "add":
             requireLocalOwner(invocation);
             expect(argv, 3, "mcp add <name> <url>", usageError);
-            return json(await runtime.profiles.add(validateMcpProfile(argv[1]!, argv[2]!)));
+            return json(
+                await runtime.profiles.add(
+                    validateMcpProfile(argv[1]!, argv[2]!),
+                ),
+            );
         case "remove":
             requireLocalOwner(invocation);
             expect(argv, 2, "mcp remove <name>", usageError);
@@ -79,11 +90,12 @@ export async function executeMcpCommand(
 export async function executeMcpModelCommand(
     runtime: McpCommandRuntime,
     argv: readonly string[],
-    invocation: CliModelCommandInvocationContext
+    invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
     if (help(argv)) {
-        if (argv.length > 1) throw modelUsageError("mcp help does not accept extra arguments");
+        if (argv.length > 1)
+            throw modelUsageError("mcp help does not accept extra arguments");
         return { kind: "text", text: MCP_MODEL_USAGE };
     }
     switch (argv[0]) {
@@ -94,12 +106,24 @@ export async function executeMcpModelCommand(
             expect(argv, 2, "mcp get <name>", modelUsageError);
             return json(await requireProfile(runtime.profiles, argv[1]!));
         case "tools":
-            return await tools(runtime, argv, invocation.signal, modelUsageError);
+            return await tools(
+                runtime,
+                argv,
+                invocation.signal,
+                modelUsageError,
+            );
         case "call":
-            return await call(runtime, argv, invocation.signal, modelUsageError);
+            return await call(
+                runtime,
+                argv,
+                invocation.signal,
+                modelUsageError,
+            );
         case "add":
         case "remove":
-            throw modelUsageError(`mcp ${argv[0]} is available only from the native owner CLI`);
+            throw modelUsageError(
+                `mcp ${argv[0]} is available only from the native owner CLI`,
+            );
         default:
             throw modelUsageError(`Unknown mcp command: ${argv[0]}`);
     }
@@ -109,36 +133,48 @@ async function tools(
     runtime: McpCommandRuntime,
     argv: readonly string[],
     signal: AbortSignal,
-    error: (message: string) => TypeError
+    error: (message: string) => TypeError,
 ): Promise<CliCommandResult> {
     expect(argv, 2, "mcp tools <name>", error);
     const profile = await requireProfile(runtime.profiles, argv[1]!);
-    return json(await withClient(runtime.clients, profile, signal, async (client) =>
-        await client.listTools(signal)
-    ));
+    return json(
+        await withClient(
+            runtime.clients,
+            profile,
+            signal,
+            async (client) => await client.listTools(signal),
+        ),
+    );
 }
 
 async function call(
     runtime: McpCommandRuntime,
     argv: readonly string[],
     signal: AbortSignal,
-    error: (message: string) => TypeError
+    error: (message: string) => TypeError,
 ): Promise<CliCommandResult> {
     if (argv.length < 3 || argv.length > 4) {
         throw error("Usage: devshell mcp call <name> <tool> [json-arguments]");
     }
     const profile = await requireProfile(runtime.profiles, argv[1]!);
     const input = parseArguments(argv[3], error);
-    return json(await withClient(runtime.clients, profile, signal, async (client) =>
-        await client.callTool(argv[2]!, input, signal)
-    ));
+    return json(
+        await withClient(
+            runtime.clients,
+            profile,
+            signal,
+            async (client) => await client.callTool(argv[2]!, input, signal),
+        ),
+    );
 }
 
 async function withClient<T>(
     factory: McpClientFactory,
     profile: { name: string; url: string },
     signal: AbortSignal,
-    operation: (client: Awaited<ReturnType<McpClientFactory["connect"]>>) => Promise<T>
+    operation: (
+        client: Awaited<ReturnType<McpClientFactory["connect"]>>,
+    ) => Promise<T>,
 ): Promise<T> {
     const client = await factory.connect(profile, signal);
     try {
@@ -150,13 +186,14 @@ async function withClient<T>(
 
 async function requireProfile(store: McpProfileStore, name: string) {
     const profile = await store.get(name);
-    if (profile === undefined) throw new Error(`MCP profile ${name} does not exist.`);
+    if (profile === undefined)
+        throw new Error(`MCP profile ${name} does not exist.`);
     return profile;
 }
 
 function parseArguments(
     text: string | undefined,
-    error: (message: string) => TypeError
+    error: (message: string) => TypeError,
 ): Record<string, ExtensionJsonValue> {
     if (text === undefined) return {};
     let value: unknown;
@@ -172,24 +209,34 @@ function parseArguments(
 }
 
 function help(argv: readonly string[]): boolean {
-    return argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "");
+    return (
+        argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")
+    );
 }
 
 function expect(
     argv: readonly string[],
     length: number,
     usage: string,
-    error: (message: string) => TypeError
+    error: (message: string) => TypeError,
 ): void {
     if (argv.length !== length) throw error(`Usage: devshell ${usage}`);
 }
 
-function requireLocalOwner(invocation: CliNativeCommandInvocationContext): void {
-    if (!invocation.localOwner) throw new Error("MCP profile mutations are restricted to the local owner CLI.");
+function requireLocalOwner(
+    invocation: CliNativeCommandInvocationContext,
+): void {
+    if (!invocation.localOwner)
+        throw new Error(
+            "MCP profile mutations are restricted to the local owner CLI.",
+        );
 }
 
 function json(value: unknown): CliCommandResult {
-    return { kind: "json", value: JSON.parse(JSON.stringify(value)) as ExtensionJsonValue };
+    return {
+        kind: "json",
+        value: JSON.parse(JSON.stringify(value)) as ExtensionJsonValue,
+    };
 }
 
 function usageError(message: string): TypeError {

@@ -1,6 +1,6 @@
 import {
     defineExtensionPoint,
-    type ExtensionPointDeclaration
+    type ExtensionPointDeclaration,
 } from "../ExtensionApi.js";
 
 export interface WebApplicationDeclaration extends ExtensionPointDeclaration {
@@ -23,4 +23,7 @@ export interface WebApplicationBinding {
     readonly source: WebApplicationSource;
 }
 
-export const applications = defineExtensionPoint<WebApplicationDeclaration, WebApplicationBinding>("web.applications");
+export const applications = defineExtensionPoint<
+    WebApplicationDeclaration,
+    WebApplicationBinding
+>("web.applications");

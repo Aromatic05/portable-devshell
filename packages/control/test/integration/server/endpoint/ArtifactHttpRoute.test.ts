@@ -5,12 +5,15 @@ import test, { type TestContext } from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
-import type { ArtifactPayloadDescriptor, JsonValue } from "@portable-devshell/shared";
+import type {
+    ArtifactPayloadDescriptor,
+    JsonValue,
+} from "@portable-devshell/shared";
 import {
     ArtifactHttpRoute,
     ArtifactService,
     artifactShareRoute,
-    type ArtifactServiceEndpoint
+    type ArtifactServiceEndpoint,
 } from "@portable-devshell/control/testing";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -35,28 +38,37 @@ class MemoryShareEndpoint implements ArtifactServiceEndpoint {
         return {
             descriptor: {
                 mediaType: "application/octet-stream",
-                name: "result \"final\".bin",
+                name: 'result "final".bin',
                 payloadBlake3: "a".repeat(64),
                 payloadBytes: this.#bytes.length,
-                type: "file"
+                type: "file",
             },
             expiresAtMs: Date.now() + 60_000,
-            payloadId: "payload-1"
+            payloadId: "payload-1",
         };
     }
 
-    async readArtifactPayload(input: { maxBytes: number; offsetBytes: number; payloadId: string }) {
-        const chunk = this.#bytes.subarray(input.offsetBytes, input.offsetBytes + input.maxBytes);
+    async readArtifactPayload(input: {
+        maxBytes: number;
+        offsetBytes: number;
+        payloadId: string;
+    }) {
+        const chunk = this.#bytes.subarray(
+            input.offsetBytes,
+            input.offsetBytes + input.maxBytes,
+        );
         const nextOffsetBytes = input.offsetBytes + chunk.length;
         return {
             content: chunk.toString("base64"),
             encoding: "base64" as const,
             eof: nextOffsetBytes >= this.#bytes.length,
-            ...(nextOffsetBytes >= this.#bytes.length ? {} : { nextOffsetBytes }),
+            ...(nextOffsetBytes >= this.#bytes.length
+                ? {}
+                : { nextOffsetBytes }),
             offsetBytes: input.offsetBytes,
             payloadId: input.payloadId,
             returnedBytes: chunk.length,
-            totalBytes: this.#bytes.length
+            totalBytes: this.#bytes.length,
         };
     }
 
@@ -82,14 +94,14 @@ class MemoryShareEndpoint implements ArtifactServiceEndpoint {
 async function fixture(
     t: TestContext,
     publicBaseUrl?: string,
-    maxDownloads?: number
+    maxDownloads?: number,
 ) {
     const storageDir = await createTestTempDirectory("artifact-http");
     const endpoint = new MemoryShareEndpoint(Buffer.from("0123456789abcdef"));
     const server = new HttpHost({
         auth: { enabled: false, provider: "none" },
         listenHost: "127.0.0.1",
-        listenPort: 0
+        listenPort: 0,
     });
     const service = new ArtifactService({
         resolveEndpoint: (name) => (name === "source-a" ? endpoint : undefined),
@@ -98,7 +110,7 @@ async function fixture(
             base.pathname = `${artifactShareRoute(base.toString())}/${token}`;
             return base.toString();
         },
-        storageDir
+        storageDir,
     });
     await service.initialize();
     new ArtifactHttpRoute(service, { publicBaseUrl }).install(server);
@@ -110,12 +122,15 @@ async function fixture(
     });
     const port = requireTcpPort(server.address);
     const baseUrl = `http://127.0.0.1:${port}`;
-    const share = await service.createShare({
-        instance: "source-a",
-        ...(maxDownloads === undefined ? {} : { maxDownloads }),
-        path: "./result.bin",
-        workspace: "/workspace"
-    }, "source-a");
+    const share = await service.createShare(
+        {
+            instance: "source-a",
+            ...(maxDownloads === undefined ? {} : { maxDownloads }),
+            path: "./result.bin",
+            workspace: "/workspace",
+        },
+        "source-a",
+    );
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     const downloadUrl = `${baseUrl}${artifactShareRoute(publicBaseUrl)}/${token}`;
     return { downloadUrl, endpoint, service, share, token };
@@ -131,15 +146,20 @@ test("artifact HTTP route serves GET and HEAD with safe download headers", async
     assert.equal(head.headers.get("cache-control"), "private, no-store");
     assert.equal(head.headers.get("referrer-policy"), "no-referrer");
     assert.equal(head.headers.get("x-content-type-options"), "nosniff");
-    assert.match(String(head.headers.get("content-disposition")), /^attachment;/u);
+    assert.match(
+        String(head.headers.get("content-disposition")),
+        /^attachment;/u,
+    );
     assert.equal(await head.text(), "");
 
     const get = await fetch(downloadUrl);
     assert.equal(get.status, 200);
     assert.equal(await get.text(), "0123456789abcdef");
     assert.equal(
-        endpoint.events.filter((event) => event.type === "artifact.shareDownloaded").length,
-        1
+        endpoint.events.filter(
+            (event) => event.type === "artifact.shareDownloaded",
+        ).length,
+        1,
     );
 });
 
@@ -157,11 +177,15 @@ test("artifact HTTP route supports one byte range and rejects invalid or multipl
     assert.equal(suffix.headers.get("content-range"), "bytes 12-15/16");
     assert.equal(await suffix.text(), "cdef");
 
-    const multiple = await fetch(downloadUrl, { headers: { range: "bytes=0-1,4-5" } });
+    const multiple = await fetch(downloadUrl, {
+        headers: { range: "bytes=0-1,4-5" },
+    });
     assert.equal(multiple.status, 416);
     assert.equal(multiple.headers.get("content-range"), "bytes */16");
 
-    const outside = await fetch(downloadUrl, { headers: { range: "bytes=99-100" } });
+    const outside = await fetch(downloadUrl, {
+        headers: { range: "bytes=99-100" },
+    });
     assert.equal(outside.status, 416);
     assert.equal(outside.headers.get("content-range"), "bytes */16");
 });
@@ -172,7 +196,11 @@ test("artifact HTTP route enforces maxDownloads while HEAD and invalid ranges do
     assert.equal(share.maxDownloads, 2);
 
     assert.equal((await fetch(downloadUrl, { method: "HEAD" })).status, 200);
-    assert.equal((await fetch(downloadUrl, { headers: { range: "bytes=99-100" } })).status, 416);
+    assert.equal(
+        (await fetch(downloadUrl, { headers: { range: "bytes=99-100" } }))
+            .status,
+        416,
+    );
     assert.equal(service.listShares()[0]?.downloadCount, 0);
 
     const range = await fetch(downloadUrl, { headers: { range: "bytes=0-3" } });

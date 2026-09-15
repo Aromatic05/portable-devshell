@@ -4,7 +4,10 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { LINUX_TESTSPACE_ISOLATION, TESTSPACE_ISOLATION_ENV } from "./TestspaceNamespace.mjs";
+import {
+    LINUX_TESTSPACE_ISOLATION,
+    TESTSPACE_ISOLATION_ENV,
+} from "./TestspaceNamespace.mjs";
 
 const TEST_HOST = "portable-devshell.test";
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -17,31 +20,42 @@ export function resolveChromiumExecutable(
     const configured = environment.PORTABLE_DEVSHELL_CHROMIUM;
     if (configured !== undefined && configured.length > 0) {
         if (!probe(configured)) {
-            throw new Error(`PORTABLE_DEVSHELL_CHROMIUM is not executable: ${configured}`);
+            throw new Error(
+                `PORTABLE_DEVSHELL_CHROMIUM is not executable: ${configured}`,
+            );
         }
         return configured;
     }
 
-    const candidates = platform === "darwin"
-        ? [
-              "/Applications/Chromium.app/Contents/MacOS/Chromium",
-              "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-          ]
-        : platform === "win32"
-          ? ["chromium.exe", "chrome.exe", "msedge.exe"]
-          : ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable"];
+    const candidates =
+        platform === "darwin"
+            ? [
+                  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              ]
+            : platform === "win32"
+              ? ["chromium.exe", "chrome.exe", "msedge.exe"]
+              : [
+                    "chromium",
+                    "chromium-browser",
+                    "google-chrome",
+                    "google-chrome-stable",
+                ];
     return candidates.find((candidate) => probe(candidate));
 }
 
 export function chromiumLaunchArguments(options = {}) {
     const environment = options.environment ?? process.env;
     const platform = options.platform ?? process.platform;
-    const uid = options.uid ?? (typeof process.getuid === "function" ? process.getuid() : undefined);
-    const sandboxUnavailable = platform === "linux" && (
-        environment.CI ||
-        environment[TESTSPACE_ISOLATION_ENV] === LINUX_TESTSPACE_ISOLATION ||
-        uid === 0
-    );
+    const uid =
+        options.uid ??
+        (typeof process.getuid === "function" ? process.getuid() : undefined);
+    const sandboxUnavailable =
+        platform === "linux" &&
+        (environment.CI ||
+            environment[TESTSPACE_ISOLATION_ENV] ===
+                LINUX_TESTSPACE_ISOLATION ||
+            uid === 0);
     return [
         "--headless=new",
         ...(sandboxUnavailable ? ["--no-sandbox"] : []),
@@ -73,14 +87,18 @@ export async function runTestspaceWebSmoke({
 
     const debuggingPort = await reservePort();
     const profile = await mkdtemp(join(tmpdir(), "pds-web-smoke-"));
-    const browser = spawn(browserExecutable, [
-        ...chromiumLaunchArguments(),
-        `--remote-debugging-port=${debuggingPort}`,
-        `--user-data-dir=${profile}`,
-        "about:blank",
-    ], {
-        stdio: ["ignore", "ignore", "pipe"],
-    });
+    const browser = spawn(
+        browserExecutable,
+        [
+            ...chromiumLaunchArguments(),
+            `--remote-debugging-port=${debuggingPort}`,
+            `--user-data-dir=${profile}`,
+            "about:blank",
+        ],
+        {
+            stdio: ["ignore", "ignore", "pipe"],
+        },
+    );
     let browserStderr = "";
     browser.stderr?.setEncoding("utf8");
     browser.stderr?.on("data", (chunk) => {
@@ -94,9 +112,13 @@ export async function runTestspaceWebSmoke({
             () => `Chromium did not expose DevTools.\n${browserStderr}`,
         );
         if (typeof version.webSocketDebuggerUrl !== "string") {
-            throw new Error("Chromium DevTools version response did not include a WebSocket URL.");
+            throw new Error(
+                "Chromium DevTools version response did not include a WebSocket URL.",
+            );
         }
-        const targets = await fetchJson(`http://127.0.0.1:${debuggingPort}/json`);
+        const targets = await fetchJson(
+            `http://127.0.0.1:${debuggingPort}/json`,
+        );
         const page = Array.isArray(targets)
             ? targets.find((target) => target?.type === "page")
             : undefined;
@@ -115,18 +137,26 @@ export async function runTestspaceWebSmoke({
             const url = `http://${TEST_HOST}:${webPort}/web/`;
             await devtools.send("Page.navigate", { url });
             const pageState = await waitForPageState(devtools, timeoutMs);
-            const failures = devtools.events.filter((event) =>
-                event.method === "Runtime.exceptionThrown" ||
-                event.method === "Network.loadingFailed" ||
-                (event.method === "Log.entryAdded" && event.params?.entry?.level === "error")
+            const failures = devtools.events.filter(
+                (event) =>
+                    event.method === "Runtime.exceptionThrown" ||
+                    event.method === "Network.loadingFailed" ||
+                    (event.method === "Log.entryAdded" &&
+                        event.params?.entry?.level === "error"),
             );
             assertWebSmokeState(pageState, failures, expectedInstance);
             if (exerciseLifecycle) {
-                await exerciseInstanceLifecycle(devtools, expectedInstance, timeoutMs);
+                await exerciseInstanceLifecycle(
+                    devtools,
+                    expectedInstance,
+                    timeoutMs,
+                );
             }
             return {
                 browser: browserExecutable,
-                instanceLifecycle: exerciseLifecycle ? "stop-start" : "not-exercised",
+                instanceLifecycle: exerciseLifecycle
+                    ? "stop-start"
+                    : "not-exercised",
                 instanceVisible: pageState.body.includes(expectedInstance),
                 online: true,
                 randomUuidAvailable: pageState.randomUuidType === "function",
@@ -138,7 +168,7 @@ export async function runTestspaceWebSmoke({
         }
     } finally {
         browser.kill("SIGTERM");
-        if (!await waitForProcessExit(browser, 1_000)) {
+        if (!(await waitForProcessExit(browser, 1_000))) {
             browser.kill("SIGKILL");
             await waitForProcessExit(browser, 1_000);
         }
@@ -257,28 +287,45 @@ async function waitForCondition(devtools, expression, timeoutMs, message) {
     throw new Error(`${message}\n${String(page.result?.value ?? "")}`);
 }
 
-export function assertWebSmokeState(pageState, failures = [], expectedInstance = "testspace-local") {
+export function assertWebSmokeState(
+    pageState,
+    failures = [],
+    expectedInstance = "testspace-local",
+) {
     if (pageState.secureContext !== false) {
         throw new Error("Web smoke did not exercise a non-secure HTTP origin.");
     }
     if (pageState.randomUuidType !== "undefined") {
-        throw new Error("Web smoke did not exercise the crypto.randomUUID fallback path.");
+        throw new Error(
+            "Web smoke did not exercise the crypto.randomUUID fallback path.",
+        );
     }
-    if (!pageState.body.includes("Online") || pageState.body.includes("Offline")) {
-        throw new Error(`Web SPA did not connect to Control.\n${pageState.body}`);
+    if (
+        !pageState.body.includes("Online") ||
+        pageState.body.includes("Offline")
+    ) {
+        throw new Error(
+            `Web SPA did not connect to Control.\n${pageState.body}`,
+        );
     }
     if (
         !pageState.body.includes("Overview") ||
         !pageState.body.includes("Audit") ||
         !pageState.body.includes(expectedInstance)
     ) {
-        throw new Error(`Web SPA did not render the real testspace read model.\n${pageState.body}`);
+        throw new Error(
+            `Web SPA did not render the real testspace read model.\n${pageState.body}`,
+        );
     }
     if (pageState.alerts.length > 0) {
-        throw new Error(`Web SPA rendered errors: ${pageState.alerts.join(" | ")}`);
+        throw new Error(
+            `Web SPA rendered errors: ${pageState.alerts.join(" | ")}`,
+        );
     }
     if (failures.length > 0) {
-        throw new Error(`Chromium reported Web failures: ${JSON.stringify(failures)}`);
+        throw new Error(
+            `Chromium reported Web failures: ${JSON.stringify(failures)}`,
+        );
     }
 }
 
@@ -317,7 +364,9 @@ async function waitForPageState(devtools, timeoutMs) {
         }
         await delay(100);
     }
-    throw new Error(`Web SPA did not settle within ${timeoutMs}ms. Last state: ${JSON.stringify(last)}`);
+    throw new Error(
+        `Web SPA did not settle within ${timeoutMs}ms. Last state: ${JSON.stringify(last)}`,
+    );
 }
 
 async function connectDevtools(url) {
@@ -352,14 +401,19 @@ async function connectDevtools(url) {
         close() {
             socket.close();
             for (const waiter of pending.values()) {
-                waiter.reject(new Error("Chromium DevTools connection closed."));
+                waiter.reject(
+                    new Error("Chromium DevTools connection closed."),
+                );
             }
             pending.clear();
         },
         send(method, params = {}) {
             const id = nextId++;
             return new Promise((resolvePromise, rejectPromise) => {
-                pending.set(id, { reject: rejectPromise, resolve: resolvePromise });
+                pending.set(id, {
+                    reject: rejectPromise,
+                    resolve: resolvePromise,
+                });
                 socket.send(JSON.stringify({ id, method, params }));
             });
         },
@@ -394,7 +448,9 @@ async function reservePort() {
     });
     const address = server.address();
     await new Promise((resolvePromise, rejectPromise) => {
-        server.close((error) => error ? rejectPromise(error) : resolvePromise());
+        server.close((error) =>
+            error ? rejectPromise(error) : resolvePromise(),
+        );
     });
     if (address === null || typeof address === "string") {
         throw new Error("Failed to reserve a Chromium debugging port.");
@@ -411,5 +467,7 @@ function commandAvailable(command) {
 }
 
 function delay(milliseconds) {
-    return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+    return new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, milliseconds),
+    );
 }

@@ -1,4 +1,9 @@
-import { createError, errorCodes, toolSchema, type ToolDefinition } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    toolSchema,
+    type ToolDefinition,
+} from "@portable-devshell/shared";
 
 import type { WorkerToolDefinition } from "../protocol/Client.js";
 
@@ -19,8 +24,8 @@ export class WorkerToolCatalog {
                     retryable: false,
                     details: {
                         toolName: tool.name,
-                        reason: parsed.error.message
-                    }
+                        reason: parsed.error.message,
+                    },
                 });
             }
 

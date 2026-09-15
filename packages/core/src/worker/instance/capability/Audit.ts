@@ -6,7 +6,10 @@ import type { WorkerProtocolClient } from "../../protocol/Client.js";
 import { toEventData } from "../state/Event.js";
 
 interface WorkerInstanceAuditOptions {
-    appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
+    appendEvent(
+        type: InstanceEventInput["type"],
+        data?: JsonValue,
+    ): Promise<unknown>;
     auditDatabase: AuditDatabase;
     isReady(): boolean;
     protocolClient: WorkerProtocolClient;
@@ -26,28 +29,39 @@ export class WorkerInstanceAudit {
     }
 
     async appendMcpSessionOpened(sessionId: string): Promise<void> {
-        await this.#appendEvent("mcp.sessionOpened", toEventData({ sessionId }));
+        await this.#appendEvent(
+            "mcp.sessionOpened",
+            toEventData({ sessionId }),
+        );
     }
 
     async appendMcpSessionClosed(sessionId: string): Promise<void> {
-        await this.#appendEvent("mcp.sessionClosed", toEventData({ sessionId }));
+        await this.#appendEvent(
+            "mcp.sessionClosed",
+            toEventData({ sessionId }),
+        );
     }
 
-    async appendMcpToolCalled(toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
+    async appendMcpToolCalled(
+        toolName: string,
+        context: { requestId?: string; ctxId?: string },
+    ): Promise<void> {
         await this.#appendEvent(
             "mcp.toolCalled",
             toEventData({
                 requestId: context.requestId,
                 ctxId: context.ctxId,
                 source: "mcp",
-                toolName
-            })
+                toolName,
+            }),
         );
     }
 
     async releaseToolSession(sessionId: string): Promise<void> {
         if (this.#isReady()) {
-            await this.#protocolClient.closeToolSession(sessionId).catch(() => undefined);
+            await this.#protocolClient
+                .closeToolSession(sessionId)
+                .catch(() => undefined);
         }
     }
 

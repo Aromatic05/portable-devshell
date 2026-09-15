@@ -26,12 +26,16 @@ export function PageSwitcher({
 }) {
     const [open, setOpen] = useState(false);
     const root = useRef<HTMLDivElement>(null);
-    const current = pages.find((item) => item.page === active.page) ?? pages[0]!;
+    const current =
+        pages.find((item) => item.page === active.page) ?? pages[0]!;
 
     useEffect(() => {
         if (!open) return;
         const onPointerDown = (event: PointerEvent) => {
-            if (event.target instanceof Node && root.current?.contains(event.target) !== true) {
+            if (
+                event.target instanceof Node &&
+                root.current?.contains(event.target) !== true
+            ) {
                 setOpen(false);
             }
         };
@@ -46,75 +50,121 @@ export function PageSwitcher({
         };
     }, [open]);
 
-    return <div className="page-navigation" ref={root}>
-        <nav aria-label="Primary navigation" className="desktop-page-nav">
-            {pages.map((item) => {
-                const badge = pageBadge(item.page, counts);
-                return <button
-                    aria-label={item.label}
-                    aria-current={active.page === item.page ? "page" : undefined}
-                    className={active.page === item.page ? "selected" : ""}
-                    key={item.page}
-                    onClick={() => navigate(pageRoute(item.page))}
+    return (
+        <div className="page-navigation" ref={root}>
+            <nav aria-label="Primary navigation" className="desktop-page-nav">
+                {pages.map((item) => {
+                    const badge = pageBadge(item.page, counts);
+                    return (
+                        <button
+                            aria-label={item.label}
+                            aria-current={
+                                active.page === item.page ? "page" : undefined
+                            }
+                            className={
+                                active.page === item.page ? "selected" : ""
+                            }
+                            key={item.page}
+                            onClick={() => navigate(pageRoute(item.page))}
+                            type="button"
+                        >
+                            <span>{item.label}</span>
+                            {badge === undefined || badge === 0 ? null : (
+                                <span className="badge">{badge}</span>
+                            )}
+                        </button>
+                    );
+                })}
+            </nav>
+            <div className="page-switcher">
+                <button
+                    aria-expanded={open}
+                    aria-haspopup="menu"
+                    aria-label={`Switch page, current ${current.label}`}
+                    className="page-switcher-trigger"
+                    onClick={() => setOpen((value) => !value)}
                     type="button"
                 >
-                    <span>{item.label}</span>
-                    {badge === undefined || badge === 0 ? null : <span className="badge">{badge}</span>}
-                </button>;
-            })}
-        </nav>
-        <div className="page-switcher">
-            <button
-            aria-expanded={open}
-            aria-haspopup="menu"
-            aria-label={`Switch page, current ${current.label}`}
-            className="page-switcher-trigger"
-            onClick={() => setOpen((value) => !value)}
-            type="button"
-            >
-                <span>{current.label}</span>
-                <span aria-hidden="true">⌄</span>
-            </button>
-            {applications.length === 0 ? null : <button
-                aria-expanded={open}
-                aria-haspopup="menu"
-                aria-label="Open Extension navigation"
-                className="desktop-extension-trigger"
-                onClick={() => setOpen((value) => !value)}
-                type="button"
-            >Extensions <span aria-hidden="true">⌄</span></button>}
-        </div>
-        {open ? <div aria-label="Pages" className="page-switcher-menu" role="menu">
-            <div className="mobile-page-menu">
-            {pages.map((item) => {
-                const badge = pageBadge(item.page, counts);
-                return <button
-                    aria-current={active.page === item.page ? "page" : undefined}
-                    className={active.page === item.page ? "selected" : ""}
-                    key={item.page}
-                    onClick={() => {
-                        setOpen(false);
-                        navigate(pageRoute(item.page));
-                    }}
-                    role="menuitem"
-                    type="button"
-                >
-                    <span>{item.label}</span>
-                    {badge === undefined || badge === 0 ? null : <span className="badge">{badge}</span>}
-                </button>;
-            })}
+                    <span>{current.label}</span>
+                    <span aria-hidden="true">⌄</span>
+                </button>
+                {applications.length === 0 ? null : (
+                    <button
+                        aria-expanded={open}
+                        aria-haspopup="menu"
+                        aria-label="Open Extension navigation"
+                        className="desktop-extension-trigger"
+                        onClick={() => setOpen((value) => !value)}
+                        type="button"
+                    >
+                        Extensions <span aria-hidden="true">⌄</span>
+                    </button>
+                )}
             </div>
-            {applications.length === 0 ? null : <>
-                <div className="page-switcher-separator" role="separator" />
-                <span className="page-switcher-section">Extensions</span>
-                {applications.map((application) => <a
-                    href={extensionApplicationHref(application.id)}
-                    key={`extension:${application.extensionId}:${application.id}`}
-                    role="menuitem"
-                >{application.title}</a>)}
-            </>}
-        </div> : null}
-    </div>;
+            {open ? (
+                <div
+                    aria-label="Pages"
+                    className="page-switcher-menu"
+                    role="menu"
+                >
+                    <div className="mobile-page-menu">
+                        {pages.map((item) => {
+                            const badge = pageBadge(item.page, counts);
+                            return (
+                                <button
+                                    aria-current={
+                                        active.page === item.page
+                                            ? "page"
+                                            : undefined
+                                    }
+                                    className={
+                                        active.page === item.page
+                                            ? "selected"
+                                            : ""
+                                    }
+                                    key={item.page}
+                                    onClick={() => {
+                                        setOpen(false);
+                                        navigate(pageRoute(item.page));
+                                    }}
+                                    role="menuitem"
+                                    type="button"
+                                >
+                                    <span>{item.label}</span>
+                                    {badge === undefined ||
+                                    badge === 0 ? null : (
+                                        <span className="badge">{badge}</span>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {applications.length === 0 ? null : (
+                        <>
+                            <div
+                                className="page-switcher-separator"
+                                role="separator"
+                            />
+                            <span className="page-switcher-section">
+                                Extensions
+                            </span>
+                            {applications.map((application) => (
+                                <a
+                                    href={extensionApplicationHref(
+                                        application.id,
+                                    )}
+                                    key={`extension:${application.extensionId}:${application.id}`}
+                                    role="menuitem"
+                                >
+                                    {application.title}
+                                </a>
+                            ))}
+                        </>
+                    )}
+                </div>
+            ) : null}
+        </div>
+    );
 }
 
 function pageBadge(

@@ -1,7 +1,19 @@
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ArtifactImageMediaType, ArtifactStoredImageResult, ArtifactViewImageInput, ArtifactViewImageResult } from "@portable-devshell/shared";
-import { readImagePayloadSourceInput, readSourceInstance, sourceDescriptor } from "../Source.js";
-import { DEFAULT_ARTIFACT_CHUNK_BYTES, requireArtifactEndpoint } from "../Service.js";
+import type {
+    ArtifactImageMediaType,
+    ArtifactStoredImageResult,
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
+} from "@portable-devshell/shared";
+import {
+    readImagePayloadSourceInput,
+    readSourceInstance,
+    sourceDescriptor,
+} from "../Source.js";
+import {
+    DEFAULT_ARTIFACT_CHUNK_BYTES,
+    requireArtifactEndpoint,
+} from "../Service.js";
 import type { ArtifactServiceOptions } from "../Service.js";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -18,7 +30,12 @@ export class ArtifactImageService {
     readonly #resolveEndpoint: ArtifactServiceOptions["resolveEndpoint"];
     readonly #store: ArtifactImageStore;
 
-    constructor(options: Pick<ArtifactServiceOptions, "chunkBytes" | "resolveEndpoint" | "storageDir">) {
+    constructor(
+        options: Pick<
+            ArtifactServiceOptions,
+            "chunkBytes" | "resolveEndpoint" | "storageDir"
+        >,
+    ) {
         const requestedChunkBytes = options.chunkBytes;
         this.#chunkBytes =
             typeof requestedChunkBytes === "number" &&
@@ -41,24 +58,29 @@ export class ArtifactImageService {
     async view(
         input: ArtifactViewImageInput,
         defaultInstance: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<ArtifactViewImageResult> {
         throwIfAborted(signal);
-        const sourceInstance = readSourceInstance(input.instance, defaultInstance);
+        const sourceInstance = readSourceInstance(
+            input.instance,
+            defaultInstance,
+        );
         const endpoint = requireArtifactEndpoint(
             this.#resolveEndpoint,
             sourceInstance,
-            defaultInstance
+            defaultInstance,
         );
         const sourceInput = readImagePayloadSourceInput(input);
         const opened = await endpoint.openArtifactPayload({
             ...sourceInput,
-            expiresAtMs: Date.now() + ARTIFACT_IMAGE_PAYLOAD_TTL_MS
+            expiresAtMs: Date.now() + ARTIFACT_IMAGE_PAYLOAD_TTL_MS,
         });
 
         try {
             if (opened.descriptor.type === "directoryArchive") {
-                throw unsupported("Artifact image source must be a file or byte artifact.");
+                throw unsupported(
+                    "Artifact image source must be a file or byte artifact.",
+                );
             }
             if (opened.descriptor.payloadBytes <= 0) {
                 throw unsupported("Artifact image source is empty.");
@@ -68,10 +90,10 @@ export class ArtifactImageService {
                     code: errorCodes.artifactImageTooLarge,
                     details: {
                         bytes: opened.descriptor.payloadBytes,
-                        maxBytes: MAX_ARTIFACT_IMAGE_BYTES
+                        maxBytes: MAX_ARTIFACT_IMAGE_BYTES,
                     },
                     message: `Artifact image exceeds the ${MAX_ARTIFACT_IMAGE_BYTES}-byte limit.`,
-                    retryable: false
+                    retryable: false,
                 });
             }
 
@@ -79,18 +101,26 @@ export class ArtifactImageService {
                 endpoint,
                 opened.payloadId,
                 opened.descriptor.payloadBytes,
-                signal
+                signal,
             );
-            const mediaType = detectArtifactImageMediaType(bytes.subarray(0, 16));
+            const mediaType = detectArtifactImageMediaType(
+                bytes.subarray(0, 16),
+            );
             const stored = await this.#store.persist(bytes, mediaType);
 
             return {
                 ...stored,
                 name: opened.descriptor.name,
-                source: sourceDescriptor(sourceInstance, sourceInput, opened.descriptor)
+                source: sourceDescriptor(
+                    sourceInstance,
+                    sourceInput,
+                    opened.descriptor,
+                ),
             };
         } finally {
-            await endpoint.closeArtifactPayload(opened.payloadId).catch(() => undefined);
+            await endpoint
+                .closeArtifactPayload(opened.payloadId)
+                .catch(() => undefined);
         }
     }
 
@@ -98,7 +128,7 @@ export class ArtifactImageService {
         endpoint: ReturnType<typeof requireArtifactEndpoint>,
         payloadId: string,
         totalBytes: number,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<Buffer> {
         const chunks: Buffer[] = [];
         let offsetBytes = 0;
@@ -108,13 +138,15 @@ export class ArtifactImageService {
             const chunk = await endpoint.readArtifactPayload({
                 maxBytes: Math.min(this.#chunkBytes, totalBytes - offsetBytes),
                 offsetBytes,
-                payloadId
+                payloadId,
             });
             throwIfAborted(signal);
             validateChunk(chunk, payloadId, offsetBytes, totalBytes);
             const decoded = Buffer.from(chunk.content, "base64");
             if (decoded.length !== chunk.returnedBytes) {
-                throw invalidPayload("Artifact image payload returned an invalid base64 chunk.");
+                throw invalidPayload(
+                    "Artifact image payload returned an invalid base64 chunk.",
+                );
             }
             chunks.push(decoded);
             offsetBytes += decoded.length;
@@ -122,18 +154,34 @@ export class ArtifactImageService {
 
         const result = Buffer.concat(chunks, totalBytes);
         if (result.length !== totalBytes) {
-            throw invalidPayload("Artifact image payload length changed during reading.");
+            throw invalidPayload(
+                "Artifact image payload length changed during reading.",
+            );
         }
         return result;
     }
 }
 
-export function detectArtifactImageMediaType(header: Uint8Array): ArtifactImageMediaType {
+export function detectArtifactImageMediaType(
+    header: Uint8Array,
+): ArtifactImageMediaType {
     const bytes = Buffer.from(header);
-    if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    if (
+        bytes.length >= 8 &&
+        bytes
+            .subarray(0, 8)
+            .equals(
+                Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            )
+    ) {
         return "image/png";
     }
-    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    if (
+        bytes.length >= 3 &&
+        bytes[0] === 0xff &&
+        bytes[1] === 0xd8 &&
+        bytes[2] === 0xff
+    ) {
         return "image/jpeg";
     }
     if (bytes.length >= 6) {
@@ -149,7 +197,9 @@ export function detectArtifactImageMediaType(header: Uint8Array): ArtifactImageM
     ) {
         return "image/webp";
     }
-    throw unsupported("Unsupported artifact image format; expected PNG, JPEG, GIF, or WebP.");
+    throw unsupported(
+        "Unsupported artifact image format; expected PNG, JPEG, GIF, or WebP.",
+    );
 }
 
 function validateChunk(
@@ -163,7 +213,7 @@ function validateChunk(
     },
     payloadId: string,
     expectedOffset: number,
-    expectedTotal: number
+    expectedTotal: number,
 ): void {
     if (
         chunk.payloadId !== payloadId ||
@@ -173,14 +223,20 @@ function validateChunk(
         chunk.returnedBytes <= 0 ||
         chunk.returnedBytes > expectedTotal - expectedOffset
     ) {
-        throw invalidPayload("Artifact image payload returned inconsistent chunk metadata.");
+        throw invalidPayload(
+            "Artifact image payload returned inconsistent chunk metadata.",
+        );
     }
     const expectedNext = expectedOffset + chunk.returnedBytes;
-    if (chunk.eof !== (expectedNext >= expectedTotal)) {
-        throw invalidPayload("Artifact image payload returned an inconsistent eof marker.");
+    if (chunk.eof !== expectedNext >= expectedTotal) {
+        throw invalidPayload(
+            "Artifact image payload returned an inconsistent eof marker.",
+        );
     }
     if (!chunk.eof && chunk.nextOffsetBytes !== expectedNext) {
-        throw invalidPayload("Artifact image payload returned an unexpected next offset.");
+        throw invalidPayload(
+            "Artifact image payload returned an unexpected next offset.",
+        );
     }
 }
 
@@ -192,10 +248,13 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
         code: errorCodes.coreToolCallCancelled,
         cause: signal.reason,
         details: {
-            reason: typeof signal.reason === "string" ? signal.reason : "client cancelled"
+            reason:
+                typeof signal.reason === "string"
+                    ? signal.reason
+                    : "client cancelled",
         },
         message: "Artifact image viewing was cancelled by the client.",
-        retryable: true
+        retryable: true,
     });
 }
 
@@ -203,7 +262,7 @@ function unsupported(message: string) {
     return createError({
         code: errorCodes.artifactImageUnsupported,
         message,
-        retryable: false
+        retryable: false,
     });
 }
 
@@ -211,7 +270,7 @@ function invalidPayload(message: string) {
     return createError({
         code: errorCodes.artifactPayloadInvalid,
         message,
-        retryable: true
+        retryable: true,
     });
 }
 
@@ -229,7 +288,10 @@ export class ArtifactImageStore {
         await chmod(this.#root, 0o700).catch(() => undefined);
     }
 
-    async persist(bytes: Buffer, mediaType: ArtifactImageMediaType): Promise<ArtifactStoredImageResult> {
+    async persist(
+        bytes: Buffer,
+        mediaType: ArtifactImageMediaType,
+    ): Promise<ArtifactStoredImageResult> {
         const blake3 = await artifactBlake3(bytes);
         const imageRef = `${blake3}.${extensionForMediaType(mediaType)}`;
         const directory = join(this.#root, blake3.slice(0, 2));
@@ -251,48 +313,75 @@ export class ArtifactImageStore {
         try {
             bytes = await readFile(path);
         } catch (error) {
-            if (isNodeError(error, "ENOENT")) throw unavailable(imageRef, "Stored artifact image is unavailable.");
+            if (isNodeError(error, "ENOENT"))
+                throw unavailable(
+                    imageRef,
+                    "Stored artifact image is unavailable.",
+                );
             throw error;
         }
         const actualBlake3 = await artifactBlake3(bytes);
         if (actualBlake3 !== parsed.blake3) {
-            throw unavailable(imageRef, "Stored artifact image failed its content hash check.");
+            throw unavailable(
+                imageRef,
+                "Stored artifact image failed its content hash check.",
+            );
         }
-        return result(parsed.blake3, imageRef, mediaTypeForExtension(parsed.extension), bytes);
+        return result(
+            parsed.blake3,
+            imageRef,
+            mediaTypeForExtension(parsed.extension),
+            bytes,
+        );
     }
 }
 
-function parseImageRef(imageRef: string): { blake3: string; extension: "gif" | "jpg" | "png" | "webp" } {
+function parseImageRef(imageRef: string): {
+    blake3: string;
+    extension: "gif" | "jpg" | "png" | "webp";
+} {
     const match = IMAGE_REF_PATTERN.exec(imageRef);
     if (match === null) {
         throw createError({
             code: errorCodes.targetInvalid,
             details: { imageRef },
             message: "Invalid artifact image reference.",
-            retryable: false
+            retryable: false,
         });
     }
     return {
         blake3: match[1]!,
-        extension: match[2]! as "gif" | "jpg" | "png" | "webp"
+        extension: match[2]! as "gif" | "jpg" | "png" | "webp",
     };
 }
 
-function extensionForMediaType(mediaType: ArtifactImageMediaType): "gif" | "jpg" | "png" | "webp" {
+function extensionForMediaType(
+    mediaType: ArtifactImageMediaType,
+): "gif" | "jpg" | "png" | "webp" {
     switch (mediaType) {
-        case "image/gif": return "gif";
-        case "image/jpeg": return "jpg";
-        case "image/png": return "png";
-        case "image/webp": return "webp";
+        case "image/gif":
+            return "gif";
+        case "image/jpeg":
+            return "jpg";
+        case "image/png":
+            return "png";
+        case "image/webp":
+            return "webp";
     }
 }
 
-function mediaTypeForExtension(extension: "gif" | "jpg" | "png" | "webp"): ArtifactImageMediaType {
+function mediaTypeForExtension(
+    extension: "gif" | "jpg" | "png" | "webp",
+): ArtifactImageMediaType {
     switch (extension) {
-        case "gif": return "image/gif";
-        case "jpg": return "image/jpeg";
-        case "png": return "image/png";
-        case "webp": return "image/webp";
+        case "gif":
+            return "image/gif";
+        case "jpg":
+            return "image/jpeg";
+        case "png":
+            return "image/png";
+        case "webp":
+            return "image/webp";
     }
 }
 
@@ -300,7 +389,7 @@ function result(
     blake3: string,
     imageRef: string,
     mediaType: ArtifactImageMediaType,
-    bytes: Buffer
+    bytes: Buffer,
 ): ArtifactStoredImageResult {
     return {
         blake3,
@@ -308,7 +397,7 @@ function result(
         content: bytes.toString("base64"),
         encoding: "base64",
         imageRef,
-        mediaType
+        mediaType,
     };
 }
 
@@ -317,10 +406,15 @@ function unavailable(imageRef: string, message: string) {
         code: errorCodes.artifactContentUnavailable,
         details: { imageRef },
         message,
-        retryable: false
+        retryable: false,
     });
 }
 
 function isNodeError(error: unknown, code: string): boolean {
-    return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code;
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === code
+    );
 }

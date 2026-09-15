@@ -1,5 +1,17 @@
-import { InstancePaths, WorkerInstanceFactory, WorkerRpcInboundConnector, WorkerTransportFactory, resolveWorkerHomeDirectory, type WorkerInstance, type WorkerInstanceConfig, type WorkerTransportFactoryOptions } from "@portable-devshell/core";
-import { asInstanceName, type ControlInstanceConfig } from "@portable-devshell/shared";
+import {
+    InstancePaths,
+    WorkerInstanceFactory,
+    WorkerRpcInboundConnector,
+    WorkerTransportFactory,
+    resolveWorkerHomeDirectory,
+    type WorkerInstance,
+    type WorkerInstanceConfig,
+    type WorkerTransportFactoryOptions,
+} from "@portable-devshell/core";
+import {
+    asInstanceName,
+    type ControlInstanceConfig,
+} from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../Descriptor.js";
 import { ContextMessageService } from "../../../instance/context/Service.js";
@@ -14,14 +26,18 @@ export class InstanceFactory {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
 
     constructor(options?: { workerInstanceFactory?: WorkerInstanceFactory }) {
-        this.#workerInstanceFactory = options?.workerInstanceFactory ?? new WorkerInstanceFactory();
+        this.#workerInstanceFactory =
+            options?.workerInstanceFactory ?? new WorkerInstanceFactory();
     }
 
     map(instance: ControlInstanceConfig): InstanceDescriptor {
         const name = asInstanceName(instance.name);
         const homeDirectory = resolveWorkerHomeDirectory();
         const paths = new InstancePaths(name, homeDirectory);
-        const reverseConnector = instance.provider === "reverse" ? new WorkerRpcInboundConnector() : undefined;
+        const reverseConnector =
+            instance.provider === "reverse"
+                ? new WorkerRpcInboundConnector()
+                : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
         const conversationStore = new ConversationStore({
             filePath: paths.conversationDatabaseFile,
@@ -29,11 +45,12 @@ export class InstanceFactory {
             legacyContextMessagesFile: paths.contextMessagesFile,
         });
         const conversation = new ConversationService({
-            legacyReports: async () => await workerHolder.value?.readToolCalls({
-                includeInput: true,
-                includeOutput: false,
-                toolName: "todo_report",
-            }) ?? [],
+            legacyReports: async () =>
+                (await workerHolder.value?.readToolCalls({
+                    includeInput: true,
+                    includeOutput: false,
+                    toolName: "todo_report",
+                })) ?? [],
             store: conversationStore,
         });
         const todo = new TodoService({
@@ -41,7 +58,7 @@ export class InstanceFactory {
                 await workerHolder.value?.appendControlEvent(type, data);
             },
             filePath: paths.todoFile,
-            instanceName: instance.name
+            instanceName: instance.name,
         });
         const contextMessages = new ContextMessageService({
             appendEvent: async (type, data) => {
@@ -55,18 +72,22 @@ export class InstanceFactory {
                 await workerHolder.value?.appendControlEvent(type, data);
             },
             filePath: paths.goalsFile,
-            instanceName: instance.name
+            instanceName: instance.name,
         });
         const wait = new WaitService({
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
             },
             filePath: paths.waitsFile,
-            instanceName: instance.name
+            instanceName: instance.name,
         });
-        const worker = this.#workerInstanceFactory.create(this.#toWorkerConfig(instance, reverseConnector, homeDirectory), {
-            toolCallAssociationProvider: (context) => todo.currentAssociation(context.ctxId)
-        });
+        const worker = this.#workerInstanceFactory.create(
+            this.#toWorkerConfig(instance, reverseConnector, homeDirectory),
+            {
+                toolCallAssociationProvider: (context) =>
+                    todo.currentAssociation(context.ctxId),
+            },
+        );
         workerHolder.value = worker;
         const terminal = new WorkerTerminalBackend({ worker });
 
@@ -85,14 +106,14 @@ export class InstanceFactory {
             terminal,
             todo,
             wait,
-            worker
+            worker,
         };
     }
 
     #toWorkerConfig(
         instance: ControlInstanceConfig,
         reverseConnector: WorkerRpcInboundConnector | undefined,
-        homeDirectory: string
+        homeDirectory: string,
     ): WorkerInstanceConfig {
         const effectiveSecurityMode: "disabled" | "workspace" =
             instance.security?.mode === "workspace" ? "workspace" : "disabled";
@@ -100,61 +121,71 @@ export class InstanceFactory {
             alerts: instance.alerts,
             env: {
                 ...instance.env,
-                    DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
-                DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode
+                DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: effectiveSecurityMode,
+                DEVSHELL_WORKER_SECURITY_MODE: effectiveSecurityMode,
             },
             eventBufferSize: instance.logs?.eventBufferSize,
             auditStorage: {
                 maxBytes: instance.logs?.maxBytes,
-                retentionDays: instance.logs?.retentionDays
+                retentionDays: instance.logs?.retentionDays,
             },
             approvalPolicy: instance.approvalPolicy,
             toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
             homeDirectory,
-            name: asInstanceName(instance.name)
+            name: asInstanceName(instance.name),
         };
 
         if (instance.provider === "reverse") {
             return {
                 ...common,
                 managementMode: "selfManaged",
-                rpcConnector: reverseConnector ?? fail(`reverse instance ${instance.name} requires connector`)
+                rpcConnector:
+                    reverseConnector ??
+                    fail(
+                        `reverse instance ${instance.name} requires connector`,
+                    ),
             };
         }
 
         return {
             ...common,
             managementMode: "controllerManaged",
-            transport: WorkerTransportFactory.create(this.#toTransportOptions(instance))
+            transport: WorkerTransportFactory.create(
+                this.#toTransportOptions(instance),
+            ),
         };
     }
 
-    #toTransportOptions(instance: ControlInstanceConfig): WorkerTransportFactoryOptions {
+    #toTransportOptions(
+        instance: ControlInstanceConfig,
+    ): WorkerTransportFactoryOptions {
         switch (instance.provider) {
             case "local":
                 return {
-                    type: "local"
+                    type: "local",
                 };
             case "ssh":
                 return {
                     command: instance.ssh.command,
-                    type: "ssh"
+                    type: "ssh",
                 };
             case "docker":
                 return {
                     container: instance.container,
                     dockerBinary: instance.dockerBinary,
-                    type: "docker"
+                    type: "docker",
                 };
             case "podman":
                 return {
                     container: instance.container,
                     podmanBinary: instance.podmanBinary,
-                    type: "podman"
+                    type: "podman",
                 };
             case "reverse":
-                throw new Error(`reverse instance ${instance.name} does not use command transport`);
+                throw new Error(
+                    `reverse instance ${instance.name} does not use command transport`,
+                );
         }
     }
 }

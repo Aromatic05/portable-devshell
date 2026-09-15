@@ -8,15 +8,18 @@ interface BindEndpoint {
 }
 
 export class HttpEndpointPreflight {
-    async assertAvailable(previous: ControlConfig, next: ControlConfig): Promise<void> {
+    async assertAvailable(
+        previous: ControlConfig,
+        next: ControlConfig,
+    ): Promise<void> {
         const active = new Set([
             ...(previous.mcp.enabled ? [endpointId(previous.mcp)] : []),
-            ...(previous.web.enabled ? [endpointId(previous.web)] : [])
+            ...(previous.web.enabled ? [endpointId(previous.web)] : []),
         ]);
         const checked = new Set<string>();
         for (const endpoint of [
             ...(next.mcp.enabled ? [next.mcp] : []),
-            ...(next.web.enabled ? [next.web] : [])
+            ...(next.web.enabled ? [next.web] : []),
         ]) {
             const id = endpointId(endpoint);
             if (active.has(id) || checked.has(id)) continue;
@@ -31,13 +34,21 @@ async function assertBindable(endpoint: BindEndpoint): Promise<void> {
     try {
         await new Promise<void>((resolve, reject) => {
             server.once("error", reject);
-            server.listen(endpoint.listenPort, endpoint.listenHost, () => resolve());
+            server.listen(endpoint.listenPort, endpoint.listenHost, () =>
+                resolve(),
+            );
         });
     } catch (error) {
-        throw new Error(`Cannot bind HTTP listener ${endpointId(endpoint)}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(
+            `Cannot bind HTTP listener ${endpointId(endpoint)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
     } finally {
         if (server.listening) {
-            await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
+            await new Promise<void>((resolve, reject) =>
+                server.close((error) =>
+                    error === undefined ? resolve() : reject(error),
+                ),
+            );
         }
     }
 }

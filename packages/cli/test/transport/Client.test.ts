@@ -4,7 +4,12 @@ import { createServer } from "node:net";
 import { dirname } from "node:path";
 import test from "node:test";
 
-import { Codec, resolveControlSocketPath, SocketChannel, type JsonValue } from "@portable-devshell/shared";
+import {
+    Codec,
+    resolveControlSocketPath,
+    SocketChannel,
+    type JsonValue,
+} from "@portable-devshell/shared";
 
 import {
     createCliClients,
@@ -22,46 +27,51 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     const socketPath = createTestIpcPath("cli-control", runtimeRoot);
     const methods: string[] = [];
     const server = createServer((socket) => {
-        const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
+        const codec = new Codec(SocketChannel.accept(socket), {
+            local: "server",
+        });
         codec.onEvent((event) => {
             methods.push(event.name);
-            const payload: JsonValue = event.name === "service.hello"
-                ? {
-                      capabilities: ["request", "stream", "streamResume"],
-                      protocolVersion: 1,
-                  }
-                : event.name === "instance.list"
-                ? [
-                      {
-                          mcpEnabled: true,
-                          name: "demo-local",
-                          snapshot: {
-                              connectionState: "disconnected",
-                              daemonState: "stopped",
-                              lastSeq: 0,
-                              name: "demo-local",
-                              ready: false,
-                              status: "stopped"
-                          }
+            const payload: JsonValue =
+                event.name === "service.hello"
+                    ? {
+                          capabilities: ["request", "stream", "streamResume"],
+                          protocolVersion: 1,
                       }
-                  ]
-                : event.name === "runtime.readLogs"
-                  ? [
-                        {
-                            at: "2026-07-08T00:00:00.000Z",
-                            message: "ready\n",
-                            seq: 1,
-                            stream: "stdout"
-                        }
-                    ]
-                  : null;
-            void codec.send({
-                id: `reply-${event.id}`,
-                replyTo: event.id,
-                destination: event.destination,
-                name: event.name,
-                payload
-            }).catch(() => undefined);
+                    : event.name === "instance.list"
+                      ? [
+                            {
+                                mcpEnabled: true,
+                                name: "demo-local",
+                                snapshot: {
+                                    connectionState: "disconnected",
+                                    daemonState: "stopped",
+                                    lastSeq: 0,
+                                    name: "demo-local",
+                                    ready: false,
+                                    status: "stopped",
+                                },
+                            },
+                        ]
+                      : event.name === "runtime.readLogs"
+                        ? [
+                              {
+                                  at: "2026-07-08T00:00:00.000Z",
+                                  message: "ready\n",
+                                  seq: 1,
+                                  stream: "stdout",
+                              },
+                          ]
+                        : null;
+            void codec
+                .send({
+                    id: `reply-${event.id}`,
+                    replyTo: event.id,
+                    destination: event.destination,
+                    name: event.name,
+                    payload,
+                })
+                .catch(() => undefined);
         });
     });
 
@@ -74,7 +84,9 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     t.after(async () => {
         clients.close?.();
         await new Promise<void>((resolve, reject) => {
-            server.close((error) => error === undefined ? resolve() : reject(error));
+            server.close((error) =>
+                error === undefined ? resolve() : reject(error),
+            );
         });
         await rm(runtimeRoot, { force: true, recursive: true });
     });
@@ -85,12 +97,17 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     assert.equal(instances[0]?.name, "demo-local");
     assert.equal(instances[0]?.snapshot.status, "stopped");
     assert.equal(logs[0]?.message, "ready\n");
-    assert.deepEqual(methods, ["service.hello", "instance.list", "runtime.readLogs"]);
+    assert.deepEqual(methods, [
+        "service.hello",
+        "instance.list",
+        "runtime.readLogs",
+    ]);
 });
 
 test("CliMain negotiates Control before a control-plane business request", async (t) => {
     const runtimeRoot = await createTestTempDirectory("cli-control-main");
-    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-control-main");
+    const restoreWindowsIdentity =
+        installUniqueWindowsTestIdentity("cli-control-main");
     t.after(restoreWindowsIdentity);
     const socketPath = resolveControlSocketPath(runtimeRoot);
     const methods: string[] = [];
@@ -98,24 +115,29 @@ test("CliMain negotiates Control before a control-plane business request", async
         await mkdir(dirname(socketPath), { recursive: true });
     }
     const server = createServer((socket) => {
-        const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
+        const codec = new Codec(SocketChannel.accept(socket), {
+            local: "server",
+        });
         codec.onEvent((event) => {
             methods.push(event.name);
-            const payload: JsonValue = event.name === "service.hello"
-                ? {
-                      capabilities: ["request", "stream", "streamResume"],
-                      protocolVersion: 1,
-                  }
-                : event.name === "cli.commands"
-                    ? []
-                    : {};
-            void codec.send({
-                id: `reply-${event.id}`,
-                replyTo: event.id,
-                destination: event.destination,
-                name: event.name,
-                payload,
-            }).catch(() => undefined);
+            const payload: JsonValue =
+                event.name === "service.hello"
+                    ? {
+                          capabilities: ["request", "stream", "streamResume"],
+                          protocolVersion: 1,
+                      }
+                    : event.name === "cli.commands"
+                      ? []
+                      : {};
+            void codec
+                .send({
+                    id: `reply-${event.id}`,
+                    replyTo: event.id,
+                    destination: event.destination,
+                    name: event.name,
+                    payload,
+                })
+                .catch(() => undefined);
         });
     });
 
@@ -129,13 +151,19 @@ test("CliMain negotiates Control before a control-plane business request", async
     const cli = new CliMain({ stderr, stdout, xdgRuntimeDir: runtimeRoot });
     t.after(async () => {
         await new Promise<void>((resolve, reject) => {
-            server.close((error) => error === undefined ? resolve() : reject(error));
+            server.close((error) =>
+                error === undefined ? resolve() : reject(error),
+            );
         });
         await rm(runtimeRoot, { force: true, recursive: true });
     });
 
     assert.equal(await cli.run(["overview"]), 0);
-    assert.deepEqual(methods, ["service.hello", "cli.commands", "overview.get"]);
+    assert.deepEqual(methods, [
+        "service.hello",
+        "cli.commands",
+        "overview.get",
+    ]);
     assert.equal(stderr.flush(), "");
     assert.equal(stdout.flush(), "{}\n");
 });
@@ -147,7 +175,7 @@ test("CliMain reports control not running without auto-starting it", async () =>
     const cli = new CliMain({
         stderr,
         stdout,
-        xdgRuntimeDir: runtimeRoot
+        xdgRuntimeDir: runtimeRoot,
     });
 
     try {
@@ -160,7 +188,10 @@ test("CliMain reports control not running without auto-starting it", async () =>
     }
 });
 
-function createBuffer(): { flush: () => string; write: (chunk: string) => void } {
+function createBuffer(): {
+    flush: () => string;
+    write: (chunk: string) => void;
+} {
     const chunks: string[] = [];
 
     return {
@@ -171,6 +202,6 @@ function createBuffer(): { flush: () => string; write: (chunk: string) => void }
         },
         write(chunk: string) {
             chunks.push(chunk);
-        }
+        },
     };
 }

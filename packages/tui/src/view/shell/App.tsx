@@ -5,14 +5,33 @@ import { TuiComponentErrorBanner } from "../component/chrome/Error.js";
 import { TuiComponentFooter } from "../component/chrome/Footer.js";
 import { TuiComponentHeader } from "../component/chrome/Header.js";
 import { TuiComponentSidebar } from "../component/Sidebar.js";
-import { TuiComponentTerminal, type TuiTerminalRenderSource } from "../../terminal/control/View.js";
-import { TuiComponentTerminalTabs, TuiComponentTmuxPanes, type TuiTmuxPanesRenderSource } from "../../terminal/tmux/View.js";
+import {
+    TuiComponentTerminal,
+    type TuiTerminalRenderSource,
+} from "../../terminal/control/View.js";
+import {
+    TuiComponentTerminalTabs,
+    TuiComponentTmuxPanes,
+    type TuiTmuxPanesRenderSource,
+} from "../../terminal/tmux/View.js";
 import { TuiComponentTextSelection } from "../component/Selection.js";
 import { TuiOverlayView } from "../overlay/View.js";
 import { TuiScreenRouter } from "./Router.js";
-import { selectConnectionState, selectErrorMessage, selectFooterModel, selectHeaderSummary, selectHeaderTitle, selectSidebarModel, selectTerminalTab } from "../projection/View.js";
+import {
+    selectConnectionState,
+    selectErrorMessage,
+    selectFooterModel,
+    selectHeaderSummary,
+    selectHeaderTitle,
+    selectSidebarModel,
+    selectTerminalTab,
+} from "../projection/View.js";
 import { tuiTerminalFullScreen } from "../projection/HitRegion.js";
-import { tuiBlockHeight, tuiMainLayoutMetrics, TuiRootLayout } from "./Layout.js";
+import {
+    tuiBlockHeight,
+    tuiMainLayoutMetrics,
+    TuiRootLayout,
+} from "./Layout.js";
 import { type TuiAppState } from "../../state/store/Model.js";
 import { type TuiTerminalTab } from "../../state/route/Model.js";
 import { type TuiTextSelectionRenderSource } from "../../interaction/selection/Model.js";
@@ -26,7 +45,7 @@ export function TuiApp(props: TuiAppProps) {
     const state = useSyncExternalStore(
         (listener) => props.runtime.scheduler.subscribe(listener),
         () => props.runtime.scheduler.getSnapshot(),
-        () => props.runtime.scheduler.getSnapshot()
+        () => props.runtime.scheduler.getSnapshot(),
     );
     const viewport = useSyncExternalStore(
         (listener) => props.runtime.viewport.subscribe(listener),
@@ -56,11 +75,11 @@ export function TuiApp(props: TuiAppProps) {
     const terminalRows = Math.max(1, viewportRows - 1);
     const renderTerminalGraphics = useCallback(
         (visible: boolean) => props.runtime.renderTerminalGraphics(visible),
-        [props.runtime]
+        [props.runtime],
     );
     const renderTextDetailImage = useCallback(
         (visible: boolean) => props.runtime.renderTextDetailImage(visible),
-        [props.runtime]
+        [props.runtime],
     );
     useInput((input, key) => {
         void props.runtime.handleInput(input, key);
@@ -68,66 +87,91 @@ export function TuiApp(props: TuiAppProps) {
     return (
         <Box height={renderRows} width={viewport.columns}>
             <TuiRootLayout
-            columns={viewport.columns}
-            footer={<TuiComponentFooter text={footer.text} />}
-            header={<TuiComponentHeader stateLabel={connection.status} summary={selectHeaderSummary(state)} title={selectHeaderTitle()} />}
-            main={
-                <Box
-                    flexDirection="column"
-                    flexGrow={1}
-                >
-                    {errorLines !== undefined ? <TuiComponentErrorBanner lines={errorLines} /> : undefined}
-                    {overlay !== undefined ? (
-                        <TuiOverlayView
-                            onTextDetailImageVisibility={renderTextDetailImage}
-                            state={state}
-                            viewportRows={viewportRows}
-                            width={contentWidth}
-                        />
-                    ) : state.ui.selectedPage === "terminal" ? (
-                        <Box flexDirection="column" flexGrow={1}>
-                            <TuiComponentTerminalTabs activeTab={selectTerminalTab(state)} focused={state.interaction.focusScope === "terminal"} />
-                            {selectTerminalTab(state) === "tmuxPanes" ? (
-                                <TuiComponentTmuxPanes
-                                    columns={Math.max(1, contentWidth)}
-                                    focused={state.interaction.focusScope === "terminal"}
-                                    instance={state.ui.selectedInstance}
-                                    rows={Math.max(1, terminalRows - 1)}
-                                    source={props.runtime.tmuxPanes}
-                                />
-                            ) : (
-                                <TuiComponentTerminal
-                                    columns={Math.max(1, contentWidth)}
-                                    focused={state.interaction.focusScope === "terminal"}
-                                    instance={state.ui.selectedInstance}
-                                    onGraphicsVisibility={renderTerminalGraphics}
-                                    rows={Math.max(1, terminalRows - 1)}
-                                    source={props.runtime.terminal}
-                                />
-                            )}
-                        </Box>
-                    ) : (
-                        <TuiScreenRouter
-                            boxInnerWidth={boxInnerWidth}
-                            contentWidth={contentWidth}
-                            state={state}
-                            viewportRows={viewportRows}
-                        />
-                    )}
-                    {connection.status === "connecting" ? <Text color="cyan">Connecting to control server...</Text> : undefined}
-                </Box>
-            }
-            rows={viewport.rows}
-            sidebar={
-                fullWidth
-                    ? undefined
-                    : <TuiComponentSidebar
-                        columns={viewport.columns}
-                        compact={layout.mode === "compact"}
-                        model={selectSidebarModel(state)}
-                        rows={Math.max(0, renderRows - 6)}
+                columns={viewport.columns}
+                footer={<TuiComponentFooter text={footer.text} />}
+                header={
+                    <TuiComponentHeader
+                        stateLabel={connection.status}
+                        summary={selectHeaderSummary(state)}
+                        title={selectHeaderTitle()}
                     />
-            }
+                }
+                main={
+                    <Box flexDirection="column" flexGrow={1}>
+                        {errorLines !== undefined ? (
+                            <TuiComponentErrorBanner lines={errorLines} />
+                        ) : undefined}
+                        {overlay !== undefined ? (
+                            <TuiOverlayView
+                                onTextDetailImageVisibility={
+                                    renderTextDetailImage
+                                }
+                                state={state}
+                                viewportRows={viewportRows}
+                                width={contentWidth}
+                            />
+                        ) : state.ui.selectedPage === "terminal" ? (
+                            <Box flexDirection="column" flexGrow={1}>
+                                <TuiComponentTerminalTabs
+                                    activeTab={selectTerminalTab(state)}
+                                    focused={
+                                        state.interaction.focusScope ===
+                                        "terminal"
+                                    }
+                                />
+                                {selectTerminalTab(state) === "tmuxPanes" ? (
+                                    <TuiComponentTmuxPanes
+                                        columns={Math.max(1, contentWidth)}
+                                        focused={
+                                            state.interaction.focusScope ===
+                                            "terminal"
+                                        }
+                                        instance={state.ui.selectedInstance}
+                                        rows={Math.max(1, terminalRows - 1)}
+                                        source={props.runtime.tmuxPanes}
+                                    />
+                                ) : (
+                                    <TuiComponentTerminal
+                                        columns={Math.max(1, contentWidth)}
+                                        focused={
+                                            state.interaction.focusScope ===
+                                            "terminal"
+                                        }
+                                        instance={state.ui.selectedInstance}
+                                        onGraphicsVisibility={
+                                            renderTerminalGraphics
+                                        }
+                                        rows={Math.max(1, terminalRows - 1)}
+                                        source={props.runtime.terminal}
+                                    />
+                                )}
+                            </Box>
+                        ) : (
+                            <TuiScreenRouter
+                                boxInnerWidth={boxInnerWidth}
+                                contentWidth={contentWidth}
+                                state={state}
+                                viewportRows={viewportRows}
+                            />
+                        )}
+                        {connection.status === "connecting" ? (
+                            <Text color="cyan">
+                                Connecting to control server...
+                            </Text>
+                        ) : undefined}
+                    </Box>
+                }
+                rows={viewport.rows}
+                sidebar={
+                    fullWidth ? undefined : (
+                        <TuiComponentSidebar
+                            columns={viewport.columns}
+                            compact={layout.mode === "compact"}
+                            model={selectSidebarModel(state)}
+                            rows={Math.max(0, renderRows - 6)}
+                        />
+                    )
+                }
             />
             <TuiComponentTextSelection source={props.runtime.selection} />
         </Box>

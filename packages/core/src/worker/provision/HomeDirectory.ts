@@ -3,11 +3,12 @@ import { posix, win32 } from "node:path";
 
 export function resolveWorkerHomeDirectory(
     environment: NodeJS.ProcessEnv = process.env,
-    platform = process.platform
+    platform = process.platform,
 ): string {
-    const configured = platform === "win32"
-        ? resolveWindowsHomeDirectory(environment)
-        : firstNonEmpty(environment.HOME, environment.USERPROFILE);
+    const configured =
+        platform === "win32"
+            ? resolveWindowsHomeDirectory(environment)
+            : firstNonEmpty(environment.HOME, environment.USERPROFILE);
     if (configured !== undefined) {
         return configured;
     }
@@ -21,7 +22,7 @@ export function resolveWorkerHomeDirectory(
 
 export function resolveWorkerDevshellHomeDirectory(
     environment: NodeJS.ProcessEnv = process.env,
-    platform = process.platform
+    platform = process.platform,
 ): string {
     const configured = environment.PORTABLE_DEVSHELL_HOME;
     if (configured !== undefined && configured.length > 0) {
@@ -34,7 +35,9 @@ export function resolveWorkerDevshellHomeDirectory(
         : posix.resolve(homeDirectory, ".devshell");
 }
 
-function resolveWindowsHomeDirectory(environment: NodeJS.ProcessEnv): string | undefined {
+function resolveWindowsHomeDirectory(
+    environment: NodeJS.ProcessEnv,
+): string | undefined {
     const userProfile = firstNonEmpty(environment.USERPROFILE);
     if (userProfile !== undefined) {
         return userProfile;
@@ -49,6 +52,10 @@ function resolveWindowsHomeDirectory(environment: NodeJS.ProcessEnv): string | u
     return firstNonEmpty(environment.HOME);
 }
 
-function firstNonEmpty(...values: readonly (string | undefined)[]): string | undefined {
-    return values.find((value): value is string => value !== undefined && value.length > 0);
+function firstNonEmpty(
+    ...values: readonly (string | undefined)[]
+): string | undefined {
+    return values.find(
+        (value): value is string => value !== undefined && value.length > 0,
+    );
 }

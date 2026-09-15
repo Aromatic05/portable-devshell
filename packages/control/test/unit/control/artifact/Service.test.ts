@@ -6,18 +6,18 @@ import test from "node:test";
 import type {
     ArtifactPayloadDescriptor,
     ArtifactTransferRecord,
-    JsonValue
+    JsonValue,
 } from "@portable-devshell/shared";
 import {
     ArtifactService,
     type ArtifactServiceEndpoint,
-    type ArtifactServiceSchedule
+    type ArtifactServiceSchedule,
 } from "@portable-devshell/control/testing";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-    "base64"
+    "base64",
 );
 
 class Deferred {
@@ -38,7 +38,7 @@ class Deferred {
 async function waitWithAbort(
     promise: Promise<void>,
     signal: AbortSignal | undefined,
-    onAbort: () => void
+    onAbort: () => void,
 ): Promise<void> {
     if (signal === undefined) {
         await promise;
@@ -88,14 +88,19 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         this.events.push({ type, data });
     }
 
-    async openArtifactPayload(_input?: unknown, signal?: AbortSignal): Promise<{
+    async openArtifactPayload(
+        _input?: unknown,
+        signal?: AbortSignal,
+    ): Promise<{
         descriptor: ArtifactPayloadDescriptor;
         expiresAtMs: number;
         payloadId: string;
     }> {
         this.openStarted.resolve();
         if (this.#openGate !== undefined) {
-            await waitWithAbort(this.#openGate.promise, signal, () => this.openAborted.resolve());
+            await waitWithAbort(this.#openGate.promise, signal, () =>
+                this.openAborted.resolve(),
+            );
         }
         return {
             descriptor: {
@@ -103,26 +108,35 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
                 name: "payload.bin",
                 payloadBlake3: "a".repeat(64),
                 payloadBytes: this.#bytes.length,
-                type: "file"
+                type: "file",
             },
             expiresAtMs: Date.now() + 60_000,
-            payloadId: "payload-1"
+            payloadId: "payload-1",
         };
     }
 
-    async readArtifactPayload(input: { maxBytes: number; offsetBytes: number; payloadId: string }) {
+    async readArtifactPayload(input: {
+        maxBytes: number;
+        offsetBytes: number;
+        payloadId: string;
+    }) {
         this.readPayloadCalls += 1;
-        const chunk = this.#bytes.subarray(input.offsetBytes, input.offsetBytes + input.maxBytes);
+        const chunk = this.#bytes.subarray(
+            input.offsetBytes,
+            input.offsetBytes + input.maxBytes,
+        );
         const nextOffsetBytes = input.offsetBytes + chunk.length;
         return {
             content: chunk.toString("base64"),
             encoding: "base64" as const,
             eof: nextOffsetBytes >= this.#bytes.length,
-            ...(nextOffsetBytes >= this.#bytes.length ? {} : { nextOffsetBytes }),
+            ...(nextOffsetBytes >= this.#bytes.length
+                ? {}
+                : { nextOffsetBytes }),
             offsetBytes: input.offsetBytes,
             payloadId: input.payloadId,
             returnedBytes: chunk.length,
-            totalBytes: this.#bytes.length
+            totalBytes: this.#bytes.length,
         };
     }
 
@@ -131,35 +145,47 @@ class MemoryArtifactEndpoint implements ArtifactServiceEndpoint {
         this.payloadClosed.resolve();
     }
 
-    async beginArtifactReceive(): Promise<{ nextOffsetBytes: number; receiveId: string }> {
+    async beginArtifactReceive(): Promise<{
+        nextOffsetBytes: number;
+        receiveId: string;
+    }> {
         const receiveId = `receive-${this.#nextReceive++}`;
         this.received.set(receiveId, Buffer.alloc(0));
         return { nextOffsetBytes: 0, receiveId };
     }
 
-    async writeArtifactReceive(input: { content: string; offsetBytes: number; receiveId: string }) {
+    async writeArtifactReceive(input: {
+        content: string;
+        offsetBytes: number;
+        receiveId: string;
+    }) {
         this.writeReceiveCalls += 1;
         const current = this.received.get(input.receiveId) ?? Buffer.alloc(0);
         assert.equal(input.offsetBytes, current.length);
-        const next = Buffer.concat([current, Buffer.from(input.content, "base64")]);
+        const next = Buffer.concat([
+            current,
+            Buffer.from(input.content, "base64"),
+        ]);
         this.received.set(input.receiveId, next);
         return {
             nextOffsetBytes: next.length,
             receivedBytes: next.length,
-            receiveId: input.receiveId
+            receiveId: input.receiveId,
         };
     }
 
     async finishArtifactReceive(receiveId: string, signal?: AbortSignal) {
         this.finishStarted.resolve();
         if (this.#finishGate !== undefined) {
-            await waitWithAbort(this.#finishGate.promise, signal, () => this.finishAborted.resolve());
+            await waitWithAbort(this.#finishGate.promise, signal, () =>
+                this.finishAborted.resolve(),
+            );
         }
         return {
             blake3: "a".repeat(64),
             bytes: this.received.get(receiveId)?.length ?? 0,
             receiveId,
-            targetPath: "/target/payload.bin"
+            targetPath: "/target/payload.bin",
         };
     }
 
@@ -172,13 +198,16 @@ class DirectTargetEndpoint extends MemoryArtifactEndpoint {
     readonly closedReceivers: string[] = [];
     failDirectOpen = false;
 
-    async openArtifactDirectReceive(input: { expiresAtMs: number; receiveId: string }) {
+    async openArtifactDirectReceive(input: {
+        expiresAtMs: number;
+        receiveId: string;
+    }) {
         if (this.failDirectOpen) throw new Error("method not found");
         return {
             expiresAtMs: input.expiresAtMs,
             nextOffsetBytes: this.received.get(input.receiveId)?.length ?? 0,
             receiverId: `receiver-${input.receiveId}`,
-            urls: [`memory://${input.receiveId}`]
+            urls: [`memory://${input.receiveId}`],
         };
     }
 
@@ -216,8 +245,15 @@ class DirectSourceEndpoint extends MemoryArtifactEndpoint {
     }) {
         this.directPushCalls += 1;
         if (this.failDirect) throw new Error("direct path unavailable");
-        const chunk = this.#directBytes.subarray(input.offsetBytes, input.offsetBytes + input.maxBytes);
-        const nextOffsetBytes = this.#target.writeDirect(input.urls[0]!, input.offsetBytes, chunk);
+        const chunk = this.#directBytes.subarray(
+            input.offsetBytes,
+            input.offsetBytes + input.maxBytes,
+        );
+        const nextOffsetBytes = this.#target.writeDirect(
+            input.urls[0]!,
+            input.offsetBytes,
+            chunk,
+        );
         return { nextOffsetBytes, pushedBytes: chunk.length };
     }
 }
@@ -229,7 +265,7 @@ function resolver(endpoints: Record<string, ArtifactServiceEndpoint>) {
 async function waitForStatus(
     service: ArtifactService,
     transferId: string,
-    status: ArtifactTransferRecord["status"]
+    status: ArtifactTransferRecord["status"],
 ): Promise<ArtifactTransferRecord> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
         const record = service.getTransfer(transferId);
@@ -251,7 +287,7 @@ test("artifact transfer returns queued immediately and completes asynchronously"
         chunkBytes: 3,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
@@ -262,20 +298,30 @@ test("artifact transfer returns queued immediately and completes asynchronously"
             sourceWorkspace: "/source",
             targetInstance: "target-b",
             targetPath: "/target/payload.bin",
-            targetWorkspace: "/target"
+            targetWorkspace: "/target",
         },
-        "source-a"
+        "source-a",
     );
     assert.equal(started.transfer.status, "queued");
 
     gate.resolve();
-    const completed = await service.waitForTransfer(started.transfer.transferId);
+    const completed = await service.waitForTransfer(
+        started.transfer.transferId,
+    );
     assert.equal(completed.status, "completed");
     assert.equal(completed.transferredBytes, 8);
     assert.deepEqual(target.received.get("receive-1"), Buffer.from("abcdefgh"));
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
-    assert.ok(source.events.some((event) => event.type === "artifact.transferCompleted"));
-    assert.ok(target.events.some((event) => event.type === "artifact.transferCompleted"));
+    assert.ok(
+        source.events.some(
+            (event) => event.type === "artifact.transferCompleted",
+        ),
+    );
+    assert.ok(
+        target.events.some(
+            (event) => event.type === "artifact.transferCompleted",
+        ),
+    );
 });
 
 test("artifact transfer relays through Control unless direct transfer is explicitly enabled", async (t) => {
@@ -288,19 +334,24 @@ test("artifact transfer relays through Control unless direct transfer is explici
         chunkBytes: 4,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./payload.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/payload.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const completed = await service.waitForTransfer(started.transfer.transferId);
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const completed = await service.waitForTransfer(
+        started.transfer.transferId,
+    );
 
     assert.equal(completed.status, "completed");
     assert.deepEqual(target.received.get("receive-1"), bytes);
@@ -321,19 +372,24 @@ test("artifact transfer sends worker payload chunks directly without relaying by
         directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./payload.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/payload.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const completed = await service.waitForTransfer(started.transfer.transferId);
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const completed = await service.waitForTransfer(
+        started.transfer.transferId,
+    );
 
     assert.equal(completed.status, "completed");
     assert.deepEqual(target.received.get("receive-1"), bytes);
@@ -344,7 +400,9 @@ test("artifact transfer sends worker payload chunks directly without relaying by
 });
 
 test("artifact transfer restarts receive and falls back to relay when direct push fails", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-direct-fallback");
+    const storageDir = await createTestTempDirectory(
+        "artifact-direct-fallback",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const bytes = Buffer.from("relay-fallback");
     const target = new DirectTargetEndpoint(Buffer.alloc(0));
@@ -355,19 +413,24 @@ test("artifact transfer restarts receive and falls back to relay when direct pus
         directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./payload.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/payload.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const completed = await service.waitForTransfer(started.transfer.transferId);
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const completed = await service.waitForTransfer(
+        started.transfer.transferId,
+    );
 
     assert.equal(completed.status, "completed");
     assert.deepEqual(target.abortedReceives, ["receive-1"]);
@@ -378,7 +441,9 @@ test("artifact transfer restarts receive and falls back to relay when direct pus
 });
 
 test("artifact transfer falls back when an older target worker has no direct receiver RPC", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-direct-old-worker");
+    const storageDir = await createTestTempDirectory(
+        "artifact-direct-old-worker",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const bytes = Buffer.from("old-worker-relay");
     const target = new DirectTargetEndpoint(Buffer.alloc(0));
@@ -389,19 +454,24 @@ test("artifact transfer falls back when an older target worker has no direct rec
         directTransfer: true,
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./payload.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/payload.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const completed = await service.waitForTransfer(started.transfer.transferId);
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./payload.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/payload.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const completed = await service.waitForTransfer(
+        started.transfer.transferId,
+    );
 
     assert.equal(completed.status, "completed");
     assert.deepEqual(target.abortedReceives, ["receive-1"]);
@@ -418,11 +488,14 @@ test("artifact image view reads through the payload protocol and always closes t
         chunkBytes: 7,
         resolveEndpoint: resolver({ "source-a": source }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const image = await service.viewImage({ path: "./pixel.png", workspace: "/workspace" }, "source-a");
+    const image = await service.viewImage(
+        { path: "./pixel.png", workspace: "/workspace" },
+        "source-a",
+    );
 
     assert.equal(image.bytes, png.length);
     assert.equal(image.content, png.toString("base64"));
@@ -435,7 +508,7 @@ test("artifact image view reads through the payload protocol and always closes t
         instance: "source-a",
         path: "./pixel.png",
         type: "file",
-        workspace: "/workspace"
+        workspace: "/workspace",
     });
     assert.deepEqual(await service.readImage(image.imageRef), {
         blake3: image.blake3,
@@ -443,11 +516,18 @@ test("artifact image view reads through the payload protocol and always closes t
         content: png.toString("base64"),
         encoding: "base64",
         imageRef: image.imageRef,
-        mediaType: "image/png"
+        mediaType: "image/png",
     });
     assert.deepEqual(
-        await readFile(join(storageDir, "images", image.blake3.slice(0, 2), image.imageRef)),
-        png
+        await readFile(
+            join(
+                storageDir,
+                "images",
+                image.blake3.slice(0, 2),
+                image.imageRef,
+            ),
+        ),
+        png,
     );
     assert.deepEqual(source.closedPayloads, ["payload-1"]);
 });
@@ -456,21 +536,31 @@ test("artifact image view rejects unsupported and oversized payloads before retu
     const storageDir = await createTestTempDirectory("artifact-image-invalid");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const unsupported = new MemoryArtifactEndpoint(Buffer.from("not an image"));
-    const oversized = new MemoryArtifactEndpoint(Buffer.alloc(10 * 1024 * 1024 + 1));
+    const oversized = new MemoryArtifactEndpoint(
+        Buffer.alloc(10 * 1024 * 1024 + 1),
+    );
     const service = new ArtifactService({
         resolveEndpoint: resolver({ oversized, unsupported }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
     await assert.rejects(
-        service.viewImage({ path: "./plain.txt", workspace: "/workspace" }, "unsupported"),
-        (error: unknown) => (error as { code?: string }).code === "artifact.imageUnsupported"
+        service.viewImage(
+            { path: "./plain.txt", workspace: "/workspace" },
+            "unsupported",
+        ),
+        (error: unknown) =>
+            (error as { code?: string }).code === "artifact.imageUnsupported",
     );
     await assert.rejects(
-        service.viewImage({ path: "./huge.png", workspace: "/workspace" }, "oversized"),
-        (error: unknown) => (error as { code?: string }).code === "artifact.imageTooLarge"
+        service.viewImage(
+            { path: "./huge.png", workspace: "/workspace" },
+            "oversized",
+        ),
+        (error: unknown) =>
+            (error as { code?: string }).code === "artifact.imageTooLarge",
     );
     assert.deepEqual(unsupported.closedPayloads, ["payload-1"]);
     assert.deepEqual(oversized.closedPayloads, ["payload-1"]);
@@ -480,14 +570,15 @@ test("queued transfer resumes after restart while active transfer becomes interr
     const storageDir = await createTestTempDirectory("artifact-recovery");
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const scheduled: Array<() => void> = [];
-    const manualSchedule: ArtifactServiceSchedule = (task) => scheduled.push(task);
+    const manualSchedule: ArtifactServiceSchedule = (task) =>
+        scheduled.push(task);
     const source = new MemoryArtifactEndpoint(Buffer.from("queued"));
     const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
     const first = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         schedule: manualSchedule,
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await first.initialize();
     const queued = await first.startTransfer(
@@ -497,9 +588,9 @@ test("queued transfer resumes after restart while active transfer becomes interr
             sourceWorkspace: "/source",
             targetInstance: "target-b",
             targetPath: "/target/queued.bin",
-            targetWorkspace: "/target"
+            targetWorkspace: "/target",
         },
-        "source-a"
+        "source-a",
     );
     assert.equal(queued.transfer.status, "queued");
     assert.equal(scheduled.length, 1);
@@ -507,20 +598,28 @@ test("queued transfer resumes after restart while active transfer becomes interr
     const second = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await second.initialize();
     const recovered = await second.waitForTransfer(queued.transfer.transferId);
     assert.equal(recovered.status, "completed");
 
-    const activeStorageDir = await createTestTempDirectory("artifact-interrupted");
+    const activeStorageDir = await createTestTempDirectory(
+        "artifact-interrupted",
+    );
     t.after(() => rm(activeStorageDir, { force: true, recursive: true }));
     const gate = new Deferred();
-    const blockedSource = new MemoryArtifactEndpoint(Buffer.from("blocked"), gate);
+    const blockedSource = new MemoryArtifactEndpoint(
+        Buffer.from("blocked"),
+        gate,
+    );
     const active = new ArtifactService({
-        resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
+        resolveEndpoint: resolver({
+            "source-a": blockedSource,
+            "target-b": target,
+        }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir: activeStorageDir
+        storageDir: activeStorageDir,
     });
     await active.initialize();
     const activeTransfer = await active.startTransfer(
@@ -530,29 +629,45 @@ test("queued transfer resumes after restart while active transfer becomes interr
             sourceWorkspace: "/source",
             targetInstance: "target-b",
             targetPath: "/target/blocked.bin",
-            targetWorkspace: "/target"
+            targetWorkspace: "/target",
         },
-        "source-a"
+        "source-a",
     );
-    await waitForStatus(active, activeTransfer.transfer.transferId, "preparing");
+    await waitForStatus(
+        active,
+        activeTransfer.transfer.transferId,
+        "preparing",
+    );
     await blockedSource.openStarted.promise;
     await active.stop();
     await blockedSource.openAborted.promise;
 
     const restarted = new ArtifactService({
-        resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
+        resolveEndpoint: resolver({
+            "source-a": blockedSource,
+            "target-b": target,
+        }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir: activeStorageDir
+        storageDir: activeStorageDir,
     });
     await restarted.initialize();
-    assert.equal(restarted.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
+    assert.equal(
+        restarted.getTransfer(activeTransfer.transfer.transferId).status,
+        "interrupted",
+    );
     const verified = new ArtifactService({
-        resolveEndpoint: resolver({ "source-a": blockedSource, "target-b": target }),
+        resolveEndpoint: resolver({
+            "source-a": blockedSource,
+            "target-b": target,
+        }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir: activeStorageDir
+        storageDir: activeStorageDir,
     });
     await verified.initialize();
-    assert.equal(verified.getTransfer(activeTransfer.transfer.transferId).status, "interrupted");
+    assert.equal(
+        verified.getTransfer(activeTransfer.transfer.transferId).status,
+        "interrupted",
+    );
     assert.deepEqual(blockedSource.closedPayloads, []);
 });
 
@@ -561,26 +676,35 @@ test("control stop waits for an in-flight artifact commit and preserves complete
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const finishGate = new Deferred();
     const source = new MemoryArtifactEndpoint(Buffer.from("committed"));
-    const target = new MemoryArtifactEndpoint(Buffer.alloc(0), undefined, finishGate);
+    const target = new MemoryArtifactEndpoint(
+        Buffer.alloc(0),
+        undefined,
+        finishGate,
+    );
     const service = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./commit.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/commit.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./commit.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/commit.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
 
     await waitForStatus(service, started.transfer.transferId, "committing");
     await target.finishStarted.promise;
     let stopSettled = false;
-    const stopping = service.stop().then(() => { stopSettled = true; });
+    const stopping = service.stop().then(() => {
+        stopSettled = true;
+    });
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(stopSettled, false);
 
@@ -590,14 +714,19 @@ test("control stop waits for an in-flight artifact commit and preserves complete
     const reloaded = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await reloaded.initialize();
-    assert.equal(reloaded.getTransfer(started.transfer.transferId).status, "completed");
+    assert.equal(
+        reloaded.getTransfer(started.transfer.transferId).status,
+        "completed",
+    );
 });
 
 test("artifact cancellation rolls back its in-memory state when persistence fails", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-cancel-persist-failure");
+    const storageDir = await createTestTempDirectory(
+        "artifact-cancel-persist-failure",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const scheduled: Array<() => void> = [];
     const source = new MemoryArtifactEndpoint(Buffer.from("queued"));
@@ -606,17 +735,20 @@ test("artifact cancellation rolls back its in-memory state when persistence fail
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         schedule: (task) => scheduled.push(task),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./queued.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/queued.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./queued.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/queued.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
     assert.equal(scheduled.length, 1);
 
     const transfersDir = join(storageDir, "transfers");
@@ -624,7 +756,10 @@ test("artifact cancellation rolls back its in-memory state when persistence fail
     await writeFile(transfersDir, "not a directory", "utf8");
     await assert.rejects(service.cancelTransfer(started.transfer.transferId));
 
-    assert.equal(service.getTransfer(started.transfer.transferId).status, "queued");
+    assert.equal(
+        service.getTransfer(started.transfer.transferId).status,
+        "queued",
+    );
 });
 
 test("artifact share persists its payload lease and revoke closes it", async (t) => {
@@ -634,11 +769,14 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
     const service = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
-    const share = await service.createShare({ path: "./share.bin", workspace: "/workspace" }, "source-a");
+    const share = await service.createShare(
+        { path: "./share.bin", workspace: "/workspace" },
+        "source-a",
+    );
     assert.equal(share.state, "active");
     assert.match(share.url, /^https:\/\/example\.test\/artifacts\/share\//u);
     assert.equal(service.listShares().length, 1);
@@ -649,21 +787,27 @@ test("artifact share persists its payload lease and revoke closes it", async (t)
 });
 
 test("artifact share persists maxDownloads and completed download count across restart", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-share-download-count");
+    const storageDir = await createTestTempDirectory(
+        "artifact-share-download-count",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(Buffer.from("share"));
     const options = {
         resolveEndpoint: resolver({ "source-a": source }),
-        shareUrl: (token: string) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        shareUrl: (token: string) =>
+            `https://example.test/artifacts/share/${token}`,
+        storageDir,
     };
     const first = new ArtifactService(options);
     await first.initialize();
-    const share = await first.createShare({
-        maxDownloads: 2,
-        path: "./share.bin",
-        workspace: "/workspace"
-    }, "source-a");
+    const share = await first.createShare(
+        {
+            maxDownloads: 2,
+            path: "./share.bin",
+            workspace: "/workspace",
+        },
+        "source-a",
+    );
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     await first.beginShareDownload(token);
     await first.finishShareDownload(token, true);
@@ -680,27 +824,36 @@ test("artifact share persists maxDownloads and completed download count across r
 });
 
 test("artifact share reserves maxDownloads slots and releases a failed download", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-share-download-reservation");
+    const storageDir = await createTestTempDirectory(
+        "artifact-share-download-reservation",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(Buffer.from("share"));
     const service = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
     t.after(() => service.stop());
-    const share = await service.createShare({
-        maxDownloads: 1,
-        path: "./share.bin",
-        workspace: "/workspace"
-    }, "source-a");
+    const share = await service.createShare(
+        {
+            maxDownloads: 1,
+            path: "./share.bin",
+            workspace: "/workspace",
+        },
+        "source-a",
+    );
     const token = new URL(share.url).pathname.split("/").at(-1)!;
 
     await service.beginShareDownload(token);
     await assert.rejects(
         service.beginShareDownload(token),
-        (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "artifact.shareExhausted"
+        (error: unknown) =>
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "artifact.shareExhausted",
     );
     await service.finishShareDownload(token, false);
     await service.beginShareDownload(token);
@@ -710,21 +863,26 @@ test("artifact share reserves maxDownloads slots and releases a failed download"
 });
 
 test("artifact share rolls back download quota state when persistence fails", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-share-download-persist-failure");
+    const storageDir = await createTestTempDirectory(
+        "artifact-share-download-persist-failure",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const source = new MemoryArtifactEndpoint(Buffer.from("share"));
     const service = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
     t.after(() => service.stop());
-    const share = await service.createShare({
-        maxDownloads: 1,
-        path: "./share.bin",
-        workspace: "/workspace"
-    }, "source-a");
+    const share = await service.createShare(
+        {
+            maxDownloads: 1,
+            path: "./share.bin",
+            workspace: "/workspace",
+        },
+        "source-a",
+    );
     const token = new URL(share.url).pathname.split("/").at(-1)!;
     await service.beginShareDownload(token);
 
@@ -733,8 +891,11 @@ test("artifact share rolls back download quota state when persistence fails", as
     await writeFile(sharesDir, "not a directory", "utf8");
     await assert.rejects(service.finishShareDownload(token, true));
     assert.deepEqual(
-        { downloadCount: service.listShares()[0]?.downloadCount, state: service.listShares()[0]?.state },
-        { downloadCount: 0, state: "active" }
+        {
+            downloadCount: service.listShares()[0]?.downloadCount,
+            state: service.listShares()[0]?.state,
+        },
+        { downloadCount: 0, state: "active" },
     );
 
     await rm(sharesDir, { force: true });
@@ -751,72 +912,121 @@ test("artifact share history bounds terminal records while preserving active sha
         resolveEndpoint: resolver({ "source-a": source }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir,
-        terminalHistoryLimit: 2
+        terminalHistoryLimit: 2,
     });
     await service.initialize();
 
-    const active = await service.createShare({ path: "./active.bin", workspace: "/workspace" }, "source-a");
+    const active = await service.createShare(
+        { path: "./active.bin", workspace: "/workspace" },
+        "source-a",
+    );
     const terminalIds: string[] = [];
     for (const name of ["old-1.bin", "old-2.bin", "old-3.bin"]) {
-        const share = await service.createShare({ path: `./${name}`, workspace: "/workspace" }, "source-a");
+        const share = await service.createShare(
+            { path: `./${name}`, workspace: "/workspace" },
+            "source-a",
+        );
         terminalIds.push(share.shareId);
         await service.revokeShare(share.shareId);
     }
 
     const shares = service.listShares();
-    assert.equal(shares.some((share) => share.shareId === active.shareId && share.state === "active"), true);
-    assert.equal(shares.some((share) => share.shareId === terminalIds[0]), false);
+    assert.equal(
+        shares.some(
+            (share) =>
+                share.shareId === active.shareId && share.state === "active",
+        ),
+        true,
+    );
+    assert.equal(
+        shares.some((share) => share.shareId === terminalIds[0]),
+        false,
+    );
     assert.deepEqual(
-        shares.filter((share) => share.state !== "active").map((share) => share.shareId).sort(),
-        terminalIds.slice(-2).sort()
+        shares
+            .filter((share) => share.state !== "active")
+            .map((share) => share.shareId)
+            .sort(),
+        terminalIds.slice(-2).sort(),
     );
 });
 
 test("artifact transfer history bounds terminal records while preserving an in-flight transfer", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-transfer-history");
+    const storageDir = await createTestTempDirectory(
+        "artifact-transfer-history",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
-    let source: MemoryArtifactEndpoint = new MemoryArtifactEndpoint(Buffer.from("transfer"));
+    let source: MemoryArtifactEndpoint = new MemoryArtifactEndpoint(
+        Buffer.from("transfer"),
+    );
     const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
     const service = new ArtifactService({
-        resolveEndpoint: (name) => name === "source-a" ? source : name === "target-b" ? target : undefined,
+        resolveEndpoint: (name) =>
+            name === "source-a"
+                ? source
+                : name === "target-b"
+                  ? target
+                  : undefined,
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir,
-        terminalHistoryLimit: 2
+        terminalHistoryLimit: 2,
     });
     await service.initialize();
 
     const terminalIds: string[] = [];
     for (let index = 1; index <= 3; index += 1) {
-        const started = await service.startTransfer({
-            operation: "start",
-            sourcePath: `./source-${index}.bin`,
-            sourceWorkspace: "/source",
-            targetInstance: "target-b",
-            targetPath: `/target/${index}.bin`,
-            targetWorkspace: "/target"
-        }, "source-a");
+        const started = await service.startTransfer(
+            {
+                operation: "start",
+                sourcePath: `./source-${index}.bin`,
+                sourceWorkspace: "/source",
+                targetInstance: "target-b",
+                targetPath: `/target/${index}.bin`,
+                targetWorkspace: "/target",
+            },
+            "source-a",
+        );
         terminalIds.push(started.transfer.transferId);
-        assert.equal((await service.waitForTransfer(started.transfer.transferId)).status, "completed");
+        assert.equal(
+            (await service.waitForTransfer(started.transfer.transferId)).status,
+            "completed",
+        );
     }
 
     const gate = new Deferred();
     source = new MemoryArtifactEndpoint(Buffer.from("active"), gate);
-    const active = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./active.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/active.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
+    const active = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./active.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/active.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
     await waitForStatus(service, active.transfer.transferId, "preparing");
 
     const transfers = service.listTransfers();
-    assert.equal(transfers.some((transfer) => transfer.transferId === active.transfer.transferId && transfer.status === "preparing"), true);
-    assert.equal(transfers.some((transfer) => transfer.transferId === terminalIds[0]), false);
+    assert.equal(
+        transfers.some(
+            (transfer) =>
+                transfer.transferId === active.transfer.transferId &&
+                transfer.status === "preparing",
+        ),
+        true,
+    );
+    assert.equal(
+        transfers.some((transfer) => transfer.transferId === terminalIds[0]),
+        false,
+    );
     assert.deepEqual(
-        transfers.filter((transfer) => transfer.status === "completed").map((transfer) => transfer.transferId).sort(),
-        terminalIds.slice(-2).sort()
+        transfers
+            .filter((transfer) => transfer.status === "completed")
+            .map((transfer) => transfer.transferId)
+            .sort(),
+        terminalIds.slice(-2).sort(),
     );
 
     gate.resolve();
@@ -824,7 +1034,9 @@ test("artifact transfer history bounds terminal records while preserving an in-f
 });
 
 test("completed transfer waiters resolve before zero-retention history is discarded", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-transfer-no-terminal-history");
+    const storageDir = await createTestTempDirectory(
+        "artifact-transfer-no-terminal-history",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const gate = new Deferred();
     const source = new MemoryArtifactEndpoint(Buffer.from("transfer"), gate);
@@ -833,17 +1045,20 @@ test("completed transfer waiters resolve before zero-retention history is discar
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
         storageDir,
-        terminalHistoryLimit: 0
+        terminalHistoryLimit: 0,
     });
     await service.initialize();
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./source.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/source.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./source.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/source.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
     const completed = service.waitForTransfer(started.transfer.transferId);
 
     gate.resolve();
@@ -857,12 +1072,16 @@ test("expired share is closed and unavailable after restart", async (t) => {
     const source = new MemoryArtifactEndpoint(Buffer.from("expired"));
     const options = {
         resolveEndpoint: resolver({ "source-a": source }),
-        shareUrl: (token: string) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        shareUrl: (token: string) =>
+            `https://example.test/artifacts/share/${token}`,
+        storageDir,
     };
     const service = new ArtifactService(options);
     await service.initialize();
-    const share = await service.createShare({ path: "./expired.bin", workspace: "/workspace" }, "source-a");
+    const share = await service.createShare(
+        { path: "./expired.bin", workspace: "/workspace" },
+        "source-a",
+    );
     await service.stop();
 
     const recordPath = join(storageDir, "shares", `${share.shareId}.json`);
@@ -882,11 +1101,13 @@ test("expired share is closed and unavailable after restart", async (t) => {
             typeof error === "object" &&
             error !== null &&
             "code" in error &&
-            error.code === "artifact.shareExpired"
+            error.code === "artifact.shareExpired",
     );
 });
 test("artifact instance retirement revokes shares and queued transfers bound to the deleted generation", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-instance-retirement");
+    const storageDir = await createTestTempDirectory(
+        "artifact-instance-retirement",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const scheduled: Array<() => void> = [];
     const source = new MemoryArtifactEndpoint(Buffer.from("source"));
@@ -898,77 +1119,110 @@ test("artifact instance retirement revokes shares and queued transfers bound to 
             if (name === "source-a") return source;
             if (name === "other") return other;
             if (name === "target-b") return target;
-            if (name === "host" && (authorityInstance === "source-a" || authorityInstance === "other")) return host;
+            if (
+                name === "host" &&
+                (authorityInstance === "source-a" ||
+                    authorityInstance === "other")
+            )
+                return host;
             return undefined;
         },
         schedule: (task) => scheduled.push(task),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
 
     const directShare = await service.createShare(
         { path: "./direct.bin", workspace: "/source" },
-        "source-a"
+        "source-a",
     );
     const hostShare = await service.createShare(
         { instance: "host", path: "./host.bin", workspace: "/host" },
-        "source-a"
+        "source-a",
     );
     const unrelatedShare = await service.createShare(
         { path: "./other.bin", workspace: "/other" },
-        "other"
+        "other",
     );
 
-    const sourceTransfer = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./source.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/source.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const targetTransfer = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./other.bin",
-        sourceWorkspace: "/other",
-        targetInstance: "source-a",
-        targetPath: "/source/incoming.bin",
-        targetWorkspace: "/source"
-    }, "other");
-    const hostAuthorityTransfer = await service.startTransfer({
-        instance: "host",
-        operation: "start",
-        sourcePath: "./host.bin",
-        sourceWorkspace: "/host",
-        targetInstance: "target-b",
-        targetPath: "/target/host.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
-    const unrelatedTransfer = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./other.bin",
-        sourceWorkspace: "/other",
-        targetInstance: "target-b",
-        targetPath: "/target/other.bin",
-        targetWorkspace: "/target"
-    }, "other");
+    const sourceTransfer = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./source.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/source.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const targetTransfer = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./other.bin",
+            sourceWorkspace: "/other",
+            targetInstance: "source-a",
+            targetPath: "/source/incoming.bin",
+            targetWorkspace: "/source",
+        },
+        "other",
+    );
+    const hostAuthorityTransfer = await service.startTransfer(
+        {
+            instance: "host",
+            operation: "start",
+            sourcePath: "./host.bin",
+            sourceWorkspace: "/host",
+            targetInstance: "target-b",
+            targetPath: "/target/host.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    const unrelatedTransfer = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./other.bin",
+            sourceWorkspace: "/other",
+            targetInstance: "target-b",
+            targetPath: "/target/other.bin",
+            targetWorkspace: "/target",
+        },
+        "other",
+    );
     assert.equal(scheduled.length, 4);
 
     await service.retireInstance("source-a");
 
-    const shares = new Map(service.listShares().map((share) => [share.shareId, share.state]));
+    const shares = new Map(
+        service.listShares().map((share) => [share.shareId, share.state]),
+    );
     assert.equal(shares.get(directShare.shareId), "revoked");
     assert.equal(shares.get(hostShare.shareId), "revoked");
     assert.equal(shares.get(unrelatedShare.shareId), "active");
-    assert.equal(service.getTransfer(sourceTransfer.transfer.transferId).status, "cancelled");
-    assert.equal(service.getTransfer(targetTransfer.transfer.transferId).status, "cancelled");
-    assert.equal(service.getTransfer(hostAuthorityTransfer.transfer.transferId).status, "cancelled");
-    assert.equal(service.getTransfer(unrelatedTransfer.transfer.transferId).status, "queued");
+    assert.equal(
+        service.getTransfer(sourceTransfer.transfer.transferId).status,
+        "cancelled",
+    );
+    assert.equal(
+        service.getTransfer(targetTransfer.transfer.transferId).status,
+        "cancelled",
+    );
+    assert.equal(
+        service.getTransfer(hostAuthorityTransfer.transfer.transferId).status,
+        "cancelled",
+    );
+    assert.equal(
+        service.getTransfer(unrelatedTransfer.transfer.transferId).status,
+        "queued",
+    );
 });
 
 test("artifact instance retirement aborts an in-flight transfer before waiting for terminal state", async (t) => {
-    const storageDir = await createTestTempDirectory("artifact-instance-retirement-active");
+    const storageDir = await createTestTempDirectory(
+        "artifact-instance-retirement-active",
+    );
     t.after(() => rm(storageDir, { force: true, recursive: true }));
     const gate = new Deferred();
     const source = new MemoryArtifactEndpoint(Buffer.from("blocked"), gate);
@@ -976,22 +1230,28 @@ test("artifact instance retirement aborts an in-flight transfer before waiting f
     const service = new ArtifactService({
         resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
         shareUrl: (token) => `https://example.test/artifacts/share/${token}`,
-        storageDir
+        storageDir,
     });
     await service.initialize();
-    const started = await service.startTransfer({
-        operation: "start",
-        sourcePath: "./blocked.bin",
-        sourceWorkspace: "/source",
-        targetInstance: "target-b",
-        targetPath: "/target/blocked.bin",
-        targetWorkspace: "/target"
-    }, "source-a");
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./blocked.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/blocked.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
     await source.openStarted.promise;
 
     const retirement = service.retireInstance("source-a");
     await source.openAborted.promise;
     await retirement;
-    assert.equal(service.getTransfer(started.transfer.transferId).status, "cancelled");
+    assert.equal(
+        service.getTransfer(started.transfer.transferId).status,
+        "cancelled",
+    );
     assert.deepEqual(source.closedPayloads, []);
 });

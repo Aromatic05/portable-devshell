@@ -1,4 +1,8 @@
-import type { ConnectionState, DaemonState, RuntimeStatus } from "@portable-devshell/shared";
+import type {
+    ConnectionState,
+    DaemonState,
+    RuntimeStatus,
+} from "@portable-devshell/shared";
 
 export interface InstanceRuntimeState {
     connectionState: ConnectionState;
@@ -13,7 +17,7 @@ export interface InstanceRuntimeState {
 
 export function deriveRuntimeStatus(
     daemonState: DaemonState,
-    connectionState: ConnectionState
+    connectionState: ConnectionState,
 ): RuntimeStatus {
     if (daemonState === "failed" || connectionState === "failed") {
         return "failed";
@@ -34,6 +38,9 @@ export function deriveRuntimeStatus(
     return "running";
 }
 
-export function isReadyState(daemonState: DaemonState, connectionState: ConnectionState): boolean {
+export function isReadyState(
+    daemonState: DaemonState,
+    connectionState: ConnectionState,
+): boolean {
     return deriveRuntimeStatus(daemonState, connectionState) === "ready";
 }

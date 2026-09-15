@@ -116,7 +116,10 @@ export class ControlError extends Error {
     readonly causeBody?: ControlErrorBody;
 
     constructor(body: ControlErrorInit) {
-        super(body.message, body.cause instanceof Error ? { cause: body.cause } : undefined);
+        super(
+            body.message,
+            body.cause instanceof Error ? { cause: body.cause } : undefined,
+        );
         this.name = "ControlError";
         this.code = body.code;
         this.details = body.details;
@@ -136,18 +139,24 @@ export class ControlError extends Error {
 }
 
 export function isControlErrorBody(value: unknown): value is ControlErrorBody {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
     const candidate = value as Record<string, unknown>;
-    return typeof candidate.code === "string"
-        && typeof candidate.message === "string"
-        && typeof candidate.retryable === "boolean"
-        && (candidate.cause === undefined || isControlErrorBody(candidate.cause));
+    return (
+        typeof candidate.code === "string" &&
+        typeof candidate.message === "string" &&
+        typeof candidate.retryable === "boolean" &&
+        (candidate.cause === undefined || isControlErrorBody(candidate.cause))
+    );
 }
 
-export function toControlErrorBody(error: unknown): ControlErrorBody | undefined {
+export function toControlErrorBody(
+    error: unknown,
+): ControlErrorBody | undefined {
     if (error instanceof ControlError) return error.toBody();
     if (!(error instanceof Error) && isControlErrorBody(error)) return error;
-    if (typeof error !== "object" || error === null || Array.isArray(error)) return undefined;
+    if (typeof error !== "object" || error === null || Array.isArray(error))
+        return undefined;
 
     const candidate = error as {
         cause?: unknown;
@@ -160,11 +169,19 @@ export function toControlErrorBody(error: unknown): ControlErrorBody | undefined
 
     const cause = toControlErrorBody(candidate.cause);
     return {
-        code: typeof candidate.code === "string" ? candidate.code : "error.unknown",
+        code:
+            typeof candidate.code === "string"
+                ? candidate.code
+                : "error.unknown",
         ...(cause === undefined ? {} : { cause }),
-        ...(candidate.details === undefined ? {} : { details: candidate.details }),
+        ...(candidate.details === undefined
+            ? {}
+            : { details: candidate.details }),
         message: candidate.message,
-        retryable: typeof candidate.retryable === "boolean" ? candidate.retryable : false,
+        retryable:
+            typeof candidate.retryable === "boolean"
+                ? candidate.retryable
+                : false,
     };
 }
 
@@ -176,11 +193,17 @@ export function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-export function toControlError(error: unknown, fallbackCode = errorCodes.targetInvalid): ControlError {
+export function toControlError(
+    error: unknown,
+    fallbackCode = errorCodes.targetInvalid,
+): ControlError {
     if (error instanceof ControlError) return error;
     const body = toControlErrorBody(error);
     return createError({
-        code: body?.code === undefined || body.code === "error.unknown" ? fallbackCode : body.code,
+        code:
+            body?.code === undefined || body.code === "error.unknown"
+                ? fallbackCode
+                : body.code,
         ...(body?.details === undefined ? {} : { details: body.details }),
         message: body?.message ?? errorMessage(error),
         retryable: body?.retryable === true,

@@ -19,32 +19,47 @@ async function harness(t: test.TestContext) {
     const context = {
         capabilities: {
             assets: {
-                async installBundle() { throw new Error("not used"); },
-                async installDirectory() { throw new Error("not used"); },
-                async listBundles() { return []; },
+                async installBundle() {
+                    throw new Error("not used");
+                },
+                async installDirectory() {
+                    throw new Error("not used");
+                },
+                async listBundles() {
+                    return [];
+                },
                 async removeBundle() {},
                 async resolveBundle(generation: string) {
-                    return { directory: join(dataDirectory, "bundles", generation), generation };
+                    return {
+                        directory: join(dataDirectory, "bundles", generation),
+                        generation,
+                    };
                 },
-                async projectBundle() { throw new Error("not used"); }
-            }
+                async projectBundle() {
+                    throw new Error("not used");
+                },
+            },
         },
         generation: "agent-generation-a",
         id: "agent",
         logger: {
             debug() {},
-            error(message: string) { errors.push(message); },
+            error(message: string) {
+                errors.push(message);
+            },
             info() {},
-            warn(message: string) { warnings.push(message); }
+            warn(message: string) {
+                warnings.push(message);
+            },
         },
         paths: {
             codeDirectory: join(root, "code"),
             dataDirectory,
             runtimeDirectory: join(root, "runtime"),
-            stateDirectory
+            stateDirectory,
         },
         register() {},
-        version: "0.1.0"
+        version: "0.1.0",
     } satisfies ExtensionContext;
     return { context, dataDirectory, errors, stateDirectory, warnings };
 }
@@ -61,41 +76,60 @@ async function writeProvider(input: {
     const id = input.id ?? "pi";
     const directory = join(input.dataDirectory, "bundles", input.generation);
     await mkdir(join(directory, "dist"), { recursive: true });
-    await writeFile(join(directory, "devshell-agent-provider.json"), `${JSON.stringify({
-        apiVersion: input.manifestApiVersion ?? 1,
-        entry: "dist/index.mjs",
-        id,
-        name: "Pi",
-        schemaVersion: 1,
-        version: input.manifestVersion ?? "0.1.0"
-    })}\n`, "utf8");
-    await writeFile(join(directory, "dist", "index.mjs"), [
-        "export function createAgentProvider() {",
-        `  return { id: ${JSON.stringify(input.runtimeId ?? id)}, version: ${JSON.stringify(input.runtimeVersion ?? "0.1.0")},`,
-        "    async start() { throw new Error('not started in loader test'); }",
-        "  };",
-        "}",
-        ""
-    ].join("\n"), "utf8");
+    await writeFile(
+        join(directory, "devshell-agent-provider.json"),
+        `${JSON.stringify({
+            apiVersion: input.manifestApiVersion ?? 1,
+            entry: "dist/index.mjs",
+            id,
+            name: "Pi",
+            schemaVersion: 1,
+            version: input.manifestVersion ?? "0.1.0",
+        })}\n`,
+        "utf8",
+    );
+    await writeFile(
+        join(directory, "dist", "index.mjs"),
+        [
+            "export function createAgentProvider() {",
+            `  return { id: ${JSON.stringify(input.runtimeId ?? id)}, version: ${JSON.stringify(input.runtimeVersion ?? "0.1.0")},`,
+            "    async start() { throw new Error('not started in loader test'); }",
+            "  };",
+            "}",
+            "",
+        ].join("\n"),
+        "utf8",
+    );
 }
 
 async function writeRegistry(
     stateDirectory: string,
-    entry: { enabled: boolean; lastKnownGoodGeneration?: string; selectedGeneration?: string }
+    entry: {
+        enabled: boolean;
+        lastKnownGoodGeneration?: string;
+        selectedGeneration?: string;
+    },
 ) {
-    await writeFile(join(stateDirectory, "providers.json"), `${JSON.stringify({
-        providers: { pi: entry },
-        schemaVersion: 1
-    })}\n`, "utf8");
+    await writeFile(
+        join(stateDirectory, "providers.json"),
+        `${JSON.stringify({
+            providers: { pi: entry },
+            schemaVersion: 1,
+        })}\n`,
+        "utf8",
+    );
 }
 
 test("Agent provider selection is independent from the Agent Extension generation", async (t) => {
     const h = await harness(t);
-    await writeProvider({ dataDirectory: h.dataDirectory, generation: "pi-hash-a" });
+    await writeProvider({
+        dataDirectory: h.dataDirectory,
+        generation: "pi-hash-a",
+    });
     await writeRegistry(h.stateDirectory, {
         enabled: true,
         lastKnownGoodGeneration: "pi-hash-a",
-        selectedGeneration: "pi-hash-a"
+        selectedGeneration: "pi-hash-a",
     });
 
     const providers = await new AgentProviderLoader(h.context).loadSelected();
@@ -112,17 +146,23 @@ test("Agent provider generation can change while the Agent Extension generation 
         dataDirectory: h.dataDirectory,
         generation: "pi-hash-a",
         manifestVersion: "0.1.0",
-        runtimeVersion: "0.1.0"
+        runtimeVersion: "0.1.0",
     });
     await writeProvider({
         dataDirectory: h.dataDirectory,
         generation: "pi-hash-b",
         manifestVersion: "0.1.1",
-        runtimeVersion: "0.1.1"
+        runtimeVersion: "0.1.1",
     });
-    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "pi-hash-a" });
+    await writeRegistry(h.stateDirectory, {
+        enabled: true,
+        selectedGeneration: "pi-hash-a",
+    });
     const first = await new AgentProviderLoader(h.context).loadSelected();
-    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "pi-hash-b" });
+    await writeRegistry(h.stateDirectory, {
+        enabled: true,
+        selectedGeneration: "pi-hash-b",
+    });
     const second = await new AgentProviderLoader(h.context).loadSelected();
 
     assert.equal(h.context.generation, "agent-generation-a");
@@ -133,27 +173,44 @@ test("Agent provider generation can change while the Agent Extension generation 
 test("Agent provider loader falls back to last-known-good without failing Agent Extension activation", async (t) => {
     const h = await harness(t);
     await writeProvider({ dataDirectory: h.dataDirectory, generation: "good" });
-    await writeProvider({ dataDirectory: h.dataDirectory, generation: "bad-api", manifestApiVersion: 2 });
+    await writeProvider({
+        dataDirectory: h.dataDirectory,
+        generation: "bad-api",
+        manifestApiVersion: 2,
+    });
     await writeRegistry(h.stateDirectory, {
         enabled: true,
         lastKnownGoodGeneration: "good",
-        selectedGeneration: "bad-api"
+        selectedGeneration: "bad-api",
     });
 
     const providers = await new AgentProviderLoader(h.context).loadSelected();
 
     assert.equal(providers[0]?.id, "pi");
-    assert.equal(h.warnings.some((message) => message.includes("bad-api")), true);
+    assert.equal(
+        h.warnings.some((message) => message.includes("bad-api")),
+        true,
+    );
     assert.equal(h.errors.length, 0);
 });
 
 test("Agent provider loader isolates an invalid provider when no known-good generation exists", async (t) => {
     const h = await harness(t);
-    await writeProvider({ dataDirectory: h.dataDirectory, generation: "lying", runtimeId: "other" });
-    await writeRegistry(h.stateDirectory, { enabled: true, selectedGeneration: "lying" });
+    await writeProvider({
+        dataDirectory: h.dataDirectory,
+        generation: "lying",
+        runtimeId: "other",
+    });
+    await writeRegistry(h.stateDirectory, {
+        enabled: true,
+        selectedGeneration: "lying",
+    });
 
     const providers = await new AgentProviderLoader(h.context).loadSelected();
 
     assert.deepEqual(providers, []);
-    assert.equal(h.errors.some((message) => message.includes("no loadable generation")), true);
+    assert.equal(
+        h.errors.some((message) => message.includes("no loadable generation")),
+        true,
+    );
 });

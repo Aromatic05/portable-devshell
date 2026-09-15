@@ -63,11 +63,11 @@ impl SpawnedDaemon {
     pub fn has_exited(&mut self) -> bool {
         #[cfg(unix)]
         {
-            return match self.child.try_wait() {
+            match self.child.try_wait() {
                 Ok(Some(_)) => true,
                 Ok(None) => false,
                 Err(_) => !process_is_running(self.pid),
-            };
+            }
         }
         #[cfg(windows)]
         {

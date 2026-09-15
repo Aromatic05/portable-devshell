@@ -19,12 +19,16 @@ export interface TuiSidebarRegions {
     sidebar: TuiSidebarRegion;
 }
 
-export interface TuiSidebarViewport<T extends TuiSidebarEntry = TuiSidebarEntry> {
+export interface TuiSidebarViewport<
+    T extends TuiSidebarEntry = TuiSidebarEntry,
+> {
     items: readonly T[];
     startIndex: number;
 }
 
-export interface TuiCompactSidebarItem<T extends TuiSidebarEntry = TuiSidebarEntry> {
+export interface TuiCompactSidebarItem<
+    T extends TuiSidebarEntry = TuiSidebarEntry,
+> {
     index: number;
     item: T;
     text: string;
@@ -120,11 +124,12 @@ export function selectTuiSidebarViewport<T extends TuiSidebarEntry>(
 
     const focusedIndex = items.findIndex((item) => item.focused);
     const selectedIndex = items.findIndex((item) => item.selected);
-    const anchorIndex = focusedIndex >= 0
-        ? focusedIndex
-        : selectedIndex >= 0
-          ? selectedIndex
-          : 0;
+    const anchorIndex =
+        focusedIndex >= 0
+            ? focusedIndex
+            : selectedIndex >= 0
+              ? selectedIndex
+              : 0;
     const startIndex = Math.min(
         Math.max(0, anchorIndex - Math.floor(visibleRows / 2)),
         items.length - visibleRows,
@@ -149,11 +154,12 @@ export function selectTuiCompactSidebarLine<T extends TuiSidebarEntry>(
     });
     const focusedIndex = items.findIndex((item) => item.focused);
     const selectedIndex = items.findIndex((item) => item.selected);
-    const anchorIndex = focusedIndex >= 0
-        ? focusedIndex
-        : selectedIndex >= 0
-          ? selectedIndex
-          : 0;
+    const anchorIndex =
+        focusedIndex >= 0
+            ? focusedIndex
+            : selectedIndex >= 0
+              ? selectedIndex
+              : 0;
 
     let start = anchorIndex;
     let end = anchorIndex + 1;
@@ -199,7 +205,11 @@ function compactSidebarLabel(
     return `${context.selected ? "▶" : " "}${context.shortcut === undefined ? "" : `${context.shortcut}:`}${label}`;
 }
 
-function containsPoint(region: TuiSidebarRegion, x: number, y: number): boolean {
+function containsPoint(
+    region: TuiSidebarRegion,
+    x: number,
+    y: number,
+): boolean {
     return (
         x >= region.x &&
         x < region.x + region.width &&

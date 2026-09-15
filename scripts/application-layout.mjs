@@ -20,7 +20,9 @@ export async function materializeApplicationTree(sourceRoot, targetRoot) {
     const source = resolve(sourceRoot);
     const target = resolve(targetRoot);
     if (source === target) {
-        throw new ApplicationLayoutError("Application materialization source and target must differ.");
+        throw new ApplicationLayoutError(
+            "Application materialization source and target must differ.",
+        );
     }
     await cp(source, target, {
         dereference: true,
@@ -37,7 +39,7 @@ export async function readPackageBinPath(packageRoot, command) {
     } catch (error) {
         throw new ApplicationLayoutError(
             `Cannot read application package manifest at ${manifestPath}.`,
-            { cause: error }
+            { cause: error },
         );
     }
 
@@ -47,7 +49,7 @@ export async function readPackageBinPath(packageRoot, command) {
     } catch (error) {
         throw new ApplicationLayoutError(
             `Application package manifest at ${manifestPath} is not valid JSON.`,
-            { cause: error }
+            { cause: error },
         );
     }
 
@@ -58,7 +60,10 @@ export async function tryReadPackageBinPath(packageRoot, command) {
     try {
         return await readPackageBinPath(packageRoot, command);
     } catch (error) {
-        if (error instanceof ApplicationLayoutError && error.cause?.code === "ENOENT") {
+        if (
+            error instanceof ApplicationLayoutError &&
+            error.cause?.code === "ENOENT"
+        ) {
             return undefined;
         }
         throw error;
@@ -72,16 +77,21 @@ export function resolvePackageBinPath(packageRoot, manifest, command) {
     const absolutePath = resolve(root, relativePath);
     const pathFromRoot = relative(root, absolutePath);
 
-    if (pathFromRoot === "" || pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+    if (
+        pathFromRoot === "" ||
+        pathFromRoot === ".." ||
+        pathFromRoot.startsWith(`..${sep}`) ||
+        isAbsolute(pathFromRoot)
+    ) {
         throw new ApplicationLayoutError(
-            `Package bin.${command} escapes package root: ${binEntry}`
+            `Package bin.${command} escapes package root: ${binEntry}`,
         );
     }
 
     return {
         absolutePath,
         command,
-        relativePath: pathFromRoot.split(sep).join("/")
+        relativePath: pathFromRoot.split(sep).join("/"),
     };
 }
 
@@ -89,10 +99,15 @@ export async function writePortableApplicationManifest(packageRoot, options) {
     const command = options.command ?? "devshell";
     const bin = await readPackageBinPath(packageRoot, command);
     const additionalBins = options.additionalBins ?? {};
-    const version = requireNonEmptyString(options.version, "portable application version");
+    const version = requireNonEmptyString(
+        options.version,
+        "portable application version",
+    );
     const minimumNodeMajor = options.minimumNodeMajor;
     if (!Number.isSafeInteger(minimumNodeMajor) || minimumNodeMajor < 1) {
-        throw new ApplicationLayoutError("minimumNodeMajor must be a positive integer.");
+        throw new ApplicationLayoutError(
+            "minimumNodeMajor must be a positive integer.",
+        );
     }
 
     const manifest = {
@@ -102,20 +117,22 @@ export async function writePortableApplicationManifest(packageRoot, options) {
         type: "module",
         bin: {
             [command]: `./${bin.relativePath}`,
-            ...Object.fromEntries(Object.entries(additionalBins).map(([name, entry]) => [
-                name,
-                `./${normalizeRelativeBinPath(entry, name)}`
-            ]))
+            ...Object.fromEntries(
+                Object.entries(additionalBins).map(([name, entry]) => [
+                    name,
+                    `./${normalizeRelativeBinPath(entry, name)}`,
+                ]),
+            ),
         },
         engines: {
-            node: `>=${minimumNodeMajor}`
-        }
+            node: `>=${minimumNodeMajor}`,
+        },
     };
 
     await writeFile(
         resolve(packageRoot, "package.json"),
         `${JSON.stringify(manifest, null, 2)}\n`,
-        "utf8"
+        "utf8",
     );
     return manifest;
 }
@@ -127,18 +144,18 @@ export async function assertPackageBinFile(bin) {
     } catch (error) {
         throw new ApplicationLayoutError(
             `Package bin.${bin.command} does not exist at ${bin.absolutePath}.`,
-            { cause: error }
+            { cause: error },
         );
     }
 
     if (metadata.isSymbolicLink()) {
         throw new ApplicationLayoutError(
-            `Package bin.${bin.command} must not be a symbolic link: ${bin.absolutePath}`
+            `Package bin.${bin.command} must not be a symbolic link: ${bin.absolutePath}`,
         );
     }
     if (!metadata.isFile()) {
         throw new ApplicationLayoutError(
-            `Package bin.${bin.command} is not a regular file: ${bin.absolutePath}`
+            `Package bin.${bin.command} is not a regular file: ${bin.absolutePath}`,
         );
     }
 
@@ -146,30 +163,40 @@ export async function assertPackageBinFile(bin) {
 }
 
 function selectBinEntry(manifest, command) {
-    if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
-        throw new ApplicationLayoutError("Application package manifest must be an object.");
+    if (
+        typeof manifest !== "object" ||
+        manifest === null ||
+        Array.isArray(manifest)
+    ) {
+        throw new ApplicationLayoutError(
+            "Application package manifest must be an object.",
+        );
     }
 
     if (typeof manifest.bin === "string") {
         const defaultCommand = packageCommandName(manifest.name);
         if (defaultCommand !== command) {
             throw new ApplicationLayoutError(
-                `Application package does not declare bin.${command}; string bin belongs to ${defaultCommand}.`
+                `Application package does not declare bin.${command}; string bin belongs to ${defaultCommand}.`,
             );
         }
         return manifest.bin;
     }
 
-    if (typeof manifest.bin !== "object" || manifest.bin === null || Array.isArray(manifest.bin)) {
+    if (
+        typeof manifest.bin !== "object" ||
+        manifest.bin === null ||
+        Array.isArray(manifest.bin)
+    ) {
         throw new ApplicationLayoutError(
-            `Application package does not declare bin.${command}.`
+            `Application package does not declare bin.${command}.`,
         );
     }
 
     const entry = manifest.bin[command];
     if (entry === undefined) {
         throw new ApplicationLayoutError(
-            `Application package does not declare bin.${command}.`
+            `Application package does not declare bin.${command}.`,
         );
     }
     return entry;
@@ -178,19 +205,19 @@ function selectBinEntry(manifest, command) {
 function normalizeRelativeBinPath(value, command) {
     if (typeof value !== "string" || value.trim().length === 0) {
         throw new ApplicationLayoutError(
-            `Package bin.${command} must be a non-empty string.`
+            `Package bin.${command} must be a non-empty string.`,
         );
     }
     if (isAbsolute(value)) {
         throw new ApplicationLayoutError(
-            `Package bin.${command} must be relative: ${value}`
+            `Package bin.${command} must be relative: ${value}`,
         );
     }
 
     const normalized = value.replaceAll("\\", "/").replace(/^\.\//u, "");
     if (normalized.length === 0) {
         throw new ApplicationLayoutError(
-            `Package bin.${command} must be a non-empty string.`
+            `Package bin.${command} must be a non-empty string.`,
         );
     }
     return normalized;
@@ -199,7 +226,7 @@ function normalizeRelativeBinPath(value, command) {
 function packageCommandName(name) {
     if (typeof name !== "string" || name.length === 0) {
         throw new ApplicationLayoutError(
-            "Application package with a string bin declaration must have a name."
+            "Application package with a string bin declaration must have a name.",
         );
     }
     const segments = name.split("/");
@@ -208,7 +235,9 @@ function packageCommandName(name) {
 
 function requireNonEmptyString(value, label) {
     if (typeof value !== "string" || value.trim().length === 0) {
-        throw new ApplicationLayoutError(`${label} must be a non-empty string.`);
+        throw new ApplicationLayoutError(
+            `${label} must be a non-empty string.`,
+        );
     }
     return value;
 }

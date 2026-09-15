@@ -8,14 +8,14 @@ import {
     createError,
     type Channel,
     type JsonValue,
-    type PrefixRouteSnapshot
+    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import {
     ControlChannelServer,
     type ControlAcceptedChannel,
     type ControlChannelAdmission,
-    type ControlChannelListener
+    type ControlChannelListener,
 } from "../../../../src/server/endpoint/Channel.ts";
 import { negotiateControlProtocol } from "../../../../src/server/endpoint/Channel.ts";
 
@@ -43,7 +43,9 @@ class MemoryChannel implements Channel {
             throw new Error("Memory channel peer is not bound.");
         }
         if (peer.#closed) {
-            throw peer.#closeError ?? new Error("Memory channel peer is closed.");
+            throw (
+                peer.#closeError ?? new Error("Memory channel peer is closed.")
+            );
         }
         const copy = Uint8Array.from(frame);
         queueMicrotask(() => peer.#accept(copy));
@@ -101,14 +103,18 @@ class MemoryControlChannelListener implements ControlChannelListener {
     closed = false;
     started = false;
 
-    constructor(admission: ControlChannelAdmission = {
-        allowedPeers: ["cli", "tui"],
-        subject: { id: "uid:test", kind: "local-owner" },
-    }) {
+    constructor(
+        admission: ControlChannelAdmission = {
+            allowedPeers: ["cli", "tui"],
+            subject: { id: "uid:test", kind: "local-owner" },
+        },
+    ) {
         this.#admission = admission;
     }
 
-    async start(accept: (connection: ControlAcceptedChannel) => void): Promise<void> {
+    async start(
+        accept: (connection: ControlAcceptedChannel) => void,
+    ): Promise<void> {
         assert.equal(this.started, false);
         this.started = true;
         this.#accept = accept;
@@ -226,7 +232,6 @@ class BlockingRetryCloseControlChannelListener implements ControlChannelListener
     }
 }
 
-
 test("ControlChannelServer serves the same routes through multiple channel providers", async (t) => {
     const socketProvider = new MemoryControlChannelListener({
         allowedPeers: ["cli", "tui"],
@@ -241,11 +246,11 @@ test("ControlChannelServer serves the same routes through multiple channel provi
         connectionClosed(connectionId: string) {
             closedConnections.push(connectionId);
         },
-        snapshot: createRouteSnapshot
+        snapshot: createRouteSnapshot,
     };
     const server = new ControlChannelServer({
         listeners: [socketProvider, webProvider],
-        routes
+        routes,
     });
     await server.start();
     t.after(async () => await server.close());
@@ -258,18 +263,23 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     await assert.rejects(
         socketConnection.request("@control", "service", "ping"),
         (error: unknown) =>
-            (error as { code?: string }).code === "control.clientIdentityRequired",
+            (error as { code?: string }).code ===
+            "control.clientIdentityRequired",
     );
     await negotiate(socketConnection, "tui");
     await negotiate(webConnection, "web");
 
     assert.deepEqual(
-        await socketConnection.request<JsonValue>("@control", "service", "ping"),
+        await socketConnection.request<JsonValue>(
+            "@control",
+            "service",
+            "ping",
+        ),
         {
             pong: true,
             protocolVersion: CONTROL_PROTOCOL_VERSION,
             subject: { id: "uid:1000", kind: "local-owner" },
-        }
+        },
     );
     assert.deepEqual(
         await webConnection.request<JsonValue>("@control", "service", "ping"),
@@ -277,7 +287,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
             pong: true,
             protocolVersion: CONTROL_PROTOCOL_VERSION,
             subject: { id: "session:abc", kind: "web-session" },
-        }
+        },
     );
     await assert.rejects(
         webConnection.request("@control", "service", "hello", {
@@ -286,7 +296,8 @@ test("ControlChannelServer serves the same routes through multiple channel provi
             minProtocolVersion: CONTROL_PROTOCOL_VERSION,
         }),
         (error: unknown) =>
-            (error as { code?: string }).code === "control.clientIdentityInvalid",
+            (error as { code?: string }).code ===
+            "control.clientIdentityInvalid",
     );
 
     await server.close();
@@ -295,7 +306,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     assert.equal(closedConnections.length, 2);
     await assert.rejects(
         webConnection.request("@control", "service", "ping"),
-        /closed/iu
+        /closed/iu,
     );
 });
 
@@ -316,7 +327,8 @@ test("ControlChannelServer rejects a self-asserted peer outside transport admiss
     await assert.rejects(
         negotiate(connection, "tui"),
         (error: unknown) =>
-            (error as { code?: string }).code === "control.clientIdentityInvalid",
+            (error as { code?: string }).code ===
+            "control.clientIdentityInvalid",
     );
 });
 
@@ -348,25 +360,29 @@ test("ControlChannelServer does not authenticate a connection when hello handlin
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: () => PrefixRoute.snapshot([
-                {
-                    destination: "@control",
-                    modules: [
-                        {
-                            name: "service",
-                            operations: [
-                                {
-                                    name: "hello",
-                                    handle: () => {
-                                        throw new Error("hello failed");
+            snapshot: () =>
+                PrefixRoute.snapshot([
+                    {
+                        destination: "@control",
+                        modules: [
+                            {
+                                name: "service",
+                                operations: [
+                                    {
+                                        name: "hello",
+                                        handle: () => {
+                                            throw new Error("hello failed");
+                                        },
                                     },
-                                },
-                                { name: "ping", handle: () => ({ pong: true }) },
-                            ],
-                        },
-                    ],
-                },
-            ]),
+                                    {
+                                        name: "ping",
+                                        handle: () => ({ pong: true }),
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ]),
         },
     });
     await server.start();
@@ -378,7 +394,8 @@ test("ControlChannelServer does not authenticate a connection when hello handlin
     await assert.rejects(
         connection.request("@control", "service", "ping"),
         (error: unknown) =>
-            (error as { code?: string }).code === "control.clientIdentityRequired",
+            (error as { code?: string }).code ===
+            "control.clientIdentityRequired",
     );
 });
 
@@ -390,14 +407,14 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
         },
         async close() {
             throw new Error("provider that did not start must not be closed");
-        }
+        },
     };
     const server = new ControlChannelServer({
         listeners: [first, failure],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
 
     await assert.rejects(server.start(), /provider failed to start/iu);
@@ -410,8 +427,8 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
     t.after(async () => await server.close());
 
@@ -432,8 +449,8 @@ test("ControlChannelServer waits for an active start before closing providers", 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
 
     const start = server.start();
@@ -454,8 +471,8 @@ test("ControlChannelServer retries providers that failed to close", async () => 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
 
     await server.start();
@@ -472,15 +489,20 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
 
     await server.start();
     await assert.rejects(server.close(), /listeners failed to close/iu);
     await server.start();
 
-    assert.deepEqual(provider.events, ["start:1", "close:1", "close:2", "start:2"]);
+    assert.deepEqual(provider.events, [
+        "start:1",
+        "close:1",
+        "close:2",
+        "start:2",
+    ]);
     await server.close();
 });
 
@@ -490,8 +512,8 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot
-        }
+            snapshot: createRouteSnapshot,
+        },
     });
 
     await server.start();
@@ -506,7 +528,12 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
     provider.releaseCleanup();
     await Promise.all([first, second]);
 
-    assert.deepEqual(provider.events, ["start:1", "close:1", "close:2", "start:2"]);
+    assert.deepEqual(provider.events, [
+        "start:1",
+        "close:1",
+        "close:2",
+        "start:2",
+    ]);
     await server.close();
 });
 
@@ -516,7 +543,7 @@ test("ControlChannelServer replaces one started provider without closing others"
     const replacement = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [socket, web],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
     });
 
     await server.start();
@@ -535,13 +562,13 @@ test("ControlChannelServer rolls back a replacement when the previous provider f
     const replacement = new RetryCloseControlChannelListener(0);
     const server = new ControlChannelServer({
         listeners: [socket, previous],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
     });
 
     await server.start();
     await assert.rejects(
         server.replaceListener(previous, replacement),
-        /provider close failed/iu
+        /provider close failed/iu,
     );
 
     assert.deepEqual(previous.events, ["start:1", "close:1", "start:2"]);
@@ -549,21 +576,25 @@ test("ControlChannelServer rolls back a replacement when the previous provider f
     assert.equal(socket.closed, false);
 
     await server.close();
-    assert.deepEqual(previous.events, ["start:1", "close:1", "start:2", "close:2"]);
+    assert.deepEqual(previous.events, [
+        "start:1",
+        "close:1",
+        "start:2",
+        "close:2",
+    ]);
     assert.deepEqual(replacement.events, ["start:1", "close:1"]);
 });
 
-
 function createClient(
     provider: MemoryControlChannelListener,
-    peer: "tui" | "web"
+    peer: "tui" | "web",
 ): ClientConnection {
     return new ClientConnection({
         connectChannel: async () => provider.connect(),
         mapError: normalizeError,
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer
+        peer,
     });
 }
 
@@ -589,7 +620,10 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                                 pong: true,
                                 ...(context.protocolVersion === undefined
                                     ? {}
-                                    : { protocolVersion: context.protocolVersion }),
+                                    : {
+                                          protocolVersion:
+                                              context.protocolVersion,
+                                      }),
                                 ...(context.subject === undefined
                                     ? {}
                                     : {
@@ -598,12 +632,12 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                                               kind: context.subject.kind,
                                           },
                                       }),
-                            })
-                        }
-                    ]
-                }
-            ]
-        }
+                            }),
+                        },
+                    ],
+                },
+            ],
+        },
     ]);
 }
 

@@ -5,38 +5,42 @@ import {
     TODO_MAX_TEXT_LENGTH,
     TODO_MAX_TITLE_LENGTH,
     type JsonValue,
-    type ToolDefinition
+    type ToolDefinition,
 } from "@portable-devshell/shared";
 
 export type McpToolCatalogTodoName = "todo_read" | "todo_report" | "todo_write";
 
 const todoItemSchema: JsonValue = {
     additionalProperties: false,
-    allOf: [{
-        if: {
-            properties: { status: { enum: ["blocked", "failed"] } },
-            required: ["status"]
+    allOf: [
+        {
+            if: {
+                properties: { status: { enum: ["blocked", "failed"] } },
+                required: ["status"],
+            },
+            then: { required: ["detail"] },
         },
-        then: { required: ["detail"] }
-    }],
+    ],
     properties: {
         content: {
             description: "Complete user-visible description of this todo item.",
             minLength: 1,
             maxLength: TODO_MAX_TEXT_LENGTH,
-            type: "string"
+            type: "string",
         },
         detail: {
-            description: "Additional status detail. Required when status is blocked or failed.",
+            description:
+                "Additional status detail. Required when status is blocked or failed.",
             minLength: 1,
             maxLength: TODO_MAX_TEXT_LENGTH,
-            type: "string"
+            type: "string",
         },
         id: {
-            description: "Stable identifier unique within the complete todo list.",
+            description:
+                "Stable identifier unique within the complete todo list.",
             minLength: 1,
             maxLength: TODO_MAX_ID_LENGTH,
-            type: "string"
+            type: "string",
         },
         status: {
             description: "Current item status.",
@@ -60,18 +64,30 @@ const todoSummarySchema: JsonValue = {
     properties: {
         completed: { minimum: 0, type: "integer" },
         currentItemId: { minLength: 1, type: "string" },
-        total: { minimum: 0, type: "integer" }
+        total: { minimum: 0, type: "integer" },
     },
     required: ["completed", "total"],
-    type: "object"
+    type: "object",
 };
 
 const checkpointOutputSchema: JsonValue = {
     additionalProperties: false,
     properties: {
-        blockers: { items: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" }, maxItems: TODO_MAX_CHECKPOINT_BLOCKERS, type: "array" },
+        blockers: {
+            items: {
+                minLength: 1,
+                maxLength: TODO_MAX_TEXT_LENGTH,
+                type: "string",
+            },
+            maxItems: TODO_MAX_CHECKPOINT_BLOCKERS,
+            type: "array",
+        },
         next: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
-        summary: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
+        summary: {
+            minLength: 1,
+            maxLength: TODO_MAX_TEXT_LENGTH,
+            type: "string",
+        },
         updatedAt: { minLength: 1, type: "string" },
     },
     required: ["summary", "updatedAt"],
@@ -89,16 +105,33 @@ function todoTaskSummarySchema(): JsonValue {
             pausedAt: { minLength: 1, type: "string" },
             revision: { minimum: 0, type: "integer" },
             status: {
-                enum: ["pending", "in_progress", "blocked", "completed", "failed", "cancelled", "paused", "none"],
-                type: "string"
+                enum: [
+                    "pending",
+                    "in_progress",
+                    "blocked",
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "paused",
+                    "none",
+                ],
+                type: "string",
             },
             taskId: { minLength: 1, type: "string" },
             title: { minLength: 1, type: "string" },
             total: { minimum: 0, type: "integer" },
-            updatedAt: { minLength: 1, type: "string" }
+            updatedAt: { minLength: 1, type: "string" },
         },
-        required: ["completed", "revision", "status", "taskId", "title", "total", "updatedAt"],
-        type: "object"
+        required: [
+            "completed",
+            "revision",
+            "status",
+            "taskId",
+            "title",
+            "total",
+            "updatedAt",
+        ],
+        type: "object",
     };
 }
 
@@ -114,10 +147,10 @@ function outputSchema(): JsonValue {
             summary: todoSummarySchema,
             taskId: { minLength: 1, type: "string" },
             tasks: { items: todoTaskSummarySchema(), type: "array" },
-            title: { minLength: 1, type: "string" }
+            title: { minLength: 1, type: "string" },
         },
         required: ["items", "revision", "summary"],
-        type: "object"
+        type: "object",
     };
 }
 
@@ -125,21 +158,24 @@ export class McpToolCatalogTodo {
     readonly #definitions: readonly ToolDefinition[] = [
         {
             requiredCapabilities: [],
-            description: "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId whenever it is known; title remains a compatibility selector. Use todo tools only for multi-step tasks.",
+            description:
+                "Read todo plans. Call with no selector to list live tasks and recover their stable taskId values. Read one task by taskId whenever it is known; title remains a compatibility selector. Use todo tools only for multi-step tasks.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     taskId: {
-                        description: "Stable task identifier returned by todo_read or todo_write. Prefer this selector once known.",
+                        description:
+                            "Stable task identifier returned by todo_read or todo_write. Prefer this selector once known.",
                         minLength: 1,
-                        type: "string"
+                        type: "string",
                     },
                     title: {
-                        description: "Exact task title compatibility selector. Do not pass together with taskId.",
+                        description:
+                            "Exact task title compatibility selector. Do not pass together with taskId.",
                         minLength: 1,
-                        type: "string"
-                    }
+                        type: "string",
+                    },
                 },
                 type: "object",
             },
@@ -148,72 +184,96 @@ export class McpToolCatalogTodo {
         },
         {
             requiredCapabilities: [],
-            description: "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
+            description:
+                "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     message: {
-                        description: "Concise user reply or meaningful progress update.",
+                        description:
+                            "Concise user reply or meaningful progress update.",
                         minLength: 1,
                         maxLength: TODO_MAX_TEXT_LENGTH,
-                        type: "string"
-                    }
+                        type: "string",
+                    },
                 },
                 required: ["message"],
-                type: "object"
+                type: "object",
             },
             name: "todo_report",
             outputSchema: {
                 additionalProperties: false,
                 properties: {
-                    reported: { type: "boolean" }
+                    reported: { type: "boolean" },
                 },
                 required: ["reported"],
-                type: "object"
-            }
+                type: "object",
+            },
         },
         {
             requiredCapabilities: [],
-            description: "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",
+            description:
+                "Replace one task's complete plan; this is not a patch. Create with a new immutable title and revision 0. After creation, preserve title and pass taskId on updates so task identity never depends on model memory of the title. Legacy title-only updates remain supported. Each item requires a unique id, content, and status. IDs must be unique. status must be one of pending | in_progress | blocked | completed | failed | cancelled. Allow at most one in_progress item; blocked and failed items require detail. checkpoint is optional durable handoff context; update it at meaningful progress boundaries with a concise summary and next action. Update the plan promptly when progress changes.",
             group: "todo",
             inputSchema: {
                 additionalProperties: false,
                 properties: {
                     checkpoint: {
                         additionalProperties: false,
-                        description: "Optional durable handoff checkpoint. Omit to preserve the previous checkpoint.",
+                        description:
+                            "Optional durable handoff checkpoint. Omit to preserve the previous checkpoint.",
                         properties: {
-                            blockers: { items: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" }, maxItems: TODO_MAX_CHECKPOINT_BLOCKERS, type: "array" },
-                            next: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
-                            summary: { minLength: 1, maxLength: TODO_MAX_TEXT_LENGTH, type: "string" },
+                            blockers: {
+                                items: {
+                                    minLength: 1,
+                                    maxLength: TODO_MAX_TEXT_LENGTH,
+                                    type: "string",
+                                },
+                                maxItems: TODO_MAX_CHECKPOINT_BLOCKERS,
+                                type: "array",
+                            },
+                            next: {
+                                minLength: 1,
+                                maxLength: TODO_MAX_TEXT_LENGTH,
+                                type: "string",
+                            },
+                            summary: {
+                                minLength: 1,
+                                maxLength: TODO_MAX_TEXT_LENGTH,
+                                type: "string",
+                            },
                         },
                         required: ["summary"],
                         type: "object",
                     },
                     revision: {
-                        description: "Revision from the latest todo_read result.",
+                        description:
+                            "Revision from the latest todo_read result.",
                         minimum: 0,
-                        type: "integer"
+                        type: "integer",
                     },
                     taskId: {
-                        description: "Stable task identifier returned when the task was created. Prefer this on every update; omit when creating revision 0.",
+                        description:
+                            "Stable task identifier returned when the task was created. Prefer this on every update; omit when creating revision 0.",
                         minLength: 1,
                         maxLength: TODO_MAX_ID_LENGTH,
-                        type: "string"
+                        type: "string",
                     },
                     title: {
-                        description: "Immutable task namespace, unique among live tasks.",
+                        description:
+                            "Immutable task namespace, unique among live tasks.",
                         minLength: 1,
                         maxLength: TODO_MAX_TITLE_LENGTH,
-                        type: "string"
+                        type: "string",
                     },
                     todos: {
-                        description: "The complete replacement list of todo items, not a partial update.",
+                        description:
+                            "The complete replacement list of todo items, not a partial update.",
                         contains: {
                             properties: { status: { const: "in_progress" } },
                             required: ["status"],
-                            type: "object"
+                            type: "object",
                         },
                         items: todoItemSchema,
                         maxContains: 1,

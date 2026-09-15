@@ -20,16 +20,45 @@ export function buildHelpLines(state: TuiAppState): string[] {
 export function buildContextualHelpLines(state: TuiAppState): string[] {
     const route = currentTuiRoute(state);
     const pageLines: Record<TuiAppState["ui"]["selectedPage"], string[]> = {
-        overview: ["Enter opens the focused Instance.", "r refreshes the overview; / searches visible data."],
-        instances: ["Enter opens the focused item; Space expands actions and details.", "Lifecycle actions are inside the expanded Instance."],
-        config: ["Enter edits the focused field.", "Ctrl+S saves; Ctrl+D discards local edits."],
-        connections: ["Enter opens the focused connection or action.", "Editable connection fields use Ctrl+S to save."],
-        messages: ["Use Active / History in the upper sidebar to choose Conversations.", "Enter opens a Conversation; type in the composer and Enter sends."],
-        audit: ["Enter opens the focused Context or Tool Call; Space expands details.", "M opens the Conversation for a concrete Context; / searches Audit."],
-        logs: ["Enter opens the focused log Context; Space expands details.", "r refreshes and / searches logs."],
-        todo: ["Enter opens the focused Todo; Space expands details.", "Destructive actions require confirmation."],
-        help: ["This page contains the complete navigation and action reference."],
-        terminal: ["Right/Tab enters the terminal; Ctrl+] returns to the sidebar.", "Ctrl+T switches terminal sources; Shift+PgUp/PgDn browses scrollback."],
+        overview: [
+            "Enter opens the focused Instance.",
+            "r refreshes the overview; / searches visible data.",
+        ],
+        instances: [
+            "Enter opens the focused item; Space expands actions and details.",
+            "Lifecycle actions are inside the expanded Instance.",
+        ],
+        config: [
+            "Enter edits the focused field.",
+            "Ctrl+S saves; Ctrl+D discards local edits.",
+        ],
+        connections: [
+            "Enter opens the focused connection or action.",
+            "Editable connection fields use Ctrl+S to save.",
+        ],
+        messages: [
+            "Use Active / History in the upper sidebar to choose Conversations.",
+            "Enter opens a Conversation; type in the composer and Enter sends.",
+        ],
+        audit: [
+            "Enter opens the focused Context or Tool Call; Space expands details.",
+            "M opens the Conversation for a concrete Context; / searches Audit.",
+        ],
+        logs: [
+            "Enter opens the focused log Context; Space expands details.",
+            "r refreshes and / searches logs.",
+        ],
+        todo: [
+            "Enter opens the focused Todo; Space expands details.",
+            "Destructive actions require confirmation.",
+        ],
+        help: [
+            "This page contains the complete navigation and action reference.",
+        ],
+        terminal: [
+            "Right/Tab enters the terminal; Ctrl+] returns to the sidebar.",
+            "Ctrl+T switches terminal sources; Shift+PgUp/PgDn browses scrollback.",
+        ],
     };
     return [
         `Page: ${state.ui.selectedPage}`,

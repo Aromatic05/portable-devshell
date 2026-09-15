@@ -8,7 +8,12 @@ export interface TuiComponentHeaderProps {
 
 export function TuiComponentHeader(props: TuiComponentHeaderProps) {
     return (
-        <Box borderStyle="single" flexDirection="column" height={3} paddingX={1}>
+        <Box
+            borderStyle="single"
+            flexDirection="column"
+            height={3}
+            paddingX={1}
+        >
             <Text bold>{props.title}</Text>
             <Text>{`${props.summary} | ${props.stateLabel}`}</Text>
         </Box>

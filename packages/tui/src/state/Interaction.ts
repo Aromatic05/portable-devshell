@@ -5,11 +5,7 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { TuiOverlay } from "./Overlay.js";
-import type {
-    TuiFocusScope,
-    TuiPageId,
-    TuiSidebarCursor,
-} from "./Ui.js";
+import type { TuiFocusScope, TuiPageId, TuiSidebarCursor } from "./Ui.js";
 
 export type TuiEditorKind = "comment" | "config" | "connector" | "create";
 

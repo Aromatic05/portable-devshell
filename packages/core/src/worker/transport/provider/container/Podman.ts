@@ -19,7 +19,7 @@ export class WorkerTransportDriverPodman extends WorkerTransportDriverContainerB
             keepIdUserNamespace: true,
             provider: "podman",
             spawnFunction: options.spawnFunction,
-            workerBinary: options.workerBinary
+            workerBinary: options.workerBinary,
         });
     }
 }

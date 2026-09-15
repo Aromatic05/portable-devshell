@@ -30,7 +30,8 @@ export interface OpenCodeParentToolResultMessage {
     type: "tool.result";
 }
 
-export type OpenCodeParentMessage = OpenCodeChildInitMessage
+export type OpenCodeParentMessage =
+    | OpenCodeChildInitMessage
     | OpenCodeChildCommandMessage
     | OpenCodeChildOwnerHeartbeatMessage
     | OpenCodeParentToolResultMessage;
@@ -57,6 +58,7 @@ export interface OpenCodeChildToolCallMessage {
     type: "tool.call";
 }
 
-export type OpenCodeChildMessage = OpenCodeChildReadyMessage
+export type OpenCodeChildMessage =
+    | OpenCodeChildReadyMessage
     | OpenCodeChildResultMessage
     | OpenCodeChildToolCallMessage;

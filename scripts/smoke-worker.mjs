@@ -8,14 +8,16 @@ const workerArgument = process.argv[2];
 if (workerArgument === undefined) {
     throw new Error("usage: node scripts/smoke-worker.mjs <worker executable>");
 }
-const worker = isAbsolute(workerArgument) ? workerArgument : resolve(process.cwd(), workerArgument);
+const worker = isAbsolute(workerArgument)
+    ? workerArgument
+    : resolve(process.cwd(), workerArgument);
 const root = await createTestTempDirectory("worker-smoke");
 const workspace = resolve(root, "workspace");
 const instance = `windows-smoke-${process.pid}`;
 const env = {
     ...process.env,
     DEVSHELL_WORKER_DIAGNOSTIC_RPC: "1",
-    PORTABLE_DEVSHELL_HOME: resolve(root, "home")
+    PORTABLE_DEVSHELL_HOME: resolve(root, "home"),
 };
 delete env.DEVSHELL_WORKER_INTERNAL_INSTANCE;
 delete env.DEVSHELL_WORKER_INTERNAL_WORKSPACE;
@@ -29,7 +31,7 @@ try {
     const bridge = spawn(worker, ["rpc", "--instance", instance], {
         cwd: workspace,
         env,
-        stdio: ["pipe", "pipe", "pipe"]
+        stdio: ["pipe", "pipe", "pipe"],
     });
     const rpc = createRpcClient(bridge, workspace);
     try {
@@ -38,32 +40,51 @@ try {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
             maxProtocolVersion: WORKER_PROTOCOL_VERSION,
-            minProtocolVersion: WORKER_PROTOCOL_VERSION
+            minProtocolVersion: WORKER_PROTOCOL_VERSION,
         });
         stage("tools.list");
         const tools = await rpc.request("tools.list", {});
         const names = tools.tools.map((tool) => tool.name);
-        if (!names.includes("bash_run")) throw new Error("bash_run is missing from tools.list");
-        if (handshake.platform.os === "windows" && names.some((name) => name.startsWith("tmux_"))) {
+        if (!names.includes("bash_run"))
+            throw new Error("bash_run is missing from tools.list");
+        if (
+            handshake.platform.os === "windows" &&
+            names.some((name) => name.startsWith("tmux_"))
+        ) {
             throw new Error("Windows worker exposed tmux tools");
         }
         if (handshake.platform.os === "windows") {
             if (handshake.platform.shell?.kind !== "powershell") {
-                throw new Error("Windows handshake did not report the PowerShell runtime");
+                throw new Error(
+                    "Windows handshake did not report the PowerShell runtime",
+                );
             }
         }
 
         stage("file_edit");
         const written = await rpc.request("file_edit", {
-            changes: "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit"
+            changes:
+                "*** Begin Edit\n*** Write File: ./portable-devshell-smoke.txt\nportable-devshell-file-smoke\n*** End Edit",
         });
-        if (!Array.isArray(written.operations) || written.operations.length === 0 ||
-            written.operations.some((operation) => operation?.status !== "applied")) {
-            throw new Error(`file_edit smoke failed: ${JSON.stringify(written)}`);
+        if (
+            !Array.isArray(written.operations) ||
+            written.operations.length === 0 ||
+            written.operations.some(
+                (operation) => operation?.status !== "applied",
+            )
+        ) {
+            throw new Error(
+                `file_edit smoke failed: ${JSON.stringify(written)}`,
+            );
         }
         stage("file_read");
-        const read = await rpc.request("file_read", { path: "./portable-devshell-smoke.txt" });
-        if (typeof read.content !== "string" || !read.content.includes("portable-devshell-file-smoke")) {
+        const read = await rpc.request("file_read", {
+            path: "./portable-devshell-smoke.txt",
+        });
+        if (
+            typeof read.content !== "string" ||
+            !read.content.includes("portable-devshell-file-smoke")
+        ) {
             throw new Error(`file_read smoke failed: ${JSON.stringify(read)}`);
         }
 
@@ -75,37 +96,62 @@ try {
         const result = await rpc.request("bash_run", {
             command,
             maxCaptureBytes: 4096,
-            timeoutMs: 10_000
+            timeoutMs: 10_000,
         });
-        if (result.exitCode !== 0 || !result.stdout.includes("portable-devshell-smoke")) {
+        if (
+            result.exitCode !== 0 ||
+            !result.stdout.includes("portable-devshell-smoke")
+        ) {
             throw new Error(`bash_run smoke failed: ${JSON.stringify(result)}`);
         }
 
         stage("terminal.open");
         const terminalCapabilities = handshake.capabilities?.terminalPty;
-        if (terminalCapabilities?.supported !== true || terminalCapabilities.resize !== true ||
-            terminalCapabilities.replay !== true) {
-            throw new Error(`worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`);
+        if (
+            terminalCapabilities?.supported !== true ||
+            terminalCapabilities.resize !== true ||
+            terminalCapabilities.replay !== true
+        ) {
+            throw new Error(
+                `worker did not advertise PTY support: ${JSON.stringify(terminalCapabilities)}`,
+            );
         }
-        const terminal = await rpc.request("terminal.open", { cols: 80, rows: 24, workspace });
+        const terminal = await rpc.request("terminal.open", {
+            cols: 80,
+            rows: 24,
+            workspace,
+        });
         const terminalClient = {
             clientSeq: 1,
             fromSeq: 0,
             responseTail: "",
             version: terminal.version,
-            windows: handshake.platform.os === "windows"
+            windows: handshake.platform.os === "windows",
         };
         if (terminalClient.windows) {
-            await waitForTerminalOutput(rpc, terminal, terminalClient, "\u001B[6n");
+            await waitForTerminalOutput(
+                rpc,
+                terminal,
+                terminalClient,
+                "\u001B[6n",
+            );
         }
         await rpc.request("terminal.write", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
             clientSeq: terminalClient.clientSeq++,
-            data: Buffer.from(terminalPrintCommand("worker-pty-smoke"), "utf8").toString("base64")
+            data: Buffer.from(
+                terminalPrintCommand("worker-pty-smoke"),
+                "utf8",
+            ).toString("base64"),
         });
-        await waitForTerminalOutput(rpc, terminal, terminalClient, "worker-pty-smoke");
+        await waitForTerminalOutput(
+            rpc,
+            terminal,
+            terminalClient,
+            "worker-pty-smoke",
+        );
 
         stage("terminal.resize");
         const resized = await rpc.request("terminal.resize", {
@@ -114,7 +160,7 @@ try {
             version: terminalClient.version,
             clientSeq: terminalClient.clientSeq++,
             cols: 100,
-            rows: 40
+            rows: 40,
         });
         terminalClient.version = resized.version;
         await rpc.request("terminal.write", {
@@ -122,7 +168,9 @@ try {
             generation: terminal.generation,
             version: terminalClient.version,
             clientSeq: terminalClient.clientSeq++,
-            data: Buffer.from(terminalSizeProbeCommand(), "utf8").toString("base64")
+            data: Buffer.from(terminalSizeProbeCommand(), "utf8").toString(
+                "base64",
+            ),
         });
         await waitForTerminalOutput(rpc, terminal, terminalClient, "40 100");
 
@@ -131,7 +179,7 @@ try {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: terminalClient.version,
-            clientSeq: terminalClient.clientSeq++
+            clientSeq: terminalClient.clientSeq++,
         });
         await waitForTerminalExit(rpc, terminal);
     } finally {
@@ -139,7 +187,7 @@ try {
         bridge.stdin.end();
         await Promise.race([
             new Promise((done) => bridge.once("exit", done)),
-            new Promise((done) => setTimeout(done, 2_000))
+            new Promise((done) => setTimeout(done, 2_000)),
         ]);
         if (bridge.exitCode === null) bridge.kill();
     }
@@ -156,7 +204,7 @@ try {
         env,
         stdio: "ignore",
         timeout: 10_000,
-        windowsHide: true
+        windowsHide: true,
     });
     await rm(root, { force: true, recursive: true });
 }
@@ -186,21 +234,30 @@ async function waitForTerminalOutput(rpc, terminal, client, expected) {
         const attached = await rpc.request("terminal.attach", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            fromSeq: client.fromSeq
+            fromSeq: client.fromSeq,
         });
         for (const frame of attached.replay) {
             if (frame.seq <= client.fromSeq) continue;
             client.fromSeq = frame.seq;
-            const data = Buffer.from(frame.dataBase64, "base64").toString("utf8");
+            const data = Buffer.from(frame.dataBase64, "base64").toString(
+                "utf8",
+            );
             output += data;
             if (client.windows) {
-                await respondToCursorPositionQueries(rpc, terminal, client, data);
+                await respondToCursorPositionQueries(
+                    rpc,
+                    terminal,
+                    client,
+                    data,
+                );
             }
         }
         if (output.includes(expected)) return;
         await delay(50);
     }
-    throw new Error(`terminal output did not include ${expected}: ${JSON.stringify(output)}`);
+    throw new Error(
+        `terminal output did not include ${expected}: ${JSON.stringify(output)}`,
+    );
 }
 
 async function respondToCursorPositionQueries(rpc, terminal, client, data) {
@@ -209,16 +266,20 @@ async function respondToCursorPositionQueries(rpc, terminal, client, data) {
     while (true) {
         const queryIndex = client.responseTail.indexOf(query);
         if (queryIndex < 0) {
-            client.responseTail = client.responseTail.slice(-(query.length - 1));
+            client.responseTail = client.responseTail.slice(
+                -(query.length - 1),
+            );
             return;
         }
-        client.responseTail = client.responseTail.slice(queryIndex + query.length);
+        client.responseTail = client.responseTail.slice(
+            queryIndex + query.length,
+        );
         await rpc.request("terminal.write", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
             version: client.version,
             clientSeq: client.clientSeq++,
-            data: Buffer.from("\u001B[1;1R", "utf8").toString("base64")
+            data: Buffer.from("\u001B[1;1R", "utf8").toString("base64"),
         });
     }
 }
@@ -229,7 +290,7 @@ async function waitForTerminalExit(rpc, terminal) {
         const attached = await rpc.request("terminal.attach", {
             terminalId: terminal.terminalId,
             generation: terminal.generation,
-            fromSeq: 0
+            fromSeq: 0,
         });
         if (attached.exit !== undefined) return;
         await delay(50);
@@ -247,11 +308,11 @@ function runWorker(args) {
         env,
         encoding: "utf8",
         timeout: 30_000,
-        windowsHide: true
+        windowsHide: true,
     });
     if (result.error !== undefined || result.status !== 0) {
         throw new Error(
-            `${worker} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`
+            `${worker} ${args.join(" ")} failed (${result.status ?? "unknown"})\n${result.error?.stack ?? ""}\n${result.stdout ?? ""}${result.stderr ?? ""}`,
         );
     }
 }
@@ -261,17 +322,19 @@ async function reportFailure(error) {
     try {
         workerLog = await readFile(
             resolve(env.PORTABLE_DEVSHELL_HOME, instance, "logs", "worker.log"),
-            "utf8"
+            "utf8",
         );
     } catch {
         // The daemon may fail before the log file exists.
     }
     const rendered = [
-        error instanceof Error ? error.stack ?? error.message : String(error),
-        workerLog.length > 0 ? `worker.log:\n${workerLog}` : "worker.log was unavailable"
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+        workerLog.length > 0
+            ? `worker.log:\n${workerLog}`
+            : "worker.log was unavailable",
     ].join("\n\n");
     process.stderr.write(
-        `::error title=Windows worker smoke::${escapeWorkflowCommand(rendered)}\n`
+        `::error title=Windows worker smoke::${escapeWorkflowCommand(rendered)}\n`,
     );
 }
 
@@ -300,7 +363,9 @@ function createRpcClient(child, workspace) {
         while (buffer.length >= 4) {
             const length = buffer.readUInt32BE(0);
             if (buffer.length < length + 4) return;
-            const payload = JSON.parse(buffer.subarray(4, length + 4).toString("utf8"));
+            const payload = JSON.parse(
+                buffer.subarray(4, length + 4).toString("utf8"),
+            );
             buffer = buffer.subarray(length + 4);
             const request = pending.get(payload.id);
             if (request === undefined) continue;
@@ -313,7 +378,9 @@ function createRpcClient(child, workspace) {
     child.once("exit", (code) => {
         for (const request of pending.values()) {
             clearTimeout(request.timer);
-            request.reject(new Error(`worker rpc bridge exited with ${code}: ${stderr}`));
+            request.reject(
+                new Error(`worker rpc bridge exited with ${code}: ${stderr}`),
+            );
         }
         pending.clear();
     });
@@ -321,24 +388,35 @@ function createRpcClient(child, workspace) {
     return {
         request(method, params) {
             const id = `smoke-${nextId++}`;
-            const payload = Buffer.from(JSON.stringify({
-                type: "request",
-                id,
-                method,
-                params,
-                context: { workspace }
-            }), "utf8");
+            const payload = Buffer.from(
+                JSON.stringify({
+                    type: "request",
+                    id,
+                    method,
+                    params,
+                    context: { workspace },
+                }),
+                "utf8",
+            );
             const frame = Buffer.allocUnsafe(payload.length + 4);
             frame.writeUInt32BE(payload.length, 0);
             payload.copy(frame, 4);
             return new Promise((resolvePromise, rejectPromise) => {
                 const timer = setTimeout(() => {
                     pending.delete(id);
-                    rejectPromise(new Error(`worker rpc timeout for ${method}: ${stderr}`));
+                    rejectPromise(
+                        new Error(
+                            `worker rpc timeout for ${method}: ${stderr}`,
+                        ),
+                    );
                 }, 15_000);
-                pending.set(id, { reject: rejectPromise, resolve: resolvePromise, timer });
+                pending.set(id, {
+                    reject: rejectPromise,
+                    resolve: resolvePromise,
+                    timer,
+                });
                 child.stdin.write(frame);
             });
-        }
+        },
     };
 }

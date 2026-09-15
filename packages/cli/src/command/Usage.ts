@@ -1,8 +1,11 @@
-import type { CliCommandDescriptor, ExtensionRuntimeRecord } from "@portable-devshell/shared";
+import type { CliCommandDescriptor } from "@portable-devshell/shared";
 
-export type CliHelpTopic = "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
+export type CliHelpTopic =
+    "approval" | "config" | "context" | "debug" | "oauth" | "todo" | "tool";
 
-export function renderCliUsage(commands: readonly CliCommandDescriptor[] = []): string {
+export function renderCliUsage(
+    commands: readonly CliCommandDescriptor[] = [],
+): string {
     const lines = [
         "portable-devshell",
         "",
@@ -39,7 +42,9 @@ export function renderCliUsage(commands: readonly CliCommandDescriptor[] = []): 
     if (commands.length > 0) {
         lines.push("", "Installed commands:");
         for (const command of commands) {
-            lines.push(`  ${command.id.padEnd(30)} ${command.summary ?? command.title}`);
+            lines.push(
+                `  ${command.id.padEnd(30)} ${command.summary ?? command.title}`,
+            );
         }
     }
     return lines.join("\n");

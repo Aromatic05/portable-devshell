@@ -5,7 +5,7 @@ import {
     type ToolCallQuery,
     type ToolCallApprovalDecision,
     type ToolCallAssociation,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { AuditRecordStore } from "./RecordStore.js";
@@ -15,7 +15,12 @@ import type {
 } from "./database/Database.js";
 
 type ToolCallHistoryStore = AuditRecordStore<ToolCallRecord> &
-    Partial<Pick<AuditToolCallRecordStore, "hasCall" | "readFailureSummary" | "readQuery">>;
+    Partial<
+        Pick<
+            AuditToolCallRecordStore,
+            "hasCall" | "readFailureSummary" | "readQuery"
+        >
+    >;
 
 interface ActiveToolCall {
     approvalId?: string;
@@ -63,7 +68,7 @@ export class AuditToolCallHistory {
         startedAt: string,
         status: ToolCallRecord["status"] = "running",
         association?: ToolCallAssociation,
-        input?: JsonValue
+        input?: JsonValue,
     ): Promise<void> {
         await this.#initialize();
         this.#activeCalls.set(callId, {
@@ -90,7 +95,10 @@ export class AuditToolCallHistory {
         activeCall.status = "pendingApproval";
     }
 
-    async running(callId: string, decision?: ToolCallApprovalDecision): Promise<void> {
+    async running(
+        callId: string,
+        decision?: ToolCallApprovalDecision,
+    ): Promise<void> {
         await this.#initialize();
         const activeCall = this.#readActiveCall(callId);
         activeCall.status = "running";
@@ -100,34 +108,84 @@ export class AuditToolCallHistory {
     async completed(
         callId: string,
         completedAt: string,
-        result?: ToolCallCompletionResult
+        result?: ToolCallCompletionResult,
     ): Promise<ToolCallRecord> {
-        return await this.#finishRunning(callId, completedAt, "completed", undefined, result);
+        return await this.#finishRunning(
+            callId,
+            completedAt,
+            "completed",
+            undefined,
+            result,
+        );
     }
 
     async failed(
         callId: string,
         error: string,
         completedAt: string,
-        result?: ToolCallCompletionResult
+        result?: ToolCallCompletionResult,
     ): Promise<ToolCallRecord> {
-        return await this.#finishRunning(callId, completedAt, "failed", error, result);
+        return await this.#finishRunning(
+            callId,
+            completedAt,
+            "failed",
+            error,
+            result,
+        );
     }
 
-    async denied(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
-        return await this.#finishNonRunning(callId, error, completedAt, "denied", "denied");
+    async denied(
+        callId: string,
+        error: string,
+        completedAt: string,
+    ): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(
+            callId,
+            error,
+            completedAt,
+            "denied",
+            "denied",
+        );
     }
 
-    async expired(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
-        return await this.#finishNonRunning(callId, error, completedAt, "expired", "expired");
+    async expired(
+        callId: string,
+        error: string,
+        completedAt: string,
+    ): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(
+            callId,
+            error,
+            completedAt,
+            "expired",
+            "expired",
+        );
     }
 
-    async queueTimeout(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
-        return await this.#finishNonRunning(callId, error, completedAt, "queueTimeout");
+    async queueTimeout(
+        callId: string,
+        error: string,
+        completedAt: string,
+    ): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(
+            callId,
+            error,
+            completedAt,
+            "queueTimeout",
+        );
     }
 
-    async cancelled(callId: string, error: string, completedAt: string): Promise<ToolCallRecord> {
-        return await this.#finishNonRunning(callId, error, completedAt, "cancelled");
+    async cancelled(
+        callId: string,
+        error: string,
+        completedAt: string,
+    ): Promise<ToolCallRecord> {
+        return await this.#finishNonRunning(
+            callId,
+            error,
+            completedAt,
+            "cancelled",
+        );
     }
 
     hasActive(callId: string): boolean {
@@ -136,45 +194,71 @@ export class AuditToolCallHistory {
 
     hasActiveForContext(ctxId: string, excludeCallId?: string): boolean {
         for (const call of this.#activeCalls.values()) {
-            if (call.ctxId === ctxId && call.callId !== excludeCallId) return true;
+            if (call.ctxId === ctxId && call.callId !== excludeCallId)
+                return true;
         }
         return false;
     }
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {
         await this.#initialize();
-        if (hasCursor(query) && this.#store.readQuery !== undefined && this.#store.hasCall !== undefined) {
+        if (
+            hasCursor(query) &&
+            this.#store.readQuery !== undefined &&
+            this.#store.hasCall !== undefined
+        ) {
             return await this.#readCursorQuery(query);
         }
-        const records = canReadQuery(query) && this.#store.readQuery !== undefined
-            ? await this.#store.readQuery(query)
-            : canReadTail(query) && this.#store.readTail !== undefined
-              ? await this.#store.readTail(query.limit!)
-              : await this.#store.readAll();
+        const records =
+            canReadQuery(query) && this.#store.readQuery !== undefined
+                ? await this.#store.readQuery(query)
+                : canReadTail(query) && this.#store.readTail !== undefined
+                  ? await this.#store.readTail(query.limit!)
+                  : await this.#store.readAll();
         const activeRecords = this.#readActiveRecords();
-        const filtered = sliceByFilters(sliceByCursor([...records, ...activeRecords], query), query);
+        const filtered = sliceByFilters(
+            sliceByCursor([...records, ...activeRecords], query),
+            query,
+        );
         return finalizeRecords(filtered, query);
     }
 
     async #readCursorQuery(query: ToolCallQuery): Promise<ToolCallRecord[]> {
         const activeRecords = this.#readActiveRecords();
-        const afterActiveIndex = query.after === undefined ? -1 : findCursorIndex(activeRecords, query.after);
-        const beforeActiveIndex = query.before === undefined ? -1 : findCursorIndex(activeRecords, query.before);
-        const afterPersisted = query.after === undefined || afterActiveIndex >= 0
-            ? false
-            : await this.#store.hasCall!(query.after);
-        const beforePersisted = query.before === undefined || beforeActiveIndex >= 0
-            ? false
-            : await this.#store.hasCall!(query.before);
+        const afterActiveIndex =
+            query.after === undefined
+                ? -1
+                : findCursorIndex(activeRecords, query.after);
+        const beforeActiveIndex =
+            query.before === undefined
+                ? -1
+                : findCursorIndex(activeRecords, query.before);
+        const afterPersisted =
+            query.after === undefined || afterActiveIndex >= 0
+                ? false
+                : await this.#store.hasCall!(query.after);
+        const beforePersisted =
+            query.before === undefined || beforeActiveIndex >= 0
+                ? false
+                : await this.#store.hasCall!(query.before);
 
-        if (query.after !== undefined && afterActiveIndex < 0 && !afterPersisted) return [];
-        if (query.before !== undefined && beforeActiveIndex < 0 && !beforePersisted) return [];
+        if (
+            query.after !== undefined &&
+            afterActiveIndex < 0 &&
+            !afterPersisted
+        )
+            return [];
+        if (
+            query.before !== undefined &&
+            beforeActiveIndex < 0 &&
+            !beforePersisted
+        )
+            return [];
 
         let persistedRecords: ToolCallRecord[] = [];
         if (afterActiveIndex < 0) {
-            const persistedQuery = beforeActiveIndex < 0
-                ? query
-                : { ...query, before: undefined };
+            const persistedQuery =
+                beforeActiveIndex < 0 ? query : { ...query, before: undefined };
             persistedRecords = await this.#store.readQuery!(persistedQuery);
         }
 
@@ -185,18 +269,27 @@ export class AuditToolCallHistory {
         else if (beforePersisted) activeEnd = 0;
         if (activeStart > activeEnd) return [];
 
-        const activeSlice = sliceByFilters(activeRecords.slice(activeStart, activeEnd), query);
+        const activeSlice = sliceByFilters(
+            activeRecords.slice(activeStart, activeEnd),
+            query,
+        );
         return finalizeRecords([...persistedRecords, ...activeSlice], query);
     }
 
-    async readFailureSummary(sinceMs: number, untilMs: number): Promise<AuditToolCallFailureSummary> {
+    async readFailureSummary(
+        sinceMs: number,
+        untilMs: number,
+    ): Promise<AuditToolCallFailureSummary> {
         await this.#initialize();
         if (this.#store.readFailureSummary !== undefined) {
             return await this.#store.readFailureSummary(sinceMs, untilMs);
         }
         const failures = (await this.#store.readAll())
             .filter((record) => isFailureInWindow(record, sinceMs, untilMs))
-            .sort((left, right) => failureTimestamp(right) - failureTimestamp(left));
+            .sort(
+                (left, right) =>
+                    failureTimestamp(right) - failureTimestamp(left),
+            );
         return {
             count: failures.length,
             ...(failures[0] === undefined ? {} : { latest: failures[0] }),
@@ -223,7 +316,7 @@ export class AuditToolCallHistory {
     #readActiveRecords(): ToolCallRecord[] {
         return [...this.#activeCalls.values()].map((activeCall) => ({
             ...activeCall,
-            instance: this.#instanceName
+            instance: this.#instanceName,
         }));
     }
 
@@ -232,7 +325,7 @@ export class AuditToolCallHistory {
         completedAt: string,
         status: Extract<ToolCallRecord["status"], "completed" | "failed">,
         error?: string,
-        result?: ToolCallCompletionResult
+        result?: ToolCallCompletionResult,
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);
@@ -240,14 +333,24 @@ export class AuditToolCallHistory {
             ...startedRecord,
             completedAt,
             ...(error === undefined ? {} : { error }),
-            ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            ...(result?.exitCode === undefined
+                ? {}
+                : { exitCode: result.exitCode }),
             instance: this.#instanceName,
             ...(result?.output === undefined ? {} : { output: result.output }),
             status,
-            ...(result?.stderrBytes === undefined ? {} : { stderrBytes: result.stderrBytes }),
-            ...(result?.stdoutBytes === undefined ? {} : { stdoutBytes: result.stdoutBytes }),
-            ...(result?.termSignal === undefined ? {} : { termSignal: result.termSignal }),
-            ...(result?.termination === undefined ? {} : { termination: result.termination })
+            ...(result?.stderrBytes === undefined
+                ? {}
+                : { stderrBytes: result.stderrBytes }),
+            ...(result?.stdoutBytes === undefined
+                ? {}
+                : { stdoutBytes: result.stdoutBytes }),
+            ...(result?.termSignal === undefined
+                ? {}
+                : { termSignal: result.termSignal }),
+            ...(result?.termination === undefined
+                ? {}
+                : { termination: result.termination }),
         };
 
         await this.#store.append(record);
@@ -259,8 +362,11 @@ export class AuditToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
-        status: Extract<ToolCallRecord["status"], "denied" | "expired" | "queueTimeout" | "cancelled">,
-        decision?: ToolCallApprovalDecision
+        status: Extract<
+            ToolCallRecord["status"],
+            "denied" | "expired" | "queueTimeout" | "cancelled"
+        >,
+        decision?: ToolCallApprovalDecision,
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);
@@ -270,7 +376,7 @@ export class AuditToolCallHistory {
             ...(decision === undefined ? {} : { decision }),
             error,
             instance: this.#instanceName,
-            status
+            status,
         };
 
         await this.#store.append(record);
@@ -279,8 +385,12 @@ export class AuditToolCallHistory {
     }
 }
 
-function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
-    const callIds = query.callIds === undefined ? undefined : new Set(query.callIds);
+function sliceByFilters(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
+    const callIds =
+        query.callIds === undefined ? undefined : new Set(query.callIds);
     return records.filter((record) => {
         if (callIds !== undefined && !callIds.has(record.callId)) {
             return false;
@@ -290,7 +400,10 @@ function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCa
             return false;
         }
 
-        if (query.extensionId !== undefined && record.extensionId !== query.extensionId) {
+        if (
+            query.extensionId !== undefined &&
+            record.extensionId !== query.extensionId
+        ) {
             return false;
         }
 
@@ -302,7 +415,10 @@ function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCa
             return false;
         }
 
-        if (query.toolName !== undefined && record.toolName !== query.toolName) {
+        if (
+            query.toolName !== undefined &&
+            record.toolName !== query.toolName
+        ) {
             return false;
         }
 
@@ -310,9 +426,18 @@ function sliceByFilters(records: ToolCallRecord[], query: ToolCallQuery): ToolCa
     });
 }
 
-function sliceByCursor(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
-    const startIndex = query.after === undefined ? 0 : findCursorIndex(records, query.after) + 1;
-    const endIndex = query.before === undefined ? records.length : findCursorIndex(records, query.before);
+function sliceByCursor(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
+    const startIndex =
+        query.after === undefined
+            ? 0
+            : findCursorIndex(records, query.after) + 1;
+    const endIndex =
+        query.before === undefined
+            ? records.length
+            : findCursorIndex(records, query.before);
 
     if (startIndex === 0 && query.after !== undefined) {
         return [];
@@ -329,7 +454,10 @@ function sliceByCursor(records: ToolCallRecord[], query: ToolCallQuery): ToolCal
     return records.slice(startIndex, endIndex);
 }
 
-function applyLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+function applyLimit(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
     if (query.limit === undefined) {
         return records;
     }
@@ -341,27 +469,39 @@ function applyLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRe
     return records.slice(-query.limit);
 }
 
-function finalizeRecords(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+function finalizeRecords(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
     const projected = records.map((record) => projectRecord(record, query));
     return applyByteLimit(applyLimit(projected, query), query);
 }
 
-function projectRecord(record: ToolCallRecord, query: ToolCallQuery): ToolCallRecord {
-    if (query.includeInput !== false && query.includeOutput !== false) return record;
+function projectRecord(
+    record: ToolCallRecord,
+    query: ToolCallQuery,
+): ToolCallRecord {
+    if (query.includeInput !== false && query.includeOutput !== false)
+        return record;
     const projected = { ...record };
     if (query.includeInput === false) delete projected.input;
     if (query.includeOutput === false) delete projected.output;
     return projected;
 }
 
-function applyByteLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCallRecord[] {
+function applyByteLimit(
+    records: ToolCallRecord[],
+    query: ToolCallQuery,
+): ToolCallRecord[] {
     if (query.maxBytes === undefined) return records;
     const newestFirst = query.after === undefined;
     const candidates = newestFirst ? [...records].reverse() : records;
     const accepted: ToolCallRecord[] = [];
     let bytes = 2;
     for (const record of candidates) {
-        const recordBytes = Buffer.byteLength(JSON.stringify(record), "utf8") + (accepted.length === 0 ? 0 : 1);
+        const recordBytes =
+            Buffer.byteLength(JSON.stringify(record), "utf8") +
+            (accepted.length === 0 ? 0 : 1);
         if (bytes + recordBytes > query.maxBytes) break;
         if (newestFirst) accepted.unshift(record);
         else accepted.push(record);
@@ -370,8 +510,11 @@ function applyByteLimit(records: ToolCallRecord[], query: ToolCallQuery): ToolCa
     return accepted;
 }
 
-function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: number } {
-    return query.limit !== undefined &&
+function canReadTail(
+    query: ToolCallQuery,
+): query is ToolCallQuery & { limit: number } {
+    return (
+        query.limit !== undefined &&
         query.after === undefined &&
         query.before === undefined &&
         query.callIds === undefined &&
@@ -382,18 +525,20 @@ function canReadTail(query: ToolCallQuery): query is ToolCallQuery & { limit: nu
         query.maxBytes === undefined &&
         query.source === undefined &&
         query.status === undefined &&
-        query.toolName === undefined;
+        query.toolName === undefined
+    );
 }
 
 function canReadQuery(query: ToolCallQuery): boolean {
-    return !hasCursor(query) && (
-        query.limit !== undefined ||
-        query.callIds !== undefined ||
-        query.ctxId !== undefined ||
-        query.extensionId !== undefined ||
-        query.source !== undefined ||
-        query.status !== undefined ||
-        query.toolName !== undefined
+    return (
+        !hasCursor(query) &&
+        (query.limit !== undefined ||
+            query.callIds !== undefined ||
+            query.ctxId !== undefined ||
+            query.extensionId !== undefined ||
+            query.source !== undefined ||
+            query.status !== undefined ||
+            query.toolName !== undefined)
     );
 }
 
@@ -401,10 +546,19 @@ function hasCursor(query: ToolCallQuery): boolean {
     return query.after !== undefined || query.before !== undefined;
 }
 
-function isFailureInWindow(record: ToolCallRecord, sinceMs: number, untilMs: number): boolean {
-    if (record.status !== "failed" && record.status !== "queueTimeout") return false;
+function isFailureInWindow(
+    record: ToolCallRecord,
+    sinceMs: number,
+    untilMs: number,
+): boolean {
+    if (record.status !== "failed" && record.status !== "queueTimeout")
+        return false;
     const timestamp = failureTimestamp(record);
-    return Number.isFinite(timestamp) && timestamp >= sinceMs && timestamp <= untilMs;
+    return (
+        Number.isFinite(timestamp) &&
+        timestamp >= sinceMs &&
+        timestamp <= untilMs
+    );
 }
 
 function failureTimestamp(record: ToolCallRecord): number {

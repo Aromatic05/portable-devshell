@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { McpContextRecord, ToolCallRecord } from "@portable-devshell/shared";
+import type {
+    McpContextRecord,
+    ToolCallRecord,
+} from "@portable-devshell/shared";
 import type { CliModelCommandBinding } from "@portable-devshell/extension/cli";
 
 import { CliExtensionCommandService } from "../../../../../src/control/extension/cli/command/Service.ts";
@@ -11,7 +14,7 @@ import { InstanceRegistry } from "../../../../../src/control/instance/registry/R
 import type { ContextAdminPort } from "../../../../../src/composition/mcp/route/Context.ts";
 import type {
     WorkerCommandSessionClose,
-    WorkerCommandSessionOpen
+    WorkerCommandSessionOpen,
 } from "@portable-devshell/core";
 
 interface Harness {
@@ -26,8 +29,11 @@ interface Harness {
     setRecord(record: ToolCallRecord): void;
 }
 
-function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): Harness {
-    let closeListener: ((request: WorkerCommandSessionClose) => void) | undefined;
+function harness(
+    options: { allow?: boolean; contextWorkspace?: string } = {},
+): Harness {
+    let closeListener:
+        ((request: WorkerCommandSessionClose) => void) | undefined;
     let openListener: ((request: WorkerCommandSessionOpen) => void) | undefined;
     let aborts = 0;
     let record = toolRecord();
@@ -44,13 +50,17 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
             completions.push(input);
             return Promise.resolve();
         },
-        onCommandSessionClose(next: (request: WorkerCommandSessionClose) => void) {
+        onCommandSessionClose(
+            next: (request: WorkerCommandSessionClose) => void,
+        ) {
             closeListener = next;
             return () => {
                 if (closeListener === next) closeListener = undefined;
             };
         },
-        onCommandSessionOpen(next: (request: WorkerCommandSessionOpen) => void) {
+        onCommandSessionOpen(
+            next: (request: WorkerCommandSessionOpen) => void,
+        ) {
             openListener = next;
             return () => {
                 if (openListener === next) openListener = undefined;
@@ -62,11 +72,11 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
         writeCommandSessionOutput(input: Harness["outputs"][number]) {
             outputs.push(input);
             return Promise.resolve();
-        }
+        },
     };
     const descriptor = {
         name: "demo-local",
-        worker
+        worker,
     } as unknown as InstanceDescriptor;
     const registry = new InstanceRegistry([descriptor]);
     const command: CliModelCommandBinding = async (argv, invocation) => {
@@ -80,22 +90,35 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
                     reject(invocation.signal.reason ?? new Error("aborted"));
                 };
                 if (invocation.signal.aborted) onAbort();
-                else invocation.signal.addEventListener("abort", onAbort, { once: true });
+                else
+                    invocation.signal.addEventListener("abort", onAbort, {
+                        once: true,
+                    });
             });
         }
         if (argv[0] === "reference") {
-            const reference = await invocation.context.instanceReference(argv[1]!);
+            const reference = await invocation.context.instanceReference(
+                argv[1]!,
+            );
             return {
                 kind: "json",
-                value: reference === undefined ? null : {
-                    current: reference.current,
-                    ...(reference.handle === undefined ? {} : { handle: reference.handle })
-                }
+                value:
+                    reference === undefined
+                        ? null
+                        : {
+                              current: reference.current,
+                              ...(reference.handle === undefined
+                                  ? {}
+                                  : { handle: reference.handle }),
+                          },
             };
         }
         return { kind: "text", text: `probe:${argv.join("|")}` };
     };
-    const commands = new CliExtensionCommandService(modelExtensionHost(command), { surface: "model" });
+    const commands = new CliExtensionCommandService(
+        modelExtensionHost(command),
+        { surface: "model" },
+    );
     const contextAdmin = {
         async referenceInstance(ctxId: string, instance: string) {
             contextReferences.push({ ctxId, instance });
@@ -107,15 +130,15 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
             return {
                 ctxId,
                 instance,
-                workspace: options.contextWorkspace ?? "/repo"
+                workspace: options.contextWorkspace ?? "/repo",
             } as McpContextRecord;
-        }
+        },
     } as unknown as ContextAdminPort;
     const broker = new ModelDevshellBroker({
         access: { allows: () => options.allow !== false },
         commands,
         contextAdmin: () => contextAdmin,
-        instances: registry
+        instances: registry,
     });
     return {
         get aborts() {
@@ -136,7 +159,7 @@ function harness(options: { allow?: boolean; contextWorkspace?: string } = {}): 
         },
         setRecord(next) {
             record = next;
-        }
+        },
     };
 }
 
@@ -146,7 +169,9 @@ test("model devshell executes an allowed command only under matching active bash
     h.open(openRequest({ argv: ["probe", "alpha"] }));
     await waitFor(() => h.completions.length === 1);
 
-    assert.deepEqual(h.outputs, [{ data: "probe:alpha\n", sessionId: "session-a", stream: "stdout" }]);
+    assert.deepEqual(h.outputs, [
+        { data: "probe:alpha\n", sessionId: "session-a", stream: "stdout" },
+    ]);
     assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
     assert.deepEqual(h.faults, []);
 });
@@ -157,10 +182,12 @@ test("model devshell Context projections use the authoritative audited ctxId", a
     h.open(openRequest({ argv: ["probe", "reference", "remote-test"] }));
     await waitFor(() => h.completions.length === 1);
 
-    assert.deepEqual(h.contextReferences, [{
-        ctxId: "ctx-a",
-        instance: "remote-test"
-    }]);
+    assert.deepEqual(h.contextReferences, [
+        {
+            ctxId: "ctx-a",
+            instance: "remote-test",
+        },
+    ]);
     assert.deepEqual(h.completions, [{ exitCode: 0, sessionId: "session-a" }]);
     assert.deepEqual(h.faults, []);
 });
@@ -179,11 +206,13 @@ test("model devshell rejects a forged ctxId and records a Worker protocol integr
 test("model devshell accepts a completed tmux task only when its audited task id matches", async (t) => {
     const h = harness();
     t.after(() => h.broker.dispose());
-    h.setRecord(toolRecord({
-        output: { task: { id: "task-a", status: "running" } },
-        status: "completed",
-        toolName: "tmux_run"
-    }));
+    h.setRecord(
+        toolRecord({
+            output: { task: { id: "task-a", status: "running" } },
+            status: "completed",
+            toolName: "tmux_run",
+        }),
+    );
     h.open(openRequest({ taskId: "task-a" }));
     await waitFor(() => h.completions.length === 1);
     assert.equal(h.completions[0]?.exitCode, 0);
@@ -201,7 +230,9 @@ test("model devshell ACL denial is command unavailable, not a Worker integrity f
     h.open(openRequest());
     await waitFor(() => h.completions.length === 1);
 
-    assert.deepEqual(h.completions, [{ exitCode: 127, sessionId: "session-a" }]);
+    assert.deepEqual(h.completions, [
+        { exitCode: 127, sessionId: "session-a" },
+    ]);
     assert.deepEqual(h.faults, []);
     assert.equal(h.outputs[0]?.data, "CLI command probe is unavailable.\n");
 });
@@ -219,7 +250,9 @@ test("Worker broker close aborts the active model command without recording an i
     assert.deepEqual(h.faults, []);
 });
 
-function openRequest(overrides: Partial<WorkerCommandSessionOpen> = {}): WorkerCommandSessionOpen {
+function openRequest(
+    overrides: Partial<WorkerCommandSessionOpen> = {},
+): WorkerCommandSessionOpen {
     return {
         argv: ["probe"],
         ctxId: "ctx-a",
@@ -227,7 +260,7 @@ function openRequest(overrides: Partial<WorkerCommandSessionOpen> = {}): WorkerC
         parentCallId: "call-a",
         sessionId: "session-a",
         workspace: "/repo",
-        ...overrides
+        ...overrides,
     };
 }
 
@@ -242,7 +275,7 @@ function toolRecord(overrides: Partial<ToolCallRecord> = {}): ToolCallRecord {
         status: "running",
         toolName: "bash_run",
         workspace: "/repo",
-        ...overrides
+        ...overrides,
     };
 }
 
@@ -258,23 +291,29 @@ function modelExtensionHost(binding: CliModelCommandBinding) {
                     declaration: {
                         id: "probe",
                         summary: "Probe model command",
-                        title: "Probe"
+                        title: "Probe",
                     },
                     id: "probe",
-                    pointId
-                }
+                    pointId,
+                },
             } as never;
         },
         listDeclarations(pointId: string) {
             if (pointId !== "cli.model-commands") return [];
-            return [{
-                declaration: { id: "probe", summary: "Probe model command", title: "Probe" },
-                extensionId: "probe-extension",
-                generation: "test",
-                id: "probe",
-                pointId
-            }];
-        }
+            return [
+                {
+                    declaration: {
+                        id: "probe",
+                        summary: "Probe model command",
+                        title: "Probe",
+                    },
+                    extensionId: "probe-extension",
+                    generation: "test",
+                    id: "probe",
+                    pointId,
+                },
+            ];
+        },
     } as never;
 }
 

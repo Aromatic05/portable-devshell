@@ -2,7 +2,7 @@ import { formatBytes, formatDuration } from "@portable-devshell/shared";
 import {
     isArtifactTransferTerminal,
     type ArtifactShareResult,
-    type ArtifactTransferRecord
+    type ArtifactTransferRecord,
 } from "@portable-devshell/shared";
 
 export interface TuiComponentArtifactActivityDetailLine {
@@ -21,30 +21,44 @@ export function buildArtifactActivityView(
     instance: string,
     shares: readonly ArtifactShareResult[],
     transfers: readonly ArtifactTransferRecord[],
-    nowMs: number = Date.now()
+    nowMs: number = Date.now(),
 ): TuiComponentArtifactActivityView {
-    const instanceShares = shares.filter((share) => share.source.instance === instance).slice(0, 3);
+    const instanceShares = shares
+        .filter((share) => share.source.instance === instance)
+        .slice(0, 3);
     const instanceTransfers = transfers
-        .filter((transfer) => transfer.source.instance === instance || transfer.target.instance === instance)
+        .filter(
+            (transfer) =>
+                transfer.source.instance === instance ||
+                transfer.target.instance === instance,
+        )
         .slice(0, 5);
-    const activeShares = instanceShares.filter((share) => share.state === "active").length;
-    const activeTransfers = instanceTransfers.filter((transfer) => !isArtifactTransferTerminal(transfer.status)).length;
-    const detailLines: Array<string | TuiComponentArtifactActivityDetailLine> = ["Artifact activity"];
+    const activeShares = instanceShares.filter(
+        (share) => share.state === "active",
+    ).length;
+    const activeTransfers = instanceTransfers.filter(
+        (transfer) => !isArtifactTransferTerminal(transfer.status),
+    ).length;
+    const detailLines: Array<string | TuiComponentArtifactActivityDetailLine> =
+        ["Artifact activity"];
 
     if (instanceShares.length === 0 && instanceTransfers.length === 0) {
         detailLines.push("No active or recent artifact activity.");
     }
 
     for (const share of instanceShares) {
-        const remainingSeconds = Math.max(0, Math.ceil((share.expiresAtMs - nowMs) / 1000));
+        const remainingSeconds = Math.max(
+            0,
+            Math.ceil((share.expiresAtMs - nowMs) / 1000),
+        );
         detailLines.push(
-            `share ${shortId(share.shareId)}  ${share.downloadName}  ${share.state}  expires=${formatDuration(remainingSeconds)}  source=${artifactSourceLabel(share.source)}`
+            `share ${shortId(share.shareId)}  ${share.downloadName}  ${share.state}  expires=${formatDuration(remainingSeconds)}  source=${artifactSourceLabel(share.source)}`,
         );
         if (share.state === "active") {
             detailLines.push({
                 id: `button:artifact-revoke:${share.shareId}`,
                 text: `[ Revoke share ${shortId(share.shareId)} ]`,
-                tone: "warning"
+                tone: "warning",
             });
         }
     }
@@ -56,20 +70,23 @@ export function buildArtifactActivityView(
                 ? formatBytes(transfer.transferredBytes)
                 : `${formatBytes(transfer.transferredBytes)} / ${formatBytes(total)}`;
         detailLines.push(
-            `transfer ${shortId(transfer.transferId)}  source=${artifactSourceLabel(transfer.source)} -> target=${artifactTargetLabel(transfer.target)}  ${transfer.status}  ${progress}`
+            `transfer ${shortId(transfer.transferId)}  source=${artifactSourceLabel(transfer.source)} -> target=${artifactTargetLabel(transfer.target)}  ${transfer.status}  ${progress}`,
         );
-        if (!isArtifactTransferTerminal(transfer.status) && transfer.status !== "cancelling") {
+        if (
+            !isArtifactTransferTerminal(transfer.status) &&
+            transfer.status !== "cancelling"
+        ) {
             detailLines.push({
                 id: `button:artifact-cancel:${transfer.transferId}`,
                 text: `[ Cancel transfer ${shortId(transfer.transferId)} ]`,
-                tone: "warning"
+                tone: "warning",
             });
         }
     }
 
     return {
         detailLines,
-        summary: `artifacts shares=${instanceShares.length} transfers=${instanceTransfers.length} active=${activeShares + activeTransfers}`
+        summary: `artifacts shares=${instanceShares.length} transfers=${instanceTransfers.length} active=${activeShares + activeTransfers}`,
     };
 }
 

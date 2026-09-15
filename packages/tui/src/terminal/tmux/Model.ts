@@ -1,7 +1,10 @@
 import type { TuiTerminalTab } from "../../state/route/Model.js";
 import type { TuiTerminalLine } from "../emulation/Model.js";
 
-export const tuiTerminalTabs: readonly TuiTerminalTab[] = ["instances", "tmuxPanes"];
+export const tuiTerminalTabs: readonly TuiTerminalTab[] = [
+    "instances",
+    "tmuxPanes",
+];
 export const TUI_TMUX_INSPECT_MAX_LINES = 200;
 
 export function tuiTmuxPaneContentRows(rows: number): number {
@@ -35,12 +38,17 @@ export interface TuiTmuxPaneViewModel {
     workspace: string;
 }
 
-export function projectTmuxPanes(panes: readonly TuiTmuxListPane[]): TuiTmuxPaneViewModel[] {
+export function projectTmuxPanes(
+    panes: readonly TuiTmuxListPane[],
+): TuiTmuxPaneViewModel[] {
     return panes.map((pane) => {
         const task = pane.task;
         return {
             id: pane.id,
-            mode: task !== undefined && task.status === "running" ? "attach" : "view",
+            mode:
+                task !== undefined && task.status === "running"
+                    ? "attach"
+                    : "view",
             name: pane.name,
             status: pane.status,
             taskId: task?.id,
@@ -59,7 +67,7 @@ export interface TuiTmuxScrollView {
 export function renderTmuxInspectView(
     lines: readonly TuiTerminalLine[],
     viewportRows: number,
-    offset: number
+    offset: number,
 ): TuiTmuxScrollView {
     const total = lines.length;
     const rows = Math.max(0, Math.floor(viewportRows));
@@ -77,7 +85,7 @@ export function scrollTmuxInspectView(
     lines: readonly TuiTerminalLine[],
     viewportRows: number,
     offset: number,
-    delta: number
+    delta: number,
 ): TuiTmuxScrollView {
     return renderTmuxInspectView(lines, viewportRows, offset + delta);
 }
@@ -86,9 +94,7 @@ export const TUI_TMUX_MULTI_WRITER_WARNING =
     "Concurrent tmux_input writers are serialized per batch; batch order is nondeterministic.";
 
 export type TuiTmuxAttachAction =
-    | { kind: "exit" }
-    | { kind: "noop" }
-    | { input: string; kind: "send" };
+    { kind: "exit" } | { kind: "noop" } | { input: string; kind: "send" };
 
 export function routeTmuxAttachInput(raw: string): TuiTmuxAttachAction {
     if (raw === "\u001b") {
@@ -110,18 +116,27 @@ export type TuiTmuxPaneBrowseAction =
     | { delta: number; kind: "scroll" }
     | { direction: "next" | "previous"; kind: "select" };
 
-export function routeTmuxPaneBrowseInput(raw: string, mode: TuiTmuxPaneBrowseMode): TuiTmuxPaneBrowseAction {
+export function routeTmuxPaneBrowseInput(
+    raw: string,
+    mode: TuiTmuxPaneBrowseMode,
+): TuiTmuxPaneBrowseAction {
     if (mode === "view") {
-        if (raw === "\u001b[A" || raw === "k") return { delta: -1, kind: "scroll" };
-        if (raw === "\u001b[B" || raw === "j") return { delta: 1, kind: "scroll" };
-        if (raw === "\u001b[D" || raw === "h") return { direction: "previous", kind: "select" };
-        if (raw === "\u001b[C" || raw === "l") return { direction: "next", kind: "select" };
+        if (raw === "\u001b[A" || raw === "k")
+            return { delta: -1, kind: "scroll" };
+        if (raw === "\u001b[B" || raw === "j")
+            return { delta: 1, kind: "scroll" };
+        if (raw === "\u001b[D" || raw === "h")
+            return { direction: "previous", kind: "select" };
+        if (raw === "\u001b[C" || raw === "l")
+            return { direction: "next", kind: "select" };
         if (raw === "\r" || raw === "\n") return { kind: "activate" };
         if (raw === "\u001b") return { kind: "close" };
         return { kind: "noop" };
     }
-    if (raw === "\u001b[A" || raw === "k" || raw === "\u001b[D" || raw === "h") return { direction: "previous", kind: "select" };
-    if (raw === "\u001b[B" || raw === "j" || raw === "\u001b[C" || raw === "l") return { direction: "next", kind: "select" };
+    if (raw === "\u001b[A" || raw === "k" || raw === "\u001b[D" || raw === "h")
+        return { direction: "previous", kind: "select" };
+    if (raw === "\u001b[B" || raw === "j" || raw === "\u001b[C" || raw === "l")
+        return { direction: "next", kind: "select" };
     if (raw === "\r" || raw === "\n") return { kind: "activate" };
     if (raw === "\u001b") return { kind: "close" };
     return { kind: "noop" };

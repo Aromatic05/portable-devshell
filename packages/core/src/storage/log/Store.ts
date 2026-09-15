@@ -13,7 +13,10 @@ export class LogStoreInstance {
     #initialized = false;
     #lastSeq = 0;
 
-    constructor(instanceName: InstanceName, store: AuditRecordStore<InstanceLogEntry>) {
+    constructor(
+        instanceName: InstanceName,
+        store: AuditRecordStore<InstanceLogEntry>,
+    ) {
         this.#instanceName = instanceName;
         this.#store = store;
     }
@@ -22,22 +25,42 @@ export class LogStoreInstance {
         stream: InstanceLogEntry["stream"],
         message: string,
         at: string,
-        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "extensionId" | "source" | "toolName"> = {}
+        context: Pick<
+            InstanceLogEntry,
+            | "callId"
+            | "requestId"
+            | "ctxId"
+            | "extensionId"
+            | "source"
+            | "toolName"
+        > = {},
     ): Promise<InstanceLogEntry> {
         const operation = this.#appendTail.then(async () => {
             await this.#initialize();
             const entry: InstanceLogEntry = {
                 at,
-                ...(context.callId === undefined ? {} : { callId: context.callId }),
-                ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
-                ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
-                ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),
-                ...(context.source === undefined ? {} : { source: context.source }),
-                ...(context.toolName === undefined ? {} : { toolName: context.toolName }),
+                ...(context.callId === undefined
+                    ? {}
+                    : { callId: context.callId }),
+                ...(context.requestId === undefined
+                    ? {}
+                    : { requestId: context.requestId }),
+                ...(context.ctxId === undefined
+                    ? {}
+                    : { ctxId: context.ctxId }),
+                ...(context.extensionId === undefined
+                    ? {}
+                    : { extensionId: context.extensionId }),
+                ...(context.source === undefined
+                    ? {}
+                    : { source: context.source }),
+                ...(context.toolName === undefined
+                    ? {}
+                    : { toolName: context.toolName }),
                 instanceName: this.#instanceName,
                 message,
                 seq: this.#lastSeq + 1,
-                stream
+                stream,
             };
             await this.#store.append(entry);
             this.#lastSeq = entry.seq;
@@ -51,22 +74,38 @@ export class LogStoreInstance {
     }
 
     async read(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
-        if (query.fromSeq === undefined && query.limit !== undefined && this.#store.readTail !== undefined) {
-            return await this.#store.readTail(query.limit, query.maxDecodedBytes);
+        if (
+            query.fromSeq === undefined &&
+            query.limit !== undefined &&
+            this.#store.readTail !== undefined
+        ) {
+            return await this.#store.readTail(
+                query.limit,
+                query.maxDecodedBytes,
+            );
         }
         const fromSeq = query.fromSeq ?? 1;
         if (this.#store.readFromSeq !== undefined) {
-            return await this.#store.readFromSeq(fromSeq, query.limit, query.maxDecodedBytes);
+            return await this.#store.readFromSeq(
+                fromSeq,
+                query.limit,
+                query.maxDecodedBytes,
+            );
         }
         const records = await this.#store.readAll();
         const filtered = records.filter((record) => record.seq >= fromSeq);
 
-        const limited = query.limit === undefined
-            ? filtered
-            : query.fromSeq === undefined
-                ? filtered.slice(-query.limit)
-                : filtered.slice(0, query.limit);
-        return applyDecodedByteBudget(limited, query.maxDecodedBytes, query.fromSeq === undefined);
+        const limited =
+            query.limit === undefined
+                ? filtered
+                : query.fromSeq === undefined
+                  ? filtered.slice(-query.limit)
+                  : filtered.slice(0, query.limit);
+        return applyDecodedByteBudget(
+            limited,
+            query.maxDecodedBytes,
+            query.fromSeq === undefined,
+        );
     }
 
     async #initialize(): Promise<void> {
@@ -74,10 +113,14 @@ export class LogStoreInstance {
             return;
         }
 
-        const records = this.#store.readTail === undefined
-            ? await this.#store.readAll()
-            : await this.#store.readTail(1);
-        this.#lastSeq = Math.max(records.at(-1)?.seq ?? 0, await this.#store.readHighWater?.() ?? 0);
+        const records =
+            this.#store.readTail === undefined
+                ? await this.#store.readAll()
+                : await this.#store.readTail(1);
+        this.#lastSeq = Math.max(
+            records.at(-1)?.seq ?? 0,
+            (await this.#store.readHighWater?.()) ?? 0,
+        );
         this.#initialized = true;
     }
 }

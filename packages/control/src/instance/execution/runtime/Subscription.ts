@@ -1,6 +1,11 @@
 import type { WorkerInstance } from "@portable-devshell/core";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { InstanceEvent, JsonValue, PrefixRouteContext, PrefixRouteStream } from "@portable-devshell/shared";
+import type {
+    InstanceEvent,
+    JsonValue,
+    PrefixRouteContext,
+    PrefixRouteStream,
+} from "@portable-devshell/shared";
 
 export interface RuntimeSubscription {
     connectionId: string;
@@ -18,7 +23,10 @@ interface RuntimeEventWatch {
     instanceName: string;
     nextSeq: number;
     onEvent(event: InstanceEvent): Promise<void> | void;
-    onGap(gap: { lastSeq: number; nextSeq: number }): Promise<number | void> | number | void;
+    onGap(gap: {
+        lastSeq: number;
+        nextSeq: number;
+    }): Promise<number | void> | number | void;
     reject(error: unknown): void;
     resolve(): void;
     signal: AbortSignal;
@@ -41,35 +49,38 @@ export class RuntimeSubscriptionManager {
         instanceName: string,
         instance: RuntimeSubscription["instance"],
         fromSeq: number,
-        eventFilter?: (event: InstanceEvent) => boolean
+        eventFilter?: (event: InstanceEvent) => boolean,
     ): Promise<void> {
         const slice = instance.subscribe(fromSeq);
         if (slice.kind === "gap") {
             throw createError({
                 code: errorCodes.streamGap,
-                message: "Requested event sequence is no longer available. Pull a fresh snapshot.",
+                message:
+                    "Requested event sequence is no longer available. Pull a fresh snapshot.",
                 retryable: true,
                 details: {
                     instance: instanceName,
                     latestSeq: slice.lastSeq,
                     oldestAvailableSeq: slice.nextSeq,
-                    requestedFromSeq: fromSeq
-                }
+                    requestedFromSeq: fromSeq,
+                },
             });
         }
 
         const key = this.#key(context.connectionId, context.requestId);
         const stream = await context.openStream(
             {
-                events: (eventFilter === undefined ? slice.events : slice.events.filter(eventFilter)) as unknown as JsonValue,
-                lastSeq: slice.lastSeq
+                events: (eventFilter === undefined
+                    ? slice.events
+                    : slice.events.filter(eventFilter)) as unknown as JsonValue,
+                lastSeq: slice.lastSeq,
             },
             {
                 onClose: () => {
                     this.#subscriptions.delete(key);
                     this.#stopPollingWhenIdle();
-                }
-            }
+                },
+            },
         );
 
         this.#subscriptions.set(key, {
@@ -79,7 +90,7 @@ export class RuntimeSubscriptionManager {
             instanceName,
             nextSeq: slice.lastSeq + 1,
             requestId: context.requestId,
-            stream
+            stream,
         });
         this.#ensurePolling();
     }
@@ -92,8 +103,11 @@ export class RuntimeSubscriptionManager {
         handlers: {
             eventFilter?: (event: InstanceEvent) => boolean;
             onEvent(event: InstanceEvent): Promise<void> | void;
-            onGap(gap: { lastSeq: number; nextSeq: number }): Promise<number | void> | number | void;
-        }
+            onGap(gap: {
+                lastSeq: number;
+                nextSeq: number;
+            }): Promise<number | void> | number | void;
+        },
     ): Promise<void> {
         signal.throwIfAborted();
         const seed: RuntimeEventWatch = {
@@ -105,7 +119,7 @@ export class RuntimeSubscriptionManager {
             onGap: handlers.onGap,
             reject: () => undefined,
             resolve: () => undefined,
-            signal
+            signal,
         };
         seed.nextSeq = await this.#deliverWatchSlice(seed);
         signal.throwIfAborted();
@@ -125,7 +139,7 @@ export class RuntimeSubscriptionManager {
                 resolve: () => {
                     signal.removeEventListener("abort", aborted);
                     resolve();
-                }
+                },
             };
             signal.addEventListener("abort", aborted, { once: true });
             this.#watches.set(id, watch);
@@ -135,7 +149,8 @@ export class RuntimeSubscriptionManager {
 
     unsubscribeConnection(connectionId: string): void {
         for (const [key, subscription] of this.#subscriptions) {
-            if (subscription.connectionId === connectionId) this.#subscriptions.delete(key);
+            if (subscription.connectionId === connectionId)
+                this.#subscriptions.delete(key);
         }
         this.#stopPollingWhenIdle();
     }
@@ -161,7 +176,9 @@ export class RuntimeSubscriptionManager {
     async #pollSubscriptions(): Promise<void> {
         for (const [key, subscription] of [...this.#subscriptions]) {
             try {
-                const slice = subscription.instance.subscribe(subscription.nextSeq);
+                const slice = subscription.instance.subscribe(
+                    subscription.nextSeq,
+                );
                 if (slice.kind === "gap") {
                     await subscription.stream.emit(
                         "gap",
@@ -169,19 +186,28 @@ export class RuntimeSubscriptionManager {
                             instance: subscription.instanceName,
                             latestSeq: slice.lastSeq,
                             oldestAvailableSeq: slice.nextSeq,
-                            requestedFromSeq: subscription.nextSeq
+                            requestedFromSeq: subscription.nextSeq,
                         },
                         slice.lastSeq,
-                        "stream"
+                        "stream",
                     );
                     subscription.nextSeq = slice.nextSeq;
                     continue;
                 }
 
                 for (const event of slice.events) {
-                    if (subscription.eventFilter !== undefined && !subscription.eventFilter(event)) continue;
+                    if (
+                        subscription.eventFilter !== undefined &&
+                        !subscription.eventFilter(event)
+                    )
+                        continue;
                     const [module, operation] = splitEventType(event.type);
-                    await subscription.stream.emit(operation, event as unknown as JsonValue, event.seq, module);
+                    await subscription.stream.emit(
+                        operation,
+                        event as unknown as JsonValue,
+                        event.seq,
+                        module,
+                    );
                 }
                 subscription.nextSeq = slice.lastSeq + 1;
             } catch {
@@ -209,11 +235,15 @@ export class RuntimeSubscriptionManager {
     async #deliverWatchSlice(watch: RuntimeEventWatch): Promise<number> {
         const slice = watch.instance.subscribe(watch.nextSeq);
         if (slice.kind === "gap") {
-            const recovered = await watch.onGap({ lastSeq: slice.lastSeq, nextSeq: slice.nextSeq });
+            const recovered = await watch.onGap({
+                lastSeq: slice.lastSeq,
+                nextSeq: slice.nextSeq,
+            });
             return recovered ?? slice.nextSeq;
         }
         for (const event of slice.events) {
-            if (watch.eventFilter !== undefined && !watch.eventFilter(event)) continue;
+            if (watch.eventFilter !== undefined && !watch.eventFilter(event))
+                continue;
             await watch.onEvent(event);
         }
         return slice.lastSeq + 1;
@@ -224,7 +254,12 @@ export class RuntimeSubscriptionManager {
     }
 
     #stopPollingWhenIdle(): void {
-        if (this.#subscriptions.size > 0 || this.#watches.size > 0 || this.#timer === undefined) return;
+        if (
+            this.#subscriptions.size > 0 ||
+            this.#watches.size > 0 ||
+            this.#timer === undefined
+        )
+            return;
         clearInterval(this.#timer);
         this.#timer = undefined;
     }

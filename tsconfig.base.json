@@ -4,30 +4,20 @@
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
         "paths": {
-            "@portable-devshell/shared": [
-                "./packages/shared/dist/index.d.ts"
-            ],
+            "@portable-devshell/shared": ["./packages/shared/dist/index.d.ts"],
             "@portable-devshell/shared/browser": [
                 "./packages/shared/dist/browser.d.ts"
             ],
             "@portable-devshell/shared/transport/frame": [
                 "./packages/shared/dist/transport/protocol/Frame.d.ts"
             ],
-            "@portable-devshell/core": [
-                "./packages/core/dist/index.d.ts"
-            ],
+            "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
             "@portable-devshell/control": [
                 "./packages/control/dist/index.d.ts"
             ],
-            "@portable-devshell/mcp": [
-                "./packages/mcp/dist/index.d.ts"
-            ],
-            "@portable-devshell/cli": [
-                "./packages/cli/dist/index.d.ts"
-            ],
-            "@portable-devshell/tui": [
-                "./packages/tui/dist/index.d.ts"
-            ],
+            "@portable-devshell/mcp": ["./packages/mcp/dist/index.d.ts"],
+            "@portable-devshell/cli": ["./packages/cli/dist/index.d.ts"],
+            "@portable-devshell/tui": ["./packages/tui/dist/index.d.ts"],
             "@portable-devshell/core/testing": [
                 "./packages/core/dist/testing.d.ts"
             ],
@@ -44,9 +34,7 @@
                 "./extensions/storage/dist/index.d.ts"
             ]
         },
-        "types": [
-            "node"
-        ],
+        "types": ["node"],
         "strict": true,
         "declaration": true,
         "declarationMap": true,

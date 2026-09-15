@@ -4,7 +4,7 @@ import {
     formatFileEditStaticCall,
     renderFileEditCallComponent,
     renderFileEditFallback,
-    renderFileEditResultComponent
+    renderFileEditResultComponent,
 } from "./file-edit-renderer.js";
 import {
     formatGlobCall,
@@ -14,13 +14,13 @@ import {
     renderFileGrep,
     renderFileRead,
     renderFileReadComponent,
-    renderFileSummaryComponent
+    renderFileSummaryComponent,
 } from "./file-tool-renderer.js";
 import type {
     PiThemeLike,
     PiToolRenderContextLike,
     PiToolRenderResultLike,
-    PiToolRenderResultOptionsLike
+    PiToolRenderResultOptionsLike,
 } from "./renderer-types.js";
 import {
     asRecord,
@@ -32,17 +32,28 @@ import {
     stringField,
     style,
     summarizeRecord,
-    textContentLines
+    textContentLines,
 } from "./renderer-utils.js";
-import { formatShellCall, renderBashResult, renderBashResultComponent } from "./shell-tool-renderer.js";
-import { formatTmuxCall, renderTerminalResultComponent, renderTmuxResult } from "./tmux-tool-renderer.js";
+import {
+    formatShellCall,
+    renderBashResult,
+    renderBashResultComponent,
+} from "./shell-tool-renderer.js";
+import {
+    formatTmuxCall,
+    renderTerminalResultComponent,
+    renderTmuxResult,
+} from "./tmux-tool-renderer.js";
 
-export { parseEditChangeSet, renderWorkerUnifiedDiff } from "./file-edit-renderer.js";
+export {
+    parseEditChangeSet,
+    renderWorkerUnifiedDiff,
+} from "./file-edit-renderer.js";
 export type {
     PiThemeLike,
     PiToolRenderContextLike,
     PiToolRenderResultLike,
-    PiToolRenderResultOptionsLike
+    PiToolRenderResultOptionsLike,
 } from "./renderer-types.js";
 
 export const devshellPiRendererToolNames = Object.freeze([
@@ -55,7 +66,7 @@ export const devshellPiRendererToolNames = Object.freeze([
     "tmux_inspect",
     "tmux_manage",
     "tmux_read",
-    "tmux_run"
+    "tmux_run",
 ] as const);
 
 const rendererToolNames = new Set<string>(devshellPiRendererToolNames);
@@ -69,10 +80,14 @@ export function renderPiToolCall(
     toolName: string,
     args: unknown,
     theme: PiThemeLike,
-    context: PiToolRenderContextLike
+    context: PiToolRenderContextLike,
 ): Component {
-    if (toolName === "file_edit") return renderFileEditCallComponent(args, theme, context);
-    return setText(context.lastComponent, formatPiToolCall(toolName, args, theme));
+    if (toolName === "file_edit")
+        return renderFileEditCallComponent(args, theme, context);
+    return setText(
+        context.lastComponent,
+        formatPiToolCall(toolName, args, theme),
+    );
 }
 
 export function renderPiToolResult(
@@ -80,40 +95,68 @@ export function renderPiToolResult(
     result: PiToolRenderResultLike,
     options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
-    context: PiToolRenderContextLike
+    context: PiToolRenderContextLike,
 ): Component {
-    if (toolName === "file_edit") return renderFileEditResultComponent(result, options, theme, context);
-    if (context.isError) return setText(context.lastComponent, renderError(result, theme));
+    if (toolName === "file_edit")
+        return renderFileEditResultComponent(result, options, theme, context);
+    if (context.isError)
+        return setText(context.lastComponent, renderError(result, theme));
 
     switch (toolName) {
         case "file_read":
             return renderFileReadComponent(result, options, theme, context);
         case "file_glob":
         case "file_grep":
-            return renderFileSummaryComponent(toolName, result, options, theme, context);
+            return renderFileSummaryComponent(
+                toolName,
+                result,
+                options,
+                theme,
+                context,
+            );
         case "bash_run":
             return renderBashResultComponent(result, options, theme, context);
         case "tmux_run":
         case "tmux_read":
         case "tmux_input":
-            return renderTerminalResultComponent(toolName, result, options, theme, context);
+            return renderTerminalResultComponent(
+                toolName,
+                result,
+                options,
+                theme,
+                context,
+            );
         default:
             return setText(
                 context.lastComponent,
-                formatPiToolResult(toolName, result, options.expanded, theme, false)
+                formatPiToolResult(
+                    toolName,
+                    result,
+                    options.expanded,
+                    theme,
+                    false,
+                ),
             );
     }
 }
 
-export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThemeLike): string {
+export function formatPiToolCall(
+    toolName: string,
+    args: unknown,
+    theme?: PiThemeLike,
+): string {
     const record = asRecord(args);
-    if (record === undefined) return style(theme, "toolTitle", displayToolLabel(toolName), true);
+    if (record === undefined)
+        return style(theme, "toolTitle", displayToolLabel(toolName), true);
 
     switch (toolName) {
         case "bash_run":
             return formatShellCall(record, theme);
         case "file_edit":
-            return formatFileEditStaticCall(stringField(record, "changes"), theme);
+            return formatFileEditStaticCall(
+                stringField(record, "changes"),
+                theme,
+            );
         case "file_glob":
             return formatGlobCall(record, theme);
         case "file_grep":
@@ -127,7 +170,11 @@ export function formatPiToolCall(toolName: string, args: unknown, theme?: PiThem
         case "tmux_run":
             return formatTmuxCall(toolName, record, theme);
         default:
-            return joinCall(style(theme, "toolTitle", toolName, true), summarizeRecord(record), theme);
+            return joinCall(
+                style(theme, "toolTitle", toolName, true),
+                summarizeRecord(record),
+                theme,
+            );
     }
 }
 
@@ -136,15 +183,21 @@ export function formatPiToolResult(
     result: PiToolRenderResultLike,
     expanded: boolean,
     theme?: PiThemeLike,
-    isError = false
+    isError = false,
 ): string {
     if (isError) return renderError(result, theme);
 
     switch (toolName) {
         case "bash_run":
-            return joinStyled(renderBashResult(result.details, expanded), theme);
+            return joinStyled(
+                renderBashResult(result.details, expanded),
+                theme,
+            );
         case "file_edit":
-            return joinStyled(renderFileEditFallback(result.details, theme), theme);
+            return joinStyled(
+                renderFileEditFallback(result.details, theme),
+                theme,
+            );
         case "file_glob":
             return joinStyled(renderFileGlob(result.details, expanded), theme);
         case "file_grep":
@@ -156,13 +209,20 @@ export function formatPiToolResult(
         case "tmux_manage":
         case "tmux_read":
         case "tmux_run":
-            return joinStyled(renderTmuxResult(toolName, result.details, expanded), theme);
+            return joinStyled(
+                renderTmuxResult(toolName, result.details, expanded),
+                theme,
+            );
         default: {
             let lines = renderStructured(result.details);
             if (lines.length === 0) lines = textContentLines(result);
-            const clipped = lines.length <= (expanded ? expandedLineLimit : 18)
-                ? lines
-                : [...lines.slice(0, expanded ? expandedLineLimit : 18), "... (more output, Ctrl+O to expand)"];
+            const clipped =
+                lines.length <= (expanded ? expandedLineLimit : 18)
+                    ? lines
+                    : [
+                          ...lines.slice(0, expanded ? expandedLineLimit : 18),
+                          "... (more output, Ctrl+O to expand)",
+                      ];
             return joinStyled(clipped, theme);
         }
     }
@@ -170,10 +230,17 @@ export function formatPiToolResult(
 
 function displayToolLabel(toolName: string): string {
     switch (toolName) {
-        case "bash_run": return "$";
-        case "file_glob": return "glob";
-        case "file_grep": return "grep";
-        case "file_read": return "read";
-        default: return toolName.startsWith("tmux_") ? `tmux ${toolName.slice(5)}` : toolName;
+        case "bash_run":
+            return "$";
+        case "file_glob":
+            return "glob";
+        case "file_grep":
+            return "grep";
+        case "file_read":
+            return "read";
+        default:
+            return toolName.startsWith("tmux_")
+                ? `tmux ${toolName.slice(5)}`
+                : toolName;
     }
 }

@@ -1,4 +1,8 @@
-import { createError, errorCodes, type ControlConfig } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type ControlConfig,
+} from "@portable-devshell/shared";
 
 import { ControlConfigStore } from "../../control/config/storage/Store.js";
 import { ControlConfigMutationLock } from "../../control/config/editor/Lock.js";
@@ -23,7 +27,8 @@ export class ControlRuntimeState {
     constructor(options: ControlRuntimeStateOptions = {}) {
         this.configStore = options.configStore ?? new ControlConfigStore();
         this.homeDirectory = options.homeDirectory;
-        this.#instanceRegistryFactory = options.instanceRegistryFactory ?? new InstanceRegistryFactory();
+        this.#instanceRegistryFactory =
+            options.instanceRegistryFactory ?? new InstanceRegistryFactory();
     }
 
     get config(): ControlConfig | undefined {
@@ -50,7 +55,7 @@ export class ControlRuntimeState {
         throw createError({
             code: errorCodes.controlConfigLoadFailed,
             message: "Control config is not loaded.",
-            retryable: false
+            retryable: false,
         });
     }
 

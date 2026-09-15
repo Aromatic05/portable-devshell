@@ -36,7 +36,9 @@ function patch(): DebugPatchSummary {
 function port(): DebugPatchPort {
     return {
         listPatches: () => [patch()],
-        listTargets: () => [{ methods: ["callTool"], target: "worker:demo-local" }],
+        listTargets: () => [
+            { methods: ["callTool"], target: "worker:demo-local" },
+        ],
         load: async () => patch(),
         release: () => patch(),
         unload: async () => ({ ...patch(), state: "unloaded" }),
@@ -45,25 +47,33 @@ function port(): DebugPatchPort {
 
 test("debug routes accept only local-owner CLI connections", async () => {
     const module = createDebugRouteModule(port());
-    const targets = module.operations.find((operation) => operation.name === "targets");
-    if (targets === undefined) throw new Error("debug.targets operation is missing");
+    const targets = module.operations.find(
+        (operation) => operation.name === "targets",
+    );
+    if (targets === undefined)
+        throw new Error("debug.targets operation is missing");
 
     assert.deepEqual(
-        await targets.handle({ id: "1", name: "targets" }, context("cli", "local-owner")),
+        await targets.handle(
+            { id: "1", name: "targets" },
+            context("cli", "local-owner"),
+        ),
         [{ methods: ["callTool"], target: "worker:demo-local" }],
     );
     await assert.rejects(
-        async () => await targets.handle(
-            { id: "2", name: "targets" },
-            context("cli", "bearer"),
-        ),
+        async () =>
+            await targets.handle(
+                { id: "2", name: "targets" },
+                context("cli", "bearer"),
+            ),
         /restricted to the local owner CLI/iu,
     );
     await assert.rejects(
-        async () => await targets.handle(
-            { id: "3", name: "targets" },
-            context("web", "local-owner"),
-        ),
+        async () =>
+            await targets.handle(
+                { id: "3", name: "targets" },
+                context("web", "local-owner"),
+            ),
         /restricted to the local owner CLI/iu,
     );
 });
@@ -76,7 +86,9 @@ test("debug load forwards source only after local ownership is established", asy
         return patch();
     };
     const module = createDebugRouteModule(service);
-    const load = module.operations.find((operation) => operation.name === "load");
+    const load = module.operations.find(
+        (operation) => operation.name === "load",
+    );
     if (load === undefined) throw new Error("debug.load operation is missing");
 
     await load.handle(

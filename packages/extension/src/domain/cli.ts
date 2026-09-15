@@ -1,7 +1,7 @@
 import {
     defineExtensionPoint,
     type ExtensionJsonValue,
-    type ExtensionPointDeclaration
+    type ExtensionPointDeclaration,
 } from "../ExtensionApi.js";
 
 export interface CliCommandDeclaration extends ExtensionPointDeclaration {
@@ -34,7 +34,9 @@ export interface CliModelInstanceReference {
 
 /** Read-only Context projection available only to a model CLI invocation. */
 export interface CliModelCommandContext {
-    instanceReference(instance: string): Promise<CliModelInstanceReference | undefined>;
+    instanceReference(
+        instance: string,
+    ): Promise<CliModelInstanceReference | undefined>;
 }
 
 /** Invocation state for a human/native CLI command. */
@@ -63,20 +65,22 @@ export interface CliModelCommandInvocationContext {
 
 export type CliNativeCommandBinding = (
     argv: readonly string[],
-    context: CliNativeCommandInvocationContext
+    context: CliNativeCommandInvocationContext,
 ) => CliCommandResult | Promise<CliCommandResult>;
 
 export type CliModelCommandBinding = (
     argv: readonly string[],
-    context: CliModelCommandInvocationContext
+    context: CliModelCommandInvocationContext,
 ) => CliCommandResult | Promise<CliCommandResult>;
 
 /** Commands that may overlay the native builtin CLI command tree. */
-export const nativeCommands = defineExtensionPoint<CliCommandDeclaration, CliNativeCommandBinding>(
-    "cli.native-commands"
-);
+export const nativeCommands = defineExtensionPoint<
+    CliCommandDeclaration,
+    CliNativeCommandBinding
+>("cli.native-commands");
 
 /** Commands visible to the restricted model-facing devshell command state. */
-export const modelCommands = defineExtensionPoint<CliCommandDeclaration, CliModelCommandBinding>(
-    "cli.model-commands"
-);
+export const modelCommands = defineExtensionPoint<
+    CliCommandDeclaration,
+    CliModelCommandBinding
+>("cli.model-commands");

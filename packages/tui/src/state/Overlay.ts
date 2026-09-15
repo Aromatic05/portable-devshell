@@ -26,7 +26,6 @@ export interface TuiApprovalOverlay {
     readonly selectedAction: "back" | "input" | "deny" | "approve";
 }
 
-
 export interface TuiTextDetailOverlay {
     readonly body: string;
     readonly image?: ArtifactViewImageResult;
@@ -47,28 +46,37 @@ export interface TuiToolFormOverlay {
     readonly toolName: string;
 }
 
-export function topTuiOverlay(overlays: readonly TuiOverlay[]): TuiOverlay | undefined {
+export function topTuiOverlay(
+    overlays: readonly TuiOverlay[],
+): TuiOverlay | undefined {
     return overlays.at(-1);
 }
 
-export function pushTuiOverlay(state: TuiAppState, overlay: TuiOverlay): TuiAppState {
+export function pushTuiOverlay(
+    state: TuiAppState,
+    overlay: TuiOverlay,
+): TuiAppState {
     return {
         ...state,
         interaction: {
             ...state.interaction,
-            overlays: [...state.interaction.overlays, overlay]
-        }
+            overlays: [...state.interaction.overlays, overlay],
+        },
     };
 }
 
-export function replaceTopTuiOverlay(state: TuiAppState, overlay: TuiOverlay): TuiAppState {
-    if (state.interaction.overlays.length === 0) return pushTuiOverlay(state, overlay);
+export function replaceTopTuiOverlay(
+    state: TuiAppState,
+    overlay: TuiOverlay,
+): TuiAppState {
+    if (state.interaction.overlays.length === 0)
+        return pushTuiOverlay(state, overlay);
     return {
         ...state,
         interaction: {
             ...state.interaction,
-            overlays: [...state.interaction.overlays.slice(0, -1), overlay]
-        }
+            overlays: [...state.interaction.overlays.slice(0, -1), overlay],
+        },
     };
 }
 
@@ -78,7 +86,7 @@ export function popTuiOverlay(state: TuiAppState): TuiAppState {
         ...state,
         interaction: {
             ...state.interaction,
-            overlays: state.interaction.overlays.slice(0, -1)
-        }
+            overlays: state.interaction.overlays.slice(0, -1),
+        },
     };
 }

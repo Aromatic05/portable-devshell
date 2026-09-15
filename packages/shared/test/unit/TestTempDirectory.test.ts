@@ -6,7 +6,7 @@ import test from "node:test";
 import {
     cleanupTestTempDirectories,
     createTestTempDirectory,
-    resolveTestTempNamespace
+    resolveTestTempNamespace,
 } from "../../../../test/TestTempDirectory.ts";
 
 test("test temp directories live under the devshell-test namespace", async (t) => {
@@ -26,20 +26,31 @@ test("test temp directories live under the devshell-test namespace", async (t) =
 
 test("concurrent test temp directories never collide", async (t) => {
     const directories = await Promise.all(
-        Array.from({ length: 16 }, () => createTestTempDirectory("concurrent"))
+        Array.from({ length: 16 }, () => createTestTempDirectory("concurrent")),
     );
     t.after(async () => {
-        await Promise.all(directories.map((directory) => rm(directory, { force: true, recursive: true })));
+        await Promise.all(
+            directories.map((directory) =>
+                rm(directory, { force: true, recursive: true }),
+            ),
+        );
     });
 
     const namespace = await resolveTestTempNamespace();
     assert.equal(new Set(directories).size, directories.length);
-    await Promise.all(directories.map(async (directory, index) => {
-        assert.equal(dirname(directory), namespace);
-        await writeFile(`${directory}/marker.txt`, String(index), "utf8");
-    }));
-    const markers = await Promise.all(directories.map((directory) => stat(`${directory}/marker.txt`)));
-    assert.equal(markers.every((entry) => entry.isFile()), true);
+    await Promise.all(
+        directories.map(async (directory, index) => {
+            assert.equal(dirname(directory), namespace);
+            await writeFile(`${directory}/marker.txt`, String(index), "utf8");
+        }),
+    );
+    const markers = await Promise.all(
+        directories.map((directory) => stat(`${directory}/marker.txt`)),
+    );
+    assert.equal(
+        markers.every((entry) => entry.isFile()),
+        true,
+    );
 });
 
 test("cleaning one test temp directory leaves siblings intact", async (t) => {
@@ -68,7 +79,9 @@ test("process cleanup removes every directory registered by the helper", async (
     await assert.rejects(stat(second));
     assert.equal((await stat(namespace)).isDirectory(), true);
 
-    const subsequent = await createTestTempDirectory("process-cleanup-subsequent");
+    const subsequent = await createTestTempDirectory(
+        "process-cleanup-subsequent",
+    );
     await writeFile(`${subsequent}/marker.txt`, "subsequent", "utf8");
     assert.equal((await stat(`${subsequent}/marker.txt`)).isFile(), true);
     await rm(subsequent, { force: true, recursive: true });

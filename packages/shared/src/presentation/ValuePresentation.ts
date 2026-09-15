@@ -31,14 +31,13 @@ export function formatJsonValue(
     return writer.result();
 }
 
-export function formatJsonSummary(
-    value: JsonValue,
-    maxLength = 80,
-): string {
+export function formatJsonSummary(value: JsonValue, maxLength = 80): string {
     const normalized = formatJsonValue(value, {
         ...jsonSearchLimits,
         formattedLength: Math.max(maxLength * 4, 512),
-    }).replace(/\s+/gu, " ").trim();
+    })
+        .replace(/\s+/gu, " ")
+        .trim();
     return normalized.length <= maxLength
         ? normalized
         : `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
@@ -69,24 +68,36 @@ class BoundedFormatWriter {
         const indent = "  ".repeat(Math.min(depth, this.limits.depth));
         const prefix = label === undefined ? "" : `${indent}${label}:`;
         if (depth >= this.limits.depth) {
-            this.append(`${prefix}${label === undefined ? "" : " "}${truncation} (max depth)`);
+            this.append(
+                `${prefix}${label === undefined ? "" : " "}${truncation} (max depth)`,
+            );
             return;
         }
         if (typeof value === "string") {
-            const limited = value.length <= this.limits.stringLength
-                ? value
-                : `${value.slice(0, Math.max(0, this.limits.stringLength - truncation.length))}${truncation}`;
+            const limited =
+                value.length <= this.limits.stringLength
+                    ? value
+                    : `${value.slice(0, Math.max(0, this.limits.stringLength - truncation.length))}${truncation}`;
             const lines = limited.split(/\r?\n/u);
             if (lines.length === 1) {
-                this.append(`${prefix}${label === undefined ? "" : " "}${limited}`);
+                this.append(
+                    `${prefix}${label === undefined ? "" : " "}${limited}`,
+                );
                 return;
             }
             this.append(prefix);
-            for (const line of lines) if (!this.append(`${indent}  ${line}`)) return;
+            for (const line of lines)
+                if (!this.append(`${indent}  ${line}`)) return;
             return;
         }
-        if (value === null || typeof value === "boolean" || typeof value === "number") {
-            this.append(`${prefix}${label === undefined ? "" : " "}${String(value)}`);
+        if (
+            value === null ||
+            typeof value === "boolean" ||
+            typeof value === "number"
+        ) {
+            this.append(
+                `${prefix}${label === undefined ? "" : " "}${String(value)}`,
+            );
             return;
         }
         this.append(prefix);
@@ -94,7 +105,8 @@ class BoundedFormatWriter {
             ? value.map((entry, index) => [`[${index}]`, entry] as const)
             : Object.entries(value);
         for (const [key, entry] of entries) {
-            if (this.#stopped || this.#remainingNodes <= 0) return this.stop(depth + 1, "node budget");
+            if (this.#stopped || this.#remainingNodes <= 0)
+                return this.stop(depth + 1, "node budget");
             this.write(entry, depth + 1, key);
         }
     }
@@ -106,16 +118,18 @@ class BoundedFormatWriter {
     private append(line: string): boolean {
         if (this.#stopped) return false;
         const separator = this.#parts.length === 0 ? 0 : 1;
-        const available = this.limits.formattedLength - this.#length - separator;
+        const available =
+            this.limits.formattedLength - this.#length - separator;
         if (available <= 0) {
             this.#stopped = true;
             return false;
         }
-        const output = line.length <= available
-            ? line
-            : truncation.length <= available
-              ? `${line.slice(0, Math.max(0, available - truncation.length))}${truncation}`
-              : truncation.slice(0, available);
+        const output =
+            line.length <= available
+                ? line
+                : truncation.length <= available
+                  ? `${line.slice(0, Math.max(0, available - truncation.length))}${truncation}`
+                  : truncation.slice(0, available);
         this.#parts.push(output);
         this.#length += separator + output.length;
         if (output !== line) this.#stopped = true;
@@ -124,7 +138,9 @@ class BoundedFormatWriter {
 
     private stop(depth: number, reason: string): void {
         if (this.#stopped) return;
-        this.append(`${"  ".repeat(Math.min(depth, this.limits.depth))}${truncation} (${reason})`);
+        this.append(
+            `${"  ".repeat(Math.min(depth, this.limits.depth))}${truncation} (${reason})`,
+        );
         this.#stopped = true;
     }
 }
@@ -133,7 +149,8 @@ export function formatBytes(
     value: number | undefined,
     unavailable = "Unavailable",
 ): string {
-    if (value === undefined || !Number.isFinite(value) || value < 0) return unavailable;
+    if (value === undefined || !Number.isFinite(value) || value < 0)
+        return unavailable;
     const units = ["B", "KiB", "MiB", "GiB", "TiB"];
     const unit = Math.min(
         Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)),
@@ -148,10 +165,12 @@ export function formatDuration(
     seconds: number | undefined,
     unavailable = "Unavailable",
 ): string {
-    if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return unavailable;
+    if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0)
+        return unavailable;
     if (seconds < 60) return `${Math.floor(seconds)}s`;
     if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
-    if (seconds < 86_400) return `${Math.floor(seconds / 3_600)}h ${Math.floor((seconds % 3_600) / 60)}m`;
+    if (seconds < 86_400)
+        return `${Math.floor(seconds / 3_600)}h ${Math.floor((seconds % 3_600) / 60)}m`;
     return `${Math.floor(seconds / 86_400)}d ${Math.floor((seconds % 86_400) / 3_600)}h`;
 }
 
@@ -159,6 +178,7 @@ export function formatPercent(
     value: number | undefined,
     unavailable = "Unavailable",
 ): string {
-    if (value === undefined || !Number.isFinite(value) || value < 0) return unavailable;
+    if (value === undefined || !Number.isFinite(value) || value < 0)
+        return unavailable;
     return `${value % 1 === 0 ? value : value.toFixed(1)}%`;
 }

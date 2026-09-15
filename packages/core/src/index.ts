@@ -10,7 +10,7 @@ export type {
     WorkerCommandSessionCompletion,
     WorkerCommandSessionOpen,
     WorkerCommandSessionOutput,
-    WorkerCommandSessionStream
+    WorkerCommandSessionStream,
 } from "./worker/protocol/CommandSession.js";
 export { WorkerHandle } from "./worker/instance/capability/Handle.js";
 export { WorkerInstance } from "./worker/instance/Instance.js";
@@ -30,7 +30,7 @@ export type {
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
     WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult
+    WorkerArtifactReceiveWriteResult,
 } from "./worker/protocol/Client.js";
 export type { WorkerRpcConnector } from "./worker/protocol/rpc/connection/Bridge.js";
 export { WorkerRpcInboundConnector } from "./worker/protocol/rpc/connection/InboundConnector.js";
@@ -43,7 +43,7 @@ export type {
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
     WorkerTerminalOpenInput,
-    WorkerTerminalOutputFrame
+    WorkerTerminalOutputFrame,
 } from "./worker/protocol/Terminal.js";
 
 export { WorkerRpcError } from "./worker/protocol/rpc/Message.js";

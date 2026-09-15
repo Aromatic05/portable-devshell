@@ -59,80 +59,136 @@ const MODEL_HIDDEN_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
 ]);
 
 const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
-    ["artifact_viewImage", {
-        handle: "Artifact handle; exclusive with path.",
-        path: "Image path; exclusive with handle.",
-    }],
-    ["bash_run", {
-        cwd: "Working directory; ./ is workspace-relative, / absolute.",
-        stdin: "Omit to send EOF.",
-        timeoutMs: "Required timeout in milliseconds.",
-    }],
-    ["environ_info", {
-        workspace: "Absolute workspace to attach or switch.",
-    }],
-    ["environ_remote", {
-        command: "Use help to list current operations.",
-        handle: "Opaque instance handle from devshell instance list/status.",
-        workspace: "Absolute workspace for attach operations.",
-    }],
-    ["file_edit", {
-        changes: "Ordered *** Begin Edit / *** End Edit change set.",
-    }],
-    ["file_glob", {
-        cursor: "Continuation cursor; when set, omit query fields.",
-        patterns: "Exact paths or globs; required without cursor.",
-    }],
-    ["file_grep", {
-        cursor: "Continuation cursor; when set, omit query fields.",
-        pattern: "Required without cursor.",
-        startLine: "Single exact file only.",
-        syntax: "Defaults to regex.",
-    }],
-    ["file_read", {
-        selector: "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
-    }],
-    ["tmux_inspect", {
-        end: "History end offset; defaults to 0.",
-        panes: "Set to all to inspect every pane.",
-        start: "History start offset; defaults to -80.",
-    }],
-    ["tmux_manage", {
-        force: "Allow closing a running or busy resource.",
-    }],
-    ["tmux_read", {
-        line: "Positive consumes oldest unread lines; negative also consumes all unread data, discards the earlier part, and returns the requested tail after waiting.",
-        timeMs: "Maximum wait, in milliseconds.",
-    }],
-    ["tmux_run", {
-        line: "Output lines returned with the task.",
-        timeout: "Block-wait deadline; the task keeps running after it expires.",
-        wait: "block waits for progress; nonblock returns after start.",
-    }],
-    ["todo_read", {
-        taskId: "Stable task id; prefer once known.",
-        title: "Compatibility selector; omit with taskId.",
-    }],
-    ["todo_report", {
-        message: "User reply or meaningful progress update.",
-    }],
-    ["todo_write", {
-        checkpoint: "Optional durable handoff context.",
-        revision: "Latest todo revision.",
-        taskId: "Stable task id.",
-        title: "Immutable task title.",
-        todos: "Complete replacement list.",
-    }],
+    [
+        "artifact_viewImage",
+        {
+            handle: "Artifact handle; exclusive with path.",
+            path: "Image path; exclusive with handle.",
+        },
+    ],
+    [
+        "bash_run",
+        {
+            cwd: "Working directory; ./ is workspace-relative, / absolute.",
+            stdin: "Omit to send EOF.",
+            timeoutMs: "Required timeout in milliseconds.",
+        },
+    ],
+    [
+        "environ_info",
+        {
+            workspace: "Absolute workspace to attach or switch.",
+        },
+    ],
+    [
+        "environ_remote",
+        {
+            command: "Use help to list current operations.",
+            handle: "Opaque instance handle from devshell instance list/status.",
+            workspace: "Absolute workspace for attach operations.",
+        },
+    ],
+    [
+        "file_edit",
+        {
+            changes: "Ordered *** Begin Edit / *** End Edit change set.",
+        },
+    ],
+    [
+        "file_glob",
+        {
+            cursor: "Continuation cursor; when set, omit query fields.",
+            patterns: "Exact paths or globs; required without cursor.",
+        },
+    ],
+    [
+        "file_grep",
+        {
+            cursor: "Continuation cursor; when set, omit query fields.",
+            pattern: "Required without cursor.",
+            startLine: "Single exact file only.",
+            syntax: "Defaults to regex.",
+        },
+    ],
+    [
+        "file_read",
+        {
+            selector:
+                "Lines: N, N-M, N+count, or comma ranges; add :raw for exact ranges.",
+        },
+    ],
+    [
+        "tmux_inspect",
+        {
+            end: "History end offset; defaults to 0.",
+            panes: "Set to all to inspect every pane.",
+            start: "History start offset; defaults to -80.",
+        },
+    ],
+    [
+        "tmux_manage",
+        {
+            force: "Allow closing a running or busy resource.",
+        },
+    ],
+    [
+        "tmux_read",
+        {
+            line: "Positive consumes oldest unread lines; negative also consumes all unread data, discards the earlier part, and returns the requested tail after waiting.",
+            timeMs: "Maximum wait, in milliseconds.",
+        },
+    ],
+    [
+        "tmux_run",
+        {
+            line: "Output lines returned with the task.",
+            timeout:
+                "Block-wait deadline; the task keeps running after it expires.",
+            wait: "block waits for progress; nonblock returns after start.",
+        },
+    ],
+    [
+        "todo_read",
+        {
+            taskId: "Stable task id; prefer once known.",
+            title: "Compatibility selector; omit with taskId.",
+        },
+    ],
+    [
+        "todo_report",
+        {
+            message: "User reply or meaningful progress update.",
+        },
+    ],
+    [
+        "todo_write",
+        {
+            checkpoint: "Optional durable handoff context.",
+            revision: "Latest todo revision.",
+            taskId: "Stable task id.",
+            title: "Immutable task title.",
+            todos: "Complete replacement list.",
+        },
+    ],
 ]);
 
-function compactModelInputSchema(toolName: string, value: JsonValue): JsonValue {
-    const normalized = hideModelInputProperties(toolName, normalizeModelInputSchema(value));
+function compactModelInputSchema(
+    toolName: string,
+    value: JsonValue,
+): JsonValue {
+    const normalized = hideModelInputProperties(
+        toolName,
+        normalizeModelInputSchema(value),
+    );
     return pruneUnusedLocalDefinitions(
         compactModelInputDescriptions(toolName, normalized),
     );
 }
 
-function hideModelInputProperties(toolName: string, value: JsonValue): JsonValue {
+function hideModelInputProperties(
+    toolName: string,
+    value: JsonValue,
+): JsonValue {
     if (!isRecord(value) || !isRecord(value.properties)) return value;
     const hidden = MODEL_HIDDEN_INPUT_PROPERTIES.get(toolName);
     if (hidden === undefined || hidden.size === 0) return value;
@@ -140,7 +196,9 @@ function hideModelInputProperties(toolName: string, value: JsonValue): JsonValue
     const properties = { ...value.properties };
     for (const property of hidden) delete properties[property];
     const required = Array.isArray(value.required)
-        ? value.required.filter((entry) => typeof entry !== "string" || !hidden.has(entry))
+        ? value.required.filter(
+              (entry) => typeof entry !== "string" || !hidden.has(entry),
+          )
         : undefined;
     return {
         ...value,
@@ -155,13 +213,16 @@ function compactModelInputDescriptions(
     hint?: string,
 ): JsonValue {
     if (Array.isArray(value)) {
-        return value.map((entry) => compactModelInputDescriptions(toolName, entry));
+        return value.map((entry) =>
+            compactModelInputDescriptions(toolName, entry),
+        );
     }
     if (!isRecord(value)) return value;
 
     const compacted: Record<string, JsonValue> = {};
     for (const [key, entry] of Object.entries(value)) {
-        if (key === "description" || key === "$schema" || key === "title") continue;
+        if (key === "description" || key === "$schema" || key === "title")
+            continue;
         if (key === "properties" && isRecord(entry)) {
             compacted.properties = Object.fromEntries(
                 Object.entries(entry).map(([propertyName, propertySchema]) => [
@@ -180,9 +241,14 @@ function compactModelInputDescriptions(
     return hint === undefined ? compacted : { ...compacted, description: hint };
 }
 
-function modelInputHint(toolName: string, propertyName: string): string | undefined {
-    return MODEL_INPUT_HINTS.get(toolName)?.[propertyName] ??
-        COMMON_MODEL_INPUT_HINTS[propertyName];
+function modelInputHint(
+    toolName: string,
+    propertyName: string,
+): string | undefined {
+    return (
+        MODEL_INPUT_HINTS.get(toolName)?.[propertyName] ??
+        COMMON_MODEL_INPUT_HINTS[propertyName]
+    );
 }
 
 function pruneUnusedLocalDefinitions(value: JsonValue): JsonValue {
@@ -216,9 +282,13 @@ function pruneUnusedLocalDefinitions(value: JsonValue): JsonValue {
     return Object.keys(kept).length === 0 ? root : { ...root, $defs: kept };
 }
 
-function collectLocalDefinitionReferences(value: JsonValue, references: Set<string>): void {
+function collectLocalDefinitionReferences(
+    value: JsonValue,
+    references: Set<string>,
+): void {
     if (Array.isArray(value)) {
-        for (const entry of value) collectLocalDefinitionReferences(entry, references);
+        for (const entry of value)
+            collectLocalDefinitionReferences(entry, references);
         return;
     }
     if (!isRecord(value)) return;
@@ -241,8 +311,8 @@ function flattenRootObjectUnion(value: JsonValue): JsonValue {
     const union = Array.isArray(value.anyOf)
         ? value.anyOf
         : Array.isArray(value.oneOf)
-            ? value.oneOf
-            : undefined;
+          ? value.oneOf
+          : undefined;
     if (union === undefined) return value;
 
     const { anyOf: _anyOf, oneOf: _oneOf, ...base } = value;
@@ -250,13 +320,17 @@ function flattenRootObjectUnion(value: JsonValue): JsonValue {
         return base;
     }
 
-    const variants = union.map((variant) => resolveObjectVariant(value, variant));
+    const variants = union.map((variant) =>
+        resolveObjectVariant(value, variant),
+    );
     if (variants.some((variant) => variant === undefined)) return value;
 
     const objects = variants as Record<string, JsonValue>[];
     const properties: Record<string, JsonValue> = {};
     for (const variant of objects) {
-        const variantProperties = isRecord(variant.properties) ? variant.properties : {};
+        const variantProperties = isRecord(variant.properties)
+            ? variant.properties
+            : {};
         Object.assign(properties, variantProperties);
     }
 
@@ -268,7 +342,7 @@ function flattenRootObjectUnion(value: JsonValue): JsonValue {
             : {}),
         properties,
         ...(required.length === 0 ? {} : { required }),
-        type: "object"
+        type: "object",
     };
 }
 
@@ -293,7 +367,8 @@ function normalizeModelSchema(value: JsonValue): JsonValue {
 }
 
 function unsupportedModelSchemaKey(key: string): boolean {
-    return key === "allOf" ||
+    return (
+        key === "allOf" ||
         key === "not" ||
         key === "dependentRequired" ||
         key === "dependentSchemas" ||
@@ -302,18 +377,23 @@ function unsupportedModelSchemaKey(key: string): boolean {
         key === "else" ||
         key === "contains" ||
         key === "minContains" ||
-        key === "maxContains";
+        key === "maxContains"
+    );
 }
 
 function resolveObjectVariant(
     root: Record<string, JsonValue>,
-    value: JsonValue
+    value: JsonValue,
 ): Record<string, JsonValue> | undefined {
     if (!isRecord(value)) return undefined;
-    const resolved = typeof value.$ref === "string"
-        ? resolveLocalDefinition(root, value.$ref)
-        : value;
-    if (resolved === undefined || (resolved.type !== "object" && !isRecord(resolved.properties))) {
+    const resolved =
+        typeof value.$ref === "string"
+            ? resolveLocalDefinition(root, value.$ref)
+            : value;
+    if (
+        resolved === undefined ||
+        (resolved.type !== "object" && !isRecord(resolved.properties))
+    ) {
         return undefined;
     }
     return resolved;
@@ -321,10 +401,11 @@ function resolveObjectVariant(
 
 function resolveLocalDefinition(
     root: Record<string, JsonValue>,
-    reference: string
+    reference: string,
 ): Record<string, JsonValue> | undefined {
     const prefix = "#/$defs/";
-    if (!reference.startsWith(prefix) || !isRecord(root.$defs)) return undefined;
+    if (!reference.startsWith(prefix) || !isRecord(root.$defs))
+        return undefined;
     const definition = root.$defs[reference.slice(prefix.length)];
     return isRecord(definition) ? definition : undefined;
 }
@@ -332,13 +413,17 @@ function resolveLocalDefinition(
 function intersectRequired(variants: Record<string, JsonValue>[]): string[] {
     if (variants.length === 0) return [];
     return readRequired(variants[0]).filter((name) =>
-        variants.slice(1).every((variant) => readRequired(variant).includes(name))
+        variants
+            .slice(1)
+            .every((variant) => readRequired(variant).includes(name)),
     );
 }
 
 function readRequired(schema: Record<string, JsonValue>): string[] {
     return Array.isArray(schema.required)
-        ? schema.required.filter((entry): entry is string => typeof entry === "string")
+        ? schema.required.filter(
+              (entry): entry is string => typeof entry === "string",
+          )
         : [];
 }
 
@@ -346,9 +431,14 @@ function isNumericType(value: JsonValue | undefined): boolean {
     if (value === "integer" || value === "number") {
         return true;
     }
-    return Array.isArray(value) && value.some((entry) => entry === "integer" || entry === "number");
+    return (
+        Array.isArray(value) &&
+        value.some((entry) => entry === "integer" || entry === "number")
+    );
 }
 
-function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+function isRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }

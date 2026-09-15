@@ -2,13 +2,15 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 
-export function normalizeLifecycleStatus(status: InstanceSnapshot["status"]): "failed" | "running" | "stale" | "stopped" {
+export function normalizeLifecycleStatus(
+    status: InstanceSnapshot["status"],
+): "failed" | "running" | "stale" | "stopped" {
     return status === "ready" ? "running" : status;
 }
 
 export function parseWorkerStatus(
     stdout: string,
-    instanceName: string
+    instanceName: string,
 ): {
     daemonState: "running" | "stale" | "stopped";
     pid?: number;
@@ -26,20 +28,26 @@ export function parseWorkerStatus(
             retryable: false,
             details: {
                 instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+            },
         });
     }
 
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+    ) {
         throw createError({
             code: errorCodes.coreWorkerStatusFailed,
             message: `Worker status returned an invalid payload for instance ${instanceName}.`,
             retryable: false,
             details: {
                 instance: instanceName,
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+            },
         });
     }
 
@@ -54,15 +62,18 @@ export function parseWorkerStatus(
             details: {
                 instance: instanceName,
                 state: String(state),
-                stdoutTail: stdout.length <= 4000 ? stdout : stdout.slice(-4000)
-            }
+                stdoutTail:
+                    stdout.length <= 4000 ? stdout : stdout.slice(-4000),
+            },
         });
     }
 
     return {
         daemonState: state,
         pid: typeof candidate.pid === "number" ? candidate.pid : undefined,
-        workerSha256: typeof candidate.workerSha256 === "string" ? candidate.workerSha256 : undefined
+        workerSha256:
+            typeof candidate.workerSha256 === "string"
+                ? candidate.workerSha256
+                : undefined,
     };
 }
-

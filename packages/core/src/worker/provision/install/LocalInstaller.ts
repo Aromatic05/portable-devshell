@@ -6,8 +6,14 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { WorkerAsset } from "../AssetResolver.js";
 import type { WorkerTarget } from "../target/Target.js";
-import { workerBinaryFileName, workerInstalledAliasFileName } from "../target/Target.js";
-import { isWorkerGenerationName, WORKER_GENERATION_RETENTION_MS } from "./GenerationPolicy.js";
+import {
+    workerBinaryFileName,
+    workerInstalledAliasFileName,
+} from "../target/Target.js";
+import {
+    isWorkerGenerationName,
+    WORKER_GENERATION_RETENTION_MS,
+} from "./GenerationPolicy.js";
 
 export interface WorkerInstallerLocalResult {
     executablePath: string;
@@ -40,7 +46,9 @@ export interface WorkerInstallerLocalFileSystem {
 export class WorkerInstallerLocal {
     readonly #fs: WorkerInstallerLocalFileSystem;
 
-    constructor(options: { fileSystem?: Partial<WorkerInstallerLocalFileSystem> } = {}) {
+    constructor(
+        options: { fileSystem?: Partial<WorkerInstallerLocalFileSystem> } = {},
+    ) {
         this.#fs = {
             chmod: nodeFs.chmod,
             copyFile: nodeFs.copyFile,
@@ -57,26 +65,38 @@ export class WorkerInstallerLocal {
         };
     }
 
-    async ensure(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): Promise<string> {
-        return (await this.ensureInstalled(devshellHomeDirectory, asset, target)).executablePath;
+    async ensure(
+        devshellHomeDirectory: string,
+        asset: WorkerAsset,
+        target: WorkerTarget,
+    ): Promise<string> {
+        return (
+            await this.ensureInstalled(devshellHomeDirectory, asset, target)
+        ).executablePath;
     }
 
     async ensureInstalled(
         devshellHomeDirectory: string,
         asset: WorkerAsset,
-        target: WorkerTarget
+        target: WorkerTarget,
     ): Promise<WorkerInstallerLocalResult> {
         if (asset.target.key !== target.key) {
             throw createError({
                 code: errorCodes.coreWorkerProvisionFailed,
-                details: { assetTargetKey: asset.target.key, targetKey: target.key },
-                message: "Resolved worker asset target does not match install target.",
-                retryable: false
+                details: {
+                    assetTargetKey: asset.target.key,
+                    targetKey: target.key,
+                },
+                message:
+                    "Resolved worker asset target does not match install target.",
+                retryable: false,
             });
         }
 
         const source = await this.#fs.readFile(asset.binaryPath);
-        const actualSourceSha = createHash("sha256").update(source).digest("hex");
+        const actualSourceSha = createHash("sha256")
+            .update(source)
+            .digest("hex");
         if (actualSourceSha !== asset.sha256) {
             throw createError({
                 code: errorCodes.coreWorkerProvisionFailed,
@@ -85,33 +105,71 @@ export class WorkerInstallerLocal {
                     expectedSha256: asset.sha256,
                     source: asset.binaryPath,
                 },
-                message: "Resolved worker bundle checksum does not match its manifest.",
+                message:
+                    "Resolved worker bundle checksum does not match its manifest.",
                 retryable: false,
             });
         }
 
         const layout = installLayout(devshellHomeDirectory, asset, target);
-        await this.#fs.mkdir(layout.installDir, target.os === "windows" ? { recursive: true } : { recursive: true, mode: 0o700 });
-        await this.#fs.mkdir(layout.binDir, target.os === "windows" ? { recursive: true } : { recursive: true, mode: 0o700 });
+        await this.#fs.mkdir(
+            layout.installDir,
+            target.os === "windows"
+                ? { recursive: true }
+                : { recursive: true, mode: 0o700 },
+        );
+        await this.#fs.mkdir(
+            layout.binDir,
+            target.os === "windows"
+                ? { recursive: true }
+                : { recursive: true, mode: 0o700 },
+        );
 
-        if (await readInstalledSha(this.#fs, layout.binaryPath, layout.shaPath) !== asset.sha256) {
-            await this.#installAsset(layout, source, asset.sha256, target.os === "windows");
+        if (
+            (await readInstalledSha(
+                this.#fs,
+                layout.binaryPath,
+                layout.shaPath,
+            )) !== asset.sha256
+        ) {
+            await this.#installAsset(
+                layout,
+                source,
+                asset.sha256,
+                target.os === "windows",
+            );
         }
-        if (await readInstalledSha(this.#fs, layout.binaryPath, layout.shaPath) !== asset.sha256) {
+        if (
+            (await readInstalledSha(
+                this.#fs,
+                layout.binaryPath,
+                layout.shaPath,
+            )) !== asset.sha256
+        ) {
             throw createError({
                 code: errorCodes.coreWorkerProvisionFailed,
-                details: { binaryPath: layout.binaryPath, expectedSha256: asset.sha256 },
+                details: {
+                    binaryPath: layout.binaryPath,
+                    expectedSha256: asset.sha256,
+                },
                 message: "Installed worker bundle failed verification.",
                 retryable: true,
             });
         }
         const activatedAt = new Date();
-        await this.#fs.utimes(layout.installDir, activatedAt, activatedAt).catch(() => undefined);
+        await this.#fs
+            .utimes(layout.installDir, activatedAt, activatedAt)
+            .catch(() => undefined);
 
-        const installed = target.os === "windows"
-            ? await this.#finishWindows(layout, asset)
-            : await this.#finishUnix(layout, asset, target);
-        await this.#pruneOldGenerations(devshellHomeDirectory, target, asset.sha256).catch(() => undefined);
+        const installed =
+            target.os === "windows"
+                ? await this.#finishWindows(layout, asset)
+                : await this.#finishUnix(layout, asset, target);
+        await this.#pruneOldGenerations(
+            devshellHomeDirectory,
+            target,
+            asset.sha256,
+        ).catch(() => undefined);
         return installed;
     }
 
@@ -125,31 +183,50 @@ export class WorkerInstallerLocal {
         const tmpBinaryPath = `${layout.binaryPath}${suffix}`;
         const tmpShaPath = `${layout.shaPath}${suffix}`;
         try {
-            await this.#fs.writeFile(tmpBinaryPath, bytes, windows ? undefined : { mode: 0o755 });
+            await this.#fs.writeFile(
+                tmpBinaryPath,
+                bytes,
+                windows ? undefined : { mode: 0o755 },
+            );
             if (!windows) await this.#fs.chmod(tmpBinaryPath, 0o755);
-            await this.#fs.writeFile(tmpShaPath, `${sha256}\n`, windows ? "utf8" : { mode: 0o600 });
+            await this.#fs.writeFile(
+                tmpShaPath,
+                `${sha256}\n`,
+                windows ? "utf8" : { mode: 0o600 },
+            );
             await this.#replaceFile(tmpBinaryPath, layout.binaryPath);
             await this.#replaceFile(tmpShaPath, layout.shaPath);
         } finally {
             await Promise.all([
-                this.#fs.rm(tmpBinaryPath, { force: true }).catch(() => undefined),
+                this.#fs
+                    .rm(tmpBinaryPath, { force: true })
+                    .catch(() => undefined),
                 this.#fs.rm(tmpShaPath, { force: true }).catch(() => undefined),
             ]);
         }
     }
 
-    async #finishWindows(layout: InstallLayout, asset: WorkerAsset): Promise<WorkerInstallerLocalResult> {
+    async #finishWindows(
+        layout: InstallLayout,
+        asset: WorkerAsset,
+    ): Promise<WorkerInstallerLocalResult> {
         const stagedAlias = `${layout.aliasPath}.next-${randomUUID()}`;
         try {
             await this.#fs.copyFile(layout.binaryPath, stagedAlias);
             await this.#replaceFile(stagedAlias, layout.aliasPath);
         } finally {
-            await this.#fs.rm(stagedAlias, { force: true }).catch(() => undefined);
+            await this.#fs
+                .rm(stagedAlias, { force: true })
+                .catch(() => undefined);
         }
         return { executablePath: layout.binaryPath, sha256: asset.sha256 };
     }
 
-    async #finishUnix(layout: InstallLayout, asset: WorkerAsset, target: WorkerTarget): Promise<WorkerInstallerLocalResult> {
+    async #finishUnix(
+        layout: InstallLayout,
+        asset: WorkerAsset,
+        target: WorkerTarget,
+    ): Promise<WorkerInstallerLocalResult> {
         const defaultAliasPath = resolve(layout.binDir, "devshell-worker");
         // The stable default alias points at the target-specific alias. Ensure it
         // exists before switching the target-specific alias so a failed switch
@@ -176,22 +253,49 @@ export class WorkerInstallerLocal {
         target: WorkerTarget,
         activeSha256: string,
     ): Promise<void> {
-        const targetDirectory = resolve(devshellHomeDirectory, "workers", target.key);
-        const entries = await this.#fs.readdir(targetDirectory, { withFileTypes: true });
+        const targetDirectory = resolve(
+            devshellHomeDirectory,
+            "workers",
+            target.key,
+        );
+        const entries = await this.#fs.readdir(targetDirectory, {
+            withFileTypes: true,
+        });
         const cutoff = Date.now() - WORKER_GENERATION_RETENTION_MS;
-        await Promise.all(entries.map(async (entry) => {
-            if (!entry.isDirectory() || entry.name === activeSha256 || !isWorkerGenerationName(entry.name)) return;
-            const path = resolve(targetDirectory, entry.name);
-            const metadata = await this.#fs.stat(path).catch(() => undefined);
-            if (metadata === undefined || metadata.mtimeMs >= cutoff) return;
-            await this.#fs.rm(path, { force: true, recursive: true }).catch(() => undefined);
-        }));
+        await Promise.all(
+            entries.map(async (entry) => {
+                if (
+                    !entry.isDirectory() ||
+                    entry.name === activeSha256 ||
+                    !isWorkerGenerationName(entry.name)
+                )
+                    return;
+                const path = resolve(targetDirectory, entry.name);
+                const metadata = await this.#fs
+                    .stat(path)
+                    .catch(() => undefined);
+                if (metadata === undefined || metadata.mtimeMs >= cutoff)
+                    return;
+                await this.#fs
+                    .rm(path, { force: true, recursive: true })
+                    .catch(() => undefined);
+            }),
+        );
     }
 }
 
-function installLayout(devshellHomeDirectory: string, asset: WorkerAsset, target: WorkerTarget): InstallLayout {
+function installLayout(
+    devshellHomeDirectory: string,
+    asset: WorkerAsset,
+    target: WorkerTarget,
+): InstallLayout {
     const binaryName = workerBinaryFileName(target);
-    const installDir = resolve(devshellHomeDirectory, "workers", target.key, asset.sha256);
+    const installDir = resolve(
+        devshellHomeDirectory,
+        "workers",
+        target.key,
+        asset.sha256,
+    );
     const binDir = resolve(devshellHomeDirectory, "bin");
     return {
         aliasPath: resolve(binDir, workerInstalledAliasFileName(target)),
@@ -199,7 +303,7 @@ function installLayout(devshellHomeDirectory: string, asset: WorkerAsset, target
         binaryName,
         binaryPath: resolve(installDir, binaryName),
         installDir,
-        shaPath: resolve(installDir, `${binaryName}.sha256`)
+        shaPath: resolve(installDir, `${binaryName}.sha256`),
     };
 }
 

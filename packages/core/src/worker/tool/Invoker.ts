@@ -1,4 +1,9 @@
-import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type JsonValue,
+    type ToolCallContext,
+} from "@portable-devshell/shared";
 
 import { WorkerRpcClient } from "../protocol/rpc/Client.js";
 import { WorkerToolCatalog } from "./Catalog.js";
@@ -17,7 +22,7 @@ export class WorkerToolInvoker {
         input: JsonValue,
         context?: ToolCallContext,
         signal?: AbortSignal,
-        onProgress?: (progress: JsonValue) => void
+        onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
         const tool = this.#catalog.getTool(toolName);
 
@@ -26,10 +31,16 @@ export class WorkerToolInvoker {
                 code: errorCodes.coreToolSchemaUnavailable,
                 message: `Tool ${toolName} is not available for this instance.`,
                 retryable: false,
-                details: { toolName }
+                details: { toolName },
             });
         }
 
-        return await this.#rpcClient.request(toolName, input, context, signal, onProgress);
+        return await this.#rpcClient.request(
+            toolName,
+            input,
+            context,
+            signal,
+            onProgress,
+        );
     }
 }

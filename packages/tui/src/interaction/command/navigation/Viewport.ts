@@ -208,10 +208,9 @@ export class TuiCommandDispatcherViewport {
                 this.returnToSidebar();
                 return true;
             }
-            const moved = (
+            const moved =
                 (direction === "up" || direction === "down") &&
-                this.#focusManager.move(direction)
-            );
+                this.#focusManager.move(direction);
             if (moved && (scope === "form" || scope === "wizard")) {
                 this.#focus.ensureMainFocusVisible();
             }

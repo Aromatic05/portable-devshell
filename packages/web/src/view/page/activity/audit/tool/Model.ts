@@ -65,13 +65,20 @@ export function selectToolCalls(
     const items: ToolCallRecord[] = [];
     let total = 0;
     for (const call of [...calls].sort((left, right) =>
-        right.startedAt.localeCompare(left.startedAt)
+        right.startedAt.localeCompare(left.startedAt),
     )) {
-        if (ctxId.length > 0 && (call.ctxId ?? "").toLowerCase() !== ctxId) continue;
+        if (ctxId.length > 0 && (call.ctxId ?? "").toLowerCase() !== ctxId)
+            continue;
         if (filters.tool !== "all" && call.toolName !== filters.tool) continue;
-        if (filters.result !== "all" && toolCallResult(call) !== filters.result) continue;
-        if (workspace.length > 0 && !(call.workspace ?? "").toLowerCase().includes(workspace)) continue;
-        if (minTime !== undefined && Date.parse(call.startedAt) < minTime) continue;
+        if (filters.result !== "all" && toolCallResult(call) !== filters.result)
+            continue;
+        if (
+            workspace.length > 0 &&
+            !(call.workspace ?? "").toLowerCase().includes(workspace)
+        )
+            continue;
+        if (minTime !== undefined && Date.parse(call.startedAt) < minTime)
+            continue;
         if (query.length > 0 && !callSearchText(call).includes(query)) continue;
         total += 1;
         if (total > offset && items.length < limit) items.push(call);
@@ -88,7 +95,9 @@ export function filterToolCalls(
 }
 
 export function hasActiveToolCallFilters(filters: ToolCallFilters): boolean {
-    return Object.values(filters).some((value) => value !== "all" && value !== "");
+    return Object.values(filters).some(
+        (value) => value !== "all" && value !== "",
+    );
 }
 
 function callSearchText(call: ToolCallRecord): string {
@@ -100,8 +109,12 @@ function callSearchText(call: ToolCallRecord): string {
         call.error,
         call.explanation,
         call.inputSummary,
-        call.input === undefined ? undefined : formatToolSearchValue(call.input),
-        call.output === undefined ? undefined : formatToolSearchValue(call.output),
+        call.input === undefined
+            ? undefined
+            : formatToolSearchValue(call.input),
+        call.output === undefined
+            ? undefined
+            : formatToolSearchValue(call.output),
         call.instance,
         call.requestId,
         call.purpose,
@@ -117,7 +130,10 @@ function callSearchText(call: ToolCallRecord): string {
     return text;
 }
 
-export function formatToolValue(value: JsonValue | undefined, fallback = "-"): string {
+export function formatToolValue(
+    value: JsonValue | undefined,
+    fallback = "-",
+): string {
     return formatJsonValue(value ?? parseJsonFallback(fallback));
 }
 
@@ -134,7 +150,8 @@ export function resolveToolCallOutput(
 
 export function toolCallDuration(call: ToolCallRecord): string {
     if (call.completedAt === undefined) return "running";
-    const milliseconds = Date.parse(call.completedAt) - Date.parse(call.startedAt);
+    const milliseconds =
+        Date.parse(call.completedAt) - Date.parse(call.startedAt);
     return Number.isFinite(milliseconds) && milliseconds >= 0
         ? `${milliseconds}ms`
         : "-";

@@ -4,24 +4,36 @@ import {
     PrefixRoute,
     type JsonValue,
     type PrefixRouteDestinationDefinition,
-    type PrefixRouteSnapshot
+    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../control/artifact/Service.js";
 import { createArtifactRouteModule } from "../control/artifact/route/Module.js";
-import { createCliRouteModule, type CliCommandPort } from "../control/extension/cli/Route.js";
+import {
+    createCliRouteModule,
+    type CliCommandPort,
+} from "../control/extension/cli/Route.js";
 import type { ConfigEditorPort } from "../control/config/Route.js";
 import { createConfigRouteModule } from "../control/config/Route.js";
 import {
     createConversationPreferenceRouteModule,
     type ConversationPreferencePort,
 } from "../control/config/preference/Route.js";
-import { createDebugRouteModule, type DebugPatchPort } from "../control/debug/Route.js";
-import { createExtensionRouteModule, type ExtensionControlPort } from "../control/extension/Route.js";
+import {
+    createDebugRouteModule,
+    type DebugPatchPort,
+} from "../control/debug/Route.js";
+import {
+    createExtensionRouteModule,
+    type ExtensionControlPort,
+} from "../control/extension/Route.js";
 import type { InstanceCreatePort } from "../control/instance/Route.js";
 import { createInstanceRouteModule } from "../control/instance/Route.js";
 import type { InstanceRegistry } from "../control/instance/registry/Registry.js";
-import { createContextRouteModule, type ContextAdminPort } from "./mcp/route/Context.js";
+import {
+    createContextRouteModule,
+    type ContextAdminPort,
+} from "./mcp/route/Context.js";
 import { createMcpRouteModule } from "./mcp/route/Module.js";
 import type { OperationalOverviewPort } from "../control/overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../control/overview/Route.js";
@@ -42,7 +54,7 @@ import { TerminalSessionService } from "../instance/execution/terminal/Service.j
 import { createToolRouteModule } from "../instance/execution/tool/Route.js";
 import {
     createWebApplicationRouteModule,
-    type WebApplicationCatalogPort
+    type WebApplicationCatalogPort,
 } from "../server/web/extension/application/Route.js";
 
 export interface ControlRouteCompositionOptions {
@@ -78,11 +90,14 @@ export class ControlRouteComposition {
 
     constructor(options: ControlRouteCompositionOptions) {
         this.#options = options;
-        this.#subscriptions = options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
-        this.#overview = options.overview ?? new OperationalOverviewService({
-            instances: options.instances,
-            oauthApprovals: options.oauthApprovals
-        });
+        this.#subscriptions =
+            options.runtimeSubscriptions ?? new RuntimeSubscriptionManager();
+        this.#overview =
+            options.overview ??
+            new OperationalOverviewService({
+                instances: options.instances,
+                oauthApprovals: options.oauthApprovals,
+            });
         this.#snapshot = this.#build();
         this.#unsubscribeInstances = options.instances.onChange(() => {
             this.#snapshot = this.#build();
@@ -114,44 +129,60 @@ export class ControlRouteComposition {
                 destination: "@control",
                 modules: [
                     createServiceRouteModule({
-                        instanceCount: () => this.#options.instances.list().length,
+                        instanceCount: () =>
+                            this.#options.instances.list().length,
                         restart: this.#options.restart,
-                        shutdown: this.#options.shutdown
+                        shutdown: this.#options.shutdown,
                     }),
                     ...(this.#options.debug === undefined
                         ? []
                         : [createDebugRouteModule(this.#options.debug)]),
                     ...(this.#options.extension === undefined
                         ? []
-                        : [createExtensionRouteModule(this.#options.extension)]),
+                        : [
+                              createExtensionRouteModule(
+                                  this.#options.extension,
+                              ),
+                          ]),
                     ...(this.#options.cliCommands === undefined
                         ? []
                         : [createCliRouteModule(this.#options.cliCommands)]),
                     ...(this.#options.webApplications === undefined
                         ? []
-                        : [createWebApplicationRouteModule(this.#options.webApplications)]),
+                        : [
+                              createWebApplicationRouteModule(
+                                  this.#options.webApplications,
+                              ),
+                          ]),
                     createMcpRouteModule({
-                        approvals: this.#options.oauthApprovals ?? (() => undefined),
-                        status: this.#options.mcpStatus ?? (() => ({
-                            running: false,
-                            reason: "MCP runtime is disabled."
-                        }))
+                        approvals:
+                            this.#options.oauthApprovals ?? (() => undefined),
+                        status:
+                            this.#options.mcpStatus ??
+                            (() => ({
+                                running: false,
+                                reason: "MCP runtime is disabled.",
+                            })),
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
                     ...(this.#options.conversationPreferences === undefined
                         ? []
-                        : [createConversationPreferenceRouteModule(this.#options.conversationPreferences)]),
+                        : [
+                              createConversationPreferenceRouteModule(
+                                  this.#options.conversationPreferences,
+                              ),
+                          ]),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,
                         editor: this.#options.config,
-                        registry: this.#options.instances
+                        registry: this.#options.instances,
                     }),
                     createConfigRouteModule(this.#options.config),
                     createReverseRouteModule(this.#options.reverse),
-                    createArtifactRouteModule(this.#options.artifact)
-                ]
-            }
+                    createArtifactRouteModule(this.#options.artifact),
+                ],
+            },
         ];
 
         for (const descriptor of descriptors) {
@@ -166,27 +197,43 @@ export class ControlRouteComposition {
                             enabled: descriptor.enabled,
                             name: descriptor.name,
                             todoSummaries: () => descriptor.todo.summaries(),
-                            worker: descriptor.worker
+                            worker: descriptor.worker,
                         },
                         this.#options.instances,
-                        this.#subscriptions
+                        this.#subscriptions,
                     ),
-                    ...(descriptor.contextMessages === undefined ? [] : [createContextMessageRouteModule(
-                        descriptor.contextMessages
-                    )]),
+                    ...(descriptor.contextMessages === undefined
+                        ? []
+                        : [
+                              createContextMessageRouteModule(
+                                  descriptor.contextMessages,
+                              ),
+                          ]),
                     createConversationRouteModule(descriptor.conversation),
                     createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
-                    createToolRouteModule(descriptor, this.#options.toolProvenance),
-                    ...(descriptor.terminal === undefined ? [] : [createTerminalRouteModule({
-                        backend: descriptor.terminal,
-                        instance: descriptor.name,
-                        ...(this.#options.terminalMaxUnackedBytes === undefined
-                            ? {}
-                            : { maxUnackedBytes: this.#options.terminalMaxUnackedBytes }),
-                        sessions: this.#terminals
-                    })])
-                ]
+                    createToolRouteModule(
+                        descriptor,
+                        this.#options.toolProvenance,
+                    ),
+                    ...(descriptor.terminal === undefined
+                        ? []
+                        : [
+                              createTerminalRouteModule({
+                                  backend: descriptor.terminal,
+                                  instance: descriptor.name,
+                                  ...(this.#options.terminalMaxUnackedBytes ===
+                                  undefined
+                                      ? {}
+                                      : {
+                                            maxUnackedBytes:
+                                                this.#options
+                                                    .terminalMaxUnackedBytes,
+                                        }),
+                                  sessions: this.#terminals,
+                              }),
+                          ]),
+                ],
             });
         }
 

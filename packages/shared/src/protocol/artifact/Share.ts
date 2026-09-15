@@ -1,6 +1,11 @@
 import type { ArtifactSourceDescriptor } from "./Transfer.js";
 
-export const artifactShareStates = ["active", "exhausted", "expired", "revoked"] as const;
+export const artifactShareStates = [
+    "active",
+    "exhausted",
+    "expired",
+    "revoked",
+] as const;
 export type ArtifactShareState = (typeof artifactShareStates)[number];
 
 export type ArtifactShareInput =

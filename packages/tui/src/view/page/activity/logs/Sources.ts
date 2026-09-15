@@ -1,4 +1,8 @@
-import { selectTuiLogs, type TuiAppState, type TuiLogEntry } from "../../../../state/store/Model.js";
+import {
+    selectTuiLogs,
+    type TuiAppState,
+    type TuiLogEntry,
+} from "../../../../state/store/Model.js";
 import type { BoxModel } from "../../../component/content/Box.js";
 import { compactSummary, formatField, makeBox } from "../../Support.js";
 

@@ -12,21 +12,26 @@ import { parseConversationPreferencesPatch } from "./Model.js";
 
 export interface ConversationPreferencePort {
     read(): Promise<ConversationPreferencesSnapshot>;
-    update(patch: ConversationPreferencesPatch): Promise<ConversationPreferencesSnapshot>;
+    update(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot>;
 }
 
 export function createConversationPreferenceRouteModule(
     port: ConversationPreferencePort,
 ): PrefixRouteModuleDefinition {
     return routeModule("conversation", {
-        preferences: async () => await port.read() as unknown as JsonValue,
-        updatePreferences: async (request) => await port.update(
-            readConversationPreferencesPatch(request.payload ?? {}),
-        ) as unknown as JsonValue,
+        preferences: async () => (await port.read()) as unknown as JsonValue,
+        updatePreferences: async (request) =>
+            (await port.update(
+                readConversationPreferencesPatch(request.payload ?? {}),
+            )) as unknown as JsonValue,
     });
 }
 
-function readConversationPreferencesPatch(value: JsonValue): ConversationPreferencesPatch {
+function readConversationPreferencesPatch(
+    value: JsonValue,
+): ConversationPreferencesPatch {
     try {
         return parseConversationPreferencesPatch(value);
     } catch (error) {

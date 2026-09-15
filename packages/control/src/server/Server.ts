@@ -29,13 +29,16 @@ export class ControlServer {
         this.#state = new ControlRuntimeState({
             configStore: options.configStore,
             homeDirectory: options.homeDirectory,
-            instanceRegistryFactory: options.instanceRegistryBuilder
+            instanceRegistryFactory: options.instanceRegistryBuilder,
         });
-        this.#runtimeFactory = options.runtimeFactory ?? new ControlRuntimeFactory({
-            mcpFactory: options.mcpWiringService
-        });
+        this.#runtimeFactory =
+            options.runtimeFactory ??
+            new ControlRuntimeFactory({
+                mcpFactory: options.mcpWiringService,
+            });
         this.#socketFile = new ControlSocketFile(options.xdgRuntimeDir);
-        this.#startupDiagnostic = options.startupDiagnostic ?? (() => undefined);
+        this.#startupDiagnostic =
+            options.startupDiagnostic ?? (() => undefined);
     }
 
     get socketPath(): string {
@@ -66,9 +69,13 @@ export class ControlServer {
         this.#startupDiagnostic("control state load started");
         await this.#state.load();
         this.#startupDiagnostic("control state load completed");
-        this.#startupDiagnostic("control runtime directory initialization started");
+        this.#startupDiagnostic(
+            "control runtime directory initialization started",
+        );
         await this.#socketFile.ensureRuntimeDir();
-        this.#startupDiagnostic("control runtime directory initialization completed");
+        this.#startupDiagnostic(
+            "control runtime directory initialization completed",
+        );
         this.#startupDiagnostic("control runtime composition started");
         const runtime = await this.#runtimeFactory.create({
             restart: async () => {
@@ -78,7 +85,7 @@ export class ControlServer {
                 await this.stop();
             },
             socketPath: this.#socketFile.path,
-            state: this.#state
+            state: this.#state,
         });
         this.#startupDiagnostic("control runtime composition completed");
         try {
@@ -106,7 +113,7 @@ export class ControlServer {
         const operation = this.#operationTail.then(factory, factory);
         this.#operationTail = operation.then(
             () => undefined,
-            () => undefined
+            () => undefined,
         );
         return await operation;
     }

@@ -1,5 +1,21 @@
-import { CONTROL_PROTOCOL_VERSION, Codec, PrefixRoute, createError, errorCodes } from "@portable-devshell/shared";
-import type { Channel, ControlClientKind, ControlProtocolHelloRequest, ControlProtocolHelloResponse, JsonValue, PrefixRouteIncoming, PrefixRouteModuleDefinition, PrefixRouteSnapshot, PrefixRouteSubject } from "@portable-devshell/shared";
+import {
+    CONTROL_PROTOCOL_VERSION,
+    Codec,
+    PrefixRoute,
+    createError,
+    errorCodes,
+} from "@portable-devshell/shared";
+import type {
+    Channel,
+    ControlClientKind,
+    ControlProtocolHelloRequest,
+    ControlProtocolHelloResponse,
+    JsonValue,
+    PrefixRouteIncoming,
+    PrefixRouteModuleDefinition,
+    PrefixRouteSnapshot,
+    PrefixRouteSubject,
+} from "@portable-devshell/shared";
 import { routeModule } from "../Route.js";
 
 export interface ControlChannelRouteProvider {
@@ -39,7 +55,9 @@ export class ControlChannelServer {
 
     constructor(options: ControlChannelServerOptions) {
         if (options.listeners.length === 0) {
-            throw new Error("Control channel server requires at least one listener.");
+            throw new Error(
+                "Control channel server requires at least one listener.",
+            );
         }
         this.#listeners = [...options.listeners];
         this.#routes = options.routes;
@@ -90,7 +108,10 @@ export class ControlChannelServer {
         }
     }
 
-    async replaceListener(previous: ControlChannelListener, next: ControlChannelListener): Promise<void> {
+    async replaceListener(
+        previous: ControlChannelListener,
+        next: ControlChannelListener,
+    ): Promise<void> {
         if (!this.#started) {
             throw new Error("Control channel server is not started.");
         }
@@ -99,7 +120,8 @@ export class ControlChannelServer {
             throw new Error("Control channel listener is not active.");
         }
 
-        const accept = (connection: ControlAcceptedChannel) => this.#accept(connection);
+        const accept = (connection: ControlAcceptedChannel) =>
+            this.#accept(connection);
         await next.start(accept);
         try {
             await previous.close();
@@ -117,7 +139,7 @@ export class ControlChannelServer {
             if (rollbackFailures.length > 0) {
                 throw new AggregateError(
                     [error, ...rollbackFailures],
-                    "Control channel listener replacement failed and rollback was incomplete."
+                    "Control channel listener replacement failed and rollback was incomplete.",
                 );
             }
             throw error;
@@ -143,7 +165,7 @@ export class ControlChannelServer {
             } catch (closeError) {
                 throw new AggregateError(
                     [error, closeError],
-                    "Control channel server failed to start and clean up."
+                    "Control channel server failed to start and clean up.",
                 );
             }
             throw error;
@@ -172,81 +194,91 @@ export class ControlChannelServer {
                       requestId: string;
                   }
                 | undefined;
-            const route = new PrefixRoute(new Codec(channel, { local: "server" }), {
-                authorizeRequest: (incoming) => {
-                    if (negotiated === undefined) {
-                        assertHelloRequest(incoming);
-                        if (pending !== undefined) {
+            const route = new PrefixRoute(
+                new Codec(channel, { local: "server" }),
+                {
+                    authorizeRequest: (incoming) => {
+                        if (negotiated === undefined) {
+                            assertHelloRequest(incoming);
+                            if (pending !== undefined) {
+                                throw createError({
+                                    code: errorCodes.controlClientIdentityInvalid,
+                                    message:
+                                        "Control connection identity negotiation is already in progress.",
+                                    retryable: false,
+                                });
+                            }
+                            const peer = readClientPeer(incoming.peer);
+                            if (!admission.allowedPeers.includes(peer)) {
+                                throw createError({
+                                    code: errorCodes.controlClientIdentityInvalid,
+                                    details: {
+                                        allowedPeers: [
+                                            ...admission.allowedPeers,
+                                        ],
+                                        requestedPeer: peer,
+                                        subject: admission.subject.id,
+                                    },
+                                    message: `Control transport subject ${admission.subject.id} cannot connect as ${peer}.`,
+                                    retryable: false,
+                                });
+                            }
+                            const hello = negotiateControlProtocol(
+                                incoming.event.payload,
+                                peer,
+                            );
+                            pending = {
+                                peer,
+                                protocolVersion: hello.protocolVersion,
+                                requestId: incoming.event.id,
+                            };
+                            return;
+                        }
+                        if (isHelloRequest(incoming)) {
                             throw createError({
                                 code: errorCodes.controlClientIdentityInvalid,
-                                message: "Control connection identity negotiation is already in progress.",
+                                message:
+                                    "Control connection identity is already negotiated.",
                                 retryable: false,
                             });
                         }
-                        const peer = readClientPeer(incoming.peer);
-                        if (!admission.allowedPeers.includes(peer)) {
+                        if (incoming.peer !== negotiated.peer) {
                             throw createError({
                                 code: errorCodes.controlClientIdentityInvalid,
-                                details: {
-                                    allowedPeers: [...admission.allowedPeers],
-                                    requestedPeer: peer,
-                                    subject: admission.subject.id,
-                                },
-                                message: `Control transport subject ${admission.subject.id} cannot connect as ${peer}.`,
+                                message: `Control connection is negotiated as ${negotiated.peer}, not ${incoming.peer}.`,
                                 retryable: false,
                             });
                         }
-                        const hello = negotiateControlProtocol(
-                            incoming.event.payload,
-                            peer,
-                        );
-                        pending = {
-                            peer,
-                            protocolVersion: hello.protocolVersion,
-                            requestId: incoming.event.id,
-                        };
-                        return;
-                    }
-                    if (isHelloRequest(incoming)) {
-                        throw createError({
-                            code: errorCodes.controlClientIdentityInvalid,
-                            message: "Control connection identity is already negotiated.",
-                            retryable: false,
-                        });
-                    }
-                    if (incoming.peer !== negotiated.peer) {
-                        throw createError({
-                            code: errorCodes.controlClientIdentityInvalid,
-                            message: `Control connection is negotiated as ${negotiated.peer}, not ${incoming.peer}.`,
-                            retryable: false,
-                        });
-                    }
+                    },
+                    eventIdPrefix: "server",
+                    getConnectionContext: () => ({
+                        protocolVersion:
+                            negotiated?.protocolVersion ??
+                            pending?.protocolVersion,
+                        subject: admission.subject,
+                    }),
+                    getSnapshot: () => this.#routes.snapshot(),
+                    onRequestResult: (incoming, result) => {
+                        if (pending?.requestId !== incoming.event.id) return;
+                        if (result.ok) {
+                            negotiated = {
+                                peer: pending.peer,
+                                protocolVersion: pending.protocolVersion,
+                            };
+                        }
+                        pending = undefined;
+                    },
                 },
-                eventIdPrefix: "server",
-                getConnectionContext: () => ({
-                    protocolVersion:
-                        negotiated?.protocolVersion ?? pending?.protocolVersion,
-                    subject: admission.subject,
-                }),
-                getSnapshot: () => this.#routes.snapshot(),
-                onRequestResult: (incoming, result) => {
-                    if (pending?.requestId !== incoming.event.id) return;
-                    if (result.ok) {
-                        negotiated = {
-                            peer: pending.peer,
-                            protocolVersion: pending.protocolVersion,
-                        };
-                    }
-                    pending = undefined;
-                },
-            });
+            );
             this.#connections.set(route.connectionId, route);
             channel.onClose(() => {
                 this.#connections.delete(route.connectionId);
                 this.#routes.connectionClosed(route.connectionId);
             });
         } catch (error) {
-            channel.close(error instanceof Error ? error : new Error(String(error)));
+            channel.close(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
 
@@ -283,7 +315,10 @@ export class ControlChannelServer {
             }
         }
         if (failures.length > 0) {
-            throw new AggregateError(failures, "Control channel listeners failed to close.");
+            throw new AggregateError(
+                failures,
+                "Control channel listeners failed to close.",
+            );
         }
     }
 }
@@ -297,7 +332,8 @@ function assertHelloRequest(incoming: PrefixRouteIncoming): void {
             module: incoming.module,
             operation: incoming.event.name,
         },
-        message: "service.hello must be the first request on a Control connection.",
+        message:
+            "service.hello must be the first request on a Control connection.",
         retryable: false,
     });
 }
@@ -326,14 +362,21 @@ export interface ServiceRouteModuleOptions {
     shutdown(): Promise<void> | void;
 }
 
-export function createServiceRouteModule(options: ServiceRouteModuleOptions): PrefixRouteModuleDefinition {
+export function createServiceRouteModule(
+    options: ServiceRouteModuleOptions,
+): PrefixRouteModuleDefinition {
     return routeModule("service", {
-        hello: (request, context) => negotiateControlProtocol(
-            request.payload,
-            context.peer
-        ) as unknown as JsonValue,
+        hello: (request, context) =>
+            negotiateControlProtocol(
+                request.payload,
+                context.peer,
+            ) as unknown as JsonValue,
         ping: () => ({ pong: true }),
-        status: () => ({ instanceCount: options.instanceCount(), ok: true, pid: process.pid }),
+        status: () => ({
+            instanceCount: options.instanceCount(),
+            ok: true,
+            pid: process.pid,
+        }),
         shutdown: (_request, context) => {
             context.afterReply(options.shutdown);
             return { accepted: true };
@@ -343,20 +386,20 @@ export function createServiceRouteModule(options: ServiceRouteModuleOptions): Pr
                 context.afterReply(options.restart);
             }
             return { accepted: true };
-        }
+        },
     });
 }
 
 export function negotiateControlProtocol(
     payload: JsonValue | undefined,
-    peer: ControlClientKind
+    peer: ControlClientKind,
 ): ControlProtocolHelloResponse {
     const request = readHelloRequest(payload);
     if (request.clientKind !== peer) {
         throw createError({
             code: errorCodes.controlClientIdentityInvalid,
             message: `service.hello clientKind ${request.clientKind} does not match ${peer}.`,
-            retryable: false
+            retryable: false,
         });
     }
     if (
@@ -368,53 +411,75 @@ export function negotiateControlProtocol(
             details: {
                 clientMaxProtocolVersion: request.maxProtocolVersion,
                 clientMinProtocolVersion: request.minProtocolVersion,
-                serverProtocolVersion: CONTROL_PROTOCOL_VERSION
+                serverProtocolVersion: CONTROL_PROTOCOL_VERSION,
             },
             message: "Control RPC protocol version is not supported.",
-            retryable: false
+            retryable: false,
         });
     }
     return {
         capabilities: ["request", "stream", "streamResume"],
-        protocolVersion: CONTROL_PROTOCOL_VERSION
+        protocolVersion: CONTROL_PROTOCOL_VERSION,
     };
 }
 
-function readHelloRequest(payload: JsonValue | undefined): ControlProtocolHelloRequest {
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+function readHelloRequest(
+    payload: JsonValue | undefined,
+): ControlProtocolHelloRequest {
+    if (
+        typeof payload !== "object" ||
+        payload === null ||
+        Array.isArray(payload)
+    ) {
         throw invalidHello("service.hello requires an object payload.");
     }
     const clientKind = payload.clientKind;
     const minProtocolVersion = payload.minProtocolVersion;
     const maxProtocolVersion = payload.maxProtocolVersion;
     if (clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web") {
-        throw invalidHello("service.hello clientKind must be cli, tui, or web.");
+        throw invalidHello(
+            "service.hello clientKind must be cli, tui, or web.",
+        );
     }
-    if (!isProtocolVersion(minProtocolVersion) || !isProtocolVersion(maxProtocolVersion)) {
-        throw invalidHello("service.hello protocol versions must be positive safe integers.");
+    if (
+        !isProtocolVersion(minProtocolVersion) ||
+        !isProtocolVersion(maxProtocolVersion)
+    ) {
+        throw invalidHello(
+            "service.hello protocol versions must be positive safe integers.",
+        );
     }
     if (minProtocolVersion > maxProtocolVersion) {
-        throw invalidHello("service.hello minProtocolVersion must not exceed maxProtocolVersion.");
+        throw invalidHello(
+            "service.hello minProtocolVersion must not exceed maxProtocolVersion.",
+        );
     }
-    if (payload.clientVersion !== undefined && typeof payload.clientVersion !== "string") {
+    if (
+        payload.clientVersion !== undefined &&
+        typeof payload.clientVersion !== "string"
+    ) {
         throw invalidHello("service.hello clientVersion must be a string.");
     }
     return {
         clientKind,
-        ...(payload.clientVersion === undefined ? {} : { clientVersion: payload.clientVersion }),
+        ...(payload.clientVersion === undefined
+            ? {}
+            : { clientVersion: payload.clientVersion }),
         maxProtocolVersion,
-        minProtocolVersion
+        minProtocolVersion,
     };
 }
 
 function isProtocolVersion(value: JsonValue | undefined): value is number {
-    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+    return (
+        typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    );
 }
 
 function invalidHello(message: string): Error {
     return createError({
         code: errorCodes.targetInvalid,
         message,
-        retryable: false
+        retryable: false,
     });
 }

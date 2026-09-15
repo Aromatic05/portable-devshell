@@ -24,8 +24,14 @@ test("self-managed workers reject Control start and stop without touching the re
 
     for (const operation of [() => lifecycle.start(), () => lifecycle.stop()]) {
         await assert.rejects(operation(), (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.reverseSelfManagedLifecycle);
-            assert.match((error as Error).message, /self-managed.*remote machine/iu);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.reverseSelfManagedLifecycle,
+            );
+            assert.match(
+                (error as Error).message,
+                /self-managed.*remote machine/iu,
+            );
             return true;
         });
     }

@@ -27,7 +27,11 @@ export class ConfigInputError extends Error {
 
     constructor(issue: ConfigIssue) {
         const fieldPath = formatConfigPath(issue.path);
-        super(fieldPath.length === 0 ? issue.message : `${fieldPath} ${issue.message}`);
+        super(
+            fieldPath.length === 0
+                ? issue.message
+                : `${fieldPath} ${issue.message}`,
+        );
         this.name = "ConfigInputError";
         this.issue = issue;
     }
@@ -37,7 +41,7 @@ export function configInputError(
     phase: ConfigIssuePhase,
     path: readonly ConfigPathSegment[],
     code: string,
-    message: string
+    message: string,
 ): ConfigInputError {
     return new ConfigInputError({ code, message, path, phase });
 }

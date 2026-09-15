@@ -603,10 +603,8 @@ impl ArtifactPayloadStore {
             Some(metadata) => {
                 storage::remove_file_if_exists(&metadata_path)?;
                 storage::remove_file_if_exists(&self.data_path(payload_id))?;
-                if had_metadata {
-                    if let Some(count) = state.payload_count.as_mut() {
-                        *count = count.saturating_sub(1);
-                    }
+                if had_metadata && let Some(count) = state.payload_count.as_mut() {
+                    *count = count.saturating_sub(1);
                 }
                 if let ArtifactPayloadBacking::ArtifactLease { lease_id } = metadata.backing {
                     let _ = self.artifacts.release_lease(&lease_id);
@@ -616,10 +614,8 @@ impl ArtifactPayloadStore {
             None => {
                 storage::remove_file_if_exists(&metadata_path)?;
                 storage::remove_file_if_exists(&self.data_path(payload_id))?;
-                if had_metadata {
-                    if let Some(count) = state.payload_count.as_mut() {
-                        *count = count.saturating_sub(1);
-                    }
+                if had_metadata && let Some(count) = state.payload_count.as_mut() {
+                    *count = count.saturating_sub(1);
                 }
                 Ok(())
             }
@@ -665,10 +661,8 @@ impl ArtifactPayloadStore {
         let metadata_path = self.metadata_path(&metadata.payload_id);
         let had_metadata = metadata_path.is_file();
         storage::remove_file_if_exists(&metadata_path)?;
-        if had_metadata {
-            if let Some(count) = state.payload_count.as_mut() {
-                *count = count.saturating_sub(1);
-            }
+        if had_metadata && let Some(count) = state.payload_count.as_mut() {
+            *count = count.saturating_sub(1);
         }
         match &metadata.backing {
             ArtifactPayloadBacking::ArtifactLease { lease_id } => {
@@ -764,7 +758,7 @@ fn collect_directory_entries_from(
     let mut children = directory
         .entries()
         .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
-    children.sort_by(|left, right| os_sort_key(left).cmp(&os_sort_key(right)));
+    children.sort_by_key(|left| os_sort_key(left));
     for name in children {
         cancellation.check()?;
         let relative = current.join(&name);
@@ -1045,7 +1039,7 @@ fn utf8_file_name(path: &Path) -> Result<String, ToolError> {
 fn modified_at_seconds(metadata: &ResolvedMetadata) -> u64 {
     #[cfg(unix)]
     {
-        return metadata.modified_at_seconds().max(0) as u64;
+        metadata.modified_at_seconds().max(0) as u64
     }
     #[cfg(not(unix))]
     {

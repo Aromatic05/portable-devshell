@@ -33,14 +33,20 @@ export interface WorkerCommandSessionCompletion {
 }
 
 export class WorkerCommandSessionBridge {
-    readonly #closeListeners = new Set<(request: WorkerCommandSessionClose) => void>();
-    readonly #openListeners = new Set<(request: WorkerCommandSessionOpen) => void>();
+    readonly #closeListeners = new Set<
+        (request: WorkerCommandSessionClose) => void
+    >();
+    readonly #openListeners = new Set<
+        (request: WorkerCommandSessionOpen) => void
+    >();
     readonly #protocol: WorkerProtocolClient;
     readonly #unsubscribe: () => void;
 
     constructor(rpc: WorkerRpcBridge, protocol: WorkerProtocolClient) {
         this.#protocol = protocol;
-        this.#unsubscribe = rpc.onNotification((notification) => this.#onNotification(notification));
+        this.#unsubscribe = rpc.onNotification((notification) =>
+            this.#onNotification(notification),
+        );
     }
 
     close(): void {
@@ -54,7 +60,9 @@ export class WorkerCommandSessionBridge {
         return () => this.#openListeners.delete(listener);
     }
 
-    onClose(listener: (request: WorkerCommandSessionClose) => void): () => void {
+    onClose(
+        listener: (request: WorkerCommandSessionClose) => void,
+    ): () => void {
         this.#closeListeners.add(listener);
         return () => this.#closeListeners.delete(listener);
     }
@@ -86,7 +94,9 @@ export class WorkerCommandSessionBridge {
             try {
                 listener(value);
             } catch (error) {
-                console.warn(error instanceof Error ? error : new Error(String(error)));
+                console.warn(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
         }
     }
@@ -95,14 +105,22 @@ export class WorkerCommandSessionBridge {
 function readOpen(value: JsonValue): WorkerCommandSessionOpen | undefined {
     if (!isRecord(value)) return undefined;
     if (
-        typeof value.sessionId !== "string" || value.sessionId.length === 0 ||
-        typeof value.ctxId !== "string" || value.ctxId.length === 0 ||
-        typeof value.parentCallId !== "string" || value.parentCallId.length === 0 ||
-        typeof value.workspace !== "string" || value.workspace.length === 0 ||
-        typeof value.cwd !== "string" || value.cwd.length === 0 ||
-        !Array.isArray(value.argv) || value.argv.length === 0 ||
+        typeof value.sessionId !== "string" ||
+        value.sessionId.length === 0 ||
+        typeof value.ctxId !== "string" ||
+        value.ctxId.length === 0 ||
+        typeof value.parentCallId !== "string" ||
+        value.parentCallId.length === 0 ||
+        typeof value.workspace !== "string" ||
+        value.workspace.length === 0 ||
+        typeof value.cwd !== "string" ||
+        value.cwd.length === 0 ||
+        !Array.isArray(value.argv) ||
+        value.argv.length === 0 ||
         !value.argv.every((candidate) => typeof candidate === "string") ||
-        (value.taskId !== null && value.taskId !== undefined && typeof value.taskId !== "string")
+        (value.taskId !== null &&
+            value.taskId !== undefined &&
+            typeof value.taskId !== "string")
     ) {
         return undefined;
     }
@@ -112,13 +130,19 @@ function readOpen(value: JsonValue): WorkerCommandSessionOpen | undefined {
         cwd: value.cwd,
         parentCallId: value.parentCallId,
         sessionId: value.sessionId,
-        ...(typeof value.taskId === "string" && value.taskId.length > 0 ? { taskId: value.taskId } : {}),
-        workspace: value.workspace
+        ...(typeof value.taskId === "string" && value.taskId.length > 0
+            ? { taskId: value.taskId }
+            : {}),
+        workspace: value.workspace,
     });
 }
 
 function readClose(value: JsonValue): WorkerCommandSessionClose | undefined {
-    if (!isRecord(value) || typeof value.sessionId !== "string" || value.sessionId.length === 0) {
+    if (
+        !isRecord(value) ||
+        typeof value.sessionId !== "string" ||
+        value.sessionId.length === 0
+    ) {
         return undefined;
     }
     return Object.freeze({ sessionId: value.sessionId });

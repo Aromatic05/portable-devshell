@@ -3,7 +3,11 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import { HttpHost, McpOAuthProtectedResource, type McpOAuthApprovalService } from "@portable-devshell/mcp";
+import {
+    HttpHost,
+    McpOAuthProtectedResource,
+    type McpOAuthApprovalService,
+} from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
@@ -12,7 +16,7 @@ import {
     controlWebBasePath,
     createError,
     type JsonValue,
-    type PrefixRouteSnapshot
+    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
@@ -23,7 +27,10 @@ import { ControlWebSocketListener } from "../../../../src/server/web/Socket.ts";
 import { NodeWebSocketChannel } from "../../../support/WebSocket.ts";
 import { cleanupInOrder } from "../../../../../../test/TestCleanup.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
-import { requireTcpPort, startLoopbackHttpProxy } from "../../../../../../test/TestHttpSupport.ts";
+import {
+    requireTcpPort,
+    startLoopbackHttpProxy,
+} from "../../../../../../test/TestHttpSupport.ts";
 
 const WEB_RESOURCE_NAME = "demo-web";
 const WEB_SCOPES = ["web"];
@@ -37,11 +44,17 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
         storage,
-        { trustProxy: true }
+        { trustProxy: true },
     );
     const sessions = new ControlWebSessionService({
-        auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
-        basePath: "/web"
+        auth: {
+            mode: "oauth2",
+            oauth2: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
+        },
+        basePath: "/web",
     });
     const flow = new ControlWebOAuthFlow({
         basePath: "/web",
@@ -49,12 +62,12 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         ownsProvider: true,
         protectedResource,
         publicBaseUrl,
-        sessions
+        sessions,
     });
     const uninstall = flow.install(http);
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot }
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
     });
     http.installOAuth(protectedResource);
     await flow.warmup();
@@ -68,25 +81,40 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         );
     });
 
-    const metadata = await fetch(`${publicBaseUrl}/.well-known/oauth-protected-resource/web`);
+    const metadata = await fetch(
+        `${publicBaseUrl}/.well-known/oauth-protected-resource/web`,
+    );
     assert.equal(metadata.status, 200);
-    const metadataBody = await metadata.json() as { authorization_servers: string[]; resource: string; resource_name: string };
+    const metadataBody = (await metadata.json()) as {
+        authorization_servers: string[];
+        resource: string;
+        resource_name: string;
+    };
     assert.equal(metadataBody.resource, `${publicBaseUrl}/web`);
     assert.equal(metadataBody.resource_name, WEB_RESOURCE_NAME);
     assert.deepEqual(metadataBody.authorization_servers, [publicBaseUrl]);
 
-    assert.equal((await fetch(`${publicBaseUrl}/web/session`, { method: "POST" })).status, 401);
+    assert.equal(
+        (await fetch(`${publicBaseUrl}/web/session`, { method: "POST" }))
+            .status,
+        401,
+    );
 
-    const sessionCookie = await walkBrowserFlow(publicBaseUrl, protectedResource.approvals);
+    const sessionCookie = await walkBrowserFlow(
+        publicBaseUrl,
+        protectedResource.approvals,
+    );
     assert.notEqual(sessionCookie, undefined);
     assert.deepEqual(
-        (await protectedResource.approvals.list()).map((approval) => approval.kind).sort(),
-        ["authorization", "registration"]
+        (await protectedResource.approvals.list())
+            .map((approval) => approval.kind)
+            .sort(),
+        ["authorization", "registration"],
     );
     assert.match(sessionCookie!, /devshell_web_session=/u);
 
     const authenticated = await fetch(`${publicBaseUrl}/web/session`, {
-        headers: { cookie: sessionCookie! }
+        headers: { cookie: sessionCookie! },
     });
     assert.equal(authenticated.status, 200);
 
@@ -94,12 +122,13 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
         connectChannel: async () =>
             await NodeWebSocketChannel.connect(
                 `${publicBaseUrl.replace("http", "ws")}/web/rpc`,
-                sessionCookie!
+                sessionCookie!,
             ),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "web"
+        peer: "web",
     });
     t.after(() => connection.close());
     await connection.request("@control", "service", "hello", {
@@ -109,7 +138,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     });
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
-        { pong: true }
+        { pong: true },
     );
 });
 
@@ -122,11 +151,17 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         publicBaseUrl,
         storage,
-        { trustProxy: true }
+        { trustProxy: true },
     );
     const sessions = new ControlWebSessionService({
-        auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
-        basePath: "/web"
+        auth: {
+            mode: "oauth2",
+            oauth2: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
+        },
+        basePath: "/web",
     });
     const flow = new ControlWebOAuthFlow({
         basePath: "/web",
@@ -134,7 +169,7 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
         ownsProvider: true,
         protectedResource,
         publicBaseUrl,
-        sessions
+        sessions,
     });
     const uninstall = flow.install(http);
     http.installOAuth(protectedResource);
@@ -147,9 +182,12 @@ test("web oauth2 rejects a callback whose state cookie does not match", async (t
         );
     });
 
-    const forged = await fetch(`${publicBaseUrl}/web/oauth/callback?code=abc&state=forged`, {
-        redirect: "manual"
-    });
+    const forged = await fetch(
+        `${publicBaseUrl}/web/oauth/callback?code=abc&state=forged`,
+        {
+            redirect: "manual",
+        },
+    );
     assert.equal(forged.status, 400);
 });
 
@@ -172,21 +210,30 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
             { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
             publicBaseUrl,
             storage,
-            { trustProxy: true }
+            { trustProxy: true },
         );
         const http = new HttpHost({ listenHost: "127.0.0.1", listenPort: 0 });
         const sessions = new ControlWebSessionService({
-            auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
-            basePath: "/web"
+            auth: {
+                mode: "oauth2",
+                oauth2: {
+                    requiredScopes: WEB_SCOPES,
+                    resourceName: WEB_RESOURCE_NAME,
+                },
+            },
+            basePath: "/web",
         });
         const flow = new ControlWebOAuthFlow({
             basePath: "/web",
             clientStateFile,
-            config: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
+            config: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
             ownsProvider: true,
             protectedResource,
             publicBaseUrl,
-            sessions
+            sessions,
         });
         http.installOAuth(protectedResource);
         flow.install(http);
@@ -198,14 +245,19 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
     };
 
     const first = await startRuntime();
-    const firstStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
+    const firstStart = await fetch(`${publicBaseUrl}/web/oauth/start`, {
+        redirect: "manual",
+    });
     assert.equal(firstStart.status, 302);
-    await waitFor(async () =>
-        (await first.protectedResource.approvals.list()).filter((approval) => approval.kind === "registration").length === 1
+    await waitFor(
+        async () =>
+            (await first.protectedResource.approvals.list()).filter(
+                (approval) => approval.kind === "registration",
+            ).length === 1,
     );
-    const firstRegistration = (await first.protectedResource.approvals.list()).find(
-        (approval) => approval.kind === "registration"
-    );
+    const firstRegistration = (
+        await first.protectedResource.approvals.list()
+    ).find((approval) => approval.kind === "registration");
     assert.notEqual(firstRegistration, undefined);
     await first.http.stop();
 
@@ -221,12 +273,14 @@ test("web oauth2 reuses its persisted dynamic client after runtime recreation", 
         globalThis.fetch = originalFetch;
     });
     const second = await startRuntime();
-    const secondStart = await fetch(`${publicBaseUrl}/web/oauth/start`, { redirect: "manual" });
+    const secondStart = await fetch(`${publicBaseUrl}/web/oauth/start`, {
+        redirect: "manual",
+    });
     assert.equal(secondStart.status, 302);
     assert.deepEqual(secondRuntimePosts, []);
-    const registrations = (await second.protectedResource.approvals.list()).filter(
-        (approval) => approval.kind === "registration"
-    );
+    const registrations = (
+        await second.protectedResource.approvals.list()
+    ).filter((approval) => approval.kind === "registration");
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0]?.clientId, firstRegistration?.clientId);
 });
@@ -236,26 +290,37 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
     const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-shared");
     const host = new McpHost({
-        instances: [{
-            auth: {
-                enabled: true,
-                oauth2: { requiredScopes: ["mcp"], resourceName: "demo-mcp" },
-                provider: "oauth2"
+        instances: [
+            {
+                auth: {
+                    enabled: true,
+                    oauth2: {
+                        requiredScopes: ["mcp"],
+                        resourceName: "demo-mcp",
+                    },
+                    provider: "oauth2",
+                },
+                name: "demo",
+                worker: createMcpWorker(),
             },
-            name: "demo",
-            worker: createMcpWorker()
-        }],
+        ],
         listenHost: "127.0.0.1",
         listenPort: 0,
         publicBaseUrl,
-        storageDir: storage
+        storageDir: storage,
     });
     const protectedResource = host.oauthProtectedResource;
     assert.notEqual(protectedResource, undefined);
 
     const sessions = new ControlWebSessionService({
-        auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
-        basePath: "/web"
+        auth: {
+            mode: "oauth2",
+            oauth2: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
+        },
+        basePath: "/web",
     });
     const flow = new ControlWebOAuthFlow({
         basePath: "/web",
@@ -263,7 +328,7 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
         ownsProvider: false,
         protectedResource: protectedResource!,
         publicBaseUrl,
-        sessions
+        sessions,
     });
     const uninstall = flow.install(host.server);
     const uninstallSession = sessions.install(host.server);
@@ -278,16 +343,35 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
         await rm(storage, { force: true, recursive: true });
     });
 
-    const webMetadata = await (await fetch(`${publicBaseUrl}/.well-known/oauth-protected-resource/web`)).json() as { resource: string };
+    const webMetadata = (await (
+        await fetch(`${publicBaseUrl}/.well-known/oauth-protected-resource/web`)
+    ).json()) as { resource: string };
     assert.equal(webMetadata.resource, `${publicBaseUrl}/web`);
-    const mcpMetadata = await (await fetch(`${publicBaseUrl}/.well-known/oauth-protected-resource/demo/mcp`)).json() as { resource: string };
+    const mcpMetadata = (await (
+        await fetch(
+            `${publicBaseUrl}/.well-known/oauth-protected-resource/demo/mcp`,
+        )
+    ).json()) as { resource: string };
     assert.equal(mcpMetadata.resource, `${publicBaseUrl}/demo/mcp`);
 
-    const sessionCookie = await walkBrowserFlow(publicBaseUrl, protectedResource!.approvals);
+    const sessionCookie = await walkBrowserFlow(
+        publicBaseUrl,
+        protectedResource!.approvals,
+    );
     assert.notEqual(sessionCookie, undefined);
-    assert.equal((await fetch(`${publicBaseUrl}/web/session`, { headers: { cookie: sessionCookie! } })).status, 200);
+    assert.equal(
+        (
+            await fetch(`${publicBaseUrl}/web/session`, {
+                headers: { cookie: sessionCookie! },
+            })
+        ).status,
+        200,
+    );
 
-    assert.equal((await fetch(`${publicBaseUrl}/demo/mcp`, { method: "POST" })).status, 401);
+    assert.equal(
+        (await fetch(`${publicBaseUrl}/demo/mcp`, { method: "POST" })).status,
+        401,
+    );
 });
 
 test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and redirect", async (t) => {
@@ -301,11 +385,17 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
         { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME },
         origin,
         storage,
-        { trustProxy: true }
+        { trustProxy: true },
     );
     const sessions = new ControlWebSessionService({
-        auth: { mode: "oauth2", oauth2: { requiredScopes: WEB_SCOPES, resourceName: WEB_RESOURCE_NAME } },
-        basePath
+        auth: {
+            mode: "oauth2",
+            oauth2: {
+                requiredScopes: WEB_SCOPES,
+                resourceName: WEB_RESOURCE_NAME,
+            },
+        },
+        basePath,
     });
     const flow = new ControlWebOAuthFlow({
         basePath,
@@ -313,7 +403,7 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
         ownsProvider: true,
         protectedResource,
         publicBaseUrl,
-        sessions
+        sessions,
     });
     await flow.warmup();
     const uninstall = flow.install(http);
@@ -327,17 +417,27 @@ test("web oauth2 preserves a public URL path prefix across discovery, PKCE, and 
         );
     });
 
-    const metadata = await fetch(`${origin}/.well-known/oauth-protected-resource${basePath}`);
+    const metadata = await fetch(
+        `${origin}/.well-known/oauth-protected-resource${basePath}`,
+    );
     assert.equal(metadata.status, 200);
-    const metadataBody = await metadata.json() as { authorization_servers: string[]; resource: string };
+    const metadataBody = (await metadata.json()) as {
+        authorization_servers: string[];
+        resource: string;
+    };
     assert.equal(metadataBody.resource, `${origin}${basePath}`);
     assert.deepEqual(metadataBody.authorization_servers, [origin]);
 
     const returnTo = `${basePath}/agent/?session=ag-1`;
-    const sessionCookie = await walkBrowserFlow(origin, protectedResource.approvals, basePath, returnTo);
+    const sessionCookie = await walkBrowserFlow(
+        origin,
+        protectedResource.approvals,
+        basePath,
+        returnTo,
+    );
     assert.notEqual(sessionCookie, undefined);
     const authenticated = await fetch(`${origin}${basePath}/session`, {
-        headers: { cookie: sessionCookie! }
+        headers: { cookie: sessionCookie! },
     });
     assert.equal(authenticated.status, 200);
 });
@@ -347,9 +447,15 @@ function createMcpWorker() {
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callTool() { return { exitCode: 0, stderr: "", stdout: "" }; },
-        listTools() { return []; },
-        snapshot() { return { ready: true }; }
+        async callTool() {
+            return { exitCode: 0, stderr: "", stdout: "" };
+        },
+        listTools() {
+            return [];
+        },
+        snapshot() {
+            return { ready: true };
+        },
     } as never;
 }
 
@@ -357,7 +463,7 @@ async function walkBrowserFlow(
     origin: string,
     approvals: McpOAuthApprovalService,
     basePath = "/web",
-    returnTo?: string
+    returnTo?: string,
 ): Promise<string | undefined> {
     let cookieHeader = "";
     const startUrl = new URL(`${origin}${basePath}/oauth/start`);
@@ -365,7 +471,10 @@ async function walkBrowserFlow(
     const start = await fetch(startUrl, { redirect: "manual" });
     assert.equal(start.status, 302);
     cookieHeader = mergeCookieHeader(cookieHeader, start);
-    assert.match(start.headers.get("set-cookie") ?? "", /devshell_web_oauth_state=/u);
+    assert.match(
+        start.headers.get("set-cookie") ?? "",
+        /devshell_web_oauth_state=/u,
+    );
 
     let currentUrl = new URL(start.headers.get("location")!, origin).href;
     let method: "GET" | "POST" = "GET";
@@ -373,13 +482,18 @@ async function walkBrowserFlow(
 
     for (let step = 0; step < 12; step += 1) {
         const response = await fetch(currentUrl, {
-            body: method === "POST" ? new URLSearchParams({ submit: "1" }).toString() : undefined,
+            body:
+                method === "POST"
+                    ? new URLSearchParams({ submit: "1" }).toString()
+                    : undefined,
             headers: {
                 ...(cookieHeader.length === 0 ? {} : { cookie: cookieHeader }),
-                ...(method === "POST" ? { "content-type": "application/x-www-form-urlencoded" } : {})
+                ...(method === "POST"
+                    ? { "content-type": "application/x-www-form-urlencoded" }
+                    : {}),
             },
             method,
-            redirect: "manual"
+            redirect: "manual",
         });
         cookieHeader = mergeCookieHeader(cookieHeader, response);
 
@@ -387,7 +501,8 @@ async function walkBrowserFlow(
             const html = await response.text();
             if (html.includes("window.location.reload()")) {
                 await approvePending(approvals, approvalKind);
-                if (approvalKind === "registration") approvalKind = "authorization";
+                if (approvalKind === "registration")
+                    approvalKind = "authorization";
                 method = "GET";
                 continue;
             }
@@ -404,13 +519,19 @@ async function walkBrowserFlow(
         if (nextUrl.pathname === `${basePath}/oauth/callback`) {
             const callback = await fetch(nextUrl.href, {
                 headers: { cookie: cookieHeader },
-                redirect: "manual"
+                redirect: "manual",
             });
             cookieHeader = mergeCookieHeader(cookieHeader, callback);
             const callbackBody = await callback.text();
             assert.equal(callback.status, 302, callbackBody);
-            const callbackLocation = new URL(callback.headers.get("location")!, origin);
-            assert.equal(`${callbackLocation.pathname}${callbackLocation.search}`, returnTo ?? `${basePath}/`);
+            const callbackLocation = new URL(
+                callback.headers.get("location")!,
+                origin,
+            );
+            assert.equal(
+                `${callbackLocation.pathname}${callbackLocation.search}`,
+                returnTo ?? `${basePath}/`,
+            );
             return extractCookie(cookieHeader, "devshell_web_session");
         }
         currentUrl = nextUrl.href;
@@ -420,9 +541,19 @@ async function walkBrowserFlow(
     throw new Error("web oauth2 browser flow did not complete");
 }
 
-async function approvePending(approvals: McpOAuthApprovalService, kind: "authorization" | "registration"): Promise<void> {
-    const approval = (await approvals.list()).find((candidate) => candidate.kind === kind && candidate.status === "pending");
-    assert.notEqual(approval, undefined, `pending ${kind} approval was not created`);
+async function approvePending(
+    approvals: McpOAuthApprovalService,
+    kind: "authorization" | "registration",
+): Promise<void> {
+    const approval = (await approvals.list()).find(
+        (candidate) =>
+            candidate.kind === kind && candidate.status === "pending",
+    );
+    assert.notEqual(
+        approval,
+        undefined,
+        `pending ${kind} approval was not created`,
+    );
     await approvals.decide(approval!.approvalId, "approve", "tui");
 }
 
@@ -442,7 +573,9 @@ function mergeCookieHeader(existing: string, response: Response): string {
         return existing;
     }
     const cookies = new Map<string, string>();
-    for (const entry of existing.split(/;\s*/u).filter((part) => part.length > 0)) {
+    for (const entry of existing
+        .split(/;\s*/u)
+        .filter((part) => part.length > 0)) {
         const [name, value] = entry.split("=", 2);
         if (name !== undefined && value !== undefined) cookies.set(name, value);
     }
@@ -451,11 +584,15 @@ function mergeCookieHeader(existing: string, response: Response): string {
         const [name, value] = pair.split("=", 2);
         if (name !== undefined && value !== undefined) cookies.set(name, value);
     }
-    return [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+    return [...cookies.entries()]
+        .map(([name, value]) => `${name}=${value}`)
+        .join("; ");
 }
 
 function readSetCookieEntries(response: Response): string[] {
-    const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+    const headers = response.headers as Headers & {
+        getSetCookie?: () => string[];
+    };
     if (typeof headers.getSetCookie === "function") {
         return headers.getSetCookie();
     }
@@ -488,10 +625,10 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                                     context.peer,
                                 ) as unknown as JsonValue,
                         },
-                        { name: "ping", handle: () => ({ pong: true }) }
-                    ]
-                }
-            ]
-        }
+                        { name: "ping", handle: () => ({ pong: true }) },
+                    ],
+                },
+            ],
+        },
     ]);
 }

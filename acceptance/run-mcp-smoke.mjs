@@ -19,40 +19,61 @@ try {
         params: {
             protocolVersion: "2025-03-26",
             capabilities: {},
-            clientInfo: { name: "acceptance", version: "0.0.0" }
-        }
+            clientInfo: { name: "acceptance", version: "0.0.0" },
+        },
     });
-    const protocolVersion = String(initialize.body.result?.protocolVersion ?? "");
+    const protocolVersion = String(
+        initialize.body.result?.protocolVersion ?? "",
+    );
     assert.equal(initialize.headers.get("mcp-session-id"), null);
     assert.notEqual(protocolVersion, "");
-    assert.equal(initialize.body.result?.serverInfo?.version, applicationVersion);
+    assert.equal(
+        initialize.body.result?.serverInfo?.version,
+        applicationVersion,
+    );
     const headers = {
-        "mcp-protocol-version": protocolVersion
+        "mcp-protocol-version": protocolVersion,
     };
 
-    const initialized = await post(endpoint, {
-        jsonrpc: "2.0",
-        method: "notifications/initialized"
-    }, headers);
+    const initialized = await post(
+        endpoint,
+        {
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+        },
+        headers,
+    );
     assert.equal(initialized.status, 202);
 
-    const toolsList = await postJson(endpoint, {
-        jsonrpc: "2.0",
-        id: "req-tools-list",
-        method: "tools/list"
-    }, headers);
-    const toolNames = toolsList.body.result?.tools?.map((tool) => tool.name) ?? [];
+    const toolsList = await postJson(
+        endpoint,
+        {
+            jsonrpc: "2.0",
+            id: "req-tools-list",
+            method: "tools/list",
+        },
+        headers,
+    );
+    const toolNames =
+        toolsList.body.result?.tools?.map((tool) => tool.name) ?? [];
     assert.equal(toolNames.includes("environ_info"), true);
     assert.equal(toolNames.includes("bash_run"), true);
     assert.equal(toolNames.includes("context_acquire"), false);
     assert.equal(toolNames.includes("context_renew"), false);
 
-    const environmentCall = await postJson(endpoint, {
-        jsonrpc: "2.0",
-        id: "req-environ-info",
-        method: "tools/call",
-        params: { name: "environ_info", arguments: { workspace: fixture.workspace } }
-    }, headers);
+    const environmentCall = await postJson(
+        endpoint,
+        {
+            jsonrpc: "2.0",
+            id: "req-environ-info",
+            method: "tools/call",
+            params: {
+                name: "environ_info",
+                arguments: { workspace: fixture.workspace },
+            },
+        },
+        headers,
+    );
     const environment = environmentCall.body.result?.structuredContent;
     const ctxId = environment?.ctxId;
     assert.equal(typeof ctxId, "string");
@@ -66,27 +87,42 @@ try {
     assert.equal(typeof environment?.platform?.distribution?.name, "string");
     assert.equal(typeof environment?.platform?.packageManager, "string");
     assert.equal(typeof environment?.platform?.shell, "string");
-    assert.equal(Number.isNaN(Date.parse(String(environment?.expiresAt ?? ""))), false);
+    assert.equal(
+        Number.isNaN(Date.parse(String(environment?.expiresAt ?? ""))),
+        false,
+    );
 
-    const toolCall = await postJson(endpoint, {
-        jsonrpc: "2.0",
-        id: "req-tools-call",
-        method: "tools/call",
-        params: {
-            name: "bash_run",
-            arguments: { command: "pwd", ctxId, timeoutMs: 30_000 }
-        }
-    }, headers);
+    const toolCall = await postJson(
+        endpoint,
+        {
+            jsonrpc: "2.0",
+            id: "req-tools-call",
+            method: "tools/call",
+            params: {
+                name: "bash_run",
+                arguments: { command: "pwd", ctxId, timeoutMs: 30_000 },
+            },
+        },
+        headers,
+    );
     assert.deepEqual(toolCall.body.result?.content, []);
-    const output = String(toolCall.body.result?.structuredContent?.stdout ?? "");
+    const output = String(
+        toolCall.body.result?.structuredContent?.stdout ?? "",
+    );
     assert.equal(output.includes(fixture.workspace), true);
 
-    process.stdout.write(JSON.stringify({
-        environmentCall: environmentCall.body,
-        initialize: initialize.body,
-        toolsList: toolsList.body,
-        toolCall: toolCall.body
-    }, null, 2) + "\n");
+    process.stdout.write(
+        JSON.stringify(
+            {
+                environmentCall: environmentCall.body,
+                initialize: initialize.body,
+                toolsList: toolsList.body,
+                toolCall: toolCall.body,
+            },
+            null,
+            2,
+        ) + "\n",
+    );
 } finally {
     await fixture.cleanup();
 }
@@ -95,11 +131,15 @@ async function postJson(url, body, headers = {}) {
     const response = await post(url, body, headers);
     const text = await response.text();
     assert.equal(response.status, 200, text);
-    return { body: parseMcpResponseBody(response, text), headers: response.headers };
+    return {
+        body: parseMcpResponseBody(response, text),
+        headers: response.headers,
+    };
 }
 
 function parseMcpResponseBody(response, text) {
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const contentType =
+        response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!contentType.includes("text/event-stream")) return JSON.parse(text);
 
     const payloads = [];
@@ -113,7 +153,11 @@ function parseMcpResponseBody(response, text) {
             .join("\n");
         if (data.length > 0) payloads.push(JSON.parse(data));
     }
-    assert.equal(payloads.length, 1, `Expected one MCP SSE message, received ${payloads.length}.\n${text}`);
+    assert.equal(
+        payloads.length,
+        1,
+        `Expected one MCP SSE message, received ${payloads.length}.\n${text}`,
+    );
     return payloads[0];
 }
 
@@ -123,8 +167,8 @@ async function post(url, body, headers = {}) {
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
-            ...headers
+            ...headers,
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
     });
 }

@@ -21,8 +21,17 @@ import {
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
 
-const fixturesDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../fixtures");
-type JsonValue = boolean | number | null | string | JsonValue[] | { [key: string]: JsonValue };
+const fixturesDirectory = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../fixtures",
+);
+type JsonValue =
+    | boolean
+    | number
+    | null
+    | string
+    | JsonValue[]
+    | { [key: string]: JsonValue };
 
 type CommandResult = {
     exitCode: number | null;
@@ -31,7 +40,11 @@ type CommandResult = {
 } & Record<string, JsonValue>;
 
 function structuredResult<T>(result: JsonValue | McpNativeToolResult): T {
-    return (result instanceof McpNativeToolResult ? result.structuredContent : result) as T;
+    return (
+        result instanceof McpNativeToolResult
+            ? result.structuredContent
+            : result
+    ) as T;
 }
 
 interface ToolDefinition {
@@ -44,15 +57,23 @@ interface ToolDefinition {
 }
 
 test("initialize succeeds over SDK transport", async () => {
-    const binding = createBinding(createWorkerHarness(), { serverVersion: "9.8.7" });
+    const binding = createBinding(createWorkerHarness(), {
+        serverVersion: "9.8.7",
+    });
     const server = await createBindingServer(binding);
 
     try {
-        const response = await postJson(server.url, await readFixture("mcp-initialize.json"));
+        const response = await postJson(
+            server.url,
+            await readFixture("mcp-initialize.json"),
+        );
 
         assert.equal(response.status, 200);
         assert.equal(typeof response.body.result?.protocolVersion, "string");
-        assert.equal(response.body.result?.serverInfo?.name, "portable-devshell-mcp");
+        assert.equal(
+            response.body.result?.serverInfo?.name,
+            "portable-devshell-mcp",
+        );
         assert.equal(response.body.result?.serverInfo?.version, "9.8.7");
         assert.equal(response.headers.get("mcp-session-id"), null);
     } finally {
@@ -67,33 +88,60 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
         worker: harness.worker,
     };
 
-    const noauth = new McpEndpointWorker(base).listTools().find((tool) => tool.name === "bash_run");
+    const noauth = new McpEndpointWorker(base)
+        .listTools()
+        .find((tool) => tool.name === "bash_run");
     assert.deepEqual(noauth?.securitySchemes, [{ type: "noauth" }]);
-    assert.deepEqual((noauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes, [{ type: "noauth" }]);
+    assert.deepEqual(
+        (noauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes,
+        [{ type: "noauth" }],
+    );
 
     const oauth = new McpEndpointWorker({
         ...base,
         auth: {
             enabled: true,
-            oauth2: { requiredScopes: ["repo:read", "repo:write"], resourceName: "portable-devshell" },
+            oauth2: {
+                requiredScopes: ["repo:read", "repo:write"],
+                resourceName: "portable-devshell",
+            },
             provider: "oauth2",
         },
-    }).listTools().find((tool) => tool.name === "bash_run");
-    const oauthSchemes = [{ type: "oauth2", scopes: ["repo:read", "repo:write"] }];
+    })
+        .listTools()
+        .find((tool) => tool.name === "bash_run");
+    const oauthSchemes = [
+        { type: "oauth2", scopes: ["repo:read", "repo:write"] },
+    ];
     assert.deepEqual(oauth?.securitySchemes, oauthSchemes);
-    assert.deepEqual((oauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes, oauthSchemes);
+    assert.deepEqual(
+        (oauth?._meta as { securitySchemes?: JsonValue })?.securitySchemes,
+        oauthSchemes,
+    );
 
     const token = new McpEndpointWorker({
         ...base,
-        auth: { enabled: true, provider: "token", token: "0123456789abcdef0123456789abcdef" },
-    }).listTools().find((tool) => tool.name === "bash_run");
+        auth: {
+            enabled: true,
+            provider: "token",
+            token: "0123456789abcdef0123456789abcdef",
+        },
+    })
+        .listTools()
+        .find((tool) => tool.name === "bash_run");
     assert.equal(token?.securitySchemes, undefined);
-    assert.equal((token?._meta as { securitySchemes?: JsonValue } | undefined)?.securitySchemes, undefined);
+    assert.equal(
+        (token?._meta as { securitySchemes?: JsonValue } | undefined)
+            ?.securitySchemes,
+        undefined,
+    );
 });
 
 test("HTTP tools/list keeps Workspace actions app-only while advertising host auth metadata", async () => {
     const harness = createWorkerHarness({ tools: [] });
-    const unused = async () => { throw new Error("unused"); };
+    const unused = async () => {
+        throw new Error("unused");
+    };
     const gateway = {
         consumeWait: unused,
         createWait: unused,
@@ -105,30 +153,45 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
         resolveWait: unused,
         waitForWait: unused,
     } as unknown as McpInstanceGateway;
-    const binding = new McpEndpointBinding(new McpEndpointWorker({
-        gateway,
-        instanceName: "demo",
-        worker: harness.worker,
-    }));
+    const binding = new McpEndpointBinding(
+        new McpEndpointWorker({
+            gateway,
+            instanceName: "demo",
+            worker: harness.worker,
+        }),
+    );
     const server = await createBindingServer(binding);
 
     try {
         const session = await initialize(server.url);
-        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        const response = await postJson(
+            server.url,
+            await readFixture("mcp-tools-list.json"),
+            session.headers,
+        );
         assert.equal(response.status, 200);
-        const tools = response.body.result?.tools as Array<{
-            _meta?: Record<string, JsonValue>;
-            name?: string;
-            outputSchema?: JsonValue;
-            securitySchemes?: JsonValue;
-        }> | undefined;
+        const tools = response.body.result?.tools as
+            | Array<{
+                  _meta?: Record<string, JsonValue>;
+                  name?: string;
+                  outputSchema?: JsonValue;
+                  securitySchemes?: JsonValue;
+              }>
+            | undefined;
         const answer = tools?.find((tool) => tool.name === "workspace_answer");
         const environment = tools?.find((tool) => tool.name === "environ_info");
         const open = tools?.find((tool) => tool.name === "workspace_open");
         assert.notEqual(environment, undefined);
         assert.deepEqual(environment?.outputSchema, { type: "object" });
-        assert.equal(environment?._meta?.["openai/outputTemplate"], workspaceAppResourceUri);
-        assert.deepEqual((environment?._meta?.ui as { visibility?: JsonValue } | undefined)?.visibility, ["model", "app"]);
+        assert.equal(
+            environment?._meta?.["openai/outputTemplate"],
+            workspaceAppResourceUri,
+        );
+        assert.deepEqual(
+            (environment?._meta?.ui as { visibility?: JsonValue } | undefined)
+                ?.visibility,
+            ["model", "app"],
+        );
         assert.notEqual(answer, undefined);
         assert.notDeepEqual(answer?.outputSchema, { type: "object" });
         assert.deepEqual(answer?._meta?.ui, { visibility: ["app"] });
@@ -137,7 +200,11 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
         assert.deepEqual(answer?.securitySchemes, [{ type: "noauth" }]);
         assert.deepEqual(answer?._meta?.securitySchemes, [{ type: "noauth" }]);
         assert.notEqual(open, undefined);
-        assert.deepEqual((open?._meta?.ui as { visibility?: JsonValue } | undefined)?.visibility, ["model", "app"]);
+        assert.deepEqual(
+            (open?._meta?.ui as { visibility?: JsonValue } | undefined)
+                ?.visibility,
+            ["model", "app"],
+        );
         assert.deepEqual(open?.securitySchemes, [{ type: "noauth" }]);
         assert.deepEqual(open?._meta?.securitySchemes, [{ type: "noauth" }]);
     } finally {
@@ -147,7 +214,9 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
 
 test("Workspace disable removes only Workspace tools and app metadata", () => {
     const harness = createWorkerHarness();
-    const unused = async () => { throw new Error("unused"); };
+    const unused = async () => {
+        throw new Error("unused");
+    };
     const gateway = {
         consumeWait: unused,
         createWait: unused,
@@ -166,96 +235,150 @@ test("Workspace disable removes only Workspace tools and app metadata", () => {
         workspaceAppEnabled: false,
     }).listTools();
 
-    assert.equal(tools.some((tool) => tool.name.startsWith("workspace_")), false);
+    assert.equal(
+        tools.some((tool) => tool.name.startsWith("workspace_")),
+        false,
+    );
     const environment = tools.find((tool) => tool.name === "environ_info");
     assert.notEqual(environment, undefined);
     assert.equal(
-        (environment?._meta as Record<string, JsonValue> | undefined)?.["openai/outputTemplate"],
+        (environment?._meta as Record<string, JsonValue> | undefined)?.[
+            "openai/outputTemplate"
+        ],
         undefined,
     );
     const bash = tools.find((tool) => tool.name === "bash_run");
     assert.notEqual(bash, undefined);
     assert.notEqual(
-        (bash?.inputSchema as { properties?: Record<string, unknown> }).properties?.instance,
+        (bash?.inputSchema as { properties?: Record<string, unknown> })
+            .properties?.instance,
         undefined,
     );
 });
 
 test("tmux_run does not render a Workspace App", () => {
     const harness = createWorkerHarness({
-        tools: [{
-            description: "Run one tmux task",
-            group: "tmux",
-            inputSchema: { type: "object" },
-            name: "tmux_run",
-            outputSchema: { type: "object" },
-            requiredCapabilities: [],
-        }]
+        tools: [
+            {
+                description: "Run one tmux task",
+                group: "tmux",
+                inputSchema: { type: "object" },
+                name: "tmux_run",
+                outputSchema: { type: "object" },
+                requiredCapabilities: [],
+            },
+        ],
     });
     const tool = new McpEndpointWorker({
         instanceName: "demo",
         worker: harness.worker,
-    }).listTools().find((entry) => entry.name === "tmux_run");
+    })
+        .listTools()
+        .find((entry) => entry.name === "tmux_run");
     const meta = tool?._meta as Record<string, JsonValue> | undefined;
 
     assert.equal(meta?.["openai/outputTemplate"], undefined);
     assert.equal(meta?.["openai/widgetAccessible"], undefined);
     assert.equal(meta?.["ui/resourceUri"], undefined);
-    assert.equal((meta?.ui as { resourceUri?: string } | undefined)?.resourceUri, undefined);
+    assert.equal(
+        (meta?.ui as { resourceUri?: string } | undefined)?.resourceUri,
+        undefined,
+    );
     assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
 });
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
-    const binding = createBinding(createWorkerHarness(), { workspaceApp: true });
+    const binding = createBinding(createWorkerHarness(), {
+        workspaceApp: true,
+    });
     const server = await createBindingServer(binding);
 
     try {
         const session = await initialize(server.url);
-        assert.deepEqual(session.initializeResult?.capabilities?.extensions?.["io.modelcontextprotocol/ui"], {});
-        const listed = await postJson(server.url, {
-            id: "req-resources-list",
-            jsonrpc: "2.0",
-            method: "resources/list",
-            params: {}
-        }, session.headers);
+        assert.deepEqual(
+            session.initializeResult?.capabilities?.extensions?.[
+                "io.modelcontextprotocol/ui"
+            ],
+            {},
+        );
+        const listed = await postJson(
+            server.url,
+            {
+                id: "req-resources-list",
+                jsonrpc: "2.0",
+                method: "resources/list",
+                params: {},
+            },
+            session.headers,
+        );
         assert.equal(listed.status, 200);
-        assert.deepEqual(listed.body.result?.resources?.map((resource: { mimeType?: string; uri?: string }) => ({
-            mimeType: resource.mimeType,
-            uri: resource.uri
-        })), [{
-            mimeType: "text/html;profile=mcp-app",
-            uri: workspaceAppResourceUri
-        }]);
+        assert.deepEqual(
+            listed.body.result?.resources?.map(
+                (resource: { mimeType?: string; uri?: string }) => ({
+                    mimeType: resource.mimeType,
+                    uri: resource.uri,
+                }),
+            ),
+            [
+                {
+                    mimeType: "text/html;profile=mcp-app",
+                    uri: workspaceAppResourceUri,
+                },
+            ],
+        );
         assert.notEqual(workspaceAppResourceUri, workspaceAppStableResourceUri);
 
-        const read = await postJson(server.url, {
-            id: "req-resource-read",
-            jsonrpc: "2.0",
-            method: "resources/read",
-            params: { uri: workspaceAppStableResourceUri }
-        }, session.headers);
+        const read = await postJson(
+            server.url,
+            {
+                id: "req-resource-read",
+                jsonrpc: "2.0",
+                method: "resources/read",
+                params: { uri: workspaceAppStableResourceUri },
+            },
+            session.headers,
+        );
         assert.equal(read.status, 200);
-        assert.equal(read.body.result?.contents?.[0]?.mimeType, "text/html;profile=mcp-app");
-        assert.equal(read.body.result?.contents?.[0]?.uri, workspaceAppStableResourceUri);
-        assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+        assert.equal(
+            read.body.result?.contents?.[0]?.mimeType,
+            "text/html;profile=mcp-app",
+        );
+        assert.equal(
+            read.body.result?.contents?.[0]?.uri,
+            workspaceAppStableResourceUri,
+        );
+        assert.deepEqual(
+            read.body.result?.contents?.[0]?._meta,
+            workspaceAppResourceMeta,
+        );
         assert.deepEqual(workspaceAppLegacyResourceUris, [
             "ui://portable-devshell/workspace-651c9d0f1042c493.html",
             "ui://portable-devshell/workspace-98410baf51f694b0.html",
             "ui://portable-devshell/workspace-03c4911b6d185e3c.html",
             "ui://portable-devshell/workspace-c978585dba4e38c7.html",
-            "ui://portable-devshell/workspace-4305d70d5fdb6a12.html"
+            "ui://portable-devshell/workspace-4305d70d5fdb6a12.html",
         ]);
         for (const [index, uri] of workspaceAppLegacyResourceUris.entries()) {
-            const legacy = await postJson(server.url, {
-                id: `req-resource-read-legacy-${index}`,
-                jsonrpc: "2.0",
-                method: "resources/read",
-                params: { uri }
-            }, session.headers);
+            const legacy = await postJson(
+                server.url,
+                {
+                    id: `req-resource-read-legacy-${index}`,
+                    jsonrpc: "2.0",
+                    method: "resources/read",
+                    params: { uri },
+                },
+                session.headers,
+            );
             assert.equal(legacy.status, 200);
             assert.equal(legacy.body.result?.contents?.[0]?.uri, uri);
-            assert.equal(legacy.body.result?.contents?.[0]?.text, read.body.result?.contents?.[0]?.text);
-            assert.deepEqual(legacy.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+            assert.equal(
+                legacy.body.result?.contents?.[0]?.text,
+                read.body.result?.contents?.[0]?.text,
+            );
+            assert.deepEqual(
+                legacy.body.result?.contents?.[0]?._meta,
+                workspaceAppResourceMeta,
+            );
         }
     } finally {
         await server.close();
@@ -271,12 +394,16 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
 
     try {
         const session = await initialize(server.url);
-        const read = await postJson(server.url, {
-            id: "req-resource-domain",
-            jsonrpc: "2.0",
-            method: "resources/read",
-            params: { uri: workspaceAppResourceUri }
-        }, session.headers);
+        const read = await postJson(
+            server.url,
+            {
+                id: "req-resource-domain",
+                jsonrpc: "2.0",
+                method: "resources/read",
+                params: { uri: workspaceAppResourceUri },
+            },
+            session.headers,
+        );
         assert.equal(read.status, 200);
         assert.deepEqual(read.body.result?.contents?.[0]?._meta, {
             ...workspaceAppResourceMeta,
@@ -301,18 +428,28 @@ test("Workspace MCP App uses the configured public origin as its ChatGPT compone
 
 test("Workspace MCP App does not advertise a wildcard listener as its component domain", async () => {
     for (const publicBaseUrl of ["http://0.0.0.0:17890", "http://[::]:17890"]) {
-        const binding = createBinding(createWorkerHarness(), { publicBaseUrl, workspaceApp: true });
+        const binding = createBinding(createWorkerHarness(), {
+            publicBaseUrl,
+            workspaceApp: true,
+        });
         const server = await createBindingServer(binding);
         try {
             const session = await initialize(server.url);
-            const read = await postJson(server.url, {
-                id: `req-resource-wildcard-${publicBaseUrl}`,
-                jsonrpc: "2.0",
-                method: "resources/read",
-                params: { uri: workspaceAppResourceUri }
-            }, session.headers);
+            const read = await postJson(
+                server.url,
+                {
+                    id: `req-resource-wildcard-${publicBaseUrl}`,
+                    jsonrpc: "2.0",
+                    method: "resources/read",
+                    params: { uri: workspaceAppResourceUri },
+                },
+                session.headers,
+            );
             assert.equal(read.status, 200);
-            assert.deepEqual(read.body.result?.contents?.[0]?._meta, workspaceAppResourceMeta);
+            assert.deepEqual(
+                read.body.result?.contents?.[0]?._meta,
+                workspaceAppResourceMeta,
+            );
         } finally {
             await server.close();
         }
@@ -326,20 +463,31 @@ test("stateless endpoint serves every request without sessions", async () => {
 
     try {
         const staleHeaders = { "mcp-session-id": "stale-session" };
-        const initializeResponse = await postJson(server.url, await readFixture("mcp-initialize.json"), staleHeaders);
+        const initializeResponse = await postJson(
+            server.url,
+            await readFixture("mcp-initialize.json"),
+            staleHeaders,
+        );
         assert.equal(initializeResponse.status, 200);
         assert.equal(initializeResponse.headers.get("mcp-session-id"), null);
 
-        const listResponse = await postJson(server.url, {
-            id: "req-stateless-tools-list",
-            jsonrpc: "2.0",
-            method: "tools/list",
-            params: {}
-        }, staleHeaders);
+        const listResponse = await postJson(
+            server.url,
+            {
+                id: "req-stateless-tools-list",
+                jsonrpc: "2.0",
+                method: "tools/list",
+                params: {},
+            },
+            staleHeaders,
+        );
         assert.equal(listResponse.status, 200);
         assert.ok(Array.isArray(listResponse.body.result?.tools));
 
-        assert.deepEqual(harness.events.map((event) => event.type), []);
+        assert.deepEqual(
+            harness.events.map((event) => event.type),
+            [],
+        );
     } finally {
         await server.close();
     }
@@ -351,19 +499,29 @@ test("tools/list exposes the fixed worker catalog without group or capability fi
 
     try {
         const session = await initialize(server.url);
-        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        const response = await postJson(
+            server.url,
+            await readFixture("mcp-tools-list.json"),
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
         const listedTools = response.body.result?.tools ?? [];
         const names = listedTools.map((tool: { name: string }) => tool.name);
         assert.equal(names.includes("bash_run"), true);
         assert.equal(names.includes("file_logs"), true);
-        const bashTool = listedTools.find((tool: { name: string }) => tool.name === "bash_run") as {
-            _meta?: { securitySchemes?: unknown };
-            securitySchemes?: unknown;
-        } | undefined;
+        const bashTool = listedTools.find(
+            (tool: { name: string }) => tool.name === "bash_run",
+        ) as
+            | {
+                  _meta?: { securitySchemes?: unknown };
+                  securitySchemes?: unknown;
+              }
+            | undefined;
         assert.deepEqual(bashTool?.securitySchemes, [{ type: "noauth" }]);
-        assert.deepEqual(bashTool?._meta?.securitySchemes, [{ type: "noauth" }]);
+        assert.deepEqual(bashTool?._meta?.securitySchemes, [
+            { type: "noauth" },
+        ]);
     } finally {
         await server.close();
     }
@@ -375,26 +533,47 @@ test("cached removed tool recipients return a structured tombstone over MCP", as
 
     try {
         const session = await initialize(server.url);
-        const listed = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
-        const names = listed.body.result?.tools.map((tool: { name: string }) => tool.name) ?? [];
+        const listed = await postJson(
+            server.url,
+            await readFixture("mcp-tools-list.json"),
+            session.headers,
+        );
+        const names =
+            listed.body.result?.tools.map(
+                (tool: { name: string }) => tool.name,
+            ) ?? [];
         assert.equal(names.includes("context_message_read"), false);
 
-        const response = await postJson(server.url, {
-            id: "req-stale-tool",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: {
-                arguments: {},
-                name: "context_message_read",
-            }
-        }, session.headers);
+        const response = await postJson(
+            server.url,
+            {
+                id: "req-stale-tool",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: {},
+                    name: "context_message_read",
+                },
+            },
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.equal(response.body.result?.isError, false);
-        assert.match(response.body.result?.content?.[0]?.text ?? "", /Cached tool context_message_read was removed/);
-        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.name, "context_message_read");
-        assert.equal(response.body.result?.structuredContent?.staleToolSnapshot?.replacement, undefined);
+        assert.match(
+            response.body.result?.content?.[0]?.text ?? "",
+            /Cached tool context_message_read was removed/,
+        );
+        assert.equal(
+            response.body.result?.structuredContent?.staleToolSnapshot?.name,
+            "context_message_read",
+        );
+        assert.equal(
+            response.body.result?.structuredContent?.staleToolSnapshot
+                ?.replacement,
+            undefined,
+        );
     } finally {
         await server.close();
     }
@@ -408,7 +587,11 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
     try {
         const session = await initialize(server.url);
         const ctxId = await createContext(server.url, session.headers);
-        const response = await postJson(server.url, withToolContext(await readFixture("mcp-tools-call.json"), ctxId), session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
         assert.equal(harness.calls.length, 1);
@@ -417,19 +600,22 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
         assert.equal(harness.calls[0]?.ctxId, ctxId);
         assert.equal(harness.calls[0]?.source, "mcp");
         assert.equal(harness.calls[0]?.toolName, "bash_run");
-        assert.deepEqual(harness.events.map((event) => event.type), ["mcp.toolCalled", "mcp.toolCalled"]);
+        assert.deepEqual(
+            harness.events.map((event) => event.type),
+            ["mcp.toolCalled", "mcp.toolCalled"],
+        );
         assert.deepEqual(harness.events[1]?.data, {
             ctxId,
             requestId: "req-tools-call",
             source: "mcp",
-            toolName: "bash_run"
+            toolName: "bash_run",
         });
         assert.equal(response.body.result?.isError, false);
         assert.deepEqual(response.body.result?.content, []);
         assert.deepEqual(response.body.result?.structuredContent, {
             exitCode: 0,
             stderr: "",
-            stdout: "/workspace\n"
+            stdout: "/workspace\n",
         });
     } finally {
         await server.close();
@@ -438,35 +624,39 @@ test("tools/call delegates to WorkerInstance.callTool", async () => {
 
 test("tools/call forwards stale worker arguments even when the advertised schema has changed", async () => {
     const harness = createWorkerHarness({
-        tools: [{
-            requiredCapabilities: ["read"],
-            group: "file",
-            name: "file_read",
-            description: "Read files in a batch",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    files: {
-                        items: {
-                            additionalProperties: false,
-                            properties: { path: { type: "string" } },
-                            required: ["path"],
-                            type: "object",
+        tools: [
+            {
+                requiredCapabilities: ["read"],
+                group: "file",
+                name: "file_read",
+                description: "Read files in a batch",
+                inputSchema: {
+                    additionalProperties: false,
+                    properties: {
+                        files: {
+                            items: {
+                                additionalProperties: false,
+                                properties: { path: { type: "string" } },
+                                required: ["path"],
+                                type: "object",
+                            },
+                            minItems: 1,
+                            type: "array",
                         },
-                        minItems: 1,
-                        type: "array",
                     },
+                    required: ["files"],
+                    type: "object",
                 },
-                required: ["files"],
-                type: "object",
+                outputSchema: { type: "object" },
             },
-            outputSchema: { type: "object" },
-        }],
+        ],
     });
-    const binding = new McpEndpointBinding(new McpEndpointWorker({
-        instanceName: "demo",
-        worker: harness.worker,
-    }));
+    const binding = new McpEndpointBinding(
+        new McpEndpointWorker({
+            instanceName: "demo",
+            worker: harness.worker,
+        }),
+    );
     const server = await createBindingServer(binding);
 
     try {
@@ -478,18 +668,26 @@ test("tools/call forwards stale worker arguments even when the advertised schema
             selector: "1-1:raw",
             view: "content",
         };
-        const response = await postJson(server.url, {
-            id: "req-stale-file-read",
-            jsonrpc: "2.0",
-            method: "tools/call",
-            params: {
-                arguments: legacyArguments,
-                name: "file_read",
+        const response = await postJson(
+            server.url,
+            {
+                id: "req-stale-file-read",
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: {
+                    arguments: legacyArguments,
+                    name: "file_read",
+                },
             },
-        }, session.headers);
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
-        assert.equal(response.body.error, undefined, JSON.stringify(response.body));
+        assert.equal(
+            response.body.error,
+            undefined,
+            JSON.stringify(response.body),
+        );
         assert.equal(harness.calls.length, 1);
         assert.deepEqual(harness.calls[0]?.input, {
             path: "./legacy.txt",
@@ -505,7 +703,7 @@ test("tools/call returns a structured hint when the tool fails", async () => {
     const harness = createWorkerHarness({
         async callHandler() {
             throw new Error("command failed");
-        }
+        },
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -516,7 +714,7 @@ test("tools/call returns a structured hint when the tool fails", async () => {
         const response = await postJson(
             server.url,
             withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
-            session.headers
+            session.headers,
         );
 
         assert.equal(response.status, 200);
@@ -529,7 +727,12 @@ test("tools/call returns a structured hint when the tool fails", async () => {
 
 test("tools/call appends a worker result hint and keeps the flat shape", async () => {
     const harness = createWorkerHarness({
-        result: { exitCode: 7, stderr: "boom", stdout: "", termination: "exited" }
+        result: {
+            exitCode: 7,
+            stderr: "boom",
+            stdout: "",
+            termination: "exited",
+        },
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -540,7 +743,7 @@ test("tools/call appends a worker result hint and keeps the flat shape", async (
         const response = await postJson(
             server.url,
             withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
-            session.headers
+            session.headers,
         );
 
         assert.equal(response.status, 200);
@@ -616,7 +819,9 @@ test("environment and control-owned tools execute through the endpoint audit pat
         { workspace: "/workspace" },
         requestContext,
     );
-    const ctxId = String(structuredResult<{ ctxId?: string }>(environment).ctxId);
+    const ctxId = String(
+        structuredResult<{ ctxId?: string }>(environment).ctxId,
+    );
     await endpoint.callTool("todo_read", { ctxId }, requestContext);
 
     assert.deepEqual(
@@ -667,9 +872,14 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         .listTools()
         .find((tool) => tool.name === "bash_run");
     assert.notEqual(bashTool, undefined);
-    const bashProperties = (bashTool?.inputSchema as {
-        properties?: Record<string, { description?: string; maxLength?: number }>;
-    }).properties;
+    const bashProperties = (
+        bashTool?.inputSchema as {
+            properties?: Record<
+                string,
+                { description?: string; maxLength?: number }
+            >;
+        }
+    ).properties;
     assert.notEqual(bashProperties?.ctxId, undefined);
     assert.deepEqual(bashProperties?.purpose, {
         description: "Intended outcome.",
@@ -686,9 +896,11 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     const environmentTool = endpoint
         .listTools()
         .find((tool) => tool.name === "environ_info");
-    const environmentInputProperties = (environmentTool?.inputSchema as {
-        properties?: Record<string, unknown>;
-    }).properties;
+    const environmentInputProperties = (
+        environmentTool?.inputSchema as {
+            properties?: Record<string, unknown>;
+        }
+    ).properties;
     assert.equal(environmentInputProperties?.purpose, undefined);
     assert.equal(environmentInputProperties?.explanation, undefined);
     assert.notEqual(environmentInputProperties?.ctxId, undefined);
@@ -713,7 +925,8 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
         {
             command: "pwd",
             ctxId,
-            explanation: "The prior result came from a different OpenAI session binding.",
+            explanation:
+                "The prior result came from a different OpenAI session binding.",
             purpose: "Verify explicit Context authority",
         },
         {
@@ -723,12 +936,15 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
     );
     assert.equal(harness.calls[0]?.ctxId, ctxId);
     assert.deepEqual(harness.calls[0]?.input, { command: "pwd" });
-    assert.deepEqual(provenanceRecords, [{
-        callId: "call-test",
-        explanation: "The prior result came from a different OpenAI session binding.",
-        instance: "demo",
-        purpose: "Verify explicit Context authority",
-    }]);
+    assert.deepEqual(provenanceRecords, [
+        {
+            callId: "call-test",
+            explanation:
+                "The prior result came from a different OpenAI session binding.",
+            instance: "demo",
+            purpose: "Verify explicit Context authority",
+        },
+    ]);
 
     await assert.rejects(
         endpoint.callTool(
@@ -736,7 +952,8 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
             { command: "pwd", ctxId, purpose: "x".repeat(161) },
             requestContext,
         ),
-        (error: unknown) => (error as { code?: string }).code === "control.invalidTarget",
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.invalidTarget",
     );
 
     await assert.rejects(
@@ -842,36 +1059,57 @@ test("OpenAI session binding resolves one internal ctxId without making models c
         .listTools()
         .find((tool) => tool.name === "environ_info");
     assert.equal(
-        (environmentTool?.inputSchema as { properties?: Record<string, unknown> }).properties?.ctxId,
+        (
+            environmentTool?.inputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.ctxId,
         undefined,
     );
     assert.equal(
-        (environmentTool?.outputSchema as { properties?: Record<string, unknown> }).properties?.ctxId,
+        (
+            environmentTool?.outputSchema as {
+                properties?: Record<string, unknown>;
+            }
+        ).properties?.ctxId,
         undefined,
     );
 
-    const first = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace/one" },
-        requestContext,
-    ));
+    const first = structuredResult<{ status: string; workspace: string }>(
+        await endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace/one" },
+            requestContext,
+        ),
+    );
     assert.equal("ctxId" in first, false);
     const internalCtxId = (await registry.list())[0]?.ctxId;
     assert.equal(internalCtxId, "ctx-openai-stable");
 
-    const second = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace/two" },
-        requestContext,
-    ));
+    const second = structuredResult<{ status: string; workspace: string }>(
+        await endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace/two" },
+            requestContext,
+        ),
+    );
 
     assert.equal(first.workspace, "/workspace/one");
     assert.equal("ctxId" in second, false);
     assert.equal(second.status, "active");
     assert.equal(second.workspace, "/workspace/two");
-    assert.deepEqual((await registry.list()).map((record) => record.ctxId), [internalCtxId]);
-    assert.equal(endpoint.listTools().some((tool) => tool.name === "context_acquire"), false);
-    assert.equal(endpoint.listTools().some((tool) => tool.name === "context_renew"), false);
+    assert.deepEqual(
+        (await registry.list()).map((record) => record.ctxId),
+        [internalCtxId],
+    );
+    assert.equal(
+        endpoint.listTools().some((tool) => tool.name === "context_acquire"),
+        false,
+    );
+    assert.equal(
+        endpoint.listTools().some((tool) => tool.name === "context_renew"),
+        false,
+    );
 
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
     assert.equal(harness.calls[0]?.ctxId, internalCtxId);
@@ -886,7 +1124,8 @@ test("OpenAI session binding resolves one internal ctxId without making models c
                 requestMeta: { "openai/session": "another-session" },
             },
         ),
-        (error: unknown) => (error as { code?: string }).code === "mcp.contextInvalid",
+        (error: unknown) =>
+            (error as { code?: string }).code === "mcp.contextInvalid",
     );
     await assert.rejects(
         endpoint.callTool(
@@ -894,16 +1133,21 @@ test("OpenAI session binding resolves one internal ctxId without making models c
             { ctxId: internalCtxId, workspace: "/workspace/three" },
             requestContext,
         ),
-        (error: unknown) => (error as { code?: string }).code === "control.invalidTarget",
+        (error: unknown) =>
+            (error as { code?: string }).code === "control.invalidTarget",
     );
     assert.equal(harness.calls.length, 1);
 });
 
 test("OpenAI session mode keeps ctxId out of model inputs but declares it for app-only Workspace tools", async () => {
     const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({ idFactory: () => "ctx-openai-workspace-app" });
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-openai-workspace-app",
+    });
     await registry.initialize();
-    const unused = async () => { throw new Error("unused"); };
+    const unused = async () => {
+        throw new Error("unused");
+    };
     const gateway = {
         consumeWait: unused,
         createWait: unused,
@@ -912,7 +1156,12 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         listApprovals: async () => [],
         listTools: () => [],
         listWaits: async () => [],
-        readTodo: async () => ({ items: [], revision: 0, summary: { completed: 0, total: 0 }, tasks: [] }),
+        readTodo: async () => ({
+            items: [],
+            revision: 0,
+            summary: { completed: 0, total: 0 },
+            tasks: [],
+        }),
         resolveWait: unused,
         waitForWait: unused,
     } as unknown as McpInstanceGateway;
@@ -924,17 +1173,24 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         worker: harness.worker,
     });
     const tools = endpoint.listTools();
-    const inputSchema = (name: string) => tools.find((tool) => tool.name === name)?.inputSchema as {
-        properties?: Record<string, unknown>;
-        required?: string[];
-    } | undefined;
+    const inputSchema = (name: string) =>
+        tools.find((tool) => tool.name === name)?.inputSchema as
+            | {
+                  properties?: Record<string, unknown>;
+                  required?: string[];
+              }
+            | undefined;
 
     for (const name of ["environ_info", "bash_run", "workspace_open"]) {
         const schema = inputSchema(name);
         assert.equal(schema?.properties?.ctxId, undefined, name);
         assert.equal(schema?.required?.includes("ctxId") ?? false, false, name);
     }
-    for (const name of ["workspace_snapshot", "workspace_watch", "workspace_answer"]) {
+    for (const name of [
+        "workspace_snapshot",
+        "workspace_watch",
+        "workspace_answer",
+    ]) {
         const schema = inputSchema(name);
         assert.notEqual(schema?.properties?.ctxId, undefined, name);
         assert.equal(schema?.required?.includes("ctxId") ?? false, true, name);
@@ -945,18 +1201,30 @@ test("OpenAI session mode keeps ctxId out of model inputs but declares it for ap
         requestMeta: { "openai/session": "chat-workspace-app" },
         requestId: "request-workspace-app",
     };
-    const environment = await endpoint.callTool("environ_info", { workspace: "/workspace" }, requestContext);
+    const environment = await endpoint.callTool(
+        "environ_info",
+        { workspace: "/workspace" },
+        requestContext,
+    );
     assert.ok(environment instanceof McpNativeToolResult);
-    const token = (environment._meta?.["portable-devshell/workspace"] as { token?: unknown } | undefined)?.token;
+    const token = (
+        environment._meta?.["portable-devshell/workspace"] as
+            { token?: unknown } | undefined
+    )?.token;
     assert.equal(typeof token, "string");
     const ctxId = (await registry.list())[0]?.ctxId;
     assert.equal(ctxId, "ctx-openai-workspace-app");
 
-    const snapshot = structuredResult<{ ctxId?: string }>(await endpoint.callTool(
-        "workspace_snapshot",
-        { ctxId, token: token as string },
-        { principal: "subject-1", requestId: "request-workspace-app-snapshot" },
-    ));
+    const snapshot = structuredResult<{ ctxId?: string }>(
+        await endpoint.callTool(
+            "workspace_snapshot",
+            { ctxId, token: token as string },
+            {
+                principal: "subject-1",
+                requestId: "request-workspace-app-snapshot",
+            },
+        ),
+    );
     assert.equal(snapshot.ctxId, ctxId);
 });
 
@@ -981,11 +1249,13 @@ test("expired OpenAI session binding renews the same internal Context on ordinar
         requestId: "request-openai-renew",
     };
 
-    const acquired = structuredResult<{ status: string }>(await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace" },
-        requestContext,
-    ));
+    const acquired = structuredResult<{ status: string }>(
+        await endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace" },
+            requestContext,
+        ),
+    );
     assert.equal("ctxId" in acquired, false);
     const ctxId = (await registry.list())[0]?.ctxId;
     assert.equal(ctxId, "ctx-openai-renew");
@@ -1000,7 +1270,9 @@ test("expired OpenAI session binding renews the same internal Context on ordinar
 test("disabled OpenAI session binding reacquires a new Context and moves the binding", async () => {
     const ids = ["ctx-openai-disabled", "ctx-openai-replacement"];
     const harness = createWorkerHarness();
-    const registry = new McpContextRegistry({ idFactory: () => ids.shift() ?? "ctx-unexpected" });
+    const registry = new McpContextRegistry({
+        idFactory: () => ids.shift() ?? "ctx-unexpected",
+    });
     await registry.initialize();
     const endpoint = new McpEndpointWorker({
         contextMode: "openai-session",
@@ -1014,11 +1286,13 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         requestId: "request-openai-disabled",
     };
 
-    const first = structuredResult<{ status: string }>(await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace/old" },
-        requestContext,
-    ));
+    const first = structuredResult<{ status: string }>(
+        await endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace/old" },
+            requestContext,
+        ),
+    );
     assert.equal("ctxId" in first, false);
     const firstCtxId = (await registry.list())[0]?.ctxId;
     assert.equal(firstCtxId, "ctx-openai-disabled");
@@ -1030,11 +1304,13 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
             (error as { code?: string }).code === "mcp.contextDisabled",
     );
 
-    const replacement = structuredResult<{ status: string; workspace: string }>(await endpoint.callTool(
-        "environ_info",
-        { workspace: "/workspace/new" },
-        requestContext,
-    ));
+    const replacement = structuredResult<{ status: string; workspace: string }>(
+        await endpoint.callTool(
+            "environ_info",
+            { workspace: "/workspace/new" },
+            requestContext,
+        ),
+    );
     assert.equal("ctxId" in replacement, false);
     assert.equal(replacement.status, "active");
     assert.equal(replacement.workspace, "/workspace/new");
@@ -1044,7 +1320,10 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         { principal: "subject-1" },
     );
     assert.equal(bound?.ctxId, "ctx-openai-replacement");
-    assert.equal((await registry.lookup(firstCtxId!, { principal: "subject-1" })).status, "disabled");
+    assert.equal(
+        (await registry.lookup(firstCtxId!, { principal: "subject-1" })).status,
+        "disabled",
+    );
 
     await endpoint.callTool("bash_run", { command: "pwd" }, requestContext);
     assert.equal(harness.calls.at(-1)?.ctxId, "ctx-openai-replacement");
@@ -1075,7 +1354,10 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
             );
 
         const first = await acquire("/workspace/one");
-        assert.equal("ctxId" in (first.body.result?.structuredContent ?? {}), false);
+        assert.equal(
+            "ctxId" in (first.body.result?.structuredContent ?? {}),
+            false,
+        );
 
         const firstRun = await postJson(
             server.url,
@@ -1092,12 +1374,19 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
             session.headers,
         );
         assert.equal(firstRun.status, 200);
-        assert.equal(firstRun.body.error, undefined, JSON.stringify(firstRun.body));
+        assert.equal(
+            firstRun.body.error,
+            undefined,
+            JSON.stringify(firstRun.body),
+        );
         const firstCtxId = harness.calls[0]?.ctxId;
         assert.equal(typeof firstCtxId, "string");
 
         const second = await acquire("/workspace/two");
-        assert.equal("ctxId" in (second.body.result?.structuredContent ?? {}), false);
+        assert.equal(
+            "ctxId" in (second.body.result?.structuredContent ?? {}),
+            false,
+        );
         const secondRun = await postJson(
             server.url,
             {
@@ -1113,7 +1402,11 @@ test("HTTP forwards OpenAI session metadata into the generic Context binding", a
             session.headers,
         );
         assert.equal(secondRun.status, 200);
-        assert.equal(secondRun.body.error, undefined, JSON.stringify(secondRun.body));
+        assert.equal(
+            secondRun.body.error,
+            undefined,
+            JSON.stringify(secondRun.body),
+        );
         assert.equal(harness.calls[1]?.ctxId, firstCtxId);
     } finally {
         await server.close();
@@ -1134,10 +1427,10 @@ test("notifications/cancelled is acknowledged without a matching in-flight call"
                 method: "notifications/cancelled",
                 params: {
                     reason: "client timeout",
-                    requestId: "req-unknown-tool"
-                }
+                    requestId: "req-unknown-tool",
+                },
             },
-            session.headers
+            session.headers,
         );
         assert.equal(cancelled.status, 202);
         assert.deepEqual(harness.calls, []);
@@ -1164,7 +1457,7 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
                 }
                 signal?.addEventListener("abort", onAbort, { once: true });
             });
-        }
+        },
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -1180,16 +1473,16 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
                 method: "tools/call",
                 params: {
                     arguments: { command: "sleep 30", ctxId },
-                    name: "bash_run"
-                }
+                    name: "bash_run",
+                },
             }),
             headers: {
                 accept: "application/json, text/event-stream",
                 "content-type": "application/json",
-                ...session.headers
+                ...session.headers,
             },
             method: "POST",
-            signal: requestController.signal
+            signal: requestController.signal,
         }).catch(() => undefined);
 
         await started;
@@ -1197,14 +1490,21 @@ test("closing the HTTP request aborts an in-flight tools/call handler", async ()
         await pendingCall;
         await waitFor(() => observedSignal?.aborted === true);
         assert.equal(observedSignal?.reason instanceof Error, true);
-        assert.match((observedSignal?.reason as Error).message, /connection closed/iu);
+        assert.match(
+            (observedSignal?.reason as Error).message,
+            /connection closed/iu,
+        );
     } finally {
         await server.close();
     }
 });
 
 test("retired instance_connect returns an actionable tombstone through SDK transport", async () => {
-    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
+    const harness = createWorkerHarness({
+        hasToolSchemaCache: false,
+        ready: false,
+        tools: [],
+    });
     const gateway = {
         assertReady() {},
         async callTool() {
@@ -1214,7 +1514,11 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
             return {};
         },
         async readTodo() {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+            };
         },
         listTools() {
             return [];
@@ -1229,15 +1533,19 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
             return {};
         },
         async writeTodo() {
-            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
-        }
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+            };
+        },
     } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             gateway,
             instanceName: "demo",
-            worker: harness.worker
-        })
+            worker: harness.worker,
+        }),
     );
     const server = await createBindingServer(binding);
 
@@ -1252,21 +1560,22 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
                 method: "tools/call",
                 params: {
                     arguments: { ctxId, instance: "demo" },
-                    name: "instance_connect"
-                }
+                    name: "instance_connect",
+                },
             },
-            session.headers
+            session.headers,
         );
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.structuredContent, {
             staleToolSnapshot: {
-                assistantInstruction: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
+                assistantInstruction:
+                    "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
                 help: "Obtain a handle with devshell instance list/status, then use environ_remote command='attach'.",
                 name: "instance_connect",
-                removedIn: "0.7.1"
-            }
+                removedIn: "0.7.1",
+            },
         });
     } finally {
         await server.close();
@@ -1274,21 +1583,48 @@ test("retired instance_connect returns an actionable tombstone through SDK trans
 });
 
 test("artifact_viewImage returns native image content over SDK transport", async () => {
-    const pngData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
+    const pngData =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const harness = createWorkerHarness({
+        hasToolSchemaCache: false,
+        ready: false,
+        tools: [],
+    });
     const gateway = {
         assertReady() {},
-        async callTool() { return {}; },
-        async createSshInstance() { return {}; },
-        async listInstances() { return []; },
-        async readTodo() { return { revision: 0, todos: [] }; },
-        listTools() { return []; },
-        async connectInstance() { return {}; },
-        async statusInstance() { return {}; },
-        async stopInstance() { return {}; },
-        async viewArtifactImage(defaultInstance: string, input: { path?: string; workspace?: string }) {
+        async callTool() {
+            return {};
+        },
+        async createSshInstance() {
+            return {};
+        },
+        async listInstances() {
+            return [];
+        },
+        async readTodo() {
+            return { revision: 0, todos: [] };
+        },
+        listTools() {
+            return [];
+        },
+        async connectInstance() {
+            return {};
+        },
+        async statusInstance() {
+            return {};
+        },
+        async stopInstance() {
+            return {};
+        },
+        async viewArtifactImage(
+            defaultInstance: string,
+            input: { path?: string; workspace?: string },
+        ) {
             assert.equal(defaultInstance, "demo");
-            assert.deepEqual(input, { path: "./pixel.png", workspace: "/workspace" });
+            assert.deepEqual(input, {
+                path: "./pixel.png",
+                workspace: "/workspace",
+            });
             return {
                 blake3: "b".repeat(64),
                 bytes: 68,
@@ -1297,17 +1633,19 @@ test("artifact_viewImage returns native image content over SDK transport", async
                 imageRef: `${"b".repeat(64)}.png`,
                 mediaType: "image/png",
                 name: "pixel.png",
-                source: { instance: "demo", path: "./pixel.png", type: "file" }
+                source: { instance: "demo", path: "./pixel.png", type: "file" },
             };
         },
-        async writeTodo() { return { revision: 0, todos: [] }; }
+        async writeTodo() {
+            return { revision: 0, todos: [] };
+        },
     } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             gateway,
             instanceName: "demo",
-            worker: harness.worker
-        })
+            worker: harness.worker,
+        }),
     );
     const server = await createBindingServer(binding);
 
@@ -1322,16 +1660,16 @@ test("artifact_viewImage returns native image content over SDK transport", async
                 method: "tools/call",
                 params: {
                     arguments: { ctxId, path: "./pixel.png" },
-                    name: "artifact_viewImage"
-                }
+                    name: "artifact_viewImage",
+                },
             },
-            session.headers
+            session.headers,
         );
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error, undefined);
         assert.deepEqual(response.body.result?.content, [
-            { data: pngData, mimeType: "image/png", type: "image" }
+            { data: pngData, mimeType: "image/png", type: "image" },
         ]);
         assert.deepEqual(response.body.result?.structuredContent, {
             blake3: "b".repeat(64),
@@ -1339,9 +1677,12 @@ test("artifact_viewImage returns native image content over SDK transport", async
             imageRef: `${"b".repeat(64)}.png`,
             mediaType: "image/png",
             name: "pixel.png",
-            source: { instance: "demo", path: "./pixel.png", type: "file" }
+            source: { instance: "demo", path: "./pixel.png", type: "file" },
         });
-        assert.equal("content" in (response.body.result?.structuredContent ?? {}), false);
+        assert.equal(
+            "content" in (response.body.result?.structuredContent ?? {}),
+            false,
+        );
     } finally {
         await server.close();
     }
@@ -1353,12 +1694,18 @@ test("tools/list returns cached schema while the instance is not ready", async (
 
     try {
         const session = await initialize(server.url);
-        const response = await postJson(server.url, await readFixture("mcp-tools-list.json"), session.headers);
+        const response = await postJson(
+            server.url,
+            await readFixture("mcp-tools-list.json"),
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
         assert.equal(
-            response.body.result?.tools.some((tool: { name: string }) => tool.name === "bash_run"),
-            true
+            response.body.result?.tools.some(
+                (tool: { name: string }) => tool.name === "bash_run",
+            ),
+            true,
         );
     } finally {
         await server.close();
@@ -1366,7 +1713,11 @@ test("tools/list returns cached schema while the instance is not ready", async (
 });
 
 test("environ_info remains callable without a worker schema", async () => {
-    const harness = createWorkerHarness({ hasToolSchemaCache: false, ready: false, tools: [] });
+    const harness = createWorkerHarness({
+        hasToolSchemaCache: false,
+        ready: false,
+        tools: [],
+    });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
 
@@ -1380,13 +1731,19 @@ test("environ_info remains callable without a worker schema", async () => {
 });
 
 test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
-    const binding = createBinding(createWorkerHarness({ ready: false }), { readyWaitMs: 50 });
+    const binding = createBinding(createWorkerHarness({ ready: false }), {
+        readyWaitMs: 50,
+    });
     const server = await createBindingServer(binding);
 
     try {
         const session = await initialize(server.url);
         const ctxId = await createContext(server.url, session.headers);
-        const response = await postJson(server.url, withToolContext(await readFixture("mcp-tools-call.json"), ctxId), session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers,
+        );
 
         assert.equal(response.status, 200);
         assert.equal(response.body.error?.data?.code, "mcp.instanceNotReady");
@@ -1418,7 +1775,7 @@ test("tools/call waits for a transiently not-ready instance before executing", a
         const call = postJson(
             server.url,
             withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
-            session.headers
+            session.headers,
         );
 
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1435,29 +1792,38 @@ test("tools/call waits for a transiently not-ready instance before executing", a
 
 function createBinding(
     harness = createWorkerHarness(),
-    options?: { contextMode?: "explicit" | "openai-session"; publicBaseUrl?: string; readyWaitMs?: number; serverVersion?: string; workspaceApp?: boolean }
+    options?: {
+        contextMode?: "explicit" | "openai-session";
+        publicBaseUrl?: string;
+        readyWaitMs?: number;
+        serverVersion?: string;
+        workspaceApp?: boolean;
+    },
 ): McpEndpointBinding {
-    const unused = async () => { throw new Error("unused"); };
-    const gateway = options?.workspaceApp === true
-        ? ({
-            consumeWait: unused,
-            createWait: unused,
-            decideApproval: unused,
-            detachWait: unused,
-            listApprovals: async () => [],
-            listTools: () => [],
-            listWaits: async () => [],
-            resolveWait: unused,
-            waitForWait: unused,
-        } as unknown as McpInstanceGateway)
-        : undefined;
+    const unused = async () => {
+        throw new Error("unused");
+    };
+    const gateway =
+        options?.workspaceApp === true
+            ? ({
+                  consumeWait: unused,
+                  createWait: unused,
+                  decideApproval: unused,
+                  detachWait: unused,
+                  listApprovals: async () => [],
+                  listTools: () => [],
+                  listWaits: async () => [],
+                  resolveWait: unused,
+                  waitForWait: unused,
+              } as unknown as McpInstanceGateway)
+            : undefined;
     return new McpEndpointBinding(
         new McpEndpointWorker({
             contextMode: options?.contextMode,
             ...(gateway === undefined ? {} : { gateway }),
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
-            worker: harness.worker
+            worker: harness.worker,
         }),
         options?.serverVersion,
         options?.publicBaseUrl,
@@ -1488,18 +1854,25 @@ async function createBindingServer(binding: McpEndpointBinding) {
                 });
             });
         },
-        url: `http://127.0.0.1:${port}/mcp`
+        url: `http://127.0.0.1:${port}/mcp`,
     };
 }
 
-async function handleRequest(binding: McpEndpointBinding, request: IncomingMessage, response: ServerResponse) {
+async function handleRequest(
+    binding: McpEndpointBinding,
+    request: IncomingMessage,
+    response: ServerResponse,
+) {
     const chunks: Buffer[] = [];
 
     for await (const chunk of request) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
 
-    const body = chunks.length === 0 ? {} : (JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonValue);
+    const body =
+        chunks.length === 0
+            ? {}
+            : (JSON.parse(Buffer.concat(chunks).toString("utf8")) as JsonValue);
     await binding.handleRequest(request, response, body);
 }
 
@@ -1509,38 +1882,53 @@ async function initialize(url: string): Promise<{
         capabilities?: { extensions?: Record<string, JsonValue> };
     };
 }> {
-    const response = await postJson(url, await readFixture("mcp-initialize.json"));
+    const response = await postJson(
+        url,
+        await readFixture("mcp-initialize.json"),
+    );
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("mcp-session-id"), null);
 
     const headers: Record<string, string> = {
-        "mcp-protocol-version": String(response.body.result?.protocolVersion ?? "")
+        "mcp-protocol-version": String(
+            response.body.result?.protocolVersion ?? "",
+        ),
     };
     const initialized = await postRawJson(
         url,
         {
             jsonrpc: "2.0",
-            method: "notifications/initialized"
+            method: "notifications/initialized",
         },
-        headers
+        headers,
     );
 
     assert.equal(initialized.status, 202);
     return {
         headers,
-        initializeResult: response.body.result as {
-            capabilities?: { extensions?: Record<string, JsonValue> };
-        } | undefined,
+        initializeResult: response.body.result as
+            | {
+                  capabilities?: { extensions?: Record<string, JsonValue> };
+              }
+            | undefined,
     };
 }
 
-async function createContext(url: string, headers: Record<string, string>, workspace = "/workspace"): Promise<string> {
-    const response = await postJson(url, {
-        id: `req-environ-${Date.now()}`,
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: { arguments: { workspace }, name: "environ_info" }
-    }, headers);
+async function createContext(
+    url: string,
+    headers: Record<string, string>,
+    workspace = "/workspace",
+): Promise<string> {
+    const response = await postJson(
+        url,
+        {
+            id: `req-environ-${Date.now()}`,
+            jsonrpc: "2.0",
+            method: "tools/call",
+            params: { arguments: { workspace }, name: "environ_info" },
+        },
+        headers,
+    );
     const ctxId = response.body.result?.structuredContent?.ctxId;
     assert.equal(typeof ctxId, "string");
     return ctxId;
@@ -1555,37 +1943,47 @@ function withToolContext(body: JsonValue, ctxId: string): JsonValue {
     return request as JsonValue;
 }
 
-async function postJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
+async function postJson(
+    url: string,
+    body: JsonValue,
+    extraHeaders?: Record<string, string>,
+) {
     const response = await postRawJson(url, body, extraHeaders);
 
     return {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         body: parseMcpHttpResponse<Record<string, any>>(response.text),
         headers: response.headers,
-        status: response.status
+        status: response.status,
     };
 }
 
-async function postRawJson(url: string, body: JsonValue, extraHeaders?: Record<string, string>) {
+async function postRawJson(
+    url: string,
+    body: JsonValue,
+    extraHeaders?: Record<string, string>,
+) {
     const response = await fetch(url, {
         body: JSON.stringify(body),
         headers: {
             accept: "application/json, text/event-stream",
             "content-type": "application/json",
-            ...extraHeaders
+            ...extraHeaders,
         },
-        method: "POST"
+        method: "POST",
     });
 
     return {
         headers: response.headers,
         text: await response.text(),
-        status: response.status
+        status: response.status,
     };
 }
 
 async function readFixture(name: string): Promise<JsonValue> {
-    return JSON.parse(await readFile(resolve(fixturesDirectory, name), "utf8")) as JsonValue;
+    return JSON.parse(
+        await readFile(resolve(fixturesDirectory, name), "utf8"),
+    ) as JsonValue;
 }
 
 function createWorkerHarness(options?: {
@@ -1593,7 +1991,7 @@ function createWorkerHarness(options?: {
         toolName: string,
         input: JsonValue,
         context: { ctxId?: string; requestId?: string; source: string },
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ) => Promise<CommandResult>;
     hasToolSchemaCache?: boolean;
     ready?: boolean;
@@ -1608,12 +2006,33 @@ function createWorkerHarness(options?: {
     const calls: Array<{ input: JsonValue; toolName: string }> = [];
     const events: Array<{ data: Record<string, JsonValue>; type: string }> = [];
     const tools: ToolDefinition[] = options?.tools ?? [
-        { requiredCapabilities: ["execute"] as const, group: "bash", name: "bash_run", description: "Run shell", inputSchema: { type: "object", properties: { command: { type: "string" } } }, outputSchema: { type: "object" } },
-        { requiredCapabilities: ["read"] as const, group: "file", name: "file_logs", description: "Read logs", inputSchema: { type: "object" }, outputSchema: { type: "object" } }
+        {
+            requiredCapabilities: ["execute"] as const,
+            group: "bash",
+            name: "bash_run",
+            description: "Run shell",
+            inputSchema: {
+                type: "object",
+                properties: { command: { type: "string" } },
+            },
+            outputSchema: { type: "object" },
+        },
+        {
+            requiredCapabilities: ["read"] as const,
+            group: "file",
+            name: "file_logs",
+            description: "Read logs",
+            inputSchema: { type: "object" },
+            outputSchema: { type: "object" },
+        },
     ];
     const hasToolSchemaCache = options?.hasToolSchemaCache ?? true;
     const ready = options?.ready ?? true;
-    const result = options?.result ?? { exitCode: 0, stderr: "", stdout: "/workspace\n" };
+    const result = options?.result ?? {
+        exitCode: 0,
+        stderr: "",
+        stdout: "/workspace\n",
+    };
 
     return {
         auditedCalls,
@@ -1630,7 +2049,7 @@ function createWorkerHarness(options?: {
                 toolName: string,
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
-                operation: (callId: string) => Promise<T>
+                operation: (callId: string) => Promise<T>,
             ): Promise<T> {
                 auditedCalls.push({ context, input, toolName });
                 return await operation("call-test");
@@ -1641,15 +2060,18 @@ function createWorkerHarness(options?: {
             async appendMcpSessionOpened(sessionId: string) {
                 events.push({ data: { sessionId }, type: "mcp.sessionOpened" });
             },
-            async appendMcpToolCalled(toolName: string, context: { ctxId?: string; requestId?: string }) {
+            async appendMcpToolCalled(
+                toolName: string,
+                context: { ctxId?: string; requestId?: string },
+            ) {
                 events.push({
                     data: {
                         requestId: context.requestId ?? null,
                         ctxId: context.ctxId ?? null,
                         source: "mcp",
-                        toolName
+                        toolName,
                     },
-                    type: "mcp.toolCalled"
+                    type: "mcp.toolCalled",
                 });
             },
             handshake: {
@@ -1657,15 +2079,32 @@ function createWorkerHarness(options?: {
                 instance: "demo",
                 platform: {
                     arch: "x86_64",
-                    distribution: { id: "arch", name: "Arch Linux", version: "rolling" },
+                    distribution: {
+                        id: "arch",
+                        name: "Arch Linux",
+                        version: "rolling",
+                    },
                     os: "linux",
                     packageManager: "pacman",
-                    shell: { executable: "/bin/bash", kind: "bash", version: "5" }
-                }
+                    shell: {
+                        executable: "/bin/bash",
+                        kind: "bash",
+                        version: "5",
+                    },
+                },
             },
-            async prepareExtensionResource(input: { collection: string; extensionId: string }) {
-                assert.deepEqual(input, { collection: "managed", extensionId: "skill" });
-                return { directory: "/home/demo/.devshell/demo/extensions/skill/resources/managed" };
+            async prepareExtensionResource(input: {
+                collection: string;
+                extensionId: string;
+            }) {
+                assert.deepEqual(input, {
+                    collection: "managed",
+                    extensionId: "skill",
+                });
+                return {
+                    directory:
+                        "/home/demo/.devshell/demo/extensions/skill/resources/managed",
+                };
             },
             async prepareWorkspace(workspace: string) {
                 return {
@@ -1673,10 +2112,12 @@ function createWorkerHarness(options?: {
                     projectMemoryDirectory: `${workspace}/.devshell`,
                     projectMemoryPresent: true,
                     temporaryDirectory: "/tmp/workspace-123456",
-                    workspace
+                    workspace,
                 };
             },
-            async readAlerts() { return { advice: [] }; },
+            async readAlerts() {
+                return { advice: [] };
+            },
             hasToolSchemaCache() {
                 return hasToolSchemaCache;
             },
@@ -1691,27 +2132,36 @@ function createWorkerHarness(options?: {
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
                 signal?: AbortSignal,
-                transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>
+                transformResult?: (
+                    result: JsonValue,
+                    callId: string,
+                ) => Promise<JsonValue>,
             ) {
                 if (!ready) {
                     const error = new Error("not ready");
                     Object.assign(error, {
                         code: "core.instanceNotReady",
                         details: { toolName },
-                        retryable: false
+                        retryable: false,
                     });
                     throw error;
                 }
 
                 calls.push({ toolName, input, ...context });
-                const toolResult = options?.callHandler === undefined
-                    ? result
-                    : await options.callHandler(toolName, input, context, signal);
+                const toolResult =
+                    options?.callHandler === undefined
+                        ? result
+                        : await options.callHandler(
+                              toolName,
+                              input,
+                              context,
+                              signal,
+                          );
                 return transformResult === undefined
                     ? toolResult
                     : await transformResult(toolResult, "call-test");
-            }
-        }
+            },
+        },
     } as const;
 }
 

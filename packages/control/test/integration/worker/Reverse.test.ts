@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import {
+    execFile,
+    spawn,
+    spawnSync,
+    type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,7 +39,10 @@ import {
     terminalSizeProbeCommand,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { startLoopbackHttpProxy, type LoopbackHttpProxy } from "../../../../../test/TestHttpSupport.ts";
+import {
+    startLoopbackHttpProxy,
+    type LoopbackHttpProxy,
+} from "../../../../../test/TestHttpSupport.ts";
 
 const workerBinary = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -71,7 +79,11 @@ test(
 
         t.after(async () => {
             const worker = workerRef.value;
-            if (worker !== undefined && worker.exitCode === null && worker.signalCode === null) {
+            if (
+                worker !== undefined &&
+                worker.exitCode === null &&
+                worker.signalCode === null
+            ) {
                 worker.kill("SIGTERM");
                 await waitForExit(worker);
             }
@@ -228,16 +240,25 @@ test(
                 version: terminalVersion,
             });
         });
-        const observeTerminalProtocol = async (event: ClientEvent): Promise<void> => {
-            if (process.platform !== "win32" || event.name !== "terminal.output") return;
+        const observeTerminalProtocol = async (
+            event: ClientEvent,
+        ): Promise<void> => {
+            if (
+                process.platform !== "win32" ||
+                event.name !== "terminal.output"
+            )
+                return;
             const payload = event.payload as { data?: string } | undefined;
-            cursorResponseCount += await cursorResponder.consume(payload?.data ?? "");
+            cursorResponseCount += await cursorResponder.consume(
+                payload?.data ?? "",
+            );
         };
         if (process.platform === "win32") {
             await waitForTerminal(
                 attached.stream,
                 () => cursorResponseCount > 0,
-                () => `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+                () =>
+                    `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
                 10_000,
                 observeTerminalProtocol,
             );
@@ -288,9 +309,12 @@ test(
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
         );
-        terminalVersion = (resized.event.payload as { version: number }).version;
+        terminalVersion = (resized.event.payload as { version: number })
+            .version;
         if (process.platform === "win32") {
-            cursorResponseCount += await cursorResponder.consume(resized.output);
+            cursorResponseCount += await cursorResponder.consume(
+                resized.output,
+            );
         }
         const sizedInputSeq = terminalClientSeq++;
         await attached.stream.send("input", {
@@ -443,11 +467,21 @@ test(
     "real Rust reverse worker re-enrolls the same persistent instance and reuses the stored credential",
     realWorkerTestOptions(workerBinary),
     async (t) => {
-        const controlHome = await createTestTempDirectory("reverse-reenroll-control");
-        const controlRuntime = await createTestTempDirectory("reverse-reenroll-runtime");
-        const workerHome = await createTestTempDirectory("reverse-reenroll-worker-home");
-        const workerRuntime = await createTestTempDirectory("reverse-reenroll-worker-runtime");
-        const workspace = await createTestTempDirectory("reverse-reenroll-workspace");
+        const controlHome = await createTestTempDirectory(
+            "reverse-reenroll-control",
+        );
+        const controlRuntime = await createTestTempDirectory(
+            "reverse-reenroll-runtime",
+        );
+        const workerHome = await createTestTempDirectory(
+            "reverse-reenroll-worker-home",
+        );
+        const workerRuntime = await createTestTempDirectory(
+            "reverse-reenroll-worker-runtime",
+        );
+        const workspace = await createTestTempDirectory(
+            "reverse-reenroll-workspace",
+        );
         const markerName = "reverse-reenroll-marker.txt";
         const marker = "reverse-reenroll-ok";
         await writeFile(join(workspace, markerName), marker, "utf8");
@@ -519,9 +553,9 @@ test(
         await pointProxyAtControlMcp(proxy, server.socketPath);
 
         const enroll = async () => {
-            const code = await new ReverseCredentialStore(controlHome).createDeviceCode(
-                "reverse-reenroll",
-            );
+            const code = await new ReverseCredentialStore(
+                controlHome,
+            ).createDeviceCode("reverse-reenroll");
             const result = await execFileAsync(
                 workerBinary!,
                 [
@@ -551,7 +585,13 @@ test(
             server.socketPath,
             "reverse-reenroll",
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
+        await assertReverseMarker(
+            server.socketPath,
+            "reverse-reenroll",
+            workspace,
+            markerName,
+            marker,
+        );
 
         await enroll();
         const secondGeneration = await waitForReverseGeneration(
@@ -559,7 +599,13 @@ test(
             "reverse-reenroll",
             firstGeneration,
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
+        await assertReverseMarker(
+            server.socketPath,
+            "reverse-reenroll",
+            workspace,
+            markerName,
+            marker,
+        );
 
         runWorkerCommand(
             ["stop", "--instance", "reverse-reenroll"],
@@ -576,12 +622,23 @@ test(
             "reverse-reenroll",
             secondGeneration,
         );
-        await assertReverseMarker(server.socketPath, "reverse-reenroll", workspace, markerName, marker);
+        await assertReverseMarker(
+            server.socketPath,
+            "reverse-reenroll",
+            workspace,
+            markerName,
+            marker,
+        );
     },
 );
 
-async function pointProxyAtControlMcp(proxy: LoopbackHttpProxy, socketPath: string): Promise<void> {
-    const status = await request(socketPath, "mcp.status", "@control") as { listenAddress?: string };
+async function pointProxyAtControlMcp(
+    proxy: LoopbackHttpProxy,
+    socketPath: string,
+): Promise<void> {
+    const status = (await request(socketPath, "mcp.status", "@control")) as {
+        listenAddress?: string;
+    };
     assert.equal(typeof status.listenAddress, "string");
     proxy.setTarget(`http://${status.listenAddress}`);
 }
@@ -640,7 +697,10 @@ async function assertReverseMarker(
         "tool.call",
         asInstanceName(instance),
         {
-            input: { command: readRelativeMarkerCommand(markerName), timeoutMs: 30_000 },
+            input: {
+                command: readRelativeMarkerCommand(markerName),
+                timeoutMs: 30_000,
+            },
             toolName: "bash_run",
             workspace,
         },
@@ -698,7 +758,8 @@ async function request(
 ): Promise<any> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
         mapError: (error) =>
             error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
@@ -715,7 +776,8 @@ async function request(
 
 function createClient(socketPath: string): ClientConnection {
     return new ClientConnection({
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
         mapError: (error) =>
             error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),

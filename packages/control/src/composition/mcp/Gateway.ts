@@ -1,6 +1,13 @@
 import type { McpInstanceGateway } from "@portable-devshell/mcp";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { ArtifactViewImageInput, ArtifactViewImageResult, ControlConfig, JsonValue, ToolCallContext, ToolDefinition } from "@portable-devshell/shared";
+import type {
+    ArtifactViewImageInput,
+    ArtifactViewImageResult,
+    ControlConfig,
+    JsonValue,
+    ToolCallContext,
+    ToolDefinition,
+} from "@portable-devshell/shared";
 import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { InstanceConnectionService } from "../../control/instance/registry/Connection.js";
 import type { ToolCallProvenanceStore } from "../../instance/execution/tool/Provenance.js";
@@ -50,13 +57,22 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     constructor(options: McpInstanceGatewayControlOptions) {
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
-        this.#instanceConnections = options.instanceConnections ?? new InstanceConnectionService(options.instanceRegistry);
+        this.#instanceConnections =
+            options.instanceConnections ??
+            new InstanceConnectionService(options.instanceRegistry);
         this.#now = options.now ?? Date.now;
         this.#toolProvenance = options.toolProvenance;
     }
 
-    async appendMcpToolCalled(instance: string, toolName: string, context: { requestId?: string; ctxId?: string }): Promise<void> {
-        await this.#requireDescriptor(instance).worker.appendMcpToolCalled(toolName, context);
+    async appendMcpToolCalled(
+        instance: string,
+        toolName: string,
+        context: { requestId?: string; ctxId?: string },
+    ): Promise<void> {
+        await this.#requireDescriptor(instance).worker.appendMcpToolCalled(
+            toolName,
+            context,
+        );
     }
 
     assertReady(instance: string): void {
@@ -66,19 +82,25 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 code: errorCodes.coreInstanceNotReady,
                 details: { instance },
                 message: `Instance ${instance} is not ready.`,
-                retryable: false
+                retryable: false,
             });
         }
     }
 
-    async beforeModelToolCall(instance: string, toolName: string, context: ToolCallContext): Promise<void> {
+    async beforeModelToolCall(
+        instance: string,
+        toolName: string,
+        context: ToolCallContext,
+    ): Promise<void> {
         const ctxId = context.ctxId;
         if (ctxId === undefined) return;
-        const decision = await this.#requireDescriptor(instance).contextMessages?.beforeModelToolCall(
+        const decision = (await this.#requireDescriptor(
+            instance,
+        ).contextMessages?.beforeModelToolCall(
             ctxId,
             toolName,
             context.requestId,
-        ) ?? { kind: "allow" as const };
+        )) ?? { kind: "allow" as const };
         if (decision.kind === "allow") {
             if (toolName === "todo_read" || toolName === "todo_write") {
                 await this.#consumeTodoAccessToken(instance, ctxId);
@@ -93,7 +115,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                     ctxId,
                     toolCallBudget: decision.toolCallBudget,
                 },
-                message: "#push response deadline reached. Call todo_report before using more tools.",
+                message:
+                    "#push response deadline reached. Call todo_report before using more tools.",
                 retryable: false,
             });
         }
@@ -108,9 +131,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         throw createError({
             code: errorCodes.controlModelStopped,
             details: { commentId: decision.commentId, ctxId },
-            message: decision.comment === undefined
-                ? "Stopped by user. Tool calls are disabled until the user sends #resume."
-                : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
+            message:
+                decision.comment === undefined
+                    ? "Stopped by user. Tool calls are disabled until the user sends #resume."
+                    : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
             retryable: false,
         });
     }
@@ -121,14 +145,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T> {
         return await this.#requireDescriptor(instance).worker.auditToolCall(
             toolName,
             input,
             context,
             operation,
-            signal
+            signal,
         );
     }
 
@@ -138,11 +162,21 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: JsonValue,
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        return await descriptor.worker.callTool(toolName, input, context, signal, transformResult, invocationInput);
+        return await descriptor.worker.callTool(
+            toolName,
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
+        );
     }
 
     async invokeToolInternal(
@@ -152,14 +186,16 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         context: ToolCallContext,
         signal?: AbortSignal,
     ): Promise<JsonValue> {
-        return await this.#requireDescriptor(instance).worker.invokeToolInternal(toolName, input, context, signal);
+        return await this.#requireDescriptor(
+            instance,
+        ).worker.invokeToolInternal(toolName, input, context, signal);
     }
 
     async closeToolSession(sessionId: string): Promise<void> {
         await Promise.all(
             this.#instanceRegistry.list().map(async (descriptor) => {
                 await descriptor.worker.releaseToolSession(sessionId);
-            })
+            }),
         );
     }
 
@@ -172,12 +208,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return this.#modelCommands(instance);
     }
 
-    setModelCommandCatalog(provider: (instance: string) => readonly string[]): void {
+    setModelCommandCatalog(
+        provider: (instance: string) => readonly string[],
+    ): void {
         this.#modelCommands = provider;
     }
 
     async listInstances(): Promise<JsonValue> {
-        const configByName = new Map(this.#getConfig().instances.map((instance) => [instance.name, instance] as const));
+        const configByName = new Map(
+            this.#getConfig().instances.map(
+                (instance) => [instance.name, instance] as const,
+            ),
+        );
         return this.#instanceRegistry.list().map((descriptor) => {
             const config = configByName.get(descriptor.name);
             return {
@@ -185,12 +227,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 mcpEnabled: descriptor.mcpEnabled,
                 name: descriptor.name,
                 provider: config?.provider,
-                snapshot: withTodoSummaries(descriptor.worker.snapshot(), descriptor.todo.summaries())
+                snapshot: withTodoSummaries(
+                    descriptor.worker.snapshot(),
+                    descriptor.todo.summaries(),
+                ),
             };
         }) as unknown as JsonValue;
     }
 
-    async createWait(instance: string, input: import("@portable-devshell/shared").WaitCreateInput) {
+    async createWait(
+        instance: string,
+        input: import("@portable-devshell/shared").WaitCreateInput,
+    ) {
         return await this.#requireWait(instance).create(input);
     }
 
@@ -202,16 +250,39 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).claimRecovery(waitId, claimId);
     }
 
-    async completeWaitRecovery(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).completeRecovery(waitId, claimId);
+    async completeWaitRecovery(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ) {
+        return await this.#requireWait(instance).completeRecovery(
+            waitId,
+            claimId,
+        );
     }
 
-    async dismissWaitRecovery(instance: string, waitId: string, recoveryMessageId: string) {
-        return await this.#requireWait(instance).dismissRecovery(waitId, recoveryMessageId);
+    async dismissWaitRecovery(
+        instance: string,
+        waitId: string,
+        recoveryMessageId: string,
+    ) {
+        return await this.#requireWait(instance).dismissRecovery(
+            waitId,
+            recoveryMessageId,
+        );
     }
 
-    async markWaitRecoveryAttempted(instance: string, waitId: string, claimId: string, goalProgressEpoch?: number) {
-        return await this.#requireWait(instance).markRecoveryAttempted(waitId, claimId, goalProgressEpoch);
+    async markWaitRecoveryAttempted(
+        instance: string,
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ) {
+        return await this.#requireWait(instance).markRecoveryAttempted(
+            waitId,
+            claimId,
+            goalProgressEpoch,
+        );
     }
 
     async detachWait(instance: string, waitId: string) {
@@ -222,12 +293,26 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await this.#requireWait(instance).reattach(waitId, ownerCallId);
     }
 
-    async releaseWaitRecovery(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).releaseRecovery(waitId, claimId);
+    async releaseWaitRecovery(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ) {
+        return await this.#requireWait(instance).releaseRecovery(
+            waitId,
+            claimId,
+        );
     }
 
-    async rejectWaitRecovery(instance: string, waitId: string, claimId: string) {
-        return await this.#requireWait(instance).rejectRecovery(waitId, claimId);
+    async rejectWaitRecovery(
+        instance: string,
+        waitId: string,
+        claimId: string,
+    ) {
+        return await this.#requireWait(instance).rejectRecovery(
+            waitId,
+            claimId,
+        );
     }
 
     async disableWaitRecovery(instance: string, waitId: string) {
@@ -254,36 +339,57 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         instance: string,
         taskId: string,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<JsonValue> {
-        return await this.#requireDescriptor(instance).worker.observeTmuxTask(taskId, context, signal);
+        return await this.#requireDescriptor(instance).worker.observeTmuxTask(
+            taskId,
+            context,
+            signal,
+        );
     }
 
     async goalContinuation(
         instance: string,
         input: import("@portable-devshell/shared").GoalContinuationInput,
-        ctxId: string
+        ctxId: string,
     ): Promise<JsonValue> {
-        return await this.#requireDescriptor(instance).goal.continuation(ctxId, input);
+        return await this.#requireDescriptor(instance).goal.continuation(
+            ctxId,
+            input,
+        );
     }
 
     async manageGoal(
         instance: string,
         input: import("@portable-devshell/shared").GoalManageInput,
-        ctxId: string
+        ctxId: string,
     ) {
-        return await this.#requireDescriptor(instance).goal.manage(ctxId, input);
+        return await this.#requireDescriptor(instance).goal.manage(
+            ctxId,
+            input,
+        );
     }
 
     async readGoal(instance: string, ctxId: string) {
         return await this.#requireDescriptor(instance).goal.read(ctxId);
     }
 
-    async recordGoalReentry(instance: string, ctxId: string, progressEpoch?: number): Promise<void> {
-        await this.#requireDescriptor(instance).goal.recordReentry(ctxId, progressEpoch);
+    async recordGoalReentry(
+        instance: string,
+        ctxId: string,
+        progressEpoch?: number,
+    ): Promise<void> {
+        await this.#requireDescriptor(instance).goal.recordReentry(
+            ctxId,
+            progressEpoch,
+        );
     }
 
-    async touchGoal(instance: string, ctxId: string, kind: import("@portable-devshell/shared").GoalActivityKind = "execution"): Promise<void> {
+    async touchGoal(
+        instance: string,
+        ctxId: string,
+        kind: import("@portable-devshell/shared").GoalActivityKind = "execution",
+    ): Promise<void> {
         await this.#requireDescriptor(instance).goal.touch(ctxId, kind);
     }
 
@@ -292,21 +398,30 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async listPendingApprovals(instance: string, ctxId?: string) {
-        return await this.#requireDescriptor(instance).worker.listPendingApprovals(ctxId);
+        return await this.#requireDescriptor(
+            instance,
+        ).worker.listPendingApprovals(ctxId);
     }
 
     async readToolCalls(instance: string, ctxId: string, limit: number) {
-        const records = await this.#requireDescriptor(instance).worker.readToolCalls({ ctxId, limit });
+        const records = await this.#requireDescriptor(
+            instance,
+        ).worker.readToolCalls({ ctxId, limit });
         if (this.#toolProvenance === undefined) return records;
-        return await this.#toolProvenance.decorate(instance, records).catch(() => records);
+        return await this.#toolProvenance
+            .decorate(instance, records)
+            .catch(() => records);
     }
 
     hasActiveToolCalls(instance: string, ctxId: string) {
-        return this.#requireDescriptor(instance).worker.hasActiveToolCalls(ctxId);
+        return this.#requireDescriptor(instance).worker.hasActiveToolCalls(
+            ctxId,
+        );
     }
 
     async readWorkspaceEvents(instance: string, fromSeq: number) {
-        const result = this.#requireDescriptor(instance).worker.subscribe(fromSeq);
+        const result =
+            this.#requireDescriptor(instance).worker.subscribe(fromSeq);
         return result.kind === "gap"
             ? { events: [], gap: true, lastSeq: result.lastSeq }
             : { events: result.events, gap: false, lastSeq: result.lastSeq };
@@ -317,20 +432,39 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         taskId: string,
         action: import("@portable-devshell/shared").TodoTaskControlAction,
         ctxId: string,
-        expectedRevision?: number
+        expectedRevision?: number,
     ): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.control(taskId, action, ctxId, expectedRevision)) as unknown as JsonValue;
+        return (await this.#requireDescriptor(instance).todo.control(
+            taskId,
+            action,
+            ctxId,
+            expectedRevision,
+        )) as unknown as JsonValue;
     }
 
-    async decideApproval(instance: string, approvalId: string, decision: "approve" | "deny") {
-        return await this.#requireDescriptor(instance).worker.decideApproval(approvalId, {
-            decidedBy: "web",
-            decision
-        });
+    async decideApproval(
+        instance: string,
+        approvalId: string,
+        decision: "approve" | "deny",
+    ) {
+        return await this.#requireDescriptor(instance).worker.decideApproval(
+            approvalId,
+            {
+                decidedBy: "web",
+                decision,
+            },
+        );
     }
 
-    async cancelApproval(instance: string, approvalId: string, reason?: string) {
-        return await this.#requireDescriptor(instance).worker.cancelApproval(approvalId, reason);
+    async cancelApproval(
+        instance: string,
+        approvalId: string,
+        reason?: string,
+    ) {
+        return await this.#requireDescriptor(instance).worker.cancelApproval(
+            approvalId,
+            reason,
+        );
     }
 
     async failContextMessages(instance: string, ctxId: string, reason: string) {
@@ -339,13 +473,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return await service.failPending(ctxId, reason);
     }
 
-    async consumeContextMessages(instance: string, ctxId: string, callId: string) {
+    async consumeContextMessages(
+        instance: string,
+        ctxId: string,
+        callId: string,
+    ) {
         const service = this.#requireDescriptor(instance).contextMessages;
         if (service === undefined) {
             throw createError({
                 code: errorCodes.envelopeInvalid,
-                message: "Context message service is unavailable for this instance.",
-                retryable: false
+                message:
+                    "Context message service is unavailable for this instance.",
+                retryable: false,
             });
         }
         return await service.consumePending(ctxId, callId);
@@ -353,9 +492,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
     async readTodo(
         instance: string,
-        input?: import("@portable-devshell/shared").TodoReadInput
+        input?: import("@portable-devshell/shared").TodoReadInput,
     ): Promise<JsonValue> {
-        return (await this.#requireDescriptor(instance).todo.read(input)) as unknown as JsonValue;
+        return (await this.#requireDescriptor(instance).todo.read(
+            input,
+        )) as unknown as JsonValue;
     }
 
     listTools(instance: string): ToolDefinition[] {
@@ -363,36 +504,57 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async prepareWorkspace(instance: string, workspace: string) {
-        return await this.#requireDescriptor(instance).worker.prepareWorkspace(workspace);
+        return await this.#requireDescriptor(instance).worker.prepareWorkspace(
+            workspace,
+        );
     }
 
     async readAlerts(instance: string, workspace: string) {
-        return await this.#requireDescriptor(instance).worker.readAlerts(workspace);
+        return await this.#requireDescriptor(instance).worker.readAlerts(
+            workspace,
+        );
     }
 
     async releaseAlerts(instance: string, workspace: string): Promise<void> {
         await this.#requireDescriptor(instance).worker.releaseAlerts(workspace);
     }
 
-    async connectInstance(instance: string, reference: string): Promise<JsonValue> {
-        const { snapshot } = await this.#instanceConnections.acquire(instance, reference);
+    async connectInstance(
+        instance: string,
+        reference: string,
+    ): Promise<JsonValue> {
+        const { snapshot } = await this.#instanceConnections.acquire(
+            instance,
+            reference,
+        );
         const descriptor = this.#requireDescriptor(instance);
-        return withTodoSummaries(snapshot, descriptor.todo.summaries()) as unknown as JsonValue;
+        return withTodoSummaries(
+            snapshot,
+            descriptor.todo.summaries(),
+        ) as unknown as JsonValue;
     }
 
-    async releaseInstanceReference(instance: string, reference: string): Promise<void> {
+    async releaseInstanceReference(
+        instance: string,
+        reference: string,
+    ): Promise<void> {
         await this.#instanceConnections.release(instance, reference);
     }
 
     async statusInstance(instance: string): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        const config = this.#getConfig().instances.find((entry) => entry.name === instance);
+        const config = this.#getConfig().instances.find(
+            (entry) => entry.name === instance,
+        );
         return {
             enabled: descriptor.enabled,
             mcpEnabled: descriptor.mcpEnabled,
             name: descriptor.name,
             provider: config?.provider,
-            snapshot: withTodoSummaries(descriptor.worker.snapshot(), descriptor.todo.summaries())
+            snapshot: withTodoSummaries(
+                descriptor.worker.snapshot(),
+                descriptor.todo.summaries(),
+            ),
         } as unknown as JsonValue;
     }
 
@@ -400,7 +562,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const descriptor = this.#requireDescriptor(instance);
         const snapshot = withTodoSummaries(
             await descriptor.worker.stop(),
-            descriptor.todo.summaries()
+            descriptor.todo.summaries(),
         );
         this.#instanceRegistry.clearOwned(instance);
         return snapshot as unknown as JsonValue;
@@ -410,15 +572,24 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         await this.#requireDescriptor(instance).worker.touchAlerts(workspace);
     }
 
-    async touchTemporaryDirectory(instance: string, path: string): Promise<void> {
-        await this.#requireDescriptor(instance).worker.touchTemporaryDirectory(path);
+    async touchTemporaryDirectory(
+        instance: string,
+        path: string,
+    ): Promise<void> {
+        await this.#requireDescriptor(instance).worker.touchTemporaryDirectory(
+            path,
+        );
     }
 
-    async writeTodo(instance: string, input: JsonValue, context: ToolCallContext): Promise<JsonValue> {
+    async writeTodo(
+        instance: string,
+        input: JsonValue,
+        context: ToolCallContext,
+    ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         return (await descriptor.todo.write(
             input as unknown as import("@portable-devshell/shared").TodoWriteInput,
-            requireCtxId(context)
+            requireCtxId(context),
         )) as unknown as JsonValue;
     }
 
@@ -435,19 +606,23 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             await this.beforeModelToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
             this.#refillTodoReportBucket(state, this.#now());
-            const replyCommentId = await descriptor.contextMessages?.pendingReplyCommentId(ctxId);
+            const replyCommentId =
+                await descriptor.contextMessages?.pendingReplyCommentId(ctxId);
 
             if (replyCommentId === undefined) {
                 if (state.lastReportMessage === message) {
                     throw createError({
                         code: errorCodes.todoInvalid,
                         details: { ctxId, reason: "duplicate" },
-                        message: "todo_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
+                        message:
+                            "todo_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
                         retryable: false,
                     });
                 }
                 if (state.tokens < 1) {
-                    const retryAfterMs = Math.ceil((1 - state.tokens) * TODO_REPORT_REFILL_INTERVAL_MS);
+                    const retryAfterMs = Math.ceil(
+                        (1 - state.tokens) * TODO_REPORT_REFILL_INTERVAL_MS,
+                    );
                     throw createError({
                         code: errorCodes.todoInvalid,
                         details: {
@@ -473,7 +648,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         });
     }
 
-    async #syncTodoReportPolicy(instance: string, ctxId: string): Promise<TodoReportPolicyState> {
+    async #syncTodoReportPolicy(
+        instance: string,
+        ctxId: string,
+    ): Promise<TodoReportPolicyState> {
         const key = todoPolicyKey(instance, ctxId);
         let state = this.#todoReportPolicy.get(key);
         if (state === undefined) {
@@ -484,11 +662,15 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             this.#todoReportPolicy.set(key, state);
         }
 
-        const entries = await this.#requireDescriptor(instance).conversation.list({
+        const entries = await this.#requireDescriptor(
+            instance,
+        ).conversation.list({
             ctxId,
             limit: TODO_REPORT_CONVERSATION_WINDOW,
         });
-        state.lastReportMessage = [...entries].reverse().find((entry) => entry.kind === "report")?.text;
+        state.lastReportMessage = [...entries]
+            .reverse()
+            .find((entry) => entry.kind === "report")?.text;
         return state;
     }
 
@@ -501,54 +683,76 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         state.lastRefillAt = now;
     }
 
-    async #consumeTodoAccessToken(instance: string, ctxId: string): Promise<void> {
+    async #consumeTodoAccessToken(
+        instance: string,
+        ctxId: string,
+    ): Promise<void> {
         const key = todoPolicyKey(instance, ctxId);
-        await this.#withPolicyLock(this.#todoAccessPolicyOperations, key, async () => {
-            let state = this.#todoAccessPolicy.get(key);
-            if (state === undefined) {
-                state = {
-                    lastRefillAt: this.#now(),
-                    tokens: TODO_ACCESS_BUCKET_CAPACITY,
-                };
-                this.#todoAccessPolicy.set(key, state);
-            }
-            const now = this.#now();
-            const elapsed = Math.max(0, now - state.lastRefillAt);
-            state.tokens = Math.min(
-                TODO_ACCESS_BUCKET_CAPACITY,
-                state.tokens + elapsed / TODO_ACCESS_REFILL_INTERVAL_MS,
-            );
-            state.lastRefillAt = now;
-            if (state.tokens < 1) {
-                const retryAfterMs = Math.ceil((1 - state.tokens) * TODO_ACCESS_REFILL_INTERVAL_MS);
-                throw createError({
-                    code: errorCodes.todoInvalid,
-                    details: {
-                        capacity: TODO_ACCESS_BUCKET_CAPACITY,
-                        ctxId,
-                        refillIntervalMs: TODO_ACCESS_REFILL_INTERVAL_MS,
-                        retryAfterMs,
-                        tools: ["todo_read", "todo_write"],
-                    },
-                    message: `todo_read/todo_write are rate-limited by a shared bucket; the next token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue the actual task instead of polling Todo state.`,
-                    retryable: false,
-                });
-            }
-            state.tokens -= 1;
-        });
+        await this.#withPolicyLock(
+            this.#todoAccessPolicyOperations,
+            key,
+            async () => {
+                let state = this.#todoAccessPolicy.get(key);
+                if (state === undefined) {
+                    state = {
+                        lastRefillAt: this.#now(),
+                        tokens: TODO_ACCESS_BUCKET_CAPACITY,
+                    };
+                    this.#todoAccessPolicy.set(key, state);
+                }
+                const now = this.#now();
+                const elapsed = Math.max(0, now - state.lastRefillAt);
+                state.tokens = Math.min(
+                    TODO_ACCESS_BUCKET_CAPACITY,
+                    state.tokens + elapsed / TODO_ACCESS_REFILL_INTERVAL_MS,
+                );
+                state.lastRefillAt = now;
+                if (state.tokens < 1) {
+                    const retryAfterMs = Math.ceil(
+                        (1 - state.tokens) * TODO_ACCESS_REFILL_INTERVAL_MS,
+                    );
+                    throw createError({
+                        code: errorCodes.todoInvalid,
+                        details: {
+                            capacity: TODO_ACCESS_BUCKET_CAPACITY,
+                            ctxId,
+                            refillIntervalMs: TODO_ACCESS_REFILL_INTERVAL_MS,
+                            retryAfterMs,
+                            tools: ["todo_read", "todo_write"],
+                        },
+                        message: `todo_read/todo_write are rate-limited by a shared bucket; the next token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue the actual task instead of polling Todo state.`,
+                        retryable: false,
+                    });
+                }
+                state.tokens -= 1;
+            },
+        );
     }
 
-    async #withTodoReportPolicy<T>(key: string, operation: () => Promise<T>): Promise<T> {
-        return await this.#withPolicyLock(this.#todoReportPolicyOperations, key, operation);
+    async #withTodoReportPolicy<T>(
+        key: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        return await this.#withPolicyLock(
+            this.#todoReportPolicyOperations,
+            key,
+            operation,
+        );
     }
 
-    async #withPolicyLock<T>(operations: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
+    async #withPolicyLock<T>(
+        operations: Map<string, Promise<void>>,
+        key: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
         const previous = operations.get(key) ?? Promise.resolve();
         let release!: () => void;
         const gate = new Promise<void>((resolve) => {
             release = resolve;
         });
-        const current = previous.catch(() => undefined).then(async () => await gate);
+        const current = previous
+            .catch(() => undefined)
+            .then(async () => await gate);
         operations.set(key, current);
         await previous.catch(() => undefined);
         try {
@@ -567,7 +771,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             throw createError({
                 code: errorCodes.envelopeInvalid,
                 message: `Wait service is unavailable for ${instance}.`,
-                retryable: false
+                retryable: false,
             });
         }
         return wait;
@@ -582,7 +786,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             code: errorCodes.instanceMissing,
             details: { instance },
             message: `Instance ${instance} was not found.`,
-            retryable: false
+            retryable: false,
         });
     }
 }
@@ -591,10 +795,15 @@ function todoPolicyKey(instance: string, ctxId: string): string {
     return `${instance}\u0000${ctxId}`;
 }
 
-function withTodoSummaries<T extends object>(snapshot: T, activeTodos: import("@portable-devshell/shared").ActiveTodoSummary[]): T & { activeTodos?: import("@portable-devshell/shared").ActiveTodoSummary[] } {
+function withTodoSummaries<T extends object>(
+    snapshot: T,
+    activeTodos: import("@portable-devshell/shared").ActiveTodoSummary[],
+): T & {
+    activeTodos?: import("@portable-devshell/shared").ActiveTodoSummary[];
+} {
     return {
         ...snapshot,
-        ...(activeTodos.length === 0 ? {} : { activeTodos })
+        ...(activeTodos.length === 0 ? {} : { activeTodos }),
     };
 }
 
@@ -605,13 +814,13 @@ function requireCtxId(context: ToolCallContext): string {
     throw createError({
         code: errorCodes.mcpContextInvalid,
         message: "todo_write requires a validated ctxId.",
-        retryable: false
+        retryable: false,
     });
 }
 
 export function decorateMcpInstanceGatewayArtifact(
     base: McpInstanceGateway,
-    artifactService: ArtifactService
+    artifactService: ArtifactService,
 ): McpInstanceGateway {
     return new Proxy(base, {
         get(target, property, receiver) {
@@ -619,12 +828,16 @@ export function decorateMcpInstanceGatewayArtifact(
                 return async (
                     defaultInstance: string,
                     input: ArtifactViewImageInput,
-                    signal?: AbortSignal
+                    signal?: AbortSignal,
                 ): Promise<ArtifactViewImageResult> =>
-                    await artifactService.viewImage(input, defaultInstance, signal);
+                    await artifactService.viewImage(
+                        input,
+                        defaultInstance,
+                        signal,
+                    );
             }
             const value = Reflect.get(target, property, receiver) as unknown;
             return typeof value === "function" ? value.bind(target) : value;
-        }
+        },
     });
 }

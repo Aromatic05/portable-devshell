@@ -17,6 +17,6 @@ export function cliBuiltinExtensionSources(): readonly CliBuiltinExtensionSource
         Object.freeze({ id: "skill", path: skillExtensionDirectory() }),
         Object.freeze({ id: "secret", path: secretExtensionDirectory() }),
         Object.freeze({ id: "storage", path: storageExtensionDirectory() }),
-        Object.freeze({ id: "mcp", path: mcpExtensionDirectory() })
+        Object.freeze({ id: "mcp", path: mcpExtensionDirectory() }),
     ]);
 }

@@ -5,7 +5,7 @@ import {
     asInstanceName,
     errorCodes,
     type InstanceEventStreamPort,
-    type InstanceStreamMessage
+    type InstanceStreamMessage,
 } from "@portable-devshell/shared";
 
 import { CliClientEventStream } from "../../src/transport/Client.js";
@@ -61,8 +61,9 @@ test("CLI event stream maps gaps and terminal closure to actionable errors", asy
         retryable: true,
     });
     await assert.rejects(
-        new CliClientEventStream(stream({ error: remote, kind: "closed" }))
-            .nextEvent(),
+        new CliClientEventStream(
+            stream({ error: remote, kind: "closed" }),
+        ).nextEvent(),
         (error: unknown) => {
             assert.equal(error, remote);
             assert.equal(readField(error, "code"), "stream.remoteCancelled");

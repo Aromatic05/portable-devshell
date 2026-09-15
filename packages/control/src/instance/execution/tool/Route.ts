@@ -8,7 +8,7 @@ import {
     resolveResultHints,
     toControlErrorBody,
     type JsonValue,
-    type PrefixRouteModuleDefinition
+    type PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../server/Route.js";
@@ -20,49 +20,83 @@ import {
     readToolApprovalListOptions,
     readToolCall,
     readToolCallQuery,
-    readToolSessionOpen
+    readToolSessionOpen,
 } from "./Input.js";
 
 export interface ToolRouteInstancePort {
     name?: string;
     worker: Pick<
         WorkerInstance,
-        "callTool" | "decideApproval" | "getApproval" | "listApprovals" | "listPendingApprovals" | "listTools" | "prepareWorkspace" | "readToolCalls" | "releaseToolSession"
+        | "callTool"
+        | "decideApproval"
+        | "getApproval"
+        | "listApprovals"
+        | "listPendingApprovals"
+        | "listTools"
+        | "prepareWorkspace"
+        | "readToolCalls"
+        | "releaseToolSession"
     >;
 }
 
 export function createToolRouteModule(
     instance: ToolRouteInstancePort,
-    provenance?: ToolCallProvenanceStore
+    provenance?: ToolCallProvenanceStore,
 ): PrefixRouteModuleDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
-            const { input, recording, toolName, workspace } = readToolCall(request.payload);
+            const { input, recording, toolName, workspace } = readToolCall(
+                request.payload,
+            );
             try {
-                const result = await instance.worker.callTool(toolName, input, {
-                    requestId: context.requestId,
-                    ctxId: context.connectionId,
-                    source: context.peer,
-                    workspace,
-                }, undefined, undefined, undefined, undefined, recording);
-                return attachComments(result, mergeComments([], resolveResultHints(toolName, result)));
+                const result = await instance.worker.callTool(
+                    toolName,
+                    input,
+                    {
+                        requestId: context.requestId,
+                        ctxId: context.connectionId,
+                        source: context.peer,
+                        workspace,
+                    },
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    recording,
+                );
+                return attachComments(
+                    result,
+                    mergeComments([], resolveResultHints(toolName, result)),
+                );
             } catch (error) {
-                const failure = error instanceof ControlError ? error : createError({
-                    code: errorCodes.targetInvalid,
-                    message: error instanceof Error ? error.message : String(error),
-                    retryable: false
-                });
+                const failure =
+                    error instanceof ControlError
+                        ? error
+                        : createError({
+                              code: errorCodes.targetInvalid,
+                              message:
+                                  error instanceof Error
+                                      ? error.message
+                                      : String(error),
+                              retryable: false,
+                          });
                 const body = toControlErrorBody(error);
-                const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
+                const hints =
+                    body === undefined ? [] : resolveErrorHints(toolName, body);
                 return {
                     comment: mergeComments([], hints),
-                    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-                    result: null
+                    error: {
+                        code: failure.code,
+                        message: failure.message,
+                        retryable: failure.retryable,
+                    },
+                    result: null,
                 } as unknown as JsonValue;
             }
         },
         callStream: async (request, context) => {
-            const { input, operationId, recording, toolName, workspace } = readToolCall(request.payload);
+            const { input, operationId, recording, toolName, workspace } =
+                readToolCall(request.payload);
             const controller = new AbortController();
             let closed = false;
             let sendTail = Promise.resolve();
@@ -71,18 +105,24 @@ export function createToolRouteModule(
                 {
                     onClose: () => {
                         closed = true;
-                        controller.abort(new Error("Tool progress stream was closed by the client."));
-                    }
-                }
+                        controller.abort(
+                            new Error(
+                                "Tool progress stream was closed by the client.",
+                            ),
+                        );
+                    },
+                },
             );
             const emitProgress = (progress: JsonValue) => {
                 if (closed) return;
-                sendTail = sendTail.then(async () => {
-                    if (!closed) await stream.emit("progress", progress);
-                }).catch((error) => {
-                    closed = true;
-                    controller.abort(error);
-                });
+                sendTail = sendTail
+                    .then(async () => {
+                        if (!closed) await stream.emit("progress", progress);
+                    })
+                    .catch((error) => {
+                        closed = true;
+                        controller.abort(error);
+                    });
             };
             let result: JsonValue;
             try {
@@ -100,21 +140,35 @@ export function createToolRouteModule(
                     undefined,
                     undefined,
                     emitProgress,
-                    recording
+                    recording,
                 );
-                result = attachComments(raw, mergeComments([], resolveResultHints(toolName, raw)));
+                result = attachComments(
+                    raw,
+                    mergeComments([], resolveResultHints(toolName, raw)),
+                );
             } catch (error) {
-                const failure = error instanceof ControlError ? error : createError({
-                    code: errorCodes.targetInvalid,
-                    message: error instanceof Error ? error.message : String(error),
-                    retryable: false
-                });
+                const failure =
+                    error instanceof ControlError
+                        ? error
+                        : createError({
+                              code: errorCodes.targetInvalid,
+                              message:
+                                  error instanceof Error
+                                      ? error.message
+                                      : String(error),
+                              retryable: false,
+                          });
                 const body = toControlErrorBody(error);
-                const hints = body === undefined ? [] : resolveErrorHints(toolName, body);
+                const hints =
+                    body === undefined ? [] : resolveErrorHints(toolName, body);
                 result = {
                     comment: mergeComments([], hints),
-                    error: { code: failure.code, message: failure.message, retryable: failure.retryable },
-                    result: null
+                    error: {
+                        code: failure.code,
+                        message: failure.message,
+                        retryable: failure.retryable,
+                    },
+                    result: null,
                 } as unknown as JsonValue;
             }
             await sendTail;
@@ -122,10 +176,12 @@ export function createToolRouteModule(
             return undefined;
         },
         openSession: async (request) => {
-            const prepared = await instance.worker.prepareWorkspace(readToolSessionOpen(request.payload).workspace);
+            const prepared = await instance.worker.prepareWorkspace(
+                readToolSessionOpen(request.payload).workspace,
+            );
             return {
                 tools: instance.worker.listTools(),
-                workspace: prepared.workspace
+                workspace: prepared.workspace,
             } as unknown as JsonValue;
         },
         closeSession: async (_request, context) => {
@@ -135,33 +191,52 @@ export function createToolRouteModule(
         listCalls: async (request) => {
             const query = readToolCallQuery(request.payload);
             const records = await instance.worker.readToolCalls(query);
-            const decorated = provenance === undefined || instance.name === undefined
-                ? records
-                : await provenance.decorate(instance.name, records).catch(() => records);
+            const decorated =
+                provenance === undefined || instance.name === undefined
+                    ? records
+                    : await provenance
+                          .decorate(instance.name, records)
+                          .catch(() => records);
             return limitToolCallResponse(
                 decorated,
-                query
+                query,
             ) as unknown as JsonValue;
         },
         listApprovals: async (request) => {
-            const { pendingOnly } = readToolApprovalListOptions(request.payload);
-            return await (pendingOnly
+            const { pendingOnly } = readToolApprovalListOptions(
+                request.payload,
+            );
+            return (await (pendingOnly
                 ? instance.worker.listPendingApprovals()
-                : instance.worker.listApprovals()) as unknown as JsonValue;
+                : instance.worker.listApprovals())) as unknown as JsonValue;
         },
-        getApproval: async (request) => await instance.worker.getApproval(
-            readToolApprovalId(request.payload, "tool.getApproval")
-        ) as unknown as JsonValue,
-        decideApproval: async (request, context) => await instance.worker.decideApproval(
-            readToolApprovalId(request.payload, "tool.decideApproval"),
-            { ...readToolApprovalDecision(request.payload), decidedBy: context.peer }
-        ) as unknown as JsonValue
+        getApproval: async (request) =>
+            (await instance.worker.getApproval(
+                readToolApprovalId(request.payload, "tool.getApproval"),
+            )) as unknown as JsonValue,
+        decideApproval: async (request, context) =>
+            (await instance.worker.decideApproval(
+                readToolApprovalId(request.payload, "tool.decideApproval"),
+                {
+                    ...readToolApprovalDecision(request.payload),
+                    decidedBy: context.peer,
+                },
+            )) as unknown as JsonValue,
     });
 }
 
-function attachComments(result: JsonValue, comments: readonly string[]): JsonValue {
-    if (typeof result !== "object" || result === null || Array.isArray(result)) {
-        throw new Error("Tool results must be objects when context comments are enabled.");
+function attachComments(
+    result: JsonValue,
+    comments: readonly string[],
+): JsonValue {
+    if (
+        typeof result !== "object" ||
+        result === null ||
+        Array.isArray(result)
+    ) {
+        throw new Error(
+            "Tool results must be objects when context comments are enabled.",
+        );
     }
     return { ...result, comment: [...comments] };
 }

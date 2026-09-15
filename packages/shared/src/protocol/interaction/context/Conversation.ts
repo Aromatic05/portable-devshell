@@ -22,7 +22,6 @@ export interface ConversationListInput {
     maxBytes?: number;
 }
 
-
 export const CONVERSATION_PREFERENCES_VERSION = 1 as const;
 
 export interface ConversationPreferencesSnapshot {

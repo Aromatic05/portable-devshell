@@ -10,17 +10,26 @@ import { chromiumTestOptions } from "../../../../test/TestPlatformSupport.ts";
 const CHROMIUM_EXECUTABLE = resolveChromiumExecutable();
 const BROWSER_TEST_OPTIONS = chromiumTestOptions(CHROMIUM_EXECUTABLE);
 
-test("Live Workspace requests PiP and uses direct state transport before MCP fallbacks", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace requests PiP and uses direct state transport before MCP fallbacks",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(LIVE_TRANSPORT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(LIVE_TRANSPORT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.__liveFetchCalls = [];
             window.__liveWatchReplied = false;
             window.fetch = function (url, options) {
@@ -51,121 +60,205 @@ test("Live Workspace requests PiP and uses direct state transport before MCP fal
                     }
                 });
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    await frame.waitForFunction("(window.__liveFetchCalls || []).some(call => call.url.includes('/snapshot'))");
-    await frame.waitForFunction("(window.__liveFetchCalls || []).some(call => call.url.includes('/watch'))");
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 1",
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        await frame.waitForFunction(
+            "(window.__liveFetchCalls || []).some(call => call.url.includes('/snapshot'))",
+        );
+        await frame.waitForFunction(
+            "(window.__liveFetchCalls || []).some(call => call.url.includes('/watch'))",
+        );
 
-    assert.deepEqual(await page.evaluate("window.__liveDisplayModeRequests"), [{ mode: "pip" }]);
-    const fetchCalls = await frame.evaluate("window.__liveFetchCalls") as Array<{ authorization?: string; url: string }>;
-    assert.equal(fetchCalls.every((call) => call.authorization === "Bearer live-direct-token"), true);
-    assert.equal(fetchCalls.some((call) => call.url.includes("ctxId=ctx-live-direct")), true);
-    assert.equal(
-        await page.evaluate("(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_watch' || call.name === 'workspace_reconnect')"),
-        false,
-    );
-    await frame.evaluate(() => {
-        window.dispatchEvent(new CustomEvent("openai:set_globals", {
-            detail: {
-                globals: {
-                    toolOutput: { ctxId: "ctx-stale", instance: "browser-instance" },
-                    toolResponseMetadata: {
-                        mcp_tool_result: {
-                            _meta: { "portable-devshell/workspace": {
-                                liveBaseUrl: "https://stale.example/api/live/demo/workspace",
-                                token: "stale-token",
-                            } },
-                            structuredContent: { ctxId: "ctx-stale", instance: "browser-instance" },
+        assert.deepEqual(
+            await page.evaluate("window.__liveDisplayModeRequests"),
+            [{ mode: "pip" }],
+        );
+        const fetchCalls = (await frame.evaluate(
+            "window.__liveFetchCalls",
+        )) as Array<{ authorization?: string; url: string }>;
+        assert.equal(
+            fetchCalls.every(
+                (call) => call.authorization === "Bearer live-direct-token",
+            ),
+            true,
+        );
+        assert.equal(
+            fetchCalls.some((call) =>
+                call.url.includes("ctxId=ctx-live-direct"),
+            ),
+            true,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot' || call.name === 'workspace_watch' || call.name === 'workspace_reconnect')",
+            ),
+            false,
+        );
+        await frame.evaluate(() => {
+            window.dispatchEvent(
+                new CustomEvent("openai:set_globals", {
+                    detail: {
+                        globals: {
+                            toolOutput: {
+                                ctxId: "ctx-stale",
+                                instance: "browser-instance",
+                            },
+                            toolResponseMetadata: {
+                                mcp_tool_result: {
+                                    _meta: {
+                                        "portable-devshell/workspace": {
+                                            liveBaseUrl:
+                                                "https://stale.example/api/live/demo/workspace",
+                                            token: "stale-token",
+                                        },
+                                    },
+                                    structuredContent: {
+                                        ctxId: "ctx-stale",
+                                        instance: "browser-instance",
+                                    },
+                                },
+                            },
                         },
                     },
-                },
-            },
-        }));
-    });
-    await page.waitForTimeout(100);
-    const afterStaleResult = await frame.evaluate("window.__liveFetchCalls") as Array<{ authorization?: string; url: string }>;
-    assert.equal(afterStaleResult.some((call) => call.url.includes("ctxId=ctx-stale")), false);
-    assert.equal(afterStaleResult.some((call) => call.authorization === "Bearer stale-token"), false);
-});
+                }),
+            );
+        });
+        await page.waitForTimeout(100);
+        const afterStaleResult = (await frame.evaluate(
+            "window.__liveFetchCalls",
+        )) as Array<{ authorization?: string; url: string }>;
+        assert.equal(
+            afterStaleResult.some((call) =>
+                call.url.includes("ctxId=ctx-stale"),
+            ),
+            false,
+        );
+        assert.equal(
+            afterStaleResult.some(
+                (call) => call.authorization === "Bearer stale-token",
+            ),
+            false,
+        );
+    },
+);
 
-test("Live Workspace reclaims PiP presentation after its iframe is refreshed", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace reclaims PiP presentation after its iframe is refreshed",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace(
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
             "window.__liveDisplayModeRequests = [];",
             'window.__liveDisplayModeRequests = []; window.__liveHostDisplayMode = "inline";',
         )
-        .replace('displayMode: "inline"', "displayMode: window.__liveHostDisplayMode")
-        .replace(
-            "window.__liveDisplayModeRequests.push(message.params);",
-            'window.__liveDisplayModeRequests.push(message.params); window.__liveHostDisplayMode = "pip";',
-        );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
-            modelContent: null,
-            privateContent: {},
-            imageIds: [],
-        };
-        iframe.srcdoc = html
-            .replace("var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;", "var DISPLAY_MODE_TRANSITION_LEASE_MS = 20;")
-            .replace("<script>", `<script>
+            .replace(
+                'displayMode: "inline"',
+                "displayMode: window.__liveHostDisplayMode",
+            )
+            .replace(
+                "window.__liveDisplayModeRequests.push(message.params);",
+                'window.__liveDisplayModeRequests.push(message.params); window.__liveHostDisplayMode = "pip";',
+            );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            (
+                window as unknown as Record<string, unknown>
+            ).__presentationWidgetState = {
+                modelContent: null,
+                privateContent: {},
+                imageIds: [],
+            };
+            iframe.srcdoc = html
+                .replace(
+                    "var DISPLAY_MODE_TRANSITION_LEASE_MS = 2000;",
+                    "var DISPLAY_MODE_TRANSITION_LEASE_MS = 20;",
+                )
+                .replace(
+                    "<script>",
+                    `<script>
                 window.openai = {
                     get widgetState() { return window.parent.__presentationWidgetState; },
                     setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
                 };
-            <\/script><script>`);
-    }, workspaceAppHtml);
+            <\/script><script>`,
+                );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-    await page.waitForTimeout(40);
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    await frame.evaluate(() => window.location.reload());
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 1",
+        );
+        await page.waitForTimeout(40);
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        await frame.evaluate(() => window.location.reload());
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 2");
-    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
-});
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 2",
+        );
+        assert.equal(
+            await page.evaluate("window.__liveHostDisplayMode"),
+            "pip",
+        );
+    },
+);
 
-test("Live Workspace consumes its own PiP remount once and only reclaims if Host settles inline", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace consumes its own PiP remount once and only reclaims if Host settles inline",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace(
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
             "window.__liveDisplayModeRequests = [];",
             'window.__liveDisplayModeRequests = []; window.__liveHostDisplayMode = "inline"; window.__liveInitializeCount = 0;',
         )
-        .replace('displayMode: "inline"', "displayMode: window.__liveHostDisplayMode")
-        .replace(
-            'if (message.method === "ui/initialize") {',
-            'if (message.method === "ui/initialize") { window.__liveInitializeCount += 1;',
-        )
-        .replace(
-            `source.postMessage({
+            .replace(
+                'displayMode: "inline"',
+                "displayMode: window.__liveHostDisplayMode",
+            )
+            .replace(
+                'if (message.method === "ui/initialize") {',
+                'if (message.method === "ui/initialize") { window.__liveInitializeCount += 1;',
+            )
+            .replace(
+                `source.postMessage({
             jsonrpc: "2.0",
             method: "ui/notifications/tool-result",`,
-            `if (false) source.postMessage({
+                `if (false) source.postMessage({
             jsonrpc: "2.0",
             method: "ui/notifications/tool-result",`,
-        )
-        .replace(
-            `window.__liveDisplayModeRequests.push(message.params);
+            )
+            .replace(
+                `window.__liveDisplayModeRequests.push(message.params);
         reply({ mode: "pip" });
         return;`,
-            `window.__liveDisplayModeRequests.push(message.params);
+                `window.__liveDisplayModeRequests.push(message.params);
         window.__liveHostDisplayMode = "pip";
         if (window.__liveDisplayModeRequests.length === 1) {
             source.location.reload();
@@ -173,286 +266,496 @@ test("Live Workspace consumes its own PiP remount once and only reclaims if Host
         }
         reply({ mode: "pip" });
         return;`,
-        );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        (window as unknown as Record<string, unknown>).__presentationWidgetState = {
-            modelContent: null,
-            privateContent: {},
-            imageIds: [],
-        };
-        iframe.srcdoc = html.replace("<script>", `<script>
+            );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            (
+                window as unknown as Record<string, unknown>
+            ).__presentationWidgetState = {
+                modelContent: null,
+                privateContent: {},
+                imageIds: [],
+            };
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.openai = {
                 get widgetState() { return window.parent.__presentationWidgetState; },
                 setWidgetState: function (state) { window.parent.__presentationWidgetState = state; }
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("window.__liveInitializeCount >= 2");
-    await page.frameLocator("#workspace").getByText("Waiting for Workspace authorization", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(150);
-    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
-    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
-    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
+        await page.waitForFunction("window.__liveInitializeCount >= 2");
+        await page
+            .frameLocator("#workspace")
+            .getByText("Waiting for Workspace authorization", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForTimeout(150);
+        assert.equal(
+            await page.evaluate("window.__liveDisplayModeRequests.length"),
+            1,
+        );
+        assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
+        assert.equal(
+            await page.evaluate("window.__liveHostDisplayMode"),
+            "pip",
+        );
 
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe?.contentWindow === null || iframe?.contentWindow === undefined) throw new Error("Workspace frame is missing.");
-        iframe.contentWindow.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/host-context-changed",
-            params: { displayMode: "inline" },
-        }, "*");
-    });
-    await page.waitForFunction("window.__liveDisplayModeRequests.length === 2");
-    assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
-    assert.equal(await page.evaluate("window.__liveHostDisplayMode"), "pip");
-});
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (
+                iframe?.contentWindow === null ||
+                iframe?.contentWindow === undefined
+            )
+                throw new Error("Workspace frame is missing.");
+            iframe.contentWindow.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/host-context-changed",
+                    params: { displayMode: "inline" },
+                },
+                "*",
+            );
+        });
+        await page.waitForFunction(
+            "window.__liveDisplayModeRequests.length === 2",
+        );
+        assert.equal(await page.evaluate("window.__liveInitializeCount"), 2);
+        assert.equal(
+            await page.evaluate("window.__liveHostDisplayMode"),
+            "pip",
+        );
+    },
+);
 
-test("Live Workspace completes its initial PiP claim when Host capabilities arrive late", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace completes its initial PiP claim when Host capabilities arrive late",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace(
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
             'hostContext: { availableDisplayModes: ["inline", "pip"], displayMode: "inline" },',
             'hostContext: { displayMode: "inline" },',
-        )
-        .replace(
+        ).replace(
             'if (message.method === "ui/initialize") {',
             'if (message.method === "ui/initialize") { window.__lateCapabilityInitializeCount = (window.__lateCapabilityInitializeCount || 0) + 1;',
         );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__lateCapabilityInitializeCount || 0) === 1");
-    assert.equal(await page.evaluate("(window.__liveDisplayModeRequests || []).length"), 0);
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe?.contentWindow === null || iframe?.contentWindow === undefined) throw new Error("Workspace frame is missing.");
-        iframe.contentWindow.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/host-context-changed",
-            params: { availableDisplayModes: ["inline", "pip"] },
-        }, "*");
-    });
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-});
+        await page.waitForFunction(
+            "(window.__lateCapabilityInitializeCount || 0) === 1",
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__liveDisplayModeRequests || []).length",
+            ),
+            0,
+        );
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (
+                iframe?.contentWindow === null ||
+                iframe?.contentWindow === undefined
+            )
+                throw new Error("Workspace frame is missing.");
+            iframe.contentWindow.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/host-context-changed",
+                    params: { availableDisplayModes: ["inline", "pip"] },
+                },
+                "*",
+            );
+        });
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 1",
+        );
+    },
+);
 
-test("Live Workspace retries a temporary inline result during the initial PiP claim", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace retries a temporary inline result during the initial PiP claim",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
-        'reply({ mode: "pip" });',
-        'window.__displayClaimAttempt = (window.__displayClaimAttempt || 0) + 1; reply({ mode: window.__displayClaimAttempt === 1 ? "inline" : "pip" });',
-    );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("var DISPLAY_MODE_RETRY_MS = 750;", "var DISPLAY_MODE_RETRY_MS = 20;");
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'reply({ mode: "pip" });',
+            'window.__displayClaimAttempt = (window.__displayClaimAttempt || 0) + 1; reply({ mode: window.__displayClaimAttempt === 1 ? "inline" : "pip" });',
+        );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "var DISPLAY_MODE_RETRY_MS = 750;",
+                "var DISPLAY_MODE_RETRY_MS = 20;",
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length >= 2");
-});
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length >= 2",
+        );
+    },
+);
 
-test("Live Workspace leaves later Host display-mode changes under user control", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace leaves later Host display-mode changes under user control",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
-        'reply({ mode: "pip" });',
-        'reply({ mode: "pip" }); source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: { displayMode: "pip" } }, "*");',
-    );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'reply({ mode: "pip" });',
+            'reply({ mode: "pip" }); source.postMessage({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: { displayMode: "pip" } }, "*");',
+        );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-    await page.evaluate(() => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe?.contentWindow === null || iframe?.contentWindow === undefined) throw new Error("Workspace frame is missing.");
-        iframe.contentWindow.postMessage({
-            jsonrpc: "2.0",
-            method: "ui/notifications/host-context-changed",
-            params: { displayMode: "inline" },
-        }, "*");
-    });
-    await page.waitForTimeout(150);
-    assert.equal(await page.evaluate("(window.__liveDisplayModeRequests || []).length"), 1);
-});
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 1",
+        );
+        await page.evaluate(() => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (
+                iframe?.contentWindow === null ||
+                iframe?.contentWindow === undefined
+            )
+                throw new Error("Workspace frame is missing.");
+            iframe.contentWindow.postMessage(
+                {
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/host-context-changed",
+                    params: { displayMode: "inline" },
+                },
+                "*",
+            );
+        });
+        await page.waitForTimeout(150);
+        assert.equal(
+            await page.evaluate(
+                "(window.__liveDisplayModeRequests || []).length",
+            ),
+            1,
+        );
+    },
+);
 
-test("Live Workspace initialization does not depend on a display-mode response", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace initialization does not depend on a display-mode response",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace('reply({ mode: "pip" });', "return;")
-        .replace('liveBaseUrl: "https://live.example/api/live/demo/workspace",', "");
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'reply({ mode: "pip" });',
+            "return;",
+        ).replace(
+            'liveBaseUrl: "https://live.example/api/live/demo/workspace",',
+            "",
+        );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length === 1");
-    await page.waitForFunction("(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot')");
-});
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__liveToolCalls || []).some(call => call.name === 'workspace_snapshot')",
+        );
+    },
+);
 
-test("Live Workspace retries a transient Host initialization failure", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace retries a transient Host initialization failure",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
-        'if (message.method === "ui/initialize") {',
-        'if (message.method === "ui/initialize") { window.__liveInitializeCount = (window.__liveInitializeCount || 0) + 1; if (window.__liveInitializeCount === 1) return;',
-    );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html
-            .replace("var HOST_CONNECT_TIMEOUT_MS = 3000;", "var HOST_CONNECT_TIMEOUT_MS = 50;")
-            .replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;");
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'if (message.method === "ui/initialize") {',
+            'if (message.method === "ui/initialize") { window.__liveInitializeCount = (window.__liveInitializeCount || 0) + 1; if (window.__liveInitializeCount === 1) return;',
+        );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html
+                .replace(
+                    "var HOST_CONNECT_TIMEOUT_MS = 3000;",
+                    "var HOST_CONNECT_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_START_RETRY_MS = 1000;",
+                    "var LIVE_START_RETRY_MS = 50;",
+                );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveInitializeCount || 0) >= 2");
-    await page.waitForFunction("(window.__liveDisplayModeRequests || []).length >= 1");
-});
+        await page.waitForFunction("(window.__liveInitializeCount || 0) >= 2");
+        await page.waitForFunction(
+            "(window.__liveDisplayModeRequests || []).length >= 1",
+        );
+    },
+);
 
-test("Live Workspace retries a transient initial snapshot failure", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace retries a transient initial snapshot failure",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace('liveBaseUrl: "https://live.example/api/live/demo/workspace",', "")
-        .replace(
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'liveBaseUrl: "https://live.example/api/live/demo/workspace",',
+            "",
+        ).replace(
             "window.__liveToolCalls.push(message.params || {});",
             'window.__liveToolCalls.push(message.params || {}); if (message.params && message.params.name === "workspace_snapshot") { window.__liveSnapshotCallCount = (window.__liveSnapshotCallCount || 0) + 1; if (window.__liveSnapshotCallCount === 1) { source.postMessage({ id: message.id, jsonrpc: "2.0", error: { code: -32603, message: "transient snapshot failure" } }, "*"); return; } }',
         );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;");
-    }, workspaceAppHtml);
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "var LIVE_START_RETRY_MS = 1000;",
+                "var LIVE_START_RETRY_MS = 50;",
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__liveSnapshotCallCount || 0) >= 2");
-});
-
-test("Live Workspace keeps the established Host bridge mounted when a tool request stalls", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace('liveBaseUrl: "https://live.example/api/live/demo/workspace",', "")
-        .replace(
-            'if (message.method === "ui/initialize") {',
-            'if (message.method === "ui/initialize") { window.__bridgeInitializeCount = (window.__bridgeInitializeCount || 0) + 1;',
-        )
-        .replace(
-            "window.__liveToolCalls.push(message.params || {});",
-            'window.__liveToolCalls.push(message.params || {}); if (message.params && message.params.name === "workspace_watch") { window.__bridgeWatchCount = (window.__bridgeWatchCount || 0) + 1; if (window.__bridgeWatchCount === 1) return; }',
+        await page.waitForFunction(
+            "(window.__liveSnapshotCallCount || 0) >= 2",
         );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html
-            .replace("var APP_TOOL_TIMEOUT_MS = 30000;", "var APP_TOOL_TIMEOUT_MS = 50;")
-            .replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;")
-            .replace("await sleep(1000);", "await sleep(50);");
-    }, workspaceAppHtml);
+    },
+);
 
-    await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 1");
-    await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2");
-    assert.equal(await page.evaluate("window.__bridgeInitializeCount"), 1);
-    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
-});
+test(
+    "Live Workspace keeps the established Host bridge mounted when a tool request stalls",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-test("Live Workspace retries Host model-context delivery without re-handshaking", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
-
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT
-        .replace('liveBaseUrl: "https://live.example/api/live/demo/workspace",', "")
-        .replace(
-            'if (message.method === "ui/initialize") {',
-            'if (message.method === "ui/initialize") { window.__contextBridgeInitializeCount = (window.__contextBridgeInitializeCount || 0) + 1;',
-        )
-        .replace(
-            'if (message.method === "ui/update-model-context") { reply({}); return; }',
-            'if (message.method === "ui/update-model-context") { window.__contextUpdateCount = (window.__contextUpdateCount || 0) + 1; if (window.__contextUpdateCount === 1) return; reply({}); return; }',
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
         );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html
-            .replace("var HOST_REQUEST_TIMEOUT_MS = 5000;", "var HOST_REQUEST_TIMEOUT_MS = 50;")
-            .replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;");
-    }, workspaceAppHtml);
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'liveBaseUrl: "https://live.example/api/live/demo/workspace",',
+            "",
+        )
+            .replace(
+                'if (message.method === "ui/initialize") {',
+                'if (message.method === "ui/initialize") { window.__bridgeInitializeCount = (window.__bridgeInitializeCount || 0) + 1;',
+            )
+            .replace(
+                "window.__liveToolCalls.push(message.params || {});",
+                'window.__liveToolCalls.push(message.params || {}); if (message.params && message.params.name === "workspace_watch") { window.__bridgeWatchCount = (window.__bridgeWatchCount || 0) + 1; if (window.__bridgeWatchCount === 1) return; }',
+            );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html
+                .replace(
+                    "var APP_TOOL_TIMEOUT_MS = 30000;",
+                    "var APP_TOOL_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_START_RETRY_MS = 1000;",
+                    "var LIVE_START_RETRY_MS = 50;",
+                )
+                .replace("await sleep(1000);", "await sleep(50);");
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__contextUpdateCount || 0) >= 1");
-    await page.waitForFunction("(window.__contextUpdateCount || 0) >= 2");
-    assert.equal(await page.evaluate("window.__contextBridgeInitializeCount"), 1);
-    assert.equal(await page.evaluate("window.__liveDisplayModeRequests.length"), 1);
-});
+        await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 1");
+        await page.waitForFunction("(window.__bridgeWatchCount || 0) >= 2");
+        assert.equal(await page.evaluate("window.__bridgeInitializeCount"), 1);
+        assert.equal(
+            await page.evaluate("window.__liveDisplayModeRequests.length"),
+            1,
+        );
+    },
+);
 
-test("Workspace does not let an older concurrent snapshot overwrite a newer action refresh", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace retries Host model-context delivery without re-handshaking",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(ORDERING_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+            'liveBaseUrl: "https://live.example/api/live/demo/workspace",',
+            "",
+        )
+            .replace(
+                'if (message.method === "ui/initialize") {',
+                'if (message.method === "ui/initialize") { window.__contextBridgeInitializeCount = (window.__contextBridgeInitializeCount || 0) + 1;',
+            )
+            .replace(
+                'if (message.method === "ui/update-model-context") { reply({}); return; }',
+                'if (message.method === "ui/update-model-context") { window.__contextUpdateCount = (window.__contextUpdateCount || 0) + 1; if (window.__contextUpdateCount === 1) return; reply({}); return; }',
+            );
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html
+                .replace(
+                    "var HOST_REQUEST_TIMEOUT_MS = 5000;",
+                    "var HOST_REQUEST_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_START_RETRY_MS = 1000;",
+                    "var LIVE_START_RETRY_MS = 50;",
+                );
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.locator('[data-task-control="pause"][data-task-id="task-order-1"]').waitFor({ state: "visible" });
-    await app.locator('[data-task-control="pause"][data-task-id="task-order-2"]').waitFor({ state: "visible" });
+        await page.waitForFunction("(window.__contextUpdateCount || 0) >= 1");
+        await page.waitForFunction("(window.__contextUpdateCount || 0) >= 2");
+        assert.equal(
+            await page.evaluate("window.__contextBridgeInitializeCount"),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("window.__liveDisplayModeRequests.length"),
+            1,
+        );
+    },
+);
 
-    await app.locator('[data-task-control="pause"][data-task-id="task-order-1"]').click();
-    await page.waitForFunction("(window.__orderingSnapshotCount || 0) >= 2");
-    await app.locator('[data-task-control="pause"][data-task-id="task-order-2"]').click();
-    await page.waitForFunction("(window.__orderingSnapshotCount || 0) >= 3");
-    await page.waitForTimeout(250);
+test(
+    "Workspace does not let an older concurrent snapshot overwrite a newer action refresh",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    assert.equal(await app.locator('[data-task-control="pause"][data-task-id="task-order-1"]').count(), 0);
-    assert.equal(await app.locator('[data-task-control="pause"][data-task-id="task-order-2"]').count(), 0);
-});
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(ORDERING_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
+
+        const app = page.frameLocator("#workspace");
+        await app
+            .locator('[data-task-control="pause"][data-task-id="task-order-1"]')
+            .waitFor({ state: "visible" });
+        await app
+            .locator('[data-task-control="pause"][data-task-id="task-order-2"]')
+            .waitFor({ state: "visible" });
+
+        await app
+            .locator('[data-task-control="pause"][data-task-id="task-order-1"]')
+            .click();
+        await page.waitForFunction(
+            "(window.__orderingSnapshotCount || 0) >= 2",
+        );
+        await app
+            .locator('[data-task-control="pause"][data-task-id="task-order-2"]')
+            .click();
+        await page.waitForFunction(
+            "(window.__orderingSnapshotCount || 0) >= 3",
+        );
+        await page.waitForTimeout(250);
+
+        assert.equal(
+            await app
+                .locator(
+                    '[data-task-control="pause"][data-task-id="task-order-1"]',
+                )
+                .count(),
+            0,
+        );
+        assert.equal(
+            await app
+                .locator(
+                    '[data-task-control="pause"][data-task-id="task-order-2"]',
+                )
+                .count(),
+            0,
+        );
+    },
+);
 
 const ORDERING_BRIDGE_SCRIPT = String.raw`
 window.__orderingSnapshotCount = 0;
@@ -603,20 +906,35 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Live Workspace times out stalled direct transport and falls back to MCP", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace times out stalled direct transport and falls back to MCP",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html
-            .replace("var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;", "var LIVE_SNAPSHOT_TIMEOUT_MS = 50;")
-            .replace("var LIVE_WATCH_TIMEOUT_MS = 30000;", "var LIVE_WATCH_TIMEOUT_MS = 50;")
-            .replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html
+                .replace(
+                    "var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;",
+                    "var LIVE_SNAPSHOT_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_WATCH_TIMEOUT_MS = 30000;",
+                    "var LIVE_WATCH_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "<script>",
+                    `<script>
                 window.__stalledLiveFetchCalls = [];
                 window.openai = {
                     widgetState: {
@@ -640,61 +958,118 @@ test("Live Workspace times out stalled direct transport and falls back to MCP", 
                         }
                     });
                 };
-            <\/script><script>`);
-    }, workspaceAppHtml);
+            <\/script><script>`,
+                );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')");
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')");
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    const directCalls = await frame.evaluate("window.__stalledLiveFetchCalls || []") as string[];
-    assert.equal(directCalls.some((url) => url.includes("/snapshot")), true);
-    assert.equal(directCalls.some((url) => url.includes("/watch")), false);
-    assert.equal(
-        await frame.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.liveBaseUrl || null"),
-        null,
-    );
-    await frame.evaluate(() => {
-        window.dispatchEvent(new CustomEvent("openai:set_globals", { detail: { globals: {
-            widgetState: {
-                modelContent: null,
-                privateContent: { portableDevshellWorkspace: {
-                    ctxId: "ctx-stalled-live",
-                    token: "stalled-live-token",
-                    liveBaseUrl: "https://stalled.example/api/live/demo/workspace",
-                } },
-                imageIds: [],
-            },
-        } } }));
-    });
-    await page.waitForTimeout(50);
-    assert.equal(
-        await frame.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.liveBaseUrl || null"),
-        null,
-    );
-    const toolCalls = await page.evaluate("window.__stalledLiveToolCalls || []") as Array<{ name?: string }>;
-    assert.equal(toolCalls.some((call) => call.name === "workspace_snapshot"), true);
-    assert.equal(toolCalls.some((call) => call.name === "workspace_watch"), true);
-});
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')",
+        );
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')",
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        const directCalls = (await frame.evaluate(
+            "window.__stalledLiveFetchCalls || []",
+        )) as string[];
+        assert.equal(
+            directCalls.some((url) => url.includes("/snapshot")),
+            true,
+        );
+        assert.equal(
+            directCalls.some((url) => url.includes("/watch")),
+            false,
+        );
+        assert.equal(
+            await frame.evaluate(
+                "window.openai.widgetState.privateContent.portableDevshellWorkspace.liveBaseUrl || null",
+            ),
+            null,
+        );
+        await frame.evaluate(() => {
+            window.dispatchEvent(
+                new CustomEvent("openai:set_globals", {
+                    detail: {
+                        globals: {
+                            widgetState: {
+                                modelContent: null,
+                                privateContent: {
+                                    portableDevshellWorkspace: {
+                                        ctxId: "ctx-stalled-live",
+                                        token: "stalled-live-token",
+                                        liveBaseUrl:
+                                            "https://stalled.example/api/live/demo/workspace",
+                                    },
+                                },
+                                imageIds: [],
+                            },
+                        },
+                    },
+                }),
+            );
+        });
+        await page.waitForTimeout(50);
+        assert.equal(
+            await frame.evaluate(
+                "window.openai.widgetState.privateContent.portableDevshellWorkspace.liveBaseUrl || null",
+            ),
+            null,
+        );
+        const toolCalls = (await page.evaluate(
+            "window.__stalledLiveToolCalls || []",
+        )) as Array<{ name?: string }>;
+        assert.equal(
+            toolCalls.some((call) => call.name === "workspace_snapshot"),
+            true,
+        );
+        assert.equal(
+            toolCalls.some((call) => call.name === "workspace_watch"),
+            true,
+        );
+    },
+);
 
-test("Live Workspace backs off a direct endpoint that authoritative metadata keeps advertising", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace backs off a direct endpoint that authoritative metadata keeps advertising",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
-        '_meta: { "portable-devshell/workspace": { token: "stalled-live-token" } },',
-        '_meta: { "portable-devshell/workspace": { token: "stalled-live-token", liveBaseUrl: "https://stalled.example/api/live/demo/workspace" } },',
-    ));
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html
-            .replace("var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;", "var LIVE_SNAPSHOT_TIMEOUT_MS = 50;")
-            .replace("var LIVE_WATCH_TIMEOUT_MS = 30000;", "var LIVE_WATCH_TIMEOUT_MS = 50;")
-            .replace("var LIVE_TRANSPORT_BACKOFF_MS = 30000;", "var LIVE_TRANSPORT_BACKOFF_MS = 5000;")
-            .replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(
+            STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT.replace(
+                '_meta: { "portable-devshell/workspace": { token: "stalled-live-token" } },',
+                '_meta: { "portable-devshell/workspace": { token: "stalled-live-token", liveBaseUrl: "https://stalled.example/api/live/demo/workspace" } },',
+            ),
+        );
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html
+                .replace(
+                    "var LIVE_SNAPSHOT_TIMEOUT_MS = 5000;",
+                    "var LIVE_SNAPSHOT_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_WATCH_TIMEOUT_MS = 30000;",
+                    "var LIVE_WATCH_TIMEOUT_MS = 50;",
+                )
+                .replace(
+                    "var LIVE_TRANSPORT_BACKOFF_MS = 30000;",
+                    "var LIVE_TRANSPORT_BACKOFF_MS = 5000;",
+                )
+                .replace(
+                    "<script>",
+                    `<script>
                 window.__stalledLiveFetchCalls = [];
                 window.fetch = function (url, options) {
                     window.__stalledLiveFetchCalls.push(String(url));
@@ -706,29 +1081,54 @@ test("Live Workspace backs off a direct endpoint that authoritative metadata kee
                         }
                     });
                 };
-            <\/script><script>`);
-    }, workspaceAppHtml);
+            <\/script><script>`,
+                );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')");
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')");
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    const directCalls = await frame.evaluate("window.__stalledLiveFetchCalls || []") as string[];
-    assert.equal(directCalls.filter((url) => url.includes("/snapshot")).length, 1);
-    assert.equal(directCalls.some((url) => url.includes("/watch")), false);
-});
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')",
+        );
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')",
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        const directCalls = (await frame.evaluate(
+            "window.__stalledLiveFetchCalls || []",
+        )) as string[];
+        assert.equal(
+            directCalls.filter((url) => url.includes("/snapshot")).length,
+            1,
+        );
+        assert.equal(
+            directCalls.some((url) => url.includes("/watch")),
+            false,
+        );
+    },
+);
 
-test("Live Workspace verifies a generic direct authorization failure through MCP before giving up", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Live Workspace verifies a generic direct authorization failure through MCP before giving up",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.__directAuthFetchCalls = [];
             window.fetch = function (url) {
                 window.__directAuthFetchCalls.push(String(url));
@@ -737,17 +1137,33 @@ test("Live Workspace verifies a generic direct authorization failure through MCP
                     status: 401
                 }));
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')");
-    await page.waitForFunction("(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')");
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    const directCalls = await frame.evaluate("window.__directAuthFetchCalls || []") as string[];
-    assert.equal(directCalls.filter((url) => url.includes("/snapshot")).length, 1);
-    assert.equal(directCalls.some((url) => url.includes("/watch")), false);
-});
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_snapshot')",
+        );
+        await page.waitForFunction(
+            "(window.__stalledLiveToolCalls || []).some(call => call.name === 'workspace_watch')",
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        const directCalls = (await frame.evaluate(
+            "window.__directAuthFetchCalls || []",
+        )) as string[];
+        assert.equal(
+            directCalls.filter((url) => url.includes("/snapshot")).length,
+            1,
+        );
+        assert.equal(
+            directCalls.some((url) => url.includes("/watch")),
+            false,
+        );
+    },
+);
 
 const STALLED_LIVE_TRANSPORT_BRIDGE_SCRIPT = String.raw`
 window.__stalledLiveToolCalls = [];
@@ -807,17 +1223,26 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace ignores an old direct response after the host switches Context", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace ignores an old direct response after the host switches Context",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(SWITCHED_CONTEXT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(SWITCHED_CONTEXT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.__oldSnapshotResolve = null;
             window.fetch = function (url, options) {
                 var text = String(url);
@@ -849,34 +1274,65 @@ test("Workspace ignores an old direct response after the host switches Context",
                     }, { once: true });
                 });
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    await frame.waitForFunction("typeof window.__oldSnapshotResolve === 'function'");
-    await frame.evaluate(() => {
-        window.dispatchEvent(new CustomEvent("openai:set_globals", {
-            detail: { globals: {
-                toolOutput: { ctxId: "ctx-new-direct", instance: "browser-instance" },
-                toolResponseMetadata: { mcp_tool_result: {
-                    _meta: { "portable-devshell/workspace": {
-                        liveBaseUrl: "https://new.example/api/live/demo/workspace",
-                        token: "new-direct-token"
-                    } },
-                    structuredContent: { ctxId: "ctx-new-direct", instance: "browser-instance" }
-                } }
-            } }
-        }));
-    });
-    await page.waitForFunction("(window.__switchedContextModelUpdates || []).some(update => update && update.portableDevshellWorkspace && update.portableDevshellWorkspace.ctxId === 'ctx-new-direct')");
-    assert.equal(await frame.evaluate("window.__oldSnapshotResolve() || true"), true);
-    await page.waitForTimeout(100);
-    const updates = await page.evaluate("window.__switchedContextModelUpdates || []") as Array<{
-        portableDevshellWorkspace?: { ctxId?: string };
-    }>;
-    assert.equal(updates.at(-1)?.portableDevshellWorkspace?.ctxId, "ctx-new-direct");
-});
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        await frame.waitForFunction(
+            "typeof window.__oldSnapshotResolve === 'function'",
+        );
+        await frame.evaluate(() => {
+            window.dispatchEvent(
+                new CustomEvent("openai:set_globals", {
+                    detail: {
+                        globals: {
+                            toolOutput: {
+                                ctxId: "ctx-new-direct",
+                                instance: "browser-instance",
+                            },
+                            toolResponseMetadata: {
+                                mcp_tool_result: {
+                                    _meta: {
+                                        "portable-devshell/workspace": {
+                                            liveBaseUrl:
+                                                "https://new.example/api/live/demo/workspace",
+                                            token: "new-direct-token",
+                                        },
+                                    },
+                                    structuredContent: {
+                                        ctxId: "ctx-new-direct",
+                                        instance: "browser-instance",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }),
+            );
+        });
+        await page.waitForFunction(
+            "(window.__switchedContextModelUpdates || []).some(update => update && update.portableDevshellWorkspace && update.portableDevshellWorkspace.ctxId === 'ctx-new-direct')",
+        );
+        assert.equal(
+            await frame.evaluate("window.__oldSnapshotResolve() || true"),
+            true,
+        );
+        await page.waitForTimeout(100);
+        const updates = (await page.evaluate(
+            "window.__switchedContextModelUpdates || []",
+        )) as Array<{
+            portableDevshellWorkspace?: { ctxId?: string };
+        }>;
+        assert.equal(
+            updates.at(-1)?.portableDevshellWorkspace?.ctxId,
+            "ctx-new-direct",
+        );
+    },
+);
 
 const SWITCHED_CONTEXT_BRIDGE_SCRIPT = String.raw`
 window.__switchedContextModelUpdates = [];
@@ -922,57 +1378,107 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace refreshes authoritative state after a stale Goal action is fenced", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace refreshes authoritative state after a stale Goal action is fenced",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(STALE_GOAL_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(STALE_GOAL_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Goal A", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Stop Goal", exact: true }).click();
-    await app.getByText("Goal B", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("State changed; review and retry", { exact: true }).waitFor({ state: "visible" });
-    const calls = await page.evaluate("window.__staleGoalCalls || []") as Array<{
-        arguments?: Record<string, unknown>;
-        name?: string;
-    }>;
-    const stop = calls.find((call) => call.name === "workspace_stop");
-    assert.equal(stop?.arguments?.goalId, "goal-A");
-    assert.equal(stop?.arguments?.revision, 1);
-    assert.equal(stop?.arguments?.token, "stale-goal-token");
-    assert.equal(calls.filter((call) => call.name === "workspace_stop").length, 1);
-});
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Goal A", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Stop Goal", exact: true })
+            .click();
+        await app
+            .getByText("Goal B", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("State changed; review and retry", { exact: true })
+            .waitFor({ state: "visible" });
+        const calls = (await page.evaluate(
+            "window.__staleGoalCalls || []",
+        )) as Array<{
+            arguments?: Record<string, unknown>;
+            name?: string;
+        }>;
+        const stop = calls.find((call) => call.name === "workspace_stop");
+        assert.equal(stop?.arguments?.goalId, "goal-A");
+        assert.equal(stop?.arguments?.revision, 1);
+        assert.equal(stop?.arguments?.token, "stale-goal-token");
+        assert.equal(
+            calls.filter((call) => call.name === "workspace_stop").length,
+            1,
+        );
+    },
+);
 
-test("Workspace clears task cancel confirmation when the authoritative task revision changes", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace clears task cancel confirmation when the authoritative task revision changes",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(STALE_TASK_CONFIRM_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(STALE_TASK_CONFIRM_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByRole("button", { name: "Cancel task", exact: true }).click();
-    await app.getByRole("button", { name: "Confirm cancel", exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("window.__advanceTaskConfirmRevision()"), true);
-    await app.getByText("Task · Updated work", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Cancel task", exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByRole("button", { name: "Confirm cancel", exact: true }).count(), 0);
-    assert.equal(await page.evaluate("(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task')"), false);
-});
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByRole("button", { name: "Cancel task", exact: true })
+            .click();
+        await app
+            .getByRole("button", { name: "Confirm cancel", exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate("window.__advanceTaskConfirmRevision()"),
+            true,
+        );
+        await app
+            .getByText("Task · Updated work", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Cancel task", exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app
+                .getByRole("button", { name: "Confirm cancel", exact: true })
+                .count(),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__staleTaskConfirmCalls || []).some(call => call.name === 'workspace_task')",
+            ),
+            false,
+        );
+    },
+);
 
 const STALE_TASK_CONFIRM_BRIDGE_SCRIPT = String.raw`
 window.__staleTaskConfirmCalls = [];
@@ -1109,82 +1615,154 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace fences an ambiguous detached-wait resume instead of replaying it", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace fences an ambiguous detached-wait resume instead of replaying it",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:420px"></iframe>');
-    await page.evaluate(WAIT_AMBIGUOUS_BRIDGE_SCRIPT);
-    const mount = async () => await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
+        );
+        await page.evaluate(WAIT_AMBIGUOUS_BRIDGE_SCRIPT);
+        const mount = async () =>
+            await page.evaluate((html) => {
+                const iframe =
+                    document.querySelector<HTMLIFrameElement>("#workspace");
+                if (iframe === null)
+                    throw new Error("Workspace iframe is missing.");
+                iframe.srcdoc = html;
+            }, workspaceAppHtml);
 
-    await mount();
-    await page.waitForFunction("(window.__waitAmbiguousMessages || []).length === 1");
-    await page.waitForFunction("(window.__waitAmbiguousReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__waitAmbiguousReports[0].outcome"), "uncertain");
-    assert.equal(await page.evaluate("window.__waitAmbiguousConsumed"), true);
-    assert.deepEqual(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry').slice(-4).map(call => call.arguments.action)"),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(
-        await page.evaluate("(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_recover').length"),
-        0,
-    );
+        await mount();
+        await page.waitForFunction(
+            "(window.__waitAmbiguousMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__waitAmbiguousReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate("window.__waitAmbiguousReports[0].outcome"),
+            "uncertain",
+        );
+        assert.equal(
+            await page.evaluate("window.__waitAmbiguousConsumed"),
+            true,
+        );
+        assert.deepEqual(
+            await page.evaluate(
+                "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_reentry').slice(-4).map(call => call.arguments.action)",
+            ),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__waitAmbiguousCalls || []).filter(call => call.name === 'workspace_recover').length",
+            ),
+            0,
+        );
 
-    await mount();
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__waitAmbiguousMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__waitAmbiguousReports || []).length"), 1);
-});
+        await mount();
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate(
+                "(window.__waitAmbiguousMessages || []).length",
+            ),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("(window.__waitAmbiguousReports || []).length"),
+            1,
+        );
+    },
+);
 
-test("Workspace fences an ambiguous Goal continuation instead of replaying it", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace fences an ambiguous Goal continuation instead of replaying it",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:420px"></iframe>');
-    await page.evaluate(GOAL_AMBIGUOUS_BRIDGE_SCRIPT);
-    const mount = async () => await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:420px"></iframe>',
+        );
+        await page.evaluate(GOAL_AMBIGUOUS_BRIDGE_SCRIPT);
+        const mount = async () =>
+            await page.evaluate((html) => {
+                const iframe =
+                    document.querySelector<HTMLIFrameElement>("#workspace");
+                if (iframe === null)
+                    throw new Error("Workspace iframe is missing.");
+                iframe.srcdoc = html;
+            }, workspaceAppHtml);
 
-    await mount();
-    const app = page.frameLocator("#workspace");
-    await page.waitForFunction("(window.__goalAmbiguousMessages || []).length === 1");
-    await page.waitForFunction("(window.__goalAmbiguousReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__goalAmbiguousReports[0].outcome"), "uncertain");
-    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    await app.getByText("Continuation delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    const goalReportClaimId = await page.evaluate("window.__goalAmbiguousReports[0].claimId") as string;
-    assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __goalAmbiguousCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__goalAmbiguousCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, goalReportClaimId),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(
-        await page.evaluate("(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').length"),
-        0,
-    );
+        await mount();
+        const app = page.frameLocator("#workspace");
+        await page.waitForFunction(
+            "(window.__goalAmbiguousMessages || []).length === 1",
+        );
+        await page.waitForFunction(
+            "(window.__goalAmbiguousReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate("window.__goalAmbiguousReports[0].outcome"),
+            "uncertain",
+        );
+        await app
+            .getByText("Delivery uncertain", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByText("Continuation delivery uncertain", { exact: true })
+            .waitFor({ state: "visible" });
+        const goalReportClaimId = (await page.evaluate(
+            "window.__goalAmbiguousReports[0].claimId",
+        )) as string;
+        assert.deepEqual(
+            await page.evaluate((claimId) => {
+                const state = window as typeof window & {
+                    __goalAmbiguousCalls?: Array<{
+                        arguments: Record<string, unknown>;
+                        name: string;
+                    }>;
+                };
+                return (state.__goalAmbiguousCalls || [])
+                    .filter(
+                        (call) =>
+                            call.name === "workspace_reentry" &&
+                            call.arguments.claimId === claimId,
+                    )
+                    .map((call) => call.arguments.action);
+            }, goalReportClaimId),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__goalAmbiguousCalls || []).filter(call => call.name === 'workspace_goal_continue').length",
+            ),
+            0,
+        );
 
-    await mount();
-    await app.getByText("Delivery uncertain", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("(window.__goalAmbiguousMessages || []).length"), 1);
-    assert.equal(await page.evaluate("(window.__goalAmbiguousReports || []).length"), 1);
-});
+        await mount();
+        await app
+            .getByText("Delivery uncertain", { exact: true })
+            .waitFor({ state: "visible" });
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate(
+                "(window.__goalAmbiguousMessages || []).length",
+            ),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("(window.__goalAmbiguousReports || []).length"),
+            1,
+        );
+    },
+);
 
 const WAIT_AMBIGUOUS_BRIDGE_SCRIPT = String.raw`
 window.__waitAmbiguousReentryClaimId = "";
@@ -1482,59 +2060,101 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace releases re-entry before dispatch when model context injection fails", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace releases re-entry before dispatch when model context injection fails",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    const pageFailures: string[] = [];
-    page.on("pageerror", (error) => pageFailures.push(error.message));
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        const pageFailures: string[] = [];
+        page.on("pageerror", (error) => pageFailures.push(error.message));
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureActions || []).includes('release')");
-    const releaseClaimId = await page.evaluate(`
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Resume after answer?", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__modelContextFailureActions || []).includes('release')",
+        );
+        const releaseClaimId = (await page.evaluate(`
         (window.__modelContextFailureCalls || [])
             .find(call => call.name === "workspace_reentry" && call.arguments.action === "release")
             ?.arguments.claimId
-    `) as string;
-    assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, releaseClaimId),
-        ["claim", "validate", "release"],
-    );
-    assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 0);
-    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('attempt')"), false);
-    assert.equal(await page.evaluate("(window.__modelContextFailureActions || []).includes('report')"), false);
-    await page.waitForTimeout(250);
-    assert.deepEqual(pageFailures, []);
-});
+    `)) as string;
+        assert.deepEqual(
+            await page.evaluate((claimId) => {
+                const state = window as typeof window & {
+                    __modelContextFailureCalls?: Array<{
+                        arguments: Record<string, unknown>;
+                        name: string;
+                    }>;
+                };
+                return (state.__modelContextFailureCalls || [])
+                    .filter(
+                        (call) =>
+                            call.name === "workspace_reentry" &&
+                            call.arguments.claimId === claimId,
+                    )
+                    .map((call) => call.arguments.action);
+            }, releaseClaimId),
+            ["claim", "validate", "release"],
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__modelContextFailureMessages || []).length",
+            ),
+            0,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__modelContextFailureActions || []).includes('attempt')",
+            ),
+            false,
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__modelContextFailureActions || []).includes('report')",
+            ),
+            false,
+        );
+        await page.waitForTimeout(250);
+        assert.deepEqual(pageFailures, []);
+    },
+);
 
-test("Workspace records uncertain delivery without remounting a failed Host message request", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace records uncertain delivery without remounting a failed Host message request",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    const pageFailures: string[] = [];
-    page.on("pageerror", (error) => pageFailures.push(error.message));
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT
-        .replace('reject("model context unavailable");', 'reply({});')
-        .replace(
+        const page = await browser.newPage();
+        const pageFailures: string[] = [];
+        page.on("pageerror", (error) => pageFailures.push(error.message));
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        const bridge = MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT.replace(
+            'reject("model context unavailable");',
+            "reply({});",
+        ).replace(
             `if (message.method === "ui/message") {
         window.__modelContextFailureMessages.push(message.params || {});
         reply({});
@@ -1551,36 +2171,73 @@ test("Workspace records uncertain delivery without remounting a failed Host mess
         return;
     }`,
         );
-    await page.evaluate(bridge);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("var LIVE_START_RETRY_MS = 1000;", "var LIVE_START_RETRY_MS = 50;");
-    }, workspaceAppHtml);
+        await page.evaluate(bridge);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "var LIVE_START_RETRY_MS = 1000;",
+                "var LIVE_START_RETRY_MS = 50;",
+            );
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Resume after answer?", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__modelContextFailureReports || []).length === 1");
-    assert.equal(await page.evaluate("window.__modelContextFailureReports[0].outcome"), "uncertain");
-    await page.waitForTimeout(250);
-    assert.equal(await page.evaluate("window.__modelContextFailureInitializeCount"), 1);
-    const reportClaimId = await page.evaluate("window.__modelContextFailureReports[0].claimId") as string;
-    assert.deepEqual(
-        await page.evaluate((claimId) => {
-            const state = window as typeof window & {
-                __modelContextFailureCalls?: Array<{ arguments: Record<string, unknown>; name: string }>;
-            };
-            return (state.__modelContextFailureCalls || [])
-                .filter((call) => call.name === "workspace_reentry" && call.arguments.claimId === claimId)
-                .map((call) => call.arguments.action);
-        }, reportClaimId),
-        ["claim", "validate", "attempt", "report"],
-    );
-    assert.equal(await page.evaluate("(window.__modelContextFailureMessages || []).length"), 1);
-    assert.equal(await page.evaluate("window.__modelContextFailureConsumed"), true);
-    assert.deepEqual(pageFailures, []);
-});
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Resume after answer?", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__modelContextFailureReports || []).length === 1",
+        );
+        assert.equal(
+            await page.evaluate(
+                "window.__modelContextFailureReports[0].outcome",
+            ),
+            "uncertain",
+        );
+        await page.waitForTimeout(250);
+        assert.equal(
+            await page.evaluate("window.__modelContextFailureInitializeCount"),
+            1,
+        );
+        const reportClaimId = (await page.evaluate(
+            "window.__modelContextFailureReports[0].claimId",
+        )) as string;
+        assert.deepEqual(
+            await page.evaluate((claimId) => {
+                const state = window as typeof window & {
+                    __modelContextFailureCalls?: Array<{
+                        arguments: Record<string, unknown>;
+                        name: string;
+                    }>;
+                };
+                return (state.__modelContextFailureCalls || [])
+                    .filter(
+                        (call) =>
+                            call.name === "workspace_reentry" &&
+                            call.arguments.claimId === claimId,
+                    )
+                    .map((call) => call.arguments.action);
+            }, reportClaimId),
+            ["claim", "validate", "attempt", "report"],
+        );
+        assert.equal(
+            await page.evaluate(
+                "(window.__modelContextFailureMessages || []).length",
+            ),
+            1,
+        );
+        assert.equal(
+            await page.evaluate("window.__modelContextFailureConsumed"),
+            true,
+        );
+        assert.deepEqual(pageFailures, []);
+    },
+);
 
 const MODEL_CONTEXT_FAILURE_BRIDGE_SCRIPT = String.raw`
 window.__modelContextFailureReentryClaimId = "";
@@ -1751,27 +2408,42 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace heartbeat reconciles durable state even when the event stream reports no change", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace heartbeat reconciles durable state even when the event stream reports no change",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(MISSED_EVENT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(MISSED_EVENT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const app = page.frameLocator("#workspace");
-    await app.getByText("Task · After reconciliation", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await app.getByText("Task · Before reconciliation", { exact: true }).count(), 0);
-    const watches = await page.evaluate(
-        "(window.__missedEventCalls || []).filter(call => call.name === 'workspace_watch')",
-    ) as Array<{ arguments?: Record<string, unknown> }>;
-    assert.equal(watches.length >= 1, true);
-});
+        const app = page.frameLocator("#workspace");
+        await app
+            .getByText("Task · After reconciliation", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await app
+                .getByText("Task · Before reconciliation", { exact: true })
+                .count(),
+            0,
+        );
+        const watches = (await page.evaluate(
+            "(window.__missedEventCalls || []).filter(call => call.name === 'workspace_watch')",
+        )) as Array<{ arguments?: Record<string, unknown> }>;
+        assert.equal(watches.length >= 1, true);
+    },
+);
 
 const MISSED_EVENT_BRIDGE_SCRIPT = String.raw`
 window.__missedEventCalls = [];
@@ -1824,22 +2496,34 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace App reconnects after MCP restart with its persisted private capability", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace App reconnects after MCP restart with its persisted private capability",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    const browserFailures: string[] = [];
-    page.on("console", (message) => {
-        if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
-    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
-    await page.evaluate(TOKEN_RESTART_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        const browserFailures: string[] = [];
+        page.on("console", (message) => {
+            if (message.type() === "error")
+                browserFailures.push(`console: ${message.text()}`);
+        });
+        page.on("pageerror", (error) =>
+            browserFailures.push(`pageerror: ${error.message}`),
+        );
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(TOKEN_RESTART_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.openai = {
                 widgetState: {
                     modelContent: null,
@@ -1853,42 +2537,79 @@ test("Workspace App reconnects after MCP restart with its persisted private capa
                 },
                 setWidgetState: function (state) { this.widgetState = state; }
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_reconnect')");
-    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.token === 'token-stable')");
-    const calls = await page.evaluate("window.__tokenRestartCalls || []") as Array<{
-        arguments?: Record<string, unknown>;
-        name?: string;
-    }>;
-    const reconnects = calls.filter((call) => call.name === "workspace_reconnect");
-    assert.equal(reconnects.length >= 1, true);
-    assert.equal(reconnects.every((call) => call.arguments?.token === "token-stable"), true);
-    assert.equal(calls.some((call) => call.name === "workspace_watch" && call.arguments?.token === "token-stable"), true);
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    assert.equal(
-        await frame?.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.token"),
-        "token-stable",
-    );
-    assert.equal(
-        await frame?.evaluate("JSON.stringify(window.openai.widgetState.modelContent || null).includes('token-stable')"),
-        false,
-    );
-    assert.deepEqual(browserFailures, []);
-});
+        await page.waitForFunction(
+            "(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_reconnect')",
+        );
+        await page.waitForFunction(
+            "(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.token === 'token-stable')",
+        );
+        const calls = (await page.evaluate(
+            "window.__tokenRestartCalls || []",
+        )) as Array<{
+            arguments?: Record<string, unknown>;
+            name?: string;
+        }>;
+        const reconnects = calls.filter(
+            (call) => call.name === "workspace_reconnect",
+        );
+        assert.equal(reconnects.length >= 1, true);
+        assert.equal(
+            reconnects.every(
+                (call) => call.arguments?.token === "token-stable",
+            ),
+            true,
+        );
+        assert.equal(
+            calls.some(
+                (call) =>
+                    call.name === "workspace_watch" &&
+                    call.arguments?.token === "token-stable",
+            ),
+            true,
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        assert.equal(
+            await frame?.evaluate(
+                "window.openai.widgetState.privateContent.portableDevshellWorkspace.token",
+            ),
+            "token-stable",
+        );
+        assert.equal(
+            await frame?.evaluate(
+                "JSON.stringify(window.openai.widgetState.modelContent || null).includes('token-stable')",
+            ),
+            false,
+        );
+        assert.deepEqual(browserFailures, []);
+    },
+);
 
-test("Workspace ignores a stale host tool result after live Context authorization is established", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace ignores a stale host tool result after live Context authorization is established",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:320px"></iframe>');
-    await page.evaluate(TOKEN_RESTART_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:320px"></iframe>',
+        );
+        await page.evaluate(TOKEN_RESTART_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.openai = {
                 widgetState: {
                     modelContent: null,
@@ -1902,39 +2623,64 @@ test("Workspace ignores a stale host tool result after live Context authorizatio
                 },
                 setWidgetState: function (state) { this.widgetState = state; }
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction("(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.ctxId === 'ctx-token-restart')");
-    const frame = page.frames().find((candidate) => candidate !== page.mainFrame());
-    if (frame === undefined) throw new Error("Workspace frame is missing.");
-    await frame.evaluate(() => {
-        window.dispatchEvent(new CustomEvent("openai:set_globals", {
-            detail: {
-                globals: {
-                    toolOutput: { ctxId: "ctx-stale", instance: "browser-instance" },
-                    toolResponseMetadata: {
-                        mcp_tool_result: {
-                            _meta: { "portable-devshell/workspace": { token: "token-stale" } },
-                            structuredContent: { ctxId: "ctx-stale", instance: "browser-instance" },
+        await page.waitForFunction(
+            "(window.__tokenRestartCalls || []).some(call => call.name === 'workspace_watch' && call.arguments.ctxId === 'ctx-token-restart')",
+        );
+        const frame = page
+            .frames()
+            .find((candidate) => candidate !== page.mainFrame());
+        if (frame === undefined) throw new Error("Workspace frame is missing.");
+        await frame.evaluate(() => {
+            window.dispatchEvent(
+                new CustomEvent("openai:set_globals", {
+                    detail: {
+                        globals: {
+                            toolOutput: {
+                                ctxId: "ctx-stale",
+                                instance: "browser-instance",
+                            },
+                            toolResponseMetadata: {
+                                mcp_tool_result: {
+                                    _meta: {
+                                        "portable-devshell/workspace": {
+                                            token: "token-stale",
+                                        },
+                                    },
+                                    structuredContent: {
+                                        ctxId: "ctx-stale",
+                                        instance: "browser-instance",
+                                    },
+                                },
+                            },
                         },
                     },
-                },
-            },
-        }));
-    });
-    await page.waitForTimeout(100);
+                }),
+            );
+        });
+        await page.waitForTimeout(100);
 
-    const calls = await page.evaluate("window.__tokenRestartCalls || []") as Array<{
-        arguments?: Record<string, unknown>;
-        name?: string;
-    }>;
-    assert.equal(calls.some((call) => call.arguments?.ctxId === "ctx-stale"), false);
-    assert.equal(
-        await frame.evaluate("window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId"),
-        "ctx-token-restart",
-    );
-});
+        const calls = (await page.evaluate(
+            "window.__tokenRestartCalls || []",
+        )) as Array<{
+            arguments?: Record<string, unknown>;
+            name?: string;
+        }>;
+        assert.equal(
+            calls.some((call) => call.arguments?.ctxId === "ctx-stale"),
+            false,
+        );
+        assert.equal(
+            await frame.evaluate(
+                "window.openai.widgetState.privateContent.portableDevshellWorkspace.ctxId",
+            ),
+            "ctx-token-restart",
+        );
+    },
+);
 
 const TOKEN_RESTART_BRIDGE_SCRIPT = String.raw`
 window.__tokenRestartCalls = [];
@@ -2012,17 +2758,26 @@ window.addEventListener("message", function (event) {
 });
 `;
 
-test("Workspace recovers ChatGPT-hidden result metadata from window.openai on first mount", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+test(
+    "Workspace recovers ChatGPT-hidden result metadata from window.openai on first mount",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(CHATGPT_METADATA_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html.replace("<script>", `<script>
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(CHATGPT_METADATA_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html.replace(
+                "<script>",
+                `<script>
             window.openai = {
                 toolOutput: { ctxId: "ctx-chatgpt-meta", instance: "browser-instance" },
                 toolResponseMetadata: {
@@ -2034,15 +2789,17 @@ test("Workspace recovers ChatGPT-hidden result metadata from window.openai on fi
                 widgetState: { modelContent: null, privateContent: {}, imageIds: [] },
                 setWidgetState: function (state) { this.widgetState = state; }
             };
-        <\/script><script>`);
-    }, workspaceAppHtml);
+        <\/script><script>`,
+            );
+        }, workspaceAppHtml);
 
-    await page.waitForFunction(
-        "(window.__chatgptMetadataCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.token === 'chatgpt-meta-token')",
-        undefined,
-        { timeout: 2_000 },
-    );
-});
+        await page.waitForFunction(
+            "(window.__chatgptMetadataCalls || []).some(call => call.name === 'workspace_snapshot' && call.arguments.token === 'chatgpt-meta-token')",
+            undefined,
+            { timeout: 2_000 },
+        );
+    },
+);
 
 const CHATGPT_METADATA_BRIDGE_SCRIPT = String.raw`
 window.__chatgptMetadataCalls = [];
@@ -2083,36 +2840,61 @@ window.addEventListener("message", function (event) {
 });
 `;
 
+test(
+    "Workspace waits for a delayed initial capability instead of minting reconnect authorization",
+    BROWSER_TEST_OPTIONS,
+    async (t) => {
+        const browser = await launchBrowser();
+        t.after(async () => await browser.close());
 
-test("Workspace waits for a delayed initial capability instead of minting reconnect authorization", BROWSER_TEST_OPTIONS, async (t) => {
-    const browser = await launchBrowser();
-    t.after(async () => await browser.close());
+        const page = await browser.newPage();
+        await page.setContent(
+            '<iframe id="workspace" style="width:800px;height:360px"></iframe>',
+        );
+        await page.evaluate(LATE_INITIAL_RESULT_BRIDGE_SCRIPT);
+        await page.evaluate((html) => {
+            const iframe =
+                document.querySelector<HTMLIFrameElement>("#workspace");
+            if (iframe === null)
+                throw new Error("Workspace iframe is missing.");
+            iframe.srcdoc = html;
+        }, workspaceAppHtml);
 
-    const page = await browser.newPage();
-    await page.setContent('<iframe id="workspace" style="width:800px;height:360px"></iframe>');
-    await page.evaluate(LATE_INITIAL_RESULT_BRIDGE_SCRIPT);
-    await page.evaluate((html) => {
-        const iframe = document.querySelector<HTMLIFrameElement>("#workspace");
-        if (iframe === null) throw new Error("Workspace iframe is missing.");
-        iframe.srcdoc = html;
-    }, workspaceAppHtml);
+        const app = page.frameLocator("#workspace");
+        await page.waitForTimeout(450);
+        assert.equal(
+            await page.evaluate("(window.__lateInitialCalls || []).length"),
+            0,
+        );
+        await app
+            .getByText("Waiting for Workspace authorization", { exact: true })
+            .waitFor({ state: "visible" });
+        assert.equal(
+            await page.evaluate("window.__deliverLateInitialResult()"),
+            true,
+        );
+        await page.waitForFunction(
+            "(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect' && call.arguments.token === 'token-initial')",
+        );
+        await app
+            .getByText("Continue after reconnect?", { exact: true })
+            .waitFor({ state: "visible" });
+        await app
+            .getByRole("button", { name: "Continue", exact: true })
+            .click();
+        await page.waitForFunction(
+            "(window.__lateInitialCalls || []).some(call => call.name === 'workspace_answer')",
+        );
 
-    const app = page.frameLocator("#workspace");
-    await page.waitForTimeout(450);
-    assert.equal(await page.evaluate("(window.__lateInitialCalls || []).length"), 0);
-    await app.getByText("Waiting for Workspace authorization", { exact: true }).waitFor({ state: "visible" });
-    assert.equal(await page.evaluate("window.__deliverLateInitialResult()"), true);
-    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_reconnect' && call.arguments.token === 'token-initial')");
-    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "visible" });
-    await app.getByRole("button", { name: "Continue", exact: true }).click();
-    await page.waitForFunction("(window.__lateInitialCalls || []).some(call => call.name === 'workspace_answer')");
-
-    const answerToken = await page.evaluate(
-        "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_answer')?.arguments?.token",
-    );
-    assert.equal(answerToken, "token-initial");
-    await app.getByText("Continue after reconnect?", { exact: true }).waitFor({ state: "hidden" });
-});
+        const answerToken = await page.evaluate(
+            "(window.__lateInitialCalls || []).find(call => call.name === 'workspace_answer')?.arguments?.token",
+        );
+        assert.equal(answerToken, "token-initial");
+        await app
+            .getByText("Continue after reconnect?", { exact: true })
+            .waitFor({ state: "hidden" });
+    },
+);
 
 const LATE_INITIAL_RESULT_BRIDGE_SCRIPT = String.raw`
 window.__lateInitialCalls = [];
@@ -2196,7 +2978,9 @@ window.addEventListener("message", function (event) {
 
 async function launchBrowser(): Promise<Browser> {
     if (CHROMIUM_EXECUTABLE === undefined) {
-        throw new Error("A Chromium executable is required for this browser test.");
+        throw new Error(
+            "A Chromium executable is required for this browser test.",
+        );
     }
     return await chromium.launch({
         executablePath: CHROMIUM_EXECUTABLE,
@@ -2214,6 +2998,9 @@ function resolveChromiumExecutable(): string | undefined {
         "/usr/bin/google-chrome",
         "/usr/bin/google-chrome-stable",
         "/opt/google/chrome/chrome",
-    ].filter((candidate): candidate is string => candidate !== undefined && candidate.length > 0);
+    ].filter(
+        (candidate): candidate is string =>
+            candidate !== undefined && candidate.length > 0,
+    );
     return candidates.find((candidate) => existsSync(candidate));
 }

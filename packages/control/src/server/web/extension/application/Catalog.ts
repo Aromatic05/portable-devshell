@@ -11,13 +11,16 @@ export class WebApplicationCatalog {
     }
 
     list(): readonly WebApplicationDescriptor[] {
-        return this.#extensions.listDeclarations("web.applications").map((registration) => {
-            const declaration = registration.declaration as WebApplicationDeclaration;
-            return Object.freeze({
-                extensionId: registration.extensionId,
-                id: declaration.id,
-                title: declaration.title
+        return this.#extensions
+            .listDeclarations("web.applications")
+            .map((registration) => {
+                const declaration =
+                    registration.declaration as WebApplicationDeclaration;
+                return Object.freeze({
+                    extensionId: registration.extensionId,
+                    id: declaration.id,
+                    title: declaration.title,
+                });
             });
-        });
     }
 }

@@ -6,13 +6,18 @@ export function workspaceFolderName(workspace: string | undefined): string {
 }
 
 export function compactContextId(ctxId: string, prefixLength = 12): string {
-    return ctxId.length <= prefixLength + 4 ? ctxId : `${ctxId.slice(0, prefixLength)}…`;
+    return ctxId.length <= prefixLength + 4
+        ? ctxId
+        : `${ctxId.slice(0, prefixLength)}…`;
 }
 
-export function humanConversationTitle(input: {
-    ctxId: string;
-    workspace?: string;
-}, contextPrefixLength = 12): string {
+export function humanConversationTitle(
+    input: {
+        ctxId: string;
+        workspace?: string;
+    },
+    contextPrefixLength = 12,
+): string {
     return input.workspace === undefined || input.workspace.length === 0
         ? compactContextId(input.ctxId, contextPrefixLength)
         : workspaceFolderName(input.workspace);

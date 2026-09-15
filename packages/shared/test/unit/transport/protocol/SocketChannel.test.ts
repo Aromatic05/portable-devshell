@@ -35,7 +35,9 @@ async function listen(): Promise<ListeningSocket> {
 }
 
 async function closeListeningSocket(listening: ListeningSocket): Promise<void> {
-    await new Promise<void>((resolve) => listening.server.close(() => resolve()));
+    await new Promise<void>((resolve) =>
+        listening.server.close(() => resolve()),
+    );
     await rm(listening.directory, { force: true, recursive: true });
 }
 
@@ -62,7 +64,9 @@ async function rawSocket(socketPath: string): Promise<Socket> {
 
 test("SocketChannel connect/accept exchanges length-prefixed frames", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const client = await SocketChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -82,7 +86,7 @@ test("SocketChannel aborts and destroys a pending socket connection", async () =
     const reason = new Error("connection cancelled");
     const connecting = SocketChannel.connect("unused", {
         signal: controller.signal,
-        socketFactory: () => socket
+        socketFactory: () => socket,
     });
 
     controller.abort(reason);
@@ -93,7 +97,9 @@ test("SocketChannel aborts and destroys a pending socket connection", async () =
 
 test("SocketChannel assembles partial headers and payloads and splits sticky frames", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const socket = await rawSocket(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -127,7 +133,9 @@ test("SocketChannel assembles partial headers and payloads and splits sticky fra
 
 test("SocketChannel rejects oversized frame headers", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const socket = await rawSocket(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -136,17 +144,24 @@ test("SocketChannel rejects oversized frame headers", async (t) => {
         await closeListeningSocket(listening);
     });
 
-    const closed = new Promise<Error | undefined>((resolve) => service.onClose(resolve));
+    const closed = new Promise<Error | undefined>((resolve) =>
+        service.onClose(resolve),
+    );
     const header = Buffer.alloc(4);
     header.writeUInt32BE(SOCKET_CHANNEL_MAX_FRAME_SIZE + 1, 0);
     socket.write(header);
 
-    assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.frameTooLarge");
+    assert.equal(
+        ((await closed) as { code?: string } | undefined)?.code,
+        "protocol.frameTooLarge",
+    );
 });
 
 test("SocketChannel treats EOF with a partial frame as an error", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const socket = await rawSocket(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -155,15 +170,22 @@ test("SocketChannel treats EOF with a partial frame as an error", async (t) => {
         await closeListeningSocket(listening);
     });
 
-    const closed = new Promise<Error | undefined>((resolve) => service.onClose(resolve));
+    const closed = new Promise<Error | undefined>((resolve) =>
+        service.onClose(resolve),
+    );
     socket.end(Buffer.from([0, 0, 0, 3, 1]));
 
-    assert.equal((await closed as { code?: string } | undefined)?.code, "protocol.invalidFrame");
+    assert.equal(
+        ((await closed) as { code?: string } | undefined)?.code,
+        "protocol.invalidFrame",
+    );
 });
 
 test("SocketChannel serializes concurrent sends and rejects sends after close", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const client = await SocketChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -181,7 +203,10 @@ test("SocketChannel serializes concurrent sends and rejects sends after close", 
             }
         });
     });
-    await Promise.all([client.send(Buffer.from("one")), client.send(Buffer.from("two"))]);
+    await Promise.all([
+        client.send(Buffer.from("one")),
+        client.send(Buffer.from("two")),
+    ]);
     assert.deepEqual(await frames, ["one", "two"]);
 
     client.close();
@@ -190,7 +215,9 @@ test("SocketChannel serializes concurrent sends and rejects sends after close", 
 
 test("SocketChannel isolates late close listener failures", async (t) => {
     const listening = await listen();
-    const accepted = onceConnection(listening.server).then((socket) => SocketChannel.accept(socket));
+    const accepted = onceConnection(listening.server).then((socket) =>
+        SocketChannel.accept(socket),
+    );
     const client = await SocketChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
@@ -227,11 +254,24 @@ class MemoryChannel implements Channel {
     readonly #frames = new Set<(frame: Uint8Array) => void>();
     readonly #closed = new Set<(error?: Error) => void>();
 
-    async send(frame: Uint8Array): Promise<void> { this.sent.push(Uint8Array.from(frame)); }
-    onFrame(listener: (frame: Uint8Array) => void): () => void { this.#frames.add(listener); return () => this.#frames.delete(listener); }
-    onClose(listener: (error?: Error) => void): () => void { this.#closed.add(listener); return () => this.#closed.delete(listener); }
-    emit(frame: Uint8Array): void { for (const listener of this.#frames) listener(frame); }
-    close(error?: Error): void { this.closed = true; for (const listener of this.#closed) listener(error); }
+    async send(frame: Uint8Array): Promise<void> {
+        this.sent.push(Uint8Array.from(frame));
+    }
+    onFrame(listener: (frame: Uint8Array) => void): () => void {
+        this.#frames.add(listener);
+        return () => this.#frames.delete(listener);
+    }
+    onClose(listener: (error?: Error) => void): () => void {
+        this.#closed.add(listener);
+        return () => this.#closed.delete(listener);
+    }
+    emit(frame: Uint8Array): void {
+        for (const listener of this.#frames) listener(frame);
+    }
+    close(error?: Error): void {
+        this.closed = true;
+        for (const listener of this.#closed) listener(error);
+    }
 }
 
 class FakeServerWebSocket extends EventEmitter {
@@ -243,7 +283,11 @@ class FakeServerWebSocket extends EventEmitter {
     readonly sendCallbacks: Array<(error?: Error) => void> = [];
     terminated = false;
 
-    send(_data: Uint8Array, _options: { binary: true }, callback: (error?: Error) => void): void {
+    send(
+        _data: Uint8Array,
+        _options: { binary: true },
+        callback: (error?: Error) => void,
+    ): void {
         if (this.sendError !== undefined) throw this.sendError;
         if (this.deferSend) {
             this.sendCallbacks.push(callback);
@@ -283,15 +327,21 @@ test("FramedStreamChannel and LengthPrefixedChannel share the transport frame co
     const output = new PassThrough();
     let transportClosed = false;
     const stream = new FramedStreamChannel(input, output, {
-        closeTransport: () => { transportClosed = true; },
+        closeTransport: () => {
+            transportClosed = true;
+        },
     });
-    const incoming = new Promise<string>((resolve) => stream.onFrame((frame) => resolve(Buffer.from(frame).toString())));
+    const incoming = new Promise<string>((resolve) =>
+        stream.onFrame((frame) => resolve(Buffer.from(frame).toString())),
+    );
     const encoded = encodeFrame(Buffer.from("incoming"));
     input.write(encoded.subarray(0, 3));
     input.write(encoded.subarray(3));
     assert.equal(await incoming, "incoming");
 
-    const outgoing = new Promise<Buffer>((resolve) => output.once("data", resolve));
+    const outgoing = new Promise<Buffer>((resolve) =>
+        output.once("data", resolve),
+    );
     await stream.send(Buffer.from("outgoing"));
     assert.deepEqual(await outgoing, encodeFrame(Buffer.from("outgoing")));
     stream.close();
@@ -300,8 +350,13 @@ test("FramedStreamChannel and LengthPrefixedChannel share the transport frame co
     const raw = new MemoryChannel();
     const framed = new LengthPrefixedChannel(raw);
     await framed.send(Buffer.from("request"));
-    assert.deepEqual(Buffer.from(raw.sent[0]!), encodeFrame(Buffer.from("request")));
-    const received = new Promise<string>((resolve) => framed.onFrame((frame) => resolve(Buffer.from(frame).toString())));
+    assert.deepEqual(
+        Buffer.from(raw.sent[0]!),
+        encodeFrame(Buffer.from("request")),
+    );
+    const received = new Promise<string>((resolve) =>
+        framed.onFrame((frame) => resolve(Buffer.from(frame).toString())),
+    );
     raw.emit(encodeFrame(Buffer.from("response")));
     assert.equal(await received, "response");
 });
@@ -310,7 +365,9 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
     const sendSocket = new FakeServerWebSocket();
     sendSocket.deferSend = true;
     const sendChannel = new WebSocketServerChannel(sendSocket);
-    const sendClosed = new Promise<Error | undefined>((resolve) => sendChannel.onClose(resolve));
+    const sendClosed = new Promise<Error | undefined>((resolve) =>
+        sendChannel.onClose(resolve),
+    );
     const first = sendChannel.send(Buffer.from("one"));
     const second = sendChannel.send(Buffer.from("two"));
     await new Promise((resolve) => setImmediate(resolve));
@@ -323,7 +380,9 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
     const closeSocket = new FakeServerWebSocket();
     closeSocket.closeError = new Error("close failed");
     const closeChannel = new WebSocketServerChannel(closeSocket);
-    const closeResult = new Promise<Error | undefined>((resolve) => closeChannel.onClose(resolve));
+    const closeResult = new Promise<Error | undefined>((resolve) =>
+        closeChannel.onClose(resolve),
+    );
     closeChannel.close();
     assert.equal((await closeResult)?.message, "close failed");
     assert.equal(closeSocket.terminated, true);
@@ -331,7 +390,9 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
     const textSocket = new FakeServerWebSocket();
     textSocket.closeError = new Error("close frame failed");
     const textChannel = new WebSocketServerChannel(textSocket);
-    const textClosed = new Promise<Error | undefined>((resolve) => textChannel.onClose(resolve));
+    const textClosed = new Promise<Error | undefined>((resolve) =>
+        textChannel.onClose(resolve),
+    );
     textSocket.message("text", false);
     assert.notEqual(await textClosed, undefined);
     assert.equal(textChannel.closed, true);
@@ -343,7 +404,14 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
         heartbeatIntervalMs: 1,
         now: () => 0,
     });
-    assert.equal((await new Promise<Error | undefined>((resolve) => heartbeatChannel.onClose(resolve)))?.message, "ping failed");
+    assert.equal(
+        (
+            await new Promise<Error | undefined>((resolve) =>
+                heartbeatChannel.onClose(resolve),
+            )
+        )?.message,
+        "ping failed",
+    );
     assert.equal(heartbeatSocket.terminated, true);
 });
 
@@ -356,8 +424,12 @@ test("WebSocketServerChannel isolates late close listener failures", async () =>
     try {
         channel.close();
         let notified = 0;
-        channel.onClose(() => { throw new Error("late close listener failed"); });
-        channel.onClose(() => { notified += 1; });
+        channel.onClose(() => {
+            throw new Error("late close listener failed");
+        });
+        channel.onClose(() => {
+            notified += 1;
+        });
         await new Promise((resolve) => setImmediate(resolve));
         assert.equal(notified, 1);
         assert.equal(warnings.length, 1);

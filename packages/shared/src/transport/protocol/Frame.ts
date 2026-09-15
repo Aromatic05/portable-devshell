@@ -23,9 +23,10 @@ export class FrameBuffer {
             return [];
         }
         const normalized = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        this.#buffer = this.#buffer.byteLength === 0
-            ? Buffer.from(normalized)
-            : Buffer.concat([this.#buffer, normalized]);
+        this.#buffer =
+            this.#buffer.byteLength === 0
+                ? Buffer.from(normalized)
+                : Buffer.concat([this.#buffer, normalized]);
         const frames: Frame[] = [];
         while (this.#buffer.byteLength >= FRAME_HEADER_SIZE) {
             const payloadLength = this.#buffer.readUInt32BE(0);
@@ -34,7 +35,11 @@ export class FrameBuffer {
             if (this.#buffer.byteLength < frameLength) {
                 break;
             }
-            frames.push(Buffer.from(this.#buffer.subarray(FRAME_HEADER_SIZE, frameLength)));
+            frames.push(
+                Buffer.from(
+                    this.#buffer.subarray(FRAME_HEADER_SIZE, frameLength),
+                ),
+            );
             this.#buffer = this.#buffer.subarray(frameLength);
         }
         return frames;
@@ -45,8 +50,13 @@ export class FrameBuffer {
     }
 }
 
-export function encodeFrame(payload: Uint8Array, maxFrameSize = TRANSPORT_MAX_FRAME_SIZE): Buffer {
-    const normalized = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+export function encodeFrame(
+    payload: Uint8Array,
+    maxFrameSize = TRANSPORT_MAX_FRAME_SIZE,
+): Buffer {
+    const normalized = Buffer.isBuffer(payload)
+        ? payload
+        : Buffer.from(payload);
     assertFrameSize(normalized.byteLength, maxFrameSize);
     const frame = Buffer.allocUnsafe(FRAME_HEADER_SIZE + normalized.byteLength);
     frame.writeUInt32BE(normalized.byteLength, 0);
@@ -54,22 +64,34 @@ export function encodeFrame(payload: Uint8Array, maxFrameSize = TRANSPORT_MAX_FR
     return frame;
 }
 
-export function decodeFrame(frame: Uint8Array, maxFrameSize = TRANSPORT_MAX_FRAME_SIZE): Buffer {
+export function decodeFrame(
+    frame: Uint8Array,
+    maxFrameSize = TRANSPORT_MAX_FRAME_SIZE,
+): Buffer {
     const normalized = Buffer.isBuffer(frame) ? frame : Buffer.from(frame);
     if (normalized.byteLength < FRAME_HEADER_SIZE) {
-        throw protocolError("protocol.invalidFrame", "Frame header is incomplete.");
+        throw protocolError(
+            "protocol.invalidFrame",
+            "Frame header is incomplete.",
+        );
     }
     const payloadLength = normalized.readUInt32BE(0);
     assertFrameSize(payloadLength, maxFrameSize);
     if (normalized.byteLength !== FRAME_HEADER_SIZE + payloadLength) {
-        throw protocolError("protocol.invalidFrame", "Frame length does not match payload length.");
+        throw protocolError(
+            "protocol.invalidFrame",
+            "Frame length does not match payload length.",
+        );
     }
     return Buffer.from(normalized.subarray(FRAME_HEADER_SIZE));
 }
 
 function assertFrameSize(size: number, maxFrameSize: number): void {
     if (size > maxFrameSize) {
-        throw protocolError("protocol.frameTooLarge", `Frame payload exceeds ${maxFrameSize} bytes.`);
+        throw protocolError(
+            "protocol.frameTooLarge",
+            `Frame payload exceeds ${maxFrameSize} bytes.`,
+        );
     }
 }
 

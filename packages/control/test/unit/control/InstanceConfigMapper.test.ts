@@ -18,12 +18,12 @@ test("instance config mapper passes effective security mode, worker env, and app
                             lastSeq: 0,
                             name: "demo-local",
                             ready: false,
-                            status: "stopped"
+                            status: "stopped",
                         };
-                    }
+                    },
                 };
-            }
-        } as never
+            },
+        } as never,
     });
 
     mapper.map({
@@ -34,25 +34,30 @@ test("instance config mapper passes effective security mode, worker env, and app
                     decision: "deny",
                     match: "exact",
                     source: "mcp",
-                    toolName: "bash_run"
-                }
-            ]
+                    toolName: "bash_run",
+                },
+            ],
         },
         enabled: true,
         extensions: { model: ["instance"] },
         env: {
-            DEMO: "1"
+            DEMO: "1",
         },
         logs: {
             eventBufferSize: 250,
             maxBytes: 33_554_432,
-            retentionDays: 14
+            retentionDays: 14,
         },
-        mcp: { auth: { mode: "none" }, contextMode: "explicit", enabled: true, path: "/demo-local/mcp" },
+        mcp: {
+            auth: { mode: "none" },
+            contextMode: "explicit",
+            enabled: true,
+            path: "/demo-local/mcp",
+        },
         name: "demo-local",
         provider: "local",
         security: {
-            mode: "workspace"
+            mode: "workspace",
         },
         workspace: { enabled: true },
     });
@@ -61,7 +66,7 @@ test("instance config mapper passes effective security mode, worker env, and app
     assert.equal(capturedConfig?.eventBufferSize, 250);
     assert.deepEqual(capturedConfig?.auditStorage, {
         maxBytes: 33_554_432,
-        retentionDays: 14
+        retentionDays: 14,
     });
     assert.deepEqual(capturedConfig?.approvalPolicy, {
         mode: "ask",
@@ -70,14 +75,14 @@ test("instance config mapper passes effective security mode, worker env, and app
                 decision: "deny",
                 match: "exact",
                 source: "mcp",
-                toolName: "bash_run"
-            }
-        ]
+                toolName: "bash_run",
+            },
+        ],
     });
     assert.deepEqual(capturedConfig?.env, {
         DEMO: "1",
         DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
-        DEVSHELL_WORKER_SECURITY_MODE: "workspace"
+        DEVSHELL_WORKER_SECURITY_MODE: "workspace",
     });
 });
 
@@ -113,9 +118,15 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
                 },
             };
         },
-        onTerminalNotification() { return () => undefined; },
-        onRpcConnected() { return () => undefined; },
-        onRpcDisconnected() { return () => undefined; },
+        onTerminalNotification() {
+            return () => undefined;
+        },
+        onRpcConnected() {
+            return () => undefined;
+        },
+        onRpcDisconnected() {
+            return () => undefined;
+        },
         snapshot() {
             return {
                 connectionState: "disconnected",
@@ -133,14 +144,23 @@ test("controller-managed terminals use the instance Worker RPC surface", async (
     const descriptor = mapper.map({
         enabled: true,
         extensions: { model: ["instance"] },
-        mcp: { auth: { mode: "none" }, contextMode: "explicit", enabled: false, path: "/demo-local/mcp" },
+        mcp: {
+            auth: { mode: "none" },
+            contextMode: "explicit",
+            enabled: false,
+            path: "/demo-local/mcp",
+        },
         name: "demo-local",
         provider: "local",
         security: { mode: "workspace" },
         workspace: { enabled: true },
     });
 
-    const opened = await descriptor.terminal!.open({ cols: 80, rows: 24, workspace: "/workspace" });
+    const opened = await descriptor.terminal!.open({
+        cols: 80,
+        rows: 24,
+        workspace: "/workspace",
+    });
     ("process" in opened ? opened.process : opened).dispose?.();
 
     assert.deepEqual(calls, ["terminal.open", "terminal.attach"]);

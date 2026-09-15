@@ -6,7 +6,7 @@ import type {
     ExtensionInstanceLogEntry,
     ExtensionInstanceLogQuery,
     ExtensionInstanceRecord,
-    ExtensionInstanceSnapshot
+    ExtensionInstanceSnapshot,
 } from "@portable-devshell/extension/instance";
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
@@ -16,7 +16,7 @@ import {
     type InstanceCreateSchema,
     type InstanceCreateSummary,
     type InstanceLogEntry,
-    type JsonValue
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -76,14 +76,20 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
         return toExtensionJson(this.#create.getSchema());
     }
 
-    async validateCreate(draft: ExtensionJsonValue): Promise<ExtensionJsonValue> {
+    async validateCreate(
+        draft: ExtensionJsonValue,
+    ): Promise<ExtensionJsonValue> {
         this.#assertAllowed();
         return toExtensionJson(this.#create.validateDraft(draft as JsonValue));
     }
 
-    async create(draft: ExtensionJsonValue): Promise<ExtensionInstanceCreateResult> {
+    async create(
+        draft: ExtensionJsonValue,
+    ): Promise<ExtensionInstanceCreateResult> {
         this.#assertAllowed();
-        return toCreateResult(await this.#create.createInstance(draft as JsonValue));
+        return toCreateResult(
+            await this.#create.createInstance(draft as JsonValue),
+        );
     }
 
     async enable(name: string): Promise<void> {
@@ -110,7 +116,9 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
                 mcpEnabled: configured.mcpEnabled,
                 name: configured.name,
                 provider: configured.provider,
-                ...(descriptor === undefined ? {} : { snapshot: toSnapshot(descriptor.worker.snapshot()) })
+                ...(descriptor === undefined
+                    ? {}
+                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
             };
         });
     }
@@ -133,7 +141,7 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
                 code: errorCodes.instanceConflict,
                 details: { instance: descriptor.name, operation: "start" },
                 message: `Instance ${descriptor.name} is disabled.`,
-                retryable: false
+                retryable: false,
             });
         }
         const snapshot = await descriptor.worker.start();
@@ -150,19 +158,30 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
         return toSnapshot(snapshot);
     }
 
-    async readLogs(name: string, query?: ExtensionInstanceLogQuery): Promise<readonly ExtensionInstanceLogEntry[]> {
+    async readLogs(
+        name: string,
+        query?: ExtensionInstanceLogQuery,
+    ): Promise<readonly ExtensionInstanceLogEntry[]> {
         this.#assertAllowed();
-        return (await this.#require(name).worker.readLogs(query)).map(toLogEntry);
+        return (await this.#require(name).worker.readLogs(query)).map(
+            toLogEntry,
+        );
     }
 
-    async watchEvents(name: string, watch: ExtensionInstanceEventWatch): Promise<void> {
+    async watchEvents(
+        name: string,
+        watch: ExtensionInstanceEventWatch,
+    ): Promise<void> {
         this.#assertAllowed();
         if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 1) {
-            throw new TypeError("Extension instances watchEvents fromSeq must be a positive safe integer.");
+            throw new TypeError(
+                "Extension instances watchEvents fromSeq must be a positive safe integer.",
+            );
         }
-        const eventTypes = watch.eventTypes === undefined
-            ? undefined
-            : new Set(watch.eventTypes.map(requireEventType));
+        const eventTypes =
+            watch.eventTypes === undefined
+                ? undefined
+                : new Set(watch.eventTypes.map(requireEventType));
         const descriptor = this.#require(name);
         await this.#subscriptions.watch(
             descriptor.name,
@@ -170,15 +189,17 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
             watch.fromSeq,
             watch.signal,
             {
-                ...(eventTypes === undefined ? {} : {
-                    eventFilter: (event) => eventTypes.has(event.type)
-                }),
+                ...(eventTypes === undefined
+                    ? {}
+                    : {
+                          eventFilter: (event) => eventTypes.has(event.type),
+                      }),
                 onEvent: async (event) => await watch.onEvent(toEvent(event)),
                 onGap: async (gap) => {
                     await watch.onGap?.({ ...gap });
                     return gap.nextSeq;
-                }
-            }
+                },
+            },
         );
     }
 
@@ -190,22 +211,28 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
             code: errorCodes.instanceMissing,
             details: { instance },
             message: `Instance ${instance} was not found or is disabled.`,
-            retryable: false
+            retryable: false,
         });
     }
 
     #assertAllowed(): void {
         if (this.#allowed) return;
-        throw new Error(`Extension ${this.#extensionId} did not declare the instances capability.`);
+        throw new Error(
+            `Extension ${this.#extensionId} did not declare the instances capability.`,
+        );
     }
 }
 
-function toCreateResult(value: InstanceCreateResult): ExtensionInstanceCreateResult {
+function toCreateResult(
+    value: InstanceCreateResult,
+): ExtensionInstanceCreateResult {
     return {
         enabled: value.enabled,
         ...(value.mcpPath === undefined ? {} : { mcpPath: value.mcpPath }),
         name: value.name,
-        ...(value.snapshot === undefined ? {} : { snapshot: toSnapshot(value.snapshot) })
+        ...(value.snapshot === undefined
+            ? {}
+            : { snapshot: toSnapshot(value.snapshot) }),
     };
 }
 
@@ -224,14 +251,20 @@ function toSnapshot(value: {
     return {
         connectionState: value.connectionState,
         daemonState: value.daemonState,
-        ...(value.effectiveSecurityMode === undefined ? {} : { effectiveSecurityMode: value.effectiveSecurityMode }),
-        ...(value.lastErrorCode === undefined ? {} : { lastErrorCode: value.lastErrorCode }),
-        ...(value.lastErrorMessage === undefined ? {} : { lastErrorMessage: value.lastErrorMessage }),
+        ...(value.effectiveSecurityMode === undefined
+            ? {}
+            : { effectiveSecurityMode: value.effectiveSecurityMode }),
+        ...(value.lastErrorCode === undefined
+            ? {}
+            : { lastErrorCode: value.lastErrorCode }),
+        ...(value.lastErrorMessage === undefined
+            ? {}
+            : { lastErrorMessage: value.lastErrorMessage }),
         lastSeq: value.lastSeq,
         name: value.name,
         ...(value.pid === undefined ? {} : { pid: value.pid }),
         ready: value.ready,
-        status: value.status
+        status: value.status,
     };
 }
 
@@ -240,14 +273,18 @@ function toLogEntry(value: InstanceLogEntry): ExtensionInstanceLogEntry {
         at: value.at,
         ...(value.callId === undefined ? {} : { callId: value.callId }),
         ...(value.ctxId === undefined ? {} : { ctxId: value.ctxId }),
-        ...(value.extensionId === undefined ? {} : { extensionId: value.extensionId }),
+        ...(value.extensionId === undefined
+            ? {}
+            : { extensionId: value.extensionId }),
         instanceName: value.instanceName,
         message: value.message,
-        ...(value.requestId === undefined ? {} : { requestId: value.requestId }),
+        ...(value.requestId === undefined
+            ? {}
+            : { requestId: value.requestId }),
         seq: value.seq,
         ...(value.source === undefined ? {} : { source: value.source }),
         stream: value.stream,
-        ...(value.toolName === undefined ? {} : { toolName: value.toolName })
+        ...(value.toolName === undefined ? {} : { toolName: value.toolName }),
     };
 }
 
@@ -260,15 +297,18 @@ function toEvent(value: {
 }): ExtensionInstanceEvent {
     return {
         at: value.at,
-        ...(value.data === undefined ? {} : { data: value.data as ExtensionJsonValue }),
+        ...(value.data === undefined
+            ? {}
+            : { data: value.data as ExtensionJsonValue }),
         instanceName: value.instanceName,
         seq: value.seq,
-        type: value.type
+        type: value.type,
     };
 }
 
 function requireEventType(value: string): string {
-    if (/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+$/u.test(value)) return value;
+    if (/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+$/u.test(value))
+        return value;
     throw new TypeError(`Extension instances event type is invalid: ${value}.`);
 }
 

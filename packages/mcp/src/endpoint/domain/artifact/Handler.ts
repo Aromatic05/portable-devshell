@@ -1,34 +1,55 @@
-import { createError, errorCodes, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type JsonValue,
+    type ToolCallContext,
+} from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../../Port.js";
 import type { McpToolCatalogArtifactName } from "./Catalog.js";
 import { waitForMcpEndpointAbortable } from "../../dispatch/Support.js";
 import { readMcpArtifactViewImageInput } from "./Input.js";
 import { McpNativeToolResult, type McpEndpointResult } from "../../Endpoint.js";
-import { mcpEndpointToolNotExposed, requireMcpEndpointGateway } from "../../dispatch/Support.js";
+import {
+    mcpEndpointToolNotExposed,
+    requireMcpEndpointGateway,
+} from "../../dispatch/Support.js";
 
 export class McpEndpointHandlerArtifact {
-    constructor(private readonly options: { gateway?: McpInstanceGateway; instanceName: string }) {}
+    constructor(
+        private readonly options: {
+            gateway?: McpInstanceGateway;
+            instanceName: string;
+        },
+    ) {}
 
     async call(
         toolName: McpToolCatalogArtifactName,
         input: JsonValue,
         context: ToolCallContext,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
-        const gateway = requireMcpEndpointGateway(this.options.gateway, this.options.instanceName);
+        const gateway = requireMcpEndpointGateway(
+            this.options.gateway,
+            this.options.instanceName,
+        );
         switch (toolName) {
             case "artifact_viewImage": {
                 if (gateway.viewArtifactImage === undefined) {
-                    throw mcpEndpointToolNotExposed(toolName, this.options.instanceName);
+                    throw mcpEndpointToolNotExposed(
+                        toolName,
+                        this.options.instanceName,
+                    );
                 }
                 const image = await waitForMcpEndpointAbortable(
                     gateway.viewArtifactImage(
                         this.options.instanceName,
-                        readMcpArtifactViewImageInput(withSourceWorkspace(input, context)),
-                        signal
+                        readMcpArtifactViewImageInput(
+                            withSourceWorkspace(input, context),
+                        ),
+                        signal,
                     ),
-                    signal
+                    signal,
                 );
                 const structuredContent = {
                     blake3: image.blake3,
@@ -36,15 +57,17 @@ export class McpEndpointHandlerArtifact {
                     imageRef: image.imageRef,
                     mediaType: image.mediaType,
                     name: image.name,
-                    source: image.source
+                    source: image.source,
                 } as unknown as JsonValue;
                 return new McpNativeToolResult({
-                    content: [{
-                        data: image.content,
-                        mimeType: image.mediaType,
-                        type: "image"
-                    }],
-                    structuredContent
+                    content: [
+                        {
+                            data: image.content,
+                            mimeType: image.mediaType,
+                            type: "image",
+                        },
+                    ],
+                    structuredContent,
                 });
             }
         }
@@ -52,16 +75,22 @@ export class McpEndpointHandlerArtifact {
 }
 
 function requireContextWorkspace(context: ToolCallContext): string {
-    if (context.workspace !== undefined && context.workspace.length > 0) return context.workspace;
+    if (context.workspace !== undefined && context.workspace.length > 0)
+        return context.workspace;
     throw createError({
         code: errorCodes.mcpContextWorkspaceRequired,
-        details: context.ctxId === undefined ? undefined : { ctxId: context.ctxId },
-        message: "Artifact path operations require a workspace attachment on the selected instance.",
-        retryable: false
+        details:
+            context.ctxId === undefined ? undefined : { ctxId: context.ctxId },
+        message:
+            "Artifact path operations require a workspace attachment on the selected instance.",
+        retryable: false,
     });
 }
 
-function withSourceWorkspace(input: JsonValue, context: ToolCallContext): JsonValue {
+function withSourceWorkspace(
+    input: JsonValue,
+    context: ToolCallContext,
+): JsonValue {
     if (!isRecord(input) || input.path === undefined) return input;
     return { ...input, workspace: requireContextWorkspace(context) };
 }

@@ -7,13 +7,18 @@ export interface CliCommandWatchStreamOptions {
     subscribe(fromSeq: number): Promise<CliClientEventStream>;
 }
 
-export async function followCliCommandWatchStream(options: CliCommandWatchStreamOptions): Promise<void> {
+export async function followCliCommandWatchStream(
+    options: CliCommandWatchStreamOptions,
+): Promise<void> {
     let handled = 0;
     let stream: CliClientEventStream | undefined;
     try {
         while (true) {
             const fromSeq = await options.loadFromSeq();
-            if (options.maxEvents !== undefined && handled >= options.maxEvents) {
+            if (
+                options.maxEvents !== undefined &&
+                handled >= options.maxEvents
+            ) {
                 return;
             }
             try {
@@ -24,7 +29,10 @@ export async function followCliCommandWatchStream(options: CliCommandWatchStream
                 }
                 throw error;
             }
-            while (options.maxEvents === undefined || handled < options.maxEvents) {
+            while (
+                options.maxEvents === undefined ||
+                handled < options.maxEvents
+            ) {
                 try {
                     await stream.nextEvent();
                 } catch (error) {
@@ -48,5 +56,10 @@ export async function followCliCommandWatchStream(options: CliCommandWatchStream
 }
 
 function isStreamGap(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "stream.gap";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "stream.gap"
+    );
 }

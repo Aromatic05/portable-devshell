@@ -60,12 +60,13 @@ export class McpEndpointHandlerEnvironment {
         this.#contextSelector = options.contextSelector;
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
-        this.#remoteEnvironment = options.gateway === undefined
-            ? undefined
-            : new McpContextRemoteEnvironment({
-                  contextRegistry: this.#contextRegistry,
-                  gateway: () => options.gateway,
-              });
+        this.#remoteEnvironment =
+            options.gateway === undefined
+                ? undefined
+                : new McpContextRemoteEnvironment({
+                      contextRegistry: this.#contextRegistry,
+                      gateway: () => options.gateway,
+                  });
         this.#worker = options.worker;
     }
 
@@ -104,18 +105,24 @@ export class McpEndpointHandlerEnvironment {
     ): Promise<McpEnvironmentHandlerResult> {
         const remote = this.#remoteEnvironment;
         if (remote === undefined) {
-            throw mcpEndpointToolNotExposed(mcpRemoteEnvironmentToolName, this.#instanceName);
+            throw mcpEndpointToolNotExposed(
+                mcpRemoteEnvironmentToolName,
+                this.#instanceName,
+            );
         }
         const commandInput = readMcpRemoteEnvironmentInput(input, {
             allowContextId: this.#contextSelector.requiresExplicitContextId,
         });
         let resolution = await this.#resolveEnvironmentContext(
-            commandInput.ctxId === undefined ? {} : { ctxId: commandInput.ctxId },
+            commandInput.ctxId === undefined
+                ? {}
+                : { ctxId: commandInput.ctxId },
             requestContext,
             { touch: false },
         );
         let record = resolution.record;
-        const workspace = contextWorkspace(record, this.#instanceName) ?? record.workspace;
+        const workspace =
+            contextWorkspace(record, this.#instanceName) ?? record.workspace;
         await this.#gateway?.beforeModelToolCall?.(
             this.#instanceName,
             mcpRemoteEnvironmentToolName,
@@ -127,24 +134,35 @@ export class McpEndpointHandlerEnvironment {
             },
         );
         if (!resolution.created) {
-            record = await this.#touchEnvironmentContext(record, requestContext);
+            record = await this.#touchEnvironmentContext(
+                record,
+                requestContext,
+            );
             resolution = { ...resolution, record };
         }
         const base = this.#contextSelector.expose(record);
         switch (commandInput.command) {
             case "help":
-                assertRemoteArguments(commandInput, { handle: false, workspace: false });
+                assertRemoteArguments(commandInput, {
+                    handle: false,
+                    workspace: false,
+                });
                 return {
                     ctxId: record.ctxId,
                     structuredContent: {
                         ...base,
                         command: "help",
-                        details: { commands: remoteEnvironmentCommandCatalog() },
+                        details: {
+                            commands: remoteEnvironmentCommandCatalog(),
+                        },
                         message: "Current environ_remote command catalog.",
                     },
                 };
             case "attach": {
-                assertRemoteArguments(commandInput, { handle: true, workspace: "optional" });
+                assertRemoteArguments(commandInput, {
+                    handle: true,
+                    workspace: "optional",
+                });
                 const details = await remote.attach(
                     record.ctxId,
                     commandInput.handle!,
@@ -156,21 +174,31 @@ export class McpEndpointHandlerEnvironment {
                     structuredContent: {
                         ...base,
                         command: "attach",
-                        details: isJsonRecord(details) ? details : { result: details },
-                        message: "Remote environment attached to the current Context.",
+                        details: isJsonRecord(details)
+                            ? details
+                            : { result: details },
+                        message:
+                            "Remote environment attached to the current Context.",
                     },
                 };
             }
             case "mask": {
-                assertRemoteArguments(commandInput, { handle: true, workspace: false });
-                const details = await remote.mask(record.ctxId, commandInput.handle!);
+                assertRemoteArguments(commandInput, {
+                    handle: true,
+                    workspace: false,
+                });
+                const details = await remote.mask(
+                    record.ctxId,
+                    commandInput.handle!,
+                );
                 return {
                     ctxId: record.ctxId,
                     structuredContent: {
                         ...base,
                         command: "mask",
                         details,
-                        message: "Remote instance is permanently masked for the lifetime of the current Context.",
+                        message:
+                            "Remote instance is permanently masked for the lifetime of the current Context.",
                     },
                 };
             }
@@ -214,7 +242,10 @@ export class McpEndpointHandlerEnvironment {
             },
         );
         if (!resolution.created) {
-            record = await this.#touchEnvironmentContext(record, requestContext);
+            record = await this.#touchEnvironmentContext(
+                record,
+                requestContext,
+            );
             resolution = { ...resolution, record };
         }
 
@@ -222,10 +253,14 @@ export class McpEndpointHandlerEnvironment {
             await this.#prepareEnvironment(workspace);
         try {
             if (
-                !resolution.created && previousWorkspace !== undefined &&
+                !resolution.created &&
+                previousWorkspace !== undefined &&
                 previousWorkspace !== prepared.workspace
             ) {
-                await this.#assertWorkspaceSwitchAvailable(record.ctxId, previousWorkspace);
+                await this.#assertWorkspaceSwitchAvailable(
+                    record.ctxId,
+                    previousWorkspace,
+                );
             }
             await this.#worker.appendMcpToolCalled(mcpEnvironmentToolName, {
                 ctxId: record.ctxId,
@@ -254,7 +289,9 @@ export class McpEndpointHandlerEnvironment {
                             : []),
                         `Use ${prepared.temporaryDirectory} for all temporary files.`,
                         ...modelDevshellComments(
-                            this.#gateway?.modelCommands?.(this.#instanceName) ?? []
+                            this.#gateway?.modelCommands?.(
+                                this.#instanceName,
+                            ) ?? [],
                         ),
                         ...alerts.map((advice) => advice.text),
                     ],
@@ -280,13 +317,19 @@ export class McpEndpointHandlerEnvironment {
                     },
                     ...(prepared.projectMemoryPresent !== false
                         ? {
-                              projectMemoryAgentFile: prepared.projectMemoryAgentFile,
-                              projectMemoryDirectory: prepared.projectMemoryDirectory,
+                              projectMemoryAgentFile:
+                                  prepared.projectMemoryAgentFile,
+                              projectMemoryDirectory:
+                                  prepared.projectMemoryDirectory,
                           }
                         : {}),
                     ...(this.#remoteEnvironment === undefined
                         ? {}
-                        : { remoteEnvironment: { commands: remoteEnvironmentCommandHints() } }),
+                        : {
+                              remoteEnvironment: {
+                                  commands: remoteEnvironmentCommandHints(),
+                              },
+                          }),
                     skillsDirectory,
                     temporaryDirectory: prepared.temporaryDirectory,
                     workspace: prepared.workspace,
@@ -344,25 +387,36 @@ export class McpEndpointHandlerEnvironment {
         }
     }
 
-    async #assertWorkspaceSwitchAvailable(ctxId: string, previousWorkspace: string): Promise<void> {
+    async #assertWorkspaceSwitchAvailable(
+        ctxId: string,
+        previousWorkspace: string,
+    ): Promise<void> {
         const gateway = this.#gateway;
         if (gateway === undefined) return;
         if (isMcpGoalGateway(gateway)) {
             const goal = await gateway.readGoal(this.#instanceName, ctxId);
             if (goal?.status === "active" || goal?.status === "blocked") {
-                throw new Error(`Workspace Goal ${goal.goalId} is still ${goal.status} in ${goal.workspace ?? previousWorkspace}; finish or stop it before switching workspace.`);
+                throw new Error(
+                    `Workspace Goal ${goal.goalId} is still ${goal.status} in ${goal.workspace ?? previousWorkspace}; finish or stop it before switching workspace.`,
+                );
             }
         }
         if (gateway.listWaits !== undefined) {
             const waits = await gateway.listWaits(this.#instanceName);
-            const blocking = waits.find((wait) => (
-                wait.createdByCtxId === ctxId &&
-                (wait.workspace === undefined || wait.workspace === previousWorkspace) &&
-                wait.automaticRecovery !== false && wait.recoveryDisabledAt === undefined &&
-                wait.status !== "consumed" && wait.status !== "cancelled"
-            ));
+            const blocking = waits.find(
+                (wait) =>
+                    wait.createdByCtxId === ctxId &&
+                    (wait.workspace === undefined ||
+                        wait.workspace === previousWorkspace) &&
+                    wait.automaticRecovery !== false &&
+                    wait.recoveryDisabledAt === undefined &&
+                    wait.status !== "consumed" &&
+                    wait.status !== "cancelled",
+            );
             if (blocking !== undefined) {
-                throw new Error(`Workspace wait ${blocking.waitId} is still attached to ${previousWorkspace}; finish or stop its owner before switching workspace.`);
+                throw new Error(
+                    `Workspace wait ${blocking.waitId} is still attached to ${previousWorkspace}; finish or stop its owner before switching workspace.`,
+                );
             }
         }
     }
@@ -380,7 +434,8 @@ export class McpEndpointHandlerEnvironment {
             if (!this.#contextSelector.requiresExplicitContextId) {
                 throw createError({
                     code: errorCodes.mcpContextInvalid,
-                    message: "ctxId is internal when Context authority is externally bound.",
+                    message:
+                        "ctxId is internal when Context authority is externally bound.",
                     retryable: false,
                 });
             }
@@ -395,15 +450,22 @@ export class McpEndpointHandlerEnvironment {
             return {
                 bindings: [],
                 created: false,
-                record: options.touch === false
-                    ? record
-                    : record.status === "expired"
-                    ? await this.#contextRegistry.renewForPrincipal(record.ctxId, {
-                          principal: requestContext.principal,
-                      })
-                    : await this.#contextRegistry.validateAndTouch(record.ctxId, {
-                          principal: requestContext.principal,
-                      }),
+                record:
+                    options.touch === false
+                        ? record
+                        : record.status === "expired"
+                          ? await this.#contextRegistry.renewForPrincipal(
+                                record.ctxId,
+                                {
+                                    principal: requestContext.principal,
+                                },
+                            )
+                          : await this.#contextRegistry.validateAndTouch(
+                                record.ctxId,
+                                {
+                                    principal: requestContext.principal,
+                                },
+                            ),
             };
         }
 
@@ -412,35 +474,43 @@ export class McpEndpointHandlerEnvironment {
             return {
                 bindings: bound.bindings,
                 created: false,
-                record: options.touch === false
-                    ? bound.record
-                    : await this.#contextRegistry.validateAndTouch(
-                          bound.record.ctxId,
-                          {
-                              principal: requestContext.principal,
-                          },
-                      ),
+                record:
+                    options.touch === false
+                        ? bound.record
+                        : await this.#contextRegistry.validateAndTouch(
+                              bound.record.ctxId,
+                              {
+                                  principal: requestContext.principal,
+                              },
+                          ),
             };
         }
         if (bound.record?.status === "expired") {
             return {
                 bindings: bound.bindings,
                 created: false,
-                record: options.touch === false
-                    ? bound.record
-                    : await this.#contextRegistry.renewForPrincipal(
-                          bound.record.ctxId,
-                          {
-                              principal: requestContext.principal,
-                          },
-                      ),
+                record:
+                    options.touch === false
+                        ? bound.record
+                        : await this.#contextRegistry.renewForPrincipal(
+                              bound.record.ctxId,
+                              {
+                                  principal: requestContext.principal,
+                              },
+                          ),
             };
         }
 
-        const workspace = input.workspace ?? (bound.record === undefined
-            ? undefined
-            : contextWorkspace(bound.record, this.#instanceName) ?? bound.record.workspace);
-        if (workspace === undefined) throw unboundContext(this.#contextSelector.requiresExplicitContextId);
+        const workspace =
+            input.workspace ??
+            (bound.record === undefined
+                ? undefined
+                : (contextWorkspace(bound.record, this.#instanceName) ??
+                  bound.record.workspace));
+        if (workspace === undefined)
+            throw unboundContext(
+                this.#contextSelector.requiresExplicitContextId,
+            );
 
         return {
             bindings: bound.bindings,
@@ -507,7 +577,12 @@ export class McpEndpointHandlerEnvironment {
         });
         const alerts = (await this.#worker.readAlerts(prepared.workspace))
             .advice;
-        return { alerts, environment, prepared, skillsDirectory: skills.directory };
+        return {
+            alerts,
+            environment,
+            prepared,
+            skillsDirectory: skills.directory,
+        };
     }
 
     async #rollbackUndisclosedContext(
@@ -620,28 +695,27 @@ function modelDevshellComments(commands: readonly string[]): string[] {
 }
 
 function remoteEnvironmentCommandHints(): string[] {
-    return [
-        "help",
-        "attach handle [workspace]",
-        "mask handle",
-    ];
+    return ["help", "attach handle [workspace]", "mask handle"];
 }
 
 function remoteEnvironmentCommandCatalog(): JsonValue[] {
     return [
         {
             command: "help",
-            summary: "Return the authoritative current environ_remote command catalog.",
+            summary:
+                "Return the authoritative current environ_remote command catalog.",
             usage: "help",
         },
         {
             command: "attach",
-            summary: "Attach a remote managed instance and optional absolute workspace to the current Context.",
+            summary:
+                "Attach a remote managed instance and optional absolute workspace to the current Context.",
             usage: "attach handle [workspace]",
         },
         {
             command: "mask",
-            summary: "Permanently hide a remote instance from this Context and revoke any existing attachment.",
+            summary:
+                "Permanently hide a remote instance from this Context and revoke any existing attachment.",
             usage: "mask handle",
         },
     ];
@@ -654,21 +728,24 @@ function assertRemoteArguments(
     if (expected.handle && input.handle === undefined) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "This environ_remote command requires handle. Use command='help' for the current command catalog.",
+            message:
+                "This environ_remote command requires handle. Use command='help' for the current command catalog.",
             retryable: false,
         });
     }
     if (!expected.handle && input.handle !== undefined) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "handle is not valid for this environ_remote command. Use command='help' for the current command catalog.",
+            message:
+                "handle is not valid for this environ_remote command. Use command='help' for the current command catalog.",
             retryable: false,
         });
     }
     if (expected.workspace === false && input.workspace !== undefined) {
         throw createError({
             code: errorCodes.targetInvalid,
-            message: "workspace is not valid for this environ_remote command. Use command='help' for the current command catalog.",
+            message:
+                "workspace is not valid for this environ_remote command. Use command='help' for the current command catalog.",
             retryable: false,
         });
     }

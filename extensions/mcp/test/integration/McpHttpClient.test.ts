@@ -20,7 +20,7 @@ test("MCP HTTP client lists and calls tools through a real Streamable HTTP serve
     const abort = new AbortController();
     const client = await new McpHttpClientFactory("0.1.0").connect(
         { name: "echo", url: server.url },
-        abort.signal
+        abort.signal,
     );
     t.after(async () => await client.close());
 
@@ -30,9 +30,13 @@ test("MCP HTTP client lists and calls tools through a real Streamable HTTP serve
     const toolList = (tools as { tools?: Array<{ name?: string }> }).tools;
     assert.ok(toolList?.some((tool) => tool.name === "echo"));
 
-    const result = await client.callTool("echo", { text: "hello" }, abort.signal);
+    const result = await client.callTool(
+        "echo",
+        { text: "hello" },
+        abort.signal,
+    );
     assert.deepEqual(result, {
-        content: [{ text: "hello", type: "text" }]
+        content: [{ text: "hello", type: "text" }],
     });
 });
 
@@ -42,14 +46,16 @@ async function startEchoServer(): Promise<TestServer> {
         "echo",
         {
             description: "Echo text",
-            inputSchema: z.object({ text: z.string() })
+            inputSchema: z.object({ text: z.string() }),
         },
         async ({ text }) => ({
-            content: [{ text, type: "text" }]
-        })
+            content: [{ text, type: "text" }],
+        }),
     );
 
-    const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const transport = new NodeStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+    });
     await mcp.connect(transport);
 
     const http = createServer((request, response) => {
@@ -58,20 +64,24 @@ async function startEchoServer(): Promise<TestServer> {
             return;
         }
         void transport.handleRequest(request, response).catch((error) => {
-            if (!response.headersSent) response.writeHead(500, { "content-type": "text/plain" });
-            response.end(error instanceof Error ? error.message : String(error));
+            if (!response.headersSent)
+                response.writeHead(500, { "content-type": "text/plain" });
+            response.end(
+                error instanceof Error ? error.message : String(error),
+            );
         });
     });
     await listen(http);
     const address = http.address();
-    if (address === null || typeof address === "string") throw new Error("Expected a TCP test server address.");
+    if (address === null || typeof address === "string")
+        throw new Error("Expected a TCP test server address.");
 
     return {
         close: async () => {
             await mcp.close();
             await close(http);
         },
-        url: `http://127.0.0.1:${address.port}/mcp`
+        url: `http://127.0.0.1:${address.port}/mcp`,
     };
 }
 
@@ -88,6 +98,8 @@ async function listen(server: HttpServer): Promise<void> {
 async function close(server: HttpServer): Promise<void> {
     if (!server.listening) return;
     await new Promise<void>((resolve, reject) => {
-        server.close((error) => error === undefined ? resolve() : reject(error));
+        server.close((error) =>
+            error === undefined ? resolve() : reject(error),
+        );
     });
 }

@@ -1,21 +1,27 @@
 import { join } from "node:path";
 
-import type { AgentProvider, AgentProviderHandle, AgentProviderStartContext } from "../../builtin/provider/AgentProvider.js";
+import type {
+    AgentProvider,
+    AgentProviderHandle,
+    AgentProviderStartContext,
+} from "../../builtin/provider/AgentProvider.js";
 import {
     PI_BOOTSTRAP_VERSION,
     PiProviderInstaller,
-    type PiProviderInstallation
+    type PiProviderInstallation,
 } from "./PiProviderInstaller.js";
 import {
     PiAgentProcessFactory,
-    type PiAgentRuntimeFactory
+    type PiAgentRuntimeFactory,
 } from "./PiAgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
 export const PI_PROVIDER_VERSION = "0.1.2";
 
 export interface PiProviderInstallerLike {
-    ensureInstalled(runtime: AgentProviderStartContext["runtime"]): Promise<PiProviderInstallation>;
+    ensureInstalled(
+        runtime: AgentProviderStartContext["runtime"],
+    ): Promise<PiProviderInstallation>;
 }
 
 export interface PiAgentProviderOptions {
@@ -33,14 +39,21 @@ export class PiAgentProvider implements AgentProvider {
 
     constructor(options: PiAgentProviderOptions = {}) {
         this.version = options.version ?? PI_PROVIDER_VERSION;
-        this.#installer = options.installer ?? new PiProviderInstaller({
-            version: options.piBootstrapVersion ?? PI_BOOTSTRAP_VERSION
-        });
-        this.#runtimeFactory = options.runtimeFactory ?? new PiAgentProcessFactory();
+        this.#installer =
+            options.installer ??
+            new PiProviderInstaller({
+                version: options.piBootstrapVersion ?? PI_BOOTSTRAP_VERSION,
+            });
+        this.#runtimeFactory =
+            options.runtimeFactory ?? new PiAgentProcessFactory();
     }
 
-    async start(context: AgentProviderStartContext): Promise<AgentProviderHandle> {
-        const installation = await this.#installer.ensureInstalled(context.runtime);
+    async start(
+        context: AgentProviderStartContext,
+    ): Promise<AgentProviderHandle> {
+        const installation = await this.#installer.ensureInstalled(
+            context.runtime,
+        );
         const paths = resolvePiAgentPaths(context);
         return await this.#runtimeFactory.start({
             agentId: context.agentId,
@@ -52,14 +65,20 @@ export class PiAgentProvider implements AgentProvider {
             runtimeDirectory: context.runtime.stateDirectory,
             target: context.target,
             tools: context.tools,
-            webBasePath: context.web?.basePath ?? "/agent/"
+            webBasePath: context.web?.basePath ?? "/agent/",
         });
     }
 }
 
-function resolvePiAgentPaths(context: AgentProviderStartContext): { localCwd: string } {
-    const agentRoot = join(context.runtime.stateDirectory, "agents", context.agentId);
+function resolvePiAgentPaths(context: AgentProviderStartContext): {
+    localCwd: string;
+} {
+    const agentRoot = join(
+        context.runtime.stateDirectory,
+        "agents",
+        context.agentId,
+    );
     return {
-        localCwd: join(agentRoot, "cwd")
+        localCwd: join(agentRoot, "cwd"),
     };
 }

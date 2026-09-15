@@ -46,12 +46,29 @@ test("Audit downgrade v2 to v1 reconstructs compressed Logs without modifying th
         try {
             assert.equal(readUserVersion(target), 1);
             assert.deepEqual(
-                (target.prepare("PRAGMA table_info(audit_records)").all() as Array<{ name: string }>).map((row) => row.name),
-                ["id", "collection", "occurred_at_ms", "payload_bytes", "payload"],
+                (
+                    target
+                        .prepare("PRAGMA table_info(audit_records)")
+                        .all() as Array<{ name: string }>
+                ).map((row) => row.name),
+                [
+                    "id",
+                    "collection",
+                    "occurred_at_ms",
+                    "payload_bytes",
+                    "payload",
+                ],
             );
-            const rows = target.prepare(
-                "SELECT id, collection, payload_bytes AS payloadBytes, payload FROM audit_records ORDER BY id",
-            ).all() as Array<{ collection: string; id: number; payload: string; payloadBytes: number }>;
+            const rows = target
+                .prepare(
+                    "SELECT id, collection, payload_bytes AS payloadBytes, payload FROM audit_records ORDER BY id",
+                )
+                .all() as Array<{
+                collection: string;
+                id: number;
+                payload: string;
+                payloadBytes: number;
+            }>;
             assert.equal(rows.length, 2);
             assert.deepEqual(JSON.parse(rows[0]!.payload), {
                 at: "2026-09-11T00:00:00.000Z",
@@ -60,7 +77,10 @@ test("Audit downgrade v2 to v1 reconstructs compressed Logs without modifying th
                 seq: 1,
                 stream: "stdout",
             });
-            assert.equal(rows[0]!.payloadBytes, Buffer.byteLength(rows[0]!.payload, "utf8"));
+            assert.equal(
+                rows[0]!.payloadBytes,
+                Buffer.byteLength(rows[0]!.payload, "utf8"),
+            );
             assert.deepEqual(JSON.parse(rows[1]!.payload), {
                 callId: "call-tool",
                 inputSummary: "{}",
@@ -93,7 +113,12 @@ test("Audit downgrade rejects unknown newer schemas and never creates an output"
         assert.deepEqual(readFileSync(source), sourceBefore);
         assert.throws(() => readFileSync(output), /ENOENT/u);
         assert.throws(
-            () => downgradeAuditDatabase({ output: source, source, toVersion: 1 }),
+            () =>
+                downgradeAuditDatabase({
+                    output: source,
+                    source,
+                    toVersion: 1,
+                }),
             /non-destructive/u,
         );
     } finally {
@@ -102,7 +127,9 @@ test("Audit downgrade rejects unknown newer schemas and never creates an output"
 });
 
 test("Audit downgrade refuses to overwrite an existing output and preserves both files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-storage-existing-output-"));
+    const root = await mkdtemp(
+        join(tmpdir(), "devshell-storage-existing-output-"),
+    );
     try {
         const source = join(root, "audit.sqlite3");
         const output = join(root, "audit-v1.sqlite3");
@@ -123,7 +150,9 @@ test("Audit downgrade refuses to overwrite an existing output and preserves both
 });
 
 test("Conversation downgrade v1 exports legacy Context Comments and preserves Reports in the source", async () => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-storage-conversation-"));
+    const root = await mkdtemp(
+        join(tmpdir(), "devshell-storage-conversation-"),
+    );
     try {
         const controlWorker = join(root, "alpha", "control-worker");
         await mkdir(controlWorker, { recursive: true });
@@ -132,7 +161,11 @@ test("Conversation downgrade v1 exports legacy Context Comments and preserves Re
         createConversationV1(source);
         const sourceBefore = readFileSync(source);
 
-        const result = downgradeConversationDatabase({ output, source, toVersion: 0 });
+        const result = downgradeConversationDatabase({
+            output,
+            source,
+            toVersion: 0,
+        });
 
         assert.deepEqual(result, {
             comments: 1,
@@ -146,16 +179,18 @@ test("Conversation downgrade v1 exports legacy Context Comments and preserves Re
         });
         assert.deepEqual(readFileSync(source), sourceBefore);
         assert.deepEqual(JSON.parse(readFileSync(output, "utf8")), {
-            messages: [{
-                callId: "call-comment",
-                createdAt: "2026-09-11T00:00:00.000Z",
-                ctxId: "ctx-alpha",
-                deliveredAt: "2026-09-11T00:00:01.000Z",
-                id: "message-1",
-                instance: "alpha",
-                status: "delivered",
-                text: "legacy comment",
-            }],
+            messages: [
+                {
+                    callId: "call-comment",
+                    createdAt: "2026-09-11T00:00:00.000Z",
+                    ctxId: "ctx-alpha",
+                    deliveredAt: "2026-09-11T00:00:01.000Z",
+                    id: "message-1",
+                    instance: "alpha",
+                    status: "delivered",
+                    text: "legacy comment",
+                },
+            ],
             version: 1,
         });
         assert.deepEqual(inspectStorageDatabase(source), {
@@ -173,8 +208,17 @@ test("Storage native command requires local owner and explicit non-destructive d
     try {
         const source = join(root, "audit.sqlite3");
         createAuditV2(source);
-        await assert.rejects(executeStorageCommand(["inspect", source], invocation(undefined, false)), /local owner/u);
-        const result = await executeStorageCommand(["inspect", "audit.sqlite3"], invocation(root));
+        await assert.rejects(
+            executeStorageCommand(
+                ["inspect", source],
+                invocation(undefined, false),
+            ),
+            /local owner/u,
+        );
+        const result = await executeStorageCommand(
+            ["inspect", "audit.sqlite3"],
+            invocation(root),
+        );
         assert.equal(result.kind, "json");
         assert.deepEqual(result.value, {
             filePath: source,
@@ -182,7 +226,10 @@ test("Storage native command requires local owner and explicit non-destructive d
             schemaVersion: 2,
         });
         await assert.rejects(
-            executeStorageCommand(["downgrade", "audit", source, "--to", "1"], invocation(root)),
+            executeStorageCommand(
+                ["downgrade", "audit", source, "--to", "1"],
+                invocation(root),
+            ),
             /requires --output/u,
         );
     } finally {
@@ -212,9 +259,19 @@ function createAuditV2(filePath: string): void {
             stream: "stdout",
         });
         const logBody = Buffer.from("compressed log body ".repeat(200), "utf8");
-        database.prepare(
-            "INSERT INTO audit_records(id, collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ).run(1, "logs", 1, Buffer.byteLength(logMetadata) + logBody.byteLength, logMetadata, zstdCompressSync(logBody), "zstd");
+        database
+            .prepare(
+                "INSERT INTO audit_records(id, collection, occurred_at_ms, payload_bytes, payload, body, body_codec) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .run(
+                1,
+                "logs",
+                1,
+                Buffer.byteLength(logMetadata) + logBody.byteLength,
+                logMetadata,
+                zstdCompressSync(logBody),
+                "zstd",
+            );
         const tool = JSON.stringify({
             callId: "call-tool",
             inputSummary: "{}",
@@ -224,9 +281,11 @@ function createAuditV2(filePath: string): void {
             status: "completed",
             toolName: "file_read",
         });
-        database.prepare(
-            "INSERT INTO audit_records(id, collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?, ?)",
-        ).run(2, "toolCalls", 2, Buffer.byteLength(tool), tool);
+        database
+            .prepare(
+                "INSERT INTO audit_records(id, collection, occurred_at_ms, payload_bytes, payload) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run(2, "toolCalls", 2, Buffer.byteLength(tool), tool);
     } finally {
         database.close();
     }
@@ -252,21 +311,35 @@ function createConversationV1(filePath: string): void {
             ) STRICT;
             PRAGMA user_version = 1;
         `);
-        database.prepare(`
+        database
+            .prepare(
+                `
             INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, status, call_id, delivered_at)
             VALUES ('comment', ?, ?, ?, ?, 'delivered', ?, ?)
-        `).run(
-            "message-1",
-            "ctx-alpha",
-            "2026-09-11T00:00:00.000Z",
-            "legacy comment",
-            "call-comment",
-            "2026-09-11T00:00:01.000Z",
-        );
-        database.prepare(`
+        `,
+            )
+            .run(
+                "message-1",
+                "ctx-alpha",
+                "2026-09-11T00:00:00.000Z",
+                "legacy comment",
+                "call-comment",
+                "2026-09-11T00:00:01.000Z",
+            );
+        database
+            .prepare(
+                `
             INSERT INTO conversation_entries(kind, id, ctx_id, created_at, text, call_id)
             VALUES ('report', ?, ?, ?, ?, ?)
-        `).run("report-call", "ctx-alpha", "2026-09-11T00:00:02.000Z", "report body", "report-call");
+        `,
+            )
+            .run(
+                "report-call",
+                "ctx-alpha",
+                "2026-09-11T00:00:02.000Z",
+                "report body",
+                "report-call",
+            );
     } finally {
         database.close();
     }
@@ -287,10 +360,18 @@ function createFutureDatabase(filePath: string, version: number): void {
 
 function openDatabase(filePath: string, readOnly = false) {
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const { DatabaseSync } =
+        require("node:sqlite") as typeof import("node:sqlite");
     return new DatabaseSync(filePath, { readOnly, timeout: 5_000 });
 }
 
 function readUserVersion(database: import("node:sqlite").DatabaseSync): number {
-    return Number(Object.values(database.prepare("PRAGMA user_version").get() as Record<string, number>)[0] ?? 0);
+    return Number(
+        Object.values(
+            database.prepare("PRAGMA user_version").get() as Record<
+                string,
+                number
+            >,
+        )[0] ?? 0,
+    );
 }

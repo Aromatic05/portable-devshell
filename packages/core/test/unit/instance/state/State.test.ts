@@ -5,14 +5,16 @@ import { asInstanceName } from "@portable-devshell/shared";
 import { InstanceStateMachine } from "@portable-devshell/core/testing";
 
 test("InstanceStateMachine derives ready running stale failed and stopped snapshots", () => {
-    const stateMachine = new InstanceStateMachine(asInstanceName("task-5-state"));
+    const stateMachine = new InstanceStateMachine(
+        asInstanceName("task-5-state"),
+    );
 
     assert.equal(stateMachine.snapshot().ready, false);
     assert.equal(stateMachine.snapshot().status, "stopped");
 
     const starting = stateMachine.apply({
         connectionState: "connecting",
-        daemonState: "starting"
+        daemonState: "starting",
     });
     assert.equal(starting.ready, false);
     assert.equal(starting.status, "running");
@@ -21,7 +23,7 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
         connectionState: "connected",
         daemonState: "running",
         lastSeq: 4,
-        pid: 1234
+        pid: 1234,
     });
     assert.equal(ready.ready, true);
     assert.equal(ready.status, "ready");
@@ -29,13 +31,13 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
     assert.equal(ready.pid, 1234);
 
     const reconnecting = stateMachine.apply({
-        connectionState: "reconnecting"
+        connectionState: "reconnecting",
     });
     assert.equal(reconnecting.ready, false);
     assert.equal(reconnecting.status, "running");
 
     const stale = stateMachine.apply({
-        daemonState: "stale"
+        daemonState: "stale",
     });
     assert.equal(stale.ready, false);
     assert.equal(stale.status, "stale");
@@ -44,21 +46,27 @@ test("InstanceStateMachine derives ready running stale failed and stopped snapsh
         connectionState: "failed",
         daemonState: "running",
         lastErrorCode: "core.workerRpcDisconnected",
-        lastErrorMessage: "Worker RPC connection closed unexpectedly."
+        lastErrorMessage: "Worker RPC connection closed unexpectedly.",
     });
     assert.equal(failed.ready, false);
     assert.equal(failed.status, "failed");
     assert.equal(failed.lastErrorCode, "core.workerRpcDisconnected");
-    assert.equal(failed.lastErrorMessage, "Worker RPC connection closed unexpectedly.");
+    assert.equal(
+        failed.lastErrorMessage,
+        "Worker RPC connection closed unexpectedly.",
+    );
 
     const retained = stateMachine.apply({ lastSeq: 5 });
-    assert.equal(retained.lastErrorMessage, "Worker RPC connection closed unexpectedly.");
+    assert.equal(
+        retained.lastErrorMessage,
+        "Worker RPC connection closed unexpectedly.",
+    );
 
     const stopped = stateMachine.apply({
         connectionState: "disconnected",
         daemonState: "stopped",
         lastErrorCode: undefined,
-        lastErrorMessage: undefined
+        lastErrorMessage: undefined,
     });
     assert.equal(stopped.ready, false);
     assert.equal(stopped.status, "stopped");

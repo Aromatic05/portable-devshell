@@ -277,7 +277,7 @@ impl ResolvedDirectory {
 
         #[cfg(unix)]
         {
-            return fs::set_permissions(self.path.join(relative), fs::Permissions::from_mode(mode));
+            fs::set_permissions(self.path.join(relative), fs::Permissions::from_mode(mode))
         }
         #[cfg(not(unix))]
         {
@@ -378,7 +378,7 @@ impl ResolvedTarget {
     pub fn is_anchored(&self) -> bool {
         #[cfg(unix)]
         {
-            return self.directory.capability.is_some();
+            self.directory.capability.is_some()
         }
         #[cfg(not(unix))]
         {

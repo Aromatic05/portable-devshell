@@ -1,13 +1,24 @@
-import type { JsonValue, ReverseInstanceStatus } from "@portable-devshell/shared";
+import type {
+    JsonValue,
+    ReverseInstanceStatus,
+} from "@portable-devshell/shared";
 
-import { InstanceEventBuffer, type InstanceEventInput, type InstanceEventStreamGap, type InstanceEventStreamSlice } from "../../../instance/EventBuffer.js";
-import { InstanceStateMachine, type InstanceStateUpdate } from "../../../instance/state/Machine.js";
+import {
+    InstanceEventBuffer,
+    type InstanceEventInput,
+    type InstanceEventStreamGap,
+    type InstanceEventStreamSlice,
+} from "../../../instance/EventBuffer.js";
+import {
+    InstanceStateMachine,
+    type InstanceStateUpdate,
+} from "../../../instance/state/Machine.js";
 import type { InstanceSnapshot } from "../../../instance/state/Snapshot.js";
 import type { ResolvedWorkerInstanceConfig } from "../Config.js";
 import {
     createConnectionChangedEventData,
     createReadyChangedEventData,
-    createStatusChangedEventData
+    createStatusChangedEventData,
 } from "./Event.js";
 import { normalizeLifecycleStatus } from "../lifecycle/Status.js";
 
@@ -32,7 +43,7 @@ export class WorkerInstanceState {
         return {
             ...this.#stateMachine.snapshot(),
             effectiveSecurityMode: this.#config.effectiveSecurityMode,
-            ...(reverse === undefined ? {} : { reverse })
+            ...(reverse === undefined ? {} : { reverse }),
         };
     }
 
@@ -44,30 +55,43 @@ export class WorkerInstanceState {
         const event = await this.#eventBuffer.append({
             at: new Date().toISOString(),
             data,
-            type
+            type,
         });
         this.#stateMachine.apply({ lastSeq: event.seq });
         return event;
     }
 
-    async apply(update: InstanceStateUpdate, reverse?: ReverseInstanceStatus): Promise<InstanceSnapshot> {
+    async apply(
+        update: InstanceStateUpdate,
+        reverse?: ReverseInstanceStatus,
+    ): Promise<InstanceSnapshot> {
         const previous = this.snapshot(reverse);
         this.#stateMachine.apply(update);
         const next = this.snapshot(reverse);
 
         if (
             previous.daemonState !== next.daemonState ||
-            normalizeLifecycleStatus(previous.status) !== normalizeLifecycleStatus(next.status)
+            normalizeLifecycleStatus(previous.status) !==
+                normalizeLifecycleStatus(next.status)
         ) {
-            await this.appendEvent("instance.statusChanged", createStatusChangedEventData(previous, next));
+            await this.appendEvent(
+                "instance.statusChanged",
+                createStatusChangedEventData(previous, next),
+            );
         }
 
         if (previous.connectionState !== next.connectionState) {
-            await this.appendEvent("instance.connectionChanged", createConnectionChangedEventData(previous, next));
+            await this.appendEvent(
+                "instance.connectionChanged",
+                createConnectionChangedEventData(previous, next),
+            );
         }
 
         if (previous.ready !== next.ready) {
-            await this.appendEvent("instance.readyChanged", createReadyChangedEventData(previous, next));
+            await this.appendEvent(
+                "instance.readyChanged",
+                createReadyChangedEventData(previous, next),
+            );
         }
 
         return this.snapshot(reverse);

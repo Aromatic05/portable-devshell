@@ -5,7 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { ReverseCredentialStore, reverseRoute } from "../../../../src/testing.ts";
+import {
+    ReverseCredentialStore,
+    reverseRoute,
+} from "../../../../src/testing.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const execFileAsync = promisify(execFile);
@@ -16,24 +19,39 @@ test("reverse device code is single-use and device token is stored in user-only 
     const code = await store.createDeviceCode("remote-test");
 
     assert.match(code.deviceCode, /^[A-Z2-9]{5}-[A-Z2-9]{5}$/u);
-    const credential = await store.consumeDeviceCode(code.deviceCode.toLowerCase());
+    const credential = await store.consumeDeviceCode(
+        code.deviceCode.toLowerCase(),
+    );
     assert.equal(credential.instance, "remote-test");
-    assert.equal(await store.authenticate("remote-test", credential.deviceToken), true);
+    assert.equal(
+        await store.authenticate("remote-test", credential.deviceToken),
+        true,
+    );
 
     await assert.rejects(
         store.consumeDeviceCode(code.deviceCode),
-        (error: unknown) => hasCode(error, "reverse.deviceCodeConsumed")
+        (error: unknown) => hasCode(error, "reverse.deviceCodeConsumed"),
     );
 
-    const record = await stat(join(home, ".devshell", "control", "reverse", "remote-test.json"));
+    const record = await stat(
+        join(home, ".devshell", "control", "reverse", "remote-test.json"),
+    );
     if (process.platform !== "win32") {
         assert.equal(record.mode & 0o777, 0o600);
     }
 });
 
 test("reverse credential writes fail closed when file security cannot be established", async () => {
-    const home = await createTestTempDirectory("devshell-reverse-security-failure");
-    const credentialPath = join(home, ".devshell", "control", "reverse", "remote-test.json");
+    const home = await createTestTempDirectory(
+        "devshell-reverse-security-failure",
+    );
+    const credentialPath = join(
+        home,
+        ".devshell",
+        "control",
+        "reverse",
+        "remote-test.json",
+    );
     const store = new ReverseCredentialStore(home, {
         async secureDirectory() {
             throw new Error("injected credential security failure");
@@ -57,9 +75,16 @@ test("reverse credential writes fail closed when file security cannot be establi
 
 test(
     "reverse credentials use owner-only Windows DACLs",
-    { skip: process.platform === "win32" ? false : "requires Windows DACL semantics" },
+    {
+        skip:
+            process.platform === "win32"
+                ? false
+                : "requires Windows DACL semantics",
+    },
     async () => {
-        const home = await createTestTempDirectory("devshell-reverse-windows-acl");
+        const home = await createTestTempDirectory(
+            "devshell-reverse-windows-acl",
+        );
         const store = new ReverseCredentialStore(home);
         await store.createDeviceCode("remote-test");
 
@@ -70,8 +95,14 @@ test(
 
         assertOwnerOnlyAcl(directoryAcl);
         assertOwnerOnlyAcl(fileAcl);
-        assert.match(directoryAcl.rules[0]?.inheritance ?? "", /ContainerInherit/u);
-        assert.match(directoryAcl.rules[0]?.inheritance ?? "", /ObjectInherit/u);
+        assert.match(
+            directoryAcl.rules[0]?.inheritance ?? "",
+            /ContainerInherit/u,
+        );
+        assert.match(
+            directoryAcl.rules[0]?.inheritance ?? "",
+            /ObjectInherit/u,
+        );
         assert.equal(fileAcl.rules[0]?.inheritance, "None");
     },
 );
@@ -83,11 +114,22 @@ test("issuing a replacement code keeps the old token valid until the code is con
     const first = await store.consumeDeviceCode(firstCode.deviceCode);
 
     const replacementCode = await store.createDeviceCode("remote-test");
-    assert.equal(await store.authenticate("remote-test", first.deviceToken), true);
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        true,
+    );
 
-    const replacement = await store.consumeDeviceCode(replacementCode.deviceCode);
-    assert.equal(await store.authenticate("remote-test", first.deviceToken), false);
-    assert.equal(await store.authenticate("remote-test", replacement.deviceToken), true);
+    const replacement = await store.consumeDeviceCode(
+        replacementCode.deviceCode,
+    );
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        false,
+    );
+    assert.equal(
+        await store.authenticate("remote-test", replacement.deviceToken),
+        true,
+    );
 });
 
 test("token rotation and revocation invalidate the previous credential", async () => {
@@ -97,7 +139,10 @@ test("token rotation and revocation invalidate the previous credential", async (
     const first = await store.consumeDeviceCode(code.deviceCode);
     const rotated = await store.rotateToken("remote-test");
 
-    assert.equal(await store.authenticate("remote-test", first.deviceToken), false);
+    assert.equal(
+        await store.authenticate("remote-test", first.deviceToken),
+        false,
+    );
     assert.equal(await store.authenticate("remote-test", rotated), true);
 
     await store.revoke("remote-test");
@@ -112,10 +157,16 @@ test("retiring a reverse instance invalidates both its device token and pending 
     const firstCode = await store.createDeviceCode("remote-test");
     const enrolled = await store.consumeDeviceCode(firstCode.deviceCode);
     const pendingCode = await store.createDeviceCode("remote-test");
-    assert.equal(await store.authenticate("remote-test", enrolled.deviceToken), true);
+    assert.equal(
+        await store.authenticate("remote-test", enrolled.deviceToken),
+        true,
+    );
 
     assert.equal(await store.retire("remote-test"), true);
-    assert.equal(await store.authenticate("remote-test", enrolled.deviceToken), false);
+    assert.equal(
+        await store.authenticate("remote-test", enrolled.deviceToken),
+        false,
+    );
     await assert.rejects(
         store.consumeDeviceCode(pendingCode.deviceCode),
         (error: unknown) => hasCode(error, "reverse.deviceCodeInvalid"),
@@ -124,7 +175,9 @@ test("retiring a reverse instance invalidates both its device token and pending 
 });
 
 test("failed replacement preparation leaves the previous reverse credential active", async () => {
-    const home = await createTestTempDirectory("devshell-reverse-atomic-replace");
+    const home = await createTestTempDirectory(
+        "devshell-reverse-atomic-replace",
+    );
     const initialStore = new ReverseCredentialStore(home);
     const code = await initialStore.createDeviceCode("remote-test");
     const initial = await initialStore.consumeDeviceCode(code.deviceCode);
@@ -143,19 +196,30 @@ test("failed replacement preparation leaves the previous reverse credential acti
         failingStore.rotateToken("remote-test"),
         /injected replacement preparation failure/u,
     );
-    assert.equal(await initialStore.authenticate("remote-test", initial.deviceToken), true);
+    assert.equal(
+        await initialStore.authenticate("remote-test", initial.deviceToken),
+        true,
+    );
 });
 
 test("reverse route follows the public base URL path", () => {
-    assert.equal(reverseRoute("https://example.test", "/reverse/v1/connect"), "/reverse/v1/connect");
+    assert.equal(
+        reverseRoute("https://example.test", "/reverse/v1/connect"),
+        "/reverse/v1/connect",
+    );
     assert.equal(
         reverseRoute("https://example.test/devshell/", "/reverse/v1/connect"),
-        "/devshell/reverse/v1/connect"
+        "/devshell/reverse/v1/connect",
     );
 });
 
 function hasCode(error: unknown, code: string): boolean {
-    return typeof error === "object" && error !== null && "code" in error && error.code === code;
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === code
+    );
 }
 
 interface WindowsAclSnapshot {

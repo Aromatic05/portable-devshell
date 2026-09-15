@@ -13,7 +13,7 @@ test("Extension registry persists selected and last-known-good generations atomi
     const paths = new ExtensionPathLayout({
         dataHome: join(root, "data"),
         homeDirectory: join(root, "home"),
-        runtimeRoot: join(root, "runtime")
+        runtimeRoot: join(root, "runtime"),
     });
     const store = new ExtensionRegistryStore(paths.registryFile);
 
@@ -23,10 +23,10 @@ test("Extension registry persists selected and last-known-good generations atomi
             agent: {
                 enabled: true,
                 lastKnownGoodGeneration: "0.1.0-good",
-                selectedGeneration: "0.2.0-next"
-            }
+                selectedGeneration: "0.2.0-next",
+            },
         },
-        schemaVersion: 1
+        schemaVersion: 1,
     });
 
     assert.deepEqual(await store.read(), {
@@ -34,10 +34,10 @@ test("Extension registry persists selected and last-known-good generations atomi
             agent: {
                 enabled: true,
                 lastKnownGoodGeneration: "0.1.0-good",
-                selectedGeneration: "0.2.0-next"
-            }
+                selectedGeneration: "0.2.0-next",
+            },
         },
-        schemaVersion: 1
+        schemaVersion: 1,
     });
     const source = await readFile(paths.registryFile, "utf8");
     assert.match(source, /"lastKnownGoodGeneration": "0\.1\.0-good"/u);
@@ -49,13 +49,46 @@ test("Extension path layout separates immutable code, persistent data, mutable s
     const paths = new ExtensionPathLayout({
         dataHome: join(root, "xdg-data"),
         homeDirectory: join(root, "home"),
-        runtimeRoot: join(root, "runtime")
+        runtimeRoot: join(root, "runtime"),
     });
 
-    assert.equal(paths.generationDirectory("agent", "0.1.0-hash"), join(root, "xdg-data", "portable-devshell", "extensions", "agent", "0.1.0-hash"));
-    assert.equal(paths.dataDirectory("agent"), join(root, "xdg-data", "portable-devshell", "extension-data", "agent"));
-    assert.equal(paths.stateDirectory("agent"), join(root, "home", ".devshell", "control", "extensions", "state", "agent"));
-    assert.equal(paths.runtimeDirectory("agent", "0.1.0-hash"), join(root, "runtime", "agent", "0.1.0-hash"));
-    assert.throws(() => paths.generationDirectory("../escape", "g1"), /Invalid Extension id/u);
-    assert.throws(() => paths.runtimeDirectory("agent", "../escape"), /Invalid Extension generation/u);
+    assert.equal(
+        paths.generationDirectory("agent", "0.1.0-hash"),
+        join(
+            root,
+            "xdg-data",
+            "portable-devshell",
+            "extensions",
+            "agent",
+            "0.1.0-hash",
+        ),
+    );
+    assert.equal(
+        paths.dataDirectory("agent"),
+        join(root, "xdg-data", "portable-devshell", "extension-data", "agent"),
+    );
+    assert.equal(
+        paths.stateDirectory("agent"),
+        join(
+            root,
+            "home",
+            ".devshell",
+            "control",
+            "extensions",
+            "state",
+            "agent",
+        ),
+    );
+    assert.equal(
+        paths.runtimeDirectory("agent", "0.1.0-hash"),
+        join(root, "runtime", "agent", "0.1.0-hash"),
+    );
+    assert.throws(
+        () => paths.generationDirectory("../escape", "g1"),
+        /Invalid Extension id/u,
+    );
+    assert.throws(
+        () => paths.runtimeDirectory("agent", "../escape"),
+        /Invalid Extension generation/u,
+    );
 });

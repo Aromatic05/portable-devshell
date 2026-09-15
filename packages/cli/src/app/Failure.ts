@@ -1,4 +1,8 @@
-import { toControlErrorBody, type ControlErrorBody, type JsonValue } from "@portable-devshell/shared";
+import {
+    toControlErrorBody,
+    type ControlErrorBody,
+    type JsonValue,
+} from "@portable-devshell/shared";
 
 export interface CliRenderErrorOptions {
     cause?: ControlErrorBody;
@@ -12,7 +16,11 @@ export class CliRenderError extends Error {
     readonly details?: JsonValue;
     readonly retryable?: boolean;
 
-    constructor(code: string, message: string, options: CliRenderErrorOptions = {}) {
+    constructor(
+        code: string,
+        message: string,
+        options: CliRenderErrorOptions = {},
+    ) {
         super(message);
         this.name = "CliRenderError";
         this.code = code;
@@ -26,7 +34,10 @@ export class CliRenderError extends Error {
     }
 }
 
-export function renderCliError(error: unknown, options: { debug?: boolean; verbose?: boolean } = {}): string {
+export function renderCliError(
+    error: unknown,
+    options: { debug?: boolean; verbose?: boolean } = {},
+): string {
     const body = readErrorBody(error);
 
     if (options.debug) {
@@ -37,7 +48,10 @@ export function renderCliError(error: unknown, options: { debug?: boolean; verbo
         body?.message ??
         (error instanceof Error
             ? error.message
-            : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+            : typeof error === "object" &&
+                error !== null &&
+                "message" in error &&
+                typeof error.message === "string"
               ? error.message
               : String(error));
     const code = body?.code;
@@ -47,9 +61,13 @@ export function renderCliError(error: unknown, options: { debug?: boolean; verbo
     }
 
     const lines = [message];
-    const details = body?.details && typeof body.details === "object" && body.details !== null && !Array.isArray(body.details)
-        ? (body.details as Record<string, JsonValue>)
-        : undefined;
+    const details =
+        body?.details &&
+        typeof body.details === "object" &&
+        body.details !== null &&
+        !Array.isArray(body.details)
+            ? (body.details as Record<string, JsonValue>)
+            : undefined;
 
     for (const line of renderDiagnosticSummary(details)) {
         lines.push(line);
@@ -64,7 +82,9 @@ export function renderCliError(error: unknown, options: { debug?: boolean; verbo
     return `${lines.join("\n")}\n`;
 }
 
-function renderDiagnosticSummary(details: Record<string, JsonValue> | undefined): string[] {
+function renderDiagnosticSummary(
+    details: Record<string, JsonValue> | undefined,
+): string[] {
     if (details === undefined) {
         return [];
     }
@@ -85,7 +105,10 @@ function renderDiagnosticSummary(details: Record<string, JsonValue> | undefined)
     return lines;
 }
 
-function renderVerboseDetails(details: Record<string, JsonValue> | undefined, cause: ControlErrorBody | undefined): string[] {
+function renderVerboseDetails(
+    details: Record<string, JsonValue> | undefined,
+    cause: ControlErrorBody | undefined,
+): string[] {
     const lines: string[] = [];
 
     if (details !== undefined) {
@@ -99,13 +122,21 @@ function renderVerboseDetails(details: Record<string, JsonValue> | undefined, ca
     return lines;
 }
 
-function pushLine(lines: string[], label: string, value: JsonValue | undefined): void {
+function pushLine(
+    lines: string[],
+    label: string,
+    value: JsonValue | undefined,
+): void {
     if (typeof value === "string" || typeof value === "number") {
         lines.push(`${label}: ${value}`);
     }
 }
 
-function pushTail(lines: string[], label: string, value: JsonValue | undefined): void {
+function pushTail(
+    lines: string[],
+    label: string,
+    value: JsonValue | undefined,
+): void {
     if (typeof value !== "string" || value.length === 0) {
         return;
     }
@@ -115,7 +146,13 @@ function pushTail(lines: string[], label: string, value: JsonValue | undefined):
 }
 
 function readErrorBody(error: unknown): ControlErrorBody | undefined {
-    if (typeof error === "object" && error !== null && "causeBody" in error && "code" in error && "message" in error) {
+    if (
+        typeof error === "object" &&
+        error !== null &&
+        "causeBody" in error &&
+        "code" in error &&
+        "message" in error
+    ) {
         const candidate = error as {
             causeBody?: ControlErrorBody;
             code?: string;
@@ -124,13 +161,20 @@ function readErrorBody(error: unknown): ControlErrorBody | undefined {
             retryable?: boolean;
         };
 
-        if (typeof candidate.code === "string" && typeof candidate.message === "string") {
+        if (
+            typeof candidate.code === "string" &&
+            typeof candidate.message === "string"
+        ) {
             return {
                 code: candidate.code,
-                ...(candidate.causeBody === undefined ? {} : { cause: candidate.causeBody }),
-                ...(candidate.details === undefined ? {} : { details: candidate.details }),
+                ...(candidate.causeBody === undefined
+                    ? {}
+                    : { cause: candidate.causeBody }),
+                ...(candidate.details === undefined
+                    ? {}
+                    : { details: candidate.details }),
                 message: candidate.message,
-                retryable: candidate.retryable === true
+                retryable: candidate.retryable === true,
             };
         }
     }
@@ -141,7 +185,10 @@ function readErrorBody(error: unknown): ControlErrorBody | undefined {
 function readMessage(error: unknown): string {
     return error instanceof Error
         ? error.message
-        : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+        : typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
           ? error.message
           : String(error);
 }
@@ -151,7 +198,7 @@ export const cliExitCodes = {
     failure: 1,
     instanceNotFound: 4,
     success: 0,
-    usage: 2
+    usage: 2,
 } as const;
 
 export type CliExitCode = (typeof cliExitCodes)[keyof typeof cliExitCodes];
@@ -174,7 +221,10 @@ export class CliExitMapper {
 }
 
 function readErrorCode(error: unknown): string | undefined {
-    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    return typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
         ? error.code
         : undefined;
 }

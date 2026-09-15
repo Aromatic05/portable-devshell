@@ -11,16 +11,20 @@ test("token auth requires bearer header", () => {
     const authorized = middleware.authorize(
         { headers: { authorization: `Bearer ${token}` } } as never,
         response as never,
-        { enabled: true, provider: "token", token }
+        { enabled: true, provider: "token", token },
     );
 
     assert.equal(authorized, true);
     assert.equal(response.statusCode, undefined);
 
     const rejected = middleware.authorize(
-        { headers: { authorization: "Bearer attacker-token-attacker-token-00" } } as never,
+        {
+            headers: {
+                authorization: "Bearer attacker-token-attacker-token-00",
+            },
+        } as never,
         response as never,
-        { enabled: true, provider: "token", token }
+        { enabled: true, provider: "token", token },
     );
     assert.equal(rejected, false);
     assert.equal(response.statusCode, 401);
@@ -37,6 +41,6 @@ function createResponseDouble() {
         end(body?: string) {
             this.body = body ?? "";
             return this;
-        }
+        },
     };
 }

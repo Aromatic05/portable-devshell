@@ -16,7 +16,7 @@ import {
     type PrefixRouteEvent,
     type PrefixRouteIncoming,
     type PrefixRouteSnapshot,
-    type PrefixRouteStream
+    type PrefixRouteStream,
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
@@ -35,7 +35,10 @@ class EventQueue {
     }
 
     async next(): Promise<PrefixRouteIncoming> {
-        return this.#events.shift() ?? await new Promise((resolve) => this.#waiters.push(resolve));
+        return (
+            this.#events.shift() ??
+            (await new Promise((resolve) => this.#waiters.push(resolve)))
+        );
     }
 }
 
@@ -55,10 +58,16 @@ async function pair(snapshot: () => PrefixRouteSnapshot): Promise<RoutePair> {
         listener.once("error", reject);
         listener.listen(socketPath, resolve);
     });
-    const accepted = new Promise<Channel>((resolve) => listener.once("connection", (socket) => resolve(SocketChannel.accept(socket))));
+    const accepted = new Promise<Channel>((resolve) =>
+        listener.once("connection", (socket) =>
+            resolve(SocketChannel.accept(socket)),
+        ),
+    );
     const clientChannel = await SocketChannel.connect(socketPath);
     const serverChannel = await accepted;
-    const client = new PrefixRoute(new Codec(clientChannel, { local: "tui", remote: "server" }));
+    const client = new PrefixRoute(
+        new Codec(clientChannel, { local: "tui", remote: "server" }),
+    );
     const events = new EventQueue();
     client.onEvent((incoming) => events.push(incoming));
     return {
@@ -69,8 +78,8 @@ async function pair(snapshot: () => PrefixRouteSnapshot): Promise<RoutePair> {
         server: new PrefixRoute(new Codec(serverChannel, { local: "server" }), {
             connectionId: "connection-1",
             getSnapshot: snapshot,
-            eventIdPrefix: "server"
-        })
+            eventIdPrefix: "server",
+        }),
     };
 }
 
@@ -89,12 +98,12 @@ async function request(
     module: string,
     operation: string,
     payload?: JsonValue,
-    id = "tui-42"
+    id = "tui-42",
 ): Promise<PrefixRouteIncoming> {
     await value.client.send(destination, module, {
         id,
         name: operation,
-        ...(payload === undefined ? {} : { payload })
+        ...(payload === undefined ? {} : { payload }),
     });
     return await value.events.next();
 }
@@ -104,29 +113,35 @@ test("PrefixRoute consumes destination/module and gives the handler a local oper
     const snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{
-                name: "todo",
-                operations: [{
-                    name: "get",
-                    handle: (request, context) => {
-                        observed = {
-                            connectionId: context.connectionId,
-                            destination: context.destination,
-                            module: context.module,
-                            name: request.name,
-                            payload: request.payload,
-                            peer: context.peer
-                        };
-                        return { items: [] };
-                    }
-                }]
-            }]
-        }
+            modules: [
+                {
+                    name: "todo",
+                    operations: [
+                        {
+                            name: "get",
+                            handle: (request, context) => {
+                                observed = {
+                                    connectionId: context.connectionId,
+                                    destination: context.destination,
+                                    module: context.module,
+                                    name: request.name,
+                                    payload: request.payload,
+                                    peer: context.peer,
+                                };
+                                return { items: [] };
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
     ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    const reply = await request(value, instance, "todo", "get", { includeDone: false });
+    const reply = await request(value, instance, "todo", "get", {
+        includeDone: false,
+    });
 
     assert.deepEqual(observed, {
         connectionId: "connection-1",
@@ -134,7 +149,7 @@ test("PrefixRoute consumes destination/module and gives the handler a local oper
         module: "todo",
         name: "get",
         payload: { includeDone: false },
-        peer: "tui"
+        peer: "tui",
     });
     assert.equal(reply.event.replyTo, "tui-42");
     assert.equal(reply.destination, "aromatic-pc");
@@ -145,32 +160,49 @@ test("PrefixRoute consumes destination/module and gives the handler a local oper
 
 test("request.cancel aborts only the addressed server request", async (t) => {
     let started!: () => void;
-    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const startedPromise = new Promise<void>((resolve) => {
+        started = resolve;
+    });
     let aborted!: () => void;
-    const abortedPromise = new Promise<void>((resolve) => { aborted = resolve; });
-    const snapshot = PrefixRoute.snapshot([{
-        destination: instance,
-        modules: [{
-            name: "service",
-            operations: [{
-                name: "slow",
-                handle: async (_request, context) => {
-                    started();
-                    await new Promise<void>((_resolve, reject) => {
-                        context.signal.addEventListener("abort", () => {
-                            aborted();
-                            reject(context.signal.reason);
-                        }, { once: true });
-                    });
-                    return undefined;
+    const abortedPromise = new Promise<void>((resolve) => {
+        aborted = resolve;
+    });
+    const snapshot = PrefixRoute.snapshot([
+        {
+            destination: instance,
+            modules: [
+                {
+                    name: "service",
+                    operations: [
+                        {
+                            name: "slow",
+                            handle: async (_request, context) => {
+                                started();
+                                await new Promise<void>((_resolve, reject) => {
+                                    context.signal.addEventListener(
+                                        "abort",
+                                        () => {
+                                            aborted();
+                                            reject(context.signal.reason);
+                                        },
+                                        { once: true },
+                                    );
+                                });
+                                return undefined;
+                            },
+                        },
+                    ],
                 },
-            }],
-        }],
-    }]);
+            ],
+        },
+    ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    await value.client.send(instance, "service", { id: "tui-slow", name: "slow" });
+    await value.client.send(instance, "service", {
+        id: "tui-slow",
+        name: "slow",
+    });
     await startedPromise;
     await value.client.send(instance, "request", {
         id: "tui-cancel",
@@ -180,39 +212,60 @@ test("request.cancel aborts only the addressed server request", async (t) => {
     await abortedPromise;
 
     const replies = [await value.events.next(), await value.events.next()];
-    const cancelReply = replies.find((reply) => reply.event.replyTo === "tui-cancel");
-    const slowReply = replies.find((reply) => reply.event.replyTo === "tui-slow");
+    const cancelReply = replies.find(
+        (reply) => reply.event.replyTo === "tui-cancel",
+    );
+    const slowReply = replies.find(
+        (reply) => reply.event.replyTo === "tui-slow",
+    );
     assert.equal(cancelReply?.event.error, undefined);
-    assert.equal(slowReply?.event.error?.message, "Request cancelled by client.");
+    assert.equal(
+        slowReply?.event.error?.message,
+        "Request cancelled by client.",
+    );
 });
 
 test("PrefixRoute returns normal protocol errors for missing destination, module, and operation", async (t) => {
     const snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{ name: "todo", operations: [{ name: "get", handle: () => ({}) }] }]
-        }
+            modules: [
+                {
+                    name: "todo",
+                    operations: [{ name: "get", handle: () => ({}) }],
+                },
+            ],
+        },
     ]);
 
     const missingDestination = await pair(() => snapshot);
     t.after(() => closePair(missingDestination));
     assert.equal(
-        (await request(missingDestination, asInstanceName("missing-pc"), "todo", "get")).event.error?.code,
-        errorCodes.targetInvalid
+        (
+            await request(
+                missingDestination,
+                asInstanceName("missing-pc"),
+                "todo",
+                "get",
+            )
+        ).event.error?.code,
+        errorCodes.targetInvalid,
     );
 
     const missingModule = await pair(() => snapshot);
     t.after(() => closePair(missingModule));
     assert.equal(
-        (await request(missingModule, instance, "missing", "read")).event.error?.code,
-        errorCodes.envelopeInvalid
+        (await request(missingModule, instance, "missing", "read")).event.error
+            ?.code,
+        errorCodes.envelopeInvalid,
     );
 
     const missingOperation = await pair(() => snapshot);
     t.after(() => closePair(missingOperation));
     assert.equal(
-        (await request(missingOperation, instance, "todo", "subscribe")).event.error?.code,
-        errorCodes.envelopeInvalid
+        (await request(missingOperation, instance, "todo", "subscribe")).event
+            .error?.code,
+        errorCodes.envelopeInvalid,
     );
 });
 
@@ -221,21 +274,25 @@ test("replyTo is a direct reply channel and handler errors become error replies"
     const snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{
-                name: "todo",
-                operations: [{
-                    name: "get",
-                    handle: () => {
-                        calls += 1;
-                        throw createError({
-                            code: errorCodes.todoInvalid,
-                            message: "todo failed",
-                            retryable: false
-                        });
-                    }
-                }]
-            }]
-        }
+            modules: [
+                {
+                    name: "todo",
+                    operations: [
+                        {
+                            name: "get",
+                            handle: () => {
+                                calls += 1;
+                                throw createError({
+                                    code: errorCodes.todoInvalid,
+                                    message: "todo failed",
+                                    retryable: false,
+                                });
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
     ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
@@ -256,26 +313,40 @@ test("streamId is independent from replyTo and bypasses normal routing", async (
     const snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{
-                name: "runtime",
-                operations: [{
-                    name: "start",
-                    handle: async (_request, context) => {
-                        sender = await context.openStream(
-                            { accepted: true },
-                            { onEvent: (incoming) => resolveInput(incoming) }
-                        );
-                        await sender.emit("output", { chunk: "ready" }, 1);
-                        return undefined;
-                    }
-                }]
-            }]
-        }
+            modules: [
+                {
+                    name: "runtime",
+                    operations: [
+                        {
+                            name: "start",
+                            handle: async (_request, context) => {
+                                sender = await context.openStream(
+                                    { accepted: true },
+                                    {
+                                        onEvent: (incoming) =>
+                                            resolveInput(incoming),
+                                    },
+                                );
+                                await sender.emit(
+                                    "output",
+                                    { chunk: "ready" },
+                                    1,
+                                );
+                                return undefined;
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
     ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    await value.client.send(instance, "runtime", { id: "start-1", name: "start" });
+    await value.client.send(instance, "runtime", {
+        id: "start-1",
+        name: "start",
+    });
     const ack = await value.events.next();
     assert.equal(ack.event.replyTo, "start-1");
     assert.notEqual(ack.event.streamId, "start-1");
@@ -291,7 +362,7 @@ test("streamId is independent from replyTo and bypasses normal routing", async (
         id: "input-1",
         streamId: ack.event.streamId,
         name: "input",
-        payload: { data: "aGVsbG8=" }
+        payload: { data: "aGVsbG8=" },
     });
     assert.equal((await input).name, "input");
 
@@ -304,34 +375,43 @@ test("streamId is independent from replyTo and bypasses normal routing", async (
 
 test("stream.cancel closes one server stream without closing the routed connection", async (t) => {
     let streamClosed = false;
-    const snapshot = PrefixRoute.snapshot([{
-        destination: instance,
-        modules: [{
-            name: "runtime",
-            operations: [{
-                name: "subscribe",
-                handle: async (_request, context) => {
-                    await context.openStream(undefined, {
-                        onClose: () => {
-                            streamClosed = true;
-                        }
-                    });
-                    return undefined;
-                }
-            }]
-        }]
-    }]);
+    const snapshot = PrefixRoute.snapshot([
+        {
+            destination: instance,
+            modules: [
+                {
+                    name: "runtime",
+                    operations: [
+                        {
+                            name: "subscribe",
+                            handle: async (_request, context) => {
+                                await context.openStream(undefined, {
+                                    onClose: () => {
+                                        streamClosed = true;
+                                    },
+                                });
+                                return undefined;
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+    ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    await value.client.send(instance, "runtime", { id: "subscribe-1", name: "subscribe" });
+    await value.client.send(instance, "runtime", {
+        id: "subscribe-1",
+        name: "subscribe",
+    });
     const acknowledgement = await value.events.next();
     const streamId = acknowledgement.event.streamId!;
 
     await value.client.send(instance, "stream", {
         id: "cancel-1",
         streamId,
-        name: "cancel"
+        name: "cancel",
     });
     const cancelled = await value.events.next();
 
@@ -350,32 +430,41 @@ test("stream.cancel acknowledges even when stream cleanup rejects", async (t) =>
     t.after(() => {
         console.warn = originalWarn;
     });
-    const snapshot = PrefixRoute.snapshot([{
-        destination: instance,
-        modules: [{
-            name: "runtime",
-            operations: [{
-                name: "subscribe",
-                handle: async (_request, context) => {
-                    await context.openStream(undefined, {
-                        onClose: async () => {
-                            throw new Error("cleanup failed");
-                        }
-                    });
-                    return undefined;
-                }
-            }]
-        }]
-    }]);
+    const snapshot = PrefixRoute.snapshot([
+        {
+            destination: instance,
+            modules: [
+                {
+                    name: "runtime",
+                    operations: [
+                        {
+                            name: "subscribe",
+                            handle: async (_request, context) => {
+                                await context.openStream(undefined, {
+                                    onClose: async () => {
+                                        throw new Error("cleanup failed");
+                                    },
+                                });
+                                return undefined;
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+    ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    await value.client.send(instance, "runtime", { id: "subscribe-2", name: "subscribe" });
+    await value.client.send(instance, "runtime", {
+        id: "subscribe-2",
+        name: "subscribe",
+    });
     const acknowledgement = await value.events.next();
     await value.client.send(instance, "stream", {
         id: "cancel-2",
         streamId: acknowledgement.event.streamId,
-        name: "cancel"
+        name: "cancel",
     });
     const cancelled = await value.events.next();
 
@@ -392,33 +481,46 @@ test("route close isolates stream cleanup and close listener failures", async (t
     t.after(() => {
         console.warn = originalWarn;
     });
-    const snapshot = PrefixRoute.snapshot([{
-        destination: instance,
-        modules: [{
-            name: "runtime",
-            operations: [{
-                name: "subscribe",
-                handle: async (_request, context) => {
-                    await context.openStream(undefined, {
-                        onClose: async () => {
-                            cleanupCalled = true;
-                            throw new Error("disconnect cleanup failed");
-                        }
-                    });
-                    return undefined;
-                }
-            }]
-        }]
-    }]);
+    const snapshot = PrefixRoute.snapshot([
+        {
+            destination: instance,
+            modules: [
+                {
+                    name: "runtime",
+                    operations: [
+                        {
+                            name: "subscribe",
+                            handle: async (_request, context) => {
+                                await context.openStream(undefined, {
+                                    onClose: async () => {
+                                        cleanupCalled = true;
+                                        throw new Error(
+                                            "disconnect cleanup failed",
+                                        );
+                                    },
+                                });
+                                return undefined;
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+    ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
 
-    await value.client.send(instance, "runtime", { id: "subscribe-3", name: "subscribe" });
+    await value.client.send(instance, "runtime", {
+        id: "subscribe-3",
+        name: "subscribe",
+    });
     await value.events.next();
     value.server.onClose(() => {
         throw new Error("broken close listener");
     });
-    const closed = new Promise<void>((resolve) => value.server.onClose(() => resolve()));
+    const closed = new Promise<void>((resolve) =>
+        value.server.onClose(() => resolve()),
+    );
 
     value.client.close();
     await closed;
@@ -430,34 +532,43 @@ test("route close isolates stream cleanup and close listener failures", async (t
 
 test("PrefixRoute snapshots reject duplicate destinations, modules, and operations", () => {
     assert.throws(
-        () => PrefixRoute.snapshot([
-            { destination: instance, modules: [] },
-            { destination: instance, modules: [] }
-        ]),
-        /Duplicate route destination/
+        () =>
+            PrefixRoute.snapshot([
+                { destination: instance, modules: [] },
+                { destination: instance, modules: [] },
+            ]),
+        /Duplicate route destination/,
     );
     assert.throws(
-        () => PrefixRoute.snapshot([{
-            destination: instance,
-            modules: [
-                { name: "todo", operations: [] },
-                { name: "todo", operations: [] }
-            ]
-        }]),
-        /Duplicate route module/
+        () =>
+            PrefixRoute.snapshot([
+                {
+                    destination: instance,
+                    modules: [
+                        { name: "todo", operations: [] },
+                        { name: "todo", operations: [] },
+                    ],
+                },
+            ]),
+        /Duplicate route module/,
     );
     assert.throws(
-        () => PrefixRoute.snapshot([{
-            destination: instance,
-            modules: [{
-                name: "todo",
-                operations: [
-                    { name: "get", handle: () => undefined },
-                    { name: "get", handle: () => undefined }
-                ]
-            }]
-        }]),
-        /Duplicate route operation/
+        () =>
+            PrefixRoute.snapshot([
+                {
+                    destination: instance,
+                    modules: [
+                        {
+                            name: "todo",
+                            operations: [
+                                { name: "get", handle: () => undefined },
+                                { name: "get", handle: () => undefined },
+                            ],
+                        },
+                    ],
+                },
+            ]),
+        /Duplicate route operation/,
     );
 });
 
@@ -465,20 +576,42 @@ test("PrefixRoute reads the current snapshot for every routed request", async (t
     let snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{ name: "todo", operations: [{ name: "get", handle: () => ({ version: 1 }) }] }]
-        }
+            modules: [
+                {
+                    name: "todo",
+                    operations: [
+                        { name: "get", handle: () => ({ version: 1 }) },
+                    ],
+                },
+            ],
+        },
     ]);
     const value = await pair(() => snapshot);
     t.after(() => closePair(value));
-    assert.deepEqual((await request(value, instance, "todo", "get", undefined, "first")).event.payload, { version: 1 });
+    assert.deepEqual(
+        (await request(value, instance, "todo", "get", undefined, "first"))
+            .event.payload,
+        { version: 1 },
+    );
 
     snapshot = PrefixRoute.snapshot([
         {
             destination: instance,
-            modules: [{ name: "todo", operations: [{ name: "get", handle: () => ({ version: 2 }) }] }]
-        }
+            modules: [
+                {
+                    name: "todo",
+                    operations: [
+                        { name: "get", handle: () => ({ version: 2 }) },
+                    ],
+                },
+            ],
+        },
     ]);
-    assert.deepEqual((await request(value, instance, "todo", "get", undefined, "second")).event.payload, { version: 2 });
+    assert.deepEqual(
+        (await request(value, instance, "todo", "get", undefined, "second"))
+            .event.payload,
+        { version: 2 },
+    );
 });
 
 test("PrefixRoute isolates late close listener failures", async (t) => {

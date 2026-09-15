@@ -5,13 +5,14 @@ import { WorkerTransportContainerProvisionCompose } from "./provision/Compose.js
 import { WorkerTransportContainerProvisionExistingStopped } from "./provision/ExistingStopped.js";
 import { WorkerTransportContainerProvisionManaged } from "./provision/Managed.js";
 
-export type WorkerTransportContainerLifecycleStatus = "missing" | "running" | "stopped";
+export type WorkerTransportContainerLifecycleStatus =
+    "missing" | "running" | "stopped";
 
 export interface WorkerTransportContainerProvision {
     afterWorkerStop(): Promise<void>;
     buildExecArgs(
         command: readonly string[],
-        environmentKeys?: readonly string[]
+        environmentKeys?: readonly string[],
     ): string[];
     buildShellExecArgs(commandLine: string): string[];
     ensureReady(operation: string): Promise<void>;
@@ -23,11 +24,13 @@ export interface WorkerTransportContainerProvision {
 
 export interface WorkerTransportContainerProvisionOperations {
     provider: "docker" | "podman";
-    readContainerStatus(containerName: string): Promise<WorkerTransportContainerLifecycleStatus>;
+    readContainerStatus(
+        containerName: string,
+    ): Promise<WorkerTransportContainerLifecycleStatus>;
     runProviderCommand(
         operation: string,
         args: readonly string[],
-        options?: { allowNonZeroExit?: boolean; env?: NodeJS.ProcessEnv }
+        options?: { allowNonZeroExit?: boolean; env?: NodeJS.ProcessEnv },
     ): Promise<WorkerCommandResult>;
 }
 
@@ -43,17 +46,17 @@ export function createWorkerTransportContainerProvision(options: {
             return new WorkerTransportContainerProvisionManaged({
                 config: options.container,
                 keepIdUserNamespace: options.keepIdUserNamespace,
-                operations: options.operations
+                operations: options.operations,
             });
         case "compose":
             return new WorkerTransportContainerProvisionCompose({
                 config: options.container,
-                operations: options.operations
+                operations: options.operations,
             });
         case "existingStoppedContainer":
             return new WorkerTransportContainerProvisionExistingStopped({
                 config: options.container,
-                operations: options.operations
+                operations: options.operations,
             });
     }
 }

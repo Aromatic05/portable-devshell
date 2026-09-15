@@ -14,18 +14,18 @@ for (const target of [
     {
         cargoSubcommand: "zigbuild",
         key: "linux-x64",
-        rustTarget: "x86_64-unknown-linux-musl"
+        rustTarget: "x86_64-unknown-linux-musl",
     },
     {
         cargoSubcommand: "build",
         key: "darwin-x64",
-        rustTarget: "x86_64-apple-darwin"
+        rustTarget: "x86_64-apple-darwin",
     },
     {
         cargoSubcommand: "build",
         key: "windows-x64",
-        rustTarget: "x86_64-pc-windows-msvc"
-    }
+        rustTarget: "x86_64-pc-windows-msvc",
+    },
 ]) {
     test(`build-worker uses cargo ${target.cargoSubcommand} for ${target.key}`, async () => {
         const fixture = await createFixture();
@@ -91,15 +91,23 @@ function runFixture(fixture, args) {
         env: {
             ...process.env,
             BUILD_WORKER_TEST_ROOT: fixture.root,
-            PORTABLE_DEVSHELL_BUILD_CARGO: JSON.stringify([process.execPath, fixture.cargoScript]),
-            PORTABLE_DEVSHELL_BUILD_ZIG: JSON.stringify([process.execPath, fixture.zigScript])
+            PORTABLE_DEVSHELL_BUILD_CARGO: JSON.stringify([
+                process.execPath,
+                fixture.cargoScript,
+            ]),
+            PORTABLE_DEVSHELL_BUILD_ZIG: JSON.stringify([
+                process.execPath,
+                fixture.zigScript,
+            ]),
         },
-        windowsHide: true
+        windowsHide: true,
     });
 }
 
 async function writeFakeCargo(path) {
-    await writeFile(path, `
+    await writeFile(
+        path,
+        `
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 const args = process.argv.slice(2);
@@ -114,7 +122,9 @@ const profile = args.includes("--release") ? "release" : "debug";
 const output = resolve(root, "target", target, profile, target.includes("windows") ? "devshell-worker.exe" : "devshell-worker");
 mkdirSync(resolve(output, ".."), { recursive: true });
 writeFileSync(output, "worker", "utf8");
-`, "utf8");
+`,
+        "utf8",
+    );
 }
 
 async function readArgs(path) {
@@ -124,15 +134,23 @@ async function readArgs(path) {
 function hostTarget() {
     const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
     if (process.platform === "linux") {
-        return { cargoSubcommand: "zigbuild", rustTarget: `${arch}-unknown-linux-musl` };
+        return {
+            cargoSubcommand: "zigbuild",
+            rustTarget: `${arch}-unknown-linux-musl`,
+        };
     }
     if (process.platform === "darwin") {
         return { cargoSubcommand: "build", rustTarget: `${arch}-apple-darwin` };
     }
     if (process.platform === "win32") {
-        return { cargoSubcommand: "build", rustTarget: `${arch}-pc-windows-msvc` };
+        return {
+            cargoSubcommand: "build",
+            rustTarget: `${arch}-pc-windows-msvc`,
+        };
     }
-    throw new Error(`unsupported host platform for build-worker test: ${process.platform}-${process.arch}`);
+    throw new Error(
+        `unsupported host platform for build-worker test: ${process.platform}-${process.arch}`,
+    );
 }
 
 function valueAfter(values, name) {

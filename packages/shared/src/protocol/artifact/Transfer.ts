@@ -19,12 +19,17 @@ const terminalArtifactTransferStatuses = new Set<ArtifactTransferStatus>([
     "interrupted",
 ]);
 
-export function isArtifactTransferTerminal(status: ArtifactTransferStatus): boolean {
+export function isArtifactTransferTerminal(
+    status: ArtifactTransferStatus,
+): boolean {
     return terminalArtifactTransferStatuses.has(status);
 }
 
-export function recoverArtifactTransferStatus(status: ArtifactTransferStatus): ArtifactTransferStatus {
-    if (status === "queued" || isArtifactTransferTerminal(status)) return status;
+export function recoverArtifactTransferStatus(
+    status: ArtifactTransferStatus,
+): ArtifactTransferStatus {
+    if (status === "queued" || isArtifactTransferTerminal(status))
+        return status;
     return "interrupted";
 }
 
@@ -62,7 +67,8 @@ export interface ArtifactDirectoryPayloadDescriptor extends ArtifactPayloadDescr
     type: "directoryArchive";
 }
 
-export type ArtifactPayloadDescriptor = ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
+export type ArtifactPayloadDescriptor =
+    ArtifactBytePayloadDescriptor | ArtifactDirectoryPayloadDescriptor;
 
 export type ArtifactTransferSourceInput =
     | {

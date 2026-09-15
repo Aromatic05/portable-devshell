@@ -27,15 +27,21 @@ export function asCommandResult(error: unknown): CommandResult | undefined {
         return {
             details: readCommandDiagnostic(candidate.details),
             exitCode: candidate.exitCode as number | null,
-            signal: typeof candidate.signal === "string" ? candidate.signal : undefined,
+            signal:
+                typeof candidate.signal === "string"
+                    ? candidate.signal
+                    : undefined,
             stderr: candidate.stderr,
             stdout: candidate.stdout,
-            timedOut: candidate.timedOut === true
+            timedOut: candidate.timedOut === true,
         };
     }
 
     const details = readCommandDiagnostic(candidate.details);
-    if (details === undefined || (typeof details.exitCode !== "number" && details.exitCode !== null)) {
+    if (
+        details === undefined ||
+        (typeof details.exitCode !== "number" && details.exitCode !== null)
+    ) {
         return undefined;
     }
 
@@ -45,7 +51,7 @@ export function asCommandResult(error: unknown): CommandResult | undefined {
         signal: details.signal,
         stderr: "",
         stdout: "",
-        timedOut: candidate.timedOut === true
+        timedOut: candidate.timedOut === true,
     };
 }
 
@@ -56,7 +62,7 @@ export function commandResultOutput(result: CommandResult): JsonValue {
         signal: result.signal,
         stderr: result.stderr,
         stdout: result.stdout,
-        timedOut: result.timedOut
+        timedOut: result.timedOut,
     });
 }
 
@@ -64,29 +70,52 @@ export function stripCommandStreams(value: JsonValue): JsonValue {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return value;
     }
-    const { stderr: _stderr, stdout: _stdout, ...rest } = value as Record<string, JsonValue>;
+    const {
+        stderr: _stderr,
+        stdout: _stdout,
+        ...rest
+    } = value as Record<string, JsonValue>;
     return rest;
 }
 
-export function asBashToolResult(value: JsonValue): WorkerInstanceBashToolResult | undefined {
+export function asBashToolResult(
+    value: JsonValue,
+): WorkerInstanceBashToolResult | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return undefined;
     }
 
     const result = value as Record<string, JsonValue>;
-    if (typeof result.stdout !== "string" || typeof result.stderr !== "string") {
+    if (
+        typeof result.stdout !== "string" ||
+        typeof result.stderr !== "string"
+    ) {
         return undefined;
     }
 
     const termination = result.termination;
     return {
-        ...(typeof result.exitCode === "number" || result.exitCode === null ? { exitCode: result.exitCode } : {}),
+        ...(typeof result.exitCode === "number" || result.exitCode === null
+            ? { exitCode: result.exitCode }
+            : {}),
         stderr: result.stderr,
-        stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : readByteLength(result.stderr),
+        stderrBytes:
+            typeof result.stderrBytes === "number"
+                ? result.stderrBytes
+                : readByteLength(result.stderr),
         stdout: result.stdout,
-        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : readByteLength(result.stdout),
-        ...(typeof result.termSignal === "number" ? { termSignal: result.termSignal } : {}),
-        ...(termination === "exited" || termination === "signaled" || termination === "timeout" ? { termination } : {})
+        stdoutBytes:
+            typeof result.stdoutBytes === "number"
+                ? result.stdoutBytes
+                : readByteLength(result.stdout),
+        ...(typeof result.termSignal === "number"
+            ? { termSignal: result.termSignal }
+            : {}),
+        ...(termination === "exited" ||
+        termination === "signaled" ||
+        termination === "timeout"
+            ? { termination }
+            : {}),
     };
 }
 

@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import type { DebugInvocationSummary, DebugPatchLoadRequest, DebugPatchScope, DebugPatchSummary, DebugTargetSummary, JsonValue } from "@portable-devshell/shared";
+import type {
+    DebugInvocationSummary,
+    DebugPatchLoadRequest,
+    DebugPatchScope,
+    DebugPatchSummary,
+    DebugTargetSummary,
+    JsonValue,
+} from "@portable-devshell/shared";
 import { Worker } from "node:worker_threads";
 
 export interface DebugMethodAdapter {
@@ -58,7 +65,8 @@ export class DebugPatchManager {
     constructor(options: DebugPatchManagerOptions = {}) {
         this.#evaluationTimeoutMs = options.evaluationTimeoutMs ?? 1_000;
         this.#historyLimit = options.historyLimit ?? 32;
-        this.#initializationTimeoutMs = options.initializationTimeoutMs ?? 1_000;
+        this.#initializationTimeoutMs =
+            options.initializationTimeoutMs ?? 1_000;
     }
 
     registerTarget(
@@ -72,7 +80,9 @@ export class DebugPatchManager {
         const previous = this.#targets.get(name);
         if (previous?.object === object) return;
         if (previous !== undefined) {
-            throw invalidPatch(`Debug target ${name} is already registered with another object.`);
+            throw invalidPatch(
+                `Debug target ${name} is already registered with another object.`,
+            );
         }
         this.#targets.set(name, { methods, object });
     }
@@ -85,13 +95,18 @@ export class DebugPatchManager {
 
     listTargets(): DebugTargetSummary[] {
         return [...this.#targets.entries()]
-            .map(([target, value]) => ({ methods: Object.keys(value.methods).sort(), target }))
+            .map(([target, value]) => ({
+                methods: Object.keys(value.methods).sort(),
+                target,
+            }))
             .sort((left, right) => left.target.localeCompare(right.target));
     }
 
     listPatches(): DebugPatchSummary[] {
         return [
-            ...[...this.#active.values()].map((entry) => cloneSummary(entry.summary)),
+            ...[...this.#active.values()].map((entry) =>
+                cloneSummary(entry.summary),
+            ),
             ...this.#history.map(cloneSummary),
         ];
     }
@@ -106,20 +121,30 @@ export class DebugPatchManager {
             });
         }
         if (this.#targetPatch.has(request.target)) {
-            throw invalidPatch(`Debug target ${request.target} already has an active patch.`);
+            throw invalidPatch(
+                `Debug target ${request.target} already has an active patch.`,
+            );
         }
         if (Buffer.byteLength(request.source, "utf8") > 64 * 1024) {
             throw invalidPatch("Debug patch source must not exceed 64 KiB.");
         }
         if (request.scope !== undefined) {
             if (request.scope.ctxId.length === 0) {
-                throw invalidPatch("Debug patch scope ctxId must be non-empty.");
+                throw invalidPatch(
+                    "Debug patch scope ctxId must be non-empty.",
+                );
             }
-            if (request.scope.toolName !== undefined && request.scope.toolName.length === 0) {
-                throw invalidPatch("Debug patch scope toolName must be non-empty when supplied.");
+            if (
+                request.scope.toolName !== undefined &&
+                request.scope.toolName.length === 0
+            ) {
+                throw invalidPatch(
+                    "Debug patch scope toolName must be non-empty when supplied.",
+                );
             }
-            const unsupported = Object.entries(target.methods)
-                .find(([, adapter]) => adapter.scope === undefined);
+            const unsupported = Object.entries(target.methods).find(
+                ([, adapter]) => adapter.scope === undefined,
+            );
             if (unsupported !== undefined) {
                 throw invalidPatch(
                     `Debug target ${request.target} method ${unsupported[0]} does not support scoped patches.`,
@@ -133,7 +158,9 @@ export class DebugPatchManager {
             loadedAt: new Date().toISOString(),
             ...(request.name === undefined ? {} : { name: request.name }),
             patchId,
-            ...(request.scope === undefined ? {} : { scope: { ...request.scope } }),
+            ...(request.scope === undefined
+                ? {}
+                : { scope: { ...request.scope } }),
             state: "active",
             target: request.target,
         };
@@ -146,7 +173,9 @@ export class DebugPatchManager {
         });
         await program.start().catch(async (error) => {
             await program.close();
-            throw invalidPatch(`Debug patch failed to initialize: ${errorMessage(error)}`);
+            throw invalidPatch(
+                `Debug patch failed to initialize: ${errorMessage(error)}`,
+            );
         });
 
         const active: ActivePatch = {
@@ -163,7 +192,9 @@ export class DebugPatchManager {
         } catch (error) {
             this.#restoreMethods(active);
             await program.close();
-            throw invalidPatch(`Debug patch could not be installed: ${errorMessage(error)}`);
+            throw invalidPatch(
+                `Debug patch could not be installed: ${errorMessage(error)}`,
+            );
         }
         this.#active.set(patchId, active);
         this.#targetPatch.set(request.target, patchId);
@@ -173,7 +204,9 @@ export class DebugPatchManager {
     async unload(patchId: string): Promise<DebugPatchSummary> {
         const active = this.#active.get(patchId);
         if (active === undefined) {
-            const terminal = this.#history.find((entry) => entry.patchId === patchId);
+            const terminal = this.#history.find(
+                (entry) => entry.patchId === patchId,
+            );
             if (terminal !== undefined) return cloneSummary(terminal);
             throw patchNotFound(patchId);
         }
@@ -197,13 +230,19 @@ export class DebugPatchManager {
 
     #installMethod(active: ActivePatch, method: string): MethodPatch {
         const adapter = active.target.methods[method];
-        if (adapter === undefined) throw new Error(`Missing adapter for ${method}.`);
+        if (adapter === undefined)
+            throw new Error(`Missing adapter for ${method}.`);
         const originalValue = Reflect.get(active.target.object, method);
         if (typeof originalValue !== "function") {
-            throw new TypeError(`Debug target method ${method} is not callable.`);
+            throw new TypeError(
+                `Debug target method ${method} is not callable.`,
+            );
         }
         const original = originalValue as (...args: unknown[]) => unknown;
-        const ownDescriptor = Object.getOwnPropertyDescriptor(active.target.object, method);
+        const ownDescriptor = Object.getOwnPropertyDescriptor(
+            active.target.object,
+            method,
+        );
         const invoke = this.#invoke.bind(this);
         const wrapper = function (this: unknown, ...args: unknown[]): unknown {
             return invoke(active.summary.patchId, method, original, this, args);
@@ -225,9 +264,11 @@ export class DebugPatchManager {
         args: unknown[],
     ): Promise<unknown> {
         const active = this.#active.get(patchId);
-        if (active === undefined) return await Reflect.apply(original, receiver, args);
+        if (active === undefined)
+            return await Reflect.apply(original, receiver, args);
         const adapter = active.target.methods[method];
-        if (adapter === undefined) return await Reflect.apply(original, receiver, args);
+        if (adapter === undefined)
+            return await Reflect.apply(original, receiver, args);
         if (active.summary.scope !== undefined) {
             const actualScope = adapter.scope?.(args);
             if (!matchesScope(active.summary.scope, actualScope)) {
@@ -245,12 +286,14 @@ export class DebugPatchManager {
 
         let directive: DebugDirective;
         try {
-            directive = readDirective(await active.program.evaluate({
-                args: adapter.project(args),
-                method,
-                patchId,
-                target: active.summary.target,
-            }));
+            directive = readDirective(
+                await active.program.evaluate({
+                    args: adapter.project(args),
+                    method,
+                    patchId,
+                    target: active.summary.target,
+                }),
+            );
         } catch (error) {
             invocation.outcome = "faulted";
             invocation.completedAt = new Date().toISOString();
@@ -331,7 +374,8 @@ export class DebugPatchManager {
         state: "faulted" | "unloaded",
         fault?: string,
     ): Promise<DebugPatchSummary> {
-        if (!this.#active.delete(active.summary.patchId)) return cloneSummary(active.summary);
+        if (!this.#active.delete(active.summary.patchId))
+            return cloneSummary(active.summary);
         this.#targetPatch.delete(active.summary.target);
         this.#restoreMethods(active);
         for (const hold of [...active.holds.values()]) hold.release();
@@ -347,18 +391,28 @@ export class DebugPatchManager {
 
     #restoreMethods(active: ActivePatch): void {
         for (const patched of [...active.methods].reverse()) {
-            const current = Object.getOwnPropertyDescriptor(active.target.object, patched.method);
+            const current = Object.getOwnPropertyDescriptor(
+                active.target.object,
+                patched.method,
+            );
             if (current?.value !== patched.wrapper) continue;
             if (patched.ownDescriptor === undefined) {
                 Reflect.deleteProperty(active.target.object, patched.method);
             } else {
-                Object.defineProperty(active.target.object, patched.method, patched.ownDescriptor);
+                Object.defineProperty(
+                    active.target.object,
+                    patched.method,
+                    patched.ownDescriptor,
+                );
             }
         }
         active.methods.length = 0;
     }
 
-    #rememberInvocation(active: ActivePatch, invocation: DebugInvocationSummary): void {
+    #rememberInvocation(
+        active: ActivePatch,
+        invocation: DebugInvocationSummary,
+    ): void {
         active.summary.lastInvocation = { ...invocation };
     }
 
@@ -376,16 +430,22 @@ function readDirective(value: unknown): DebugDirective {
     const directive = value as Record<string, unknown>;
     if (directive.action === "continue") return { action: "continue" };
     if (directive.action === "hold") {
-        if (directive.label !== undefined && typeof directive.label !== "string") {
+        if (
+            directive.label !== undefined &&
+            typeof directive.label !== "string"
+        ) {
             throw invalidPatch("Debug hold label must be a string.");
         }
         return {
             action: "hold",
-            ...(directive.label === undefined ? {} : { label: directive.label }),
+            ...(directive.label === undefined
+                ? {}
+                : { label: directive.label }),
         };
     }
     if (directive.action === "return") {
-        if (!("value" in directive)) throw invalidPatch("Debug return directive requires value.");
+        if (!("value" in directive))
+            throw invalidPatch("Debug return directive requires value.");
         return { action: "return", value: cloneJsonValue(directive.value) };
     }
     if (directive.action === "error" && typeof directive.message === "string") {
@@ -397,10 +457,13 @@ function readDirective(value: unknown): DebugDirective {
 function cloneJsonValue(value: unknown): JsonValue {
     try {
         const serialized = JSON.stringify(value);
-        if (serialized === undefined) throw new Error("value is not JSON serializable");
+        if (serialized === undefined)
+            throw new Error("value is not JSON serializable");
         return JSON.parse(serialized) as JsonValue;
     } catch (error) {
-        throw invalidPatch(`Debug return value must be JSON serializable: ${errorMessage(error)}`);
+        throw invalidPatch(
+            `Debug return value must be JSON serializable: ${errorMessage(error)}`,
+        );
     }
 }
 
@@ -435,7 +498,9 @@ function matchesScope(
     actual: DebugPatchScope | undefined,
 ): boolean {
     if (actual?.ctxId !== expected.ctxId) return false;
-    return expected.toolName === undefined || actual.toolName === expected.toolName;
+    return (
+        expected.toolName === undefined || actual.toolName === expected.toolName
+    );
 }
 
 function cloneSummary(summary: DebugPatchSummary): DebugPatchSummary {
@@ -562,11 +627,17 @@ export class DebugPatchProgram {
             };
             this.#worker.on("message", ready);
         });
-        this.#worker.on("message", (message: WorkerMessage) => this.#accept(message));
+        this.#worker.on("message", (message: WorkerMessage) =>
+            this.#accept(message),
+        );
         this.#worker.on("error", (error) => this.#fault(error));
         this.#worker.on("exit", (code) => {
             if (!this.#closing && !this.#faulted) {
-                this.#fault(new Error(`Debug patch worker exited unexpectedly with code ${code}.`));
+                this.#fault(
+                    new Error(
+                        `Debug patch worker exited unexpectedly with code ${code}.`,
+                    ),
+                );
             }
         });
     }
@@ -613,7 +684,10 @@ export class DebugPatchProgram {
         }
         this.#pending.clear();
         this.#worker.unref();
-        const terminated = this.#worker.terminate().then(() => undefined, () => undefined);
+        const terminated = this.#worker.terminate().then(
+            () => undefined,
+            () => undefined,
+        );
         await Promise.race([terminated, delay(DEBUG_WORKER_TERMINATE_WAIT_MS)]);
     }
 

@@ -1,7 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 
-import { createError, errorCodes, FramedStreamChannel, type Channel } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    FramedStreamChannel,
+    type Channel,
+} from "@portable-devshell/shared";
 
 import type { WorkerCommandTransport } from "../../transport/command/Transport.js";
 import type { WorkerRpcOptions } from "../../transport/command/Model.js";
@@ -33,7 +38,7 @@ export function createWorkerRpcProcess(child: ChildProcess): WorkerRpcProcess {
             child.once("exit", (code, signal) => {
                 resolve({ code, signal });
             });
-        })
+        }),
     };
 }
 
@@ -41,11 +46,16 @@ export class WorkerRpcProcessAdapter {
     readonly #process: WorkerRpcProcess;
 
     constructor(process: WorkerRpcProcess) {
-        if (process.stdin === null || process.stdout === null || process.stderr === null) {
+        if (
+            process.stdin === null ||
+            process.stdout === null ||
+            process.stderr === null
+        ) {
             throw createError({
                 code: errorCodes.coreWorkerRpcSpawnFailed,
-                message: "Worker RPC process must expose stdin, stdout, and stderr.",
-                retryable: false
+                message:
+                    "Worker RPC process must expose stdin, stdout, and stderr.",
+                retryable: false,
             });
         }
 
@@ -55,12 +65,16 @@ export class WorkerRpcProcessAdapter {
     static async spawn(
         transport: WorkerCommandTransport,
         options: WorkerRpcOptions,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<WorkerRpcProcessAdapter> {
         if (signal?.aborted === true) {
             throw abortError(signal);
         }
-        const spawning = WorkerRpcProcessAdapter.#spawnProcess(transport, options, signal);
+        const spawning = WorkerRpcProcessAdapter.#spawnProcess(
+            transport,
+            options,
+            signal,
+        );
         if (signal === undefined) {
             return await spawning;
         }
@@ -80,7 +94,7 @@ export class WorkerRpcProcessAdapter {
     static async #spawnProcess(
         transport: WorkerCommandTransport,
         options: WorkerRpcOptions,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<WorkerRpcProcessAdapter> {
         try {
             const process = await transport.spawnWorkerRpc(options);
@@ -97,7 +111,12 @@ export class WorkerRpcProcessAdapter {
             if (signal?.aborted === true) {
                 throw abortError(signal);
             }
-            if (typeof error === "object" && error !== null && "code" in error && error.code === errorCodes.coreWorkerRpcSpawnFailed) {
+            if (
+                typeof error === "object" &&
+                error !== null &&
+                "code" in error &&
+                error.code === errorCodes.coreWorkerRpcSpawnFailed
+            ) {
                 throw error;
             }
 
@@ -106,7 +125,7 @@ export class WorkerRpcProcessAdapter {
                 cause: error,
                 details: { instance: options.instanceName },
                 message: `Worker RPC spawn failed for instance ${options.instanceName}.`,
-                retryable: false
+                retryable: false,
             });
         }
     }
@@ -123,7 +142,10 @@ export class WorkerRpcProcessAdapter {
         return this.#process.stderr as Readable;
     }
 
-    get exit(): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+    get exit(): Promise<{
+        code: number | null;
+        signal: NodeJS.Signals | null;
+    }> {
         return this.#process.exit;
     }
 
@@ -148,13 +170,27 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
     }
 
     async connect(signal?: AbortSignal): Promise<Channel> {
-        const process = await WorkerRpcProcessAdapter.spawn(this.#transport, this.#options, signal);
+        const process = await WorkerRpcProcessAdapter.spawn(
+            this.#transport,
+            this.#options,
+            signal,
+        );
         const channel = new FramedStreamChannel(process.stdout, process.stdin, {
-            closeTransport: () => { process.kill("SIGTERM"); },
+            closeTransport: () => {
+                process.kill("SIGTERM");
+            },
         });
         void process.exit.then(
-            (result) => channel.close(new Error(`rpc process exited with code ${String(result.code)} signal ${String(result.signal)}`)),
-            (error) => channel.close(error instanceof Error ? error : new Error(String(error))),
+            (result) =>
+                channel.close(
+                    new Error(
+                        `rpc process exited with code ${String(result.code)} signal ${String(result.signal)}`,
+                    ),
+                ),
+            (error) =>
+                channel.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                ),
         );
         return channel;
     }

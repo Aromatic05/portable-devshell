@@ -21,7 +21,9 @@ export class ApprovalStore {
         if (this.#store.readLatest !== undefined) {
             return (await this.#store.readLatest(approvalId))[0];
         }
-        return toLatestRequests(await this.#store.readAll()).find((request) => request.approvalId === approvalId);
+        return toLatestRequests(await this.#store.readAll()).find(
+            (request) => request.approvalId === approvalId,
+        );
     }
 
     async list(): Promise<ApprovalRequest[]> {
@@ -37,5 +39,7 @@ function toLatestRequests(records: ApprovalRequest[]): ApprovalRequest[] {
     for (const record of records) {
         latest.set(record.approvalId, record);
     }
-    return [...latest.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    return [...latest.values()].sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt),
+    );
 }

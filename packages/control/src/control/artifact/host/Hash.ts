@@ -9,7 +9,9 @@ export async function artifactBlake3(bytes: Uint8Array): Promise<string> {
     return hasher.digest("hex");
 }
 
-export async function artifactHashFile(path: string): Promise<{ blake3: string; bytes: number }> {
+export async function artifactHashFile(
+    path: string,
+): Promise<{ blake3: string; bytes: number }> {
     const file = await open(path, "r");
     try {
         const hasher = await createBLAKE3();
@@ -17,7 +19,12 @@ export async function artifactHashFile(path: string): Promise<{ blake3: string; 
         const buffer = Buffer.allocUnsafe(64 * 1024);
         let bytes = 0;
         while (true) {
-            const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+            const { bytesRead } = await file.read(
+                buffer,
+                0,
+                buffer.length,
+                null,
+            );
             if (bytesRead === 0) {
                 break;
             }
@@ -45,7 +52,7 @@ export function updateManifestHash(
         modifiedAtSeconds: number;
         relativePath: string;
         size: number;
-    }
+    },
 ): void {
     hasher.update(Uint8Array.of(entry.entryType === "directory" ? 0 : 1));
     const path = Buffer.from(entry.relativePath, "utf8");
@@ -54,7 +61,10 @@ export function updateManifestHash(
     hasher.update(u32(entry.mode));
     hasher.update(u64(entry.size));
     hasher.update(u64(entry.modifiedAtSeconds));
-    const content = entry.contentBlake3 === undefined ? Buffer.alloc(0) : Buffer.from(entry.contentBlake3, "ascii");
+    const content =
+        entry.contentBlake3 === undefined
+            ? Buffer.alloc(0)
+            : Buffer.from(entry.contentBlake3, "ascii");
     hasher.update(u64(content.length));
     if (content.length > 0) {
         hasher.update(content);

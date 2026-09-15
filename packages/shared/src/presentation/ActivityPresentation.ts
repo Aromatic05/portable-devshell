@@ -1,5 +1,8 @@
 import type { InstanceLogEntry } from "../protocol/instance/activity/Log.js";
-import type { TodoReadResult, TodoTaskSummary } from "../protocol/instance/task/Todo.js";
+import type {
+    TodoReadResult,
+    TodoTaskSummary,
+} from "../protocol/instance/task/Todo.js";
 import type { ToolCallRecord, ToolCallStatus } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 const failedStatuses = new Set<ToolCallStatus>([
@@ -34,7 +37,8 @@ export function resolveToolOutput(
         ...(stdout.length === 0 ? {} : { stdout }),
     };
     if (output === undefined) return streams;
-    if (typeof output !== "object" || output === null || Array.isArray(output)) return output;
+    if (typeof output !== "object" || output === null || Array.isArray(output))
+        return output;
     return { ...streams, ...output };
 }
 
@@ -50,14 +54,19 @@ export function projectTodoTaskSummaries(
     todo: TodoReadResult | undefined,
 ): TodoTaskSummary[] {
     if (todo === undefined) return [];
-    const summaries = new Map((todo.tasks ?? []).map((task) => [task.taskId, task]));
+    const summaries = new Map(
+        (todo.tasks ?? []).map((task) => [task.taskId, task]),
+    );
     if (todo.taskId !== undefined) {
         const existing = summaries.get(todo.taskId);
         summaries.set(todo.taskId, {
             completed: todo.summary.completed,
-            currentItem: todo.summary.currentItemId === undefined
-                ? undefined
-                : todo.items.find((item) => item.id === todo.summary.currentItemId)?.content,
+            currentItem:
+                todo.summary.currentItemId === undefined
+                    ? undefined
+                    : todo.items.find(
+                          (item) => item.id === todo.summary.currentItemId,
+                      )?.content,
             revision: todo.revision,
             status: activeTodoStatus(todo),
             taskId: todo.taskId,
@@ -68,7 +77,7 @@ export function projectTodoTaskSummaries(
         });
     }
     return [...summaries.values()].sort((left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt)
+        right.updatedAt.localeCompare(left.updatedAt),
     );
 }
 
@@ -82,7 +91,9 @@ export function toolCallOutput(
 function activeTodoStatus(todo: TodoReadResult): TodoTaskSummary["status"] {
     if (todo.items.some((item) => item.status === "failed")) return "failed";
     if (todo.items.some((item) => item.status === "blocked")) return "blocked";
-    if (todo.items.some((item) => item.status === "in_progress")) return "in_progress";
-    if (todo.summary.total > 0 && todo.summary.completed === todo.summary.total) return "completed";
+    if (todo.items.some((item) => item.status === "in_progress"))
+        return "in_progress";
+    if (todo.summary.total > 0 && todo.summary.completed === todo.summary.total)
+        return "completed";
     return todo.summary.total === 0 ? "none" : "pending";
 }

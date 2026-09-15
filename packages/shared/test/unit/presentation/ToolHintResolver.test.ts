@@ -5,14 +5,17 @@ import {
     mergeComments,
     resolveErrorHints,
     resolveResultHints,
-    type ToolDiagnosticHint
+    type ToolDiagnosticHint,
 } from "@portable-devshell/shared";
 
 function codes(hints: readonly ToolDiagnosticHint[]): string[] {
     return hints.map((hint) => hint.code);
 }
 
-function body(code: string, extra: Record<string, unknown> = {}): {
+function body(
+    code: string,
+    extra: Record<string, unknown> = {},
+): {
     code: string;
     message: string;
     retryable: boolean;
@@ -30,7 +33,7 @@ test("bash_run clean success produces no hint", () => {
         stdout: "ok",
         stdoutBytes: 2,
         stdoutTruncated: false,
-        termination: "exited"
+        termination: "exited",
     });
     assert.deepEqual(hints, []);
 });
@@ -45,94 +48,211 @@ test("bash_run non-zero exit yields a failure hint without leaking command or ou
         stdout: "secret-token=abc123",
         stdoutBytes: 10,
         stdoutTruncated: false,
-        termination: "exited"
+        termination: "exited",
     });
     assert.deepEqual(codes(hints), ["bash.nonZeroExit"]);
     const text = hints[0].text;
     assert.match(text, /code 7/);
-    for (const leak of ["permission denied", "/secret/path", "secret-token", "abc123"]) {
+    for (const leak of [
+        "permission denied",
+        "/secret/path",
+        "secret-token",
+        "abc123",
+    ]) {
         assert.equal(text.includes(leak), false, `hint must not leak ${leak}`);
     }
 });
 
 test("bash_run timeout, signal, truncation, and artifact warnings each map to distinct hints", () => {
-    assert.deepEqual(codes(resolveResultHints("bash_run", {
-        stderr: "", stderrBytes: 0, stderrTruncated: false,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: false,
-        termination: "timeout", timedOut: true
-    })), ["bash.timeout"]);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("bash_run", {
+                stderr: "",
+                stderrBytes: 0,
+                stderrTruncated: false,
+                stdout: "",
+                stdoutBytes: 0,
+                stdoutTruncated: false,
+                termination: "timeout",
+                timedOut: true,
+            }),
+        ),
+        ["bash.timeout"],
+    );
 
-    assert.deepEqual(codes(resolveResultHints("bash_run", {
-        stderr: "", stderrBytes: 0, stderrTruncated: false,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: false,
-        termSignal: 9, termination: "signaled"
-    })), ["bash.signaled"]);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("bash_run", {
+                stderr: "",
+                stderrBytes: 0,
+                stderrTruncated: false,
+                stdout: "",
+                stdoutBytes: 0,
+                stdoutTruncated: false,
+                termSignal: 9,
+                termination: "signaled",
+            }),
+        ),
+        ["bash.signaled"],
+    );
 
-    assert.deepEqual(codes(resolveResultHints("bash_run", {
-        exitCode: 0,
-        stderr: "", stderrBytes: 0, stderrTruncated: true,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: true,
-        termination: "exited"
-    })), ["bash.outputTruncated"]);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("bash_run", {
+                exitCode: 0,
+                stderr: "",
+                stderrBytes: 0,
+                stderrTruncated: true,
+                stdout: "",
+                stdoutBytes: 0,
+                stdoutTruncated: true,
+                termination: "exited",
+            }),
+        ),
+        ["bash.outputTruncated"],
+    );
 
-    assert.deepEqual(codes(resolveResultHints("bash_run", {
-        artifactWarnings: ["storage degraded"],
-        exitCode: 0,
-        stderr: "", stderrBytes: 0, stderrTruncated: false,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: false,
-        termination: "exited"
-    })), ["bash.artifactWarning"]);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("bash_run", {
+                artifactWarnings: ["storage degraded"],
+                exitCode: 0,
+                stderr: "",
+                stderrBytes: 0,
+                stderrTruncated: false,
+                stdout: "",
+                stdoutBytes: 0,
+                stdoutTruncated: false,
+                termination: "exited",
+            }),
+        ),
+        ["bash.artifactWarning"],
+    );
 });
 
 test("bash_run truncation hint does not leak an artifact handle", () => {
     const hints = resolveResultHints("bash_run", {
         exitCode: 0,
-        stderr: "", stderrBytes: 0, stderrTruncated: false,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: true,
+        stderr: "",
+        stderrBytes: 0,
+        stderrTruncated: false,
+        stdout: "",
+        stdoutBytes: 0,
+        stdoutTruncated: true,
         stdoutArtifact: { artifactTruncated: false, handle: "h1" },
-        termination: "exited"
+        termination: "exited",
     });
     assert.deepEqual(codes(hints), ["bash.outputTruncated"]);
     assert.equal(hints[0].text.includes("h1"), false);
 });
 
 test("bash_run error hints cover invalid command and cancellation semantics", () => {
-    assert.deepEqual(codes(resolveErrorHints("bash_run", body("bash.invalidCommand"))), ["bash.invalidCommand"]);
-    assert.match(resolveErrorHints("bash_run", body("bash.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
+    assert.deepEqual(
+        codes(resolveErrorHints("bash_run", body("bash.invalidCommand"))),
+        ["bash.invalidCommand"],
+    );
+    assert.match(
+        resolveErrorHints("bash_run", body("bash.invalidCwd"))[0]?.text ?? "",
+        /\.\/.*workspace-relative/u,
+    );
     const cancelled = resolveErrorHints("bash_run", body("tool.cancelled"));
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
 
 test("file_read truncation and partial parse are diagnosed", () => {
-    assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "complete", truncated: true })), ["file.partialRead"]);
-    assert.deepEqual(codes(resolveResultHints("file_read", { parseStatus: "partial", truncated: false })), ["file.partialParse"]);
-    assert.deepEqual(codes(resolveResultHints("file_read", {
-        files: [{ nextSelector: "201", path: "./a.ts", view: "content" }]
-    })), ["file.partialRead"]);
-    assert.deepEqual(resolveResultHints("file_read", { parseStatus: "complete", truncated: false }), []);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("file_read", {
+                parseStatus: "complete",
+                truncated: true,
+            }),
+        ),
+        ["file.partialRead"],
+    );
+    assert.deepEqual(
+        codes(
+            resolveResultHints("file_read", {
+                parseStatus: "partial",
+                truncated: false,
+            }),
+        ),
+        ["file.partialParse"],
+    );
+    assert.deepEqual(
+        codes(
+            resolveResultHints("file_read", {
+                files: [
+                    { nextSelector: "201", path: "./a.ts", view: "content" },
+                ],
+            }),
+        ),
+        ["file.partialRead"],
+    );
+    assert.deepEqual(
+        resolveResultHints("file_read", {
+            parseStatus: "complete",
+            truncated: false,
+        }),
+        [],
+    );
 });
 
 test("file_glob and file_grep paging is diagnosed but empty results are not failures", () => {
-    assert.deepEqual(codes(resolveResultHints("file_glob", { entries: [], nextCursor: "c1" })), ["file.partialResults"]);
+    assert.deepEqual(
+        codes(
+            resolveResultHints("file_glob", { entries: [], nextCursor: "c1" }),
+        ),
+        ["file.partialResults"],
+    );
     assert.deepEqual(resolveResultHints("file_glob", { entries: [] }), []);
-    assert.deepEqual(codes(resolveResultHints("file_grep", { files: [], nextCursor: "c1" })), ["file.partialResults"]);
+    assert.deepEqual(
+        codes(resolveResultHints("file_grep", { files: [], nextCursor: "c1" })),
+        ["file.partialResults"],
+    );
     assert.deepEqual(resolveResultHints("file_grep", { files: [] }), []);
 });
 
 test("file_read metadata missing paths are observations, not failures", () => {
-    assert.deepEqual(resolveResultHints("file_read", {
-        files: [{ metadata: { exists: false }, path: "./missing", view: "metadata" }]
-    }), []);
+    assert.deepEqual(
+        resolveResultHints("file_read", {
+            files: [
+                {
+                    metadata: { exists: false },
+                    path: "./missing",
+                    view: "metadata",
+                },
+            ],
+        }),
+        [],
+    );
 });
 
 test("file_edit partial failure reports applied, failed, and not-executed operations", () => {
     const hints = resolveResultHints("file_edit", {
         complete: false,
         operations: [
-            { action: "write", addedLines: 1, index: 0, removedLines: 0, status: "applied", truncated: false },
-            { action: "patch", error: { code: "file.revisionMismatch" }, index: 1, status: "failed", truncated: false },
-            { action: "delete", index: 2, status: "notExecuted", truncated: false }
-        ]
+            {
+                action: "write",
+                addedLines: 1,
+                index: 0,
+                removedLines: 0,
+                status: "applied",
+                truncated: false,
+            },
+            {
+                action: "patch",
+                error: { code: "file.revisionMismatch" },
+                index: 1,
+                status: "failed",
+                truncated: false,
+            },
+            {
+                action: "delete",
+                index: 2,
+                status: "notExecuted",
+                truncated: false,
+            },
+        ],
     });
     assert.deepEqual(codes(hints), ["file.partialEdit"]);
     const text = hints[0].text;
@@ -144,26 +264,59 @@ test("file_edit partial failure reports applied, failed, and not-executed operat
 test("file_edit no-op patch and truncated diff are diagnosed on complete sets", () => {
     const noop = resolveResultHints("file_edit", {
         complete: true,
-        operations: [{ action: "patch", addedLines: 0, index: 0, removedLines: 0, status: "applied", truncated: false }]
+        operations: [
+            {
+                action: "patch",
+                addedLines: 0,
+                index: 0,
+                removedLines: 0,
+                status: "applied",
+                truncated: false,
+            },
+        ],
     });
     assert.deepEqual(codes(noop), ["file.noContentChange"]);
 
     const diffTruncated = resolveResultHints("file_edit", {
         complete: true,
-        operations: [{ action: "write", addedLines: 5, index: 0, removedLines: 1, status: "applied", truncated: true }]
+        operations: [
+            {
+                action: "write",
+                addedLines: 5,
+                index: 0,
+                removedLines: 1,
+                status: "applied",
+                truncated: true,
+            },
+        ],
     });
     assert.deepEqual(codes(diffTruncated), ["file.diffTruncated"]);
 
     const move = resolveResultHints("file_edit", {
         complete: true,
-        operations: [{ action: "move", addedLines: 0, index: 0, removedLines: 0, status: "applied", truncated: false }]
+        operations: [
+            {
+                action: "move",
+                addedLines: 0,
+                index: 0,
+                removedLines: 0,
+                status: "applied",
+                truncated: false,
+            },
+        ],
     });
     assert.deepEqual(move, []);
 });
 
 test("file_edit snapshotRequired revisionMismatch and cancellation errors are classified", () => {
-    assert.deepEqual(codes(resolveErrorHints("file_edit", body("file.snapshotRequired"))), ["file.snapshotRequired"]);
-    assert.deepEqual(codes(resolveErrorHints("file_edit", body("file.revisionMismatch"))), ["file.revisionMismatch"]);
+    assert.deepEqual(
+        codes(resolveErrorHints("file_edit", body("file.snapshotRequired"))),
+        ["file.snapshotRequired"],
+    );
+    assert.deepEqual(
+        codes(resolveErrorHints("file_edit", body("file.revisionMismatch"))),
+        ["file.revisionMismatch"],
+    );
     const cancelled = resolveErrorHints("file_edit", body("tool.cancelled"));
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
 });
@@ -179,7 +332,7 @@ test("tmux_run block timeout keeps the task running and is not a failure", () =>
         observationReset: false,
         output: [],
         task: { id: "t1", status: "running" },
-        warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }]
+        warnings: [{ code: "tmux.blockTimeout", message: "wait timed out" }],
     });
     assert.deepEqual(codes(hints), ["tmux.blockTimeout"]);
     assert.match(hints[0]?.text ?? "", /tmux_read/u);
@@ -190,7 +343,7 @@ test("tmux_run running task without block timeout yields a task-running diagnost
         observationReset: false,
         output: [],
         task: { id: "t1", status: "running" },
-        warnings: []
+        warnings: [],
     });
     assert.deepEqual(codes(hints), ["tmux.taskRunning"]);
     assert.match(hints[0]?.text ?? "", /tmux_read/u);
@@ -228,39 +381,84 @@ test("tmux_run interrupted wait tells the model the task is still running", () =
 });
 
 test("tmux task terminal status distinguishes success, failure, and unknown", () => {
-    assert.deepEqual(resolveResultHints("tmux_read", { task: { status: "0" }, warnings: [] }), []);
-    assert.deepEqual(resolveResultHints("tmux_run", { task: { status: "0" } }), []);
-    assert.deepEqual(codes(resolveResultHints("tmux_read", { task: { status: "3" }, warnings: [] })), ["tmux.taskFailed"]);
-    assert.deepEqual(codes(resolveResultHints("tmux_read", { task: { status: "unknown" }, warnings: [] })), ["tmux.taskStatusUnknown"]);
+    assert.deepEqual(
+        resolveResultHints("tmux_read", {
+            task: { status: "0" },
+            warnings: [],
+        }),
+        [],
+    );
+    assert.deepEqual(
+        resolveResultHints("tmux_run", { task: { status: "0" } }),
+        [],
+    );
+    assert.deepEqual(
+        codes(
+            resolveResultHints("tmux_read", {
+                task: { status: "3" },
+                warnings: [],
+            }),
+        ),
+        ["tmux.taskFailed"],
+    );
+    assert.deepEqual(
+        codes(
+            resolveResultHints("tmux_read", {
+                task: { status: "unknown" },
+                warnings: [],
+            }),
+        ),
+        ["tmux.taskStatusUnknown"],
+    );
 });
 
 test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
-    const hints = resolveErrorHints("tmux_run", body("tmux.taskStartUnconfirmed"));
+    const hints = resolveErrorHints(
+        "tmux_run",
+        body("tmux.taskStartUnconfirmed"),
+    );
     assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
 });
 
 test("tmux cwd errors explain the supported path namespaces", () => {
-    assert.match(resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))[0]?.text ?? "", /\.\/.*workspace-relative/u);
+    assert.match(
+        resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))[0]?.text ??
+            "",
+        /\.\/.*workspace-relative/u,
+    );
 });
 
 test("tmux_manage list full capacity is a diagnostic, not a list failure", () => {
-    const hints = resolveResultHints("tmux_manage", { capacity: { max: 4, used: 4 }, panes: [], warnings: [] });
+    const hints = resolveResultHints("tmux_manage", {
+        capacity: { max: 4, used: 4 },
+        panes: [],
+        warnings: [],
+    });
     assert.deepEqual(codes(hints), ["tmux.capacityFull"]);
 });
 
 test("instance already-exists and config-invalid use real catalog codes and safe fields", () => {
-    const exists = resolveErrorHints("instance_create", body("control.instanceAlreadyExists"));
+    const exists = resolveErrorHints(
+        "instance_create",
+        body("control.instanceAlreadyExists"),
+    );
     assert.deepEqual(codes(exists), ["control.instanceAlreadyExists"]);
-    const config = resolveErrorHints("instance_create", body("control.configInvalid", {
-        details: { fieldPath: "ssh.port", issueCode: "outOfRange" }
-    }));
+    const config = resolveErrorHints(
+        "instance_create",
+        body("control.configInvalid", {
+            details: { fieldPath: "ssh.port", issueCode: "outOfRange" },
+        }),
+    );
     assert.deepEqual(codes(config), ["control.configInvalid"]);
     assert.match(config[0].text, /ssh\.port/);
     assert.match(config[0].text, /outOfRange/);
 });
 
 test("todo revision conflict and invalid invariants are classified", () => {
-    assert.deepEqual(codes(resolveErrorHints("todo_write", body("todo.revisionConflict"))), ["todo.revisionConflict"]);
+    assert.deepEqual(
+        codes(resolveErrorHints("todo_write", body("todo.revisionConflict"))),
+        ["todo.revisionConflict"],
+    );
     const invalid = resolveErrorHints("todo_write", body("todo.invalid"));
     assert.deepEqual(codes(invalid), ["todo.invalid"]);
 });
@@ -269,19 +467,35 @@ test("cross-tool error hints apply to any tool and walk the cause chain", () => 
     const denied = resolveErrorHints("bash_run", body("core.approvalDenied"));
     assert.deepEqual(codes(denied), ["core.approvalDenied"]);
 
-    const wrapped = resolveErrorHints("bash_run", body("core.workerStartFailed", {
-        cause: { code: "core.providerFailed", message: "provider", retryable: true }
-    }));
-    assert.deepEqual(codes(wrapped), ["core.workerStartFailed", "core.providerFailed"]);
+    const wrapped = resolveErrorHints(
+        "bash_run",
+        body("core.workerStartFailed", {
+            cause: {
+                code: "core.providerFailed",
+                message: "provider",
+                retryable: true,
+            },
+        }),
+    );
+    assert.deepEqual(codes(wrapped), [
+        "core.workerStartFailed",
+        "core.providerFailed",
+    ]);
 });
 
 test("conversation control errors use dedicated cross-tool guidance instead of Todo invariants", () => {
-    const stopped = resolveErrorHints("todo_write", body("control.modelStopped"));
+    const stopped = resolveErrorHints(
+        "todo_write",
+        body("control.modelStopped"),
+    );
     assert.deepEqual(codes(stopped), ["control.modelStopped"]);
     assert.match(stopped[0]?.text ?? "", /#resume/u);
     assert.doesNotMatch(stopped[0]?.text ?? "", /resubmit the full plan/u);
 
-    const pushed = resolveErrorHints("file_read", body("control.modelReplyRequired"));
+    const pushed = resolveErrorHints(
+        "file_read",
+        body("control.modelReplyRequired"),
+    );
     assert.deepEqual(codes(pushed), ["control.modelReplyRequired"]);
     assert.match(pushed[0]?.text ?? "", /todo_report/u);
 
@@ -293,13 +507,22 @@ test("conversation control errors use dedicated cross-tool guidance instead of T
 test("context expired, disabled, and invalid remain distinct error classes", () => {
     const expired = resolveErrorHints("bash_run", body("mcp.contextExpired"));
     assert.deepEqual(codes(expired), ["mcp.contextExpired"]);
-    assert.match(expired[0]?.text ?? "", /Call environ_info to renew the current Context/u);
+    assert.match(
+        expired[0]?.text ?? "",
+        /Call environ_info to renew the current Context/u,
+    );
     const disabled = resolveErrorHints("bash_run", body("mcp.contextDisabled"));
     assert.deepEqual(codes(disabled), ["mcp.contextDisabled"]);
-    assert.match(disabled[0]?.text ?? "", /environ_info with workspace to establish a new active Context/u);
+    assert.match(
+        disabled[0]?.text ?? "",
+        /environ_info with workspace to establish a new active Context/u,
+    );
     const invalid = resolveErrorHints("bash_run", body("mcp.contextInvalid"));
     assert.deepEqual(codes(invalid), ["mcp.contextInvalid"]);
-    assert.match(invalid[0]?.text ?? "", /environ_info with workspace to establish or recover the current Context/u);
+    assert.match(
+        invalid[0]?.text ?? "",
+        /environ_info with workspace to establish or recover the current Context/u,
+    );
 });
 
 test("unclassified errors fall back to a safe unknown hint", () => {
@@ -309,10 +532,20 @@ test("unclassified errors fall back to a safe unknown hint", () => {
 
 test("merge keeps user comments first and deduplicates hint codes", () => {
     const hints = resolveResultHints("bash_run", {
-        exitCode: 1, stderr: "", stderrBytes: 0, stderrTruncated: false,
-        stdout: "", stdoutBytes: 0, stdoutTruncated: false, termination: "exited"
+        exitCode: 1,
+        stderr: "",
+        stderrBytes: 0,
+        stderrTruncated: false,
+        stdout: "",
+        stdoutBytes: 0,
+        stdoutTruncated: false,
+        termination: "exited",
     });
     const merged = mergeComments(["user note"], [...hints, ...hints]);
     assert.equal(merged[0], "user note");
-    assert.equal(merged.filter((entry) => entry.startsWith("[bash.nonZeroExit] ")).length, 1);
+    assert.equal(
+        merged.filter((entry) => entry.startsWith("[bash.nonZeroExit] "))
+            .length,
+        1,
+    );
 });

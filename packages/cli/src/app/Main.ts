@@ -12,7 +12,12 @@ import {
     negotiateCliControl,
     type CliClients,
 } from "../transport/Client.js";
-import { CliExitMapper, CliRenderError, cliExitCodes, renderCliError } from "./Failure.js";
+import {
+    CliExitMapper,
+    CliRenderError,
+    cliExitCodes,
+    renderCliError,
+} from "./Failure.js";
 
 export type { CliLifecycleManagerLike } from "../command/control/service/Lifecycle.js";
 
@@ -56,11 +61,17 @@ export class CliMain {
         this.#stdout = options.stdout ?? process.stdout;
         this.#homeDirectory = options.homeDirectory;
         this.#xdgRuntimeDir = options.xdgRuntimeDir;
-        this.#clients = options.createCliClients?.() ?? createControlClients({
-            ...(options.controlToken === undefined ? {} : { controlToken: options.controlToken }),
-            ...(options.controlUrl === undefined ? {} : { controlUrl: options.controlUrl }),
-            xdgRuntimeDir: this.#xdgRuntimeDir,
-        });
+        this.#clients =
+            options.createCliClients?.() ??
+            createControlClients({
+                ...(options.controlToken === undefined
+                    ? {}
+                    : { controlToken: options.controlToken }),
+                ...(options.controlUrl === undefined
+                    ? {}
+                    : { controlUrl: options.controlUrl }),
+                xdgRuntimeDir: this.#xdgRuntimeDir,
+            });
     }
 
     async run(argv: readonly string[]): Promise<number> {
@@ -76,10 +87,12 @@ export class CliMain {
                 stdout: this.#stdout,
                 lifecycle: async () => await this.#lifecycle(),
                 negotiate: async () => await negotiateCliControl(this.#clients),
-                rootUsage: async () => await this.#rootUsage(resolved.controlNegotiated),
+                rootUsage: async () =>
+                    await this.#rootUsage(resolved.controlNegotiated),
                 startTui: async () => await this.#startTui(),
                 version: () => resolvePortableDevshellApplicationVersion(),
-                writeJson: (value) => this.#stdout.write(`${JSON.stringify(value, null, 2)}\n`),
+                writeJson: (value) =>
+                    this.#stdout.write(`${JSON.stringify(value, null, 2)}\n`),
             });
             return cliExitCodes.success;
         } catch (error) {
@@ -90,36 +103,62 @@ export class CliMain {
         }
     }
 
-    async #resolve(argv: readonly string[]): Promise<{ command: CliParsedCommand; controlNegotiated: boolean }> {
+    async #resolve(
+        argv: readonly string[],
+    ): Promise<{ command: CliParsedCommand; controlNegotiated: boolean }> {
         const commandId = argv[0];
         if (commandId === undefined || !/^[a-z][a-z0-9-]*$/u.test(commandId)) {
-            return { command: this.#parser.parse(argv), controlNegotiated: false };
+            return {
+                command: this.#parser.parse(argv),
+                controlNegotiated: false,
+            };
         }
         try {
             await negotiateCliControl(this.#clients);
             const commands = await this.#clients.cli.commands();
-            const overlay = commands.find((candidate) => candidate.id === commandId);
+            const overlay = commands.find(
+                (candidate) => candidate.id === commandId,
+            );
             if (overlay !== undefined) {
                 return {
-                    command: { args: normalizeExtensionCommandArgs(argv.slice(1)), commandId, kind: "cli.command" },
+                    command: {
+                        args: normalizeExtensionCommandArgs(argv.slice(1)),
+                        commandId,
+                        kind: "cli.command",
+                    },
                     controlNegotiated: true,
                 };
             }
-            const suggestion = suggestCliCommand(commandId, commands.map((candidate) => candidate.id));
+            const suggestion = suggestCliCommand(
+                commandId,
+                commands.map((candidate) => candidate.id),
+            );
             if (suggestion !== undefined) {
-                throw CliRenderError.usage(`Unknown command "${commandId}". Did you mean "${suggestion}"?`);
+                throw CliRenderError.usage(
+                    `Unknown command "${commandId}". Did you mean "${suggestion}"?`,
+                );
             }
-            return { command: this.#parser.parse(argv), controlNegotiated: true };
+            return {
+                command: this.#parser.parse(argv),
+                controlNegotiated: true,
+            };
         } catch (error) {
-            if (error instanceof CliRenderError && error.code === "control.notRunning") {
-                return { command: this.#parser.parse(argv), controlNegotiated: false };
+            if (
+                error instanceof CliRenderError &&
+                error.code === "control.notRunning"
+            ) {
+                return {
+                    command: this.#parser.parse(argv),
+                    controlNegotiated: false,
+                };
             }
             throw error;
         }
     }
 
     async #lifecycle(): Promise<CliLifecycleManagerLike> {
-        if (this.#createLifecycleManager !== undefined) return await this.#createLifecycleManager();
+        if (this.#createLifecycleManager !== undefined)
+            return await this.#createLifecycleManager();
         const [lifecycle, control] = await Promise.all([
             import("@portable-devshell/shared"),
             import("@portable-devshell/control"),
@@ -127,7 +166,9 @@ export class CliMain {
         return new lifecycle.ControlLifecycleManager({
             daemonModulePath: control.controlDaemonModulePath(),
             env: {
-                [control.CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: JSON.stringify(cliBuiltinExtensionSources()),
+                [control.CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: JSON.stringify(
+                    cliBuiltinExtensionSources(),
+                ),
             },
             homeDirectory: this.#homeDirectory,
             xdgRuntimeDir: this.#xdgRuntimeDir,
@@ -149,40 +190,82 @@ export class CliMain {
             return;
         }
         const imported = (await import("@portable-devshell/tui")) as {
-            runTui(options?: { controlToken?: string; controlUrl?: string; xdgRuntimeDir?: string }): Promise<void>;
+            runTui(options?: {
+                controlToken?: string;
+                controlUrl?: string;
+                xdgRuntimeDir?: string;
+            }): Promise<void>;
         };
         await imported.runTui({
-            ...(this.#controlToken === undefined ? {} : { controlToken: this.#controlToken }),
-            ...(this.#controlUrl === undefined ? {} : { controlUrl: this.#controlUrl }),
+            ...(this.#controlToken === undefined
+                ? {}
+                : { controlToken: this.#controlToken }),
+            ...(this.#controlUrl === undefined
+                ? {}
+                : { controlUrl: this.#controlUrl }),
             xdgRuntimeDir: this.#xdgRuntimeDir,
         });
     }
 }
 
 const builtinCliCommands = [
-    "approval", "config", "context", "debug", "extension", "help", "instance",
-    "logs", "oauth", "overview", "restart", "start", "status", "stop", "todo",
-    "tool", "tui", "watch",
+    "approval",
+    "config",
+    "context",
+    "debug",
+    "extension",
+    "help",
+    "instance",
+    "logs",
+    "oauth",
+    "overview",
+    "restart",
+    "start",
+    "status",
+    "stop",
+    "todo",
+    "tool",
+    "tui",
+    "watch",
 ] as const;
 
-function suggestCliCommand(command: string, extensionCommands: readonly string[]): string | undefined {
-    if ((builtinCliCommands as readonly string[]).includes(command)) return undefined;
-    const candidates = [...builtinCliCommands, ...extensionCommands].filter((candidate, index, values) => values.indexOf(candidate) === index);
+function suggestCliCommand(
+    command: string,
+    extensionCommands: readonly string[],
+): string | undefined {
+    if ((builtinCliCommands as readonly string[]).includes(command))
+        return undefined;
+    const candidates = [...builtinCliCommands, ...extensionCommands].filter(
+        (candidate, index, values) => values.indexOf(candidate) === index,
+    );
     let best: { command: string; distance: number } | undefined;
     for (const candidate of candidates) {
         const distance = editDistance(command, candidate);
-        if (best === undefined || distance < best.distance) best = { command: candidate, distance };
+        if (best === undefined || distance < best.distance)
+            best = { command: candidate, distance };
     }
     const threshold = command.length <= 4 ? 1 : command.length <= 8 ? 2 : 3;
-    return best !== undefined && best.distance <= threshold ? best.command : undefined;
+    return best !== undefined && best.distance <= threshold
+        ? best.command
+        : undefined;
 }
 
 function editDistance(left: string, right: string): number {
-    let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    let previous = Array.from(
+        { length: right.length + 1 },
+        (_, index) => index,
+    );
     for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
         const current = [leftIndex + 1];
         for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-            current.push(Math.min(current[rightIndex]! + 1, previous[rightIndex + 1]! + 1, previous[rightIndex]! + (left[leftIndex] === right[rightIndex] ? 0 : 1)));
+            current.push(
+                Math.min(
+                    current[rightIndex]! + 1,
+                    previous[rightIndex + 1]! + 1,
+                    previous[rightIndex]! +
+                        (left[leftIndex] === right[rightIndex] ? 0 : 1),
+                ),
+            );
         }
         previous = current;
     }
@@ -195,25 +278,43 @@ function normalizeExtensionCommandArgs(args: readonly string[]): string[] {
     return [...args];
 }
 
-function splitGlobalFlags(argv: readonly string[]): { commandArgs: string[]; debug: boolean; verbose: boolean } {
+function splitGlobalFlags(argv: readonly string[]): {
+    commandArgs: string[];
+    debug: boolean;
+    verbose: boolean;
+} {
     const commandArgs = [...argv];
     let debug = false;
     let verbose = false;
     while (commandArgs[0] === "--verbose" || commandArgs[0] === "--debug") {
-        if (commandArgs[0] === "--debug") { debug = true; verbose = true; } else verbose = true;
+        if (commandArgs[0] === "--debug") {
+            debug = true;
+            verbose = true;
+        } else verbose = true;
         commandArgs.shift();
     }
     return { commandArgs, debug, verbose };
 }
 
-function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): string {
+function resolvePortableDevshellApplicationVersion(
+    startUrl = import.meta.url,
+): string {
     let directory = dirname(fileURLToPath(startUrl));
     while (true) {
         const manifestPath = join(directory, "package.json");
         try {
-            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { name?: unknown; version?: unknown };
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+                name?: unknown;
+                version?: unknown;
+            };
             if (manifest.name === "portable-devshell") {
-                if (typeof manifest.version !== "string" || manifest.version.length === 0) throw new Error(`Application package version is invalid: ${manifestPath}`);
+                if (
+                    typeof manifest.version !== "string" ||
+                    manifest.version.length === 0
+                )
+                    throw new Error(
+                        `Application package version is invalid: ${manifestPath}`,
+                    );
                 return manifest.version;
             }
         } catch (error) {
@@ -223,5 +324,7 @@ function resolvePortableDevshellApplicationVersion(startUrl = import.meta.url): 
         if (parent === directory) break;
         directory = parent;
     }
-    throw new Error("Cannot locate portable-devshell application package manifest.");
+    throw new Error(
+        "Cannot locate portable-devshell application package manifest.",
+    );
 }

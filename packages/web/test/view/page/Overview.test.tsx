@@ -5,7 +5,11 @@ import { expect, it } from "vitest";
 import { WorkerDiagnostics } from "../../../src/view/page/Instances.js";
 import { Overview } from "../../../src/view/page/Overview.js";
 import type { WebState } from "../../../src/state/Store.js";
-import { formatBytes, formatDuration, formatPercent } from "@portable-devshell/shared/browser";
+import {
+    formatBytes,
+    formatDuration,
+    formatPercent,
+} from "@portable-devshell/shared/browser";
 import { overviewAlertRoute } from "../../../src/view/ReadModel.js";
 import { presentWorker } from "../../../src/view/page/Instances.js";
 
@@ -29,7 +33,13 @@ it("keeps controller and partial alerts on Overview while routing instance alert
 it("presents worker handshake metadata only when the server supplied it", () => {
     const worker = {
         capabilities: { cancel: true, streaming: true, tools: false },
-        platform: { arch: "arm64", distribution: { id: "ubuntu", name: "Ubuntu", version: "24.04" }, os: "linux", packageManager: "apt", shell: { executable: "/bin/zsh", kind: "zsh", version: "5.9" } },
+        platform: {
+            arch: "arm64",
+            distribution: { id: "ubuntu", name: "Ubuntu", version: "24.04" },
+            os: "linux",
+            packageManager: "apt",
+            shell: { executable: "/bin/zsh", kind: "zsh", version: "5.9" },
+        },
         protocolVersion: 3,
         version: "1.2.3",
     };
@@ -40,7 +50,6 @@ it("presents worker handshake metadata only when the server supplied it", () => 
     rerender(<WorkerDiagnostics worker={undefined} />);
     expect(screen.queryByText("1.2.3")).not.toBeInTheDocument();
 });
-
 
 it("shows an Overview failure instead of an endless loading message", () => {
     const state: WebState = {

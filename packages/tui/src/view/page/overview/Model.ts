@@ -1,6 +1,11 @@
-import { formatBytes, formatDuration, formatPercent } from "@portable-devshell/shared";
+import {
+    formatBytes,
+    formatDuration,
+    formatPercent,
+} from "@portable-devshell/shared";
 
-export type TuiOverviewTone = "normal" | "muted" | "accent" | "success" | "warning" | "danger";
+export type TuiOverviewTone =
+    "normal" | "muted" | "accent" | "success" | "warning" | "danger";
 
 export interface TuiOverviewMeterModel {
     readonly detail: string;
@@ -68,6 +73,9 @@ export interface TuiOverviewPresentation {
     readonly query: string;
 }
 
-export const formatOverviewDuration = (seconds: number): string => formatDuration(seconds, "—");
-export const formatOverviewPercent = (value: number | undefined): string => formatPercent(value, "—");
-export const formatOverviewBytes = (bytes: number): string => formatBytes(bytes, "0 B");
+export const formatOverviewDuration = (seconds: number): string =>
+    formatDuration(seconds, "—");
+export const formatOverviewPercent = (value: number | undefined): string =>
+    formatPercent(value, "—");
+export const formatOverviewBytes = (bytes: number): string =>
+    formatBytes(bytes, "0 B");

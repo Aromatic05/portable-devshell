@@ -6,13 +6,16 @@ import {
     type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallQuery,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../../../approval/Manager.js";
 import type { InstanceEventInput } from "../../../instance/EventBuffer.js";
 import type { LogQuery } from "../../../storage/log/Query.js";
-import type { InstanceLogEntry, LogStoreInstance } from "../../../storage/log/Store.js";
+import type {
+    InstanceLogEntry,
+    LogStoreInstance,
+} from "../../../storage/log/Store.js";
 import type { AuditToolCallHistory } from "../../../storage/audit/ToolCallHistory.js";
 import type { WorkerToolInvoker } from "../../tool/Invoker.js";
 import type { WorkerToolCallScheduler } from "../../tool/Scheduler.js";
@@ -23,11 +26,16 @@ import { WorkerInstanceToolLog } from "./record/Log.js";
 
 interface WorkerToolOptions {
     approvalManager: ApprovalManager;
-    appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
+    appendEvent(
+        type: InstanceEventInput["type"],
+        data?: JsonValue,
+    ): Promise<unknown>;
     assertReady(): void;
     instanceName: InstanceName;
     logStore: LogStoreInstance;
-    toolCallAssociationProvider?: (context: ToolCallContext) => ToolCallAssociation | undefined;
+    toolCallAssociationProvider?: (
+        context: ToolCallContext,
+    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
@@ -43,16 +51,16 @@ export class WorkerInstanceTool {
         this.#approval = new WorkerInstanceToolApproval({
             approvalManager: options.approvalManager,
             appendEvent: options.appendEvent,
-            toolCallHistory: options.toolCallHistory
+            toolCallHistory: options.toolCallHistory,
         });
         this.#audit = new WorkerInstanceToolAudit({
             appendEvent: options.appendEvent,
             toolCallAssociationProvider: options.toolCallAssociationProvider,
-            toolCallHistory: options.toolCallHistory
+            toolCallHistory: options.toolCallHistory,
         });
         this.#log = new WorkerInstanceToolLog({
             appendEvent: options.appendEvent,
-            logStore: options.logStore
+            logStore: options.logStore,
         });
         this.#execution = new WorkerInstanceToolExecution({
             approval: this.#approval,
@@ -61,7 +69,7 @@ export class WorkerInstanceTool {
             instanceName: options.instanceName,
             log: this.#log,
             toolCallScheduler: options.toolCallScheduler,
-            toolInvoker: options.toolInvoker
+            toolInvoker: options.toolInvoker,
         });
     }
 
@@ -70,7 +78,10 @@ export class WorkerInstanceTool {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
@@ -83,7 +94,7 @@ export class WorkerInstanceTool {
             transformResult,
             invocationInput,
             onProgress,
-            recording
+            recording,
         );
     }
 
@@ -92,9 +103,15 @@ export class WorkerInstanceTool {
         input: JsonValue,
         context: ToolCallContext,
         operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal
+        signal?: AbortSignal,
     ): Promise<T> {
-        return await this.#audit.auditOperation(toolName, input, context, operation, signal);
+        return await this.#audit.auditOperation(
+            toolName,
+            input,
+            context,
+            operation,
+            signal,
+        );
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
@@ -111,12 +128,21 @@ export class WorkerInstanceTool {
 
     async decideApproval(
         approvalId: string,
-        input: { decision: ApprovalDecision["decision"]; decidedBy: ApprovalDecision["decidedBy"]; policyPatch?: JsonValue; reason?: string; remember?: boolean }
+        input: {
+            decision: ApprovalDecision["decision"];
+            decidedBy: ApprovalDecision["decidedBy"];
+            policyPatch?: JsonValue;
+            reason?: string;
+            remember?: boolean;
+        },
     ): Promise<ApprovalRequest> {
         return await this.#approval.decideApproval(approvalId, input);
     }
 
-    async cancelApproval(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+    async cancelApproval(
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest> {
         return await this.#approval.cancelApproval(approvalId, reason);
     }
 

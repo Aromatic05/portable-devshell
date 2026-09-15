@@ -115,8 +115,8 @@ Web 的默认 `listenHost` / `listenPort` 继承 MCP listener，因此两者默�
 
 `publicBaseUrl` 的 patch 语义区分“省略”和 `null`：
 
-* MCP patch 省略该字段时保留现值；显式 `null` 会清除显式公网基址；
-* Web patch 省略时保留现值；显式 `null` 会回到基于当前 `listenHost` / `listenPort` 推导的本地基址。
+- MCP patch 省略该字段时保留现值；显式 `null` 会清除显式公网基址；
+- Web patch 省略时保留现值；显式 `null` 会回到基于当前 `listenHost` / `listenPort` 推导的本地基址。
 
 这对于临时撤掉反向代理/公网域名很重要，不需要为了“恢复默认”伪造一个 loopback URL 覆盖旧公网值。
 
@@ -358,9 +358,9 @@ PORTABLE_DEVSHELL_RELEASE_BASE_URL
 
 ## 进一步阅读
 
-* [安装与升级](../getting-started/installation.md)
-* [系统架构](../concepts/architecture.md)
-* [MCP](../concepts/mcp.md)
-* [Context](../concepts/context.md)
-* [OAuth](oauth.md)
-* [Reverse Worker](reverse-connections.md)
+- [安装与升级](../getting-started/installation.md)
+- [系统架构](../concepts/architecture.md)
+- [MCP](../concepts/mcp.md)
+- [Context](../concepts/context.md)
+- [OAuth](oauth.md)
+- [Reverse Worker](reverse-connections.md)

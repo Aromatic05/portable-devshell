@@ -62,14 +62,29 @@ test("release preflight fails closed when GitHub cannot determine tag publicatio
 
 test("release assets require a native Agent Extension and every Agent provider for each target", () => {
     const names = expectedReleaseAssetNames();
-    for (const target of ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64", "windows-arm64"]) {
+    for (const target of [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "windows-x64",
+        "windows-arm64",
+    ]) {
         const extension = `portable-devshell-agent-${target}.dsext`;
         assert.equal(names.includes(extension), true, extension);
-        assert.equal(names.includes(`${extension}.sha256`), true, `${extension}.sha256`);
+        assert.equal(
+            names.includes(`${extension}.sha256`),
+            true,
+            `${extension}.sha256`,
+        );
         for (const providerId of ["pi", "opencode"]) {
             const provider = `portable-devshell-agent-provider-${providerId}-${target}.dsprovider`;
             assert.equal(names.includes(provider), true, provider);
-            assert.equal(names.includes(`${provider}.sha256`), true, `${provider}.sha256`);
+            assert.equal(
+                names.includes(`${provider}.sha256`),
+                true,
+                `${provider}.sha256`,
+            );
         }
     }
 });

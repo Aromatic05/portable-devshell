@@ -106,12 +106,12 @@ DEVSHELL_TESTSPACE_ROOT=/absolute/testspace pnpm testspace
 
 安全规则：
 
-* 不能为空；
-* 不能是文件系统根；
-* 不能包含 portable-devshell 仓库本身；
-* 已存在的自定义目录必须带 Testspace ownership marker；
-* marker 必须同时匹配 Testspace kind、当前 repository root 和当前 root；
-* 不满足 ownership 时拒绝递归 cleanup。
+- 不能为空；
+- 不能是文件系统根；
+- 不能包含 portable-devshell 仓库本身；
+- 已存在的自定义目录必须带 Testspace ownership marker；
+- marker 必须同时匹配 Testspace kind、当前 repository root 和当前 root；
+- 不满足 ownership 时拒绝递归 cleanup。
 
 这意味着 Testspace 不会因为用户误填一个普通目录就对它执行 `rm -rf`。
 

@@ -8,7 +8,7 @@ import {
     readdir,
     rename,
     rm,
-    writeFile
+    writeFile,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -18,9 +18,12 @@ import type {
     WorkerArtifactReceiveBeginResult,
     WorkerArtifactReceiveFinishResult,
     WorkerArtifactReceiveWriteInput,
-    WorkerArtifactReceiveWriteResult
+    WorkerArtifactReceiveWriteResult,
 } from "@portable-devshell/core";
-import { createError, type ArtifactPayloadDescriptor } from "@portable-devshell/shared";
+import {
+    createError,
+    type ArtifactPayloadDescriptor,
+} from "@portable-devshell/shared";
 
 import { extractArtifactDirectoryArchive } from "./Archive.js";
 import { artifactHashFile } from "../Hash.js";
@@ -48,11 +51,19 @@ export class ArtifactHostReceiveStore {
     readonly #root: string;
     readonly #temporaryDirectory: string;
 
-    constructor(options: { downloadDirectory: string; maxActiveReceives?: number; root: string }) {
+    constructor(options: {
+        downloadDirectory: string;
+        maxActiveReceives?: number;
+        root: string;
+    }) {
         this.#downloadDirectory = options.downloadDirectory;
-        this.#maxActiveReceives = options.maxActiveReceives ?? DEFAULT_MAX_ACTIVE_RECEIVES;
+        this.#maxActiveReceives =
+            options.maxActiveReceives ?? DEFAULT_MAX_ACTIVE_RECEIVES;
         this.#root = options.root;
-        this.#temporaryDirectory = join(options.downloadDirectory, ".devshell-receive");
+        this.#temporaryDirectory = join(
+            options.downloadDirectory,
+            ".devshell-receive",
+        );
     }
 
     async initialize(): Promise<void> {
@@ -61,7 +72,9 @@ export class ArtifactHostReceiveStore {
         await mkdir(this.#temporaryDirectory, { mode: 0o700, recursive: true });
         await chmod(this.#root, 0o700).catch(() => undefined);
         await chmod(this.#temporaryDirectory, 0o700).catch(() => undefined);
-        for (const file of await readdir(this.#root).catch(() => [] as string[])) {
+        for (const file of await readdir(this.#root).catch(
+            () => [] as string[],
+        )) {
             if (!file.endsWith(".json")) {
                 continue;
             }
@@ -76,37 +89,51 @@ export class ArtifactHostReceiveStore {
         for (const name of await readdir(this.#temporaryDirectory)) {
             await rm(join(this.#temporaryDirectory, name), {
                 force: true,
-                recursive: true
+                recursive: true,
             });
         }
     }
 
-    async begin(input: WorkerArtifactReceiveBeginInput): Promise<WorkerArtifactReceiveBeginResult> {
+    async begin(
+        input: WorkerArtifactReceiveBeginInput,
+    ): Promise<WorkerArtifactReceiveBeginResult> {
         validateDescriptor(input.descriptor);
-        const targetName = resolveTargetName(input.targetPath, input.descriptor);
+        const targetName = resolveTargetName(
+            input.targetPath,
+            input.descriptor,
+        );
         const targetPath = join(this.#downloadDirectory, targetName);
         const targetMetadata = await lstat(targetPath).catch(() => undefined);
         if (targetMetadata?.isSymbolicLink()) {
             throw artifactError(
                 "artifact.directoryUnsafe",
-                "Host Download target must not be a symbolic link."
+                "Host Download target must not be a symbolic link.",
             );
         }
         if (targetMetadata !== undefined && !input.overwrite) {
-            throw artifactError("artifact.targetExists", "Host Download target already exists.");
+            throw artifactError(
+                "artifact.targetExists",
+                "Host Download target already exists.",
+            );
         }
 
         if (this.#activeReceives.size >= this.#maxActiveReceives) {
-            throw artifactError("artifact.quotaExceeded", "Host receive count limit exceeded.");
+            throw artifactError(
+                "artifact.quotaExceeded",
+                "Host receive count limit exceeded.",
+            );
         }
         const receiveId = randomUUID();
         this.#activeReceives.add(receiveId);
-        const temporaryPath = join(this.#temporaryDirectory, `${receiveId}.payload`);
+        const temporaryPath = join(
+            this.#temporaryDirectory,
+            `${receiveId}.payload`,
+        );
         try {
             const temporary = await open(
                 temporaryPath,
                 constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-                0o600
+                0o600,
             );
             await temporary.close();
             const stored: StoredReceive = {
@@ -117,7 +144,7 @@ export class ArtifactHostReceiveStore {
                 receivedBytes: 0,
                 targetPath,
                 temporaryPath,
-                version: RECORD_VERSION
+                version: RECORD_VERSION,
             };
             await this.#persist(stored);
             return { nextOffsetBytes: 0, receiveId };
@@ -128,26 +155,31 @@ export class ArtifactHostReceiveStore {
         }
     }
 
-    async write(input: WorkerArtifactReceiveWriteInput): Promise<WorkerArtifactReceiveWriteResult> {
+    async write(
+        input: WorkerArtifactReceiveWriteInput,
+    ): Promise<WorkerArtifactReceiveWriteResult> {
         validateId(input.receiveId);
         const stored = await this.#load(input.receiveId);
         if (stored.phase !== "receiving") {
             throw artifactError(
                 "artifact.receiveStateConflict",
-                "Host receive is not accepting payload chunks."
+                "Host receive is not accepting payload chunks.",
             );
         }
         if (input.offsetBytes !== stored.receivedBytes) {
             throw artifactError(
                 "artifact.receiveOffsetMismatch",
-                `Expected offset ${stored.receivedBytes}, received ${input.offsetBytes}.`
+                `Expected offset ${stored.receivedBytes}, received ${input.offsetBytes}.`,
             );
         }
         const bytes = decodeBase64(input.content);
-        if (stored.receivedBytes + bytes.length > stored.descriptor.payloadBytes) {
+        if (
+            stored.receivedBytes + bytes.length >
+            stored.descriptor.payloadBytes
+        ) {
             throw artifactError(
                 "artifact.payloadInvalid",
-                "Host receive exceeds the declared payload size."
+                "Host receive exceeds the declared payload size.",
             );
         }
         const file = await open(stored.temporaryPath, "r+");
@@ -158,12 +190,12 @@ export class ArtifactHostReceiveStore {
                     bytes,
                     written,
                     bytes.length - written,
-                    input.offsetBytes + written
+                    input.offsetBytes + written,
                 );
                 if (result.bytesWritten <= 0) {
                     throw artifactError(
                         "artifact.receiveFailed",
-                        "Host receive stopped making progress."
+                        "Host receive stopped making progress.",
                     );
                 }
                 written += result.bytesWritten;
@@ -177,23 +209,25 @@ export class ArtifactHostReceiveStore {
         return {
             nextOffsetBytes: stored.receivedBytes,
             receivedBytes: stored.receivedBytes,
-            receiveId: stored.receiveId
+            receiveId: stored.receiveId,
         };
     }
 
-    async finish(receiveId: string): Promise<WorkerArtifactReceiveFinishResult> {
+    async finish(
+        receiveId: string,
+    ): Promise<WorkerArtifactReceiveFinishResult> {
         validateId(receiveId);
         const stored = await this.#load(receiveId);
         if (stored.phase !== "receiving") {
             throw artifactError(
                 "artifact.receiveStateConflict",
-                "Host receive cannot be finished from its current state."
+                "Host receive cannot be finished from its current state.",
             );
         }
         if (stored.receivedBytes !== stored.descriptor.payloadBytes) {
             throw artifactError(
                 "artifact.payloadInvalid",
-                `Received ${stored.receivedBytes} bytes but expected ${stored.descriptor.payloadBytes}.`
+                `Received ${stored.receivedBytes} bytes but expected ${stored.descriptor.payloadBytes}.`,
             );
         }
         stored.phase = "verifying";
@@ -205,20 +239,23 @@ export class ArtifactHostReceiveStore {
         ) {
             throw artifactError(
                 "artifact.payloadInvalid",
-                "Host receive payload checksum does not match the descriptor."
+                "Host receive payload checksum does not match the descriptor.",
             );
         }
 
         let sourcePath = stored.temporaryPath;
         if (stored.descriptor.type === "directoryArchive") {
-            const stagedPath = join(this.#temporaryDirectory, `${receiveId}.directory`);
+            const stagedPath = join(
+                this.#temporaryDirectory,
+                `${receiveId}.directory`,
+            );
             await rm(stagedPath, { force: true, recursive: true });
             await mkdir(stagedPath, { mode: 0o700 });
             stored.stagedPath = stagedPath;
             await this.#persist(stored);
             const manifest = await extractArtifactDirectoryArchive(
                 stored.temporaryPath,
-                stagedPath
+                stagedPath,
             ).catch(async (error) => {
                 await rm(stagedPath, { force: true, recursive: true });
                 throw error;
@@ -231,7 +268,7 @@ export class ArtifactHostReceiveStore {
                 await rm(stagedPath, { force: true, recursive: true });
                 throw artifactError(
                     "artifact.payloadInvalid",
-                    "Restored host directory manifest does not match the descriptor."
+                    "Restored host directory manifest does not match the descriptor.",
                 );
             }
             sourcePath = stagedPath;
@@ -247,7 +284,7 @@ export class ArtifactHostReceiveStore {
             blake3: payload.blake3,
             bytes: payload.bytes,
             receiveId,
-            targetPath: stored.targetPath
+            targetPath: stored.targetPath,
         };
     }
 
@@ -263,51 +300,65 @@ export class ArtifactHostReceiveStore {
     }
 
     async #commit(stored: StoredReceive, sourcePath: string): Promise<void> {
-        const targetMetadata = await lstat(stored.targetPath).catch(() => undefined);
+        const targetMetadata = await lstat(stored.targetPath).catch(
+            () => undefined,
+        );
         if (targetMetadata?.isSymbolicLink()) {
             throw artifactError(
                 "artifact.directoryUnsafe",
-                "Host Download target must not be a symbolic link."
+                "Host Download target must not be a symbolic link.",
             );
         }
         if (targetMetadata !== undefined && !stored.overwrite) {
-            throw artifactError("artifact.targetExists", "Host Download target already exists.");
+            throw artifactError(
+                "artifact.targetExists",
+                "Host Download target already exists.",
+            );
         }
         if (targetMetadata !== undefined) {
-            const backupPath = join(this.#temporaryDirectory, `${stored.receiveId}.backup`);
+            const backupPath = join(
+                this.#temporaryDirectory,
+                `${stored.receiveId}.backup`,
+            );
             await rm(backupPath, { force: true, recursive: true });
             stored.backupPath = backupPath;
             await this.#persist(stored);
             await rename(stored.targetPath, backupPath);
             await Promise.all([
                 syncDirectory(this.#downloadDirectory),
-                syncDirectory(this.#temporaryDirectory)
+                syncDirectory(this.#temporaryDirectory),
             ]);
             try {
                 await rename(sourcePath, stored.targetPath);
             } catch (error) {
-                await rename(backupPath, stored.targetPath).catch(() => undefined);
+                await rename(backupPath, stored.targetPath).catch(
+                    () => undefined,
+                );
                 throw error;
             }
             await rm(backupPath, { force: true, recursive: true });
             stored.backupPath = undefined;
             await Promise.all([
                 syncDirectory(this.#downloadDirectory),
-                syncDirectory(this.#temporaryDirectory)
+                syncDirectory(this.#temporaryDirectory),
             ]);
             return;
         }
         await rename(sourcePath, stored.targetPath);
         await Promise.all([
             syncDirectory(this.#downloadDirectory),
-            syncDirectory(this.#temporaryDirectory)
+            syncDirectory(this.#temporaryDirectory),
         ]);
     }
 
     async #recover(stored: StoredReceive): Promise<void> {
         if (stored.backupPath !== undefined) {
-            const targetExists = (await lstat(stored.targetPath).catch(() => undefined)) !== undefined;
-            const backupExists = (await lstat(stored.backupPath).catch(() => undefined)) !== undefined;
+            const targetExists =
+                (await lstat(stored.targetPath).catch(() => undefined)) !==
+                undefined;
+            const backupExists =
+                (await lstat(stored.backupPath).catch(() => undefined)) !==
+                undefined;
             if (backupExists && !targetExists) {
                 await rename(stored.backupPath, stored.targetPath);
             } else if (backupExists) {
@@ -324,12 +375,20 @@ export class ArtifactHostReceiveStore {
     async #load(receiveId: string): Promise<StoredReceive> {
         let value: unknown;
         try {
-            value = JSON.parse(await readFile(this.#metadataPath(receiveId), "utf8"));
+            value = JSON.parse(
+                await readFile(this.#metadataPath(receiveId), "utf8"),
+            );
         } catch {
-            throw artifactError("artifact.receiveNotFound", "Host receive is unavailable.");
+            throw artifactError(
+                "artifact.receiveNotFound",
+                "Host receive is unavailable.",
+            );
         }
         if (!isStoredReceive(value, receiveId)) {
-            throw artifactError("artifact.receiveNotFound", "Host receive metadata is invalid.");
+            throw artifactError(
+                "artifact.receiveNotFound",
+                "Host receive metadata is invalid.",
+            );
         }
         return value;
     }
@@ -337,7 +396,9 @@ export class ArtifactHostReceiveStore {
     async #persist(stored: StoredReceive): Promise<void> {
         const path = this.#metadataPath(stored.receiveId);
         const temporary = `${path}.${randomUUID()}.tmp`;
-        await writeFile(temporary, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
+        await writeFile(temporary, `${JSON.stringify(stored)}\n`, {
+            mode: 0o600,
+        });
         await rename(temporary, path).catch(async (error) => {
             await rm(temporary, { force: true }).catch(() => undefined);
             throw error;
@@ -363,7 +424,7 @@ async function syncDirectory(path: string): Promise<void> {
 
 function resolveTargetName(
     targetPath: string,
-    descriptor: ArtifactPayloadDescriptor
+    descriptor: ArtifactPayloadDescriptor,
 ): string {
     const normalized = targetPath.replace(/[\\/]+$/u, "");
     const requested = basename(normalized);
@@ -371,11 +432,15 @@ function resolveTargetName(
         return requested;
     }
     const fallback =
-        descriptor.type === "directoryArchive" && descriptor.name.endsWith(".tar.zst")
+        descriptor.type === "directoryArchive" &&
+        descriptor.name.endsWith(".tar.zst")
             ? descriptor.name.slice(0, -8)
             : descriptor.name;
     if (!isSafeBasename(fallback)) {
-        throw artifactError("artifact.invalidTarget", "Host target has no safe file name.");
+        throw artifactError(
+            "artifact.invalidTarget",
+            "Host target has no safe file name.",
+        );
     }
     return fallback;
 }
@@ -392,8 +457,15 @@ function isSafeBasename(value: string): boolean {
 }
 
 function decodeBase64(content: string): Buffer {
-    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(content)) {
-        throw artifactError("artifact.payloadInvalid", "Host receive chunk is not valid base64.");
+    if (
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+            content,
+        )
+    ) {
+        throw artifactError(
+            "artifact.payloadInvalid",
+            "Host receive chunk is not valid base64.",
+        );
     }
     return Buffer.from(content, "base64");
 }
@@ -406,7 +478,10 @@ function validateDescriptor(descriptor: ArtifactPayloadDescriptor): void {
         descriptor.payloadBytes < 0 ||
         !/^[0-9a-f]{64}$/u.test(descriptor.payloadBlake3)
     ) {
-        throw artifactError("artifact.payloadInvalid", "Artifact payload descriptor is invalid.");
+        throw artifactError(
+            "artifact.payloadInvalid",
+            "Artifact payload descriptor is invalid.",
+        );
     }
     if (
         descriptor.type === "directoryArchive" &&
@@ -419,18 +494,28 @@ function validateDescriptor(descriptor: ArtifactPayloadDescriptor): void {
     ) {
         throw artifactError(
             "artifact.payloadInvalid",
-            "Directory payload descriptor is incomplete."
+            "Directory payload descriptor is incomplete.",
         );
     }
 }
 
 function validateId(value: string): void {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value)) {
-        throw artifactError("artifact.invalidReceiveId", "receiveId is invalid.");
+    if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+            value,
+        )
+    ) {
+        throw artifactError(
+            "artifact.invalidReceiveId",
+            "receiveId is invalid.",
+        );
     }
 }
 
-function isStoredReceive(value: unknown, receiveId: string): value is StoredReceive {
+function isStoredReceive(
+    value: unknown,
+    receiveId: string,
+): value is StoredReceive {
     if (typeof value !== "object" || value === null) {
         return false;
     }

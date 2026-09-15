@@ -11,15 +11,23 @@ import {
     type ApprovalTimeout,
     type InstanceName,
     type JsonValue,
-    type ToolCallContext
+    type ToolCallContext,
 } from "@portable-devshell/shared";
 
 import { ApprovalError } from "./Evaluation.js";
-import type { ApprovalEvaluation, ApprovalEvaluationInput, ApprovalResolution } from "./Evaluation.js";
+import type {
+    ApprovalEvaluation,
+    ApprovalEvaluationInput,
+    ApprovalResolution,
+} from "./Evaluation.js";
 import { ApprovalStore } from "./Store.js";
 
 export { ApprovalError } from "./Evaluation.js";
-export type { ApprovalEvaluation, ApprovalEvaluationInput, ApprovalResolution } from "./Evaluation.js";
+export type {
+    ApprovalEvaluation,
+    ApprovalEvaluationInput,
+    ApprovalResolution,
+} from "./Evaluation.js";
 export { ApprovalStore } from "./Store.js";
 
 interface ApprovalManagerOptions {
@@ -51,13 +59,21 @@ export class ApprovalManager {
         this.#timeoutMs = options.timeout?.ms ?? 300_000;
     }
 
-    async evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
+    async evaluate(
+        input: ApprovalEvaluationInput,
+    ): Promise<ApprovalEvaluation> {
         await this.#ensureReady();
         return await this.#runExclusive(() => this.#evaluate(input));
     }
 
-    async #evaluate(input: ApprovalEvaluationInput): Promise<ApprovalEvaluation> {
-        const policyDecision = resolvePolicyDecision(this.#policy, input.context.source, input.toolName);
+    async #evaluate(
+        input: ApprovalEvaluationInput,
+    ): Promise<ApprovalEvaluation> {
+        const policyDecision = resolvePolicyDecision(
+            this.#policy,
+            input.context.source,
+            input.toolName,
+        );
 
         if (policyDecision === "allow") {
             return { decision: "allow" };
@@ -66,7 +82,10 @@ export class ApprovalManager {
         if (policyDecision === "deny") {
             return {
                 decision: "deny",
-                error: createApprovalDeniedError(this.#instanceName, input.toolName)
+                error: createApprovalDeniedError(
+                    this.#instanceName,
+                    input.toolName,
+                ),
             };
         }
 
@@ -80,14 +99,22 @@ export class ApprovalManager {
             instance: this.#instanceName,
             reason: `Approval required before running ${input.toolName}.`,
             recording: input.recording ?? "host",
-            ...(input.context.requestId === undefined ? {} : { requestId: input.context.requestId }),
+            ...(input.context.requestId === undefined
+                ? {}
+                : { requestId: input.context.requestId }),
             riskLevel: "medium",
-            ...(input.context.ctxId === undefined ? {} : { ctxId: input.context.ctxId }),
-            ...(input.context.extensionId === undefined ? {} : { extensionId: input.context.extensionId }),
+            ...(input.context.ctxId === undefined
+                ? {}
+                : { ctxId: input.context.ctxId }),
+            ...(input.context.extensionId === undefined
+                ? {}
+                : { extensionId: input.context.extensionId }),
             source: input.context.source,
             status: "pending",
             toolName: input.toolName,
-            ...(input.context.workspace === undefined ? {} : { workspace: input.context.workspace }),
+            ...(input.context.workspace === undefined
+                ? {}
+                : { workspace: input.context.workspace }),
         };
 
         await this.#store.append(request);
@@ -96,7 +123,7 @@ export class ApprovalManager {
             const pending: PendingApproval = {
                 request,
                 resolve,
-                timeout: undefined as unknown as NodeJS.Timeout
+                timeout: undefined as unknown as NodeJS.Timeout,
             };
             this.#pending.set(request.approvalId, pending);
             this.#armExpiration(request.approvalId, pending, this.#timeoutMs);
@@ -105,7 +132,7 @@ export class ApprovalManager {
         return {
             awaitDecision,
             decision: "ask",
-            request
+            request,
         };
     }
 
@@ -118,7 +145,9 @@ export class ApprovalManager {
         return Promise.resolve(
             [...this.#pending.values()]
                 .map((pending) => pending.request)
-                .filter((request) => ctxId === undefined || request.ctxId === ctxId)
+                .filter(
+                    (request) => ctxId === undefined || request.ctxId === ctxId,
+                ),
         );
     }
 
@@ -133,7 +162,7 @@ export class ApprovalManager {
             code: errorCodes.coreApprovalNotFound,
             details: { approvalId, instance: this.#instanceName },
             message: `Approval ${approvalId} was not found for instance ${this.#instanceName}.`,
-            retryable: false
+            retryable: false,
         });
     }
 
@@ -145,10 +174,12 @@ export class ApprovalManager {
             policyPatch?: JsonValue;
             reason?: string;
             remember?: boolean;
-        }
+        },
     ): Promise<ApprovalRequest> {
         await this.#ensureReady();
-        return await this.#runExclusive(() => this.#decideApproval(approvalId, input));
+        return await this.#runExclusive(() =>
+            this.#decideApproval(approvalId, input),
+        );
     }
 
     async #decideApproval(
@@ -159,7 +190,7 @@ export class ApprovalManager {
             policyPatch?: JsonValue;
             reason?: string;
             remember?: boolean;
-        }
+        },
     ): Promise<ApprovalRequest> {
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
@@ -169,16 +200,20 @@ export class ApprovalManager {
                 code: errorCodes.coreApprovalNotFound,
                 details: { approvalId, instance: this.#instanceName },
                 message: `Approval ${approvalId} was not found for instance ${this.#instanceName}.`,
-                retryable: false
+                retryable: false,
             });
         }
 
         if (request.status !== "pending") {
             throw createError({
                 code: errorCodes.coreApprovalAlreadyDecided,
-                details: { approvalId, instance: this.#instanceName, status: request.status },
+                details: {
+                    approvalId,
+                    instance: this.#instanceName,
+                    status: request.status,
+                },
                 message: `Approval ${approvalId} was already decided.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -187,14 +222,18 @@ export class ApprovalManager {
             decidedAt: new Date().toISOString(),
             decidedBy: input.decidedBy,
             decision: input.decision,
-            ...(input.policyPatch === undefined ? {} : { policyPatch: input.policyPatch }),
+            ...(input.policyPatch === undefined
+                ? {}
+                : { policyPatch: input.policyPatch }),
             ...(input.reason === undefined ? {} : { reason: input.reason }),
-            ...(input.remember === undefined ? {} : { remember: input.remember })
+            ...(input.remember === undefined
+                ? {}
+                : { remember: input.remember }),
         };
         const resolvedRequest: ApprovalRequest = {
             ...request,
             decision,
-            status: input.decision === "approve" ? "approved" : "denied"
+            status: input.decision === "approve" ? "approved" : "denied",
         };
 
         await this.#store.append(resolvedRequest);
@@ -209,25 +248,34 @@ export class ApprovalManager {
                 input.decision === "approve"
                     ? {
                           decision,
-                          status: "approved"
+                          status: "approved",
                       }
                     : {
                           decision,
-                          error: createApprovalDeniedError(this.#instanceName, request.toolName),
-                          status: "denied"
-                      }
+                          error: createApprovalDeniedError(
+                              this.#instanceName,
+                              request.toolName,
+                          ),
+                          status: "denied",
+                      },
             );
         }
 
         return resolvedRequest;
     }
 
-    async cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+    async cancel(
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest> {
         await this.#ensureReady();
         return await this.#runExclusive(() => this.#cancel(approvalId, reason));
     }
 
-    async #cancel(approvalId: string, reason?: string): Promise<ApprovalRequest> {
+    async #cancel(
+        approvalId: string,
+        reason?: string,
+    ): Promise<ApprovalRequest> {
         const pending = this.#pending.get(approvalId);
         const request = pending?.request ?? (await this.#store.get(approvalId));
 
@@ -236,7 +284,7 @@ export class ApprovalManager {
                 code: errorCodes.coreApprovalNotFound,
                 details: { approvalId, instance: this.#instanceName },
                 message: `Approval ${approvalId} was not found for instance ${this.#instanceName}.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -246,7 +294,7 @@ export class ApprovalManager {
 
         const cancelledRequest: ApprovalRequest = {
             ...request,
-            status: "cancelled"
+            status: "cancelled",
         };
 
         if (pending !== undefined) {
@@ -256,12 +304,15 @@ export class ApprovalManager {
         try {
             await this.#store.append(cancelledRequest);
         } catch (error) {
-            if (pending !== undefined && this.#pending.get(approvalId) === pending) {
+            if (
+                pending !== undefined &&
+                this.#pending.get(approvalId) === pending
+            ) {
                 pending.request = request;
                 this.#armExpiration(
                     approvalId,
                     pending,
-                    Math.min(1_000, Math.max(1, this.#timeoutMs))
+                    Math.min(1_000, Math.max(1, this.#timeoutMs)),
                 );
             }
             throw error;
@@ -272,8 +323,12 @@ export class ApprovalManager {
                 this.#pending.delete(approvalId);
             }
             pending.resolve({
-                error: createApprovalCancelledError(this.#instanceName, request.toolName, reason),
-                status: "cancelled"
+                error: createApprovalCancelledError(
+                    this.#instanceName,
+                    request.toolName,
+                    reason,
+                ),
+                status: "cancelled",
             });
         }
 
@@ -307,14 +362,18 @@ export class ApprovalManager {
         this.#policy = policy ?? { mode: "disabled" };
     }
 
-    #armExpiration(approvalId: string, pending: PendingApproval, delayMs: number): void {
+    #armExpiration(
+        approvalId: string,
+        pending: PendingApproval,
+        delayMs: number,
+    ): void {
         const expire = () => {
             void this.#expire(approvalId).then(pending.resolve, () => {
                 if (this.#pending.get(approvalId) !== pending) return;
                 this.#armExpiration(
                     approvalId,
                     pending,
-                    Math.min(1_000, Math.max(1, this.#timeoutMs))
+                    Math.min(1_000, Math.max(1, this.#timeoutMs)),
                 );
             });
         };
@@ -330,21 +389,30 @@ export class ApprovalManager {
         if (pending === undefined) {
             const request = await this.#store.get(approvalId);
             if (request !== undefined && request.status !== "pending") {
-                return resolutionFromSettledRequest(this.#instanceName, request);
+                return resolutionFromSettledRequest(
+                    this.#instanceName,
+                    request,
+                );
             }
             return {
-                error: createApprovalExpiredError(this.#instanceName, request?.toolName ?? "unknown"),
-                status: "expired"
+                error: createApprovalExpiredError(
+                    this.#instanceName,
+                    request?.toolName ?? "unknown",
+                ),
+                status: "expired",
             };
         }
 
         if (pending.request.status !== "pending") {
-            return resolutionFromSettledRequest(this.#instanceName, pending.request);
+            return resolutionFromSettledRequest(
+                this.#instanceName,
+                pending.request,
+            );
         }
 
         const expiredRequest: ApprovalRequest = {
             ...pending.request,
-            status: "expired"
+            status: "expired",
         };
         await this.#store.append(expiredRequest);
         pending.request = expiredRequest;
@@ -353,8 +421,11 @@ export class ApprovalManager {
         }
 
         return {
-            error: createApprovalExpiredError(this.#instanceName, expiredRequest.toolName),
-            status: "expired"
+            error: createApprovalExpiredError(
+                this.#instanceName,
+                expiredRequest.toolName,
+            ),
+            status: "expired",
         };
     }
 
@@ -373,8 +444,10 @@ export class ApprovalManager {
     }
 }
 
-
-function resolutionFromSettledRequest(instanceName: InstanceName, request: ApprovalRequest): ApprovalResolution {
+function resolutionFromSettledRequest(
+    instanceName: InstanceName,
+    request: ApprovalRequest,
+): ApprovalResolution {
     if (request.status === "approved" && request.decision !== undefined) {
         return { decision: request.decision, status: "approved" };
     }
@@ -382,28 +455,37 @@ function resolutionFromSettledRequest(instanceName: InstanceName, request: Appro
         return {
             decision: request.decision,
             error: createApprovalDeniedError(instanceName, request.toolName),
-            status: "denied"
+            status: "denied",
         };
     }
     if (request.status === "cancelled") {
         return {
             error: createApprovalCancelledError(instanceName, request.toolName),
-            status: "cancelled"
+            status: "cancelled",
         };
     }
     return {
         error: createApprovalExpiredError(instanceName, request.toolName),
-        status: "expired"
+        status: "expired",
     };
 }
 
-function resolvePolicyDecision(policy: ApprovalPolicy, source: ToolCallContext["source"], toolName: string): ApprovalPolicyDecision {
-    if (policy.mode !== "disabled" && policy.mode !== "allow" && policy.mode !== "ask" && policy.mode !== "deny") {
+function resolvePolicyDecision(
+    policy: ApprovalPolicy,
+    source: ToolCallContext["source"],
+    toolName: string,
+): ApprovalPolicyDecision {
+    if (
+        policy.mode !== "disabled" &&
+        policy.mode !== "allow" &&
+        policy.mode !== "ask" &&
+        policy.mode !== "deny"
+    ) {
         throw createError({
             code: errorCodes.coreApprovalPolicyInvalid,
             details: { mode: policy.mode },
             message: `Approval policy mode ${String(policy.mode)} is invalid.`,
-            retryable: false
+            retryable: false,
         });
     }
 
@@ -413,10 +495,12 @@ function resolvePolicyDecision(policy: ApprovalPolicy, source: ToolCallContext["
                 code: errorCodes.coreApprovalPolicyInvalid,
                 details: {
                     match: rule.match,
-                    ...(rule.toolName === undefined ? {} : { toolName: rule.toolName })
+                    ...(rule.toolName === undefined
+                        ? {}
+                        : { toolName: rule.toolName }),
                 },
                 message: `Approval policy match ${String(rule.match)} is invalid.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -442,36 +526,46 @@ function resolvePolicyDecision(policy: ApprovalPolicy, source: ToolCallContext["
     }
 }
 
-function createApprovalDeniedError(instanceName: InstanceName, toolName: string): ApprovalError {
+function createApprovalDeniedError(
+    instanceName: InstanceName,
+    toolName: string,
+): ApprovalError {
     return new ApprovalError(
         errorCodes.coreApprovalDenied,
         `Approval denied for ${toolName} on instance ${instanceName}.`,
         {
             instance: instanceName,
-            toolName
-        }
+            toolName,
+        },
     );
 }
 
-function createApprovalExpiredError(instanceName: InstanceName, toolName: string): ApprovalError {
+function createApprovalExpiredError(
+    instanceName: InstanceName,
+    toolName: string,
+): ApprovalError {
     return new ApprovalError(
         errorCodes.coreApprovalExpired,
         `Approval expired for ${toolName} on instance ${instanceName}.`,
         {
             instance: instanceName,
-            toolName
-        }
+            toolName,
+        },
     );
 }
 
-function createApprovalCancelledError(instanceName: InstanceName, toolName: string, reason?: string): ApprovalError {
+function createApprovalCancelledError(
+    instanceName: InstanceName,
+    toolName: string,
+    reason?: string,
+): ApprovalError {
     return new ApprovalError(
         errorCodes.coreToolCallCancelled,
         `Approval wait cancelled for ${toolName} on instance ${instanceName}.`,
         {
             instance: instanceName,
             reason: reason ?? "client cancelled",
-            toolName
-        }
+            toolName,
+        },
     );
 }

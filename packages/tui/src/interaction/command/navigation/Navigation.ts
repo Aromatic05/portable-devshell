@@ -28,7 +28,11 @@ export interface TuiCommandDispatcherNavigationOptions {
     dispatch?(intent: TuiUiIntent): Promise<boolean>;
     focus: TuiCommandDispatcherFocus;
     focusManager: TuiFocusManager;
-    onContextMessage?(instance: string, ctxId: string, text: string): Promise<void>;
+    onContextMessage?(
+        instance: string,
+        ctxId: string,
+        text: string,
+    ): Promise<void>;
     onLogsReload(): Promise<void>;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
     onRedraw(): void;
@@ -61,13 +65,13 @@ export class TuiCommandDispatcherNavigation {
             dispatch: options.dispatch,
             focus: options.focus,
             focusManager: options.focusManager,
-            store: options.store
+            store: options.store,
         });
         this.#viewport = new TuiCommandDispatcherViewport({
             focus: options.focus,
             focusManager: options.focusManager,
             projection: options.projection,
-            store: options.store
+            store: options.store,
         });
     }
 
@@ -82,11 +86,15 @@ export class TuiCommandDispatcherNavigation {
             case "page.reload":
                 return await this.#reloadPage();
             case "ui.help":
-                return (await this.#overlay.dispatch({
-                    body: buildContextualHelpLines(this.#store.getState()).join("\n"),
-                    title: `${this.#store.getState().ui.selectedPage} · help`,
-                    type: "textDetail.open",
-                })) ?? false;
+                return (
+                    (await this.#overlay.dispatch({
+                        body: buildContextualHelpLines(
+                            this.#store.getState(),
+                        ).join("\n"),
+                        title: `${this.#store.getState().ui.selectedPage} · help`,
+                        type: "textDetail.open",
+                    })) ?? false
+                );
             case "ui.redraw":
                 this.#store.bumpRedrawNonce();
                 this.#onRedraw();
@@ -104,7 +112,10 @@ export class TuiCommandDispatcherNavigation {
                 this.#store.setScreenStatus(intent.page, intent.status);
                 return true;
             case "screen.clearStatus":
-                this.#store.setScreenStatus(this.#store.getState().ui.selectedPage, undefined);
+                this.#store.setScreenStatus(
+                    this.#store.getState().ui.selectedPage,
+                    undefined,
+                );
                 return true;
             case "contextConversation.openCurrent":
                 return this.#openContextConversation();
@@ -129,9 +140,9 @@ export class TuiCommandDispatcherNavigation {
     async activateSidebarSelection(): Promise<boolean> {
         const cursor = this.#store.getState().interaction.sidebarCursor;
         if (cursor?.kind === "context") {
-            const entry = selectSidebarModel(this.#store.getState()).context.items.find(
-                (candidate) => candidate.id === cursor.id,
-            );
+            const entry = selectSidebarModel(
+                this.#store.getState(),
+            ).context.items.find((candidate) => candidate.id === cursor.id);
             if (entry === undefined) return false;
             switch (entry.target.kind) {
                 case "page":
@@ -186,7 +197,10 @@ export class TuiCommandDispatcherNavigation {
     }
 
     cancelPassiveScope(): boolean {
-        if (topTuiOverlay(this.#store.getState().interaction.overlays) !== undefined) {
+        if (
+            topTuiOverlay(this.#store.getState().interaction.overlays) !==
+            undefined
+        ) {
             return this.#overlay.cancelPassiveScope();
         }
         if (this.#store.popRoute()) {
@@ -194,7 +208,8 @@ export class TuiCommandDispatcherNavigation {
             return true;
         }
         if (
-            this.#store.getState().interaction.focusScope === "sidebarContext" &&
+            this.#store.getState().interaction.focusScope ===
+                "sidebarContext" &&
             this.#store.getState().ui.sidebarLevel === "section"
         ) {
             this.#store.setSidebarLevel("root");
@@ -210,9 +225,14 @@ export class TuiCommandDispatcherNavigation {
     openFocusedRoute(): boolean {
         const state = this.#store.getState();
         if (state.ui.selectedPage === "overview") {
-            const instance = selectTuiOverviewInstanceName(state.ui.mainFocusId);
+            const instance = selectTuiOverviewInstanceName(
+                state.ui.mainFocusId,
+            );
             if (instance === undefined) {
-                this.#store.setScreenStatus("overview", "Select an instance row first.");
+                this.#store.setScreenStatus(
+                    "overview",
+                    "Select an instance row first.",
+                );
                 return false;
             }
             this.#store.setSelectedInstance(instance);
@@ -221,9 +241,14 @@ export class TuiCommandDispatcherNavigation {
             this.#focus.syncMainFocus();
             return true;
         }
-        const box = this.#projection.selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
+        const box = this.#projection
+            .selectMainScreenModel(state)
+            .boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
         if (box?.primaryAction?.kind !== "navigate" || box.disabled === true) {
-            this.#store.setScreenStatus(state.ui.selectedPage, "This box has no detail page.");
+            this.#store.setScreenStatus(
+                state.ui.selectedPage,
+                "This box has no detail page.",
+            );
             return false;
         }
         this.#store.pushRoute(box.primaryAction.route);
@@ -239,10 +264,13 @@ export class TuiCommandDispatcherNavigation {
         this.#store.setSelectedPage(page);
         this.#store.setFocusScope("sidebarContext");
         this.#store.setSidebarFocus("context");
-        const context = selectSidebarModel(this.#store.getState()).context.items;
+        const context = selectSidebarModel(this.#store.getState()).context
+            .items;
         const cursor = context.find((entry) => entry.selected) ?? context[0];
         this.#store.setSidebarCursor(
-            cursor === undefined ? undefined : { id: cursor.id, kind: "context" },
+            cursor === undefined
+                ? undefined
+                : { id: cursor.id, kind: "context" },
         );
         this.#focus.syncMainFocus();
         return true;
@@ -253,7 +281,7 @@ export class TuiCommandDispatcherNavigation {
         if (entry === undefined) {
             this.#store.setScreenStatus(
                 this.#store.getState().ui.selectedPage,
-                `Instance ${index + 1} is unavailable.`
+                `Instance ${index + 1} is unavailable.`,
             );
             return false;
         }
@@ -263,13 +291,11 @@ export class TuiCommandDispatcherNavigation {
         return true;
     }
 
-    #scrollSidebar(
-        section: "context" | "instances",
-        delta: number,
-    ): boolean {
+    #scrollSidebar(section: "context" | "instances", delta: number): boolean {
         const state = this.#store.getState();
         const sidebar = selectSidebarModel(state);
-        const items = section === "context" ? sidebar.context.items : sidebar.instances;
+        const items =
+            section === "context" ? sidebar.context.items : sidebar.instances;
         if (items.length === 0) return false;
 
         const cursor = state.interaction.sidebarCursor;
@@ -279,11 +305,12 @@ export class TuiCommandDispatcherNavigation {
                 : cursor?.kind === "instance" && cursor.id === item.id,
         );
         const selectedIndex = items.findIndex((item) => item.selected);
-        const currentIndex = cursorIndex >= 0
-            ? cursorIndex
-            : selectedIndex >= 0
-              ? selectedIndex
-              : 0;
+        const currentIndex =
+            cursorIndex >= 0
+                ? cursorIndex
+                : selectedIndex >= 0
+                  ? selectedIndex
+                  : 0;
         const nextIndex = Math.min(
             Math.max(0, currentIndex + Math.trunc(delta)),
             items.length - 1,
@@ -328,7 +355,11 @@ export class TuiCommandDispatcherNavigation {
         const target = this.#contextConversationTarget();
         if (target === undefined) return false;
         const state = this.#store.getState();
-        const draft = readContextConversationDraft(state, target.instance, target.ctxId);
+        const draft = readContextConversationDraft(
+            state,
+            target.instance,
+            target.ctxId,
+        );
         this.#store.setEditor({
             cursor: draft.length,
             editing: true,
@@ -342,9 +373,21 @@ export class TuiCommandDispatcherNavigation {
     #editContextConversationDraft(input: string, backspace: boolean): boolean {
         const target = this.#contextConversationTarget();
         const editor = this.#store.getState().interaction.editor;
-        if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
-        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
-        const cursor = normalizeTuiGraphemeCursor(draft, editor.cursor ?? draft.length);
+        if (
+            target === undefined ||
+            editor?.kind !== "comment" ||
+            editor.editing !== true
+        )
+            return false;
+        const draft = readContextConversationDraft(
+            this.#store.getState(),
+            target.instance,
+            target.ctxId,
+        );
+        const cursor = normalizeTuiGraphemeCursor(
+            draft,
+            editor.cursor ?? draft.length,
+        );
         const previous = previousTuiGraphemeCursor(draft, cursor);
         const next = backspace
             ? `${draft.slice(0, previous)}${draft.slice(cursor)}`
@@ -365,14 +408,27 @@ export class TuiCommandDispatcherNavigation {
     #moveContextConversationCursor(direction: "left" | "right"): boolean {
         const target = this.#contextConversationTarget();
         const editor = this.#store.getState().interaction.editor;
-        if (target === undefined || editor?.kind !== "comment" || editor.editing !== true) return false;
-        const draft = readContextConversationDraft(this.#store.getState(), target.instance, target.ctxId);
-        const cursor = normalizeTuiGraphemeCursor(draft, editor.cursor ?? draft.length);
+        if (
+            target === undefined ||
+            editor?.kind !== "comment" ||
+            editor.editing !== true
+        )
+            return false;
+        const draft = readContextConversationDraft(
+            this.#store.getState(),
+            target.instance,
+            target.ctxId,
+        );
+        const cursor = normalizeTuiGraphemeCursor(
+            draft,
+            editor.cursor ?? draft.length,
+        );
         this.#store.setEditor({
             ...editor,
-            cursor: direction === "left"
-                ? previousTuiGraphemeCursor(draft, cursor)
-                : nextTuiGraphemeCursor(draft, cursor),
+            cursor:
+                direction === "left"
+                    ? previousTuiGraphemeCursor(draft, cursor)
+                    : nextTuiGraphemeCursor(draft, cursor),
         });
         return true;
     }
@@ -387,11 +443,17 @@ export class TuiCommandDispatcherNavigation {
             target.ctxId,
         ).trim();
         if (text.length === 0) {
-            this.#store.setScreenStatus(target.page, "Comment cannot be empty.");
+            this.#store.setScreenStatus(
+                target.page,
+                "Comment cannot be empty.",
+            );
             return false;
         }
         if (this.#onContextMessage === undefined) {
-            this.#store.setScreenStatus(target.page, "Context Comment service is unavailable.");
+            this.#store.setScreenStatus(
+                target.page,
+                "Context Comment service is unavailable.",
+            );
             return false;
         }
         try {
@@ -411,16 +473,21 @@ export class TuiCommandDispatcherNavigation {
             this.#store.setFocusScope("contextConversation");
             return true;
         } catch (error) {
-            this.#store.setScreenStatus(target.page, `Comment failed: ${readErrorMessage(error)}`);
+            this.#store.setScreenStatus(
+                target.page,
+                `Comment failed: ${readErrorMessage(error)}`,
+            );
             return false;
         }
     }
 
-    #contextConversationTarget(): {
-        ctxId: string;
-        instance: string;
-        page: "audit" | "messages";
-    } | undefined {
+    #contextConversationTarget():
+        | {
+              ctxId: string;
+              instance: string;
+              page: "audit" | "messages";
+          }
+        | undefined {
         const state = this.#store.getState();
         const route = currentTuiRoute(state);
         if (state.ui.selectedInstance === undefined) return undefined;
@@ -447,18 +514,27 @@ export class TuiCommandDispatcherNavigation {
     async #reloadPage(): Promise<boolean> {
         const state = this.#store.getState();
         try {
-            if (state.ui.selectedPage === "logs" && state.ui.selectedInstance !== undefined) {
+            if (
+                state.ui.selectedPage === "logs" &&
+                state.ui.selectedInstance !== undefined
+            ) {
                 await this.#onLogsReload();
             } else {
-                await this.#onPageReload(state.ui.selectedPage, state.ui.selectedInstance);
+                await this.#onPageReload(
+                    state.ui.selectedPage,
+                    state.ui.selectedInstance,
+                );
             }
-            this.#store.setScreenStatus(state.ui.selectedPage, "Page reloaded.");
+            this.#store.setScreenStatus(
+                state.ui.selectedPage,
+                "Page reloaded.",
+            );
             this.#focus.syncMainFocus();
             return true;
         } catch (error) {
             this.#store.setScreenStatus(
                 state.ui.selectedPage,
-                `Reload failed: ${readErrorMessage(error)}`
+                `Reload failed: ${readErrorMessage(error)}`,
             );
             return false;
         }

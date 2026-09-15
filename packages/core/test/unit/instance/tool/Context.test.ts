@@ -6,18 +6,14 @@ import { createWorkerInstanceToolCallScope } from "../../../../src/worker/instan
 test("tool-call live event metadata excludes full input and bounds its summary", () => {
     const input = {
         command: "x".repeat(20_000),
-        cwd: "/workspace"
+        cwd: "/workspace",
     };
-    const scope = createWorkerInstanceToolCallScope(
-        "bash_run",
-        input,
-        {
-            ctxId: "ctx-large",
-            requestId: "request-large",
-            source: "mcp",
-            workspace: "/projects/alpha",
-        }
-    );
+    const scope = createWorkerInstanceToolCallScope("bash_run", input, {
+        ctxId: "ctx-large",
+        requestId: "request-large",
+        source: "mcp",
+        workspace: "/projects/alpha",
+    });
 
     assert.equal("input" in scope.eventContext, false);
     assert.equal(scope.input, input);

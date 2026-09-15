@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import {
+    spawn as nodeSpawn,
+    type ChildProcess,
+    type SpawnOptions,
+} from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFile, readlink, rm, writeFile } from "node:fs/promises";
@@ -16,15 +20,19 @@ import {
     WorkerTransportDriverSsh,
     WorkerBinary,
     getWorkerTargetByKey,
-    probeLocalWorkerTarget
+    probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
-import { realWorkerTestOptions, resolveTestWorkerBinary } from "../../../../../test/TestPlatformSupport.ts";
+import {
+    realWorkerTestOptions,
+    resolveTestWorkerBinary,
+} from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
-const shellEscape = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+const shellEscape = (value: string): string =>
+    `'${value.replaceAll("'", `'\\''`)}'`;
 
 function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };
@@ -38,7 +46,7 @@ test("local transport builds start command and rpc bridge", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const startResult = await transport.runWorkerCommand("start", {
@@ -47,12 +55,22 @@ test("local transport builds start command and rpc bridge", async () => {
 
     assert.equal(startResult.exitCode, 0);
     assert.equal(recorder.calls[0]?.command, "/worker/bin");
-    assert.deepEqual(recorder.calls[0]?.args, ["start", "--instance", "task-3-local"]);
+    assert.deepEqual(recorder.calls[0]?.args, [
+        "start",
+        "--instance",
+        "task-3-local",
+    ]);
     assert.equal(recorder.calls[0]?.options.cwd, undefined);
     assert.deepEqual(recorder.calls[0]?.options.env, sanitizedWorkerEnv());
-    assert.deepEqual(recorder.calls[0]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[0]?.options.stdio, [
+        "ignore",
+        "pipe",
+        "pipe",
+    ]);
 
-    const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-local" });
+    const rpcProcess = await transport.spawnWorkerRpc({
+        instanceName: "task-3-local",
+    });
 
     assert.equal(rpcProcess.stdin, recorder.children[1].stdin);
     assert.equal(rpcProcess.stdout, recorder.children[1].stdout);
@@ -60,17 +78,25 @@ test("local transport builds start command and rpc bridge", async () => {
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
     assert.equal(recorder.calls[1]?.command, "/worker/bin");
-    assert.deepEqual(recorder.calls[1]?.args, ["rpc", "--instance", "task-3-local"]);
+    assert.deepEqual(recorder.calls[1]?.args, [
+        "rpc",
+        "--instance",
+        "task-3-local",
+    ]);
     assert.equal(recorder.calls[1]?.options.cwd, undefined);
     assert.deepEqual(recorder.calls[1]?.options.env, sanitizedWorkerEnv());
-    assert.deepEqual(recorder.calls[1]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[1]?.options.stdio, [
+        "pipe",
+        "pipe",
+        "pipe",
+    ]);
 });
 
 test("local transport runs installWorker probe", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
@@ -78,7 +104,11 @@ test("local transport runs installWorker probe", async () => {
     assert.deepEqual(recorder.calls[0], {
         command: "/worker/bin",
         args: ["--version"],
-        options: { cwd: undefined, env: sanitizedWorkerEnv(), stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: sanitizedWorkerEnv(),
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
@@ -94,23 +124,33 @@ test("local transport honors command PORTABLE_DEVSHELL_HOME for worker lookup an
     const target = probeLocalWorkerTarget();
     const workerPathEnvironmentName = `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
     const recorder = createSpawnRecorder();
-    const transport = new WorkerTransportDriverLocal({ spawnFunction: recorder.spawn });
+    const transport = new WorkerTransportDriverLocal({
+        spawnFunction: recorder.spawn,
+    });
     const result = await transport.runWorkerCommand("status", {
         env: {
             PORTABLE_DEVSHELL_HOME: devshellHome,
-            [workerPathEnvironmentName]: worker.path
+            [workerPathEnvironmentName]: worker.path,
         },
-        instanceName: "custom-home-local"
+        instanceName: "custom-home-local",
     });
 
     assert.equal(result.exitCode, 0);
-    const workerSha = createHash("sha256").update(worker.contents).digest("hex");
-    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`);
+    const workerSha = createHash("sha256")
+        .update(worker.contents)
+        .digest("hex");
+    const targetAlias = join(
+        devshellHome,
+        "bin",
+        `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`,
+    );
     const executedWorker = recorder.calls[0]?.command;
     assert.equal(typeof executedWorker, "string");
     assert.equal(
-        createHash("sha256").update(await readFile(executedWorker!)).digest("hex"),
-        workerSha
+        createHash("sha256")
+            .update(await readFile(executedWorker!))
+            .digest("hex"),
+        workerSha,
     );
     assert.equal(await installedWorkerSha(targetAlias), workerSha);
 });
@@ -128,53 +168,79 @@ test("local start upgrades a changed worker while status keeps the active worker
 
     const target = probeLocalWorkerTarget();
     const workerPathEnvironmentName = `PORTABLE_DEVSHELL_WORKER_${target.key.replaceAll("-", "_").toUpperCase()}_PATH`;
-    const oldSha = createHash("sha256").update(oldWorker.contents).digest("hex");
-    const newSha = createHash("sha256").update(newWorker.contents).digest("hex");
+    const oldSha = createHash("sha256")
+        .update(oldWorker.contents)
+        .digest("hex");
+    const newSha = createHash("sha256")
+        .update(newWorker.contents)
+        .digest("hex");
     let daemonSha = oldSha;
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] !== "status") {
             return false;
         }
         closeRecordedChild(child, {
-            stdout: JSON.stringify({ state: "running", workerSha256: daemonSha, workspace: "/tmp/workspace" })
+            stdout: JSON.stringify({
+                state: "running",
+                workerSha256: daemonSha,
+                workspace: "/tmp/workspace",
+            }),
         });
         return true;
     });
-    const transport = new WorkerTransportDriverLocal({ spawnFunction: recorder.spawn });
+    const transport = new WorkerTransportDriverLocal({
+        spawnFunction: recorder.spawn,
+    });
     const baseOptions = {
         instanceName: "local-upgrade",
     };
     const oldEnv = {
         PORTABLE_DEVSHELL_HOME: devshellHome,
-        [workerPathEnvironmentName]: oldWorker.path
+        [workerPathEnvironmentName]: oldWorker.path,
     };
     const newEnv = {
         PORTABLE_DEVSHELL_HOME: devshellHome,
-        [workerPathEnvironmentName]: newWorker.path
+        [workerPathEnvironmentName]: newWorker.path,
     };
 
     await transport.runWorkerCommand("status", { ...baseOptions, env: oldEnv });
-    const targetAlias = join(devshellHome, "bin", `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`);
+    const targetAlias = join(
+        devshellHome,
+        "bin",
+        `devshell-worker-${target.key}${target.os === "windows" ? ".exe" : ""}`,
+    );
     assert.equal(await installedWorkerSha(targetAlias), oldSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("status", { ...baseOptions, env: newEnv });
-    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status"]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args[0]),
+        ["status"],
+    );
     assert.equal(await installedWorkerSha(targetAlias), oldSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
-    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "stop", "start"]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args[0]),
+        ["status", "stop", "start"],
+    );
     assert.equal(await installedWorkerSha(targetAlias), newSha);
 
     recorder.calls.length = 0;
     await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
-    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "stop", "start"]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args[0]),
+        ["status", "stop", "start"],
+    );
 
     daemonSha = newSha;
     recorder.calls.length = 0;
     await transport.runWorkerCommand("start", { ...baseOptions, env: newEnv });
-    assert.deepEqual(recorder.calls.map((call) => call.args[0]), ["status", "start"]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args[0]),
+        ["status", "start"],
+    );
 });
 
 test("provider installWorker failures keep diagnostic details across local ssh docker and podman", async () => {
@@ -183,48 +249,58 @@ test("provider installWorker failures keep diagnostic details across local ssh d
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverLocal({
                     workerBinary: new WorkerBinary("/worker/bin"),
-                    spawnFunction
+                    spawnFunction,
                 }),
             expectedCommandPart: "/worker/bin",
-            provider: "local"
+            provider: "local",
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverSsh({
                     command: "ssh-bin devbox",
-                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-                    spawnFunction
+                    workerBinary: new WorkerBinary(
+                        "/usr/local/bin/devshell-worker",
+                    ),
+                    spawnFunction,
                 }),
             expectedCommandPart: "ssh-bin",
-            provider: "ssh"
+            provider: "ssh",
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverDocker({
                     container: createManagedContainerConfig(),
                     dockerBinary: "docker-bin",
-                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-                    spawnFunction
+                    workerBinary: new WorkerBinary(
+                        "/usr/local/bin/devshell-worker",
+                    ),
+                    spawnFunction,
                 }),
             expectedCommandPart: "/usr/local/bin/devshell-worker",
-            provider: "docker"
+            provider: "docker",
         },
         {
             build: (spawnFunction: SpawnFunctionLike) =>
                 new WorkerTransportDriverPodman({
                     container: createManagedContainerConfig(),
                     podmanBinary: "podman-bin",
-                    workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-                    spawnFunction
+                    workerBinary: new WorkerBinary(
+                        "/usr/local/bin/devshell-worker",
+                    ),
+                    spawnFunction,
                 }),
             expectedCommandPart: "/usr/local/bin/devshell-worker",
-            provider: "podman"
-        }
+            provider: "podman",
+        },
     ] as const;
 
     for (const testCase of cases) {
         const recorder = createSpawnRecorder((_call, child, callIndex) => {
-            if ((testCase.provider === "docker" || testCase.provider === "podman") && callIndex === 0) {
+            if (
+                (testCase.provider === "docker" ||
+                    testCase.provider === "podman") &&
+                callIndex === 0
+            ) {
                 closeRecordedChild(child, { stdout: "running\n" });
                 return true;
             }
@@ -232,7 +308,7 @@ test("provider installWorker failures keep diagnostic details across local ssh d
             closeRecordedChild(child, {
                 code: 23,
                 stderr: "fatal stderr\n",
-                stdout: "fatal stdout\n"
+                stdout: "fatal stdout\n",
             });
             return true;
         });
@@ -240,16 +316,29 @@ test("provider installWorker failures keep diagnostic details across local ssh d
 
         await assert.rejects(transport.installWorker(), (error: unknown) => {
             assert.ok(typeof error === "object" && error !== null);
-            assert.equal((error as { code?: string }).code, "core.workerProvisionFailed");
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.workerProvisionFailed",
+            );
 
-            const details = (error as { details?: Record<string, unknown> }).details;
+            const details = (error as { details?: Record<string, unknown> })
+                .details;
             assert.equal(details?.provider, testCase.provider);
             assert.equal(details?.operation, "installWorker");
             assert.equal(details?.exitCode, 23);
             assert.equal(details?.stderrTail, "fatal stderr\n");
             assert.equal(details?.stdoutTail, "fatal stdout\n");
             assert.equal(details?.causeMessage, "fatal stderr\n");
-            assert.match(String(details?.commandDisplay ?? ""), new RegExp(testCase.expectedCommandPart.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+            assert.match(
+                String(details?.commandDisplay ?? ""),
+                new RegExp(
+                    testCase.expectedCommandPart.replace(
+                        /[.*+?^${}()|[\]\\]/gu,
+                        "\\$&",
+                    ),
+                    "u",
+                ),
+            );
             return true;
         });
     }
@@ -259,7 +348,7 @@ test("local transport preserves base process env when instance env is provided",
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
     const previousPath = process.env.PATH;
     const previousHome = process.env.HOME;
@@ -270,7 +359,7 @@ test("local transport preserves base process env when instance env is provided",
     process.env.XDG_RUNTIME_DIR = "/base/runtime";
     const expectedEnv = {
         ...sanitizedWorkerEnv(),
-        FOO: "bar"
+        FOO: "bar",
     };
 
     try {
@@ -290,8 +379,8 @@ test("local transport preserves base process env when instance env is provided",
         options: {
             cwd: undefined,
             env: expectedEnv,
-            stdio: ["ignore", "pipe", "pipe"]
-        }
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
@@ -300,7 +389,7 @@ test("ssh transport starts the worker without a workspace cwd", async () => {
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const result = await transport.runWorkerCommand("start", {
@@ -319,9 +408,15 @@ test("ssh transport starts the worker without a workspace cwd", async () => {
             "--",
             "sh",
             "-lc",
-            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
+            shellEscape(
+                "'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'",
+            ),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(result.details, {
         command: [
@@ -334,15 +429,19 @@ test("ssh transport starts the worker without a workspace cwd", async () => {
             "--",
             "sh",
             "-lc",
-            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'")
+            shellEscape(
+                "'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'",
+            ),
         ],
         commandDisplay:
             `ssh-bin -oBatchMode=yes -oNumberOfPasswordPrompts=0 -oKbdInteractiveAuthentication=no -oPasswordAuthentication=no devbox -- sh -lc ` +
-            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'"),
+            shellEscape(
+                "'/usr/local/bin/devshell-worker' 'start' '--instance' 'task-3-ssh'",
+            ),
         exitCode: 0,
         instance: "task-3-ssh",
         operation: "start",
-        provider: "ssh"
+        provider: "ssh",
     });
 });
 
@@ -357,7 +456,7 @@ test("ssh transport uploads instance environment without replacing the local ssh
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const result = await transport.runWorkerCommand("start", {
@@ -366,7 +465,7 @@ test("ssh transport uploads instance environment without replacing the local ssh
             DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
             DEVSHELL_WORKER_SECURITY_MODE: "workspace",
             HOME: "/remote/home",
-            PATH: "/remote/bin"
+            PATH: "/remote/bin",
         },
         instanceName: "task-3-ssh",
     });
@@ -380,8 +479,13 @@ test("ssh transport uploads instance environment without replacing the local ssh
     assert.equal(upload.command, "ssh-bin");
     assert.equal(upload.options.env, undefined);
     assert.deepEqual(upload.options.stdio, ["pipe", "pipe", "pipe"]);
-    assert.match(upload.args.at(-1) ?? "", /umask 077; cat > .*portable-devshell-env-/u);
-    const uploaded = Buffer.concat(recorder.children[0]?.stdinChunks ?? []).toString("utf8");
+    assert.match(
+        upload.args.at(-1) ?? "",
+        /umask 077; cat > .*portable-devshell-env-/u,
+    );
+    const uploaded = Buffer.concat(
+        recorder.children[0]?.stdinChunks ?? [],
+    ).toString("utf8");
     assert.match(uploaded, /API_TOKEN='remote-secret'/u);
     assert.match(uploaded, /DEVSHELL_WORKER_SECURITY_MODE='workspace'/u);
     assert.match(uploaded, /HOME='\/remote\/home'/u);
@@ -392,8 +496,14 @@ test("ssh transport uploads instance environment without replacing the local ssh
     assert.deepEqual(start.options.stdio, ["ignore", "pipe", "pipe"]);
     assert.match(start.args.at(-1) ?? "", /env_file=.*portable-devshell-env-/u);
     assert.match(start.args.at(-1) ?? "", /exec .*devshell-worker/u);
-    assert.doesNotMatch(JSON.stringify(start.args), /remote-secret|\/remote\/home|\/remote\/bin/u);
-    assert.doesNotMatch(JSON.stringify(result.details), /remote-secret|\/remote\/home|\/remote\/bin/u);
+    assert.doesNotMatch(
+        JSON.stringify(start.args),
+        /remote-secret|\/remote\/home|\/remote\/bin/u,
+    );
+    assert.doesNotMatch(
+        JSON.stringify(result.details),
+        /remote-secret|\/remote\/home|\/remote\/bin/u,
+    );
 });
 
 test("ssh RPC exit cleans an uploaded environment file after an early local termination", async () => {
@@ -410,12 +520,12 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const rpc = await transport.spawnWorkerRpc({
         env: { API_TOKEN: "remote-secret" },
-        instanceName: "task-3-ssh"
+        instanceName: "task-3-ssh",
     });
     assert.equal(recorder.calls.length, 2);
     assert.equal(rpc.kill("SIGTERM"), true);
@@ -433,7 +543,7 @@ test("ssh transport rejects environment keys that cannot be represented safely",
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await assert.rejects(
@@ -442,10 +552,13 @@ test("ssh transport rejects environment keys that cannot be represented safely",
             instanceName: "task-3-ssh",
         }),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "core.providerFailed");
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.providerFailed",
+            );
             assert.match(String((error as Error).message), /INVALID-KEY/u);
             return true;
-        }
+        },
     );
     assert.equal(recorder.calls.length, 0);
 });
@@ -455,7 +568,7 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
@@ -471,20 +584,27 @@ test("ssh transport runs installWorker probe via remote shell", async () => {
             "--",
             "sh",
             "-lc",
-            shellEscape("'/usr/local/bin/devshell-worker' '--version'")
+            shellEscape("'/usr/local/bin/devshell-worker' '--version'"),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
-
 
 test("ssh transport probes remote target before installing default worker", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    const previousWorkerPath =
+        process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
+        restoreEnv(
+            "PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH",
+            previousWorkerPath,
+        );
     });
 
     const recorder = createSpawnRecorder((call, child, callIndex) => {
@@ -519,7 +639,7 @@ test("ssh transport probes remote target before installing default worker", asyn
     });
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
@@ -535,9 +655,13 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            shellEscape("uname -s && uname -m")
+            shellEscape("uname -s && uname -m"),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "ssh-bin",
@@ -550,17 +674,36 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            shellEscape('printf %s "${HOME:?HOME is required to install the worker}"')
+            shellEscape(
+                'printf %s "${HOME:?HOME is required to install the worker}"',
+            ),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.equal(recorder.calls[2]?.command, "ssh-bin");
-    assert.equal(recorder.calls[2]?.args[8]?.includes("/home/dev/.devshell/workers/darwin-arm64/"), true);
+    assert.equal(
+        recorder.calls[2]?.args[8]?.includes(
+            "/home/dev/.devshell/workers/darwin-arm64/",
+        ),
+        true,
+    );
     assert.equal(recorder.calls[2]?.args[8]?.includes("missing"), true);
-    assert.deepEqual(recorder.calls[2]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[2]?.options.stdio, [
+        "ignore",
+        "pipe",
+        "pipe",
+    ]);
     assert.equal(recorder.calls[3]?.command, "ssh-bin");
     assert.equal(recorder.calls[3]?.args[8]?.includes("tmp_binary_path"), true);
-    assert.deepEqual(recorder.calls[3]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[3]?.options.stdio, [
+        "pipe",
+        "pipe",
+        "pipe",
+    ]);
     assert.deepEqual(recorder.calls[4], {
         command: "ssh-bin",
         args: [
@@ -572,20 +715,33 @@ test("ssh transport probes remote target before installing default worker", asyn
             "--",
             "sh",
             "-lc",
-            shellEscape("'/home/dev/.devshell/bin/devshell-worker' '--version'")
+            shellEscape(
+                "'/home/dev/.devshell/bin/devshell-worker' '--version'",
+            ),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
-    assert.deepEqual(Buffer.concat(recorder.children[3]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(
+        Buffer.concat(recorder.children[3]?.stdinChunks ?? []),
+        worker.contents,
+    );
 });
 
 test("ssh transport reuses a matching remote worker without uploading the binary", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    const previousWorkerPath =
+        process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
+        restoreEnv(
+            "PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH",
+            previousWorkerPath,
+        );
     });
 
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
@@ -607,16 +763,28 @@ test("ssh transport reuses a matching remote worker without uploading the binary
     });
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
 
     assert.equal(recorder.calls.length, 4);
-    assert.deepEqual(recorder.calls[2]?.options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.deepEqual(recorder.calls[2]?.options.stdio, [
+        "ignore",
+        "pipe",
+        "pipe",
+    ]);
     assert.equal(recorder.calls[2]?.args[8]?.includes("ready"), true);
-    assert.equal(Buffer.concat(recorder.children[2]?.stdinChunks ?? []).length, 0);
-    assert.equal(recorder.calls.some((call) => call.args.some((arg) => arg.includes("tmp_binary_path"))), false);
+    assert.equal(
+        Buffer.concat(recorder.children[2]?.stdinChunks ?? []).length,
+        0,
+    );
+    assert.equal(
+        recorder.calls.some((call) =>
+            call.args.some((arg) => arg.includes("tmp_binary_path")),
+        ),
+        false,
+    );
 });
 
 test("remote installer surfaces missing target-specific asset as structured error", async () => {
@@ -628,35 +796,48 @@ test("remote installer surfaces missing target-specific asset as structured erro
                     code: errorCodes.coreWorkerAssetUnavailable,
                     details: {
                         searchedPaths: [],
-                        targetKey: "darwin-arm64"
+                        targetKey: "darwin-arm64",
                     },
-                    message: "Worker asset is unavailable for target darwin-arm64.",
-                    retryable: false
+                    message:
+                        "Worker asset is unavailable for target darwin-arm64.",
+                    retryable: false,
                 });
-            }
+            },
         } as never,
         spawnShell() {
-            throw new Error("spawnShell should not be called when resolution fails");
+            throw new Error(
+                "spawnShell should not be called when resolution fails",
+            );
         },
         createContext(operation, command) {
             return {
                 command: [...command],
                 commandDisplay: command.join(" "),
                 operation,
-                provider: "ssh"
+                provider: "ssh",
             };
         },
         createProviderError(_context, cause) {
             throw cause;
-        }
+        },
     });
 
-    await assert.rejects(installer.ensure("devshell-worker"), (error: unknown) => {
-        assert.ok(typeof error === "object" && error !== null);
-        assert.equal((error as { code?: string }).code, "core.workerAssetUnavailable");
-        assert.equal((error as { details?: Record<string, unknown> }).details?.targetKey, "darwin-arm64");
-        return true;
-    });
+    await assert.rejects(
+        installer.ensure("devshell-worker"),
+        (error: unknown) => {
+            assert.ok(typeof error === "object" && error !== null);
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.workerAssetUnavailable",
+            );
+            assert.equal(
+                (error as { details?: Record<string, unknown> }).details
+                    ?.targetKey,
+                "darwin-arm64",
+            );
+            return true;
+        },
+    );
 });
 
 test("ssh transport reinstalls default worker when target asset changes", async (t) => {
@@ -665,10 +846,14 @@ test("ssh transport reinstalls default worker when target asset changes", async 
     t.after(firstWorker.cleanup);
     t.after(secondWorker.cleanup);
 
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
+    const previousWorkerPath =
+        process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = firstWorker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH", previousWorkerPath);
+        restoreEnv(
+            "PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH",
+            previousWorkerPath,
+        );
     });
 
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
@@ -699,15 +884,25 @@ test("ssh transport reinstalls default worker when target asset changes", async 
     });
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
     process.env.PORTABLE_DEVSHELL_WORKER_DARWIN_ARM64_PATH = secondWorker.path;
     await transport.installWorker();
 
-    assert.equal(Buffer.concat(recorder.children[3]?.stdinChunks ?? []).equals(firstWorker.contents), true);
-    assert.equal(Buffer.concat(recorder.children[7]?.stdinChunks ?? []).equals(secondWorker.contents), true);
+    assert.equal(
+        Buffer.concat(recorder.children[3]?.stdinChunks ?? []).equals(
+            firstWorker.contents,
+        ),
+        true,
+    );
+    assert.equal(
+        Buffer.concat(recorder.children[7]?.stdinChunks ?? []).equals(
+            secondWorker.contents,
+        ),
+        true,
+    );
     assert.notEqual(recorder.calls[3]?.args[8], recorder.calls[7]?.args[8]);
 });
 
@@ -715,21 +910,31 @@ test("ssh transport appends interactive-auth hint when batch mode authentication
     const recorder = createSpawnRecorder((_call, child) => {
         closeRecordedChild(child, {
             code: 255,
-            stderr: "Permission denied (publickey,password).\n"
+            stderr: "Permission denied (publickey,password).\n",
         });
         return true;
     });
     const transport = new WorkerTransportDriverSsh({
         command: "ssh demo",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
-    const result = await transport.runWorkerCommand("status", { instanceName: "demo-ssh" });
+    const result = await transport.runWorkerCommand("status", {
+        instanceName: "demo-ssh",
+    });
 
     assert.equal(result.exitCode, 255);
-    assert.match(result.stderr, /requires interactive authentication or host confirmation/u);
-    assert.equal(result.details?.stderrTail?.includes("requires interactive authentication or host confirmation"), true);
+    assert.match(
+        result.stderr,
+        /requires interactive authentication or host confirmation/u,
+    );
+    assert.equal(
+        result.details?.stderrTail?.includes(
+            "requires interactive authentication or host confirmation",
+        ),
+        true,
+    );
 });
 
 test("ssh transport interactive start establishes a reusable control socket", async () => {
@@ -746,7 +951,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
     const transport = new WorkerTransportDriverSsh({
         command: "ssh-bin devbox",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const startResult = await transport.runWorkerCommand(
@@ -758,10 +963,12 @@ test("ssh transport interactive start establishes a reusable control socket", as
             },
             async writeOutput(chunk: string) {
                 outputs.push(chunk);
-            }
-        }
+            },
+        },
     );
-    const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "demo-ssh" });
+    const rpcProcess = await transport.spawnWorkerRpc({
+        instanceName: "demo-ssh",
+    });
     rpcProcess.kill("SIGTERM");
     await rpcProcess.exit;
 
@@ -769,10 +976,20 @@ test("ssh transport interactive start establishes a reusable control socket", as
     assert.equal(outputs.join(""), "Password: ");
     assert.equal(recorder.calls[0]?.command, "script");
     assert.equal(recorder.calls[0]?.args[0], "-qefc");
-    assert.match(String(recorder.calls[0]?.args[1] ?? ""), /-oControlMaster=auto/u);
-    assert.match(String(recorder.calls[0]?.args[1] ?? ""), /-oControlPersist=600/u);
+    assert.match(
+        String(recorder.calls[0]?.args[1] ?? ""),
+        /-oControlMaster=auto/u,
+    );
+    assert.match(
+        String(recorder.calls[0]?.args[1] ?? ""),
+        /-oControlPersist=600/u,
+    );
 
-    const controlPath = String(recorder.calls[1]?.args.find((arg) => arg.startsWith("-oControlPath=")) ?? "").slice("-oControlPath=".length);
+    const controlPath = String(
+        recorder.calls[1]?.args.find((arg) =>
+            arg.startsWith("-oControlPath="),
+        ) ?? "",
+    ).slice("-oControlPath=".length);
     assert.match(controlPath, /pds-ssh-/u);
     assert.deepEqual(recorder.calls[1], {
         command: "ssh-bin",
@@ -788,9 +1005,15 @@ test("ssh transport interactive start establishes a reusable control socket", as
             "--",
             "sh",
             "-lc",
-            shellEscape("'/usr/local/bin/devshell-worker' 'start' '--instance' 'demo-ssh'")
+            shellEscape(
+                "'/usr/local/bin/devshell-worker' 'start' '--instance' 'demo-ssh'",
+            ),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[2], {
         command: "ssh-bin",
@@ -806,9 +1029,15 @@ test("ssh transport interactive start establishes a reusable control socket", as
             "--",
             "sh",
             "-lc",
-            shellEscape("'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'")
+            shellEscape(
+                "'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'",
+            ),
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["pipe", "pipe", "pipe"],
+        },
     });
 });
 
@@ -825,21 +1054,46 @@ test("docker transport builds exec command", async () => {
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
-    const result = await transport.runWorkerCommand("logs", { instanceName: "task-3-docker" });
+    const result = await transport.runWorkerCommand("logs", {
+        instanceName: "task-3-docker",
+    });
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "logs", "--instance", "task-3-docker"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "/usr/local/bin/devshell-worker",
+            "logs",
+            "--instance",
+            "task-3-docker",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
@@ -856,30 +1110,55 @@ test("docker transport runs installWorker probe via exec", async () => {
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
 
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "/usr/local/bin/devshell-worker",
+            "--version",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
 test("docker transport installs default worker before exec command", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
+    const previousWorkerPath =
+        process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
+        restoreEnv(
+            "PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH",
+            previousWorkerPath,
+        );
     });
 
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
@@ -915,31 +1194,82 @@ test("docker transport installs default worker before exec command", async (t) =
     const transport = new WorkerTransportDriverDocker({
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
-    const result = await transport.runWorkerCommand("logs", { instanceName: "task-3-docker" });
+    const result = await transport.runWorkerCommand("logs", {
+        instanceName: "task-3-docker",
+    });
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "docker-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "docker-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", "uname -s && uname -m"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "sh",
+            "-lc",
+            "uname -s && uname -m",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[2], {
         command: "docker-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "sh",
+            "-lc",
+            'printf %s "${HOME:?HOME is required to install the worker}"',
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
-    assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
-    assert.deepEqual(recorder.calls[3]?.options.stdio, ["ignore", "pipe", "pipe"]);
-    assert.equal(recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'), true);
-    assert.deepEqual(recorder.calls[4]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.equal(
+        recorder.calls[3]?.args[5]?.includes(
+            "/home/dev/.devshell/workers/linux-arm64/",
+        ),
+        true,
+    );
+    assert.deepEqual(recorder.calls[3]?.options.stdio, [
+        "ignore",
+        "pipe",
+        "pipe",
+    ]);
+    assert.equal(
+        recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'),
+        true,
+    );
+    assert.deepEqual(recorder.calls[4]?.options.stdio, [
+        "pipe",
+        "pipe",
+        "pipe",
+    ]);
     assert.deepEqual(recorder.calls[5], {
         command: "docker-bin",
         args: [
@@ -949,11 +1279,18 @@ test("docker transport installs default worker before exec command", async (t) =
             "/home/dev/.devshell/bin/devshell-worker",
             "logs",
             "--instance",
-            "task-3-docker"
+            "task-3-docker",
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
-    assert.deepEqual(Buffer.concat(recorder.children[4]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(
+        Buffer.concat(recorder.children[4]?.stdinChunks ?? []),
+        worker.contents,
+    );
 });
 
 test("podman transport builds exec command", async () => {
@@ -969,26 +1306,55 @@ test("podman transport builds exec command", async () => {
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
-    const result = await transport.runWorkerCommand("stop", { instanceName: "task-3-podman" });
+    const result = await transport.runWorkerCommand("stop", {
+        instanceName: "task-3-podman",
+    });
 
     assert.equal(result.exitCode, 0);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-podman"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "/usr/local/bin/devshell-worker",
+            "stop",
+            "--instance",
+            "task-3-podman",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[2], {
         command: "podman-bin",
         args: ["stop", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
@@ -1004,7 +1370,7 @@ test("podman transport preserves provider storage environment and forwards worke
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
     const previousHome = process.env.HOME;
     const previousPath = process.env.PATH;
@@ -1018,9 +1384,9 @@ test("podman transport preserves provider storage environment and forwards worke
             env: {
                 DEVSHELL_WORKER_INTERNAL_SECURITY_MODE: "workspace",
                 DEVSHELL_WORKER_SECURITY_MODE: "workspace",
-                FOO: "bar"
+                FOO: "bar",
             },
-            instanceName: "task-3-podman"
+            instanceName: "task-3-podman",
         });
     } finally {
         restoreEnv("HOME", previousHome);
@@ -1037,9 +1403,12 @@ test("podman transport preserves provider storage environment and forwards worke
         "DEVSHELL_WORKER_SECURITY_MODE",
         "-e",
         "FOO",
-        "worker-container"
+        "worker-container",
     ]);
-    assert.equal(exec.args.includes("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"), false);
+    assert.equal(
+        exec.args.includes("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE"),
+        false,
+    );
     assert.equal(exec.options.env?.HOME, "/control/home");
     assert.equal(exec.options.env?.PATH, "/provider/bin");
     assert.equal(exec.options.env?.XDG_RUNTIME_DIR, "/control/runtime");
@@ -1054,9 +1423,9 @@ test("Windows container provider environment canonicalizes reserved keys case-in
         processEnvironment: {
             HOME: "C:\\Users\\runner",
             Path: "C:\\provider\\bin",
-            Xdg_Runtime_Dir: "C:\\runtime"
+            Xdg_Runtime_Dir: "C:\\runtime",
         },
-        provider: "podman"
+        provider: "podman",
     });
 
     assert.equal(environment.processEnv?.PATH, "C:\\provider\\bin");
@@ -1065,13 +1434,14 @@ test("Windows container provider environment canonicalizes reserved keys case-in
     assert.equal(environment.processEnv?.Xdg_Runtime_Dir, undefined);
     assert.equal(environment.processEnv?.FOO, "bar");
     assert.throws(
-        () => createContainerWorkerEnvironment({
-            env: { path: "C:\\override" },
-            platform: "win32",
-            processEnvironment: {},
-            provider: "podman"
-        }),
-        /cannot override provider-reserved variables: PATH/u
+        () =>
+            createContainerWorkerEnvironment({
+                env: { path: "C:\\override" },
+                platform: "win32",
+                processEnvironment: {},
+                provider: "podman",
+            }),
+        /cannot override provider-reserved variables: PATH/u,
     );
 });
 
@@ -1081,7 +1451,7 @@ test("podman transport rejects provider-reserved instance environment before pro
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await assert.rejects(
@@ -1090,14 +1460,16 @@ test("podman transport rejects provider-reserved instance environment before pro
             instanceName: "task-3-podman",
         }),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, "core.providerFailed");
+            assert.equal(
+                (error as { code?: string }).code,
+                "core.providerFailed",
+            );
             assert.match(String((error as Error).message), /HOME, PATH/u);
             return true;
-        }
+        },
     );
     assert.equal(recorder.calls.length, 0);
 });
-
 
 test("podman transport runs installWorker probe via exec", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
@@ -1112,30 +1484,55 @@ test("podman transport runs installWorker probe via exec", async () => {
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.installWorker();
 
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-i", "worker-container", "/usr/local/bin/devshell-worker", "--version"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "/usr/local/bin/devshell-worker",
+            "--version",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
 });
 
 test("podman transport installs default worker before spawning rpc", async (t) => {
     const worker = await createDummyWorkerBinary();
     t.after(worker.cleanup);
-    const previousWorkerPath = process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
+    const previousWorkerPath =
+        process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH;
     process.env.PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH = worker.path;
     t.after(() => {
-        restoreEnv("PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH", previousWorkerPath);
+        restoreEnv(
+            "PORTABLE_DEVSHELL_WORKER_LINUX_ARM64_PATH",
+            previousWorkerPath,
+        );
     });
 
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
@@ -1171,10 +1568,12 @@ test("podman transport installs default worker before spawning rpc", async (t) =
     const transport = new WorkerTransportDriverPodman({
         container: createManagedContainerConfig(),
         podmanBinary: "podman-bin",
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
-    const rpcProcess = await transport.spawnWorkerRpc({ instanceName: "task-3-podman" });
+    const rpcProcess = await transport.spawnWorkerRpc({
+        instanceName: "task-3-podman",
+    });
     t.after(() => {
         rpcProcess.kill("SIGTERM");
     });
@@ -1184,23 +1583,72 @@ test("podman transport installs default worker before spawning rpc", async (t) =
     assert.equal(rpcProcess.stderr, recorder.children[5]?.stderr);
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
-        args: ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "inspect",
+            "--type",
+            "container",
+            "--format",
+            "{{.State.Status}}",
+            "worker-container",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[1], {
         command: "podman-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", "uname -s && uname -m"],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "sh",
+            "-lc",
+            "uname -s && uname -m",
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
     assert.deepEqual(recorder.calls[2], {
         command: "podman-bin",
-        args: ["exec", "-i", "worker-container", "sh", "-lc", 'printf %s "${HOME:?HOME is required to install the worker}"'],
-        options: { cwd: undefined, env: undefined, stdio: ["ignore", "pipe", "pipe"] }
+        args: [
+            "exec",
+            "-i",
+            "worker-container",
+            "sh",
+            "-lc",
+            'printf %s "${HOME:?HOME is required to install the worker}"',
+        ],
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["ignore", "pipe", "pipe"],
+        },
     });
-    assert.equal(recorder.calls[3]?.args[5]?.includes("/home/dev/.devshell/workers/linux-arm64/"), true);
-    assert.deepEqual(recorder.calls[3]?.options.stdio, ["ignore", "pipe", "pipe"]);
-    assert.equal(recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'), true);
-    assert.deepEqual(recorder.calls[4]?.options.stdio, ["pipe", "pipe", "pipe"]);
+    assert.equal(
+        recorder.calls[3]?.args[5]?.includes(
+            "/home/dev/.devshell/workers/linux-arm64/",
+        ),
+        true,
+    );
+    assert.deepEqual(recorder.calls[3]?.options.stdio, [
+        "ignore",
+        "pipe",
+        "pipe",
+    ]);
+    assert.equal(
+        recorder.calls[4]?.args[5]?.includes('cat > "$tmp_binary_path"'),
+        true,
+    );
+    assert.deepEqual(recorder.calls[4]?.options.stdio, [
+        "pipe",
+        "pipe",
+        "pipe",
+    ]);
     assert.deepEqual(recorder.calls[5], {
         command: "podman-bin",
         args: [
@@ -1210,11 +1658,18 @@ test("podman transport installs default worker before spawning rpc", async (t) =
             "/home/dev/.devshell/bin/devshell-worker",
             "rpc",
             "--instance",
-            "task-3-podman"
+            "task-3-podman",
         ],
-        options: { cwd: undefined, env: undefined, stdio: ["pipe", "pipe", "pipe"] }
+        options: {
+            cwd: undefined,
+            env: undefined,
+            stdio: ["pipe", "pipe", "pipe"],
+        },
     });
-    assert.deepEqual(Buffer.concat(recorder.children[4]?.stdinChunks ?? []), worker.contents);
+    assert.deepEqual(
+        Buffer.concat(recorder.children[4]?.stdinChunks ?? []),
+        worker.contents,
+    );
     assert.equal(rpcProcess.kill("SIGTERM"), true);
     assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
 });
@@ -1222,7 +1677,10 @@ test("podman transport installs default worker before spawning rpc", async (t) =
 test("docker transport creates and starts managed containers before starting the worker", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {
-            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            closeRecordedChild(child, {
+                stderr: "No such container\n",
+                code: 1,
+            });
             return true;
         }
 
@@ -1233,11 +1691,11 @@ test("docker transport creates and starts managed containers before starting the
             containerName: "worker-container",
             image: "archlinux:latest",
             mode: "preset",
-            preset: "arch"
+            preset: "arch",
         },
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const result = await transport.runWorkerCommand("start", {
@@ -1245,9 +1703,23 @@ test("docker transport creates and starts managed containers before starting the
     });
 
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(recorder.calls[0]?.args, ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"]);
-    assert.deepEqual(recorder.calls[1]?.args.slice(0, 3), ["create", "--name", "worker-container"]);
-    assert.equal(recorder.calls[1]?.args.includes("/workspace:/workspace:rw"), false);
+    assert.deepEqual(recorder.calls[0]?.args, [
+        "inspect",
+        "--type",
+        "container",
+        "--format",
+        "{{.State.Status}}",
+        "worker-container",
+    ]);
+    assert.deepEqual(recorder.calls[1]?.args.slice(0, 3), [
+        "create",
+        "--name",
+        "worker-container",
+    ]);
+    assert.equal(
+        recorder.calls[1]?.args.includes("/workspace:/workspace:rw"),
+        false,
+    );
     assert.equal(recorder.calls[1]?.args.includes("archlinux:latest"), true);
     assert.deepEqual(recorder.calls[2]?.args, ["start", "worker-container"]);
     assert.deepEqual(recorder.calls[3]?.args, [
@@ -1257,7 +1729,7 @@ test("docker transport creates and starts managed containers before starting the
         "/usr/local/bin/devshell-worker",
         "start",
         "--instance",
-        "task-3-docker"
+        "task-3-docker",
     ]);
 });
 
@@ -1267,15 +1739,25 @@ test("managed container retirement removes the devshell-owned container", async 
         container: createManagedContainerConfig(),
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.retireProviderResources();
 
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "worker-container"],
-        ["rm", "-f", "worker-container"]
-    ]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
+        [
+            [
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                "{{.State.Status}}",
+                "worker-container",
+            ],
+            ["rm", "-f", "worker-container"],
+        ],
+    );
 });
 
 test("dockerfile container mode builds the image before creating the managed container", async () => {
@@ -1286,7 +1768,10 @@ test("dockerfile container mode builds the image before creating the managed con
         }
 
         if (call.args[0] === "inspect" && call.args[1] === "--type") {
-            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            closeRecordedChild(child, {
+                stderr: "No such container\n",
+                code: 1,
+            });
             return true;
         }
 
@@ -1297,36 +1782,61 @@ test("dockerfile container mode builds the image before creating the managed con
             build: {
                 context: "/project",
                 dockerfile: "/project/Containerfile",
-                tag: "devshell-test:latest"
+                tag: "devshell-test:latest",
             },
             containerName: "dockerfile-container",
-            mode: "dockerfile"
+            mode: "dockerfile",
         },
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-dockerfile",
     });
 
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["image", "inspect", "devshell-test:latest"],
-        ["build", "-t", "devshell-test:latest", "-f", "/project/Containerfile", "/project"],
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "dockerfile-container"],
-        ["create", "--name", "dockerfile-container", "devshell-test:latest", "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done"],
-        ["start", "dockerfile-container"],
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
         [
-            "exec",
-            "-i",
-            "dockerfile-container",
-            "/usr/local/bin/devshell-worker",
-            "start",
-            "--instance",
-            "task-3-dockerfile"
-        ]
-    ]);
+            ["image", "inspect", "devshell-test:latest"],
+            [
+                "build",
+                "-t",
+                "devshell-test:latest",
+                "-f",
+                "/project/Containerfile",
+                "/project",
+            ],
+            [
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                "{{.State.Status}}",
+                "dockerfile-container",
+            ],
+            [
+                "create",
+                "--name",
+                "dockerfile-container",
+                "devshell-test:latest",
+                "sh",
+                "-lc",
+                "trap 'exit 0' TERM INT; while :; do sleep 2147483647; done",
+            ],
+            ["start", "dockerfile-container"],
+            [
+                "exec",
+                "-i",
+                "dockerfile-container",
+                "/usr/local/bin/devshell-worker",
+                "start",
+                "--instance",
+                "task-3-dockerfile",
+            ],
+        ],
+    );
 });
 
 test("compose container mode starts the configured service and executes the worker through compose", async () => {
@@ -1336,37 +1846,58 @@ test("compose container mode starts the configured service and executes the work
             compose: {
                 file: "/project/compose.yaml",
                 projectName: "devshell-test",
-                service: "workspace"
+                service: "workspace",
             },
-            mode: "compose"
+            mode: "compose",
         },
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-compose",
     });
 
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-q", "workspace"],
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "up", "-d", "workspace"],
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
         [
-            "compose",
-            "-f",
-            "/project/compose.yaml",
-            "-p",
-            "devshell-test",
-            "exec",
-            "-T",
-            "workspace",
-            "/usr/local/bin/devshell-worker",
-            "start",
-            "--instance",
-            "task-3-compose"
-        ]
-    ]);
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "ps",
+                "-q",
+                "workspace",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "up",
+                "-d",
+                "workspace",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "exec",
+                "-T",
+                "workspace",
+                "/usr/local/bin/devshell-worker",
+                "start",
+                "--instance",
+                "task-3-compose",
+            ],
+        ],
+    );
 });
 
 test("container retirement leaves compose and user-owned stopped containers intact", async () => {
@@ -1376,24 +1907,24 @@ test("container retirement leaves compose and user-owned stopped containers inta
             compose: {
                 file: "/project/compose.yaml",
                 projectName: "devshell-test",
-                service: "workspace"
+                service: "workspace",
             },
-            mode: "compose"
+            mode: "compose",
         },
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: composeRecorder.spawn
+        spawnFunction: composeRecorder.spawn,
     });
     const adoptedRecorder = createSpawnRecorder();
     const adopted = new WorkerTransportDriverPodman({
         container: {
             adoptLifecycle: true,
             containerName: "user-container",
-            mode: "existingStoppedContainer"
+            mode: "existingStoppedContainer",
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: adoptedRecorder.spawn
+        spawnFunction: adoptedRecorder.spawn,
     });
 
     await compose.retireProviderResources();
@@ -1415,24 +1946,42 @@ test("runtime retirement temporarily starts and restores an adopted stopped cont
         container: {
             adoptLifecycle: true,
             containerName: "user-container",
-            mode: "existingStoppedContainer"
+            mode: "existingStoppedContainer",
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const result = await transport.runWorkerCommand("retire", {
-        instanceName: "task-3-adopted"
+        instanceName: "task-3-adopted",
     });
 
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "user-container"],
-        ["start", "user-container"],
-        ["exec", "-i", "user-container", "/usr/local/bin/devshell-worker", "retire", "--instance", "task-3-adopted"],
-        ["stop", "user-container"]
-    ]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
+        [
+            [
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                "{{.State.Status}}",
+                "user-container",
+            ],
+            ["start", "user-container"],
+            [
+                "exec",
+                "-i",
+                "user-container",
+                "/usr/local/bin/devshell-worker",
+                "retire",
+                "--instance",
+                "task-3-adopted",
+            ],
+            ["stop", "user-container"],
+        ],
+    );
 });
 
 test("runtime retirement temporarily starts and restores a stopped compose service", async () => {
@@ -1448,33 +1997,87 @@ test("runtime retirement temporarily starts and restores a stopped compose servi
             compose: {
                 file: "/project/compose.yaml",
                 projectName: "devshell-test",
-                service: "workspace"
+                service: "workspace",
             },
-            mode: "compose"
+            mode: "compose",
         },
         dockerBinary: "docker-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     const result = await transport.runWorkerCommand("retire", {
-        instanceName: "task-3-compose"
+        instanceName: "task-3-compose",
     });
 
     assert.equal(result.exitCode, 0);
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-q", "workspace"],
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "ps", "-a", "-q", "workspace"],
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "start", "workspace"],
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "exec", "-T", "workspace", "/usr/local/bin/devshell-worker", "retire", "--instance", "task-3-compose"],
-        ["compose", "-f", "/project/compose.yaml", "-p", "devshell-test", "stop", "workspace"]
-    ]);
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
+        [
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "ps",
+                "-q",
+                "workspace",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "ps",
+                "-a",
+                "-q",
+                "workspace",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "start",
+                "workspace",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "exec",
+                "-T",
+                "workspace",
+                "/usr/local/bin/devshell-worker",
+                "retire",
+                "--instance",
+                "task-3-compose",
+            ],
+            [
+                "compose",
+                "-f",
+                "/project/compose.yaml",
+                "-p",
+                "devshell-test",
+                "stop",
+                "workspace",
+            ],
+        ],
+    );
 });
 
 test("existing image container mode creates a dedicated managed container", async () => {
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            closeRecordedChild(child, {
+                stderr: "No such container\n",
+                code: 1,
+            });
             return true;
         }
 
@@ -1484,11 +2087,11 @@ test("existing image container mode creates a dedicated managed container", asyn
         container: {
             containerName: "existing-image-container",
             image: "registry.example/devshell:latest",
-            mode: "existingImage"
+            mode: "existingImage",
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.runWorkerCommand("start", {
@@ -1499,21 +2102,34 @@ test("existing image container mode creates a dedicated managed container", asyn
         "create",
         "--name",
         "existing-image-container",
-        "--userns=keep-id"
+        "--userns=keep-id",
     ]);
-    assert.equal(recorder.calls[1]?.args.includes("registry.example/devshell:latest"), true);
+    assert.equal(
+        recorder.calls[1]?.args.includes("registry.example/devshell:latest"),
+        true,
+    );
     assert.equal(
         recorder.calls[1]?.args.includes("/workspace:/workspace:rw"),
-        false
+        false,
     );
-    assert.deepEqual(recorder.calls[2]?.args, ["start", "existing-image-container"]);
-    assert.deepEqual(recorder.calls[3]?.args.slice(0, 3), ["exec", "-i", "existing-image-container"]);
+    assert.deepEqual(recorder.calls[2]?.args, [
+        "start",
+        "existing-image-container",
+    ]);
+    assert.deepEqual(recorder.calls[3]?.args.slice(0, 3), [
+        "exec",
+        "-i",
+        "existing-image-container",
+    ]);
 });
 
 test("managed container uses an explicit workspace mount without adding a duplicate", async () => {
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, { stderr: "No such container\n", code: 1 });
+            closeRecordedChild(child, {
+                stderr: "No such container\n",
+                code: 1,
+            });
             return true;
         }
         return false;
@@ -1523,11 +2139,13 @@ test("managed container uses an explicit workspace mount without adding a duplic
             containerName: "mounted-container",
             image: "registry.example/devshell:latest",
             mode: "existingImage",
-            mounts: [{ mode: "ro", source: "/host/project", target: "/workspace" }]
+            mounts: [
+                { mode: "ro", source: "/host/project", target: "/workspace" },
+            ],
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.runWorkerCommand("start", {
@@ -1535,12 +2153,15 @@ test("managed container uses an explicit workspace mount without adding a duplic
     });
 
     assert.equal(
-        recorder.calls[1]?.args.filter((arg) => arg.endsWith(":/workspace:rw")).length,
-        0
+        recorder.calls[1]?.args.filter((arg) => arg.endsWith(":/workspace:rw"))
+            .length,
+        0,
     );
     assert.equal(
-        recorder.calls[1]?.args.filter((arg) => arg === "/host/project:/workspace:ro").length,
-        1
+        recorder.calls[1]?.args.filter(
+            (arg) => arg === "/host/project:/workspace:ro",
+        ).length,
+        1,
     );
 });
 
@@ -1548,7 +2169,9 @@ test("existing stopped container mode adopts and restores the configured lifecyc
     let inspectCount = 0;
     const recorder = createSpawnRecorder((call, child) => {
         if (call.args[0] === "inspect") {
-            closeRecordedChild(child, { stdout: inspectCount++ === 0 ? "stopped\n" : "running\n" });
+            closeRecordedChild(child, {
+                stdout: inspectCount++ === 0 ? "stopped\n" : "running\n",
+            });
             return true;
         }
 
@@ -1558,34 +2181,61 @@ test("existing stopped container mode adopts and restores the configured lifecyc
         container: {
             adoptLifecycle: true,
             containerName: "adopted-container",
-            mode: "existingStoppedContainer"
+            mode: "existingStoppedContainer",
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await transport.runWorkerCommand("start", {
         instanceName: "task-3-adopted",
     });
-    await transport.runWorkerCommand("stop", { instanceName: "task-3-adopted" });
+    await transport.runWorkerCommand("stop", {
+        instanceName: "task-3-adopted",
+    });
 
-    assert.deepEqual(recorder.calls.map((call) => call.args), [
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "adopted-container"],
-        ["start", "adopted-container"],
+    assert.deepEqual(
+        recorder.calls.map((call) => call.args),
         [
-            "exec",
-            "-i",
-            "adopted-container",
-            "/usr/local/bin/devshell-worker",
-            "start",
-            "--instance",
-            "task-3-adopted"
+            [
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                "{{.State.Status}}",
+                "adopted-container",
+            ],
+            ["start", "adopted-container"],
+            [
+                "exec",
+                "-i",
+                "adopted-container",
+                "/usr/local/bin/devshell-worker",
+                "start",
+                "--instance",
+                "task-3-adopted",
+            ],
+            [
+                "inspect",
+                "--type",
+                "container",
+                "--format",
+                "{{.State.Status}}",
+                "adopted-container",
+            ],
+            [
+                "exec",
+                "-i",
+                "adopted-container",
+                "/usr/local/bin/devshell-worker",
+                "stop",
+                "--instance",
+                "task-3-adopted",
+            ],
+            ["stop", "adopted-container"],
         ],
-        ["inspect", "--type", "container", "--format", "{{.State.Status}}", "adopted-container"],
-        ["exec", "-i", "adopted-container", "/usr/local/bin/devshell-worker", "stop", "--instance", "task-3-adopted"],
-        ["stop", "adopted-container"]
-    ]);
+    );
 });
 
 test("podman transport rejects already running existing stopped containers", async () => {
@@ -1601,72 +2251,103 @@ test("podman transport rejects already running existing stopped containers", asy
         container: {
             adoptLifecycle: true,
             containerName: "worker-container",
-            mode: "existingStoppedContainer"
+            mode: "existingStoppedContainer",
         },
         podmanBinary: "podman-bin",
         workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
-        spawnFunction: recorder.spawn
+        spawnFunction: recorder.spawn,
     });
 
     await assert.rejects(
         transport.runWorkerCommand("start", { instanceName: "task-3-podman" }),
-        /Running container attach is not a supported instance mode/u
+        /Running container attach is not a supported instance mode/u,
     );
 });
 
-test("local transport executes frozen devshell-worker start status logs stop rpc", realWorkerTestOptions(workerBinaryPath), async (t) => {
-    const homeDirectory = await createTestTempDirectory("core-home");
-    const runtimeDirectory = await createTestTempDirectory("core-runtime");
-    const instanceName = `task-3-${process.pid}`;
-    const env = { ...process.env, HOME: homeDirectory, XDG_RUNTIME_DIR: runtimeDirectory };
-    const transport = new WorkerTransportDriverLocal({
-        workerBinary: new WorkerBinary(workerBinaryPath!),
-        spawnFunction: nodeSpawn
-    });
+test(
+    "local transport executes frozen devshell-worker start status logs stop rpc",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const homeDirectory = await createTestTempDirectory("core-home");
+        const runtimeDirectory = await createTestTempDirectory("core-runtime");
+        const instanceName = `task-3-${process.pid}`;
+        const env = {
+            ...process.env,
+            HOME: homeDirectory,
+            XDG_RUNTIME_DIR: runtimeDirectory,
+        };
+        const transport = new WorkerTransportDriverLocal({
+            workerBinary: new WorkerBinary(workerBinaryPath!),
+            spawnFunction: nodeSpawn,
+        });
 
-    t.after(async () => {
-        await transport.runWorkerCommand("stop", { env, instanceName });
-        await rm(homeDirectory, { recursive: true, force: true });
-        await rm(runtimeDirectory, { recursive: true, force: true });
-    });
+        t.after(async () => {
+            await transport.runWorkerCommand("stop", { env, instanceName });
+            await rm(homeDirectory, { recursive: true, force: true });
+            await rm(runtimeDirectory, { recursive: true, force: true });
+        });
 
-    await transport.installWorker();
+        await transport.installWorker();
 
-    const startResult = await transport.runWorkerCommand("start", { env, instanceName });
-    assert.equal(startResult.exitCode, 0);
-    assert.equal("workspace" in JSON.parse(startResult.stdout), false);
+        const startResult = await transport.runWorkerCommand("start", {
+            env,
+            instanceName,
+        });
+        assert.equal(startResult.exitCode, 0);
+        assert.equal("workspace" in JSON.parse(startResult.stdout), false);
 
-    const statusResult = await transport.runWorkerCommand("status", { env, instanceName });
-    assert.equal(statusResult.exitCode, 0);
-    assert.equal(JSON.parse(statusResult.stdout).running, true);
+        const statusResult = await transport.runWorkerCommand("status", {
+            env,
+            instanceName,
+        });
+        assert.equal(statusResult.exitCode, 0);
+        assert.equal(JSON.parse(statusResult.stdout).running, true);
 
-    const logsResult = await transport.runWorkerCommand("logs", { env, instanceName });
-    assert.equal(logsResult.exitCode, 0);
+        const logsResult = await transport.runWorkerCommand("logs", {
+            env,
+            instanceName,
+        });
+        assert.equal(logsResult.exitCode, 0);
 
-    const rpcProcess = await transport.spawnWorkerRpc({ env, instanceName });
-    assert.notEqual(rpcProcess.stdin, null);
-    assert.notEqual(rpcProcess.stdout, null);
-    assert.notEqual(rpcProcess.stderr, null);
-    assert.equal(rpcProcess.kill("SIGTERM"), true);
-    const rpcExit = await rpcProcess.exit;
-    if (process.platform === "win32") {
-        assert.notDeepEqual(rpcExit, { code: 0, signal: null });
-    } else {
-        assert.deepEqual(rpcExit, { code: null, signal: "SIGTERM" });
-    }
+        const rpcProcess = await transport.spawnWorkerRpc({
+            env,
+            instanceName,
+        });
+        assert.notEqual(rpcProcess.stdin, null);
+        assert.notEqual(rpcProcess.stdout, null);
+        assert.notEqual(rpcProcess.stderr, null);
+        assert.equal(rpcProcess.kill("SIGTERM"), true);
+        const rpcExit = await rpcProcess.exit;
+        if (process.platform === "win32") {
+            assert.notDeepEqual(rpcExit, { code: 0, signal: null });
+        } else {
+            assert.deepEqual(rpcExit, { code: null, signal: "SIGTERM" });
+        }
 
-    const stopResult = await transport.runWorkerCommand("stop", { env, instanceName });
-    assert.equal(stopResult.exitCode, 0);
-    assert.equal(JSON.parse(stopResult.stdout).stopped, true);
-});
+        const stopResult = await transport.runWorkerCommand("stop", {
+            env,
+            instanceName,
+        });
+        assert.equal(stopResult.exitCode, 0);
+        assert.equal(JSON.parse(stopResult.stdout).stopped, true);
+    },
+);
 
 interface RecordedCall {
     command: string;
     args: string[];
-    options: { cwd?: string; env?: NodeJS.ProcessEnv; stdio: readonly string[] };
+    options: {
+        cwd?: string;
+        env?: NodeJS.ProcessEnv;
+        stdio: readonly string[];
+    };
 }
 
-type SpawnFunctionLike = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+type SpawnFunctionLike = (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions,
+) => ChildProcess;
 
 interface RecordedChild extends ChildProcess {
     stdin: PassThrough;
@@ -1675,7 +2356,10 @@ interface RecordedChild extends ChildProcess {
     stdinChunks: Buffer[];
 }
 
-function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
+function restoreEnv(
+    name: keyof NodeJS.ProcessEnv,
+    value: string | undefined,
+): void {
     if (value === undefined) {
         delete process.env[name];
         return;
@@ -1688,16 +2372,24 @@ function createManagedContainerConfig() {
     return {
         containerName: "worker-container",
         image: "worker-image:latest",
-        mode: "existingImage" as const
+        mode: "existingImage" as const,
     };
 }
 
 function createSpawnRecorder(
-    onSpawn?: (call: RecordedCall, child: RecordedChild, callIndex: number) => boolean
+    onSpawn?: (
+        call: RecordedCall,
+        child: RecordedChild,
+        callIndex: number,
+    ) => boolean,
 ): {
     calls: RecordedCall[];
     children: RecordedChild[];
-    spawn: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+    spawn: (
+        command: string,
+        args: readonly string[],
+        options: SpawnOptions,
+    ) => ChildProcess;
 } {
     const calls: RecordedCall[] = [];
     const children: RecordedChild[] = [];
@@ -1729,8 +2421,16 @@ function createSpawnRecorder(
                     stdin.end();
                     stdout.end();
                     stderr.end();
-                    child.emit("exit", null, typeof signal === "string" ? signal : "SIGTERM");
-                    child.emit("close", null, typeof signal === "string" ? signal : "SIGTERM");
+                    child.emit(
+                        "exit",
+                        null,
+                        typeof signal === "string" ? signal : "SIGTERM",
+                    );
+                    child.emit(
+                        "close",
+                        null,
+                        typeof signal === "string" ? signal : "SIGTERM",
+                    );
                 });
                 return true;
             };
@@ -1741,15 +2441,21 @@ function createSpawnRecorder(
                 options: {
                     cwd: options.cwd?.toString(),
                     env: options.env,
-                    stdio: Array.isArray(options.stdio) ? options.stdio.map((item) => String(item)) : []
-                }
+                    stdio: Array.isArray(options.stdio)
+                        ? options.stdio.map((item) => String(item))
+                        : [],
+                },
             });
             stdin.on("data", (chunk) => {
-                stdinChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                stdinChunks.push(
+                    Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk),
+                );
             });
             children.push(child);
 
-            const handled = onSpawn?.(calls[calls.length - 1]!, child, calls.length - 1) ?? false;
+            const handled =
+                onSpawn?.(calls[calls.length - 1]!, child, calls.length - 1) ??
+                false;
 
             if (!handled && options.stdio?.[0] === "ignore") {
                 setImmediate(() => {
@@ -1762,7 +2468,7 @@ function createSpawnRecorder(
             }
 
             return child;
-        }
+        },
     };
 }
 
@@ -1773,7 +2479,10 @@ async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
 }> {
     const directory = await createTestTempDirectory("core-worker");
     const path = join(directory, "devshell-worker");
-    const contents = Buffer.from(`#!/bin/sh\necho remote worker ${tag}\n`, "utf8");
+    const contents = Buffer.from(
+        `#!/bin/sh\necho remote worker ${tag}\n`,
+        "utf8",
+    );
 
     await writeFile(path, contents, { mode: 0o755 });
 
@@ -1782,17 +2491,23 @@ async function createDummyWorkerBinary(tag: string = "remote"): Promise<{
         contents,
         cleanup: async () => {
             await rm(directory, { recursive: true, force: true });
-        }
+        },
     };
 }
 
 async function installedWorkerSha(path: string): Promise<string> {
     if (process.platform === "win32") {
-        return createHash("sha256").update(await readFile(path)).digest("hex");
+        return createHash("sha256")
+            .update(await readFile(path))
+            .digest("hex");
     }
     const target = await readlink(path);
     const match = target.match(/[a-f0-9]{64}/u);
-    assert.notEqual(match, null, `installed worker symlink does not contain a sha256: ${target}`);
+    assert.notEqual(
+        match,
+        null,
+        `installed worker symlink does not contain a sha256: ${target}`,
+    );
     return match![0];
 }
 
@@ -1803,7 +2518,7 @@ function closeRecordedChild(
         stderr?: string;
         code?: number;
         signal?: NodeJS.Signals | null;
-    } = {}
+    } = {},
 ): void {
     const code = options.code ?? 0;
     const signal = options.signal ?? null;

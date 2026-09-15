@@ -2,7 +2,12 @@ import { createConnection, type Socket } from "node:net";
 
 import type { ErrorCode } from "../../protocol/Error.js";
 import { createError } from "../../protocol/Error.js";
-import { encodeFrame, FrameBuffer, TRANSPORT_MAX_FRAME_SIZE, type Frame } from "../protocol/Frame.js";
+import {
+    encodeFrame,
+    FrameBuffer,
+    TRANSPORT_MAX_FRAME_SIZE,
+    type Frame,
+} from "../protocol/Frame.js";
 import type { Channel } from "../protocol/Channel.js";
 
 export const SOCKET_CHANNEL_MAX_FRAME_SIZE = TRANSPORT_MAX_FRAME_SIZE;
@@ -31,7 +36,8 @@ export class SocketChannel implements Channel {
         if (options.signal?.aborted === true) {
             throw abortError(options.signal);
         }
-        const socket = options.socketFactory?.(socketPath) ?? createConnection(socketPath);
+        const socket =
+            options.socketFactory?.(socketPath) ?? createConnection(socketPath);
         return await new Promise<SocketChannel>((resolve, reject) => {
             let settled = false;
             const cleanup = () => {
@@ -96,7 +102,12 @@ export class SocketChannel implements Channel {
         socket.on("data", (chunk: Buffer) => this.#acceptChunk(chunk));
         socket.once("end", () => {
             if (!this.#frames.empty) {
-                this.close(protocolError("protocol.invalidFrame", "Socket ended with an incomplete frame."));
+                this.close(
+                    protocolError(
+                        "protocol.invalidFrame",
+                        "Socket ended with an incomplete frame.",
+                    ),
+                );
                 return;
             }
             this.close();
@@ -116,11 +127,15 @@ export class SocketChannel implements Channel {
         const encoded = encodeFrame(frame, this.#maxFrameSize);
         const write = this.#writeQueue.then(async () => {
             if (this.#closed) {
-                throw this.#closeError ?? new Error("Socket channel is closed.");
+                throw (
+                    this.#closeError ?? new Error("Socket channel is closed.")
+                );
             }
             await new Promise<void>((resolve, reject) => {
                 try {
-                    this.#socket.write(encoded, (error) => error == null ? resolve() : reject(error));
+                    this.#socket.write(encoded, (error) =>
+                        error == null ? resolve() : reject(error),
+                    );
                 } catch (error) {
                     reject(error);
                 }
@@ -130,7 +145,8 @@ export class SocketChannel implements Channel {
         try {
             await write;
         } catch (error) {
-            const normalized = error instanceof Error ? error : new Error(String(error));
+            const normalized =
+                error instanceof Error ? error : new Error(String(error));
             this.close(normalized);
             throw normalized;
         }
@@ -173,12 +189,18 @@ export class SocketChannel implements Channel {
                     try {
                         listener(frame);
                     } catch (error) {
-                        process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+                        process.emitWarning(
+                            error instanceof Error
+                                ? error
+                                : new Error(String(error)),
+                        );
                     }
                 }
             }
         } catch (error) {
-            this.close(error instanceof Error ? error : new Error(String(error)));
+            this.close(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
 
@@ -199,7 +221,9 @@ export class SocketChannel implements Channel {
         try {
             listener(this.#closeError);
         } catch (error) {
-            process.emitWarning(error instanceof Error ? error : new Error(String(error)));
+            process.emitWarning(
+                error instanceof Error ? error : new Error(String(error)),
+            );
         }
     }
 }

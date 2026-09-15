@@ -24,14 +24,17 @@ export class InstanceConnectionService {
         this.#registry = registry;
     }
 
-    async acquire(instance: string, reference: string): Promise<InstanceConnectionLease> {
+    async acquire(
+        instance: string,
+        reference: string,
+    ): Promise<InstanceConnectionLease> {
         const descriptor = this.#requireDescriptor(instance);
         if (!descriptor.enabled) {
             throw createError({
                 code: errorCodes.instanceConflict,
                 details: { instance, operation: "connect" },
                 message: `Instance ${instance} is disabled.`,
-                retryable: false
+                retryable: false,
             });
         }
 
@@ -45,7 +48,7 @@ export class InstanceConnectionService {
                         code: errorCodes.reverseSelfManagedOffline,
                         details: { instance },
                         message: `Instance ${instance} is self-managed and is not connected.`,
-                        retryable: true
+                        retryable: true,
                     });
                 }
             } else {
@@ -55,19 +58,24 @@ export class InstanceConnectionService {
         }
 
         if (descriptor.worker.managementMode !== "selfManaged") {
-            this.#registry.retainConnectionReference(instance, reference, ownsLifecycle);
+            this.#registry.retainConnectionReference(
+                instance,
+                reference,
+                ownsLifecycle,
+            );
         }
         return {
             handle: descriptor.worker.handle,
             snapshot,
-            worker: descriptor.worker
+            worker: descriptor.worker,
         };
     }
 
     async release(instance: string, reference: string): Promise<void> {
         const descriptor = this.#requireDescriptor(instance);
         if (descriptor.worker.managementMode === "selfManaged") return;
-        if (!this.#registry.releaseConnectionReference(instance, reference)) return;
+        if (!this.#registry.releaseConnectionReference(instance, reference))
+            return;
         if (descriptor.worker.snapshot().daemonState !== "stopped") {
             await descriptor.worker.stop();
         }
@@ -81,7 +89,7 @@ export class InstanceConnectionService {
             code: errorCodes.instanceMissing,
             details: { instance },
             message: `Instance ${instance} was not found.`,
-            retryable: false
+            retryable: false,
         });
     }
 }

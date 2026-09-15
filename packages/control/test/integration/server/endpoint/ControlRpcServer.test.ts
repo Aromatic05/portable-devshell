@@ -3,8 +3,14 @@ import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { WorkerCommandInteractiveSession, WorkerInstance } from "@portable-devshell/core/testing";
-import type { TerminalProcess, TerminalProcessExit } from "../../../../src/instance/execution/terminal/Backend.ts";
+import type {
+    WorkerCommandInteractiveSession,
+    WorkerInstance,
+} from "@portable-devshell/core/testing";
+import type {
+    TerminalProcess,
+    TerminalProcessExit,
+} from "../../../../src/instance/execution/terminal/Backend.ts";
 import {
     asInstanceName,
     type ActiveTodoSummary,
@@ -20,7 +26,7 @@ import {
     type JsonValue,
     type Peer,
     type ToolCallQuery,
-    type ToolCallRecord
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
@@ -53,63 +59,110 @@ test("ControlSocketServer routes canonical control and instance operations over 
         assert.equal((await stat(harness.socketPath)).mode & 0o777, 0o600);
     }
 
-    assert.deepEqual((await request(harness.socketPath, "@control", "service.ping")).payload, { pong: true });
-    assert.deepEqual((await request(harness.socketPath, "@control", "service.status")).payload, {
-        instanceCount: 1,
-        ok: true,
-        pid: process.pid
-    });
-    assert.deepEqual((await request(
-        harness.socketPath,
-        "@control",
-        "service.hello",
-        { clientKind: "tui", maxProtocolVersion: 1, minProtocolVersion: 1 },
-        "tui"
-    )).payload, {
-        capabilities: ["request", "stream", "streamResume"],
-        protocolVersion: 1
-    });
-    assert.equal((await request(
-        harness.socketPath,
-        "@control",
-        "service.hello",
-        { clientKind: "tui", maxProtocolVersion: 2, minProtocolVersion: 2 },
-        "tui"
-    )).error?.code, "protocol.versionUnsupported");
-    assert.equal((await request(
-        harness.socketPath,
-        "@control",
-        "service.hello",
-        { clientKind: "web", maxProtocolVersion: 1, minProtocolVersion: 1 },
-        "web"
-    )).error?.code, "control.clientIdentityInvalid");
+    assert.deepEqual(
+        (await request(harness.socketPath, "@control", "service.ping")).payload,
+        { pong: true },
+    );
+    assert.deepEqual(
+        (await request(harness.socketPath, "@control", "service.status"))
+            .payload,
+        {
+            instanceCount: 1,
+            ok: true,
+            pid: process.pid,
+        },
+    );
+    assert.deepEqual(
+        (
+            await request(
+                harness.socketPath,
+                "@control",
+                "service.hello",
+                {
+                    clientKind: "tui",
+                    maxProtocolVersion: 1,
+                    minProtocolVersion: 1,
+                },
+                "tui",
+            )
+        ).payload,
+        {
+            capabilities: ["request", "stream", "streamResume"],
+            protocolVersion: 1,
+        },
+    );
+    assert.equal(
+        (
+            await request(
+                harness.socketPath,
+                "@control",
+                "service.hello",
+                {
+                    clientKind: "tui",
+                    maxProtocolVersion: 2,
+                    minProtocolVersion: 2,
+                },
+                "tui",
+            )
+        ).error?.code,
+        "protocol.versionUnsupported",
+    );
+    assert.equal(
+        (
+            await request(
+                harness.socketPath,
+                "@control",
+                "service.hello",
+                {
+                    clientKind: "web",
+                    maxProtocolVersion: 1,
+                    minProtocolVersion: 1,
+                },
+                "web",
+            )
+        ).error?.code,
+        "control.clientIdentityInvalid",
+    );
 
-    const listed = (await request(harness.socketPath, "@control", "instance.list")).payload as Array<{
+    const listed = (
+        await request(harness.socketPath, "@control", "instance.list")
+    ).payload as Array<{
         name: string;
     }>;
     assert.equal(listed[0]?.name, "alpha");
 
-    const overview = (await request(
-        harness.socketPath,
-        "@control",
-        "overview.get"
-    )).payload as {
+    const overview = (
+        await request(harness.socketPath, "@control", "overview.get")
+    ).payload as {
         counts: { instancesAttention: number; instancesTotal: number };
     };
     assert.equal(overview.counts.instancesTotal, 1);
     assert.equal(overview.counts.instancesAttention, 0);
 
-    const snapshot = await request(harness.socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    const snapshot = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "runtime.snapshot",
+    );
     assert.equal((snapshot.payload as { lastSeq: number }).lastSeq, 0);
 
-    const goals = await request(harness.socketPath, asInstanceName("alpha"), "goal.get");
+    const goals = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "goal.get",
+    );
     assert.deepEqual(goals.payload, { goals: [], lastSeq: 0 });
 
-    await request(harness.socketPath, asInstanceName("alpha"), "runtime.readLogs", { limit: 1_000 });
+    await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "runtime.readLogs",
+        { limit: 1_000 },
+    );
     assert.deepEqual(harness.worker.lastReadLogsQuery, {
         fromSeq: undefined,
         limit: 100,
-        maxDecodedBytes: 1024 * 1024
+        maxDecodedBytes: 1024 * 1024,
     });
 
     harness.worker.toolCalls = [1, 2, 3].map((index): ToolCallRecord => ({
@@ -120,30 +173,37 @@ test("ControlSocketServer routes canonical control and instance operations over 
         source: "cli",
         startedAt: `2026-09-01T00:00:0${index}.000Z`,
         status: "completed",
-        toolName: "bash_run"
+        toolName: "bash_run",
     }));
-    const boundedToolCalls = await request(harness.socketPath, asInstanceName("alpha"), "tool.listCalls");
+    const boundedToolCalls = await request(
+        harness.socketPath,
+        asInstanceName("alpha"),
+        "tool.listCalls",
+    );
     assert.deepEqual(harness.worker.lastReadToolCallsQuery, { limit: 200 });
     assert.equal(Array.isArray(boundedToolCalls.payload), true);
     const boundedToolCallIds = Array.isArray(boundedToolCalls.payload)
         ? boundedToolCalls.payload.map(readToolCallId)
         : [];
-    assert.deepEqual(
-        boundedToolCallIds,
-        ["large-call-2", "large-call-3"]
+    assert.deepEqual(boundedToolCallIds, ["large-call-2", "large-call-3"]);
+    assert.equal(
+        Buffer.byteLength(JSON.stringify(boundedToolCalls.payload), "utf8") <=
+            8 * 1024 * 1024,
+        true,
     );
-    assert.equal(Buffer.byteLength(JSON.stringify(boundedToolCalls.payload), "utf8") <= 8 * 1024 * 1024, true);
 
-    harness.worker.toolCalls = [{
-        ...harness.worker.toolCalls[0]!,
-        callId: "oversized-call",
-        output: { text: "x".repeat(9 * 1024 * 1024) }
-    }];
+    harness.worker.toolCalls = [
+        {
+            ...harness.worker.toolCalls[0]!,
+            callId: "oversized-call",
+            output: { text: "x".repeat(9 * 1024 * 1024) },
+        },
+    ];
     const oversizedToolCall = await request(
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.listCalls",
-        { callIds: ["oversized-call"], limit: 1 }
+        { callIds: ["oversized-call"], limit: 1 },
     );
     assert.equal(oversizedToolCall.error?.code, errorCodes.targetInvalid);
     assert.match(oversizedToolCall.error?.message ?? "", /safe response size/u);
@@ -152,8 +212,12 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.call",
-        { input: { command: "pwd" }, toolName: "bash_run", workspace: "/tmp/ws" },
-        "tui"
+        {
+            input: { command: "pwd" },
+            toolName: "bash_run",
+            workspace: "/tmp/ws",
+        },
+        "tui",
     );
     assert.equal((toolReply.payload as { exitCode: number }).exitCode, 0);
     assert.equal(harness.worker.lastToolCall?.source, "tui");
@@ -164,8 +228,12 @@ test("ControlSocketServer routes canonical control and instance operations over 
         harness.socketPath,
         asInstanceName("alpha"),
         "tool.call",
-        { input: { command: "pwd" }, toolName: "bash_run", workspace: "/tmp/ws" },
-        "web"
+        {
+            input: { command: "pwd" },
+            toolName: "bash_run",
+            workspace: "/tmp/ws",
+        },
+        "web",
     );
     assert.equal(rejectedWeb.error?.code, "control.clientIdentityInvalid");
     assert.equal(harness.worker.lastToolCall?.source, "tui");
@@ -173,14 +241,14 @@ test("ControlSocketServer routes canonical control and instance operations over 
     const missingDestination = await request(
         harness.socketPath,
         asInstanceName("missing"),
-        "runtime.snapshot"
+        "runtime.snapshot",
     );
     assert.equal(missingDestination.error?.code, "control.invalidTarget");
 
     const missingOperation = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.missing"
+        "runtime.missing",
     );
     assert.equal(missingOperation.error?.code, "control.methodNotFound");
 });
@@ -211,36 +279,53 @@ test("local Control socket loads and rolls back a protected debug patch on a liv
         (await request(socketPath, "@control", "debug.targets")).payload,
         [{ methods: ["callTool"], target: "worker:alpha" }],
     );
-    const loaded = (await request(socketPath, "@control", "debug.load", {
-        scope: { ctxId: "ctx-own", toolName: "file_read" },
-        source: `() => ({ action: "return", value: { patched: true } })`,
-        target: "worker:alpha",
-    })).payload as { patchId: string; state: string };
+    const loaded = (
+        await request(socketPath, "@control", "debug.load", {
+            scope: { ctxId: "ctx-own", toolName: "file_read" },
+            source: `() => ({ action: "return", value: { patched: true } })`,
+            target: "worker:alpha",
+        })
+    ).payload as { patchId: string; state: string };
     assert.equal(loaded.state, "active");
 
     assert.deepEqual(
-        await worker.callTool("file_read", {}, { ctxId: "ctx-own", source: "mcp" }),
+        await worker.callTool(
+            "file_read",
+            {},
+            { ctxId: "ctx-own", source: "mcp" },
+        ),
         { patched: true },
     );
     assert.deepEqual(
-        await worker.callTool("file_read", {}, { ctxId: "ctx-other", source: "mcp" }),
+        await worker.callTool(
+            "file_read",
+            {},
+            { ctxId: "ctx-other", source: "mcp" },
+        ),
         { exitCode: 0 },
     );
     assert.equal(worker.lastToolCall?.ctxId, "ctx-other");
 
-    const listed = (await request(socketPath, "@control", "debug.list")).payload as Array<{
+    const listed = (await request(socketPath, "@control", "debug.list"))
+        .payload as Array<{
         patchId: string;
         state: string;
     }>;
     assert.equal(listed[0]?.patchId, loaded.patchId);
     assert.equal(listed[0]?.state, "active");
 
-    const unloaded = (await request(socketPath, "@control", "debug.unload", {
-        patchId: loaded.patchId,
-    })).payload as { state: string };
+    const unloaded = (
+        await request(socketPath, "@control", "debug.unload", {
+            patchId: loaded.patchId,
+        })
+    ).payload as { state: string };
     assert.equal(unloaded.state, "unloaded");
     assert.deepEqual(
-        await worker.callTool("file_read", {}, { ctxId: "ctx-own", source: "mcp" }),
+        await worker.callTool(
+            "file_read",
+            {},
+            { ctxId: "ctx-own", source: "mcp" },
+        ),
         { exitCode: 0 },
     );
     assert.equal(worker.lastToolCall?.ctxId, "ctx-own");
@@ -265,12 +350,12 @@ test("config RPC masks the Web token across get, validate, and update responses"
         runtimePreflight: { async assertAvailable() {} },
         setConfig: (next) => {
             config = next;
-        }
+        },
     });
     const routes = new ControlRouteComposition({
         config: editor,
         instances: registry,
-        shutdown() {}
+        shutdown() {},
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -285,40 +370,68 @@ test("config RPC masks the Web token across get, validate, and update responses"
     const getReply = await request(socketPath, "@control", "config.get");
     assert.equal(getReply.error, undefined);
     const getPayload = getReply.payload as Record<string, JsonValue>;
-    assert.equal((getPayload.web as Record<string, JsonValue>).token, MASKED_CONFIG_TOKEN);
+    assert.equal(
+        (getPayload.web as Record<string, JsonValue>).token,
+        MASKED_CONFIG_TOKEN,
+    );
     assert.equal(JSON.stringify(getPayload).includes(strongToken), false);
 
-    const instances = (getPayload.instances as Array<Record<string, JsonValue>>).map((instance) => {
+    const instances = (
+        getPayload.instances as Array<Record<string, JsonValue>>
+    ).map((instance) => {
         const security = instance.security as Record<string, JsonValue>;
         return { ...instance, security: { mode: security.mode } };
     });
-    const validateReply = await request(socketPath, "@control", "config.validate", {
-        ...getPayload,
-        instances
-    });
+    const validateReply = await request(
+        socketPath,
+        "@control",
+        "config.validate",
+        {
+            ...getPayload,
+            instances,
+        },
+    );
     assert.equal(validateReply.error, undefined);
     assert.equal(
-        ((validateReply.payload as Record<string, JsonValue>).web as Record<string, JsonValue>).token,
-        MASKED_CONFIG_TOKEN
+        (
+            (validateReply.payload as Record<string, JsonValue>).web as Record<
+                string,
+                JsonValue
+            >
+        ).token,
+        MASKED_CONFIG_TOKEN,
     );
-    assert.equal(JSON.stringify(validateReply.payload).includes(strongToken), false);
+    assert.equal(
+        JSON.stringify(validateReply.payload).includes(strongToken),
+        false,
+    );
 
     const updateReply = await request(socketPath, "@control", "config.update", {
-        web: { auth: "token", token: MASKED_CONFIG_TOKEN }
+        web: { auth: "token", token: MASKED_CONFIG_TOKEN },
     });
     assert.equal(updateReply.error, undefined);
-    assert.equal(JSON.stringify(updateReply.payload).includes(strongToken), false);
+    assert.equal(
+        JSON.stringify(updateReply.payload).includes(strongToken),
+        false,
+    );
     assert.deepEqual(config.web.auth, { mode: "token", token: strongToken });
     assert.deepEqual((await configStore.readOrCreate(homeDirectory)).web.auth, {
         mode: "token",
-        token: strongToken
+        token: strongToken,
     });
 });
 
 test("ControlSocketServer exposes server-backed Conversation preferences through the control route", async (t) => {
-    const directory = await createTestTempDirectory("conversation-preference-rpc");
-    const socketPath = createTestIpcPath("conversation-preference-rpc", directory);
-    const preferences = new ConversationPreferenceStore(join(directory, "conversation-preferences.json"));
+    const directory = await createTestTempDirectory(
+        "conversation-preference-rpc",
+    );
+    const socketPath = createTestIpcPath(
+        "conversation-preference-rpc",
+        directory,
+    );
+    const preferences = new ConversationPreferenceStore(
+        join(directory, "conversation-preferences.json"),
+    );
     const routes = new ControlRouteComposition({
         conversationPreferences: preferences,
         instances: new InstanceRegistry([]),
@@ -341,7 +454,11 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         undefined,
         "tui",
     );
-    assert.equal(initialPreferences.error, undefined, JSON.stringify(initialPreferences.error));
+    assert.equal(
+        initialPreferences.error,
+        undefined,
+        JSON.stringify(initialPreferences.error),
+    );
     assert.deepEqual(initialPreferences.payload, {
         orderByWorkspace: {},
         titles: {},
@@ -349,19 +466,24 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         workspaceOrder: [],
     });
 
-    const updated = (await request(
-        socketPath,
-        "@control",
-        "conversation.updatePreferences",
-        {
-            orderByWorkspace: {
-                "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
+    const updated = (
+        await request(
+            socketPath,
+            "@control",
+            "conversation.updatePreferences",
+            {
+                orderByWorkspace: {
+                    "/work/portable-devshell": [
+                        "alpha\u0000ctx-b",
+                        "alpha\u0000ctx-a",
+                    ],
+                },
+                titles: { "alpha\u0000ctx-a": "Audit regression" },
+                workspaceOrder: ["/work/portable-devshell"],
             },
-            titles: { "alpha\u0000ctx-a": "Audit regression" },
-            workspaceOrder: ["/work/portable-devshell"],
-        },
-        "tui",
-    )).payload;
+            "tui",
+        )
+    ).payload;
     assert.deepEqual(updated, {
         orderByWorkspace: {
             "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
@@ -370,27 +492,40 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         version: 1,
         workspaceOrder: ["/work/portable-devshell"],
     });
-    assert.deepEqual((await request(
-        socketPath,
-        "@control",
-        "conversation.preferences",
-        undefined,
-        "tui",
-    )).payload, updated);
-    assert.equal((await request(
-        socketPath,
-        "@control",
-        "conversation.updatePreferences",
-        { unknown: true },
-        "tui",
-    )).error?.code, errorCodes.targetInvalid);
+    assert.deepEqual(
+        (
+            await request(
+                socketPath,
+                "@control",
+                "conversation.preferences",
+                undefined,
+                "tui",
+            )
+        ).payload,
+        updated,
+    );
+    assert.equal(
+        (
+            await request(
+                socketPath,
+                "@control",
+                "conversation.updatePreferences",
+                { unknown: true },
+                "tui",
+            )
+        ).error?.code,
+        errorCodes.targetInvalid,
+    );
 });
 
 test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
     const directory = await createTestTempDirectory("route-snapshot");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
-    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
+    const routes = new ControlRouteComposition({
+        instances: registry,
+        shutdown() {},
+    });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     t.after(async () => {
@@ -401,26 +536,39 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
         );
     });
 
-    const before = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    const before = await request(
+        socketPath,
+        asInstanceName("alpha"),
+        "runtime.snapshot",
+    );
     assert.equal(before.error?.code, "control.invalidTarget");
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
 
-    const after = await request(socketPath, asInstanceName("alpha"), "runtime.snapshot");
+    const after = await request(
+        socketPath,
+        asInstanceName("alpha"),
+        "runtime.snapshot",
+    );
     assert.equal(after.error, undefined);
-    assert.equal((after.payload as { snapshot: { name: string } }).snapshot.name, "alpha");
+    assert.equal(
+        (after.payload as { snapshot: { name: string } }).snapshot.name,
+        "alpha",
+    );
 });
 
 test("interactive runtime receives stream input while the root handler is still running", async (t) => {
-    const activeTodos: ActiveTodoSummary[] = [{
-        completed: 1,
-        currentItem: "Verify release lifecycle",
-        revision: 3,
-        status: "in_progress",
-        taskId: "release-review",
-        title: "Release review",
-        total: 2
-    }];
+    const activeTodos: ActiveTodoSummary[] = [
+        {
+            completed: 1,
+            currentItem: "Verify release lifecycle",
+            revision: 3,
+            status: "in_progress",
+            taskId: "release-review",
+            title: "Release review",
+            total: 2,
+        },
+    ];
     const harness = await createHarness(activeTodos);
     t.after(() => harness.cleanup());
     const client = createClient(harness.socketPath, "cli");
@@ -429,14 +577,16 @@ test("interactive runtime receives stream input while the root handler is still 
         asInstanceName("alpha"),
         "runtime",
         "start",
-        {}
+        {},
     );
     const stream: ClientStream = opened.stream;
     t.after(() => stream.close());
     assert.equal(opened.acknowledgement.replyTo === undefined, false);
     assert.notEqual(stream.id, opened.acknowledgement.replyTo);
 
-    await stream.send("input", { data: Buffer.from("hello").toString("base64") });
+    await stream.send("input", {
+        data: Buffer.from("hello").toString("base64"),
+    });
 
     const output = await stream.nextEvent();
     assert.equal(output.name, "runtime.output");
@@ -446,18 +596,19 @@ test("interactive runtime receives stream input while the root handler is still 
     assert.equal(completed.name, "stream.completed");
     assert.equal((completed.payload as { ready: boolean }).ready, true);
     assert.deepEqual(
-        (completed.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
-        activeTodos
+        (completed.payload as { activeTodos?: ActiveTodoSummary[] })
+            .activeTodos,
+        activeTodos,
     );
 
     const stopped = await request(
         harness.socketPath,
         asInstanceName("alpha"),
-        "runtime.stop"
+        "runtime.stop",
     );
     assert.deepEqual(
         (stopped.payload as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
-        activeTodos
+        activeTodos,
     );
 });
 
@@ -488,23 +639,33 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
 
     const client = createClient(socketPath, "tui");
     await negotiateClient(client, "tui");
-    const opened = await client.request<{ generation: number; terminalId: string }>(
-        asInstanceName("alpha"),
-        "terminal",
-        "open",
-        { cols: 80, rows: 24, workspace: "/tmp/ws" },
-    );
+    const opened = await client.request<{
+        generation: number;
+        terminalId: string;
+    }>(asInstanceName("alpha"), "terminal", "open", {
+        cols: 80,
+        rows: 24,
+        workspace: "/tmp/ws",
+    });
     process.emit("before-attach");
 
     const attached = await client.openStream(
         asInstanceName("alpha"),
         "terminal",
         "attach",
-        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+        {
+            fromSeq: 0,
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+        },
     );
     t.after(() => attached.stream.close());
     assert.equal(
-        ((attached.acknowledgement.payload as { session: { terminalId: string } }).session).terminalId,
+        (
+            attached.acknowledgement.payload as {
+                session: { terminalId: string };
+            }
+        ).session.terminalId,
         opened.terminalId,
     );
     const replay = await attached.stream.nextEvent();
@@ -549,7 +710,10 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     assert.deepEqual(process.resizes, [{ cols: 120, rows: 40 }]);
 
     process.emit("live");
-    assert.deepEqual((await attached.stream.nextEvent()).payload, { data: "live", seq: 2 });
+    assert.deepEqual((await attached.stream.nextEvent()).payload, {
+        data: "live",
+        seq: 2,
+    });
     await attached.stream.send("ack", {
         generation: opened.generation,
         terminalId: opened.terminalId,
@@ -564,21 +728,23 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         asInstanceName("alpha"),
         "terminal",
         "attach",
-        { fromSeq: 2, generation: opened.generation, terminalId: opened.terminalId },
-    );
-    t.after(() => resumed.stream.close());
-    assert.deepEqual((await resumed.stream.nextEvent()).payload, { data: "detached", seq: 3 });
-
-    await client.request(
-        asInstanceName("alpha"),
-        "terminal",
-        "kill",
         {
+            fromSeq: 2,
             generation: opened.generation,
             terminalId: opened.terminalId,
-            version: 2,
         },
     );
+    t.after(() => resumed.stream.close());
+    assert.deepEqual((await resumed.stream.nextEvent()).payload, {
+        data: "detached",
+        seq: 3,
+    });
+
+    await client.request(asInstanceName("alpha"), "terminal", "kill", {
+        generation: opened.generation,
+        terminalId: opened.terminalId,
+        version: 2,
+    });
     assert.equal(process.killed, true);
 });
 
@@ -607,17 +773,23 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
 
     const client = createClient(socketPath, "tui");
     await negotiateClient(client, "tui");
-    const opened = await client.request<{ generation: number; terminalId: string }>(
-        asInstanceName("alpha"),
-        "terminal",
-        "open",
-        { cols: 80, rows: 24, workspace: "/tmp/ws" },
-    );
+    const opened = await client.request<{
+        generation: number;
+        terminalId: string;
+    }>(asInstanceName("alpha"), "terminal", "open", {
+        cols: 80,
+        rows: 24,
+        workspace: "/tmp/ws",
+    });
     const attached = await client.openStream(
         asInstanceName("alpha"),
         "terminal",
         "attach",
-        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+        {
+            fromSeq: 0,
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+        },
     );
     process.emit("12345");
     process.emit("67890");
@@ -637,9 +809,16 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         asInstanceName("alpha"),
         "terminal",
         "attach",
-        { fromSeq: 0, generation: opened.generation, terminalId: opened.terminalId },
+        {
+            fromSeq: 0,
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+        },
     );
-    assert.deepEqual((await resumed.stream.nextEvent()).payload, { data: "12345", seq: 1 });
+    assert.deepEqual((await resumed.stream.nextEvent()).payload, {
+        data: "12345",
+        seq: 1,
+    });
     resumed.stream.close();
 });
 
@@ -651,7 +830,7 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
         instances: new InstanceRegistry([]),
         shutdown() {
             shutdownRequested = true;
-        }
+        },
     });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
@@ -668,12 +847,19 @@ test("service.shutdown replies before invoking the shutdown action", async (t) =
     await waitFor(() => shutdownRequested);
 });
 
-async function createHarness(activeTodos: ActiveTodoSummary[] = []): Promise<Harness> {
+async function createHarness(
+    activeTodos: ActiveTodoSummary[] = [],
+): Promise<Harness> {
     const directory = await createTestTempDirectory("control-socket");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const worker = new FakeWorker("alpha");
-    const registry = new InstanceRegistry([createDescriptor(worker, activeTodos)]);
-    const routes = new ControlRouteComposition({ instances: registry, shutdown() {} });
+    const registry = new InstanceRegistry([
+        createDescriptor(worker, activeTodos),
+    ]);
+    const routes = new ControlRouteComposition({
+        instances: registry,
+        shutdown() {},
+    });
     const server = new ControlSocketServer({ routes, socketPath });
     await server.start();
     return {
@@ -688,30 +874,41 @@ async function createHarness(activeTodos: ActiveTodoSummary[] = []): Promise<Har
         routes,
         server,
         socketPath,
-        worker
+        worker,
     };
 }
 
-function createDescriptor(worker: FakeWorker, activeTodos: ActiveTodoSummary[] = []) {
-    const descriptor = createTestInstanceDescriptor(worker as unknown as WorkerInstance, {
-        name: "alpha"
-    });
+function createDescriptor(
+    worker: FakeWorker,
+    activeTodos: ActiveTodoSummary[] = [],
+) {
+    const descriptor = createTestInstanceDescriptor(
+        worker as unknown as WorkerInstance,
+        {
+            name: "alpha",
+        },
+    );
     return {
         ...descriptor,
         todo: {
             ...descriptor.todo,
-            summaries: () => activeTodos
-        }
+            summaries: () => activeTodos,
+        },
     };
 }
 
-function createClient(socketPath: string, peer: Exclude<Peer, "server">): ClientConnection {
+function createClient(
+    socketPath: string,
+    peer: Exclude<Peer, "server">,
+): ClientConnection {
     return new ClientConnection({
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer
+        peer,
     });
 }
 
@@ -741,7 +938,7 @@ async function request(
     destination: Destination,
     name: string,
     payload?: JsonValue,
-    peer: Exclude<Peer, "server"> = "cli"
+    peer: Exclude<Peer, "server"> = "cli",
 ): Promise<ClientEvent> {
     const [module, operation] = name.split(".");
     const connection = createClient(socketPath, peer);
@@ -820,7 +1017,13 @@ class FakeTerminalProcess implements TerminalProcess {
 
 class FakeWorker {
     readonly #name: string;
-    readonly #events: Array<{ at: string; data?: JsonValue; instanceName: string; seq: number; type: string }> = [];
+    readonly #events: Array<{
+        at: string;
+        data?: JsonValue;
+        instanceName: string;
+        seq: number;
+        type: string;
+    }> = [];
     #lastSeq = 0;
     #ready = false;
     lastReadLogsQuery?: { fromSeq?: number; limit?: number };
@@ -839,7 +1042,7 @@ class FakeWorker {
             lastSeq: this.#lastSeq,
             name: asInstanceName(this.#name),
             ready: this.#ready,
-            status: this.#ready ? "ready" : "stopped"
+            status: this.#ready ? "ready" : "stopped",
         };
     }
 
@@ -867,12 +1070,16 @@ class FakeWorker {
                 instanceName: asInstanceName(this.#name),
                 message: "ready\n",
                 seq: 1,
-                stream: "stdout" as const
-            }
+                stream: "stdout" as const,
+            },
         ];
     }
 
-    async callTool(_toolName: string, _input: JsonValue, options: { ctxId?: string; requestId?: string; source?: string }) {
+    async callTool(
+        _toolName: string,
+        _input: JsonValue,
+        options: { ctxId?: string; requestId?: string; source?: string },
+    ) {
         this.lastToolCall = options;
         return { exitCode: 0 };
     }
@@ -902,12 +1109,15 @@ class FakeWorker {
         return {
             events: this.#events.filter((event) => event.seq >= fromSeq),
             kind: "events" as const,
-            lastSeq: this.#lastSeq
+            lastSeq: this.#lastSeq,
         };
     }
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+async function waitFor(
+    predicate: () => boolean,
+    timeoutMs = 1_000,
+): Promise<void> {
     const startedAt = Date.now();
     while (!predicate()) {
         if (Date.now() - startedAt > timeoutMs) {

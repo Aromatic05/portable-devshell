@@ -1,7 +1,6 @@
 import type { ApprovalPolicy } from "../../../tool/Approval.js";
 import type { InstanceContainerMountConfig } from "../../../instance/Create.js";
 import type {
-    ControlConfig,
     ControlGlobalConfig,
     ControlInstanceAlertsConfig,
     ControlInstanceConfig,

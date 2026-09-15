@@ -1,4 +1,7 @@
-import type { TuiTmuxInspectPane, TuiTmuxInputResult } from "../../app/operation/Tmux.js";
+import type {
+    TuiTmuxInspectPane,
+    TuiTmuxInputResult,
+} from "../../app/operation/Tmux.js";
 import { TuiTerminalBuffer } from "../emulation/Buffer.js";
 import type { TuiTerminalLine } from "../emulation/Model.js";
 import {
@@ -15,9 +18,19 @@ import {
 } from "./Model.js";
 
 export interface TuiTmuxPaneTerminalOperations {
-    inspectPane(instance: string, workspace: string, pane: string, lines?: number): Promise<TuiTmuxInspectPane | undefined>;
+    inspectPane(
+        instance: string,
+        workspace: string,
+        pane: string,
+        lines?: number,
+    ): Promise<TuiTmuxInspectPane | undefined>;
     listPanes(instance: string): Promise<TuiTmuxListPane[]>;
-    sendInput(instance: string, workspace: string, task: string, input: string): Promise<TuiTmuxInputResult>;
+    sendInput(
+        instance: string,
+        workspace: string,
+        task: string,
+        input: string,
+    ): Promise<TuiTmuxInputResult>;
 }
 
 export type TuiTmuxPaneTerminalStatus = "error" | "idle" | "loading" | "ready";
@@ -65,7 +78,11 @@ export class TuiTmuxPaneTerminalSession {
     #inputTail: Promise<void> = Promise.resolve();
     #refreshGeneration = 0;
     #refreshInFlight?: Promise<void>;
-    #snapshot: TuiTmuxPaneTerminalSnapshot = { panes: [], selectedIndex: 0, status: "idle" };
+    #snapshot: TuiTmuxPaneTerminalSnapshot = {
+        panes: [],
+        selectedIndex: 0,
+        status: "idle",
+    };
     #stopPolling?: () => void;
     #viewportRows: number;
 
@@ -76,7 +93,10 @@ export class TuiTmuxPaneTerminalSession {
     }) {
         this.#operations = options.operations;
         this.#scheduler = options.scheduler ?? defaultScheduler;
-        this.#viewportRows = Math.max(1, Math.floor(options.viewportRows ?? 24));
+        this.#viewportRows = Math.max(
+            1,
+            Math.floor(options.viewportRows ?? 24),
+        );
     }
 
     dispose(): void {
@@ -133,7 +153,14 @@ export class TuiTmuxPaneTerminalSession {
             this.#replace({ panes: [], selectedIndex: 0, status: "idle" });
             return;
         }
-        this.#replace({ active: undefined, error: undefined, instance, panes: [], selectedIndex: 0, status: "loading" });
+        this.#replace({
+            active: undefined,
+            error: undefined,
+            instance,
+            panes: [],
+            selectedIndex: 0,
+            status: "loading",
+        });
         await this.refresh();
     }
 
@@ -161,30 +188,47 @@ export class TuiTmuxPaneTerminalSession {
             return;
         }
         const generation = ++this.#refreshGeneration;
-        const previouslySelected = this.#snapshot.panes[this.#snapshot.selectedIndex];
+        const previouslySelected =
+            this.#snapshot.panes[this.#snapshot.selectedIndex];
         let panes: TuiTmuxPaneViewModel[];
         try {
-            panes = projectTmuxPanes(await this.#operations.listPanes(instance));
+            panes = projectTmuxPanes(
+                await this.#operations.listPanes(instance),
+            );
         } catch (error) {
             if (generation !== this.#refreshGeneration) {
                 return;
             }
-            this.#replace({ ...this.#snapshot, error: readErrorMessage(error), status: "error" });
+            this.#replace({
+                ...this.#snapshot,
+                error: readErrorMessage(error),
+                status: "error",
+            });
             return;
         }
         if (generation !== this.#refreshGeneration) {
             return;
         }
 
-        const preservedIndex = previouslySelected === undefined
-            ? -1
-            : panes.findIndex((pane) => pane.id === previouslySelected.id && pane.workspace === previouslySelected.workspace);
-        const selectedIndex = preservedIndex >= 0
-            ? preservedIndex
-            : clampIndex(this.#snapshot.selectedIndex, panes.length);
+        const preservedIndex =
+            previouslySelected === undefined
+                ? -1
+                : panes.findIndex(
+                      (pane) =>
+                          pane.id === previouslySelected.id &&
+                          pane.workspace === previouslySelected.workspace,
+                  );
+        const selectedIndex =
+            preservedIndex >= 0
+                ? preservedIndex
+                : clampIndex(this.#snapshot.selectedIndex, panes.length);
         let active = this.#snapshot.active;
         if (active !== undefined) {
-            const current = panes.find((pane) => pane.id === active?.paneId && pane.workspace === active?.workspace);
+            const current = panes.find(
+                (pane) =>
+                    pane.id === active?.paneId &&
+                    pane.workspace === active?.workspace,
+            );
             if (current === undefined) {
                 active = undefined;
             } else {
@@ -198,19 +242,30 @@ export class TuiTmuxPaneTerminalSession {
                     name: current.name,
                     status: current.status,
                     taskId: sameTaskRunning ? active.taskId : undefined,
-                    warning: active.attached && sameTaskRunning ? active.warning : undefined,
+                    warning:
+                        active.attached && sameTaskRunning
+                            ? active.warning
+                            : undefined,
                 };
             }
         }
         if (active !== undefined) {
             let detail: TuiTmuxInspectPane | undefined;
             try {
-                detail = await this.#operations.inspectPane(instance, active.workspace, active.paneId);
+                detail = await this.#operations.inspectPane(
+                    instance,
+                    active.workspace,
+                    active.paneId,
+                );
             } catch (error) {
                 if (generation !== this.#refreshGeneration) {
                     return;
                 }
-                this.#replace({ ...this.#snapshot, error: readErrorMessage(error), status: "error" });
+                this.#replace({
+                    ...this.#snapshot,
+                    error: readErrorMessage(error),
+                    status: "error",
+                });
                 return;
             }
             if (generation !== this.#refreshGeneration) {
@@ -221,7 +276,14 @@ export class TuiTmuxPaneTerminalSession {
                 return;
             }
         }
-        this.#replace({ active, error: undefined, instance, panes, selectedIndex, status: "ready" });
+        this.#replace({
+            active,
+            error: undefined,
+            instance,
+            panes,
+            selectedIndex,
+            status: "ready",
+        });
     }
 
     selectNext(): void {
@@ -252,20 +314,29 @@ export class TuiTmuxPaneTerminalSession {
         const generation = ++this.#refreshGeneration;
         let detail: TuiTmuxInspectPane | undefined;
         try {
-            detail = await this.#operations.inspectPane(instance, pane.workspace, pane.id);
+            detail = await this.#operations.inspectPane(
+                instance,
+                pane.workspace,
+                pane.id,
+            );
         } catch (error) {
             if (generation !== this.#refreshGeneration) {
                 return;
             }
-            this.#replace({ ...this.#snapshot, error: readErrorMessage(error), status: "error" });
+            this.#replace({
+                ...this.#snapshot,
+                error: readErrorMessage(error),
+                status: "error",
+            });
             return;
         }
         if (generation !== this.#refreshGeneration) {
             return;
         }
-        const taskId = detail?.taskId !== undefined && detail.taskStatus === "running"
-            ? detail.taskId
-            : undefined;
+        const taskId =
+            detail?.taskId !== undefined && detail.taskStatus === "running"
+                ? detail.taskId
+                : undefined;
         const lines = await parseTmuxInspectLines(detail?.lines ?? []);
         if (generation !== this.#refreshGeneration) {
             return;
@@ -280,10 +351,17 @@ export class TuiTmuxPaneTerminalSession {
                 lines,
                 name: pane.name,
                 paneId: pane.id,
-                scroll: renderTmuxInspectView(lines, this.#viewportRows, lines.length),
+                scroll: renderTmuxInspectView(
+                    lines,
+                    this.#viewportRows,
+                    lines.length,
+                ),
                 status: detail?.status ?? pane.status,
                 taskId,
-                warning: attach && taskId !== undefined ? TUI_TMUX_MULTI_WRITER_WARNING : undefined,
+                warning:
+                    attach && taskId !== undefined
+                        ? TUI_TMUX_MULTI_WRITER_WARNING
+                        : undefined,
                 workspace: pane.workspace,
             },
             error: undefined,
@@ -318,7 +396,10 @@ export class TuiTmuxPaneTerminalSession {
         if (active === undefined || !active.attached) {
             return;
         }
-        this.#replace({ ...this.#snapshot, active: { ...active, attached: false, warning: undefined } });
+        this.#replace({
+            ...this.#snapshot,
+            active: { ...active, attached: false, warning: undefined },
+        });
     }
 
     async handleInput(raw: string): Promise<void> {
@@ -358,10 +439,18 @@ export class TuiTmuxPaneTerminalSession {
             }
             let result: TuiTmuxInputResult;
             try {
-                result = await this.#operations.sendInput(instance, workspace, taskId, action.input);
+                result = await this.#operations.sendInput(
+                    instance,
+                    workspace,
+                    taskId,
+                    action.input,
+                );
             } catch (error) {
                 if (!this.#disposed) {
-                    this.#replace({ ...this.#snapshot, error: readErrorMessage(error) });
+                    this.#replace({
+                        ...this.#snapshot,
+                        error: readErrorMessage(error),
+                    });
                 }
                 return;
             }
@@ -370,11 +459,20 @@ export class TuiTmuxPaneTerminalSession {
             }
             this.#refreshGeneration += 1;
             const current = this.#snapshot.active;
-            if (current === undefined || current.taskId !== taskId || current.workspace !== workspace) {
+            if (
+                current === undefined ||
+                current.taskId !== taskId ||
+                current.workspace !== workspace
+            ) {
                 return;
             }
-            const lines = [...current.lines, ...(await parseTmuxInspectLines(result.output))];
-            const offset = current.scroll.atBottom ? lines.length : current.scroll.offset;
+            const lines = [
+                ...current.lines,
+                ...(await parseTmuxInspectLines(result.output)),
+            ];
+            const offset = current.scroll.atBottom
+                ? lines.length
+                : current.scroll.offset;
             const exited = result.status !== "running";
             this.#replace({
                 ...this.#snapshot,
@@ -382,7 +480,11 @@ export class TuiTmuxPaneTerminalSession {
                     ...current,
                     attached: exited ? false : current.attached,
                     lines,
-                    scroll: renderTmuxInspectView(lines, this.#viewportRows, offset),
+                    scroll: renderTmuxInspectView(
+                        lines,
+                        this.#viewportRows,
+                        offset,
+                    ),
                     status: result.status,
                     taskId: exited ? undefined : current.taskId,
                     warning: exited ? undefined : current.warning,
@@ -407,7 +509,10 @@ export class TuiTmuxPaneTerminalSession {
             await this.handleInput(raw);
             return;
         }
-        const action = routeTmuxPaneBrowseInput(raw, active === undefined ? "list" : "view");
+        const action = routeTmuxPaneBrowseInput(
+            raw,
+            active === undefined ? "list" : "view",
+        );
         switch (action.kind) {
             case "select":
                 if (action.direction === "next") {
@@ -430,7 +535,10 @@ export class TuiTmuxPaneTerminalSession {
         }
     }
 
-    startPolling(intervalMs: number, maxTicks: number = Number.POSITIVE_INFINITY): void {
+    startPolling(
+        intervalMs: number,
+        maxTicks: number = Number.POSITIVE_INFINITY,
+    ): void {
         if (this.#disposed) {
             return;
         }
@@ -450,9 +558,14 @@ export class TuiTmuxPaneTerminalSession {
         this.#stopPolling = undefined;
     }
 
-    async #applyInspect(active: TuiTmuxPaneTerminalActive, detail: TuiTmuxInspectPane | undefined): Promise<TuiTmuxPaneTerminalActive> {
+    async #applyInspect(
+        active: TuiTmuxPaneTerminalActive,
+        detail: TuiTmuxInspectPane | undefined,
+    ): Promise<TuiTmuxPaneTerminalActive> {
         const lines = await parseTmuxInspectLines(detail?.lines ?? []);
-        const offset = active.scroll.atBottom ? lines.length : active.scroll.offset;
+        const offset = active.scroll.atBottom
+            ? lines.length
+            : active.scroll.offset;
         const taskId =
             active.taskId !== undefined &&
             detail?.taskId === active.taskId &&
@@ -468,7 +581,10 @@ export class TuiTmuxPaneTerminalSession {
             scroll: renderTmuxInspectView(lines, this.#viewportRows, offset),
             status: detail?.status ?? active.status,
             taskId,
-            warning: active.attached && taskId !== undefined ? active.warning : undefined,
+            warning:
+                active.attached && taskId !== undefined
+                    ? active.warning
+                    : undefined,
         };
     }
 
@@ -482,7 +598,11 @@ export class TuiTmuxPaneTerminalSession {
             return;
         }
         const keepViewOpen = this.#snapshot.active !== undefined;
-        this.#replace({ ...this.#snapshot, active: undefined, selectedIndex: clamped });
+        this.#replace({
+            ...this.#snapshot,
+            active: undefined,
+            selectedIndex: clamped,
+        });
         if (keepViewOpen) {
             void this.#openSelected(false);
         }
@@ -508,14 +628,22 @@ function readErrorMessage(error: unknown): string {
 }
 
 const TMUX_INSPECT_PARSE_MIN_COLUMNS = 80;
-// eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|\u001B[@-Z\\-_]/g;
 
-export async function parseTmuxInspectLines(rawLines: readonly string[]): Promise<TuiTerminalLine[]> {
+const ANSI_ESCAPE_PATTERN = new RegExp(
+    String.raw`\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|\u001B[@-Z\\-_]`,
+    "g",
+);
+
+export async function parseTmuxInspectLines(
+    rawLines: readonly string[],
+): Promise<TuiTerminalLine[]> {
     if (rawLines.length === 0) {
         return [];
     }
-    const columns = Math.max(TMUX_INSPECT_PARSE_MIN_COLUMNS, ...rawLines.map(visibleWidth));
+    const columns = Math.max(
+        TMUX_INSPECT_PARSE_MIN_COLUMNS,
+        ...rawLines.map(visibleWidth),
+    );
     const buffer = new TuiTerminalBuffer({ columns, rows: rawLines.length });
     try {
         await buffer.write(rawLines.join("\r\n"));

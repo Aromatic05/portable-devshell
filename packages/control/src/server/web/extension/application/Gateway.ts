@@ -5,7 +5,7 @@ import {
     type IncomingHttpHeaders,
     type IncomingMessage,
     type RequestOptions,
-    type ServerResponse
+    type ServerResponse,
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { extname, isAbsolute, relative, resolve } from "node:path";
@@ -50,121 +50,195 @@ export class ExtensionWebGateway {
     }
 
     install(http: HttpHost, sessions: ControlWebSessionService): () => void {
-        const removeHttp = http.registerRawPrefix(this.#basePath, async (request, response) => {
-            const target = parseMountedRequest(request.url ?? "/", this.#basePath);
-            if (target === undefined) {
-                writeError(response, 404, "Extension WebUI not found");
-                return;
-            }
-            if (!sessions.authorize(request)) {
-                if (isBrowserEntryRequest(request, target.suffix)) {
-                    redirectToLogin(response, this.#loginPath, this.#returnPath(request.url ?? "/"));
+        const removeHttp = http.registerRawPrefix(
+            this.#basePath,
+            async (request, response) => {
+                const target = parseMountedRequest(
+                    request.url ?? "/",
+                    this.#basePath,
+                );
+                if (target === undefined) {
+                    writeError(response, 404, "Extension WebUI not found");
                     return;
                 }
-                writeError(response, 401, "Unauthorized");
-                return;
-            }
-
-            if (!this.#hasApplication(target.applicationId)) {
-                writeError(response, 404, "Extension WebUI not found");
-                return;
-            }
-
-            let acquired;
-            try {
-                acquired = await this.#extensions.acquireRegistration("web.applications", target.applicationId);
-            } catch {
-                const published = this.#hasApplication(target.applicationId);
-                writeError(
-                    response,
-                    published ? 503 : 404,
-                    published ? "Extension WebUI unavailable" : "Extension WebUI not found"
-                );
-                return;
-            }
-            const { extensionId, lease, registration } = acquired;
-            try {
-                try {
-                    const source = (registration.binding as WebApplicationBinding).source;
-                    if (source.kind === "files") {
-                        const directory = resolve(
-                            this.#paths.generationDirectory(extensionId, lease.generation),
-                            source.directory
+                if (!sessions.authorize(request)) {
+                    if (isBrowserEntryRequest(request, target.suffix)) {
+                        redirectToLogin(
+                            response,
+                            this.#loginPath,
+                            this.#returnPath(request.url ?? "/"),
                         );
-                        await serveStatic(request, response, directory, target.suffix);
                         return;
                     }
-                    const upstream = await source.resolve();
-                    if (upstream === undefined) {
-                        writeError(response, 503, "Extension WebUI unavailable");
-                        return;
-                    }
-                    await proxyHttp(request, response, {
-                        upstream: requireLoopbackUpstream(upstream),
-                        upstreamPath: target.suffix
-                    }, target.mountPath);
-                } catch {
-                    if (!response.headersSent) {
-                        writeError(response, 503, "Extension WebUI unavailable");
-                        return;
-                    }
-                    response.destroy();
+                    writeError(response, 401, "Unauthorized");
+                    return;
                 }
-            } finally {
-                lease.release();
-            }
-        });
 
-        const removeUpgrade = http.registerUpgradePrefix(this.#basePath, async (request, socket, head) => {
-            if (!sessions.authorize(request)) {
-                rejectUpgrade(socket, 401, "Unauthorized");
-                return;
-            }
-            const target = parseFullRequest(request.url ?? "/", this.#basePath);
-            if (target === undefined) {
-                rejectUpgrade(socket, 404, "Extension WebUI not found");
-                return;
-            }
-            if (!this.#hasApplication(target.applicationId)) {
-                rejectUpgrade(socket, 404, "Extension WebUI not found");
-                return;
-            }
-            let acquired;
-            try {
-                acquired = await this.#extensions.acquireRegistration("web.applications", target.applicationId);
-            } catch {
-                const published = this.#hasApplication(target.applicationId);
-                rejectUpgrade(
-                    socket,
-                    published ? 503 : 404,
-                    published ? "Extension WebSocket unavailable" : "Extension WebUI not found"
-                );
-                return;
-            }
-            const { lease, registration } = acquired;
-            try {
-                try {
-                    const source = (registration.binding as WebApplicationBinding).source;
-                    if (source.kind !== "endpoint") {
-                        rejectUpgrade(socket, 404, "Extension WebSocket not found");
-                        return;
-                    }
-                    const upstream = await source.resolve();
-                    if (upstream === undefined) {
-                        rejectUpgrade(socket, 503, "Extension WebSocket unavailable");
-                        return;
-                    }
-                    await proxyUpgrade(request, socket, head, {
-                        upstream: requireLoopbackUpstream(upstream),
-                        upstreamPath: target.suffix
-                    }, target.mountPath);
-                } catch {
-                    if (!socket.destroyed) rejectUpgrade(socket, 503, "Extension WebSocket unavailable");
+                if (!this.#hasApplication(target.applicationId)) {
+                    writeError(response, 404, "Extension WebUI not found");
+                    return;
                 }
-            } finally {
-                lease.release();
-            }
-        });
+
+                let acquired;
+                try {
+                    acquired = await this.#extensions.acquireRegistration(
+                        "web.applications",
+                        target.applicationId,
+                    );
+                } catch {
+                    const published = this.#hasApplication(
+                        target.applicationId,
+                    );
+                    writeError(
+                        response,
+                        published ? 503 : 404,
+                        published
+                            ? "Extension WebUI unavailable"
+                            : "Extension WebUI not found",
+                    );
+                    return;
+                }
+                const { extensionId, lease, registration } = acquired;
+                try {
+                    try {
+                        const source = (
+                            registration.binding as WebApplicationBinding
+                        ).source;
+                        if (source.kind === "files") {
+                            const directory = resolve(
+                                this.#paths.generationDirectory(
+                                    extensionId,
+                                    lease.generation,
+                                ),
+                                source.directory,
+                            );
+                            await serveStatic(
+                                request,
+                                response,
+                                directory,
+                                target.suffix,
+                            );
+                            return;
+                        }
+                        const upstream = await source.resolve();
+                        if (upstream === undefined) {
+                            writeError(
+                                response,
+                                503,
+                                "Extension WebUI unavailable",
+                            );
+                            return;
+                        }
+                        await proxyHttp(
+                            request,
+                            response,
+                            {
+                                upstream: requireLoopbackUpstream(upstream),
+                                upstreamPath: target.suffix,
+                            },
+                            target.mountPath,
+                        );
+                    } catch {
+                        if (!response.headersSent) {
+                            writeError(
+                                response,
+                                503,
+                                "Extension WebUI unavailable",
+                            );
+                            return;
+                        }
+                        response.destroy();
+                    }
+                } finally {
+                    lease.release();
+                }
+            },
+        );
+
+        const removeUpgrade = http.registerUpgradePrefix(
+            this.#basePath,
+            async (request, socket, head) => {
+                if (!sessions.authorize(request)) {
+                    rejectUpgrade(socket, 401, "Unauthorized");
+                    return;
+                }
+                const target = parseFullRequest(
+                    request.url ?? "/",
+                    this.#basePath,
+                );
+                if (target === undefined) {
+                    rejectUpgrade(socket, 404, "Extension WebUI not found");
+                    return;
+                }
+                if (!this.#hasApplication(target.applicationId)) {
+                    rejectUpgrade(socket, 404, "Extension WebUI not found");
+                    return;
+                }
+                let acquired;
+                try {
+                    acquired = await this.#extensions.acquireRegistration(
+                        "web.applications",
+                        target.applicationId,
+                    );
+                } catch {
+                    const published = this.#hasApplication(
+                        target.applicationId,
+                    );
+                    rejectUpgrade(
+                        socket,
+                        published ? 503 : 404,
+                        published
+                            ? "Extension WebSocket unavailable"
+                            : "Extension WebUI not found",
+                    );
+                    return;
+                }
+                const { lease, registration } = acquired;
+                try {
+                    try {
+                        const source = (
+                            registration.binding as WebApplicationBinding
+                        ).source;
+                        if (source.kind !== "endpoint") {
+                            rejectUpgrade(
+                                socket,
+                                404,
+                                "Extension WebSocket not found",
+                            );
+                            return;
+                        }
+                        const upstream = await source.resolve();
+                        if (upstream === undefined) {
+                            rejectUpgrade(
+                                socket,
+                                503,
+                                "Extension WebSocket unavailable",
+                            );
+                            return;
+                        }
+                        await proxyUpgrade(
+                            request,
+                            socket,
+                            head,
+                            {
+                                upstream: requireLoopbackUpstream(upstream),
+                                upstreamPath: target.suffix,
+                            },
+                            target.mountPath,
+                        );
+                    } catch {
+                        if (!socket.destroyed)
+                            rejectUpgrade(
+                                socket,
+                                503,
+                                "Extension WebSocket unavailable",
+                            );
+                    }
+                } finally {
+                    lease.release();
+                }
+            },
+        );
 
         return () => {
             removeUpgrade();
@@ -174,7 +248,8 @@ export class ExtensionWebGateway {
 
     #returnPath(value: string): string {
         const url = new URL(value, "http://localhost");
-        const suffix = url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+/, "")}`;
+        const suffix =
+            url.pathname === "/" ? "/" : `/${url.pathname.replace(/^\/+/, "")}`;
         return `${this.#basePath}${suffix}${url.search}`;
     }
 
@@ -185,19 +260,28 @@ export class ExtensionWebGateway {
     }
 }
 
-function parseMountedRequest(value: string, basePath: string): ExtensionWebRequestTarget | undefined {
+function parseMountedRequest(
+    value: string,
+    basePath: string,
+): ExtensionWebRequestTarget | undefined {
     const parsed = new URL(value, "http://localhost");
     return parseExtensionSuffix(`${parsed.pathname}${parsed.search}`, basePath);
 }
 
-function parseFullRequest(value: string, basePath: string): ExtensionWebRequestTarget | undefined {
+function parseFullRequest(
+    value: string,
+    basePath: string,
+): ExtensionWebRequestTarget | undefined {
     const parsed = new URL(value, "http://localhost");
     if (!pathMatchesPrefix(parsed.pathname, basePath)) return undefined;
     const suffix = parsed.pathname.slice(basePath.length) || "/";
     return parseExtensionSuffix(`${suffix}${parsed.search}`, basePath);
 }
 
-function parseExtensionSuffix(value: string, basePath: string): ExtensionWebRequestTarget | undefined {
+function parseExtensionSuffix(
+    value: string,
+    basePath: string,
+): ExtensionWebRequestTarget | undefined {
     const parsed = new URL(value, "http://localhost");
     const match = /^\/([^/]+)(\/.*)?$/u.exec(parsed.pathname);
     if (match === null) return undefined;
@@ -212,7 +296,7 @@ function parseExtensionSuffix(value: string, basePath: string): ExtensionWebRequ
     return {
         applicationId,
         mountPath: `${basePath}/${applicationId}`,
-        suffix: `${pathname}${parsed.search}`
+        suffix: `${pathname}${parsed.search}`,
     };
 }
 
@@ -220,7 +304,7 @@ async function serveStatic(
     request: IncomingMessage,
     response: ServerResponse,
     directory: string,
-    suffix: string
+    suffix: string,
 ): Promise<void> {
     const method = (request.method ?? "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
@@ -244,11 +328,18 @@ async function serveStatic(
 
     const root = await realpath(directory);
     const relativePath = decoded.replace(/^\/+/, "");
-    let candidate = resolve(root, relativePath.length === 0 ? "index.html" : relativePath);
-    let metadata = await lstat(candidate).catch((error: unknown) => isMissing(error) ? undefined : Promise.reject(error));
+    let candidate = resolve(
+        root,
+        relativePath.length === 0 ? "index.html" : relativePath,
+    );
+    let metadata = await lstat(candidate).catch((error: unknown) =>
+        isMissing(error) ? undefined : Promise.reject(error),
+    );
     if (metadata?.isDirectory()) {
         candidate = resolve(candidate, "index.html");
-        metadata = await lstat(candidate).catch((error: unknown) => isMissing(error) ? undefined : Promise.reject(error));
+        metadata = await lstat(candidate).catch((error: unknown) =>
+            isMissing(error) ? undefined : Promise.reject(error),
+        );
     }
     if (metadata === undefined || !metadata.isFile()) {
         writeError(response, 404, "Extension WebUI asset not found");
@@ -283,9 +374,12 @@ async function proxyHttp(
     request: IncomingMessage,
     response: ServerResponse,
     target: ResolvedProxyTarget,
-    mountPath: string
+    mountPath: string,
 ): Promise<void> {
-    const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
+    const upstreamUrl = resolveUpstreamUrl(
+        target.upstream,
+        target.upstreamPath,
+    );
     await new Promise<void>((resolveRequest, rejectRequest) => {
         let proxyResponse: IncomingMessage | undefined;
         let settled = false;
@@ -305,18 +399,23 @@ async function proxyHttp(
             proxyRequest.destroy();
             finish();
         };
-        const proxyRequest = requestFor(upstreamUrl, {
-            headers: proxyHeaders(request.headers, upstreamUrl, mountPath),
-            method: request.method ?? "GET"
-        }, (upstreamResponse) => {
-            proxyResponse = upstreamResponse;
-            response.statusCode = proxyResponse.statusCode ?? 502;
-            if (proxyResponse.statusMessage !== undefined) response.statusMessage = proxyResponse.statusMessage;
-            copyResponseHeaders(proxyResponse.headers, response);
-            proxyResponse.pipe(response);
-            proxyResponse.once("end", () => finish());
-            proxyResponse.once("error", (error) => finish(error));
-        });
+        const proxyRequest = requestFor(
+            upstreamUrl,
+            {
+                headers: proxyHeaders(request.headers, upstreamUrl, mountPath),
+                method: request.method ?? "GET",
+            },
+            (upstreamResponse) => {
+                proxyResponse = upstreamResponse;
+                response.statusCode = proxyResponse.statusCode ?? 502;
+                if (proxyResponse.statusMessage !== undefined)
+                    response.statusMessage = proxyResponse.statusMessage;
+                copyResponseHeaders(proxyResponse.headers, response);
+                proxyResponse.pipe(response);
+                proxyResponse.once("end", () => finish());
+                proxyResponse.once("error", (error) => finish(error));
+            },
+        );
         proxyRequest.once("error", (error) => finish(error));
         request.once("aborted", downstreamClosed);
         response.once("close", downstreamClosed);
@@ -335,9 +434,12 @@ async function proxyUpgrade(
     socket: Duplex,
     head: Buffer,
     target: ResolvedProxyTarget,
-    mountPath: string
+    mountPath: string,
 ): Promise<void> {
-    const upstreamUrl = resolveUpstreamUrl(target.upstream, target.upstreamPath);
+    const upstreamUrl = resolveUpstreamUrl(
+        target.upstream,
+        target.upstreamPath,
+    );
     await new Promise<void>((resolveSocket, rejectSocket) => {
         let upstreamSocket: Duplex | undefined;
         let responseStarted = false;
@@ -347,8 +449,10 @@ async function proxyUpgrade(
             settled = true;
             socket.off("close", downstreamClosed);
             upstreamSocket?.off("close", upstreamClosed);
-            if ((error === undefined || responseStarted) && !socket.destroyed) socket.destroy();
-            if (upstreamSocket !== undefined && !upstreamSocket.destroyed) upstreamSocket.destroy();
+            if ((error === undefined || responseStarted) && !socket.destroyed)
+                socket.destroy();
+            if (upstreamSocket !== undefined && !upstreamSocket.destroyed)
+                upstreamSocket.destroy();
             if (error === undefined) resolveSocket();
             else rejectSocket(error);
         };
@@ -361,21 +465,24 @@ async function proxyUpgrade(
             headers: {
                 ...proxyHeaders(request.headers, upstreamUrl, mountPath),
                 connection: "Upgrade",
-                upgrade: request.headers.upgrade ?? "websocket"
+                upgrade: request.headers.upgrade ?? "websocket",
             },
-            method: request.method ?? "GET"
+            method: request.method ?? "GET",
         });
-        proxyRequest.once("upgrade", (proxyResponse, connectedUpstream, upstreamHead) => {
-            responseStarted = true;
-            upstreamSocket = connectedUpstream;
-            writeUpgradeResponse(socket, proxyResponse);
-            if (upstreamHead.length > 0) socket.write(upstreamHead);
-            if (head.length > 0) upstreamSocket.write(head);
-            socket.pipe(upstreamSocket);
-            upstreamSocket.pipe(socket);
-            socket.once("close", downstreamClosed);
-            upstreamSocket.once("close", upstreamClosed);
-        });
+        proxyRequest.once(
+            "upgrade",
+            (proxyResponse, connectedUpstream, upstreamHead) => {
+                responseStarted = true;
+                upstreamSocket = connectedUpstream;
+                writeUpgradeResponse(socket, proxyResponse);
+                if (upstreamHead.length > 0) socket.write(upstreamHead);
+                if (head.length > 0) upstreamSocket.write(head);
+                socket.pipe(upstreamSocket);
+                upstreamSocket.pipe(socket);
+                socket.once("close", downstreamClosed);
+                upstreamSocket.once("close", upstreamClosed);
+            },
+        );
         proxyRequest.once("response", (proxyResponse) => {
             responseStarted = true;
             writeUpgradeResponse(socket, proxyResponse);
@@ -395,14 +502,18 @@ async function proxyUpgrade(
 function requestFor(
     url: URL,
     options: Pick<RequestOptions, "headers" | "method">,
-    onResponse?: (response: IncomingMessage) => void
+    onResponse?: (response: IncomingMessage) => void,
 ) {
     return url.protocol === "https:"
         ? httpsRequest(url, options, onResponse)
         : httpRequest(url, options, onResponse);
 }
 
-function proxyHeaders(headers: IncomingHttpHeaders, upstream: URL, mountPath: string): IncomingHttpHeaders {
+function proxyHeaders(
+    headers: IncomingHttpHeaders,
+    upstream: URL,
+    mountPath: string,
+): IncomingHttpHeaders {
     const next = { ...headers };
     for (const name of [
         "authorization",
@@ -413,7 +524,7 @@ function proxyHeaders(headers: IncomingHttpHeaders, upstream: URL, mountPath: st
         "x-forwarded-for",
         "x-forwarded-host",
         "x-forwarded-port",
-        "x-forwarded-proto"
+        "x-forwarded-proto",
     ]) {
         delete next[name];
     }
@@ -422,9 +533,13 @@ function proxyHeaders(headers: IncomingHttpHeaders, upstream: URL, mountPath: st
     return next;
 }
 
-function copyResponseHeaders(headers: IncomingHttpHeaders, response: ServerResponse): void {
+function copyResponseHeaders(
+    headers: IncomingHttpHeaders,
+    response: ServerResponse,
+): void {
     for (const [name, value] of Object.entries(headers)) {
-        if (value === undefined || name.toLowerCase() === "set-cookie") continue;
+        if (value === undefined || name.toLowerCase() === "set-cookie")
+            continue;
         response.setHeader(name, value);
     }
 }
@@ -432,8 +547,11 @@ function copyResponseHeaders(headers: IncomingHttpHeaders, response: ServerRespo
 function resolveUpstreamUrl(base: URL, suffix: string): URL {
     const parsed = new URL(suffix, "http://localhost");
     const result = new URL(base.toString());
-    const prefix = result.pathname === "/" ? "" : result.pathname.replace(/\/+$/u, "");
-    result.pathname = `${prefix}${parsed.pathname.startsWith("/") ? parsed.pathname : `/${parsed.pathname}`}` || "/";
+    const prefix =
+        result.pathname === "/" ? "" : result.pathname.replace(/\/+$/u, "");
+    result.pathname =
+        `${prefix}${parsed.pathname.startsWith("/") ? parsed.pathname : `/${parsed.pathname}`}` ||
+        "/";
     result.search = parsed.search;
     result.hash = "";
     return result;
@@ -445,11 +563,13 @@ function requireLoopbackUpstream(value: URL): URL {
         throw new Error("Extension WebUI upstream must use http or https.");
     }
     const hostname = url.hostname.toLowerCase();
-    const loopback = hostname === "localhost"
-        || hostname === "::1"
-        || hostname === "[::1]"
-        || /^127(?:\.\d{1,3}){3}$/u.test(hostname);
-    if (!loopback) throw new Error("Extension WebUI upstream must be loopback-only.");
+    const loopback =
+        hostname === "localhost" ||
+        hostname === "::1" ||
+        hostname === "[::1]" ||
+        /^127(?:\.\d{1,3}){3}$/u.test(hostname);
+    if (!loopback)
+        throw new Error("Extension WebUI upstream must be loopback-only.");
     return url;
 }
 
@@ -460,22 +580,33 @@ function writeUpgradeResponse(socket: Duplex, response: IncomingMessage): void {
     for (let index = 0; index < response.rawHeaders.length; index += 2) {
         const name = response.rawHeaders[index];
         const value = response.rawHeaders[index + 1];
-        if (name === undefined || value === undefined || name.toLowerCase() === "set-cookie") continue;
+        if (
+            name === undefined ||
+            value === undefined ||
+            name.toLowerCase() === "set-cookie"
+        )
+            continue;
         socket.write(`${name}: ${value}\r\n`);
     }
     socket.write("\r\n");
 }
 
-function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
+function rejectUpgrade(
+    socket: Duplex,
+    statusCode: number,
+    message: string,
+): void {
     const body = `${message}\n`;
-    socket.end([
-        `HTTP/1.1 ${statusCode} ${upgradeStatusText(statusCode)}`,
-        "Connection: close",
-        "Content-Type: text/plain; charset=utf-8",
-        `Content-Length: ${Buffer.byteLength(body)}`,
-        "",
-        body
-    ].join("\r\n"));
+    socket.end(
+        [
+            `HTTP/1.1 ${statusCode} ${upgradeStatusText(statusCode)}`,
+            "Connection: close",
+            "Content-Type: text/plain; charset=utf-8",
+            `Content-Length: ${Buffer.byteLength(body)}`,
+            "",
+            body,
+        ].join("\r\n"),
+    );
 }
 
 function upgradeStatusText(statusCode: number): string {
@@ -485,21 +616,32 @@ function upgradeStatusText(statusCode: number): string {
     return "Bad Gateway";
 }
 
-function writeError(response: ServerResponse, statusCode: number, message: string): void {
+function writeError(
+    response: ServerResponse,
+    statusCode: number,
+    message: string,
+): void {
     if (response.writableEnded) return;
     response.statusCode = statusCode;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.end(JSON.stringify({ error: message }));
 }
 
-function isBrowserEntryRequest(request: IncomingMessage, suffix: string): boolean {
+function isBrowserEntryRequest(
+    request: IncomingMessage,
+    suffix: string,
+): boolean {
     const method = (request.method ?? "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") return false;
     const pathname = new URL(suffix, "http://localhost").pathname;
     return pathname !== "/api" && !pathname.startsWith("/api/");
 }
 
-function redirectToLogin(response: ServerResponse, loginPath: string, returnTo: string): void {
+function redirectToLogin(
+    response: ServerResponse,
+    loginPath: string,
+    returnTo: string,
+): void {
     const login = new URL(loginPath, "http://localhost");
     login.searchParams.set("returnTo", returnTo);
     response.statusCode = 302;
@@ -508,62 +650,91 @@ function redirectToLogin(response: ServerResponse, loginPath: string, returnTo: 
     response.end();
 }
 
-function applyStaticSecurityHeaders(response: ServerResponse, filePath: string): void {
-    response.setHeader("Content-Security-Policy", [
-        "default-src 'self'",
-        "base-uri 'none'",
-        "connect-src 'self'",
-        "frame-ancestors 'none'",
-        "img-src 'self' data:",
-        "object-src 'none'",
-        "script-src 'self'",
-        "style-src 'self'"
-    ].join("; "));
+function applyStaticSecurityHeaders(
+    response: ServerResponse,
+    filePath: string,
+): void {
+    response.setHeader(
+        "Content-Security-Policy",
+        [
+            "default-src 'self'",
+            "base-uri 'none'",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "img-src 'self' data:",
+            "object-src 'none'",
+            "script-src 'self'",
+            "style-src 'self'",
+        ].join("; "),
+    );
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader(
         "Cache-Control",
         /[/\\]assets[/\\].+\.[A-Za-z0-9]+$/u.test(filePath)
             ? "public, max-age=31536000, immutable"
-            : "no-cache"
+            : "no-cache",
     );
 }
 
 function contentType(filePath: string): string {
     switch (extname(filePath).toLowerCase()) {
-        case ".css": return "text/css; charset=utf-8";
-        case ".html": return "text/html; charset=utf-8";
+        case ".css":
+            return "text/css; charset=utf-8";
+        case ".html":
+            return "text/html; charset=utf-8";
         case ".js":
-        case ".mjs": return "text/javascript; charset=utf-8";
-        case ".json": return "application/json; charset=utf-8";
-        case ".svg": return "image/svg+xml";
-        case ".png": return "image/png";
+        case ".mjs":
+            return "text/javascript; charset=utf-8";
+        case ".json":
+            return "application/json; charset=utf-8";
+        case ".svg":
+            return "image/svg+xml";
+        case ".png":
+            return "image/png";
         case ".jpg":
-        case ".jpeg": return "image/jpeg";
-        case ".webp": return "image/webp";
-        case ".ico": return "image/x-icon";
-        case ".woff": return "font/woff";
-        case ".woff2": return "font/woff2";
-        default: return "application/octet-stream";
+        case ".jpeg":
+            return "image/jpeg";
+        case ".webp":
+            return "image/webp";
+        case ".ico":
+            return "image/x-icon";
+        case ".woff":
+            return "font/woff";
+        case ".woff2":
+            return "font/woff2";
+        default:
+            return "application/octet-stream";
     }
 }
 
 function normalizeBasePath(value: string): string {
     const trimmed = value.trim();
-    if (!trimmed.startsWith("/")) throw new TypeError("Extension Web base path must be absolute.");
+    if (!trimmed.startsWith("/"))
+        throw new TypeError("Extension Web base path must be absolute.");
     return trimmed === "/" ? "/" : trimmed.replace(/\/+$/u, "");
 }
 
 function normalizeLoginPath(value: string): string {
     const trimmed = value.trim();
-    if (!trimmed.startsWith("/")) throw new TypeError("Extension Web login path must be absolute.");
+    if (!trimmed.startsWith("/"))
+        throw new TypeError("Extension Web login path must be absolute.");
     return `${trimmed.replace(/\/+$/u, "")}/`;
 }
 
 function pathMatchesPrefix(pathname: string, prefix: string): boolean {
-    return prefix === "/" || pathname === prefix || pathname.startsWith(`${prefix}/`);
+    return (
+        prefix === "/" ||
+        pathname === prefix ||
+        pathname.startsWith(`${prefix}/`)
+    );
 }
 
 function isMissing(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+    );
 }

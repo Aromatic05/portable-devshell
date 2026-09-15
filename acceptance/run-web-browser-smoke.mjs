@@ -6,7 +6,10 @@ import { createAcceptanceFixture, runCli } from "./AcceptanceSupport.mjs";
 
 const browserExecutable = resolveChromiumExecutable();
 if (browserExecutable === undefined) {
-    if (process.env.CI !== undefined || process.env.PORTABLE_DEVSHELL_REQUIRE_BROWSER === "1") {
+    if (
+        process.env.CI !== undefined ||
+        process.env.PORTABLE_DEVSHELL_REQUIRE_BROWSER === "1"
+    ) {
         throw new Error(
             "Web browser smoke requires Chromium in CI. Set PORTABLE_DEVSHELL_CHROMIUM to its executable.",
         );

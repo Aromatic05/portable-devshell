@@ -1,5 +1,7 @@
-export type ExtensionRuntimeState = "active" | "disabled" | "failed" | "installed";
-export type ExtensionGenerationRuntimeState = "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
+export type ExtensionRuntimeState =
+    "active" | "disabled" | "failed" | "installed";
+export type ExtensionGenerationRuntimeState =
+    "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionRuntimeFailure {
     generation?: string;

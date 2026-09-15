@@ -2,7 +2,10 @@ import { AgentHost, type AgentHostRecord } from "./host/AgentHost.js";
 import { AgentProviderRegistry } from "./provider/AgentProviderRegistry.js";
 import type { AgentProvider } from "./provider/AgentProvider.js";
 import { parseAgentWorkerTarget } from "./worker/AgentWorkerTarget.js";
-import type { ExtensionContext, ExtensionJsonValue } from "@portable-devshell/extension";
+import type {
+    ExtensionContext,
+    ExtensionJsonValue,
+} from "@portable-devshell/extension";
 
 import { readAgentId, readMessageInput, readStartInput } from "./AgentInput.js";
 import { openAgentToolSession } from "./AgentToolAdapter.js";
@@ -21,17 +24,25 @@ export class AgentExtensionRuntime {
     readonly #providers: AgentProviderRegistry;
     readonly #resolveProvider?: (requested?: string) => Promise<string>;
 
-    constructor(context: ExtensionContext, options: AgentExtensionRuntimeOptions = {}) {
+    constructor(
+        context: ExtensionContext,
+        options: AgentExtensionRuntimeOptions = {},
+    ) {
         this.#context = context;
         const processes = context.capabilities.processes;
-        if (processes === undefined) throw new Error("Agent Extension requires the processes capability.");
-        this.#providers = options.registry ?? new AgentProviderRegistry(options.providers ?? []);
+        if (processes === undefined)
+            throw new Error(
+                "Agent Extension requires the processes capability.",
+            );
+        this.#providers =
+            options.registry ??
+            new AgentProviderRegistry(options.providers ?? []);
         this.#resolveProvider = options.resolveProvider;
         this.#host = new AgentHost({
             processes,
             registry: this.#providers,
             runtimeRootDirectory: context.paths.stateDirectory,
-            webBasePath: "/"
+            webBasePath: "/",
         });
     }
 
@@ -47,7 +58,9 @@ export class AgentExtensionRuntime {
         return this.#host.isProviderInUse(providerId);
     }
 
-    async start(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord> {
+    async start(
+        value: ExtensionJsonValue | undefined,
+    ): Promise<AgentHostRecord> {
         const input = readStartInput(value);
         const requested = parseAgentWorkerTarget(input.target);
         const provider = await this.#selectProvider(input.provider);
@@ -55,20 +68,24 @@ export class AgentExtensionRuntime {
         return await this.#host.start({
             provider,
             target: tools.target,
-            tools
+            tools,
         });
     }
 
     async #selectProvider(requested?: string): Promise<string> {
-        if (this.#resolveProvider !== undefined) return await this.#resolveProvider(requested);
+        if (this.#resolveProvider !== undefined)
+            return await this.#resolveProvider(requested);
         if (requested !== undefined) {
             this.#providers.require(requested);
             return requested;
         }
         const providers = this.#providers.list();
         if (providers.length === 1) return providers[0]!.id;
-        if (providers.length === 0) throw new Error("No enabled Agent provider is available.");
-        throw new Error("Multiple Agent providers are enabled; select one with --provider.");
+        if (providers.length === 0)
+            throw new Error("No enabled Agent provider is available.");
+        throw new Error(
+            "Multiple Agent providers are enabled; select one with --provider.",
+        );
     }
 
     async prompt(value: ExtensionJsonValue | undefined): Promise<void> {
@@ -98,7 +115,9 @@ export class AgentExtensionRuntime {
         await this.#host.reload(readAgentId(value));
     }
 
-    async stop(value: ExtensionJsonValue | undefined): Promise<AgentHostRecord> {
+    async stop(
+        value: ExtensionJsonValue | undefined,
+    ): Promise<AgentHostRecord> {
         return await this.#host.stop(readAgentId(value));
     }
 

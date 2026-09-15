@@ -1,6 +1,9 @@
 import type { TuiTerminalCommand } from "./Model.js";
 import { TuiTerminalBuffer } from "./Buffer.js";
-import { TuiTerminalGraphicsParser, type TuiTerminalOutputToken } from "../graphics/Parser.js";
+import {
+    TuiTerminalGraphicsParser,
+    type TuiTerminalOutputToken,
+} from "../graphics/Parser.js";
 import type {
     TuiTerminalDisposable,
     TuiTerminalGraphic,
@@ -9,7 +12,7 @@ import type {
     TuiTerminalPtyFactory,
     TuiTerminalSnapshot,
     TuiTerminalStartOptions,
-    TuiTerminalVisibleGraphic
+    TuiTerminalVisibleGraphic,
 } from "./Model.js";
 
 export class TuiTerminalSession {
@@ -62,14 +65,18 @@ export class TuiTerminalSession {
         this.#syncBuffer();
     }
 
-    setError(message: string, columns = this.#snapshot.columns, rows = this.#snapshot.rows): void {
+    setError(
+        message: string,
+        columns = this.#snapshot.columns,
+        rows = this.#snapshot.rows,
+    ): void {
         this.#processGeneration += 1;
         this.#disposeProcess();
         this.#replaceSnapshot({
             ...emptySnapshot(columns, rows),
             error: message,
             message,
-            status: "error"
+            status: "error",
         });
     }
 
@@ -79,7 +86,7 @@ export class TuiTerminalSession {
         this.#replaceSnapshot({
             ...emptySnapshot(columns, rows),
             message,
-            status: "idle"
+            status: "idle",
         });
     }
 
@@ -98,7 +105,7 @@ export class TuiTerminalSession {
         this.#replaceSnapshot({
             ...this.#buffer.getSnapshot(),
             instance: options.instance,
-            status: "starting"
+            status: "starting",
         });
         this.#bufferDataSubscription = this.#buffer.onData((data) => {
             this.#pty?.write(data);
@@ -106,13 +113,18 @@ export class TuiTerminalSession {
         this.#buffer.setFocused(this.#focused);
 
         try {
-            this.#spawn(options.command, options.environment, options.instance, generation);
+            this.#spawn(
+                options.command,
+                options.environment,
+                options.instance,
+                generation,
+            );
         } catch (error) {
             this.#replaceSnapshot({
                 ...this.#buffer.getSnapshot(),
                 error: readErrorMessage(error),
                 instance: options.instance,
-                status: "error"
+                status: "error",
             });
         }
     }
@@ -194,29 +206,36 @@ export class TuiTerminalSession {
         }
     }
 
-    #spawn(command: TuiTerminalCommand, environment: NodeJS.ProcessEnv | undefined, instance: string, generation: number): void {
+    #spawn(
+        command: TuiTerminalCommand,
+        environment: NodeJS.ProcessEnv | undefined,
+        instance: string,
+        generation: number,
+    ): void {
         const columns = this.#snapshot.columns;
         const rows = this.#snapshot.rows;
         const pty = this.#ptyFactory(command.command, command.args, {
             columns,
             cwd: command.cwd ?? this.#command?.cwd,
             environment: terminalEnvironment(environment),
-            rows
+            rows,
         });
         this.#pty = pty;
         this.#ptyDataSubscription = pty.onData((data) => {
             const tokens = this.#graphicsParser.push(data);
-            this.#outputQueue = this.#outputQueue.then(async () => {
-                await this.#writeOutputTokens(tokens, generation);
-            }).catch((error: unknown) => {
-                if (generation === this.#processGeneration) {
-                    this.#replaceSnapshot({
-                        ...this.#snapshot,
-                        error: readErrorMessage(error),
-                        status: "error"
-                    });
-                }
-            });
+            this.#outputQueue = this.#outputQueue
+                .then(async () => {
+                    await this.#writeOutputTokens(tokens, generation);
+                })
+                .catch((error: unknown) => {
+                    if (generation === this.#processGeneration) {
+                        this.#replaceSnapshot({
+                            ...this.#snapshot,
+                            error: readErrorMessage(error),
+                            status: "error",
+                        });
+                    }
+                });
         });
         this.#ptyExitSubscription = pty.onExit((event) => {
             const finalTokens = this.#graphicsParser.flush();
@@ -228,7 +247,7 @@ export class TuiTerminalSession {
                 this.#replaceSnapshot({
                     ...this.#snapshot,
                     exitCode: event.exitCode,
-                    status: "exited"
+                    status: "exited",
                 });
             });
         });
@@ -236,11 +255,14 @@ export class TuiTerminalSession {
             ...this.#snapshot,
             error: undefined,
             instance,
-            status: "running"
+            status: "running",
         });
     }
 
-    async #writeOutputTokens(tokens: readonly TuiTerminalOutputToken[], generation: number): Promise<void> {
+    async #writeOutputTokens(
+        tokens: readonly TuiTerminalOutputToken[],
+        generation: number,
+    ): Promise<void> {
         if (generation !== this.#processGeneration) {
             return;
         }
@@ -288,15 +310,18 @@ export class TuiTerminalSession {
         }
         this.#replaceSnapshot({
             ...this.#snapshot,
-            ...this.#buffer.getSnapshot()
+            ...this.#buffer.getSnapshot(),
         });
     }
 }
 
-function terminalEnvironment(environment: NodeJS.ProcessEnv | undefined): Record<string, string> {
+function terminalEnvironment(
+    environment: NodeJS.ProcessEnv | undefined,
+): Record<string, string> {
     return Object.fromEntries(
-        Object.entries(environment ?? process.env)
-            .filter((entry): entry is [string, string] => entry[1] !== undefined)
+        Object.entries(environment ?? process.env).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
     );
 }
 
@@ -307,7 +332,7 @@ function emptySnapshot(columns = 1, rows = 1): TuiTerminalSnapshot {
         graphics: {
             count: 0,
             protocols: [],
-            revision: 0
+            revision: 0,
         },
         lines: [],
         modes: {
@@ -316,16 +341,16 @@ function emptySnapshot(columns = 1, rows = 1): TuiTerminalSnapshot {
             bracketedPaste: false,
             mouseEncoding: "legacy",
             mouseTracking: "none",
-            sendFocus: false
+            sendFocus: false,
         },
         rows: clampDimension(rows),
         scroll: {
             atBottom: true,
             historyLines: 0,
             offsetFromBottom: 0,
-            viewportLine: 0
+            viewportLine: 0,
         },
-        status: "idle"
+        status: "idle",
     };
 }
 

@@ -17,7 +17,9 @@ export async function resolveTestTempNamespace() {
 export async function createTestTempDirectory(label = "test") {
     const sanitized = label.replaceAll(/[^A-Za-z0-9._-]/gu, "-") || "test";
     const namespace = await resolveTestTempNamespace();
-    const directory = await realpath(await mkdtemp(join(namespace, `${sanitized}-`)));
+    const directory = await realpath(
+        await mkdtemp(join(namespace, `${sanitized}-`)),
+    );
     activeDirectories.add(directory);
     return directory;
 }

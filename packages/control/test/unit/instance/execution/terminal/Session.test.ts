@@ -238,7 +238,9 @@ test("terminal exit is durable for later attachments and kill is explicit", asyn
 test("explicit terminal kill wins when process exit arrives before kill resolves", async () => {
     const process = new FakeTerminalProcess();
     process.exitOnKill = { exitCode: 0, signal: 15 };
-    const service = new TerminalSessionService({ idFactory: () => "terminal-kill-race" });
+    const service = new TerminalSessionService({
+        idFactory: () => "terminal-kill-race",
+    });
     const opened = await service.open({
         backend: { open: async () => process },
         cols: 80,
@@ -255,7 +257,11 @@ test("explicit terminal kill wins when process exit arrives before kill resolves
         terminalId: opened.terminalId,
     });
 
-    const killed = await service.kill(opened.terminalId, opened.generation, opened.version);
+    const killed = await service.kill(
+        opened.terminalId,
+        opened.generation,
+        opened.version,
+    );
 
     assert.equal(killed.state, "killed");
     assert.equal(service.get(opened.terminalId).state, "killed");
@@ -416,9 +422,9 @@ test("terminal history keeps active sessions and bounds completed sessions newes
     const listed = service.list("alpha");
     assert.equal(listed.length, 3);
     assert.equal(listed[0]?.terminalId, active.terminalId);
-    assert.deepEqual(listed.slice(1).map((session) => session.terminalId), [
-        "terminal-history-4",
-        "terminal-history-3",
-    ]);
+    assert.deepEqual(
+        listed.slice(1).map((session) => session.terminalId),
+        ["terminal-history-4", "terminal-history-3"],
+    );
     assert.throws(() => service.get("terminal-history-2"), /not found/u);
 });

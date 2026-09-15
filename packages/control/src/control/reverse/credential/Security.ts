@@ -16,7 +16,7 @@ const WINDOWS_ACL_SCRIPT = [
     "  $acl = [System.Security.AccessControl.FileSecurity]::new()",
     "  $inheritance = [System.Security.AccessControl.InheritanceFlags]::None",
     "} else {",
-    "  throw \"Unsupported ACL target kind: $kind\"",
+    '  throw "Unsupported ACL target kind: $kind"',
     "}",
     "$acl.SetOwner($identity.User)",
     "$acl.SetAccessRuleProtection($true, $false)",
@@ -63,10 +63,19 @@ class WindowsReverseCredentialFileSecurity implements ReverseCredentialFileSecur
     }
 }
 
-async function secureWindowsPath(path: string, kind: "directory" | "file"): Promise<void> {
+async function secureWindowsPath(
+    path: string,
+    kind: "directory" | "file",
+): Promise<void> {
     await execFileAsync(
         "powershell.exe",
-        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_ACL_SCRIPT],
+        [
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            WINDOWS_ACL_SCRIPT,
+        ],
         {
             env: {
                 ...process.env,

@@ -1,6 +1,7 @@
 import type { TuiTerminalGraphicProtocol } from "../emulation/Model.js";
 
-export type TuiTerminalGraphicsMode = "auto" | "both" | "kitty" | "none" | "sixel";
+export type TuiTerminalGraphicsMode =
+    "auto" | "both" | "kitty" | "none" | "sixel";
 
 export interface TuiTerminalGraphicsSupport {
     kitty: boolean;
@@ -27,26 +28,28 @@ const KITTY_DELETE_ALL = `${ESCAPE}_Ga=d,d=A;${ESCAPE}\\`;
 
 export function detectTerminalGraphicsSupport(
     environment: NodeJS.ProcessEnv = process.env,
-    mode: TuiTerminalGraphicsMode = readGraphicsMode(environment.DEVSHELL_TUI_GRAPHICS)
+    mode: TuiTerminalGraphicsMode = readGraphicsMode(
+        environment.DEVSHELL_TUI_GRAPHICS,
+    ),
 ): TuiTerminalGraphicsSupport {
     if (mode !== "auto") {
         return {
             kitty: mode === "kitty" || mode === "both",
-            sixel: mode === "sixel" || mode === "both"
+            sixel: mode === "sixel" || mode === "both",
         };
     }
 
-    const program = `${environment.TERM_PROGRAM ?? ""} ${environment.LC_TERMINAL ?? ""}`.toLowerCase();
+    const program =
+        `${environment.TERM_PROGRAM ?? ""} ${environment.LC_TERMINAL ?? ""}`.toLowerCase();
     const term = (environment.TERM ?? "").toLowerCase();
     const wezterm = program.includes("wezterm");
     return {
-        kitty: environment.KITTY_WINDOW_ID !== undefined
-            || wezterm
-            || program.includes("ghostty")
-            || term.includes("kitty"),
-        sixel: wezterm
-            || program.includes("mlterm")
-            || term.includes("sixel")
+        kitty:
+            environment.KITTY_WINDOW_ID !== undefined ||
+            wezterm ||
+            program.includes("ghostty") ||
+            term.includes("kitty"),
+        sixel: wezterm || program.includes("mlterm") || term.includes("sixel"),
     };
 }
 
@@ -56,7 +59,9 @@ export function renderTerminalGraphicsFrame(options: {
     region: TuiTerminalGraphicRegion;
     support: TuiTerminalGraphicsSupport;
 }): string {
-    const supported = options.graphics.filter((graphic) => options.support[graphic.protocol]);
+    const supported = options.graphics.filter(
+        (graphic) => options.support[graphic.protocol],
+    );
     if (!options.clear && supported.length === 0) {
         return "";
     }
@@ -66,15 +71,21 @@ export function renderTerminalGraphicsFrame(options: {
         output += KITTY_DELETE_ALL;
     }
     for (const graphic of supported) {
-        const x = options.region.x + clamp(graphic.x, 0, Math.max(0, options.region.width - 1));
-        const y = options.region.y + clamp(graphic.y, 0, Math.max(0, options.region.height - 1));
+        const x =
+            options.region.x +
+            clamp(graphic.x, 0, Math.max(0, options.region.width - 1));
+        const y =
+            options.region.y +
+            clamp(graphic.y, 0, Math.max(0, options.region.height - 1));
         output += `${ESCAPE}[${y};${x}H${graphic.sequence}`;
     }
     output += `${ESCAPE}8`;
     return output;
 }
 
-export function terminalGraphicsClearSequence(support: TuiTerminalGraphicsSupport): string {
+export function terminalGraphicsClearSequence(
+    support: TuiTerminalGraphicsSupport,
+): string {
     return support.kitty ? `${ESCAPE}7${KITTY_DELETE_ALL}${ESCAPE}8` : "";
 }
 

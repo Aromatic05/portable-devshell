@@ -48,10 +48,22 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
     assert.equal(created.summary.total, 3);
     assert.equal(created.summary.currentItemId, "implement");
     assert.equal("tasks" in created, false);
-    assert.equal("tasks" in await service.read({ taskId: created.taskId }), false);
-    assert.equal("tasks" in await service.read({ taskId: "task-missing" }), false);
-    assert.deepEqual((await service.read()).tasks?.map((task) => task.taskId), [created.taskId]);
-    assert.equal(service.currentAssociation("mcp-session")?.todoItemId, "implement");
+    assert.equal(
+        "tasks" in (await service.read({ taskId: created.taskId })),
+        false,
+    );
+    assert.equal(
+        "tasks" in (await service.read({ taskId: "task-missing" })),
+        false,
+    );
+    assert.deepEqual(
+        (await service.read()).tasks?.map((task) => task.taskId),
+        [created.taskId],
+    );
+    assert.equal(
+        service.currentAssociation("mcp-session")?.todoItemId,
+        "implement",
+    );
     assert.equal(events[0]?.type, "todo.created");
 
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
@@ -182,16 +194,30 @@ test("TodoService cancelAll archives every active task while preserving prior hi
         filePath: join(root, "todo.json"),
         instanceName: "alpha",
     });
-    const first = await service.write({
-        revision: 0,
-        title: "First active",
-        todos: [{ content: "Continue first", id: "first", status: "in_progress" }],
-    }, "ctx-first");
-    await service.write({
-        revision: 0,
-        title: "Second active",
-        todos: [{ content: "Continue second", id: "second", status: "pending" }],
-    }, "ctx-second");
+    const first = await service.write(
+        {
+            revision: 0,
+            title: "First active",
+            todos: [
+                {
+                    content: "Continue first",
+                    id: "first",
+                    status: "in_progress",
+                },
+            ],
+        },
+        "ctx-first",
+    );
+    await service.write(
+        {
+            revision: 0,
+            title: "Second active",
+            todos: [
+                { content: "Continue second", id: "second", status: "pending" },
+            ],
+        },
+        "ctx-second",
+    );
 
     await service.cancelAll();
 
@@ -207,20 +233,30 @@ test("TodoService permanently deletes an active or archived todo project", async
     const filePath = join(root, "todo.json");
     const events: string[] = [];
     const service = new TodoService({
-        appendEvent: async (type) => { events.push(type); },
+        appendEvent: async (type) => {
+            events.push(type);
+        },
         filePath,
         instanceName: "aromatic-pc",
     });
-    const active = await service.write({
-        revision: 0,
-        title: "Active",
-        todos: [{ content: "Continue", id: "continue", status: "in_progress" }],
-    }, "ctx-active");
-    const archived = await service.write({
-        revision: 0,
-        title: "Archived",
-        todos: [{ content: "Done", id: "done", status: "completed" }],
-    }, "ctx-archived");
+    const active = await service.write(
+        {
+            revision: 0,
+            title: "Active",
+            todos: [
+                { content: "Continue", id: "continue", status: "in_progress" },
+            ],
+        },
+        "ctx-active",
+    );
+    const archived = await service.write(
+        {
+            revision: 0,
+            title: "Archived",
+            todos: [{ content: "Done", id: "done", status: "completed" }],
+        },
+        "ctx-archived",
+    );
 
     await service.delete(active.taskId!);
     await service.delete(archived.taskId!);
@@ -233,19 +269,32 @@ test("TodoService keeps a committed write successful when its derived audit even
     const root = await createTestTempDirectory("todo-audit-failure");
     const filePath = join(root, "todo.json");
     const service = new TodoService({
-        appendEvent: async () => { throw new Error("audit unavailable"); },
+        appendEvent: async () => {
+            throw new Error("audit unavailable");
+        },
         filePath,
         instanceName: "aromatic-pc",
     });
 
-    const written = await service.write({
-        revision: 0,
-        title: "Durable task",
-        todos: [{ content: "Keep committed state", id: "keep", status: "in_progress" }],
-    }, "ctx-audit");
+    const written = await service.write(
+        {
+            revision: 0,
+            title: "Durable task",
+            todos: [
+                {
+                    content: "Keep committed state",
+                    id: "keep",
+                    status: "in_progress",
+                },
+            ],
+        },
+        "ctx-audit",
+    );
 
     assert.equal(written.revision, 1);
     assert.equal((await service.read("Durable task")).revision, 1);
-    const persisted = JSON.parse(await readFile(filePath, "utf8")) as { active: Array<{ revision: number }> };
+    const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
+        active: Array<{ revision: number }>;
+    };
     assert.equal(persisted.active[0]?.revision, 1);
 });

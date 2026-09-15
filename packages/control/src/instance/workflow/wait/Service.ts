@@ -9,17 +9,23 @@ import { WaitState, type WaitDocument, type WaitTransition } from "./State.js";
 import { WaitStore } from "./Store.js";
 
 export interface WaitServiceOptions {
-    appendEvent(type: Extract<InstanceEventType, `wait.${string}`>, data: JsonValue): Promise<void>;
+    appendEvent(
+        type: Extract<InstanceEventType, `wait.${string}`>,
+        data: JsonValue,
+    ): Promise<void>;
     filePath: string;
     instanceName: string;
 }
 
 export class WaitService {
     readonly #appendEvent: WaitServiceOptions["appendEvent"];
-    readonly #pending = new Map<string, {
-        reject(error: Error): void;
-        resolve(record: WaitRecord): void;
-    }>();
+    readonly #pending = new Map<
+        string,
+        {
+            reject(error: Error): void;
+            resolve(record: WaitRecord): void;
+        }
+    >();
     readonly #state: WaitState;
     readonly #store: WaitStore;
     #operation: Promise<void> = Promise.resolve();
@@ -35,17 +41,23 @@ export class WaitService {
     }
 
     async create(input: WaitCreateInput): Promise<WaitRecord> {
-        return await this.#commit("wait.created", (document) => this.#state.create(document, input));
+        return await this.#commit("wait.created", (document) =>
+            this.#state.create(document, input),
+        );
     }
 
     async detach(waitId: string): Promise<WaitRecord> {
-        const record = await this.#commit("wait.detached", (document) => this.#state.detach(document, waitId));
+        const record = await this.#commit("wait.detached", (document) =>
+            this.#state.detach(document, waitId),
+        );
         this.#notify(record);
         return record;
     }
 
     async reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord> {
-        return await this.#commit("wait.reattached", (document) => this.#state.reattach(document, waitId, ownerCallId));
+        return await this.#commit("wait.reattached", (document) =>
+            this.#state.reattach(document, waitId, ownerCallId),
+        );
     }
 
     async resolve(
@@ -54,68 +66,85 @@ export class WaitService {
         options: { consumeIfDetached?: boolean } = {},
     ): Promise<WaitRecord> {
         const record = await this.#commit(
-            (next) => next.status === "consumed" ? "wait.consumed" : "wait.resolved",
-            (document) => this.#state.resolve(document, waitId, result, options),
+            (next) =>
+                next.status === "consumed" ? "wait.consumed" : "wait.resolved",
+            (document) =>
+                this.#state.resolve(document, waitId, result, options),
         );
         this.#notify(record);
         return record;
     }
 
     async claimRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryClaimed",
-            (document) => this.#state.claimRecovery(document, waitId, claimId),
+        return await this.#commit("wait.recoveryClaimed", (document) =>
+            this.#state.claimRecovery(document, waitId, claimId),
         );
     }
 
-    async releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryReleased",
-            (document) => this.#state.releaseRecovery(document, waitId, claimId),
+    async releaseRecovery(
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord> {
+        return await this.#commit("wait.recoveryReleased", (document) =>
+            this.#state.releaseRecovery(document, waitId, claimId),
         );
     }
 
     async rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryReleased",
-            (document) => this.#state.rejectRecovery(document, waitId, claimId),
+        return await this.#commit("wait.recoveryReleased", (document) =>
+            this.#state.rejectRecovery(document, waitId, claimId),
         );
     }
 
     async disableRecovery(waitId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryReleased",
-            (document) => this.#state.disableRecovery(document, waitId),
+        return await this.#commit("wait.recoveryReleased", (document) =>
+            this.#state.disableRecovery(document, waitId),
         );
     }
 
-    async markRecoveryAttempted(waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryMessageAttempted",
-            (document) => this.#state.markRecoveryAttempted(document, waitId, claimId, goalProgressEpoch),
+    async markRecoveryAttempted(
+        waitId: string,
+        claimId: string,
+        goalProgressEpoch?: number,
+    ): Promise<WaitRecord> {
+        return await this.#commit("wait.recoveryMessageAttempted", (document) =>
+            this.#state.markRecoveryAttempted(
+                document,
+                waitId,
+                claimId,
+                goalProgressEpoch,
+            ),
         );
     }
 
-    async dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.recoveryDismissed",
-            (document) => this.#state.dismissRecovery(document, waitId, recoveryMessageId),
+    async dismissRecovery(
+        waitId: string,
+        recoveryMessageId: string,
+    ): Promise<WaitRecord> {
+        return await this.#commit("wait.recoveryDismissed", (document) =>
+            this.#state.dismissRecovery(document, waitId, recoveryMessageId),
         );
     }
 
-    async completeRecovery(waitId: string, claimId: string): Promise<WaitRecord> {
-        return await this.#commit(
-            "wait.consumed",
-            (document) => this.#state.completeRecovery(document, waitId, claimId),
+    async completeRecovery(
+        waitId: string,
+        claimId: string,
+    ): Promise<WaitRecord> {
+        return await this.#commit("wait.consumed", (document) =>
+            this.#state.completeRecovery(document, waitId, claimId),
         );
     }
 
     async consume(waitId: string): Promise<WaitRecord> {
-        return await this.#commit("wait.consumed", (document) => this.#state.consume(document, waitId));
+        return await this.#commit("wait.consumed", (document) =>
+            this.#state.consume(document, waitId),
+        );
     }
 
     async cancel(waitId: string): Promise<WaitRecord> {
-        const record = await this.#commit("wait.cancelled", (document) => this.#state.cancel(document, waitId));
+        const record = await this.#commit("wait.cancelled", (document) =>
+            this.#state.cancel(document, waitId),
+        );
         this.#notify(record);
         return record;
     }
@@ -133,13 +162,18 @@ export class WaitService {
     async waitForResolution(waitId: string): Promise<WaitRecord> {
         await this.#operation;
         const record = this.#store.readRecord(waitId);
-        if (record === undefined) throw new Error(`Wait ${waitId} was not found.`);
+        if (record === undefined)
+            throw new Error(`Wait ${waitId} was not found.`);
         if (record.status === "resolved") return record;
         if (record.status !== "waiting" && record.status !== "detached") {
-            throw new Error(`Wait ${waitId} cannot be awaited while it is ${record.status}.`);
+            throw new Error(
+                `Wait ${waitId} cannot be awaited while it is ${record.status}.`,
+            );
         }
         if (this.#pending.has(waitId)) {
-            throw new Error(`Wait ${waitId} already has an active in-process owner.`);
+            throw new Error(
+                `Wait ${waitId} already has an active in-process owner.`,
+            );
         }
         return await new Promise<WaitRecord>((resolve, reject) => {
             this.#pending.set(waitId, { reject, resolve });
@@ -156,20 +190,27 @@ export class WaitService {
         }
         if (record.status === "detached" || record.status === "cancelled") {
             this.#pending.delete(record.waitId);
-            pending.reject(new Error(`Wait ${record.waitId} became ${record.status}.`));
+            pending.reject(
+                new Error(`Wait ${record.waitId} became ${record.status}.`),
+            );
         }
     }
 
     async #commit(
         eventType:
             | Extract<InstanceEventType, `wait.${string}`>
-            | ((record: WaitRecord) => Extract<InstanceEventType, `wait.${string}`>),
+            | ((
+                  record: WaitRecord,
+              ) => Extract<InstanceEventType, `wait.${string}`>),
         transition: (document: WaitDocument) => WaitTransition,
     ): Promise<WaitRecord> {
         return await this.#runExclusive(async () => {
             const record = await this.#store.transition(transition);
-            const type = typeof eventType === "function" ? eventType(record) : eventType;
-            await this.#appendEvent(type, eventData(record)).catch(() => undefined);
+            const type =
+                typeof eventType === "function" ? eventType(record) : eventType;
+            await this.#appendEvent(type, eventData(record)).catch(
+                () => undefined,
+            );
             return record;
         });
     }
@@ -193,15 +234,29 @@ function eventData(record: WaitRecord): JsonValue {
     return {
         createdAt: record.createdAt,
         createdByCtxId: record.createdByCtxId,
-        ...(record.deadlineAt === undefined ? {} : { deadlineAt: record.deadlineAt }),
+        ...(record.deadlineAt === undefined
+            ? {}
+            : { deadlineAt: record.deadlineAt }),
         ...(record.goalId === undefined ? {} : { goalId: record.goalId }),
         kind: record.kind,
-        ...(record.ownerCallId === undefined ? {} : { ownerCallId: record.ownerCallId }),
+        ...(record.ownerCallId === undefined
+            ? {}
+            : { ownerCallId: record.ownerCallId }),
         status: record.status,
-        ...(record.recoveryDismissedAt === undefined ? {} : { recoveryDismissedAt: record.recoveryDismissedAt }),
-        ...(record.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: record.recoveryMessageAttemptedAt }),
-        ...(record.recoveryMessageId === undefined ? {} : { recoveryMessageId: record.recoveryMessageId }),
-        ...(record.recoveryMessageSentAt === undefined ? {} : { recoveryMessageSentAt: record.recoveryMessageSentAt }),
+        ...(record.recoveryDismissedAt === undefined
+            ? {}
+            : { recoveryDismissedAt: record.recoveryDismissedAt }),
+        ...(record.recoveryMessageAttemptedAt === undefined
+            ? {}
+            : {
+                  recoveryMessageAttemptedAt: record.recoveryMessageAttemptedAt,
+              }),
+        ...(record.recoveryMessageId === undefined
+            ? {}
+            : { recoveryMessageId: record.recoveryMessageId }),
+        ...(record.recoveryMessageSentAt === undefined
+            ? {}
+            : { recoveryMessageSentAt: record.recoveryMessageSentAt }),
         targetId: record.targetId,
         ...(record.taskId === undefined ? {} : { taskId: record.taskId }),
         updatedAt: record.updatedAt,

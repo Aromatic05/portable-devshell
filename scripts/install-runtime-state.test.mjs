@@ -26,7 +26,11 @@ test("install runtime state leaves a previously stopped Control stopped", () => 
 test("install runtime state preserves restart-compatible managed instances", () => {
     const state = captureInstalledRuntimeState((args) => {
         if (args[0] === "status") {
-            return { status: 0, stderr: "", stdout: "control: running\npid: 123\ninstances: 6\n" };
+            return {
+                status: 0,
+                stderr: "",
+                stdout: "control: running\npid: 123\ninstances: 6\n",
+            };
         }
         assert.deepEqual(args, ["overview"]);
         return {
@@ -34,12 +38,42 @@ test("install runtime state preserves restart-compatible managed instances", () 
             stderr: "",
             stdout: JSON.stringify({
                 instances: [
-                    { name: "ready-local", snapshot: { daemonState: "running", reverse: undefined } },
-                    { name: "starting-ssh", snapshot: { daemonState: "starting", reverse: undefined } },
-                    { name: "stale-local", snapshot: { daemonState: "stale", reverse: undefined } },
-                    { name: "stopped-local", snapshot: { daemonState: "stopped", reverse: undefined } },
-                    { name: "failed-local", snapshot: { daemonState: "failed", reverse: undefined } },
-                    { name: "reverse-node", snapshot: { daemonState: "running", reverse: { connected: true } } },
+                    {
+                        name: "ready-local",
+                        snapshot: {
+                            daemonState: "running",
+                            reverse: undefined,
+                        },
+                    },
+                    {
+                        name: "starting-ssh",
+                        snapshot: {
+                            daemonState: "starting",
+                            reverse: undefined,
+                        },
+                    },
+                    {
+                        name: "stale-local",
+                        snapshot: { daemonState: "stale", reverse: undefined },
+                    },
+                    {
+                        name: "stopped-local",
+                        snapshot: {
+                            daemonState: "stopped",
+                            reverse: undefined,
+                        },
+                    },
+                    {
+                        name: "failed-local",
+                        snapshot: { daemonState: "failed", reverse: undefined },
+                    },
+                    {
+                        name: "reverse-node",
+                        snapshot: {
+                            daemonState: "running",
+                            reverse: { connected: true },
+                        },
+                    },
                 ],
             }),
         };
@@ -66,18 +100,24 @@ test("install runtime state preserves restart-compatible managed instances", () 
 
 test("install runtime state refuses to discard a running Control when its overview cannot be captured", () => {
     assert.throws(
-        () => captureInstalledRuntimeState((args) => args[0] === "status"
-            ? { status: 0, stderr: "", stdout: "control: running\n" }
-            : { status: 1, stderr: "overview failed", stdout: "" }),
+        () =>
+            captureInstalledRuntimeState((args) =>
+                args[0] === "status"
+                    ? { status: 0, stderr: "", stdout: "control: running\n" }
+                    : { status: 1, stderr: "overview failed", stdout: "" },
+            ),
         /capture running instances.*overview failed/iu,
     );
 });
 
 test("install runtime state rejects an incomplete running overview", () => {
     assert.throws(
-        () => captureInstalledRuntimeState((args) => args[0] === "status"
-            ? { status: 0, stderr: "", stdout: "control: running\n" }
-            : { status: 0, stderr: "", stdout: "{}" }),
+        () =>
+            captureInstalledRuntimeState((args) =>
+                args[0] === "status"
+                    ? { status: 0, stderr: "", stdout: "control: running\n" }
+                    : { status: 0, stderr: "", stdout: "{}" },
+            ),
         /overview result is missing instances/iu,
     );
 });
@@ -85,17 +125,21 @@ test("install runtime state rejects an incomplete running overview", () => {
 test("install runtime state reports a failed instance restore", () => {
     const calls = [];
     assert.throws(
-        () => restoreInstalledRuntimeState((args) => {
-            calls.push(args);
-            return {
-                status: args.at(-1) === "broken" ? 1 : 0,
-                stderr: args.at(-1) === "broken" ? "worker failed" : "",
-                stdout: "",
-            };
-        }, {
-            controlRunning: true,
-            instances: ["healthy", "broken", "later"],
-        }),
+        () =>
+            restoreInstalledRuntimeState(
+                (args) => {
+                    calls.push(args);
+                    return {
+                        status: args.at(-1) === "broken" ? 1 : 0,
+                        stderr: args.at(-1) === "broken" ? "worker failed" : "",
+                        stdout: "",
+                    };
+                },
+                {
+                    controlRunning: true,
+                    instances: ["healthy", "broken", "later"],
+                },
+            ),
         /failed to restore 1 instance/iu,
     );
     assert.deepEqual(calls, [

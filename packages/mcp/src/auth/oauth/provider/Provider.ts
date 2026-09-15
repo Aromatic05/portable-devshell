@@ -6,22 +6,21 @@ import {
     checkResourceAllowed,
     OAuthError,
     OAuthErrorCode,
-    resourceUrlFromServerUrl
+    resourceUrlFromServerUrl,
 } from "@modelcontextprotocol/server";
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
-import { getOAuthProtectedResourceMetadataUrl, requireBearerAuth } from "@modelcontextprotocol/express";
+import {
+    getOAuthProtectedResourceMetadataUrl,
+    requireBearerAuth,
+} from "@modelcontextprotocol/express";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/express";
-import type {
-    Request,
-    RequestHandler,
-    Response
-} from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { exportJWK, generateKeyPair } from "jose";
 import Provider, {
     errors,
     type Adapter,
     type AdapterFactory,
-    type AdapterPayload
+    type AdapterPayload,
 } from "oidc-provider";
 
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
@@ -34,12 +33,12 @@ import type { McpOAuth2Config } from "../../Config.js";
 import {
     McpOAuthApprovalService,
     OAuthApprovalCapacityError,
-    type OAuthApprovalInput
+    type OAuthApprovalInput,
 } from "../interaction/Approval.js";
 import { createMcpOAuthOidcFileAdapterFactory } from "./Adapter.js";
 import {
     createMcpOAuthStorageSecurity,
-    type McpOAuthStorageSecurity
+    type McpOAuthStorageSecurity,
 } from "./Storage.js";
 
 export interface McpOAuthProviderRuntimeOptions {
@@ -70,7 +69,9 @@ export class McpOAuthProviderRuntime {
     readonly #config: McpOAuth2Config;
     readonly #issuerUrl: URL;
     readonly #registeredResources = new Map<string, McpOAuth2Config>();
-    readonly #revocationListeners = new Set<(revocation: McpOAuthAccessRevocation) => void>();
+    readonly #revocationListeners = new Set<
+        (revocation: McpOAuthAccessRevocation) => void
+    >();
     readonly #storageDir: string;
     readonly #storageSecurity: McpOAuthStorageSecurity;
     readonly #trustProxy: boolean;
@@ -83,7 +84,8 @@ export class McpOAuthProviderRuntime {
         this.#issuerUrl = new URL(options.publicBaseUrl);
         this.#basePath = normalizeBasePath(this.#issuerUrl.pathname);
         this.#storageDir = options.storageDir;
-        this.#storageSecurity = options.storageSecurity ?? createMcpOAuthStorageSecurity();
+        this.#storageSecurity =
+            options.storageSecurity ?? createMcpOAuthStorageSecurity();
         this.#trustProxy = options.trustProxy ?? false;
     }
 
@@ -102,7 +104,7 @@ export class McpOAuthProviderRuntime {
     get provider(): Provider {
         if (this.#provider === undefined) {
             throw new Error(
-                "OIDC provider is not initialized. Call warmup() before use."
+                "OIDC provider is not initialized. Call warmup() before use.",
             );
         }
         return this.#provider;
@@ -112,7 +114,9 @@ export class McpOAuthProviderRuntime {
         return [...this.#registeredResources.keys()];
     }
 
-    onAccessRevoked(listener: (revocation: McpOAuthAccessRevocation) => void): () => void {
+    onAccessRevoked(
+        listener: (revocation: McpOAuthAccessRevocation) => void,
+    ): () => void {
         this.#revocationListeners.add(listener);
         return () => this.#revocationListeners.delete(listener);
     }
@@ -120,7 +124,7 @@ export class McpOAuthProviderRuntime {
     registerResource(resourceServerUrl: URL, config: McpOAuth2Config): void {
         this.#registeredResources.set(
             resourceUrlFromServerUrl(resourceServerUrl).href,
-            config
+            config,
         );
     }
 
@@ -142,126 +146,146 @@ export class McpOAuthProviderRuntime {
                 ...DYNAMIC_CLIENT_REQUIRED_SCOPES,
                 ...this.#config.requiredScopes,
                 ...[...this.#registeredResources.values()].flatMap(
-                    (resource) => resource.requiredScopes
-                )
-            ])
-        ];
-        const provider = new Provider(stripTrailingSlash(this.#issuerUrl.href), {
-            adapter: createDynamicClientScopeAdapterFactory(
-                createMcpOAuthOidcFileAdapterFactory(
-                    join(this.#storageDir, "adapter"),
-                    async (path) => await this.#storageSecurity.secureStorage(path),
+                    (resource) => resource.requiredScopes,
                 ),
-                dynamicClientRequiredScopes,
-                async (clientId, payload) => {
-                    try {
-                        await this.#approvals.registerClient(
-                            toRegistrationApprovalInputFromPayload(clientId, payload)
-                        );
-                    } catch (error) {
-                        if (error instanceof OAuthApprovalCapacityError) {
-                            throw new errors.InvalidRequest(error.message, 429);
-                        }
-                        throw error;
-                    }
-                }
-            ),
-            clientDefaults: {
-                grant_types: ["authorization_code", "refresh_token"],
-                response_types: ["code"],
-                token_endpoint_auth_method: "none"
-            },
-            claims: {
-                openid: ["sub"]
-            },
-            features: {
-                devInteractions: { enabled: false },
-                registration: {
-                    enabled: true,
-                    initialAccessToken: false
-                },
-                registrationManagement: {
-                    enabled: true
-                },
-                resourceIndicators: {
-                    defaultResource: async (_ctx, _client, oneOf) => {
-                        if (Array.isArray(oneOf) && oneOf.length === 1) {
-                            return oneOf[0];
-                        }
-                        if (this.#registeredResources.size === 1) {
-                            return [...this.#registeredResources.keys()][0];
-                        }
-                        throw new Error(
-                            "Unable to determine a default resource indicator."
-                        );
-                    },
-                    enabled: true,
-                    getResourceServerInfo: async (_ctx, resourceIndicator) => {
-                        const resourceConfig = this.#registeredResources.get(resourceIndicator);
-                        if (resourceConfig === undefined) {
-                            throw new Error(
-                                `Unknown resource indicator: ${resourceIndicator}`
+            ]),
+        ];
+        const provider = new Provider(
+            stripTrailingSlash(this.#issuerUrl.href),
+            {
+                adapter: createDynamicClientScopeAdapterFactory(
+                    createMcpOAuthOidcFileAdapterFactory(
+                        join(this.#storageDir, "adapter"),
+                        async (path) =>
+                            await this.#storageSecurity.secureStorage(path),
+                    ),
+                    dynamicClientRequiredScopes,
+                    async (clientId, payload) => {
+                        try {
+                            await this.#approvals.registerClient(
+                                toRegistrationApprovalInputFromPayload(
+                                    clientId,
+                                    payload,
+                                ),
                             );
+                        } catch (error) {
+                            if (error instanceof OAuthApprovalCapacityError) {
+                                throw new errors.InvalidRequest(
+                                    error.message,
+                                    429,
+                                );
+                            }
+                            throw error;
                         }
-                        return {
-                            accessTokenFormat: "opaque" as const,
-                            audience: resourceIndicator,
-                            scope: resourceConfig.requiredScopes.join(" ")
-                        };
                     },
-                    useGrantedResource: async () => true
+                ),
+                clientDefaults: {
+                    grant_types: ["authorization_code", "refresh_token"],
+                    response_types: ["code"],
+                    token_endpoint_auth_method: "none",
                 },
-                revocation: {
-                    allowedPolicy: async (_ctx, client, token) => token.clientId === client.clientId,
-                    enabled: true
-                }
+                claims: {
+                    openid: ["sub"],
+                },
+                features: {
+                    devInteractions: { enabled: false },
+                    registration: {
+                        enabled: true,
+                        initialAccessToken: false,
+                    },
+                    registrationManagement: {
+                        enabled: true,
+                    },
+                    resourceIndicators: {
+                        defaultResource: async (_ctx, _client, oneOf) => {
+                            if (Array.isArray(oneOf) && oneOf.length === 1) {
+                                return oneOf[0];
+                            }
+                            if (this.#registeredResources.size === 1) {
+                                return [...this.#registeredResources.keys()][0];
+                            }
+                            throw new Error(
+                                "Unable to determine a default resource indicator.",
+                            );
+                        },
+                        enabled: true,
+                        getResourceServerInfo: async (
+                            _ctx,
+                            resourceIndicator,
+                        ) => {
+                            const resourceConfig =
+                                this.#registeredResources.get(
+                                    resourceIndicator,
+                                );
+                            if (resourceConfig === undefined) {
+                                throw new Error(
+                                    `Unknown resource indicator: ${resourceIndicator}`,
+                                );
+                            }
+                            return {
+                                accessTokenFormat: "opaque" as const,
+                                audience: resourceIndicator,
+                                scope: resourceConfig.requiredScopes.join(" "),
+                            };
+                        },
+                        useGrantedResource: async () => true,
+                    },
+                    revocation: {
+                        allowedPolicy: async (_ctx, client, token) =>
+                            token.clientId === client.clientId,
+                        enabled: true,
+                    },
+                },
+                findAccount: async (_ctx, sub) => {
+                    if (sub !== this.#accountId) {
+                        return undefined;
+                    }
+                    return {
+                        accountId: this.#accountId,
+                        claims: async () => ({ sub: this.#accountId }),
+                    };
+                },
+                interactions: {
+                    url: async (_ctx, interaction) => {
+                        return `${this.#basePath}/interaction/${interaction.uid}`;
+                    },
+                },
+                jwks,
+                routes: {
+                    authorization: "/authorize",
+                    end_session: "/session/end",
+                    jwks: "/jwks",
+                    registration: "/register",
+                    revocation: "/revoke",
+                    token: "/token",
+                    userinfo: "/userinfo",
+                },
+                scopes: [
+                    "openid",
+                    "offline_access",
+                    ...new Set([
+                        ...this.#config.requiredScopes,
+                        ...[...this.#registeredResources.values()].flatMap(
+                            (resource) => resource.requiredScopes,
+                        ),
+                    ]),
+                ],
+                ttl: {
+                    AccessToken: () => ACCESS_TOKEN_TTL_SECONDS,
+                    Grant: () => LONG_LIVED_TTL_SECONDS,
+                    IdToken: () => ID_TOKEN_TTL_SECONDS,
+                    Interaction: () => INTERACTION_TTL_SECONDS,
+                    RefreshToken: () => LONG_LIVED_TTL_SECONDS,
+                    Session: () => LONG_LIVED_TTL_SECONDS,
+                },
             },
-            findAccount: async (_ctx, sub) => {
-                if (sub !== this.#accountId) {
-                    return undefined;
-                }
-                return {
-                    accountId: this.#accountId,
-                    claims: async () => ({ sub: this.#accountId })
-                };
-            },
-            interactions: {
-                url: async (_ctx, interaction) => {
-                    return `${this.#basePath}/interaction/${interaction.uid}`;
-                }
-            },
-            jwks,
-            routes: {
-                authorization: "/authorize",
-                end_session: "/session/end",
-                jwks: "/jwks",
-                registration: "/register",
-                revocation: "/revoke",
-                token: "/token",
-                userinfo: "/userinfo"
-            },
-            scopes: [
-                "openid",
-                "offline_access",
-                ...new Set([
-                    ...this.#config.requiredScopes,
-                    ...[...this.#registeredResources.values()].flatMap(
-                        (resource) => resource.requiredScopes
-                    )
-                ])
-            ],
-            ttl: {
-                AccessToken: () => ACCESS_TOKEN_TTL_SECONDS,
-                Grant: () => LONG_LIVED_TTL_SECONDS,
-                IdToken: () => ID_TOKEN_TTL_SECONDS,
-                Interaction: () => INTERACTION_TTL_SECONDS,
-                RefreshToken: () => LONG_LIVED_TTL_SECONDS,
-                Session: () => LONG_LIVED_TTL_SECONDS
-            }
-        });
+        );
         provider.proxy = this.#trustProxy;
         provider.on("registration_create.success", (context, client) => {
-            const scope = extendDynamicClientScope(client.scope, dynamicClientRequiredScopes());
+            const scope = extendDynamicClientScope(
+                client.scope,
+                dynamicClientRequiredScopes(),
+            );
             (client as unknown as { scope: string }).scope = scope;
             if (isRecord(context.body)) {
                 context.body.scope = scope;
@@ -291,7 +315,7 @@ export class McpOAuthProviderRuntime {
             "/revoke",
             "/session",
             "/token",
-            "/userinfo"
+            "/userinfo",
         ];
         return authPrefixes.some((prefix) => {
             return pathname.startsWith(`${this.#basePath}${prefix}`);
@@ -300,59 +324,65 @@ export class McpOAuthProviderRuntime {
 
     protectedResourceMetadata(
         resourceServerUrl: URL,
-        config: McpOAuth2Config = this.#config
+        config: McpOAuth2Config = this.#config,
     ): OAuthProtectedResourceMetadata {
         return {
             authorization_servers: [stripTrailingSlash(this.#issuerUrl.href)],
             resource: resourceUrlFromServerUrl(resourceServerUrl).href,
             resource_documentation: config.documentationUrl,
             resource_name: config.resourceName,
-            scopes_supported: config.requiredScopes.length === 0
-                ? undefined
-                : [...config.requiredScopes]
+            scopes_supported:
+                config.requiredScopes.length === 0
+                    ? undefined
+                    : [...config.requiredScopes],
         };
     }
 
     protectedResourceMetadataHandler(
         resourceServerUrl: URL,
-        config: McpOAuth2Config = this.#config
+        config: McpOAuth2Config = this.#config,
     ): RequestHandler {
         return async (_request: Request, response: Response) => {
-            response.json(this.protectedResourceMetadata(resourceServerUrl, config));
+            response.json(
+                this.protectedResourceMetadata(resourceServerUrl, config),
+            );
         };
     }
 
-    requestAuthHandler(resourceServerUrl: URL, config: McpOAuth2Config = this.#config): RequestHandler {
+    requestAuthHandler(
+        resourceServerUrl: URL,
+        config: McpOAuth2Config = this.#config,
+    ): RequestHandler {
         return requireBearerAuth({
             requiredScopes: config.requiredScopes,
-            resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
-                resourceServerUrl
-            ),
+            resourceMetadataUrl:
+                getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
             verifier: new McpOAuthResourceVerifier(
                 this.provider,
                 resourceServerUrl,
-                config.requiredScopes
-            )
+                config.requiredScopes,
+            ),
         });
     }
 
     async verifyAccessToken(
         resourceServerUrl: URL,
-        token: string
+        token: string,
     ): Promise<McpOAuthAccessTokenVerification> {
-        const config = this.#registeredResources.get(
-            resourceUrlFromServerUrl(resourceServerUrl).href
-        ) ?? this.#config;
+        const config =
+            this.#registeredResources.get(
+                resourceUrlFromServerUrl(resourceServerUrl).href,
+            ) ?? this.#config;
         const verified = await new McpOAuthResourceVerifier(
             this.provider,
             resourceServerUrl,
-            config.requiredScopes
+            config.requiredScopes,
         ).verifyAccessToken(token);
         return {
             clientId: verified.clientId,
             expiresAt: verified.expiresAt,
             grantId: verified.grantId,
-            scopes: [...verified.scopes]
+            scopes: [...verified.scopes],
         };
     }
 
@@ -361,7 +391,9 @@ export class McpOAuthProviderRuntime {
             try {
                 listener(revocation);
             } catch (error) {
-                console.warn(error instanceof Error ? error : new Error(String(error)));
+                console.warn(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
         }
     }
@@ -370,12 +402,19 @@ export class McpOAuthProviderRuntime {
 function createDynamicClientScopeAdapterFactory(
     delegate: AdapterFactory,
     requiredScopes: () => readonly string[],
-    onClientCreated: (clientId: string, payload: AdapterPayload) => Promise<void>
+    onClientCreated: (
+        clientId: string,
+        payload: AdapterPayload,
+    ) => Promise<void>,
 ): AdapterFactory {
     return (name) => {
         const adapter = delegate(name);
         return name === "Client"
-            ? new DynamicClientScopeAdapter(adapter, requiredScopes, onClientCreated)
+            ? new DynamicClientScopeAdapter(
+                  adapter,
+                  requiredScopes,
+                  onClientCreated,
+              )
             : adapter;
     };
 }
@@ -384,7 +423,10 @@ class DynamicClientScopeAdapter implements Adapter {
     constructor(
         private readonly delegate: Adapter,
         private readonly requiredScopes: () => readonly string[],
-        private readonly onClientCreated: (clientId: string, payload: AdapterPayload) => Promise<void>
+        private readonly onClientCreated: (
+            clientId: string,
+            payload: AdapterPayload,
+        ) => Promise<void>,
     ) {}
 
     async consume(id: string): Promise<void> {
@@ -400,7 +442,10 @@ class DynamicClientScopeAdapter implements Adapter {
         if (payload === undefined) {
             return undefined;
         }
-        const extended = extendDynamicClientPayload(payload, this.requiredScopes());
+        const extended = extendDynamicClientPayload(
+            payload,
+            this.requiredScopes(),
+        );
         if (extended !== payload) {
             await this.delegate.upsert(id, extended, 0);
         }
@@ -408,11 +453,13 @@ class DynamicClientScopeAdapter implements Adapter {
     }
 
     async findByUid(uid: string): Promise<AdapterPayload | undefined> {
-        return await this.delegate.findByUid(uid) ?? undefined;
+        return (await this.delegate.findByUid(uid)) ?? undefined;
     }
 
-    async findByUserCode(userCode: string): Promise<AdapterPayload | undefined> {
-        return await this.delegate.findByUserCode(userCode) ?? undefined;
+    async findByUserCode(
+        userCode: string,
+    ): Promise<AdapterPayload | undefined> {
+        return (await this.delegate.findByUserCode(userCode)) ?? undefined;
     }
 
     async revokeByGrantId(grantId: string): Promise<void> {
@@ -422,10 +469,13 @@ class DynamicClientScopeAdapter implements Adapter {
     async upsert(
         id: string,
         payload: AdapterPayload,
-        expiresIn: number
+        expiresIn: number,
     ): Promise<void> {
         const existing = await this.delegate.find(id);
-        const extended = extendDynamicClientPayload(payload, this.requiredScopes());
+        const extended = extendDynamicClientPayload(
+            payload,
+            this.requiredScopes(),
+        );
         await this.delegate.upsert(id, extended, expiresIn);
         if (existing !== undefined) return;
         try {
@@ -436,7 +486,7 @@ class DynamicClientScopeAdapter implements Adapter {
             } catch (rollbackError) {
                 throw new AggregateError(
                     [error, rollbackError],
-                    `Dynamic client ${id} approval failed and client rollback was incomplete.`
+                    `Dynamic client ${id} approval failed and client rollback was incomplete.`,
                 );
             }
             throw error;
@@ -446,18 +496,20 @@ class DynamicClientScopeAdapter implements Adapter {
 
 function extendDynamicClientPayload(
     payload: AdapterPayload,
-    requiredScopes: readonly string[]
+    requiredScopes: readonly string[],
 ): AdapterPayload {
     const scope = extendDynamicClientScope(payload.scope, requiredScopes);
-    return scope === payload.scope
-        ? payload
-        : { ...payload, scope };
+    return scope === payload.scope ? payload : { ...payload, scope };
 }
 
-function extendDynamicClientScope(value: unknown, requiredScopes: readonly string[]): string {
-    const scopes = typeof value === "string"
-        ? value.split(/\s+/u).filter((scope) => scope.length > 0)
-        : [];
+function extendDynamicClientScope(
+    value: unknown,
+    requiredScopes: readonly string[],
+): string {
+    const scopes =
+        typeof value === "string"
+            ? value.split(/\s+/u).filter((scope) => scope.length > 0)
+            : [];
     for (const scope of requiredScopes) {
         if (!scopes.includes(scope)) {
             scopes.push(scope);
@@ -478,46 +530,51 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
     constructor(
         provider: Provider,
         expectedResourceUrl: URL,
-        requiredScopes: readonly string[]
+        requiredScopes: readonly string[],
     ) {
         this.#provider = provider;
-        this.#expectedResourceUrl = resourceUrlFromServerUrl(
-            expectedResourceUrl
-        );
+        this.#expectedResourceUrl =
+            resourceUrlFromServerUrl(expectedResourceUrl);
         this.#requiredScopes = requiredScopes;
     }
 
     async verifyAccessToken(token: string) {
         const accessToken = await this.#provider.AccessToken.find(token);
         if (accessToken === undefined || accessToken.isValid !== true) {
-            throw new OAuthError(OAuthErrorCode.InvalidToken, "Token is invalid or expired.");
+            throw new OAuthError(
+                OAuthErrorCode.InvalidToken,
+                "Token is invalid or expired.",
+            );
         }
 
         const resources = readTokenResources(accessToken.aud);
         if (resources === undefined) {
-            throw new OAuthError(OAuthErrorCode.InvalidToken, "Token resource audience is missing or invalid.");
+            throw new OAuthError(
+                OAuthErrorCode.InvalidToken,
+                "Token resource audience is missing or invalid.",
+            );
         }
         const resource = resources.find((candidate) =>
             checkResourceAllowed({
                 configuredResource: this.#expectedResourceUrl,
-                requestedResource: candidate
-            })
+                requestedResource: candidate,
+            }),
         );
         if (resource === undefined) {
             throw new OAuthError(
                 OAuthErrorCode.InvalidToken,
-                `Token resource audience is not valid for ${this.#expectedResourceUrl.href}.`
+                `Token resource audience is not valid for ${this.#expectedResourceUrl.href}.`,
             );
         }
 
         const grantedScopes = new Set(accessToken.scopes);
         const missingScope = this.#requiredScopes.find(
-            (scope) => !grantedScopes.has(scope)
+            (scope) => !grantedScopes.has(scope),
         );
         if (missingScope !== undefined) {
             throw new OAuthError(
                 OAuthErrorCode.InvalidToken,
-                `Token is missing required resource scope: ${missingScope}.`
+                `Token is missing required resource scope: ${missingScope}.`,
             );
         }
 
@@ -527,13 +584,13 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
         ) {
             throw new OAuthError(
                 OAuthErrorCode.ServerError,
-                "Issued access token does not include a client identifier."
+                "Issued access token does not include a client identifier.",
             );
         }
         if (typeof accessToken.exp !== "number") {
             throw new OAuthError(
                 OAuthErrorCode.ServerError,
-                "Issued access token does not include an expiration."
+                "Issued access token does not include an expiration.",
             );
         }
         if (
@@ -542,7 +599,7 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
         ) {
             throw new OAuthError(
                 OAuthErrorCode.ServerError,
-                "Issued access token does not include a grant identifier."
+                "Issued access token does not include a grant identifier.",
             );
         }
 
@@ -551,14 +608,15 @@ class McpOAuthResourceVerifier implements OAuthTokenVerifier {
             expiresAt: accessToken.exp,
             grantId: accessToken.grantId,
             extra: {
-                subject: typeof (accessToken as { accountId?: unknown }).accountId ===
-                    "string"
-                    ? (accessToken as { accountId: string }).accountId
-                    : accessToken.clientId
+                subject:
+                    typeof (accessToken as { accountId?: unknown })
+                        .accountId === "string"
+                        ? (accessToken as { accountId: string }).accountId
+                        : accessToken.clientId,
             },
             resource,
             scopes: [...accessToken.scopes],
-            token
+            token,
         };
     }
 }
@@ -583,13 +641,14 @@ function readLocalAccountId(): string {
 }
 
 function readTokenResources(
-    audience: string | string[] | undefined
+    audience: string | string[] | undefined,
 ): URL[] | undefined {
-    const values = typeof audience === "string"
-        ? [audience]
-        : Array.isArray(audience)
-            ? audience
-            : [];
+    const values =
+        typeof audience === "string"
+            ? [audience]
+            : Array.isArray(audience)
+              ? audience
+              : [];
     if (values.length === 0) {
         return undefined;
     }
@@ -604,11 +663,14 @@ function readTokenResources(
     return resources;
 }
 
-function toRegistrationApprovalInputFromPayload(clientId: string, payload: AdapterPayload): OAuthApprovalInput {
+function toRegistrationApprovalInputFromPayload(
+    clientId: string,
+    payload: AdapterPayload,
+): OAuthApprovalInput {
     return {
         clientId,
         clientName: readClientName(clientId, payload.client_name),
-        redirectUris: readStringArray(payload.redirect_uris)
+        redirectUris: readStringArray(payload.redirect_uris),
     };
 }
 
@@ -632,7 +694,7 @@ function readStringArray(value: unknown): string[] {
 }
 
 async function readOrCreateJwks(
-    storageDir: string
+    storageDir: string,
 ): Promise<{ keys: Array<Record<string, unknown>> }> {
     const jwksPath = join(storageDir, "jwks.json");
     try {
@@ -650,14 +712,14 @@ async function readOrCreateJwks(
     }
 
     const { privateKey } = await generateKeyPair("RS256", {
-        extractable: true
+        extractable: true,
     });
     const jwk = await exportJWK(privateKey);
     jwk.alg = "RS256";
     jwk.kid = "aromatic-oidc-signing-key";
     jwk.use = "sig";
     const jwks = {
-        keys: [jwk as unknown as Record<string, unknown>]
+        keys: [jwk as unknown as Record<string, unknown>],
     };
     const temporary = `${jwksPath}.${process.pid}.${randomUUID()}.tmp`;
     const file = await open(temporary, "wx", 0o600);
@@ -689,8 +751,10 @@ async function readOrCreateJwks(
 }
 
 function isMissing(error: unknown): error is NodeJS.ErrnoException {
-    return typeof error === "object" &&
+    return (
+        typeof error === "object" &&
         error !== null &&
         "code" in error &&
-        error.code === "ENOENT";
+        error.code === "ENOENT"
+    );
 }

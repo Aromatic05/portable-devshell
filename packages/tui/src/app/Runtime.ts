@@ -4,10 +4,7 @@ import type { ReadStream, WriteStream } from "node:tty";
 import React from "react";
 import { render, type Instance as InkInstance } from "ink";
 
-import {
-    createTuiClients,
-    type TuiClients,
-} from "./control/Client.js";
+import { createTuiClients, type TuiClients } from "./control/Client.js";
 import { TuiCommandDispatcher } from "../interaction/command/Dispatch.js";
 import { TuiControlSession } from "./control/Session.js";
 import { TuiFocusManager } from "../interaction/focus/Manager.js";
@@ -32,10 +29,7 @@ import {
     type TuiHitTarget,
 } from "../view/projection/HitRegion.js";
 import { tuiSidebarSectionAt } from "../view/projection/Sidebar.js";
-import {
-    tuiBlockHeight,
-    tuiMainLayoutMetrics,
-} from "../view/shell/Layout.js";
+import { tuiBlockHeight, tuiMainLayoutMetrics } from "../view/shell/Layout.js";
 import { TuiRuntimeOperations } from "./Operations.js";
 import { TuiRouteDataLoader } from "./control/Route.js";
 import { TuiRouteLifecycleController } from "./control/Route.js";
@@ -175,15 +169,22 @@ export class TuiRuntime {
         const clients =
             dependencies.clients ??
             createTuiClients({
-                ...(options.controlToken === undefined ? {} : { controlToken: options.controlToken }),
-                ...(options.controlUrl === undefined ? {} : { controlUrl: options.controlUrl }),
-                ...(options.environment === undefined ? {} : { environment: options.environment }),
+                ...(options.controlToken === undefined
+                    ? {}
+                    : { controlToken: options.controlToken }),
+                ...(options.controlUrl === undefined
+                    ? {}
+                    : { controlUrl: options.controlUrl }),
+                ...(options.environment === undefined
+                    ? {}
+                    : { environment: options.environment }),
                 xdgRuntimeDir: options.xdgRuntimeDir,
             });
         if (dependencies.terminal === undefined) {
             this.#controlTerminalPty = new TuiControlTerminalPtyFactory({
                 client: clients.terminal,
-                workspaceForInstance: (instance) => this.#requireInstanceHome(instance),
+                workspaceForInstance: (instance) =>
+                    this.#requireInstanceHome(instance),
             });
             this.terminal = new TuiTerminalSession({
                 ptyFactory: this.#controlTerminalPty.create(),
@@ -213,9 +214,13 @@ export class TuiRuntime {
             terminal: this.terminal,
             tmuxPanes: this.tmuxPanes,
             copyText: (text) => this.#copyText(text),
-            enqueueInput: (operation) => { void this.#enqueueInput(operation); },
+            enqueueInput: (operation) => {
+                void this.#enqueueInput(operation);
+            },
             handleAppMouse: async (event) => await this.#handleMouse(event),
-            writeAppInput: (data) => { this.#inkStdin.write(data); },
+            writeAppInput: (data) => {
+                this.#inkStdin.write(data);
+            },
         });
         const routeDataLoader = new TuiRouteDataLoader({
             session: this.session,
@@ -238,10 +243,7 @@ export class TuiRuntime {
             mainContentColumns: () =>
                 tuiMainLayoutMetrics(this.columns, this.rows).contentWidth,
             mainViewportRows: () => {
-                const geometry = tuiMainLayoutMetrics(
-                    this.columns,
-                    this.rows,
-                );
+                const geometry = tuiMainLayoutMetrics(this.columns, this.rows);
                 const state = this.store.getState();
                 return Math.max(
                     0,
@@ -265,7 +267,9 @@ export class TuiRuntime {
             },
             onArtifactViewImage: async (instance, input) => {
                 if ("imageRef" in input) {
-                    const stored = await clients.artifact.readImage(input.imageRef);
+                    const stored = await clients.artifact.readImage(
+                        input.imageRef,
+                    );
                     return {
                         ...stored,
                         name: input.name,
@@ -274,9 +278,15 @@ export class TuiRuntime {
                 }
                 if ("path" in input) {
                     return await clients.artifact.viewImage(instance, {
-                        ...(input.instance === undefined ? {} : { instance: input.instance }),
+                        ...(input.instance === undefined
+                            ? {}
+                            : { instance: input.instance }),
                         path: input.path,
-                        workspace: input.workspace ?? this.#requireInstanceHome(input.instance ?? instance),
+                        workspace:
+                            input.workspace ??
+                            this.#requireInstanceHome(
+                                input.instance ?? instance,
+                            ),
                     });
                 }
                 return await clients.artifact.viewImage(instance, input);
@@ -665,9 +675,15 @@ export class TuiRuntime {
     }
 
     #requireInstanceHome(instance: string): string {
-        const home = this.store.getState().instances.find((candidate) => candidate.name === instance)?.homeDirectory;
+        const home = this.store
+            .getState()
+            .instances.find(
+                (candidate) => candidate.name === instance,
+            )?.homeDirectory;
         if (home !== undefined && home.length > 0) return home;
-        throw new Error(`Worker home directory is unavailable for ${instance}.`);
+        throw new Error(
+            `Worker home directory is unavailable for ${instance}.`,
+        );
     }
 
     #copyText(text: string): void {
@@ -729,7 +745,10 @@ export class TuiRuntime {
                 this.#terminalController.scrollViewport(delta);
                 return;
             }
-            await this.commandDispatcher.dispatch({ delta, type: "screen.scroll" });
+            await this.commandDispatcher.dispatch({
+                delta,
+                type: "screen.scroll",
+            });
             return;
         }
 
@@ -778,10 +797,7 @@ export class TuiRuntime {
         }
 
         const target = hitTargetAt(regions, event.x, event.y);
-        if (
-            target !== undefined &&
-            sameTuiHitTarget(gesture.target, target)
-        ) {
+        if (target !== undefined && sameTuiHitTarget(gesture.target, target)) {
             await this.#handleHitTarget(target);
         }
     }
@@ -820,7 +836,9 @@ export class TuiRuntime {
                     button: target.action,
                     type: "confirm.focus",
                 });
-                await this.commandDispatcher.dispatch({ type: "confirm.accept" });
+                await this.commandDispatcher.dispatch({
+                    type: "confirm.accept",
+                });
                 return;
             }
             if (
@@ -829,7 +847,9 @@ export class TuiRuntime {
                     kind: "approvalAction",
                 })
             ) {
-                await this.commandDispatcher.dispatch({ type: "focus.activate" });
+                await this.commandDispatcher.dispatch({
+                    type: "focus.activate",
+                });
             }
             return;
         }
@@ -879,8 +899,6 @@ export class TuiRuntime {
         }
         await this.commandDispatcher.dispatch({ type: "focus.activate" });
     }
-
-
 }
 
 function sameTuiHitTarget(
@@ -895,7 +913,10 @@ function sameTuiHitTarget(
         case "instance":
             return right.kind === left.kind && right.id === left.id;
         case "overviewInstance":
-            return right.kind === "overviewInstance" && right.instance === left.instance;
+            return (
+                right.kind === "overviewInstance" &&
+                right.instance === left.instance
+            );
         case "messagesViewport":
             return right.kind === "messagesViewport";
         case "terminalTab":

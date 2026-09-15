@@ -26,10 +26,10 @@ export function composeComments(advice: readonly CommentAdvice[]): string[] {
 
 export function mergeComments(
     userComments: readonly string[],
-    hints: readonly ToolDiagnosticHint[]
+    hints: readonly ToolDiagnosticHint[],
 ): string[] {
     return composeComments([
         ...userComments.map((text) => ({ text })),
-        ...hints.map((hint) => ({ code: hint.code, text: formatHint(hint) }))
+        ...hints.map((hint) => ({ code: hint.code, text: formatHint(hint) })),
     ]);
 }

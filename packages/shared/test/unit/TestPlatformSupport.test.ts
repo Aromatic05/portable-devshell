@@ -9,7 +9,7 @@ test("Darwin test IPC paths stay below the conservative Unix socket limit", () =
     const socketPath = createTestIpcPath(
         "portable-devshell-client-connection-with-a-long-name",
         longTemporaryDirectory,
-        "darwin"
+        "darwin",
     );
 
     assert.match(socketPath, /^\/tmp\/pds-/u);
@@ -20,15 +20,15 @@ test("Darwin test IPC paths stay below the conservative Unix socket limit", () =
 test("Linux test IPC paths remain inside the requested directory", () => {
     assert.equal(
         createTestIpcPath("client-connection", "/tmp/runtime", "linux"),
-        "/tmp/runtime/client-connection.sock"
+        "/tmp/runtime/client-connection.sock",
     );
 });
 
 test("Windows test IPC paths use a named pipe", () => {
     assert.equal(
         createTestIpcPath("client-connection", "C:\\temp", "win32").startsWith(
-            "\\\\.\\pipe\\portable-devshell-test-client-connection-"
+            "\\\\.\\pipe\\portable-devshell-test-client-connection-",
         ),
-        true
+        true,
     );
 });

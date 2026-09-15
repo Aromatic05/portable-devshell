@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import {
     asInstanceName,
     createInitialControlReadModelState,
@@ -56,25 +62,28 @@ const state: WebState = {
     operations: {},
     readModel: {
         ...createInitialControlReadModelState(),
-        contexts: [{
-            createdAt: "2026-07-01T00:00:00Z",
-            ctxId: "ctx-alpha",
-            expiresAt: "2026-12-01T00:00:00Z",
-            instance: "alpha",
-            lastAccessedAt: recentContextAccess,
-            principal: "client-alpha",
-            status: "active",
-            workspace: "/workspace/alpha",
-        }, {
-            createdAt: "2026-07-31T08:00:00Z",
-            ctxId: "ctx-beta",
-            expiresAt: "2026-12-01T00:00:00Z",
-            instance: "beta",
-            lastAccessedAt: recentContextAccess,
-            principal: "client-beta",
-            status: "active",
-            workspace: "/workspace/beta",
-        }],
+        contexts: [
+            {
+                createdAt: "2026-07-01T00:00:00Z",
+                ctxId: "ctx-alpha",
+                expiresAt: "2026-12-01T00:00:00Z",
+                instance: "alpha",
+                lastAccessedAt: recentContextAccess,
+                principal: "client-alpha",
+                status: "active",
+                workspace: "/workspace/alpha",
+            },
+            {
+                createdAt: "2026-07-31T08:00:00Z",
+                ctxId: "ctx-beta",
+                expiresAt: "2026-12-01T00:00:00Z",
+                instance: "beta",
+                lastAccessedAt: recentContextAccess,
+                principal: "client-beta",
+                status: "active",
+                workspace: "/workspace/beta",
+            },
+        ],
         instances: [
             {
                 mcpEnabled: true,
@@ -104,27 +113,36 @@ const state: WebState = {
         instanceState: {
             alpha: {
                 approvals: [],
-                commentCalls: [{
-                    callId: "call-comment-old",
-                    completedAt: "2026-07-30T09:00:01Z",
-                    ctxId: "ctx-alpha",
-                    input: { command: "pwd" },
-                    inputSummary: '{"command":"pwd"}',
-                    instance: asInstanceName("alpha"),
-                    output: { comment: ["Review the previous failure."], exitCode: 0, stderr: "", stdout: "/workspace\n" },
-                    source: "mcp",
-                    startedAt: "2026-07-30T09:00:00Z",
-                    status: "completed",
-                    toolName: "bash_run",
-                }],
-                contextMessages: [{
-                    createdAt: "2026-07-31T09:05:00Z",
-                    ctxId: "ctx-alpha",
-                    id: "message-1",
-                    instance: "alpha",
-                    status: "pending",
-                    text: "Check the failing command.",
-                }],
+                commentCalls: [
+                    {
+                        callId: "call-comment-old",
+                        completedAt: "2026-07-30T09:00:01Z",
+                        ctxId: "ctx-alpha",
+                        input: { command: "pwd" },
+                        inputSummary: '{"command":"pwd"}',
+                        instance: asInstanceName("alpha"),
+                        output: {
+                            comment: ["Review the previous failure."],
+                            exitCode: 0,
+                            stderr: "",
+                            stdout: "/workspace\n",
+                        },
+                        source: "mcp",
+                        startedAt: "2026-07-30T09:00:00Z",
+                        status: "completed",
+                        toolName: "bash_run",
+                    },
+                ],
+                contextMessages: [
+                    {
+                        createdAt: "2026-07-31T09:05:00Z",
+                        ctxId: "ctx-alpha",
+                        id: "message-1",
+                        instance: "alpha",
+                        status: "pending",
+                        text: "Check the failing command.",
+                    },
+                ],
                 goals: [],
                 logs: [],
                 reportCalls: [],
@@ -169,12 +187,14 @@ function renderAudit({
 } = {}) {
     return {
         navigate,
-        ...render(<Audit
-            navigate={navigate}
-            route={route}
-            state={nextState}
-            store={store as WebStore}
-        />),
+        ...render(
+            <Audit
+                navigate={navigate}
+                route={route}
+                state={nextState}
+                store={store as WebStore}
+            />,
+        ),
     };
 }
 
@@ -183,17 +203,31 @@ describe("Audit", () => {
         const { navigate } = renderAudit();
 
         const scope = screen.getByLabelText("Scope");
-        expect(within(scope).getByRole("option", { name: /ctx-alpha.*active/u })).toBeInTheDocument();
-        expect(scope.querySelector('optgroup[label="Workspace · alpha"]')).not.toBeNull();
-        expect(scope.querySelector('optgroup[label="Workspace · beta"]')).not.toBeNull();
-        expect(scope.querySelector('optgroup[label="Instances"]')).not.toBeNull();
-        expect(screen.getByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
-        expect(within(screen.getByRole("group", { name: "Active filters" }))
-            .getByRole("button", { name: "Context: Active · last 30 min ×" }))
-            .toBeInTheDocument();
+        expect(
+            within(scope).getByRole("option", { name: /ctx-alpha.*active/u }),
+        ).toBeInTheDocument();
+        expect(
+            scope.querySelector('optgroup[label="Workspace · alpha"]'),
+        ).not.toBeNull();
+        expect(
+            scope.querySelector('optgroup[label="Workspace · beta"]'),
+        ).not.toBeNull();
+        expect(
+            scope.querySelector('optgroup[label="Instances"]'),
+        ).not.toBeNull();
+        expect(
+            screen.getByRole("button", { name: "Filters (1)" }),
+        ).toBeInTheDocument();
+        expect(
+            within(
+                screen.getByRole("group", { name: "Active filters" }),
+            ).getByRole("button", { name: "Context: Active · last 30 min ×" }),
+        ).toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
         expect(screen.getByLabelText("Context status")).toHaveValue("active");
-        fireEvent.change(scope, { target: { value: "#/audit/context/alpha/ctx-alpha" } });
+        fireEvent.change(scope, {
+            target: { value: "#/audit/context/alpha/ctx-alpha" },
+        });
         expect(navigate).toHaveBeenCalledWith({
             page: "audit",
             view: "timeline",
@@ -205,23 +239,39 @@ describe("Audit", () => {
         renderAudit();
 
         const scope = screen.getByLabelText("Scope");
-        fireEvent.change(screen.getByRole("searchbox", { name: "Search scopes" }), {
-            target: { value: "beta" },
-        });
+        fireEvent.change(
+            screen.getByRole("searchbox", { name: "Search scopes" }),
+            {
+                target: { value: "beta" },
+            },
+        );
 
-        expect(within(scope).getByRole("option", { name: "All instances" })).toBeInTheDocument();
-        expect(within(scope).getByRole("option", { name: /ctx-beta/u })).toBeInTheDocument();
-        expect(within(scope).queryByRole("option", { name: /ctx-alpha/u })).not.toBeInTheDocument();
+        expect(
+            within(scope).getByRole("option", { name: "All instances" }),
+        ).toBeInTheDocument();
+        expect(
+            within(scope).getByRole("option", { name: /ctx-beta/u }),
+        ).toBeInTheDocument();
+        expect(
+            within(scope).queryByRole("option", { name: /ctx-alpha/u }),
+        ).not.toBeInTheDocument();
     });
 
     it("clears the visible default Context window like any other filter", () => {
         renderAudit();
 
-        fireEvent.click(within(screen.getByRole("group", { name: "Active filters" }))
-            .getByRole("button", { name: "Context: Active · last 30 min ×" }));
+        fireEvent.click(
+            within(
+                screen.getByRole("group", { name: "Active filters" }),
+            ).getByRole("button", { name: "Context: Active · last 30 min ×" }),
+        );
 
-        expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
-        expect(screen.queryByRole("group", { name: "Active filters" })).not.toBeInTheDocument();
+        expect(
+            screen.getByRole("button", { name: "Filters" }),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByRole("group", { name: "Active filters" }),
+        ).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Filters" }));
         expect(screen.getByLabelText("Context status")).toHaveValue("all");
     });
@@ -235,40 +285,73 @@ describe("Audit", () => {
                     context.ctxId === "ctx-alpha"
                         ? {
                               ...context,
-                              lastAccessedAt: new Date(Date.now() - 31 * 60 * 1_000).toISOString(),
+                              lastAccessedAt: new Date(
+                                  Date.now() - 31 * 60 * 1_000,
+                              ).toISOString(),
                           }
-                        : context
+                        : context,
                 ),
             },
         };
         const view = renderAudit({ state: staleState });
 
-        expect(screen.queryByRole("option", { name: /ctx-alpha/u })).not.toBeInTheDocument();
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
-        expect(screen.queryByText("bash_run", { selector: "strong" })).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("option", { name: /ctx-alpha/u }),
+        ).not.toBeInTheDocument();
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(1);
+        expect(
+            screen.queryByText("bash_run", { selector: "strong" }),
+        ).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
-        fireEvent.change(screen.getByLabelText("Context status"), { target: { value: "all" } });
+        fireEvent.change(screen.getByLabelText("Context status"), {
+            target: { value: "all" },
+        });
 
-        expect(screen.getByRole("option", { name: /ctx-alpha/u })).toBeInTheDocument();
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(2);
+        expect(
+            screen.getByRole("option", { name: /ctx-alpha/u }),
+        ).toBeInTheDocument();
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(2);
     });
 
     it("separates Search, quick result filters, and collapsed advanced filters", () => {
         const view = renderAudit();
 
         expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
-        fireEvent.change(screen.getByLabelText("Search audit"), { target: { value: "file_read" } });
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
+        fireEvent.change(screen.getByLabelText("Search audit"), {
+            target: { value: "file_read" },
+        });
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(1);
 
-        fireEvent.change(screen.getByLabelText("Search audit"), { target: { value: "" } });
-        fireEvent.click(within(screen.getByRole("group", { name: "Result" })).getByRole("button", { name: "Failures" }));
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
-        expect(screen.getByText("bash_run", { selector: "strong" })).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText("Search audit"), {
+            target: { value: "" },
+        });
+        fireEvent.click(
+            within(screen.getByRole("group", { name: "Result" })).getByRole(
+                "button",
+                { name: "Failures" },
+            ),
+        );
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(1);
+        expect(
+            screen.getByText("bash_run", { selector: "strong" }),
+        ).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: "Filters (1)" }));
-        fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "projects/alpha" } });
-        expect(screen.getByRole("group", { name: "Active filters" })).toHaveTextContent("Workspace: projects/alpha");
+        fireEvent.change(screen.getByLabelText("Workspace"), {
+            target: { value: "projects/alpha" },
+        });
+        expect(
+            screen.getByRole("group", { name: "Active filters" }),
+        ).toHaveTextContent("Workspace: projects/alpha");
     });
 
     it("restores direct Context ID filtering without changing Audit scope or hiding stale Contexts", () => {
@@ -276,48 +359,82 @@ describe("Audit", () => {
             ...state,
             readModel: {
                 ...state.readModel,
-                contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-beta"
-                    ? {
-                        ...context,
-                        lastAccessedAt: "2026-07-31T09:00:00Z",
-                        status: "expired" as const,
-                    }
-                    : context),
+                contexts: state.readModel.contexts.map((context) =>
+                    context.ctxId === "ctx-beta"
+                        ? {
+                              ...context,
+                              lastAccessedAt: "2026-07-31T09:00:00Z",
+                              status: "expired" as const,
+                          }
+                        : context,
+                ),
             },
         };
         const { navigate, container } = renderAudit({ state: staleState });
 
-        expect(screen.queryByText("file_read", { selector: "strong" })).not.toBeInTheDocument();
+        expect(
+            screen.queryByText("file_read", { selector: "strong" }),
+        ).not.toBeInTheDocument();
 
-        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-beta" } });
+        fireEvent.change(screen.getByLabelText("Context ID"), {
+            target: { value: "ctx-beta" },
+        });
 
-        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
-        expect(screen.getByText("file_read", { selector: "strong" })).toBeInTheDocument();
-        expect(screen.queryByText("bash_run", { selector: "strong" })).not.toBeInTheDocument();
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(
+            1,
+        );
+        expect(
+            screen.getByText("file_read", { selector: "strong" }),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByText("bash_run", { selector: "strong" }),
+        ).not.toBeInTheDocument();
         expect(navigate).not.toHaveBeenCalled();
     });
 
     it("treats Context ID as an exact identifier rather than a substring search", () => {
         const { container } = renderAudit();
 
-        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-" } });
+        fireEvent.change(screen.getByLabelText("Context ID"), {
+            target: { value: "ctx-" },
+        });
 
-        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(0);
-        fireEvent.change(screen.getByLabelText("Context ID"), { target: { value: "ctx-alpha" } });
-        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
-        expect(screen.getByText("bash_run", { selector: "strong" })).toBeInTheDocument();
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(
+            0,
+        );
+        fireEvent.change(screen.getByLabelText("Context ID"), {
+            target: { value: "ctx-alpha" },
+        });
+        expect(container.querySelectorAll(".activity-feed > li")).toHaveLength(
+            1,
+        );
+        expect(
+            screen.getByText("bash_run", { selector: "strong" }),
+        ).toBeInTheDocument();
     });
 
     it("scopes tool calls without exposing a Comment composer in Audit", () => {
         const view = renderAudit({ route: alphaContextRoute });
 
-        expect(screen.getByRole("heading", { name: "Context controls" })).toBeInTheDocument();
+        expect(
+            screen.getByRole("heading", { name: "Context controls" }),
+        ).toBeInTheDocument();
         expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Queue Comment" })).not.toBeInTheDocument();
-        expect(screen.queryByText("Check the failing command.")).not.toBeInTheDocument();
-        expect(screen.queryByText("Review the previous failure.")).not.toBeInTheDocument();
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(1);
-        expect(screen.queryByText("file_read", { selector: "strong" })).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole("button", { name: "Queue Comment" }),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText("Check the failing command."),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByText("Review the previous failure."),
+        ).not.toBeInTheDocument();
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(1);
+        expect(
+            screen.queryByText("file_read", { selector: "strong" }),
+        ).not.toBeInTheDocument();
     });
 
     it("retains Context lifecycle controls with pending renewal and disable confirmation", async () => {
@@ -325,16 +442,29 @@ describe("Audit", () => {
         const renewContext = vi.fn(async () => true);
         renderAudit({
             route: alphaContextRoute,
-            state: { ...state, operations: { "context-renew:ctx-alpha": "pending" } },
+            state: {
+                ...state,
+                operations: { "context-renew:ctx-alpha": "pending" },
+            },
             store: { disableContext, renewContext },
         });
 
-        expect(screen.getByRole("button", { name: "Renewing…" })).toBeDisabled();
-        fireEvent.click(screen.getByRole("button", { name: "Disable Context" }));
+        expect(
+            screen.getByRole("button", { name: "Renewing…" }),
+        ).toBeDisabled();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Disable Context" }),
+        );
         const dialog = screen.getByRole("dialog", { name: "Confirm disable" });
-        expect(within(dialog).getByText(/\/workspace\/alpha/u)).toBeInTheDocument();
-        fireEvent.click(within(dialog).getByRole("button", { name: "Disable" }));
-        await waitFor(() => expect(disableContext).toHaveBeenCalledWith("ctx-alpha"));
+        expect(
+            within(dialog).getByText(/\/workspace\/alpha/u),
+        ).toBeInTheDocument();
+        fireEvent.click(
+            within(dialog).getByRole("button", { name: "Disable" }),
+        );
+        await waitFor(() =>
+            expect(disableContext).toHaveBeenCalledWith("ctx-alpha"),
+        );
     });
 
     it("keeps Context disable confirmation open and reports a failed operation in place", async () => {
@@ -343,34 +473,55 @@ describe("Audit", () => {
             route: alphaContextRoute,
             state: failedState,
             store: {
-                get state() { return failedState; },
+                get state() {
+                    return failedState;
+                },
                 disableContext: vi.fn(async () => false),
                 renewContext: vi.fn(async () => true),
             },
         });
 
-        fireEvent.click(screen.getByRole("button", { name: "Disable Context" }));
-        fireEvent.click(within(screen.getByRole("dialog", { name: "Confirm disable" })).getByRole("button", { name: "Disable" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Disable Context" }),
+        );
+        fireEvent.click(
+            within(
+                screen.getByRole("dialog", { name: "Confirm disable" }),
+            ).getByRole("button", { name: "Disable" }),
+        );
 
-        const dialog = await screen.findByRole("dialog", { name: "Confirm disable" });
-        expect(within(dialog).getByRole("alert")).toHaveTextContent("Context disable failed.");
+        const dialog = await screen.findByRole("dialog", {
+            name: "Confirm disable",
+        });
+        expect(within(dialog).getByRole("alert")).toHaveTextContent(
+            "Context disable failed.",
+        );
     });
 
     it("shows Tool Call detail loading failures inside the expanded record", async () => {
         renderAudit({
             store: {
-                readToolCallDetail: vi.fn(async () => { throw new Error("Tool Call detail unavailable."); }),
+                readToolCallDetail: vi.fn(async () => {
+                    throw new Error("Tool Call detail unavailable.");
+                }),
                 refreshToolCall: vi.fn(async () => undefined),
             },
         });
 
-        fireEvent.click(screen.getByText("file_read", { selector: "strong" }).closest("summary")!);
+        fireEvent.click(
+            screen
+                .getByText("file_read", { selector: "strong" })
+                .closest("summary")!,
+        );
 
-        expect(await screen.findByRole("alert")).toHaveTextContent("Tool Call detail unavailable.");
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+            "Tool Call detail unavailable.",
+        );
     });
 
     it("renders persisted artifact_viewImage content from its Audit imageRef", async () => {
-        const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        const png =
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
         const blake3 = "b".repeat(64);
         const readArtifactImage = vi.fn(async () => ({
             blake3,
@@ -388,32 +539,34 @@ describe("Audit", () => {
                     ...state.readModel.instanceState,
                     alpha: {
                         ...state.readModel.instanceState.alpha!,
-                        toolCalls: [{
-                            callId: "call-image",
-                            completedAt: "2026-07-31T09:20:01Z",
-                            ctxId: "ctx-alpha",
-                            input: { path: "./preview.png" },
-                            inputSummary: '{"path":"./preview.png"}',
-                            instance: asInstanceName("alpha"),
-                            output: {
-                                blake3,
-                                bytes: 68,
-                                imageRef: `${blake3}.png`,
-                                mediaType: "image/png",
-                                name: "preview.png",
-                                source: {
-                                    instance: "alpha",
-                                    path: "./preview.png",
-                                    type: "file",
-                                    workspace: "/projects/alpha",
+                        toolCalls: [
+                            {
+                                callId: "call-image",
+                                completedAt: "2026-07-31T09:20:01Z",
+                                ctxId: "ctx-alpha",
+                                input: { path: "./preview.png" },
+                                inputSummary: '{"path":"./preview.png"}',
+                                instance: asInstanceName("alpha"),
+                                output: {
+                                    blake3,
+                                    bytes: 68,
+                                    imageRef: `${blake3}.png`,
+                                    mediaType: "image/png",
+                                    name: "preview.png",
+                                    source: {
+                                        instance: "alpha",
+                                        path: "./preview.png",
+                                        type: "file",
+                                        workspace: "/projects/alpha",
+                                    },
                                 },
+                                source: "mcp",
+                                startedAt: "2026-07-31T09:20:00Z",
+                                status: "completed",
+                                toolName: "artifact_viewImage",
+                                workspace: "/projects/alpha",
                             },
-                            source: "mcp",
-                            startedAt: "2026-07-31T09:20:00Z",
-                            status: "completed",
-                            toolName: "artifact_viewImage",
-                            workspace: "/projects/alpha",
-                        }],
+                        ],
                     },
                 },
             },
@@ -424,7 +577,11 @@ describe("Audit", () => {
             store: { readArtifactImage },
         });
 
-        fireEvent.click(screen.getByText("artifact_viewImage", { selector: "strong" }).closest("summary")!);
+        fireEvent.click(
+            screen
+                .getByText("artifact_viewImage", { selector: "strong" })
+                .closest("summary")!,
+        );
 
         const image = await screen.findByRole("img", { name: "preview.png" });
         expect(readArtifactImage).toHaveBeenCalledWith(`${blake3}.png`);
@@ -442,23 +599,39 @@ describe("Audit", () => {
                         context.ctxId === "ctx-alpha"
                             ? {
                                   ...context,
-                                  lastAccessedAt: new Date(Date.now() - 2 * 60 * 60 * 1_000).toISOString(),
+                                  lastAccessedAt: new Date(
+                                      Date.now() - 2 * 60 * 60 * 1_000,
+                                  ).toISOString(),
                               }
-                            : context
+                            : context,
                     ),
                 },
             },
             store: { disableContexts },
         });
-        fireEvent.click(screen.getByRole("button", { name: "Disable inactive Contexts…" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Disable inactive Contexts…" }),
+        );
 
-        const dialog = screen.getByRole("dialog", { name: "Disable inactive Contexts" });
+        const dialog = screen.getByRole("dialog", {
+            name: "Disable inactive Contexts",
+        });
         expect(within(dialog).getByText("ctx-alpha")).toBeInTheDocument();
-        fireEvent.change(within(dialog).getByLabelText("Inactive for"), { target: { value: "20" } });
-        fireEvent.click(within(dialog).getByRole("checkbox", { name: "Select ctx-alpha" }));
-        fireEvent.click(within(dialog).getByRole("button", { name: "Review disable" }));
-        fireEvent.click(within(dialog).getByRole("button", { name: "Disable 1 Context" }));
-        await waitFor(() => expect(disableContexts).toHaveBeenCalledWith(["ctx-alpha"]));
+        fireEvent.change(within(dialog).getByLabelText("Inactive for"), {
+            target: { value: "20" },
+        });
+        fireEvent.click(
+            within(dialog).getByRole("checkbox", { name: "Select ctx-alpha" }),
+        );
+        fireEvent.click(
+            within(dialog).getByRole("button", { name: "Review disable" }),
+        );
+        fireEvent.click(
+            within(dialog).getByRole("button", { name: "Disable 1 Context" }),
+        );
+        await waitFor(() =>
+            expect(disableContexts).toHaveBeenCalledWith(["ctx-alpha"]),
+        );
     });
 
     it("opens a call deep link directly instead of requiring a second disclosure action", () => {
@@ -472,15 +645,23 @@ describe("Audit", () => {
             },
         });
 
-        expect(screen.getByText("Confirm the failing command")).toBeInTheDocument();
-        expect(screen.getByText("The previous run returned a non-zero exit code.")).toBeInTheDocument();
-        expect(screen.queryByText("file_read", { selector: "strong" })).not.toBeInTheDocument();
+        expect(
+            screen.getByText("Confirm the failing command"),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText("The previous run returned a non-zero exit code."),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByText("file_read", { selector: "strong" }),
+        ).not.toBeInTheDocument();
     });
 
     it("refreshes the Audit surface without resetting query state", async () => {
         const refreshAudit = vi.fn(async () => undefined);
         renderAudit({ store: { refreshAudit } });
-        fireEvent.change(screen.getByLabelText("Search audit"), { target: { value: "bash_run" } });
+        fireEvent.change(screen.getByLabelText("Search audit"), {
+            target: { value: "bash_run" },
+        });
         fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
 
         await waitFor(() => expect(refreshAudit).toHaveBeenCalledOnce());
@@ -497,7 +678,13 @@ describe("Audit", () => {
                     ...state.readModel.instanceState,
                     alpha: {
                         ...state.readModel.instanceState.alpha!,
-                        toolCalls: [{ ...alphaCall, callId: "large-call", output: `${token}${"x".repeat(200_000)}` }],
+                        toolCalls: [
+                            {
+                                ...alphaCall,
+                                callId: "large-call",
+                                output: `${token}${"x".repeat(200_000)}`,
+                            },
+                        ],
                     },
                 },
             },
@@ -533,11 +720,19 @@ describe("Audit", () => {
         };
         const view = renderAudit({ state: manyState });
 
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(20);
-        const pagination = screen.getByRole("navigation", { name: "Tool calls pagination" });
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(20);
+        const pagination = screen.getByRole("navigation", {
+            name: "Tool calls pagination",
+        });
         expect(pagination).toHaveTextContent("Page 1 of 8");
-        fireEvent.click(within(pagination).getByRole("button", { name: "Next page" }));
-        expect(view.container.querySelectorAll(".activity-feed > li")).toHaveLength(20);
+        fireEvent.click(
+            within(pagination).getByRole("button", { name: "Next page" }),
+        );
+        expect(
+            view.container.querySelectorAll(".activity-feed > li"),
+        ).toHaveLength(20);
         expect(pagination).toHaveTextContent("Page 2 of 8");
     });
 
@@ -546,22 +741,34 @@ describe("Audit", () => {
             ...state,
             readModel: {
                 ...state.readModel,
-                contexts: state.readModel.contexts.map((context) => context.ctxId === "ctx-alpha"
-                    ? {
-                        ...context,
-                        environments: [
-                            { instance: "alpha", workspace: "/workspace/alpha" },
-                            { instance: "beta", workspace: "/workspace/remote" },
-                        ],
-                    }
-                    : context),
+                contexts: state.readModel.contexts.map((context) =>
+                    context.ctxId === "ctx-alpha"
+                        ? {
+                              ...context,
+                              environments: [
+                                  {
+                                      instance: "alpha",
+                                      workspace: "/workspace/alpha",
+                                  },
+                                  {
+                                      instance: "beta",
+                                      workspace: "/workspace/remote",
+                                  },
+                              ],
+                          }
+                        : context,
+                ),
             },
         };
         renderAudit({ state: multiState });
 
         const scope = screen.getByLabelText("Scope");
-        expect(within(scope).getByRole("option", { name: /ctx-alpha · alpha/u })).toBeInTheDocument();
-        expect(within(scope).getByRole("option", { name: /ctx-alpha · beta/u })).toBeInTheDocument();
+        expect(
+            within(scope).getByRole("option", { name: /ctx-alpha · alpha/u }),
+        ).toBeInTheDocument();
+        expect(
+            within(scope).getByRole("option", { name: /ctx-alpha · beta/u }),
+        ).toBeInTheDocument();
     });
 });
 
@@ -622,19 +829,26 @@ describe("tool call audit query", () => {
     });
 
     it("filters tool calls directly by Context ID", () => {
-        expect(filterToolCalls(calls, {
-            ...emptyToolCallFilters,
-            ctxId: "ctx-alpha",
-        })).toEqual([calls[1], calls[0]]);
-        expect(filterToolCalls(calls, {
-            ...emptyToolCallFilters,
-            ctxId: "ctx-missing",
-        })).toEqual([]);
+        expect(
+            filterToolCalls(calls, {
+                ...emptyToolCallFilters,
+                ctxId: "ctx-alpha",
+            }),
+        ).toEqual([calls[1], calls[0]]);
+        expect(
+            filterToolCalls(calls, {
+                ...emptyToolCallFilters,
+                ctxId: "ctx-missing",
+            }),
+        ).toEqual([]);
     });
 
     it("formats complete structured input and restores output from linked logs", () => {
         expect(
-            formatToolValue({ command: "printf ok", options: { timeoutMs: 1000 } }),
+            formatToolValue({
+                command: "printf ok",
+                options: { timeoutMs: 1000 },
+            }),
         ).toBe("\n  command: printf ok\n  options:\n    timeoutMs: 1000");
         expect(
             resolveToolCallOutput(calls[0]!, [
@@ -665,8 +879,18 @@ describe("bounded Tool Call presentation", () => {
             input: { command: "unique-input-token" },
             output: { stdout: "unique-output-token" },
         };
-        expect(filterToolCalls([call], { ...emptyToolCallFilters, query: "unique-input-token" })).toEqual([call]);
-        expect(filterToolCalls([call], { ...emptyToolCallFilters, query: "unique-output-token" })).toEqual([call]);
+        expect(
+            filterToolCalls([call], {
+                ...emptyToolCallFilters,
+                query: "unique-input-token",
+            }),
+        ).toEqual([call]);
+        expect(
+            filterToolCalls([call], {
+                ...emptyToolCallFilters,
+                query: "unique-output-token",
+            }),
+        ).toEqual([call]);
     });
 
     it("bounds deeply nested and oversized values", () => {
@@ -685,7 +909,8 @@ it("uses a global traversal budget for wide nested values", () => {
     let reads = 0;
     const inner = new Proxy(new Array(1_000).fill("value"), {
         get(target, property, receiver) {
-            if (typeof property === "string" && /^\d+$/u.test(property)) reads += 1;
+            if (typeof property === "string" && /^\d+$/u.test(property))
+                reads += 1;
             return Reflect.get(target, property, receiver);
         },
     });
@@ -715,7 +940,12 @@ it("returns the requested page of matching calls", () => {
         callId: `call-${index}`,
         startedAt: `2026-07-31T09:${String(index % 60).padStart(2, "0")}:00Z`,
     }));
-    const { items, total } = selectToolCalls(many, emptyToolCallFilters, Date.now(), 100);
+    const { items, total } = selectToolCalls(
+        many,
+        emptyToolCallFilters,
+        Date.now(),
+        100,
+    );
 
     expect(items).toHaveLength(50);
     expect(total).toBe(150);

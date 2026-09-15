@@ -1,11 +1,11 @@
 {
-  "jsonrpc": "2.0",
-  "id": "req-tools-call",
-  "method": "tools/call",
-  "params": {
-    "name": "bash_run",
-    "arguments": {
-      "command": "pwd"
+    "jsonrpc": "2.0",
+    "id": "req-tools-call",
+    "method": "tools/call",
+    "params": {
+        "name": "bash_run",
+        "arguments": {
+            "command": "pwd"
+        }
     }
-  }
 }

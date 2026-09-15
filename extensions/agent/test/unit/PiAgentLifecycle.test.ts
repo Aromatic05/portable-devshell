@@ -17,7 +17,7 @@ function fakeSession(events: string[], abortError?: Error): PiSessionLike {
         async followUp() {},
         async prompt() {},
         async reload() {},
-        async waitForIdle() {}
+        async waitForIdle() {},
     };
 }
 
@@ -27,10 +27,12 @@ test("managed Pi Agent disposal aborts, detaches, and disposes its session", asy
 
     await disposeManagedPiAgent(
         { session },
-        { detach(value) {
-            assert.equal(value, session);
-            events.push("detach");
-        } }
+        {
+            detach(value) {
+                assert.equal(value, session);
+                events.push("detach");
+            },
+        },
     );
 
     assert.deepEqual(events, ["abort", "detach", "dispose"]);
@@ -42,9 +44,11 @@ test("managed Pi Agent disposal continues after an abort failure", async () => {
 
     await disposeManagedPiAgent(
         { session },
-        { detach() {
-            events.push("detach");
-        } }
+        {
+            detach() {
+                events.push("detach");
+            },
+        },
     );
 
     assert.deepEqual(events, ["abort", "detach", "dispose"]);

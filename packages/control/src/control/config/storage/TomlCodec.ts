@@ -13,7 +13,7 @@ export class ControlConfigTomlCodec {
                 cause: error,
                 details: { phase: "decode" },
                 message: error instanceof Error ? error.message : String(error),
-                retryable: false
+                retryable: false,
             });
         }
     }
@@ -27,7 +27,7 @@ export class ControlConfigTomlCodec {
                 cause: error,
                 details: { phase: "encode" },
                 message: error instanceof Error ? error.message : String(error),
-                retryable: false
+                retryable: false,
             });
         }
     }

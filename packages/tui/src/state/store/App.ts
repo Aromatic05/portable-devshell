@@ -78,15 +78,20 @@ export class TuiAppStore {
         readModel: ControlReadModelState,
         instances: TuiInstanceListEntry[] = this.#state.instances,
     ): void {
-        this.dispatch({ instances, readModel, type: "control.readModel.replace" });
+        this.dispatch({
+            instances,
+            readModel,
+            type: "control.readModel.replace",
+        });
     }
 
     patchControlReadModel(patch: TuiControlReadModelPatch): void {
         const { instanceState, instances, ...global } = patch;
         const current = this.#state.readModel;
-        const nextInstanceState = instanceState === undefined
-            ? current.instanceState
-            : { ...current.instanceState };
+        const nextInstanceState =
+            instanceState === undefined
+                ? current.instanceState
+                : { ...current.instanceState };
         if (instanceState !== undefined) {
             for (const [name, value] of Object.entries(instanceState)) {
                 nextInstanceState[name] = {
@@ -106,7 +111,9 @@ export class TuiAppStore {
         );
     }
 
-    patchControlSnapshot(snapshot: NonNullable<ControlInstanceReadState["snapshot"]>): void {
+    patchControlSnapshot(
+        snapshot: NonNullable<ControlInstanceReadState["snapshot"]>,
+    ): void {
         this.patchControlReadModel({
             instanceState: {
                 [snapshot.name]: {
@@ -327,14 +334,15 @@ export class TuiAppStore {
     }
 
     applyInstanceEvent(event: InstanceEvent): void {
-        const lastSeq = this.#state.readModel.instanceState[event.instanceName]?.sequence ?? 0;
+        const lastSeq =
+            this.#state.readModel.instanceState[event.instanceName]?.sequence ??
+            0;
         if (event.seq <= lastSeq) return;
         this.dispatch({
             rawEvent: toRawEventRecord(event),
             type: "event.append",
         });
     }
-
 }
 
 function emptyInstanceReadState(): ControlInstanceReadState {

@@ -247,12 +247,8 @@ privileges
 {
     "capabilities": ["assets", "workers", "processes"],
     "extensions": {
-        "cli.native-commands": [
-            { "id": "agent", "title": "Agent" }
-        ],
-        "web.applications": [
-            { "id": "agent", "title": "Agent" }
-        ]
+        "cli.native-commands": [{ "id": "agent", "title": "Agent" }],
+        "web.applications": [{ "id": "agent", "title": "Agent" }]
     }
 }
 ```
@@ -658,7 +654,7 @@ import { commands } from "@portable-devshell/extension/cli";
 得到的 runtime descriptor 最终依靠稳定 point id 识别，而不是：
 
 ```ts
-hostPoint === extensionBundledPoint
+hostPoint === extensionBundledPoint;
 ```
 
 这样的 object identity。
@@ -1374,13 +1370,13 @@ Generation lifecycle 内部的状态/动作
 本设计借鉴但不复制以下成熟插件系统的边界：
 
 - Visual Studio Code Extension API：区分 manifest Contribution Points 与 Extension runtime API；Contribution Points 可以在 Extension activation 前被发现。
-  - https://code.visualstudio.com/api/get-started/extension-anatomy
-  - https://code.visualstudio.com/api/references/contribution-points
+    - https://code.visualstudio.com/api/get-started/extension-anatomy
+    - https://code.visualstudio.com/api/references/contribution-points
 - IntelliJ Platform：由 platform/plugin domain 定义 Extension Point，插件向具体 Extension Point 注册实现；Extension Point 不被压缩成一个中央功能 enum。
-  - https://plugins.jetbrains.com/docs/intellij/plugin-extensions.html
-  - https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html
+    - https://plugins.jetbrains.com/docs/intellij/plugin-extensions.html
+    - https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html
 - Chrome Extensions：manifest capability/permission 与功能声明分离，说明“获得什么 authority”和“提供什么功能”应当是不同维度。
-  - https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions
+    - https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions
 
 portable-devshell 与这些系统不同之处在于：
 

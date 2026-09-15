@@ -6,7 +6,10 @@ import {
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
 import { InstanceCreateCoordinator } from "../../../../src/control/instance/create/Coordinator.ts";
-import { normalizeConfigInstanceDraft, type ControlConfig } from "@portable-devshell/shared";
+import {
+    normalizeConfigInstanceDraft,
+    type ControlConfig,
+} from "@portable-devshell/shared";
 
 test("instance create validates docker preset drafts into container config", () => {
     const service = createService("linux");
@@ -61,13 +64,13 @@ test("instance create validation summary never returns secret values", () => {
             containerName: "devshell-demo-docker",
             env: { CONTAINER_TOKEN: "container-secret" },
             image: "archlinux:latest",
-            mode: "existingImage"
+            mode: "existingImage",
         },
         env: { API_TOKEN: "instance-secret" },
         mcp: {
             auth: "token",
             enabled: true,
-            token: "mcp-secret-" + "x".repeat(32)
+            token: "mcp-secret-" + "x".repeat(32),
         },
         name: "demo-docker",
         provider: "docker",
@@ -79,8 +82,10 @@ test("instance create validation summary never returns secret values", () => {
     assert.equal(serialized.includes("mcp-secret-"), false);
     assert.deepEqual(summary.env, { API_TOKEN: "********" });
     assert.deepEqual(
-        summary.container?.mode === "existingImage" ? summary.container.env : undefined,
-        { CONTAINER_TOKEN: "********" }
+        summary.container?.mode === "existingImage"
+            ? summary.container.env
+            : undefined,
+        { CONTAINER_TOKEN: "********" },
     );
 });
 
@@ -111,17 +116,19 @@ test("instance create prepares the runtime descriptor before persisting configur
             async write(nextConfig) {
                 writes += 1;
                 config = nextConfig;
-            }
+            },
         },
         getConfig: () => config,
         getMcpHost: () => undefined,
         instanceConfigMapper: {
             map() {
                 throw new Error("runtime descriptor failed");
-            }
+            },
         } as never,
         instanceRegistry: new InstanceRegistry([]),
-        setConfig: (nextConfig) => { config = nextConfig; }
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
     });
 
     await assert.rejects(
@@ -129,7 +136,7 @@ test("instance create prepares the runtime descriptor before persisting configur
             name: "demo-local",
             provider: "local",
         }),
-        /runtime descriptor failed/u
+        /runtime descriptor failed/u,
     );
     assert.equal(writes, 0);
     assert.deepEqual(config.instances, []);
@@ -141,7 +148,13 @@ test("instance create restores configuration and registry when MCP registration 
     const writes: ControlConfig[] = [];
     const registry = new InstanceRegistry([]);
     const descriptor = {
-        conversation: { close() {}, async list() { return []; }, async recordReport() {} },
+        conversation: {
+            close() {},
+            async list() {
+                return [];
+            },
+            async recordReport() {},
+        },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",
@@ -156,16 +169,21 @@ test("instance create restores configuration and registry when MCP registration 
             async write(nextConfig) {
                 writes.push(structuredClone(nextConfig));
                 config = nextConfig;
-            }
+            },
         },
         getConfig: () => config,
-        getMcpHost: () => ({
-            registerInstance() { throw new Error("MCP registration failed"); },
-            unregisterInstance() {}
-        }) as never,
+        getMcpHost: () =>
+            ({
+                registerInstance() {
+                    throw new Error("MCP registration failed");
+                },
+                unregisterInstance() {},
+            }) as never,
         instanceConfigMapper: { map: () => descriptor } as never,
         instanceRegistry: registry,
-        setConfig: (nextConfig) => { config = nextConfig; }
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
     });
 
     await assert.rejects(
@@ -174,7 +192,7 @@ test("instance create restores configuration and registry when MCP registration 
             name: "demo-local",
             provider: "local",
         }),
-        /MCP registration failed/u
+        /MCP registration failed/u,
     );
     assert.equal(writes.length, 2);
     assert.deepEqual(config.instances, []);

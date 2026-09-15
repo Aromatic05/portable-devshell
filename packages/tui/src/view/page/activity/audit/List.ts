@@ -91,9 +91,10 @@ export function buildAuditContextListBoxes(
                 ),
                 context.latestActivityAt,
             ],
-            title: context.workspace === undefined
-                ? context.label
-                : workspaceFolderName(context.workspace),
+            title:
+                context.workspace === undefined
+                    ? context.label
+                    : workspaceFolderName(context.workspace),
         }),
     );
 }
@@ -109,8 +110,9 @@ export function buildAuditPageBoxes(
     if (route.view === "conversation") {
         return buildAuditConversationBoxes(state, instanceName, route.ctxId);
     }
-    const key = route.scope === "unscoped"
-        ? { kind: "unscoped" as const }
-        : { ctxId: route.ctxId, kind: "context" as const };
+    const key =
+        route.scope === "unscoped"
+            ? { kind: "unscoped" as const }
+            : { ctxId: route.ctxId, kind: "context" as const };
     return buildAuditContextBoxes(state, instanceName, key);
 }

@@ -9,7 +9,7 @@ export class CliCommandInstanceTodo {
         instance: string,
         follow: boolean,
         onTodo: (todo: TodoReadResult) => Promise<void> | void,
-        maxEvents?: number
+        maxEvents?: number,
     ): Promise<void> {
         const load = async () => {
             const envelope = await todoClient.get(instance);
@@ -26,7 +26,7 @@ export class CliCommandInstanceTodo {
             async onEvent() {
                 await onTodo((await todoClient.get(instance)).todo);
             },
-            subscribe: (fromSeq) => todoClient.subscribe(instance, fromSeq)
+            subscribe: (fromSeq) => todoClient.subscribe(instance, fromSeq),
         });
     }
 }
@@ -65,8 +65,14 @@ export function renderInstanceTodo(todo: TodoReadResult): string {
 }
 
 function renderTaskSummary(task: TodoTaskSummary): string {
-    const symbol = task.status === "none" ? "·" : task.status === "paused" ? "Ⅱ" : symbols[task.status];
-    const current = task.currentItem === undefined ? "" : ` — ${task.currentItem}`;
+    const symbol =
+        task.status === "none"
+            ? "·"
+            : task.status === "paused"
+              ? "Ⅱ"
+              : symbols[task.status];
+    const current =
+        task.currentItem === undefined ? "" : ` — ${task.currentItem}`;
     return `${symbol} ${task.title} [${task.completed}/${task.total}]${current}`;
 }
 
@@ -81,18 +87,37 @@ import { renderCliTopicUsage } from "../Usage.js";
 
 export function parseTodoCommand(argv: readonly string[]): CliParsedCommand {
     if (argv[0] === "help" || argv[0] === "--help" || argv[0] === "-h") {
-        if (argv.length !== 1) throw CliRenderError.usage(`Unexpected arguments for ${argv[0]}`);
+        if (argv.length !== 1)
+            throw CliRenderError.usage(`Unexpected arguments for ${argv[0]}`);
         return { kind: "help", topic: "todo" };
     }
-    if (argv[0] !== "delete" || argv.length !== 3) throw CliRenderError.usage(`todo delete requires <instance> <taskId>\n\n${renderCliTopicUsage("todo")}`);
-    if (!argv[1] || !argv[2]) throw CliRenderError.usage("todo delete requires <instance> <taskId>");
+    if (argv[0] !== "delete" || argv.length !== 3)
+        throw CliRenderError.usage(
+            `todo delete requires <instance> <taskId>\n\n${renderCliTopicUsage("todo")}`,
+        );
+    if (!argv[1] || !argv[2])
+        throw CliRenderError.usage("todo delete requires <instance> <taskId>");
     return { instance: argv[1], kind: "todo.delete", taskId: argv[2] };
 }
 
 import type { CliDispatchContext } from "../Dispatch.js";
-export async function executeTodoCommand(command: CliParsedCommand, context: CliDispatchContext): Promise<boolean> {
-    if(command.kind==="todo.delete"){context.writeJson(await context.clients.todo.delete(command.instance,command.taskId));return true;}
-    if(command.kind!=="instance.todo") return false;
-    await new CliCommandInstanceTodo().execute(context.clients.todo,command.instance,command.follow,async(todo)=>context.stdout.write(renderInstanceTodo(todo)),context.followEventLimit);
+export async function executeTodoCommand(
+    command: CliParsedCommand,
+    context: CliDispatchContext,
+): Promise<boolean> {
+    if (command.kind === "todo.delete") {
+        context.writeJson(
+            await context.clients.todo.delete(command.instance, command.taskId),
+        );
+        return true;
+    }
+    if (command.kind !== "instance.todo") return false;
+    await new CliCommandInstanceTodo().execute(
+        context.clients.todo,
+        command.instance,
+        command.follow,
+        async (todo) => context.stdout.write(renderInstanceTodo(todo)),
+        context.followEventLimit,
+    );
     return true;
 }

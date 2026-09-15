@@ -16,35 +16,46 @@ export function createIntegrationSteps(state, platform = process.platform) {
         },
         {
             name: "Real Worker smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-real-worker-smoke.mjs"],
-                { env: state.env, inherit: true },
-            ),
+            run: () =>
+                runCommand(
+                    process.execPath,
+                    ["acceptance/run-real-worker-smoke.mjs"],
+                    { env: state.env, inherit: true },
+                ),
         },
         {
             name: "MCP smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-mcp-smoke.mjs"],
-                { env: state.env, inherit: true },
-            ),
+            run: () =>
+                runCommand(process.execPath, ["acceptance/run-mcp-smoke.mjs"], {
+                    env: state.env,
+                    inherit: true,
+                }),
         },
-        ...(platform === "win32" ? [] : [{
-            name: "Long tmux handoff smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-long-tmux-handoff-smoke.mjs"],
-                { env: state.env, inherit: true, timeoutMs: 300_000 },
-            ),
-        }]),
+        ...(platform === "win32"
+            ? []
+            : [
+                  {
+                      name: "Long tmux handoff smoke",
+                      run: () =>
+                          runCommand(
+                              process.execPath,
+                              ["acceptance/run-long-tmux-handoff-smoke.mjs"],
+                              {
+                                  env: state.env,
+                                  inherit: true,
+                                  timeoutMs: 300_000,
+                              },
+                          ),
+                  },
+              ]),
         {
             name: "Web browser smoke",
-            run: () => runCommand(
-                process.execPath,
-                ["acceptance/run-web-browser-smoke.mjs"],
-                { env: state.env, inherit: true },
-            ),
+            run: () =>
+                runCommand(
+                    process.execPath,
+                    ["acceptance/run-web-browser-smoke.mjs"],
+                    { env: state.env, inherit: true },
+                ),
         },
     ];
 }
@@ -76,7 +87,10 @@ export function runFinalAcceptance() {
         },
         {
             name: "Build Rust workspace",
-            run: () => runCommand("cargo", ["build", "--locked", "--workspace"], { inherit: true }),
+            run: () =>
+                runCommand("cargo", ["build", "--locked", "--workspace"], {
+                    inherit: true,
+                }),
         },
         {
             name: "Resolve prepared Worker",
@@ -89,17 +103,24 @@ export function runFinalAcceptance() {
         },
         {
             name: "Package tests",
-            run: () => runCommand("pnpm", ["test"], { env: state.env, inherit: true }),
+            run: () =>
+                runCommand("pnpm", ["test"], { env: state.env, inherit: true }),
         },
         {
             name: "Rust workspace tests",
-            run: () => runCommand("cargo", ["test", "--locked", "--workspace"], { inherit: true }),
+            run: () =>
+                runCommand("cargo", ["test", "--locked", "--workspace"], {
+                    inherit: true,
+                }),
         },
         {
             name: "tmux Worker contracts",
             run() {
                 if (process.platform !== "win32") {
-                    runCommand("pnpm", ["test:worker:tmux"], { env: state.env, inherit: true });
+                    runCommand("pnpm", ["test:worker:tmux"], {
+                        env: state.env,
+                        inherit: true,
+                    });
                 }
             },
         },
@@ -108,7 +129,10 @@ export function runFinalAcceptance() {
     return runAcceptanceSteps(steps);
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+    process.argv[1] !== undefined &&
+    import.meta.url === pathToFileURL(process.argv[1]).href
+) {
     const result = process.argv.includes("--integration-only")
         ? runFinalIntegration()
         : runFinalAcceptance();

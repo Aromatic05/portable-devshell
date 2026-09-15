@@ -6,7 +6,12 @@ export interface TuiComponentErrorBannerProps {
 
 export function TuiComponentErrorBanner(props: TuiComponentErrorBannerProps) {
     return (
-        <Box borderStyle="round" borderColor="red" flexDirection="column" paddingX={1}>
+        <Box
+            borderStyle="round"
+            borderColor="red"
+            flexDirection="column"
+            paddingX={1}
+        >
             {props.lines.map((line, index) => (
                 <Text color="red" key={index}>
                     {line}

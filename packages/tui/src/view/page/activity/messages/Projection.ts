@@ -35,7 +35,9 @@ export interface TuiMessageComposerSegment {
 }
 
 const activeSessionWindowMs = 30 * 60 * 1_000;
-const emptyConversationEntries = Object.freeze([]) as readonly ConversationEntry[];
+const emptyConversationEntries = Object.freeze(
+    [],
+) as readonly ConversationEntry[];
 const messageHistoryCache = new WeakMap<
     readonly ConversationEntry[],
     Map<string, Array<{ kind: "meta" | "text"; text: string }>>
@@ -46,8 +48,9 @@ export function selectTuiMessageSessions(
     instance: string,
     now: number = Date.now(),
 ): TuiMessageSession[] {
-    return projectTuiMessageSessions(state, instance)
-        .filter((session) => isActiveMessageSession(session, now));
+    return projectTuiMessageSessions(state, instance).filter((session) =>
+        isActiveMessageSession(session, now),
+    );
 }
 
 export function selectTuiMessageHistorySessions(
@@ -55,8 +58,9 @@ export function selectTuiMessageHistorySessions(
     instance: string,
     now: number = Date.now(),
 ): TuiMessageSession[] {
-    return projectTuiMessageSessions(state, instance)
-        .filter((session) => !isActiveMessageSession(session, now));
+    return projectTuiMessageSessions(state, instance).filter(
+        (session) => !isActiveMessageSession(session, now),
+    );
 }
 
 function projectTuiMessageSessions(
@@ -89,7 +93,8 @@ function projectTuiMessageSessions(
             workspace: environment.workspace ?? context.workspace,
         });
     }
-    for (const entry of state.readModel.instanceState[instance]?.conversationEntries ?? []) {
+    for (const entry of state.readModel.instanceState[instance]
+        ?.conversationEntries ?? []) {
         touch(entry.ctxId, { latestAt: entry.createdAt });
     }
 
@@ -107,12 +112,15 @@ export function selectTuiMessagesSidebarEntries(
     const route = currentTuiRoute(state);
     const instance = state.ui.selectedInstance;
     const scope = state.ui.messageScope;
-    const sessions = instance === undefined
-        ? []
-        : scope === "active"
-            ? selectTuiMessageSessions(state, instance, now)
-            : selectTuiMessageHistorySessions(state, instance, now);
-    const baseLabels = sessions.map((session) => humanConversationTitle(session, 8));
+    const sessions =
+        instance === undefined
+            ? []
+            : scope === "active"
+              ? selectTuiMessageSessions(state, instance, now)
+              : selectTuiMessageHistorySessions(state, instance, now);
+    const baseLabels = sessions.map((session) =>
+        humanConversationTitle(session, 8),
+    );
     const labelCounts = new Map<string, number>();
     for (const label of baseLabels) {
         labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
@@ -121,7 +129,9 @@ export function selectTuiMessagesSidebarEntries(
     return [
         {
             focused:
-                focused && cursor?.kind === "context" && cursor.id === "messages:back",
+                focused &&
+                cursor?.kind === "context" &&
+                cursor.id === "messages:back",
             id: "messages:back",
             label: "← messages",
             selected: route.page === "messages" && route.view === "contexts",
@@ -129,7 +139,9 @@ export function selectTuiMessagesSidebarEntries(
         },
         {
             focused:
-                focused && cursor?.kind === "context" && cursor.id === "messages:scope",
+                focused &&
+                cursor?.kind === "context" &&
+                cursor.id === "messages:scope",
             id: "messages:scope",
             label: scope === "active" ? "History" : "Active",
             selected: false,
@@ -139,10 +151,12 @@ export function selectTuiMessagesSidebarEntries(
             },
         },
         ...sessions.map((session, index): TuiSidebarContextEntry => {
-            const baseLabel = baseLabels[index] ?? humanConversationTitle(session, 8);
-            const label = (labelCounts.get(baseLabel) ?? 0) > 1
-                ? `${baseLabel} · ${compactContextId(session.ctxId, 8)}`
-                : baseLabel;
+            const baseLabel =
+                baseLabels[index] ?? humanConversationTitle(session, 8);
+            const label =
+                (labelCounts.get(baseLabel) ?? 0) > 1
+                    ? `${baseLabel} · ${compactContextId(session.ctxId, 8)}`
+                    : baseLabel;
             return {
                 focused:
                     focused &&
@@ -167,7 +181,10 @@ export function selectTuiMessagesSidebarEntries(
     ];
 }
 
-function isActiveMessageSession(session: TuiMessageSession, now: number): boolean {
+function isActiveMessageSession(
+    session: TuiMessageSession,
+    now: number,
+): boolean {
     return Date.parse(session.latestAt) >= now - activeSessionWindowMs;
 }
 
@@ -177,7 +194,8 @@ export function selectTuiMessageEntries(
     ctxId: string,
 ): TuiMessageEntry[] {
     return selectTuiMessageEntriesFromSource(
-        state.readModel.instanceState[instance]?.conversationEntries ?? emptyConversationEntries,
+        state.readModel.instanceState[instance]?.conversationEntries ??
+            emptyConversationEntries,
         ctxId,
     );
 }
@@ -196,9 +214,10 @@ function selectTuiMessageEntriesFromSource(
             text: entry.text,
         }))
         .sort(
-        (left, right) =>
-            left.at.localeCompare(right.at) || left.id.localeCompare(right.id),
-    );
+            (left, right) =>
+                left.at.localeCompare(right.at) ||
+                left.id.localeCompare(right.id),
+        );
 }
 
 export function renderTuiMessageHistoryLines(
@@ -208,7 +227,9 @@ export function renderTuiMessageHistoryLines(
     width: number,
 ): Array<{ kind: "meta" | "text"; text: string }> {
     const innerWidth = Math.max(1, width - 2);
-    const source = state.readModel.instanceState[instance]?.conversationEntries ?? emptyConversationEntries;
+    const source =
+        state.readModel.instanceState[instance]?.conversationEntries ??
+        emptyConversationEntries;
     let byContextAndWidth = messageHistoryCache.get(source);
     if (byContextAndWidth === undefined) {
         byContextAndWidth = new Map();
@@ -217,17 +238,19 @@ export function renderTuiMessageHistoryLines(
     const cacheKey = `${ctxId}\u0000${innerWidth}`;
     const cached = byContextAndWidth.get(cacheKey);
     if (cached !== undefined) return cached;
-    const rendered = selectTuiMessageEntriesFromSource(source, ctxId).flatMap((entry) => [
-        {
-            kind: "meta" as const,
-            text: `${entry.kind === "comment" ? "You" : "Agent"}  ${formatMessageTime(entry.at)}${entry.kind === "comment" && entry.status !== "delivered" ? `  ${entry.status ?? ""}` : ""}`,
-        },
-        ...wrapTerminalText(entry.text, innerWidth).map((line) => ({
-            kind: "text" as const,
-            text: `  ${line}`,
-        })),
-        { kind: "text" as const, text: " " },
-    ]);
+    const rendered = selectTuiMessageEntriesFromSource(source, ctxId).flatMap(
+        (entry) => [
+            {
+                kind: "meta" as const,
+                text: `${entry.kind === "comment" ? "You" : "Agent"}  ${formatMessageTime(entry.at)}${entry.kind === "comment" && entry.status !== "delivered" ? `  ${entry.status ?? ""}` : ""}`,
+            },
+            ...wrapTerminalText(entry.text, innerWidth).map((line) => ({
+                kind: "text" as const,
+                text: `  ${line}`,
+            })),
+            { kind: "text" as const, text: " " },
+        ],
+    );
     byContextAndWidth.set(cacheKey, rendered);
     return rendered;
 }
@@ -254,12 +277,18 @@ export function renderTuiMessageComposerSegments(
     const next = nextTuiGraphemeCursor(draft, cursor);
     return [
         { text: draft.slice(0, cursor) },
-        { text: cursor === draft.length ? " " : draft.slice(cursor, next), underline: visible || undefined },
+        {
+            text: cursor === draft.length ? " " : draft.slice(cursor, next),
+            underline: visible || undefined,
+        },
         { text: draft.slice(next) },
     ];
 }
 
-function laterTimestamp(left: string | undefined, right: string | undefined): string {
+function laterTimestamp(
+    left: string | undefined,
+    right: string | undefined,
+): string {
     if (left === undefined) return right ?? "";
     if (right === undefined) return left;
     return left.localeCompare(right) >= 0 ? left : right;

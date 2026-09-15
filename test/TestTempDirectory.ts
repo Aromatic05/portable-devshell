@@ -17,7 +17,9 @@ export async function resolveTestTempNamespace(): Promise<string> {
 export async function createTestTempDirectory(label = "test"): Promise<string> {
     const sanitized = label.replaceAll(/[^A-Za-z0-9._-]/gu, "-") || "test";
     const namespace = await resolveTestTempNamespace();
-    const directory = await realpath(await mkdtemp(join(namespace, `${sanitized}-`)));
+    const directory = await realpath(
+        await mkdtemp(join(namespace, `${sanitized}-`)),
+    );
     activeDirectories.add(directory);
     return directory;
 }
@@ -29,7 +31,7 @@ export function cleanupTestTempDirectories(): void {
                 force: true,
                 maxRetries: 5,
                 recursive: true,
-                retryDelay: 50
+                retryDelay: 50,
             });
         } catch {
             // Process-exit cleanup is best effort; active handles may still be closing on Windows.

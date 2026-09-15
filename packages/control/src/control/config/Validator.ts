@@ -4,7 +4,7 @@ import {
     errorCodes,
     formatConfigPath,
     validateConfigSemantics,
-    type ControlConfig
+    type ControlConfig,
 } from "@portable-devshell/shared";
 
 export class ControlConfigValidator {
@@ -20,10 +20,10 @@ export class ControlConfigValidator {
                     details: {
                         fieldPath: formatConfigPath(error.issue.path),
                         phase: error.issue.phase,
-                        issueCode: error.issue.code
+                        issueCode: error.issue.code,
                     },
                     message: error.message,
-                    retryable: false
+                    retryable: false,
                 });
             }
             throw createError({
@@ -31,12 +31,17 @@ export class ControlConfigValidator {
                 cause: error,
                 details: { phase: "semantic" },
                 message: error instanceof Error ? error.message : String(error),
-                retryable: false
+                retryable: false,
             });
         }
     }
 }
 
 function isStructuredConfigError(error: unknown): error is { code: string } {
-    return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string";
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
+    );
 }

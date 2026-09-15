@@ -20,40 +20,69 @@ export async function readWorkspaceSnapshot(
         reentry?: JsonValue;
     } = {},
 ): Promise<JsonValue> {
-    const workspaceGateway = isMcpWorkspaceGateway(gateway) ? gateway : undefined;
+    const workspaceGateway = isMcpWorkspaceGateway(gateway)
+        ? gateway
+        : undefined;
     const goalGateway = isMcpGoalGateway(gateway) ? gateway : undefined;
-    const instances = [...new Set([instanceName, ...(options.instances ?? [])])];
-    const eventSlice = await (workspaceGateway?.readWorkspaceEvents(instanceName, Number.MAX_SAFE_INTEGER) ?? Promise.resolve({
-        events: [],
-        gap: false,
-        lastSeq: 0,
-    }));
-    const [todo, waits, goal, approvalSlices, activeCallSlices] = await Promise.all([
-        gateway.readTodo(instanceName),
-        gateway.listWaits(instanceName),
-        goalGateway?.readGoal(instanceName, ctxId),
-        Promise.allSettled(instances.map(async (instance) =>
-            gateway.listPendingApprovals === undefined
-                ? (await gateway.listApprovals(instance)).filter((approval) => approval.status === "pending")
-                : await gateway.listPendingApprovals(instance, ctxId)
-        )),
-        Promise.allSettled(instances.map(async (instance) => {
-            if (workspaceGateway?.hasActiveToolCalls !== undefined) {
-                return workspaceGateway.hasActiveToolCalls(instance, ctxId);
-            }
-            const calls = await (workspaceGateway?.readToolCalls(instance, ctxId, 64) ?? []);
-            return calls.some((call) =>
-                call.status === "queued" || call.status === "pendingApproval" || call.status === "running"
-            );
-        })),
-    ]);
-    const approvals = approvalSlices.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    const instances = [
+        ...new Set([instanceName, ...(options.instances ?? [])]),
+    ];
+    const eventSlice = await (workspaceGateway?.readWorkspaceEvents(
+        instanceName,
+        Number.MAX_SAFE_INTEGER,
+    ) ??
+        Promise.resolve({
+            events: [],
+            gap: false,
+            lastSeq: 0,
+        }));
+    const [todo, waits, goal, approvalSlices, activeCallSlices] =
+        await Promise.all([
+            gateway.readTodo(instanceName),
+            gateway.listWaits(instanceName),
+            goalGateway?.readGoal(instanceName, ctxId),
+            Promise.allSettled(
+                instances.map(async (instance) =>
+                    gateway.listPendingApprovals === undefined
+                        ? (await gateway.listApprovals(instance)).filter(
+                              (approval) => approval.status === "pending",
+                          )
+                        : await gateway.listPendingApprovals(instance, ctxId),
+                ),
+            ),
+            Promise.allSettled(
+                instances.map(async (instance) => {
+                    if (workspaceGateway?.hasActiveToolCalls !== undefined) {
+                        return workspaceGateway.hasActiveToolCalls(
+                            instance,
+                            ctxId,
+                        );
+                    }
+                    const calls = await (workspaceGateway?.readToolCalls(
+                        instance,
+                        ctxId,
+                        64,
+                    ) ?? []);
+                    return calls.some(
+                        (call) =>
+                            call.status === "queued" ||
+                            call.status === "pendingApproval" ||
+                            call.status === "running",
+                    );
+                }),
+            ),
+        ]);
+    const approvals = approvalSlices.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : [],
+    );
     const todoRecord = asRecord(todo);
     const tasks = Array.isArray(todoRecord?.tasks)
         ? todoRecord.tasks.filter((task) => asRecord(task)?.ctxId === ctxId)
         : [];
     const ownedWaits = waits.filter((wait) => wait.createdByCtxId === ctxId);
-    const ownedApprovals = approvals.filter((approval) => approval.ctxId === ctxId && approval.status === "pending");
+    const ownedApprovals = approvals.filter(
+        (approval) => approval.ctxId === ctxId && approval.status === "pending",
+    );
     const visibleTasks = tasks.flatMap((task) => {
         const record = asRecord(task);
         if (record === undefined) return [];
@@ -74,34 +103,63 @@ export async function readWorkspaceSnapshot(
         const { ctxId: _ctxId, ...visible } = approval;
         return visible;
     });
-    const agentBusy = activeCallSlices.some((result) => result.status === "fulfilled" && result.value);
+    const agentBusy = activeCallSlices.some(
+        (result) => result.status === "fulfilled" && result.value,
+    );
     return {
         agentBusy,
         approvals: visibleApprovals,
         background: ownedWaits
-            .filter((wait) => (
-                wait.kind === "tmux" && (wait.status === "waiting" || wait.status === "detached")
-            ) || (
-                (wait.kind === "tmux" || wait.kind === "question") &&
-                wait.status === "resolved" && wait.detachedAt !== undefined &&
-                (wait.recoveryDisabledAt === undefined || wait.recoveryMessageAttemptedAt !== undefined)
-            ))
+            .filter(
+                (wait) =>
+                    (wait.kind === "tmux" &&
+                        (wait.status === "waiting" ||
+                            wait.status === "detached")) ||
+                    ((wait.kind === "tmux" || wait.kind === "question") &&
+                        wait.status === "resolved" &&
+                        wait.detachedAt !== undefined &&
+                        (wait.recoveryDisabledAt === undefined ||
+                            wait.recoveryMessageAttemptedAt !== undefined)),
+            )
             .map((wait) => ({
-                ...(wait.automaticRecovery === undefined ? {} : { automaticRecovery: wait.automaticRecovery }),
-                ...(wait.detachedAt === undefined ? {} : { detachedAt: wait.detachedAt }),
+                ...(wait.automaticRecovery === undefined
+                    ? {}
+                    : { automaticRecovery: wait.automaticRecovery }),
+                ...(wait.detachedAt === undefined
+                    ? {}
+                    : { detachedAt: wait.detachedAt }),
                 ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
-                ...(wait.goalProgressAt === undefined ? {} : { goalProgressAt: wait.goalProgressAt }),
-                ...(wait.goalRevision === undefined ? {} : { goalRevision: wait.goalRevision }),
-                ...(wait.goalStepId === undefined ? {} : { goalStepId: wait.goalStepId }),
+                ...(wait.goalProgressAt === undefined
+                    ? {}
+                    : { goalProgressAt: wait.goalProgressAt }),
+                ...(wait.goalRevision === undefined
+                    ? {}
+                    : { goalRevision: wait.goalRevision }),
+                ...(wait.goalStepId === undefined
+                    ? {}
+                    : { goalStepId: wait.goalStepId }),
                 kind: wait.kind,
-                ...(wait.recoveryDisabledAt === undefined ? {} : { recoveryDisabledAt: wait.recoveryDisabledAt }),
-                ...(wait.recoveryMessageAttemptedAt === undefined ? {} : { recoveryMessageAttemptedAt: wait.recoveryMessageAttemptedAt }),
-                ...(wait.recoveryMessageId === undefined ? {} : { recoveryMessageId: wait.recoveryMessageId }),
+                ...(wait.recoveryDisabledAt === undefined
+                    ? {}
+                    : { recoveryDisabledAt: wait.recoveryDisabledAt }),
+                ...(wait.recoveryMessageAttemptedAt === undefined
+                    ? {}
+                    : {
+                          recoveryMessageAttemptedAt:
+                              wait.recoveryMessageAttemptedAt,
+                      }),
+                ...(wait.recoveryMessageId === undefined
+                    ? {}
+                    : { recoveryMessageId: wait.recoveryMessageId }),
                 ...(wait.result === undefined ? {} : { result: wait.result }),
                 status: wait.status,
-                ...(wait.targetInstance === undefined ? {} : { targetInstance: wait.targetInstance }),
+                ...(wait.targetInstance === undefined
+                    ? {}
+                    : { targetInstance: wait.targetInstance }),
                 ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
-                ...(wait.todoItemId === undefined ? {} : { todoItemId: wait.todoItemId }),
+                ...(wait.todoItemId === undefined
+                    ? {}
+                    : { todoItemId: wait.todoItemId }),
                 ...(wait.kind === "tmux" ? { tmuxTaskId: wait.targetId } : {}),
                 updatedAt: wait.updatedAt,
                 waitId: wait.waitId,
@@ -111,20 +169,38 @@ export async function readWorkspaceSnapshot(
         cursor: eventSlice.lastSeq,
         goal: goal ?? null,
         instance: instanceName,
-        questions: visibleWaits.filter((wait) => wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")),
+        questions: visibleWaits.filter(
+            (wait) =>
+                wait.kind === "question" &&
+                (wait.status === "waiting" || wait.status === "detached"),
+        ),
         reentry: options.reentry ?? { epoch: 0, pending: false },
         tasks: visibleTasks,
     } as unknown as JsonValue;
 }
 
-export function workspaceEventBelongsTo(event: InstanceEvent, ctxId: string): boolean {
-    if (event.type === "wait.recoveryClaimed" || event.type === "wait.recoveryReleased") return false;
+export function workspaceEventBelongsTo(
+    event: InstanceEvent,
+    ctxId: string,
+): boolean {
+    if (
+        event.type === "wait.recoveryClaimed" ||
+        event.type === "wait.recoveryReleased"
+    )
+        return false;
     const data = asRecord(event.data);
     return data?.ctxId === ctxId || data?.createdByCtxId === ctxId;
 }
 
-function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]): JsonValue {
-    const candidates: Array<{ rank: number; updatedAt: string; value: JsonValue }> = [];
+function workspaceCurrentEvent(
+    waits: WaitRecord[],
+    approvals: ApprovalRequest[],
+): JsonValue {
+    const candidates: Array<{
+        rank: number;
+        updatedAt: string;
+        value: JsonValue;
+    }> = [];
     for (const approval of approvals) {
         candidates.push({
             rank: 0,
@@ -144,7 +220,10 @@ function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]
         });
     }
     for (const wait of waits) {
-        if (wait.kind === "question" && (wait.status === "waiting" || wait.status === "detached")) {
+        if (
+            wait.kind === "question" &&
+            (wait.status === "waiting" || wait.status === "detached")
+        ) {
             candidates.push({
                 rank: wait.status === "waiting" ? 0 : 1,
                 updatedAt: wait.updatedAt,
@@ -152,22 +231,34 @@ function workspaceCurrentEvent(waits: WaitRecord[], approvals: ApprovalRequest[]
                     eventName: "user.answer",
                     kind: "question",
                     name: "workspace_ask",
-                    ...(wait.payload === undefined ? {} : { payload: wait.payload }),
-                    ...(wait.goalId === undefined ? {} : { goalId: wait.goalId }),
+                    ...(wait.payload === undefined
+                        ? {}
+                        : { payload: wait.payload }),
+                    ...(wait.goalId === undefined
+                        ? {}
+                        : { goalId: wait.goalId }),
                     status: wait.status,
-                    ...(wait.taskId === undefined ? {} : { taskId: wait.taskId }),
+                    ...(wait.taskId === undefined
+                        ? {}
+                        : { taskId: wait.taskId }),
                     updatedAt: wait.updatedAt,
                     waitId: wait.waitId,
                 },
             });
         }
     }
-    candidates.sort((left, right) => left.rank - right.rank || left.updatedAt.localeCompare(right.updatedAt));
+    candidates.sort(
+        (left, right) =>
+            left.rank - right.rank ||
+            left.updatedAt.localeCompare(right.updatedAt),
+    );
     return candidates[0]?.value ?? null;
 }
 
-function asRecord(value: JsonValue | unknown): Record<string, JsonValue> | undefined {
+function asRecord(
+    value: JsonValue | unknown,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, JsonValue>
+        ? (value as Record<string, JsonValue>)
         : undefined;
 }

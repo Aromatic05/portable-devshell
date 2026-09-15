@@ -16,10 +16,14 @@ export function createCursorPositionResponder(
             while (true) {
                 const queryIndex = pending.indexOf(CURSOR_POSITION_QUERY);
                 if (queryIndex < 0) {
-                    pending = pending.slice(-(CURSOR_POSITION_QUERY.length - 1));
+                    pending = pending.slice(
+                        -(CURSOR_POSITION_QUERY.length - 1),
+                    );
                     return responses;
                 }
-                pending = pending.slice(queryIndex + CURSOR_POSITION_QUERY.length);
+                pending = pending.slice(
+                    queryIndex + CURSOR_POSITION_QUERY.length,
+                );
                 await sendResponse(CURSOR_POSITION_RESPONSE);
                 responses += 1;
             }

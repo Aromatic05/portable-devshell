@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type {
     ExtensionJsonValue,
     ExtensionManagedProcess,
-    ExtensionProcessCapability
+    ExtensionProcessCapability,
 } from "@portable-devshell/extension";
 
 import type { AgentProviderHandle } from "../../builtin/provider/AgentProvider.js";
@@ -14,7 +14,7 @@ import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.j
 import type {
     PiChildAgentCommandMessage,
     PiChildMessage,
-    PiParentMessage
+    PiParentMessage,
 } from "./PiProcessProtocol.js";
 
 const PI_OWNER_HEARTBEAT_INTERVAL_MS = 2_000;
@@ -43,10 +43,13 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
     #lifecycleTail: Promise<void> = Promise.resolve();
 
     constructor(options: { childModulePath?: string } = {}) {
-        this.#childModulePath = options.childModulePath ?? resolveChildModulePath();
+        this.#childModulePath =
+            options.childModulePath ?? resolveChildModulePath();
     }
 
-    async start(options: PiAgentProcessStartOptions): Promise<AgentProviderHandle> {
+    async start(
+        options: PiAgentProcessStartOptions,
+    ): Promise<AgentProviderHandle> {
         return await this.#exclusive(async () => {
             let runtime = this.#runtime;
             if (runtime === undefined) {
@@ -55,11 +58,11 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
                     args: [
                         ...childExecArgv(this.#childModulePath),
                         this.#childModulePath,
-                        String(PI_OWNER_HEARTBEAT_TIMEOUT_MS)
+                        String(PI_OWNER_HEARTBEAT_TIMEOUT_MS),
                     ],
                     command: process.execPath,
                     cwd: options.runtimeDirectory,
-                    messages: true
+                    messages: true,
                 });
                 runtime = new PiSharedProcess(managedProcess, options);
                 try {
@@ -89,7 +92,7 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
             return new PiAgentSessionHandle(
                 runtime,
                 options.agentId,
-                async () => await this.#stopAgent(runtime, options.agentId)
+                async () => await this.#stopAgent(runtime, options.agentId),
             );
         });
     }
@@ -137,7 +140,11 @@ class PiAgentSessionHandle implements AgentProviderHandle {
     readonly closed: Promise<void>;
     #stopped = false;
 
-    constructor(runtime: PiSharedProcess, agentId: string, stopAgent: () => Promise<void>) {
+    constructor(
+        runtime: PiSharedProcess,
+        agentId: string,
+        stopAgent: () => Promise<void>,
+    ) {
         this.#runtime = runtime;
         this.#agentId = agentId;
         this.#stopAgent = stopAgent;
@@ -187,8 +194,12 @@ class PiAgentSessionHandle implements AgentProviderHandle {
         }
     }
 
-    async #command(command: PiChildAgentCommandMessage["command"], message?: string): Promise<void> {
-        if (this.#stopped) throw new Error(`Pi Agent ${this.#agentId} is already stopped.`);
+    async #command(
+        command: PiChildAgentCommandMessage["command"],
+        message?: string,
+    ): Promise<void> {
+        if (this.#stopped)
+            throw new Error(`Pi Agent ${this.#agentId} is already stopped.`);
         await this.#runtime.command(this.#agentId, command, message);
     }
 }
@@ -196,13 +207,20 @@ class PiAgentSessionHandle implements AgentProviderHandle {
 class PiSharedProcess {
     readonly #child: ExtensionManagedProcess;
     readonly #close: () => void;
-    readonly #commands = new Map<string, {
-        reject(error: Error): void;
-        resolve(): void;
-    }>();
+    readonly #commands = new Map<
+        string,
+        {
+            reject(error: Error): void;
+            resolve(): void;
+        }
+    >();
     readonly #identity: Pick<
         PiAgentProcessStartOptions,
-        "agentDirectory" | "entrypoint" | "managedInstallRoot" | "runtimeDirectory" | "webBasePath"
+        | "agentDirectory"
+        | "entrypoint"
+        | "managedInstallRoot"
+        | "runtimeDirectory"
+        | "webBasePath"
     >;
     readonly #ownerHeartbeat: NodeJS.Timeout;
     readonly #agents = new Set<string>();
@@ -215,7 +233,10 @@ class PiSharedProcess {
     #web?: { upstream: URL };
     readonly closed: Promise<void>;
 
-    constructor(child: ExtensionManagedProcess, options: PiAgentProcessStartOptions) {
+    constructor(
+        child: ExtensionManagedProcess,
+        options: PiAgentProcessStartOptions,
+    ) {
         let close!: () => void;
         this.closed = new Promise<void>((resolve) => {
             close = resolve;
@@ -226,30 +247,42 @@ class PiSharedProcess {
             entrypoint: options.entrypoint,
             managedInstallRoot: options.managedInstallRoot,
             runtimeDirectory: options.runtimeDirectory,
-            webBasePath: options.webBasePath
+            webBasePath: options.webBasePath,
         };
         this.#child = child;
         this.#child.onStderr((chunk) => {
             this.#stderr = `${this.#stderr}${chunk}`.slice(-16_384);
         });
         this.#child.onMessage((message) => {
-            void this.#onMessage(message).catch((error) => this.#fail(
-                error instanceof Error ? error : new Error(String(error))
-            ));
+            void this.#onMessage(message).catch((error) =>
+                this.#fail(
+                    error instanceof Error ? error : new Error(String(error)),
+                ),
+            );
         });
-        void this.#child.closed.then((exit) => {
-            if (!this.#stopped) {
-                const detail = this.#stderr.trim();
-                this.#fail(new Error(
-                    `Pi provider child exited unexpectedly (${exit.code ?? exit.signal ?? "unknown"}).${detail.length === 0 ? "" : `\n${detail}`}`
-                ));
-            }
-        }).catch(() => undefined);
+        void this.#child.closed
+            .then((exit) => {
+                if (!this.#stopped) {
+                    const detail = this.#stderr.trim();
+                    this.#fail(
+                        new Error(
+                            `Pi provider child exited unexpectedly (${exit.code ?? exit.signal ?? "unknown"}).${detail.length === 0 ? "" : `\n${detail}`}`,
+                        ),
+                    );
+                }
+            })
+            .catch(() => undefined);
         this.#ownerHeartbeat = setInterval(() => {
             if (this.#stopped) return;
-            void this.#send({ type: "owner.heartbeat" }).catch((error: unknown) => {
-                this.#fail(error instanceof Error ? error : new Error(String(error)));
-            });
+            void this.#send({ type: "owner.heartbeat" }).catch(
+                (error: unknown) => {
+                    this.#fail(
+                        error instanceof Error
+                            ? error
+                            : new Error(String(error)),
+                    );
+                },
+            );
         }, PI_OWNER_HEARTBEAT_INTERVAL_MS);
         this.#ownerHeartbeat.unref();
     }
@@ -259,7 +292,8 @@ class PiSharedProcess {
     }
 
     get web(): { upstream: URL } {
-        if (this.#web === undefined) throw new Error("Pi provider WebUI is not initialized.");
+        if (this.#web === undefined)
+            throw new Error("Pi provider WebUI is not initialized.");
         return this.#web;
     }
 
@@ -269,10 +303,12 @@ class PiSharedProcess {
             "agentDirectory",
             "entrypoint",
             "managedInstallRoot",
-            "webBasePath"
+            "webBasePath",
         ] as const) {
             if (options[field] !== this.#identity[field]) {
-                throw new Error(`Pi provider shared process cannot change ${field} while Agents are running.`);
+                throw new Error(
+                    `Pi provider shared process cannot change ${field} while Agents are running.`,
+                );
             }
         }
     }
@@ -287,13 +323,14 @@ class PiSharedProcess {
             entrypoint: this.#identity.entrypoint,
             managedInstallRoot: this.#identity.managedInstallRoot,
             type: "init",
-            webBasePath: this.#identity.webBasePath
+            webBasePath: this.#identity.webBasePath,
         });
         await ready;
     }
 
     async startAgent(options: PiAgentProcessStartOptions): Promise<void> {
-        if (this.#agents.has(options.agentId)) throw new Error(`Pi Agent already exists: ${options.agentId}`);
+        if (this.#agents.has(options.agentId))
+            throw new Error(`Pi Agent already exists: ${options.agentId}`);
         this.assertCompatible(options);
         assertToolTarget(options.target, options.tools);
         this.#toolSessions.set(options.agentId, options.tools);
@@ -302,10 +339,12 @@ class PiSharedProcess {
                 agentId: options.agentId,
                 id: randomUUID(),
                 localCwd: options.localCwd,
-                modelTools: options.tools.modelTools.map((tool) => ({ ...tool })),
+                modelTools: options.tools.modelTools.map((tool) => ({
+                    ...tool,
+                })),
                 target: options.target,
                 tools: options.tools.tools.map((tool) => ({ ...tool })),
-                type: "agent.start"
+                type: "agent.start",
             });
         } catch (error) {
             this.#toolSessions.delete(options.agentId);
@@ -317,15 +356,16 @@ class PiSharedProcess {
     async command(
         agentId: string,
         command: PiChildAgentCommandMessage["command"],
-        message?: string
+        message?: string,
     ): Promise<void> {
-        if (!this.#agents.has(agentId)) throw new Error(`Unknown Pi Agent: ${agentId}`);
+        if (!this.#agents.has(agentId))
+            throw new Error(`Unknown Pi Agent: ${agentId}`);
         await this.#request({
             agentId,
             command,
             id: randomUUID(),
             ...(message === undefined ? {} : { message }),
-            type: "agent.command"
+            type: "agent.command",
         });
     }
 
@@ -367,11 +407,15 @@ class PiSharedProcess {
     async #request(
         message: Exclude<
             PiParentMessage,
-            { type: "init" } | { type: "owner.heartbeat" } | { type: "tool.progress" } | { type: "tool.result" }
+            | { type: "init" }
+            | { type: "owner.heartbeat" }
+            | { type: "tool.progress" }
+            | { type: "tool.result" }
         >,
-        allowStopped = false
+        allowStopped = false,
     ): Promise<void> {
-        if (this.#stopped && !allowStopped) throw new Error("Pi provider child is already stopped.");
+        if (this.#stopped && !allowStopped)
+            throw new Error("Pi provider child is already stopped.");
         const response = new Promise<void>((resolve, reject) => {
             this.#commands.set(message.id, { resolve, reject });
         });
@@ -388,13 +432,20 @@ class PiSharedProcess {
         const message = value as PiChildMessage;
         if (message?.type === "ready") {
             if (!message.ok) {
-                this.#readyReject?.(new Error(message.error ?? "Pi provider child initialization failed."));
+                this.#readyReject?.(
+                    new Error(
+                        message.error ??
+                            "Pi provider child initialization failed.",
+                    ),
+                );
                 this.#readyResolve = undefined;
                 this.#readyReject = undefined;
                 return;
             }
             if (message.webUpstream === undefined) {
-                this.#readyReject?.(new Error("Pi provider child did not expose its WebUI."));
+                this.#readyReject?.(
+                    new Error("Pi provider child did not expose its WebUI."),
+                );
             } else {
                 this.#web = { upstream: new URL(message.webUpstream) };
                 this.#readyResolve?.();
@@ -408,11 +459,18 @@ class PiSharedProcess {
             if (pending === undefined) return;
             this.#commands.delete(message.id);
             if (message.ok) pending.resolve();
-            else pending.reject(new Error(message.error ?? "Pi provider command failed."));
+            else
+                pending.reject(
+                    new Error(message.error ?? "Pi provider command failed."),
+                );
             return;
         }
         if (message?.type === "tool.cancel") {
-            this.#toolCalls.get(message.callId)?.abort(new Error(`Pi tool call ${message.callId} was cancelled.`));
+            this.#toolCalls
+                .get(message.callId)
+                ?.abort(
+                    new Error(`Pi tool call ${message.callId} was cancelled.`),
+                );
             return;
         }
         if (message?.type === "tool.close") {
@@ -424,7 +482,9 @@ class PiSharedProcess {
         }
     }
 
-    async #handleToolCall(message: Extract<PiChildMessage, { type: "tool.call" }>): Promise<void> {
+    async #handleToolCall(
+        message: Extract<PiChildMessage, { type: "tool.call" }>,
+    ): Promise<void> {
         const session = this.#toolSessions.get(message.agentId);
         if (session === undefined) {
             await this.#send({
@@ -432,7 +492,7 @@ class PiSharedProcess {
                 callId: message.callId,
                 error: `Unknown Pi Agent tool session: ${message.agentId}`,
                 ok: false,
-                type: "tool.result"
+                type: "tool.result",
             });
             return;
         }
@@ -449,16 +509,16 @@ class PiSharedProcess {
                         agentId: message.agentId,
                         callId: message.callId,
                         progress,
-                        type: "tool.progress"
+                        type: "tool.progress",
                     }).catch(() => undefined);
-                }
+                },
             );
             await this.#send({
                 agentId: message.agentId,
                 callId: message.callId,
                 ok: true,
                 result,
-                type: "tool.result"
+                type: "tool.result",
             });
         } catch (error) {
             await this.#send({
@@ -466,7 +526,7 @@ class PiSharedProcess {
                 callId: message.callId,
                 error: error instanceof Error ? error.message : String(error),
                 ok: false,
-                type: "tool.result"
+                type: "tool.result",
             });
         } finally {
             this.#toolCalls.delete(message.callId);
@@ -477,14 +537,20 @@ class PiSharedProcess {
         const session = this.#toolSessions.get(agentId);
         try {
             await session?.close();
-            await this.#send({ agentId, callId, ok: true, result: null, type: "tool.result" });
+            await this.#send({
+                agentId,
+                callId,
+                ok: true,
+                result: null,
+                type: "tool.result",
+            });
         } catch (error) {
             await this.#send({
                 agentId,
                 callId,
                 error: error instanceof Error ? error.message : String(error),
                 ok: false,
-                type: "tool.result"
+                type: "tool.result",
             });
         }
     }
@@ -497,7 +563,8 @@ class PiSharedProcess {
         if (this.#stopped) return;
         this.#stopped = true;
         clearInterval(this.#ownerHeartbeat);
-        for (const controller of this.#toolCalls.values()) controller.abort(error);
+        for (const controller of this.#toolCalls.values())
+            controller.abort(error);
         this.#toolCalls.clear();
         this.#rejectPending(error);
         this.#agents.clear();
@@ -515,15 +582,28 @@ class PiSharedProcess {
     }
 }
 
-function assertToolTarget(target: AgentWorkerTarget, session: AgentToolSession): void {
-    if (session.target.instance !== target.instance || session.target.workspace !== target.workspace) {
-        throw new Error("Pi Agent tool session target does not match the Agent target.");
+function assertToolTarget(
+    target: AgentWorkerTarget,
+    session: AgentToolSession,
+): void {
+    if (
+        session.target.instance !== target.instance ||
+        session.target.workspace !== target.workspace
+    ) {
+        throw new Error(
+            "Pi Agent tool session target does not match the Agent target.",
+        );
     }
 }
 
 function resolveChildModulePath(): string {
     const source = fileURLToPath(import.meta.url);
-    return fileURLToPath(new URL(source.endsWith(".ts") ? "./PiAgentChild.ts" : "./PiAgentChild.js", import.meta.url));
+    return fileURLToPath(
+        new URL(
+            source.endsWith(".ts") ? "./PiAgentChild.ts" : "./PiAgentChild.js",
+            import.meta.url,
+        ),
+    );
 }
 
 function childExecArgv(childModulePath: string): string[] {
@@ -535,28 +615,43 @@ function childExecArgv(childModulePath: string): string[] {
             result.push(argument);
             continue;
         }
-        if (["--import", "--loader", "--experimental-loader", "--require", "-r"].includes(argument)) {
+        if (
+            [
+                "--import",
+                "--loader",
+                "--experimental-loader",
+                "--require",
+                "-r",
+            ].includes(argument)
+        ) {
             const specifier = process.execArgv[++index];
             if (specifier === undefined || !sourceMode) continue;
             result.push(argument, resolveExecModule(specifier));
             continue;
         }
         if (
-            argument.startsWith("--import=")
-            || argument.startsWith("--loader=")
-            || argument.startsWith("--experimental-loader=")
-            || argument.startsWith("--require=")
+            argument.startsWith("--import=") ||
+            argument.startsWith("--loader=") ||
+            argument.startsWith("--experimental-loader=") ||
+            argument.startsWith("--require=")
         ) {
             if (!sourceMode) continue;
             const delimiter = argument.indexOf("=");
-            result.push(`${argument.slice(0, delimiter + 1)}${resolveExecModule(argument.slice(delimiter + 1))}`);
+            result.push(
+                `${argument.slice(0, delimiter + 1)}${resolveExecModule(argument.slice(delimiter + 1))}`,
+            );
         }
     }
     return result;
 }
 
 function resolveExecModule(specifier: string): string {
-    if (specifier.startsWith("file:") || specifier.startsWith("/") || specifier.startsWith(".")) return specifier;
+    if (
+        specifier.startsWith("file:") ||
+        specifier.startsWith("/") ||
+        specifier.startsWith(".")
+    )
+        return specifier;
     try {
         return import.meta.resolve(specifier);
     } catch {

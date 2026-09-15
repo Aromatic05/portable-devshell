@@ -8,11 +8,13 @@ export class CliCommandWatchLogs {
         runtime: CliClientRuntime,
         instance: string,
         onEntries: (entries: InstanceLogEntry[]) => Promise<void> | void,
-        maxEvents?: number
+        maxEvents?: number,
     ): Promise<void> {
         let nextLogSeq = 1;
         const emitNewLogs = async () => {
-            const entries = await runtime.readLogs(instance, { fromSeq: nextLogSeq });
+            const entries = await runtime.readLogs(instance, {
+                fromSeq: nextLogSeq,
+            });
             if (entries.length > 0) {
                 nextLogSeq = entries.at(-1)!.seq + 1;
                 await onEntries(entries);
@@ -26,14 +28,14 @@ export class CliCommandWatchLogs {
             },
             maxEvents,
             onEvent: emitNewLogs,
-            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq)
+            subscribe: (fromSeq) => runtime.subscribe(instance, fromSeq),
         });
     }
 }
 
-
-
-export function renderInstanceLogs(entries: readonly InstanceLogEntry[]): string {
+export function renderInstanceLogs(
+    entries: readonly InstanceLogEntry[],
+): string {
     if (entries.length === 0) {
         return "";
     }
@@ -43,10 +45,26 @@ export function renderInstanceLogs(entries: readonly InstanceLogEntry[]): string
 
 import type { CliParsedCommand } from "../../Parse.js";
 import type { CliDispatchContext } from "../../Dispatch.js";
-export async function executeInstanceLogs(command: CliParsedCommand, context: CliDispatchContext): Promise<boolean> {
-    if(command.kind!=="instance.logs"&&command.kind!=="watch.logs") return false;
-    const follow=command.kind==="watch.logs"?true:command.follow;
-    if(follow){ await new CliCommandWatchLogs().execute(context.clients.runtime,command.instance,async(entries)=>context.stdout.write(renderInstanceLogs(entries)),context.followEventLimit); }
-    else context.stdout.write(renderInstanceLogs(await context.clients.runtime.readLogs(command.instance)));
+export async function executeInstanceLogs(
+    command: CliParsedCommand,
+    context: CliDispatchContext,
+): Promise<boolean> {
+    if (command.kind !== "instance.logs" && command.kind !== "watch.logs")
+        return false;
+    const follow = command.kind === "watch.logs" ? true : command.follow;
+    if (follow) {
+        await new CliCommandWatchLogs().execute(
+            context.clients.runtime,
+            command.instance,
+            async (entries) =>
+                context.stdout.write(renderInstanceLogs(entries)),
+            context.followEventLimit,
+        );
+    } else
+        context.stdout.write(
+            renderInstanceLogs(
+                await context.clients.runtime.readLogs(command.instance),
+            ),
+        );
     return true;
 }

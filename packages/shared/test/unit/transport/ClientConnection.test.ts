@@ -11,7 +11,7 @@ import {
     type Event,
     type JsonValue,
     SocketChannel,
-    withRequestTimeout
+    withRequestTimeout,
 } from "@portable-devshell/shared";
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -30,7 +30,11 @@ class ControlPeer {
     readonly socketPath: string;
     connectionCount = 0;
 
-    private constructor(directory: string, listener: Server, socketPath: string) {
+    private constructor(
+        directory: string,
+        listener: Server,
+        socketPath: string,
+    ) {
         this.directory = directory;
         this.listener = listener;
         this.socketPath = socketPath;
@@ -50,7 +54,10 @@ class ControlPeer {
     }
 
     async nextEvent(): Promise<ReceivedEvent> {
-        return this.#events.shift() ?? await new Promise((resolve) => this.#waiters.push(resolve));
+        return (
+            this.#events.shift() ??
+            (await new Promise((resolve) => this.#waiters.push(resolve)))
+        );
     }
 
     async reply(received: ReceivedEvent, payload?: JsonValue): Promise<void> {
@@ -59,18 +66,22 @@ class ControlPeer {
             replyTo: received.event.id,
             destination: received.event.destination,
             name: received.event.name,
-            ...(payload === undefined ? {} : { payload })
+            ...(payload === undefined ? {} : { payload }),
         });
     }
 
-    async openStream(received: ReceivedEvent, streamId: string, payload?: JsonValue): Promise<void> {
+    async openStream(
+        received: ReceivedEvent,
+        streamId: string,
+        payload?: JsonValue,
+    ): Promise<void> {
         await received.codec.send({
             id: `reply-${received.event.id}`,
             replyTo: received.event.id,
             streamId,
             destination: received.event.destination,
             name: received.event.name,
-            ...(payload === undefined ? {} : { payload })
+            ...(payload === undefined ? {} : { payload }),
         });
     }
 
@@ -78,14 +89,14 @@ class ControlPeer {
         received: ReceivedEvent,
         streamId: string,
         name: `${string}.${string}`,
-        payload?: JsonValue
+        payload?: JsonValue,
     ): Promise<void> {
         await received.codec.send({
             id: `event-${streamId}-${name}`,
             streamId,
             destination: received.event.destination,
             name,
-            ...(payload === undefined ? {} : { payload })
+            ...(payload === undefined ? {} : { payload }),
         });
     }
 
@@ -97,7 +108,9 @@ class ControlPeer {
 
     async close(): Promise<void> {
         this.disconnectAll();
-        await new Promise<void>((resolve) => this.listener.close(() => resolve()));
+        await new Promise<void>((resolve) =>
+            this.listener.close(() => resolve()),
+        );
         await rm(this.directory, { force: true, recursive: true });
     }
 
@@ -105,7 +118,9 @@ class ControlPeer {
         this.connectionCount += 1;
         this.#sockets.add(socket);
         socket.once("close", () => this.#sockets.delete(socket));
-        const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
+        const codec = new Codec(SocketChannel.accept(socket), {
+            local: "server",
+        });
         codec.onEvent((event) => {
             const received = { codec, event };
             const waiter = this.#waiters.shift();
@@ -216,13 +231,18 @@ class SequencedChannelConnector {
     }
 }
 
-function client(socketPath: string, mode: "short" | "persistent" = "persistent"): ClientConnection {
+function client(
+    socketPath: string,
+    mode: "short" | "persistent" = "persistent",
+): ClientConnection {
     return new ClientConnection({
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode,
         peer: "tui",
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal })
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
     });
 }
 
@@ -234,8 +254,16 @@ test("persistent ClientConnection reuses one socket and resolves concurrent repl
         await peer.close();
     });
 
-    const firstPromise = connection.requestEvent("@control", "service", "first");
-    const secondPromise = connection.requestEvent("@control", "service", "second");
+    const firstPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "first",
+    );
+    const secondPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "second",
+    );
     const first = await peer.nextEvent();
     const second = await peer.nextEvent();
 
@@ -255,12 +283,20 @@ test("short ClientConnection keeps one-request-per-socket behavior", async (t) =
         await peer.close();
     });
 
-    const firstPromise = connection.requestEvent("@control", "service", "first");
+    const firstPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "first",
+    );
     const first = await peer.nextEvent();
     await peer.reply(first);
     await firstPromise;
 
-    const secondPromise = connection.requestEvent("@control", "service", "second");
+    const secondPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "second",
+    );
     const second = await peer.nextEvent();
     await peer.reply(second);
     await secondPromise;
@@ -277,10 +313,11 @@ test("ClientConnection obtains each short session from an injected channel conne
     };
     const connection = new ClientConnection({
         connectChannel,
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "short",
-        peer: "tui"
+        peer: "tui",
     });
     t.after(async () => {
         connection.close();
@@ -303,8 +340,18 @@ test("persistent ClientConnection multiplexes streams and closes one stream with
         await peer.close();
     });
 
-    const firstPromise = connection.openStream("alpha" as never, "runtime", "subscribe", { fromSeq: 1 });
-    const secondPromise = connection.openStream("beta" as never, "runtime", "subscribe", { fromSeq: 3 });
+    const firstPromise = connection.openStream(
+        "alpha" as never,
+        "runtime",
+        "subscribe",
+        { fromSeq: 1 },
+    );
+    const secondPromise = connection.openStream(
+        "beta" as never,
+        "runtime",
+        "subscribe",
+        { fromSeq: 3 },
+    );
     const firstRequest = await peer.nextEvent();
     const secondRequest = await peer.nextEvent();
     await peer.openStream(firstRequest, "stream-first");
@@ -312,8 +359,12 @@ test("persistent ClientConnection multiplexes streams and closes one stream with
     const first = await firstPromise;
     const second = await secondPromise;
 
-    await peer.sendStream(firstRequest, first.stream.id, "runtime.updated", { value: 1 });
-    await peer.sendStream(secondRequest, second.stream.id, "runtime.updated", { value: 2 });
+    await peer.sendStream(firstRequest, first.stream.id, "runtime.updated", {
+        value: 1,
+    });
+    await peer.sendStream(secondRequest, second.stream.id, "runtime.updated", {
+        value: 2,
+    });
     assert.deepEqual((await first.stream.nextEvent()).payload, { value: 1 });
     assert.deepEqual((await second.stream.nextEvent()).payload, { value: 2 });
 
@@ -324,10 +375,16 @@ test("persistent ClientConnection multiplexes streams and closes one stream with
     assert.equal(cancel.event.streamId, first.stream.id);
     await peer.sendStream(firstRequest, first.stream.id, "stream.cancelled");
 
-    await peer.sendStream(secondRequest, second.stream.id, "runtime.updated", { value: 3 });
+    await peer.sendStream(secondRequest, second.stream.id, "runtime.updated", {
+        value: 3,
+    });
     assert.deepEqual((await second.stream.nextEvent()).payload, { value: 3 });
 
-    const requestPromise = connection.requestEvent("@control", "service", "ping");
+    const requestPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "ping",
+    );
     const request = await peer.nextEvent();
     await peer.reply(request, { pong: true });
     assert.deepEqual((await requestPromise).payload, { pong: true });
@@ -342,7 +399,11 @@ test("server cancellation terminates only the addressed persistent stream", asyn
         await peer.close();
     });
 
-    const openedPromise = connection.openStream("alpha" as never, "runtime", "subscribe");
+    const openedPromise = connection.openStream(
+        "alpha" as never,
+        "runtime",
+        "subscribe",
+    );
     const streamRequest = await peer.nextEvent();
     await peer.openStream(streamRequest, "stream-cancelled");
     const opened = await openedPromise;
@@ -354,8 +415,8 @@ test("server cancellation terminates only the addressed persistent stream", asyn
         error: {
             code: "stream.cancelled",
             message: "cancelled by server",
-            retryable: false
-        }
+            retryable: false,
+        },
     });
 
     const cancelled = await opened.stream.nextEvent();
@@ -363,7 +424,11 @@ test("server cancellation terminates only the addressed persistent stream", asyn
     assert.equal(cancelled.error?.message, "cancelled by server");
     await assert.rejects(opened.stream.nextEvent(), /closed/u);
 
-    const requestPromise = connection.requestEvent("@control", "service", "ping");
+    const requestPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "ping",
+    );
     const request = await peer.nextEvent();
     await peer.reply(request, { pong: true });
     assert.deepEqual((await requestPromise).payload, { pong: true });
@@ -378,14 +443,26 @@ test("disconnect rejects every pending request and active stream waiter until ex
         await peer.close();
     });
 
-    const openedPromise = connection.openStream("alpha" as never, "runtime", "subscribe");
+    const openedPromise = connection.openStream(
+        "alpha" as never,
+        "runtime",
+        "subscribe",
+    );
     const streamRequest = await peer.nextEvent();
     await peer.openStream(streamRequest, "stream-one");
     const opened = await openedPromise;
     const streamWaiter = opened.stream.nextEvent();
 
-    const firstPending = connection.requestEvent("@control", "service", "first");
-    const secondPending = connection.requestEvent("@control", "service", "second");
+    const firstPending = connection.requestEvent(
+        "@control",
+        "service",
+        "first",
+    );
+    const secondPending = connection.requestEvent(
+        "@control",
+        "service",
+        "second",
+    );
     await peer.nextEvent();
     await peer.nextEvent();
     peer.disconnectAll();
@@ -393,10 +470,17 @@ test("disconnect rejects every pending request and active stream waiter until ex
     await assert.rejects(firstPending, /closed|socket|connection/u);
     await assert.rejects(secondPending, /closed|socket|connection/u);
     await assert.rejects(streamWaiter, /closed|socket|connection/u);
-    await assert.rejects(connection.requestEvent("@control", "service", "blocked"), /closed|socket|connection/u);
+    await assert.rejects(
+        connection.requestEvent("@control", "service", "blocked"),
+        /closed|socket|connection/u,
+    );
 
     await connection.reconnect();
-    const recoveredPromise = connection.requestEvent("@control", "service", "ping");
+    const recoveredPromise = connection.requestEvent(
+        "@control",
+        "service",
+        "ping",
+    );
     const recovered = await peer.nextEvent();
     await peer.reply(recovered, { pong: true });
     assert.deepEqual((await recoveredPromise).payload, { pong: true });
@@ -413,7 +497,10 @@ test("timed out persistent requests are cancelled without poisoning late replies
 
     const slow = connection.requestEvent("@control", "service", "slow");
     const slowRequest = await peer.nextEvent();
-    await assert.rejects(withRequestTimeout(slow, 5, "service.slow"), /timed out/u);
+    await assert.rejects(
+        withRequestTimeout(slow, 5, "service.slow"),
+        /timed out/u,
+    );
 
     const cancel = await peer.nextEvent();
     assert.equal(cancel.event.name, "request.cancel");
@@ -432,17 +519,22 @@ test("persistent ClientConnection coalesces concurrent reconnect calls", async (
     const provider = new BlockingSocketConnector(peer.socketPath);
     const connection = new ClientConnection({
         connectChannel: (signal) => provider.connect(signal),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "tui"
+        peer: "tui",
     });
     t.after(async () => {
         connection.close();
         await peer.close();
     });
 
-    const initialRequest = connection.requestEvent("@control", "service", "initial");
+    const initialRequest = connection.requestEvent(
+        "@control",
+        "service",
+        "initial",
+    );
     const initial = await peer.nextEvent();
     await peer.reply(initial, { ready: true });
     await initialRequest;
@@ -458,7 +550,11 @@ test("persistent ClientConnection coalesces concurrent reconnect calls", async (
     await Promise.all([first, second]);
     assert.equal(provider.connectCount, 2);
 
-    const recoveredRequest = connection.requestEvent("@control", "service", "recovered");
+    const recoveredRequest = connection.requestEvent(
+        "@control",
+        "service",
+        "recovered",
+    );
     const recovered = await peer.nextEvent();
     await peer.reply(recovered, { ready: true });
     assert.deepEqual((await recoveredRequest).payload, { ready: true });
@@ -468,10 +564,11 @@ test("ClientConnection close immediately cancels a stalled channel connect", asy
     const provider = new SequencedChannelConnector();
     const connection = new ClientConnection({
         connectChannel: (signal) => provider.connect(signal),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "tui"
+        peer: "tui",
     });
     const pending = connection.requestEvent("@control", "service", "stalled");
     await provider.firstStarted;
@@ -489,10 +586,11 @@ test("ClientConnection reconnect cancels a stalled connect and uses the new chan
     const provider = new SequencedChannelConnector();
     const connection = new ClientConnection({
         connectChannel: (signal) => provider.connect(signal),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "tui"
+        peer: "tui",
     });
     const pending = connection.requestEvent("@control", "service", "stalled");
     await provider.firstStarted;
@@ -517,8 +615,16 @@ test("unexpected replyTo closes a persistent connection and rejects its pending 
         await peer.close();
     });
 
-    const firstPending = connection.requestEvent("@control", "service", "first");
-    const secondPending = connection.requestEvent("@control", "service", "second");
+    const firstPending = connection.requestEvent(
+        "@control",
+        "service",
+        "first",
+    );
+    const secondPending = connection.requestEvent(
+        "@control",
+        "service",
+        "second",
+    );
     const firstRejected = assert.rejects(firstPending, /Unexpected replyTo/u);
     const secondRejected = assert.rejects(secondPending, /Unexpected replyTo/u);
     const received = await peer.nextEvent();
@@ -527,7 +633,7 @@ test("unexpected replyTo closes a persistent connection and rejects its pending 
         id: "bad-reply",
         replyTo: "unknown-request",
         destination: "@control",
-        name: "service.first"
+        name: "service.first",
     });
 
     await Promise.all([firstRejected, secondRejected]);
@@ -539,8 +645,11 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
         return await Promise.race([
             promise,
             new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(() => reject(new Error("request did not settle")), 250);
-            })
+                timer = setTimeout(
+                    () => reject(new Error("request did not settle")),
+                    250,
+                );
+            }),
         ]);
     } finally {
         if (timer !== undefined) clearTimeout(timer);
@@ -550,7 +659,8 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 async function waitUntil(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 2_000;
     while (!predicate()) {
-        if (Date.now() >= deadline) throw new Error("Timed out waiting for condition.");
+        if (Date.now() >= deadline)
+            throw new Error("Timed out waiting for condition.");
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
 }

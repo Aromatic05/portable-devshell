@@ -10,7 +10,7 @@ export interface PiGuiDetachLike {
 
 export async function disposeManagedPiAgent(
     active: ManagedPiAgentResources,
-    gui: PiGuiDetachLike
+    gui: PiGuiDetachLike,
 ): Promise<void> {
     await active.session.abort().catch(() => undefined);
     gui.detach(active.session);

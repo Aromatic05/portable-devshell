@@ -1,6 +1,6 @@
 import type {
     ExtensionJsonValue,
-    ExtensionPointDeclaration
+    ExtensionPointDeclaration,
 } from "@portable-devshell/extension";
 
 export interface ExtensionPointValidationContext {
@@ -16,11 +16,17 @@ export interface ExtensionPointSandboxInvokeOptions {
 }
 
 export interface ExtensionPointSandboxInterfacePort {
-    request(operation: string, input?: ExtensionJsonValue): Promise<ExtensionJsonValue | undefined>;
+    request(
+        operation: string,
+        input?: ExtensionJsonValue,
+    ): Promise<ExtensionJsonValue | undefined>;
 }
 
 export interface ExtensionPointSandboxInvocationContext extends ExtensionPointValidationContext {
-    requestInterface(operation: string, input?: ExtensionJsonValue): Promise<ExtensionJsonValue | undefined>;
+    requestInterface(
+        operation: string,
+        input?: ExtensionJsonValue,
+    ): Promise<ExtensionJsonValue | undefined>;
 }
 
 export interface ExtensionPointSandboxBridge {
@@ -28,7 +34,7 @@ export interface ExtensionPointSandboxBridge {
         pointId: string,
         id: string,
         input?: ExtensionJsonValue,
-        options?: ExtensionPointSandboxInvokeOptions
+        options?: ExtensionPointSandboxInvokeOptions,
     ): Promise<unknown>;
 }
 
@@ -36,14 +42,19 @@ export interface ExtensionPointDefinition {
     createSandboxBinding?(
         descriptor: ExtensionJsonValue,
         context: ExtensionPointValidationContext,
-        bridge: ExtensionPointSandboxBridge
+        bridge: ExtensionPointSandboxBridge,
     ): unknown;
     readonly id: string;
-    parseDeclaration(declaration: ExtensionPointDeclaration): ExtensionPointDeclaration;
-    validateBinding(binding: unknown, context: ExtensionPointValidationContext): void;
+    parseDeclaration(
+        declaration: ExtensionPointDeclaration,
+    ): ExtensionPointDeclaration;
+    validateBinding(
+        binding: unknown,
+        context: ExtensionPointValidationContext,
+    ): void;
     validateBindingResources?(
         binding: unknown,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointValidationContext,
     ): Promise<void> | void;
 }
 
@@ -53,11 +64,17 @@ export class ExtensionPointRegistry {
 
     constructor(definitions: readonly ExtensionPointDefinition[]) {
         for (const definition of definitions) {
-            if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(definition.id)) {
-                throw new TypeError(`Extension Point id must be a lowercase namespaced id: ${definition.id}.`);
+            if (
+                !/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(definition.id)
+            ) {
+                throw new TypeError(
+                    `Extension Point id must be a lowercase namespaced id: ${definition.id}.`,
+                );
             }
             if (this.#definitions.has(definition.id)) {
-                throw new TypeError(`Extension Point ${definition.id} is registered more than once.`);
+                throw new TypeError(
+                    `Extension Point ${definition.id} is registered more than once.`,
+                );
             }
             this.#definitions.set(definition.id, definition);
         }
@@ -70,20 +87,27 @@ export class ExtensionPointRegistry {
     parseDeclaration(
         pointId: string,
         declaration: ExtensionPointDeclaration,
-        extensionId: string
+        extensionId: string,
     ): ExtensionPointDeclaration {
-        return this.#require(pointId, extensionId).parseDeclaration(declaration);
+        return this.#require(pointId, extensionId).parseDeclaration(
+            declaration,
+        );
     }
 
     createSandboxBinding(
         pointId: string,
         descriptor: ExtensionJsonValue,
         context: ExtensionPointValidationContext,
-        bridge: ExtensionPointSandboxBridge
+        bridge: ExtensionPointSandboxBridge,
     ): unknown {
-        const create = this.#require(pointId, context.extensionId).createSandboxBinding;
+        const create = this.#require(
+            pointId,
+            context.extensionId,
+        ).createSandboxBinding;
         if (create === undefined) {
-            throw new TypeError(`Extension Point ${pointId} does not support sandbox bindings.`);
+            throw new TypeError(
+                `Extension Point ${pointId} does not support sandbox bindings.`,
+            );
         }
         return create(descriptor, context, bridge);
     }
@@ -91,22 +115,30 @@ export class ExtensionPointRegistry {
     validateBinding(
         pointId: string,
         binding: unknown,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointValidationContext,
     ): void {
-        this.#require(pointId, context.extensionId).validateBinding(binding, context);
+        this.#require(pointId, context.extensionId).validateBinding(
+            binding,
+            context,
+        );
     }
 
     async validateBindingResources(
         pointId: string,
         binding: unknown,
-        context: ExtensionPointValidationContext
+        context: ExtensionPointValidationContext,
     ): Promise<void> {
-        await this.#require(pointId, context.extensionId).validateBindingResources?.(binding, context);
+        await this.#require(
+            pointId,
+            context.extensionId,
+        ).validateBindingResources?.(binding, context);
     }
 
     #require(pointId: string, extensionId: string): ExtensionPointDefinition {
         const definition = this.#definitions.get(pointId);
         if (definition !== undefined) return definition;
-        throw new TypeError(`Extension ${extensionId} declares unsupported Extension Point ${pointId}.`);
+        throw new TypeError(
+            `Extension ${extensionId} declares unsupported Extension Point ${pointId}.`,
+        );
     }
 }

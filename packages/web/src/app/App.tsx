@@ -28,18 +28,25 @@ export function App({
     const application = useWebApplicationSession(activeSession, createClients);
 
     if (application.sessionState === "checking") {
-        return <main className="session">
-            <p aria-live="polite">Checking session…</p>
-        </main>;
+        return (
+            <main className="session">
+                <p aria-live="polite">Checking session…</p>
+            </main>
+        );
     }
-    if (application.sessionState === "login" || application.store === undefined) {
+    if (
+        application.sessionState === "login" ||
+        application.store === undefined
+    ) {
         return <Login error={application.error} onLogin={application.login} />;
     }
-    return <Application
-        busy={application.busy}
-        error={application.error}
-        onLogout={application.logout}
-        onReconnect={application.reconnect}
-        store={application.store}
-    />;
+    return (
+        <Application
+            busy={application.busy}
+            error={application.error}
+            onLogout={application.logout}
+            onReconnect={application.reconnect}
+            store={application.store}
+        />
+    );
 }

@@ -9,12 +9,15 @@ import type { CliNativeCommandInvocationContext } from "@portable-devshell/exten
 
 import { executeSkillCommand } from "../../src/builtin/SkillCommand.ts";
 
-function invocation(workingDirectory: string, localOwner = true): CliNativeCommandInvocationContext {
+function invocation(
+    workingDirectory: string,
+    localOwner = true,
+): CliNativeCommandInvocationContext {
     return {
         localOwner,
         requestId: "req-1",
         signal: new AbortController().signal,
-        workingDirectory
+        workingDirectory,
     };
 }
 
@@ -26,36 +29,46 @@ function context(options: {
     return {
         capabilities: {
             assets: {
-                async installBundle() { throw new Error("not used"); },
+                async installBundle() {
+                    throw new Error("not used");
+                },
                 async installDirectory(sourcePath) {
                     options.events.push(`asset.install:${sourcePath}`);
                     return { directory: "/asset", generation };
                 },
-                async listBundles() { return []; },
+                async listBundles() {
+                    return [];
+                },
                 async projectBundle(input) {
                     options.events.push(
-                        `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`
+                        `asset.project:${input.target.instance}:${input.target.collection}:${input.target.key}:${input.overwrite}`,
                     );
-                    if (options.projectionFailure !== undefined) throw options.projectionFailure;
+                    if (options.projectionFailure !== undefined)
+                        throw options.projectionFailure;
                     return { transferredBytes: 123 };
                 },
                 async removeBundle() {},
-                async resolveBundle() { return undefined; }
-            }
+                async resolveBundle() {
+                    return undefined;
+                },
+            },
         },
         generation: "g1",
         id: "skill",
         logger: {
-            debug() {}, error() {}, info() {}, warn() {}
+            debug() {},
+            error() {},
+            info() {},
+            warn() {},
         },
         paths: {
             codeDirectory: "/code",
             dataDirectory: "/data",
             runtimeDirectory: "/runtime",
-            stateDirectory: "/state"
+            stateDirectory: "/state",
         },
         register() {},
-        version: "0.1.0"
+        version: "0.1.0",
     };
 }
 
@@ -64,16 +77,33 @@ test("Skill command discovers project Skills from the local-owner CLI working di
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const skillDirectory = join(root, ".agents", "skills", "review");
     await mkdir(skillDirectory, { recursive: true });
-    await writeFile(join(skillDirectory, "SKILL.md"), "---\ndescription: Review changes\n---\n# Review\n", "utf8");
+    await writeFile(
+        join(skillDirectory, "SKILL.md"),
+        "---\ndescription: Review changes\n---\n# Review\n",
+        "utf8",
+    );
     const events: string[] = [];
 
-    const result = await executeSkillCommand(context({ events }), ["list"], invocation(root));
+    const result = await executeSkillCommand(
+        context({ events }),
+        ["list"],
+        invocation(root),
+    );
 
     assert.equal(result.kind, "json");
-    const value = result.kind === "json" ? result.value as { skills: Array<{ description: string; name: string; source: string }> } : undefined;
+    const value =
+        result.kind === "json"
+            ? (result.value as {
+                  skills: Array<{
+                      description: string;
+                      name: string;
+                      source: string;
+                  }>;
+              })
+            : undefined;
     assert.deepEqual(
         value?.skills.find((skill) => skill.name === "review"),
-        { description: "Review changes", name: "review", source: "project" }
+        { description: "Review changes", name: "review", source: "project" },
     );
     assert.deepEqual(events, []);
 });
@@ -83,19 +113,23 @@ test("Skill get snapshots one selected Skill and projects it as an instance-scop
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const skillDirectory = join(root, ".agents", "skills", "Review changes");
     await mkdir(skillDirectory, { recursive: true });
-    await writeFile(join(skillDirectory, "SKILL.md"), "# Review\n\nReview changes.\n", "utf8");
+    await writeFile(
+        join(skillDirectory, "SKILL.md"),
+        "# Review\n\nReview changes.\n",
+        "utf8",
+    );
     const events: string[] = [];
 
     const result = await executeSkillCommand(
         context({ events }),
         ["get", "Review changes", "remote-one"],
-        invocation(root)
+        invocation(root),
     );
 
     assert.equal(result.kind, "json");
     assert.deepEqual(events, [
         `asset.install:${skillDirectory}`,
-        "asset.project:remote-one:managed:Review changes:true"
+        "asset.project:remote-one:managed:Review changes:true",
     ]);
     assert.deepEqual(result.kind === "json" ? result.value : undefined, {
         generation: `sha256-${"a".repeat(64)}`,
@@ -104,9 +138,9 @@ test("Skill get snapshots one selected Skill and projects it as an instance-scop
         target: {
             collection: "managed",
             instance: "remote-one",
-            key: "Review changes"
+            key: "Review changes",
         },
-        projection: { transferredBytes: 123 }
+        projection: { transferredBytes: 123 },
     });
 });
 
@@ -120,15 +154,18 @@ test("Skill get surfaces projection failure without opening a Worker tool sessio
 
     await assert.rejects(
         executeSkillCommand(
-            context({ events, projectionFailure: new Error("projection failed") }),
+            context({
+                events,
+                projectionFailure: new Error("projection failed"),
+            }),
             ["get", "review", "remote-one"],
-            invocation(root)
+            invocation(root),
         ),
-        /projection failed/u
+        /projection failed/u,
     );
     assert.deepEqual(events, [
         `asset.install:${skillDirectory}`,
-        "asset.project:remote-one:managed:review:true"
+        "asset.project:remote-one:managed:review:true",
     ]);
 });
 
@@ -138,11 +175,19 @@ test("Skill commands reject non-owner callers and invalid resource targets", asy
     const events: string[] = [];
 
     await assert.rejects(
-        executeSkillCommand(context({ events }), ["list"], invocation(root, false)),
-        /local owner CLI/u
+        executeSkillCommand(
+            context({ events }),
+            ["list"],
+            invocation(root, false),
+        ),
+        /local owner CLI/u,
     );
     await assert.rejects(
-        executeSkillCommand(context({ events }), ["get", "review", "Bad_ID"], invocation(root)),
-        /instance name is invalid/u
+        executeSkillCommand(
+            context({ events }),
+            ["get", "review", "Bad_ID"],
+            invocation(root),
+        ),
+        /instance name is invalid/u,
     );
 });

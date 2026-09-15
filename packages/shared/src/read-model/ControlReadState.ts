@@ -2,7 +2,10 @@ import type { ArtifactShareResult } from "../protocol/artifact/Share.js";
 import type { ArtifactTransferRecord } from "../protocol/artifact/Transfer.js";
 import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
 import type { OperationalOverview } from "../protocol/control/Overview.js";
-import type { InstanceListEntry, InstanceSnapshot } from "../protocol/instance/activity/State.js";
+import type {
+    InstanceListEntry,
+    InstanceSnapshot,
+} from "../protocol/instance/activity/State.js";
 import type { InstanceLogEntry } from "../protocol/instance/activity/Log.js";
 import type { GoalSnapshot } from "../protocol/instance/task/Goal.js";
 import type { TodoReadResult } from "../protocol/instance/task/Todo.js";
@@ -13,7 +16,10 @@ import type { McpContextRecord } from "../protocol/interaction/context/ContextRe
 import type { ApprovalRequest } from "../protocol/tool/Approval.js";
 import type { ToolCallRecord } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
-import type { ControlServiceStatus, McpRuntimeStatus } from "../client/ControlClients.js";
+import type {
+    ControlServiceStatus,
+    McpRuntimeStatus,
+} from "../client/ControlClients.js";
 
 export type ControlInstanceReadKey =
     | "snapshot"

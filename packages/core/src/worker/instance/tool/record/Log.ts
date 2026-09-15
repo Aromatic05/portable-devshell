@@ -1,14 +1,24 @@
-import type { CommandResult, JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type {
+    CommandResult,
+    JsonValue,
+    ToolCallContext,
+} from "@portable-devshell/shared";
 
 import type { InstanceEventInput } from "../../../../instance/EventBuffer.js";
 import type { LogQuery } from "../../../../storage/log/Query.js";
-import type { InstanceLogEntry, LogStoreInstance } from "../../../../storage/log/Store.js";
+import type {
+    InstanceLogEntry,
+    LogStoreInstance,
+} from "../../../../storage/log/Store.js";
 import { toEventData } from "../../state/Event.js";
 
 const LOG_CHUNK_CODE_UNITS = 256 * 1024;
 
 interface WorkerInstanceToolLogOptions {
-    appendEvent(type: InstanceEventInput["type"], data?: JsonValue): Promise<unknown>;
+    appendEvent(
+        type: InstanceEventInput["type"],
+        data?: JsonValue,
+    ): Promise<unknown>;
     logStore: LogStoreInstance;
 }
 
@@ -34,20 +44,29 @@ export class WorkerInstanceToolLog {
             extensionId?: string;
             source: ToolCallContext["source"];
             toolName: string;
-        }
+        },
     ): Promise<void> {
         const at = new Date().toISOString();
         const logContext = {
             callId: context.callId,
-            ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+            ...(context.requestId === undefined
+                ? {}
+                : { requestId: context.requestId }),
             ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
-            ...(context.extensionId === undefined ? {} : { extensionId: context.extensionId }),
+            ...(context.extensionId === undefined
+                ? {}
+                : { extensionId: context.extensionId }),
             source: context.source,
             toolName: context.toolName,
         };
 
         if (result.stdout.length > 0) {
-            const bytes = await this.#appendStream("stdout", result.stdout, at, logContext);
+            const bytes = await this.#appendStream(
+                "stdout",
+                result.stdout,
+                at,
+                logContext,
+            );
             await this.#appendEvent(
                 "log.appended",
                 toEventData({
@@ -55,13 +74,18 @@ export class WorkerInstanceToolLog {
                     bytes,
                     preview: readPreview(result.stdout),
                     stream: "stdout",
-                    tail: readTail(result.stdout)
-                })
+                    tail: readTail(result.stdout),
+                }),
             );
         }
 
         if (result.stderr.length > 0) {
-            const bytes = await this.#appendStream("stderr", result.stderr, at, logContext);
+            const bytes = await this.#appendStream(
+                "stderr",
+                result.stderr,
+                at,
+                logContext,
+            );
             await this.#appendEvent(
                 "log.appended",
                 toEventData({
@@ -69,8 +93,8 @@ export class WorkerInstanceToolLog {
                     bytes,
                     preview: readPreview(result.stderr),
                     stream: "stderr",
-                    tail: readTail(result.stderr)
-                })
+                    tail: readTail(result.stderr),
+                }),
             );
         }
     }
@@ -79,7 +103,15 @@ export class WorkerInstanceToolLog {
         stream: InstanceLogEntry["stream"],
         message: string,
         at: string,
-        context: Pick<InstanceLogEntry, "callId" | "requestId" | "ctxId" | "extensionId" | "source" | "toolName">,
+        context: Pick<
+            InstanceLogEntry,
+            | "callId"
+            | "requestId"
+            | "ctxId"
+            | "extensionId"
+            | "source"
+            | "toolName"
+        >,
     ): Promise<number> {
         let bytes = 0;
         for (const chunk of logChunks(message)) {

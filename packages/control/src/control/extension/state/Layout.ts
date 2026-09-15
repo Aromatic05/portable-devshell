@@ -25,19 +25,25 @@ export class ExtensionPathLayout {
         const home = options.homeDirectory ?? homedir();
         const environment = options.environment ?? process.env;
         const platform = options.platform ?? process.platform;
-        const dataHome = options.dataHome
-            ?? environment.XDG_DATA_HOME
-            ?? (platform === "win32"
-                ? environment.LOCALAPPDATA ?? join(home, "AppData", "Local")
+        const dataHome =
+            options.dataHome ??
+            environment.XDG_DATA_HOME ??
+            (platform === "win32"
+                ? (environment.LOCALAPPDATA ?? join(home, "AppData", "Local"))
                 : join(home, ".local", "share"));
         this.codeRoot = join(dataHome, "portable-devshell", "extensions");
         this.dataRoot = join(dataHome, "portable-devshell", "extension-data");
         this.stateRoot = join(home, ".devshell", "control", "extensions");
         this.registryFile = join(this.stateRoot, "registry.json");
-        this.runtimeRoot = options.runtimeRoot
-            ?? join(
-                new ControlPathRuntime(options.xdgRuntimeDir, platform, environment).runtimeDir,
-                "extensions"
+        this.runtimeRoot =
+            options.runtimeRoot ??
+            join(
+                new ControlPathRuntime(
+                    options.xdgRuntimeDir,
+                    platform,
+                    environment,
+                ).runtimeDir,
+                "extensions",
             );
     }
 
@@ -48,7 +54,10 @@ export class ExtensionPathLayout {
     }
 
     manifestFile(id: string, generation: string): string {
-        return join(this.generationDirectory(id, generation), "devshell-extension.json");
+        return join(
+            this.generationDirectory(id, generation),
+            "devshell-extension.json",
+        );
     }
 
     dataDirectory(id: string): string {

@@ -2,7 +2,7 @@ import type {
     ConnectionState,
     DaemonState,
     InstanceName,
-    InstanceSnapshot as SharedInstanceSnapshot
+    InstanceSnapshot as SharedInstanceSnapshot,
 } from "@portable-devshell/shared";
 
 import { deriveRuntimeStatus, isReadyState } from "./Runtime.js";
@@ -19,8 +19,13 @@ export interface InstanceSnapshotInput {
     pid?: number;
 }
 
-export function createInstanceSnapshot(input: InstanceSnapshotInput): InstanceSnapshot {
-    const status = deriveRuntimeStatus(input.daemonState, input.connectionState);
+export function createInstanceSnapshot(
+    input: InstanceSnapshotInput,
+): InstanceSnapshot {
+    const status = deriveRuntimeStatus(
+        input.daemonState,
+        input.connectionState,
+    );
 
     return {
         connectionState: input.connectionState,
@@ -31,6 +36,6 @@ export function createInstanceSnapshot(input: InstanceSnapshotInput): InstanceSn
         name: input.name,
         pid: input.pid,
         ready: isReadyState(input.daemonState, input.connectionState),
-        status
+        status,
     };
 }

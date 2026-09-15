@@ -20,22 +20,32 @@ export class McpContextExecutionStore {
         const database = this.#open();
         if (database === undefined) return undefined;
         try {
-            const row = database.prepare(`
+            const row = database
+                .prepare(
+                    `
                 SELECT execution_epoch AS executionEpoch,
                        execution_last_activity_at AS executionLastActivityAt,
                        execution_lease_until AS executionLeaseUntil
                 FROM context_execution
                 WHERE ctx_id = ?
-            `).get(ctxId) as {
-                executionEpoch: number;
-                executionLastActivityAt: string | null;
-                executionLeaseUntil: string | null;
-            } | undefined;
+            `,
+                )
+                .get(ctxId) as
+                | {
+                      executionEpoch: number;
+                      executionLastActivityAt: string | null;
+                      executionLeaseUntil: string | null;
+                  }
+                | undefined;
             if (row === undefined) return undefined;
             return {
                 executionEpoch: Number(row.executionEpoch),
-                ...(row.executionLastActivityAt === null ? {} : { executionLastActivityAt: row.executionLastActivityAt }),
-                ...(row.executionLeaseUntil === null ? {} : { executionLeaseUntil: row.executionLeaseUntil }),
+                ...(row.executionLastActivityAt === null
+                    ? {}
+                    : { executionLastActivityAt: row.executionLastActivityAt }),
+                ...(row.executionLeaseUntil === null
+                    ? {}
+                    : { executionLeaseUntil: row.executionLeaseUntil }),
             };
         } finally {
             database.close();
@@ -46,7 +56,9 @@ export class McpContextExecutionStore {
         const database = this.#open();
         if (database === undefined) return;
         try {
-            database.prepare(`
+            database
+                .prepare(
+                    `
                 INSERT INTO context_execution(
                     ctx_id, execution_epoch, execution_last_activity_at, execution_lease_until
                 ) VALUES (?, ?, ?, ?)
@@ -54,12 +66,14 @@ export class McpContextExecutionStore {
                     execution_epoch = excluded.execution_epoch,
                     execution_last_activity_at = excluded.execution_last_activity_at,
                     execution_lease_until = excluded.execution_lease_until
-            `).run(
-                ctxId,
-                record.executionEpoch,
-                record.executionLastActivityAt ?? null,
-                record.executionLeaseUntil ?? null,
-            );
+            `,
+                )
+                .run(
+                    ctxId,
+                    record.executionEpoch,
+                    record.executionLastActivityAt ?? null,
+                    record.executionLeaseUntil ?? null,
+                );
         } finally {
             database.close();
         }
@@ -70,7 +84,9 @@ export class McpContextExecutionStore {
         const database = this.#open();
         if (database === undefined) return;
         try {
-            database.prepare("DELETE FROM context_execution WHERE ctx_id = ?").run(ctxId);
+            database
+                .prepare("DELETE FROM context_execution WHERE ctx_id = ?")
+                .run(ctxId);
         } finally {
             database.close();
         }
@@ -79,8 +95,13 @@ export class McpContextExecutionStore {
     #open(): DatabaseSync | undefined {
         if (this.#filePath === undefined) return undefined;
         if (!this.#initialized) {
-            mkdirSync(dirname(this.#filePath), { recursive: true, mode: 0o700 });
-            const database = new DatabaseSync(this.#filePath, { timeout: 5_000 });
+            mkdirSync(dirname(this.#filePath), {
+                recursive: true,
+                mode: 0o700,
+            });
+            const database = new DatabaseSync(this.#filePath, {
+                timeout: 5_000,
+            });
             try {
                 database.exec(`
                     PRAGMA journal_mode = DELETE;

@@ -1,12 +1,24 @@
 import { Box, Text } from "ink";
 
 import { TuiFocusItem } from "../../interaction/focus/Item.js";
-import { TuiFocusGraph, type TuiFocusNode } from "../../interaction/focus/Graph.js";
+import {
+    TuiFocusGraph,
+    type TuiFocusNode,
+} from "../../interaction/focus/Graph.js";
 import type { TuiAppState } from "../../state/store/Model.js";
 import type { TuiBoxModel } from "../../state/Ui.js";
-import { renderExpandableBoxLines, type TuiComponentExpandableBoxRenderLine } from "../component/content/Box.js";
+import {
+    renderExpandableBoxLines,
+    type TuiComponentExpandableBoxRenderLine,
+} from "../component/content/Box.js";
 import { TuiComponentErrorBanner } from "../component/chrome/Error.js";
-import { measureMainBoxFlowMetrics, selectMainBoxIds, selectMainScreenModel, selectMainScrollKey, selectSidebarModel } from "../projection/View.js";
+import {
+    measureMainBoxFlowMetrics,
+    selectMainBoxIds,
+    selectMainScreenModel,
+    selectMainScrollKey,
+    selectSidebarModel,
+} from "../projection/View.js";
 import { TuiMessagesView } from "../page/activity/messages/View.js";
 import { TuiOverviewView } from "../page/overview/View.js";
 import { tuiBlockHeight } from "./Layout.js";
@@ -30,7 +42,9 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
         );
     }
     if (props.state.ui.selectedPage === "overview") {
-        const showOverview = model.loadState.kind === "ready" || model.loadState.kind === "stale";
+        const showOverview =
+            model.loadState.kind === "ready" ||
+            model.loadState.kind === "stale";
         const stateRows = model.loadState.kind === "ready" ? 0 : 1;
         const overviewRows = Math.max(
             0,
@@ -41,14 +55,28 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
         );
         return (
             <Box flexDirection="column">
-                {model.errorLines === undefined ? undefined : <TuiComponentErrorBanner lines={model.errorLines} />}
+                {model.errorLines === undefined ? undefined : (
+                    <TuiComponentErrorBanner lines={model.errorLines} />
+                )}
                 <PageLoadState state={model.loadState} />
-                {showOverview ? <TuiOverviewView state={props.state} viewportRows={overviewRows} width={props.contentWidth} /> : undefined}
-                {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
+                {showOverview ? (
+                    <TuiOverviewView
+                        state={props.state}
+                        viewportRows={overviewRows}
+                        width={props.contentWidth}
+                    />
+                ) : undefined}
+                {model.statusLine !== undefined ? (
+                    <Text color="yellow">{model.statusLine}</Text>
+                ) : undefined}
             </Box>
         );
     }
-    const flow = measureMainBoxFlowMetrics(model.boxes, selectMainScrollKey(props.state), props.boxInnerWidth);
+    const flow = measureMainBoxFlowMetrics(
+        model.boxes,
+        selectMainScrollKey(props.state),
+        props.boxInnerWidth,
+    );
     const scrollOffset = props.state.ui.scrollOffsets[flow.scrollKey] ?? 0;
     const stateRows = model.loadState.kind === "ready" ? 0 : 1;
     const boxViewportRows = Math.max(
@@ -60,36 +88,63 @@ export function TuiScreenRouter(props: TuiScreenRouterProps) {
             (model.statusLine === undefined ? 0 : 1) -
             (model.emptyState === undefined ? 0 : 1),
     );
-    const clampedOffset = clamp(scrollOffset, 0, Math.max(0, flow.totalLines - boxViewportRows));
-    const visibleLines = boxViewportRows > 0
-        ? renderVisibleBoxLines(model.boxes, flow.boxRanges, props.boxInnerWidth, clampedOffset, boxViewportRows)
-        : [];
+    const clampedOffset = clamp(
+        scrollOffset,
+        0,
+        Math.max(0, flow.totalLines - boxViewportRows),
+    );
+    const visibleLines =
+        boxViewportRows > 0
+            ? renderVisibleBoxLines(
+                  model.boxes,
+                  flow.boxRanges,
+                  props.boxInnerWidth,
+                  clampedOffset,
+                  boxViewportRows,
+              )
+            : [];
 
     return (
         <Box flexDirection="column">
             <Text bold>{model.pageTitle}</Text>
-            {model.errorLines === undefined ? undefined : <TuiComponentErrorBanner lines={model.errorLines} />}
+            {model.errorLines === undefined ? undefined : (
+                <TuiComponentErrorBanner lines={model.errorLines} />
+            )}
             <PageLoadState state={model.loadState} />
-            {model.emptyState !== undefined ? <Text color="yellow">{model.emptyState}</Text> : undefined}
+            {model.emptyState !== undefined ? (
+                <Text color="yellow">{model.emptyState}</Text>
+            ) : undefined}
             {model.emptyState === undefined
                 ? visibleLines.map((line) => (
-                      <Text backgroundColor={line.backgroundColor} color={line.color} dimColor={line.dimColor} key={line.key}>
+                      <Text
+                          backgroundColor={line.backgroundColor}
+                          color={line.color}
+                          dimColor={line.dimColor}
+                          key={line.key}
+                      >
                           {line.segments === undefined
                               ? line.text
                               : line.segments.map((segment, index) => (
-                                    <Text key={`${line.key}:${index}`} underline={segment.underline}>
+                                    <Text
+                                        key={`${line.key}:${index}`}
+                                        underline={segment.underline}
+                                    >
                                         {segment.text}
                                     </Text>
                                 ))}
                       </Text>
                   ))
                 : undefined}
-            {model.statusLine !== undefined ? <Text color="yellow">{model.statusLine}</Text> : undefined}
+            {model.statusLine !== undefined ? (
+                <Text color="yellow">{model.statusLine}</Text>
+            ) : undefined}
         </Box>
     );
 }
 
-function PageLoadState(props: { state: ReturnType<typeof selectMainScreenModel>["loadState"] }) {
+function PageLoadState(props: {
+    state: ReturnType<typeof selectMainScreenModel>["loadState"];
+}) {
     switch (props.state.kind) {
         case "ready":
             return null;
@@ -98,9 +153,13 @@ function PageLoadState(props: { state: ReturnType<typeof selectMainScreenModel>[
         case "empty":
             return <Text dimColor>No data available.</Text>;
         case "failed":
-            return <Text color="red">{`Load failed: ${props.state.error}`}</Text>;
+            return (
+                <Text color="red">{`Load failed: ${props.state.error}`}</Text>
+            );
         case "stale":
-            return <Text color="yellow">{`Showing stale data: ${props.state.reason}`}</Text>;
+            return (
+                <Text color="yellow">{`Showing stale data: ${props.state.reason}`}</Text>
+            );
     }
 }
 
@@ -109,7 +168,7 @@ function renderVisibleBoxLines(
     ranges: Record<string, { end: number; start: number }>,
     width: number,
     offset: number,
-    viewportRows: number
+    viewportRows: number,
 ): TuiComponentExpandableBoxRenderLine[] {
     const viewportEnd = offset + viewportRows;
     const visible: TuiComponentExpandableBoxRenderLine[] = [];
@@ -118,10 +177,12 @@ function renderVisibleBoxLines(
         if (range === undefined || range.end <= offset) continue;
         if (range.start >= viewportEnd) break;
         const lines = renderExpandableBoxLines(box, width);
-        visible.push(...lines.slice(
-            Math.max(0, offset - range.start),
-            Math.min(lines.length, viewportEnd - range.start)
-        ));
+        visible.push(
+            ...lines.slice(
+                Math.max(0, offset - range.start),
+                Math.min(lines.length, viewportEnd - range.start),
+            ),
+        );
     }
     return visible;
 }
@@ -138,24 +199,28 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
         case "confirm":
             return buildLinearGraph([
                 { id: "cancel", kind: "button" as const },
-                { id: "confirm", kind: "button" as const }
+                { id: "confirm", kind: "button" as const },
             ]);
         case "approvalDetail":
             return buildLinearGraph([
                 { id: "back", kind: "approvalAction" as const },
                 { id: "input", kind: "approvalAction" as const },
                 { id: "deny", kind: "approvalAction" as const },
-                { id: "approve", kind: "approvalAction" as const }
+                { id: "approve", kind: "approvalAction" as const },
             ]);
         case "denyConfirm":
             return buildLinearGraph([
                 { id: "back", kind: "approvalAction" as const },
-                { id: "deny", kind: "approvalAction" as const }
+                { id: "deny", kind: "approvalAction" as const },
             ]);
         case "search":
-            return new TuiFocusGraph([{ item: { id: "search.query", kind: "field" } }]);
+            return new TuiFocusGraph([
+                { item: { id: "search.query", kind: "field" } },
+            ]);
         case "toolForm":
-            return new TuiFocusGraph([{ item: { id: "toolForm.input", kind: "field" } }]);
+            return new TuiFocusGraph([
+                { item: { id: "toolForm.input", kind: "field" } },
+            ]);
         case "form": {
             const boxes = selectMainScreenModel(state).boxes.filter(
                 (candidate) => candidate.expanded,
@@ -179,7 +244,9 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
             );
         }
         case "wizard": {
-            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
+            const box = selectMainScreenModel(state).boxes.find(
+                (candidate) => candidate.id === state.ui.mainFocusId,
+            );
             return buildLinearGraph(
                 (box?.expandedLines ?? []).map((line) => ({
                     id: line.id!,
@@ -193,25 +260,49 @@ export function buildFocusGraphForState(state: TuiAppState): TuiFocusGraph {
         case "sidebarInstances": {
             const sidebar = selectSidebarModel(state);
             return buildLinearGraph([
-                ...sidebar.context.items.map((entry) => ({ id: entry.id, kind: "context" as const })),
-                ...state.instances.map((instance) => ({ id: instance.name, kind: "instance" as const }))
+                ...sidebar.context.items.map((entry) => ({
+                    id: entry.id,
+                    kind: "context" as const,
+                })),
+                ...state.instances.map((instance) => ({
+                    id: instance.name,
+                    kind: "instance" as const,
+                })),
             ]);
         }
         case "mainBoxes":
         case "contextConversation":
             if (state.ui.selectedPage === "overview") {
-                return buildLinearGraph(selectMainBoxIds(state).map((id) => ({ id, kind: "box" as const })));
+                return buildLinearGraph(
+                    selectMainBoxIds(state).map((id) => ({
+                        id,
+                        kind: "box" as const,
+                    })),
+                );
             }
             return buildLinearGraph(
-                selectMainScreenModel(state).boxes.flatMap<TuiFocusItem>((box) =>
-                    box.expanded
-                        ? box.expandedLines.map((line) => ({ boxId: box.id, id: line.id ?? line.text, kind: "line" as const }))
-                        : [{ id: box.id, kind: "box" as const }]
-                )
+                selectMainScreenModel(state).boxes.flatMap<TuiFocusItem>(
+                    (box) =>
+                        box.expanded
+                            ? box.expandedLines.map((line) => ({
+                                  boxId: box.id,
+                                  id: line.id ?? line.text,
+                                  kind: "line" as const,
+                              }))
+                            : [{ id: box.id, kind: "box" as const }],
+                ),
             );
         case "boxDetail": {
-            const box = selectMainScreenModel(state).boxes.find((candidate) => candidate.id === state.ui.mainFocusId);
-            return buildLinearGraph((box?.expandedLines ?? []).map((line) => ({ boxId: box?.id ?? "", id: line.id ?? line.text, kind: "line" as const })));
+            const box = selectMainScreenModel(state).boxes.find(
+                (candidate) => candidate.id === state.ui.mainFocusId,
+            );
+            return buildLinearGraph(
+                (box?.expandedLines ?? []).map((line) => ({
+                    boxId: box?.id ?? "",
+                    id: line.id ?? line.text,
+                    kind: "line" as const,
+                })),
+            );
         }
     }
 }
@@ -222,7 +313,7 @@ function buildLinearGraph(items: TuiFocusItem[]): TuiFocusGraph {
         item,
         next: items[(index + 1) % items.length],
         previous: items[(index - 1 + items.length) % items.length],
-        up: items[(index - 1 + items.length) % items.length]
+        up: items[(index - 1 + items.length) % items.length],
     }));
     return new TuiFocusGraph(nodes);
 }

@@ -14,7 +14,8 @@ function register(manager: DebugPatchManager, target: DemoTarget): void {
     manager.registerTarget("demo", target, {
         run: {
             project: (args) => ({ value: String(args[0]) }),
-            signal: (args) => args[1] instanceof AbortSignal ? args[1] : undefined,
+            signal: (args) =>
+                args[1] instanceof AbortSignal ? args[1] : undefined,
         },
     });
 }
@@ -54,8 +55,13 @@ test("DebugPatchManager auto-unloads a non-terminating program and continues the
 
     const startedAt = Date.now();
     assert.equal(await target.run("safe"), "original:safe");
-    assert.ok(Date.now() - startedAt < 500, "debug worker cleanup blocked the original method");
-    const record = manager.listPatches().find((entry) => entry.patchId === patch.patchId);
+    assert.ok(
+        Date.now() - startedAt < 500,
+        "debug worker cleanup blocked the original method",
+    );
+    const record = manager
+        .listPatches()
+        .find((entry) => entry.patchId === patch.patchId);
     assert.equal(record?.state, "faulted");
     assert.match(record?.fault ?? "", /timed out|timeout/iu);
     assert.equal(await target.run("again"), "original:again");
@@ -80,7 +86,9 @@ test("DebugPatchManager holds only the matched invocation and records host cance
     controller.abort(new Error("host cancelled"));
     await assert.rejects(pending, /host cancelled/iu);
 
-    const record = manager.listPatches().find((entry) => entry.patchId === patch.patchId);
+    const record = manager
+        .listPatches()
+        .find((entry) => entry.patchId === patch.patchId);
     assert.equal(record?.state, "active");
     assert.equal(record?.lastInvocation?.outcome, "aborted");
     assert.equal(record?.lastInvocation?.label, "host-timeout-probe");
@@ -100,7 +108,10 @@ test("DebugPatchManager bypasses non-matching scopes before projection or invoca
                 projections += 1;
                 return { value: String(args[0]) };
             },
-            scope: (args) => ({ ctxId: String(args[0]), toolName: String(args[1] ?? "run") }),
+            scope: (args) => ({
+                ctxId: String(args[0]),
+                toolName: String(args[1] ?? "run"),
+            }),
         },
     });
     const patch = await manager.load({
@@ -112,10 +123,16 @@ test("DebugPatchManager bypasses non-matching scopes before projection or invoca
     assert.equal(await target.run("ctx-other"), "original:ctx-other");
     assert.equal(projections, 0);
     assert.equal(manager.listPatches()[0]?.invocationCount, 0);
-    assert.equal(await Reflect.apply(target.run, target, ["ctx-own", "other"]), "original:ctx-own");
+    assert.equal(
+        await Reflect.apply(target.run, target, ["ctx-own", "other"]),
+        "original:ctx-own",
+    );
     assert.equal(projections, 0);
     assert.equal(manager.listPatches()[0]?.invocationCount, 0);
-    assert.equal(await Reflect.apply(target.run, target, ["ctx-own", "probe"]), "patched");
+    assert.equal(
+        await Reflect.apply(target.run, target, ["ctx-own", "probe"]),
+        "patched",
+    );
     assert.equal(projections, 1);
     assert.equal(manager.listPatches()[0]?.invocationCount, 1);
 

@@ -8,7 +8,13 @@ export type ExtensionJsonValue =
     | { [key: string]: ExtensionJsonValue };
 
 /** Host-managed runtime resource categories granted to one Extension generation. */
-export type ExtensionCapability = "artifacts" | "assets" | "delegatedWorkers" | "instances" | "processes" | "workers";
+export type ExtensionCapability =
+    | "artifacts"
+    | "assets"
+    | "delegatedWorkers"
+    | "instances"
+    | "processes"
+    | "workers";
 
 export interface ExtensionPointDeclaration {
     readonly id: string;
@@ -84,9 +90,13 @@ export interface ExtensionAssetCapability {
     installBundle(sourcePath: string): Promise<ExtensionAssetBundle>;
     installDirectory(sourcePath: string): Promise<ExtensionAssetBundle>;
     listBundles(): Promise<readonly ExtensionAssetBundle[]>;
-    projectBundle(input: ExtensionAssetProjectionInput): Promise<ExtensionAssetProjectionResult>;
+    projectBundle(
+        input: ExtensionAssetProjectionInput,
+    ): Promise<ExtensionAssetProjectionResult>;
     removeBundle(generation: string): Promise<void>;
-    resolveBundle(generation: string): Promise<ExtensionAssetBundle | undefined>;
+    resolveBundle(
+        generation: string,
+    ): Promise<ExtensionAssetBundle | undefined>;
 }
 
 export interface ExtensionWorkerToolDefinition {
@@ -141,14 +151,16 @@ export interface ExtensionWorkerSession {
     callTool(
         toolName: string,
         input: ExtensionJsonValue,
-        options?: ExtensionWorkerCallOptions
+        options?: ExtensionWorkerCallOptions,
     ): Promise<ExtensionJsonValue>;
     close(): Promise<void>;
     listTools(): readonly ExtensionWorkerToolDefinition[];
 }
 
 export interface ExtensionWorkerCapability {
-    openSession(input: ExtensionWorkerOpenInput): Promise<ExtensionWorkerSession>;
+    openSession(
+        input: ExtensionWorkerOpenInput,
+    ): Promise<ExtensionWorkerSession>;
 }
 
 export interface ExtensionProcessExit {
@@ -193,7 +205,10 @@ declare const extensionPointDeclarationType: unique symbol;
 declare const extensionPointBindingType: unique symbol;
 
 /** Stable domain-owned point identity plus compile-time declaration/binding types. */
-export interface ExtensionPoint<Declaration extends ExtensionPointDeclaration, Binding> {
+export interface ExtensionPoint<
+    Declaration extends ExtensionPointDeclaration,
+    Binding,
+> {
     readonly id: string;
     readonly [extensionPointBindingType]?: Binding;
     readonly [extensionPointDeclarationType]?: Declaration;
@@ -203,11 +218,14 @@ export interface ExtensionPoint<Declaration extends ExtensionPointDeclaration, B
  * Define a stable Extension Point descriptor. Runtime identity is the id string,
  * never JavaScript object identity, so descriptors may safely be bundled.
  */
-export function defineExtensionPoint<Declaration extends ExtensionPointDeclaration, Binding>(
-    id: string
-): ExtensionPoint<Declaration, Binding> {
+export function defineExtensionPoint<
+    Declaration extends ExtensionPointDeclaration,
+    Binding,
+>(id: string): ExtensionPoint<Declaration, Binding> {
     if (!/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(id)) {
-        throw new TypeError("Extension Point id must be a lowercase namespaced identifier.");
+        throw new TypeError(
+            "Extension Point id must be a lowercase namespaced identifier.",
+        );
     }
     return Object.freeze({ id }) as ExtensionPoint<Declaration, Binding>;
 }
@@ -222,7 +240,7 @@ export interface ExtensionContext {
     register<Declaration extends ExtensionPointDeclaration, Binding>(
         point: ExtensionPoint<Declaration, Binding>,
         id: string,
-        binding: Binding
+        binding: Binding,
     ): void;
 }
 

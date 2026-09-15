@@ -5,7 +5,7 @@ import test from "node:test";
 
 import {
     createArtifactDirectoryArchive,
-    extractArtifactDirectoryArchive
+    extractArtifactDirectoryArchive,
 } from "../../../../../src/control/artifact/host/storage/Archive.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
@@ -14,13 +14,17 @@ test("directory archive treats absolute, relative, and trailing-separator roots 
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const source = join(root, "source");
     await mkdir(join(source, "nested"), { recursive: true });
-    await writeFile(join(source, "devshell-extension.json"), "manifest\n", "utf8");
+    await writeFile(
+        join(source, "devshell-extension.json"),
+        "manifest\n",
+        "utf8",
+    );
     await writeFile(join(source, "nested", "entry.txt"), "entry\n", "utf8");
 
     const variants = [
         source,
         `${source}/`,
-        relativePath(process.cwd(), source)
+        relativePath(process.cwd(), source),
     ];
     const manifests = [];
     for (const [index, variant] of variants.entries()) {
@@ -29,8 +33,15 @@ test("directory archive treats absolute, relative, and trailing-separator roots 
         await mkdir(output);
         manifests.push(await createArtifactDirectoryArchive(variant, archive));
         await extractArtifactDirectoryArchive(archive, output);
-        assert.deepEqual(await tree(output), ["devshell-extension.json", "nested/", "nested/entry.txt"]);
-        assert.equal(await readFile(join(output, "devshell-extension.json"), "utf8"), "manifest\n");
+        assert.deepEqual(await tree(output), [
+            "devshell-extension.json",
+            "nested/",
+            "nested/entry.txt",
+        ]);
+        assert.equal(
+            await readFile(join(output, "devshell-extension.json"), "utf8"),
+            "manifest\n",
+        );
     }
     assert.deepEqual(manifests[1], manifests[0]);
     assert.deepEqual(manifests[2], manifests[0]);
@@ -42,7 +53,8 @@ async function tree(root: string): Promise<string[]> {
         const entries = await readdir(directory, { withFileTypes: true });
         entries.sort((left, right) => left.name.localeCompare(right.name));
         for (const entry of entries) {
-            const path = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+            const path =
+                prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
             if (entry.isDirectory()) {
                 output.push(`${path}/`);
                 await walk(join(directory, entry.name), path);

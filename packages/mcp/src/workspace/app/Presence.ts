@@ -23,7 +23,9 @@ export class WorkspaceAppPresenceStore {
         const key = presenceKey(instance, ctxId);
         const existing = this.#states.get(key);
         this.#states.set(key, {
-            ...(existing?.lastSeenAt === undefined ? {} : { lastSeenAt: existing.lastSeenAt }),
+            ...(existing?.lastSeenAt === undefined
+                ? {}
+                : { lastSeenAt: existing.lastSeenAt }),
             open: true,
             watches: existing?.watches ?? 0,
         });
@@ -57,7 +59,10 @@ export class WorkspaceAppPresenceStore {
         if (existing === undefined) return;
         const watches = Math.max(0, existing.watches - 1);
         this.#states.set(key, {
-            lastSeenAt: watches === 0 ? this.#now() : existing.lastSeenAt ?? this.#now(),
+            lastSeenAt:
+                watches === 0
+                    ? this.#now()
+                    : (existing.lastSeenAt ?? this.#now()),
             open: existing.open,
             watches,
         });
@@ -70,9 +75,10 @@ export class WorkspaceAppPresenceStore {
     isActive(instance: string, ctxId: string, livenessMs: number): boolean {
         const state = this.#states.get(presenceKey(instance, ctxId));
         if (state?.lastSeenAt === undefined) return false;
-        const effectiveLivenessMs = state.watches > 0
-            ? livenessMs
-            : Math.min(livenessMs, WATCH_HANDOFF_GRACE_MS);
+        const effectiveLivenessMs =
+            state.watches > 0
+                ? livenessMs
+                : Math.min(livenessMs, WATCH_HANDOFF_GRACE_MS);
         return this.#now() - state.lastSeenAt <= effectiveLivenessMs;
     }
 

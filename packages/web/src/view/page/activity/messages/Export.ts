@@ -32,7 +32,11 @@ export function buildConversationMarkdown({
     return `${lines.join("\n")}\n`;
 }
 
-export function markdownExportFilename(title: string, instance: string, ctxId: string): string {
+export function markdownExportFilename(
+    title: string,
+    instance: string,
+    ctxId: string,
+): string {
     const stem = `${title}-${instance}-${ctxId}`
         .replace(/[<>:"/\\|?*]+/g, "-")
         .replace(/\s+/g, "-")
@@ -43,7 +47,9 @@ export function markdownExportFilename(title: string, instance: string, ctxId: s
 }
 
 export function downloadMarkdown(filename: string, markdown: string): void {
-    const url = URL.createObjectURL(new Blob([markdown], { type: "text/markdown;charset=utf-8" }));
+    const url = URL.createObjectURL(
+        new Blob([markdown], { type: "text/markdown;charset=utf-8" }),
+    );
     const link = document.createElement("a");
     link.download = filename;
     link.href = url;

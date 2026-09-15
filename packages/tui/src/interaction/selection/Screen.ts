@@ -56,7 +56,10 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     }
 
     clearSelection(): void {
-        if (this.#selection === undefined && this.#snapshot === EMPTY_SNAPSHOT) {
+        if (
+            this.#selection === undefined &&
+            this.#snapshot === EMPTY_SNAPSHOT
+        ) {
             return;
         }
         this.#selection = undefined;
@@ -80,8 +83,11 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     getSelectionText(): string {
         return this.#selection === undefined
             ? ""
-            : buildSelection(this.#terminal, this.#selection, this.#columnBounds)
-                  .text;
+            : buildSelection(
+                  this.#terminal,
+                  this.#selection,
+                  this.#columnBounds,
+              ).text;
     }
 
     getSnapshot(): TuiTextSelectionSnapshot {
@@ -117,16 +123,20 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
     }
 
     write(data: string | Uint8Array): void {
-        const value = typeof data === "string"
-            ? data
-            : Buffer.from(data).toString("utf8");
+        const value =
+            typeof data === "string"
+                ? data
+                : Buffer.from(data).toString("utf8");
         if (value.length === 0) return;
         this.#pendingData += value;
         this.#scheduleWrite();
     }
 
     #scheduleWrite(): void {
-        if (this.#pendingWrite !== undefined || this.#pendingData.length === 0) {
+        if (
+            this.#pendingWrite !== undefined ||
+            this.#pendingData.length === 0
+        ) {
             return;
         }
         const running = this.#drainWrites();
@@ -183,8 +193,7 @@ export class TuiScreenTextSelection implements TuiTextSelectionRenderSource {
         return {
             column: clamp(Math.floor(x) - 1, min, Math.max(min, max)),
             line:
-                buffer.viewportY +
-                clamp(Math.floor(y) - 1, 0, this.#rows - 1),
+                buffer.viewportY + clamp(Math.floor(y) - 1, 0, this.#rows - 1),
         };
     }
 }
@@ -204,10 +213,15 @@ export function createTuiScreenCaptureStdout(
                         chunk instanceof Uint8Array
                     ) {
                         selection.write(
-                            typeof chunk === "string" ? chunk : Buffer.from(chunk),
+                            typeof chunk === "string"
+                                ? chunk
+                                : Buffer.from(chunk),
                         );
                     }
-                    return Reflect.apply(target.write, target, [chunk, ...args]);
+                    return Reflect.apply(target.write, target, [
+                        chunk,
+                        ...args,
+                    ]);
                 };
             }
             const value = Reflect.get(target, property, target);
@@ -231,7 +245,8 @@ function buildSelection(
     for (let lineIndex = start.line; lineIndex <= end.line; lineIndex += 1) {
         const line = buffer.getLine(lineIndex);
         if (line === undefined) continue;
-        const startColumn = lineIndex === start.line ? start.column : rangeStart;
+        const startColumn =
+            lineIndex === start.line ? start.column : rangeStart;
         const endColumn = lineIndex === end.line ? end.column + 1 : rangeEnd;
         const lineText = line.translateToString(true, startColumn, endColumn);
         if (lineText.length > 0) {

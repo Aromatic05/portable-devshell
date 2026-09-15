@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     ControlError,
     isControlErrorBody,
-    toControlErrorBody
+    toControlErrorBody,
 } from "@portable-devshell/shared";
 
 test("control error serializes nested control errors and structured details", () => {
@@ -12,14 +12,14 @@ test("control error serializes nested control errors and structured details", ()
         code: "worker.offline",
         details: { instance: "local-one" },
         message: "worker offline",
-        retryable: true
+        retryable: true,
     });
     const error = new ControlError({
         cause,
         code: "control.failed",
         details: { operation: "start" },
         message: "control failed",
-        retryable: false
+        retryable: false,
     });
 
     assert.deepEqual(error.toBody(), {
@@ -27,12 +27,12 @@ test("control error serializes nested control errors and structured details", ()
             code: "worker.offline",
             details: { instance: "local-one" },
             message: "worker offline",
-            retryable: true
+            retryable: true,
         },
         code: "control.failed",
         details: { operation: "start" },
         message: "control failed",
-        retryable: false
+        retryable: false,
     });
     assert.equal(error.cause, cause);
 });
@@ -43,13 +43,13 @@ test("control error body validation recursively rejects malformed causes", () =>
             cause: {
                 code: "worker.offline",
                 message: "offline",
-                retryable: true
+                retryable: true,
             },
             code: "control.failed",
             message: "failed",
-            retryable: false
+            retryable: false,
         }),
-        true
+        true,
     );
 
     for (const value of [
@@ -62,8 +62,8 @@ test("control error body validation recursively rejects malformed causes", () =>
             cause: { code: "nested", message: "nested", retryable: "no" },
             code: "failed",
             message: "failed",
-            retryable: false
-        }
+            retryable: false,
+        },
     ]) {
         assert.equal(isControlErrorBody(value), false);
     }
@@ -72,22 +72,22 @@ test("control error body validation recursively rejects malformed causes", () =>
 test("plain errors are normalized with defaults and nested causes", () => {
     const cause = Object.assign(new Error("root cause"), {
         code: "root.failed",
-        retryable: true
+        retryable: true,
     });
     const error = Object.assign(new Error("outer failure", { cause }), {
-        details: { operation: "status" }
+        details: { operation: "status" },
     });
 
     assert.deepEqual(toControlErrorBody(error), {
         cause: {
             code: "root.failed",
             message: "root cause",
-            retryable: true
+            retryable: true,
         },
         code: "error.unknown",
         details: { operation: "status" },
         message: "outer failure",
-        retryable: false
+        retryable: false,
     });
 });
 
@@ -95,7 +95,7 @@ test("existing control error bodies pass through and unrelated values are ignore
     const body = {
         code: "control.failed",
         message: "failed",
-        retryable: false
+        retryable: false,
     };
 
     assert.equal(toControlErrorBody(body), body);

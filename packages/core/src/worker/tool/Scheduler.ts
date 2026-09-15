@@ -1,4 +1,10 @@
-import { createError, errorCodes, type InstanceName, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    type InstanceName,
+    type JsonValue,
+    type ToolCallContext,
+} from "@portable-devshell/shared";
 
 import { readWorkerAbortReason } from "../AbortReason.js";
 
@@ -55,7 +61,12 @@ interface ToolSchedulerEntry {
     cancellationReason?: unknown;
 }
 
-const terminalStates = new Set<ToolSchedulerEntryState>(["completed", "failed", "cancelled", "queueTimeout"]);
+const terminalStates = new Set<ToolSchedulerEntryState>([
+    "completed",
+    "failed",
+    "cancelled",
+    "queueTimeout",
+]);
 
 const urgentToolNames = new Set(["tmux_input", "tmux_inspect", "tmux_manage"]);
 
@@ -67,14 +78,14 @@ export const defaultWorkerToolSchedulerLimits: WorkerToolSchedulerLimits = {
     byTool: {
         bash_run: {
             maxRunning: 4,
-            queueDepth: 16
-        }
+            queueDepth: 16,
+        },
     },
     maxRunning: 4,
     maxRunningPerSession: 2,
     queueDepth: 16,
     queueDepthPerSession: 4,
-    queueTimeoutMs: 30_000
+    queueTimeoutMs: 30_000,
 };
 
 export class WorkerToolSchedulerFullError extends Error {
@@ -102,11 +113,16 @@ export class WorkerToolCallScheduler {
     readonly #entries = new Map<string, ToolSchedulerEntry>();
     readonly #waiting: ToolSchedulerEntry[] = [];
 
-    constructor(limits: WorkerToolSchedulerLimits = defaultWorkerToolSchedulerLimits) {
+    constructor(
+        limits: WorkerToolSchedulerLimits = defaultWorkerToolSchedulerLimits,
+    ) {
         this.#limits = limits;
     }
 
-    reserve(request: WorkerToolSchedulerRequest, signal?: AbortSignal): WorkerToolSchedulerReservation {
+    reserve(
+        request: WorkerToolSchedulerRequest,
+        signal?: AbortSignal,
+    ): WorkerToolSchedulerReservation {
         if (signal?.aborted === true) {
             throw this.#cancelledErrorForRequest(request, signal.reason);
         }
@@ -118,7 +134,7 @@ export class WorkerToolCallScheduler {
         const entry: ToolSchedulerEntry = {
             request,
             settled: false,
-            state: "reserved"
+            state: "reserved",
         };
         this.#entries.set(request.callId, entry);
         if (signal !== undefined) {
@@ -127,7 +143,8 @@ export class WorkerToolCallScheduler {
                 this.#cancel(entry);
             };
             signal.addEventListener("abort", onAbort, { once: true });
-            entry.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+            entry.removeAbortListener = () =>
+                signal.removeEventListener("abort", onAbort);
         }
 
         return {
@@ -139,7 +156,8 @@ export class WorkerToolCallScheduler {
             release: () => {
                 this.#cancel(entry);
             },
-            run: async <T>(work: () => Promise<T>): Promise<T> => await this.#queue(entry, work)
+            run: async <T>(work: () => Promise<T>): Promise<T> =>
+                await this.#queue(entry, work),
         };
     }
 
@@ -149,15 +167,24 @@ export class WorkerToolCallScheduler {
         const fullReasons: string[] = [];
 
         const urgentAllowance = isUrgentTool(request.toolName) ? 1 : 0;
-        if (snapshot.accepted >= this.#limits.maxRunning + this.#limits.queueDepth + urgentAllowance) {
+        if (
+            snapshot.accepted >=
+            this.#limits.maxRunning + this.#limits.queueDepth + urgentAllowance
+        ) {
             fullReasons.push("instance");
         }
-        if (snapshot.toolAccepted >= toolLimit.maxRunning + toolLimit.queueDepth) {
+        if (
+            snapshot.toolAccepted >=
+            toolLimit.maxRunning + toolLimit.queueDepth
+        ) {
             fullReasons.push("tool");
         }
         if (
-            request.ctxId !== undefined
-            && snapshot.contextAccepted >= this.#limits.maxRunningPerSession + this.#limits.queueDepthPerSession + urgentAllowance
+            request.ctxId !== undefined &&
+            snapshot.contextAccepted >=
+                this.#limits.maxRunningPerSession +
+                    this.#limits.queueDepthPerSession +
+                    urgentAllowance
         ) {
             fullReasons.push("context");
         }
@@ -183,16 +210,21 @@ export class WorkerToolCallScheduler {
             toolQueueDepth: toolLimit.queueDepth,
             toolQueued: snapshot.toolQueued,
             toolMaxRunning: toolLimit.maxRunning,
-            toolRunning: snapshot.toolRunning
+            toolRunning: snapshot.toolRunning,
         });
     }
 
-    async #queue<T>(entry: ToolSchedulerEntry, work: () => Promise<T>): Promise<T> {
+    async #queue<T>(
+        entry: ToolSchedulerEntry,
+        work: () => Promise<T>,
+    ): Promise<T> {
         if (terminalStates.has(entry.state)) {
             throw this.#cancelledError(entry);
         }
         if (entry.state !== "reserved" && entry.state !== "pendingApproval") {
-            throw new Error(`Tool call ${entry.request.callId} cannot be queued from state ${entry.state}.`);
+            throw new Error(
+                `Tool call ${entry.request.callId} cannot be queued from state ${entry.state}.`,
+            );
         }
 
         return await new Promise<T>((resolve, reject) => {
@@ -205,14 +237,22 @@ export class WorkerToolCallScheduler {
                 if (entry.state !== "queued") {
                     return;
                 }
-                this.#finish(entry, "queueTimeout", undefined, new WorkerToolQueueTimeoutError({
-                    callId: entry.request.callId,
-                    instance: entry.request.instanceName,
-                    queueTimeoutMs: this.#limits.queueTimeoutMs,
-                    queuedForMs: entry.queuedAt === undefined ? 0 : Date.now() - entry.queuedAt,
-                    ctxId: entry.request.ctxId,
-                    toolName: entry.request.toolName
-                }));
+                this.#finish(
+                    entry,
+                    "queueTimeout",
+                    undefined,
+                    new WorkerToolQueueTimeoutError({
+                        callId: entry.request.callId,
+                        instance: entry.request.instanceName,
+                        queueTimeoutMs: this.#limits.queueTimeoutMs,
+                        queuedForMs:
+                            entry.queuedAt === undefined
+                                ? 0
+                                : Date.now() - entry.queuedAt,
+                        ctxId: entry.request.ctxId,
+                        toolName: entry.request.toolName,
+                    }),
+                );
                 this.#drain();
             }, this.#limits.queueTimeoutMs);
             this.#waiting.push(entry);
@@ -223,10 +263,16 @@ export class WorkerToolCallScheduler {
     #drain(): void {
         for (;;) {
             let index = this.#waiting.findIndex(
-                (entry) => entry.state === "queued" && isUrgentTool(entry.request.toolName) && this.#canRun(entry.request)
+                (entry) =>
+                    entry.state === "queued" &&
+                    isUrgentTool(entry.request.toolName) &&
+                    this.#canRun(entry.request),
             );
             if (index === -1) {
-                index = this.#waiting.findIndex((entry) => entry.state === "queued" && this.#canRun(entry.request));
+                index = this.#waiting.findIndex(
+                    (entry) =>
+                        entry.state === "queued" && this.#canRun(entry.request),
+                );
             }
             if (index === -1) {
                 return;
@@ -243,7 +289,12 @@ export class WorkerToolCallScheduler {
         this.#clearTimeout(entry);
         const work = entry.run;
         if (work === undefined) {
-            this.#finish(entry, "failed", undefined, new Error("Queued tool call is missing its work function."));
+            this.#finish(
+                entry,
+                "failed",
+                undefined,
+                new Error("Queued tool call is missing its work function."),
+            );
             return;
         }
 
@@ -265,11 +316,24 @@ export class WorkerToolCallScheduler {
         if (terminalStates.has(entry.state) || entry.state === "running") {
             return;
         }
-        this.#finish(entry, "cancelled", undefined, this.#cancelledError(entry));
+        this.#finish(
+            entry,
+            "cancelled",
+            undefined,
+            this.#cancelledError(entry),
+        );
         this.#drain();
     }
 
-    #finish(entry: ToolSchedulerEntry, state: Extract<ToolSchedulerEntryState, "completed" | "failed" | "cancelled" | "queueTimeout">, value?: unknown, error?: unknown): void {
+    #finish(
+        entry: ToolSchedulerEntry,
+        state: Extract<
+            ToolSchedulerEntryState,
+            "completed" | "failed" | "cancelled" | "queueTimeout"
+        >,
+        value?: unknown,
+        error?: unknown,
+    ): void {
         if (entry.settled) {
             return;
         }
@@ -293,10 +357,16 @@ export class WorkerToolCallScheduler {
     }
 
     #cancelledError(entry: ToolSchedulerEntry) {
-        return this.#cancelledErrorForRequest(entry.request, entry.cancellationReason);
+        return this.#cancelledErrorForRequest(
+            entry.request,
+            entry.cancellationReason,
+        );
     }
 
-    #cancelledErrorForRequest(request: WorkerToolSchedulerRequest, reason: unknown) {
+    #cancelledErrorForRequest(
+        request: WorkerToolSchedulerRequest,
+        reason: unknown,
+    ) {
         return createError({
             code: errorCodes.coreToolCallCancelled,
             message: "Tool call was cancelled before it started.",
@@ -305,8 +375,8 @@ export class WorkerToolCallScheduler {
                 callId: request.callId,
                 instance: request.instanceName,
                 reason: readWorkerAbortReason(reason),
-                toolName: request.toolName
-            }
+                toolName: request.toolName,
+            },
         });
     }
 
@@ -335,8 +405,9 @@ export class WorkerToolCallScheduler {
             return false;
         }
         if (
-            request.ctxId !== undefined
-            && snapshot.contextRunning >= this.#limits.maxRunningPerSession + urgentAllowance
+            request.ctxId !== undefined &&
+            snapshot.contextRunning >=
+                this.#limits.maxRunningPerSession + urgentAllowance
         ) {
             return false;
         }
@@ -354,15 +425,45 @@ export class WorkerToolCallScheduler {
         toolQueued: number;
         toolRunning: number;
     } {
-        const entries = [...this.#entries.values()].filter((entry) => !terminalStates.has(entry.state));
-        const queuedEntries = entries.filter((entry) => entry.state === "reserved" || entry.state === "pendingApproval" || entry.state === "queued");
-        const runningEntries = entries.filter((entry) => entry.state === "running");
-        const toolEntries = entries.filter((entry) => entry.request.toolName === request.toolName);
-        const toolQueuedEntries = queuedEntries.filter((entry) => entry.request.toolName === request.toolName);
-        const toolRunningEntries = runningEntries.filter((entry) => entry.request.toolName === request.toolName);
-        const contextEntries = request.ctxId === undefined ? [] : entries.filter((entry) => entry.request.ctxId === request.ctxId);
-        const contextQueuedEntries = request.ctxId === undefined ? [] : queuedEntries.filter((entry) => entry.request.ctxId === request.ctxId);
-        const contextRunningEntries = request.ctxId === undefined ? [] : runningEntries.filter((entry) => entry.request.ctxId === request.ctxId);
+        const entries = [...this.#entries.values()].filter(
+            (entry) => !terminalStates.has(entry.state),
+        );
+        const queuedEntries = entries.filter(
+            (entry) =>
+                entry.state === "reserved" ||
+                entry.state === "pendingApproval" ||
+                entry.state === "queued",
+        );
+        const runningEntries = entries.filter(
+            (entry) => entry.state === "running",
+        );
+        const toolEntries = entries.filter(
+            (entry) => entry.request.toolName === request.toolName,
+        );
+        const toolQueuedEntries = queuedEntries.filter(
+            (entry) => entry.request.toolName === request.toolName,
+        );
+        const toolRunningEntries = runningEntries.filter(
+            (entry) => entry.request.toolName === request.toolName,
+        );
+        const contextEntries =
+            request.ctxId === undefined
+                ? []
+                : entries.filter(
+                      (entry) => entry.request.ctxId === request.ctxId,
+                  );
+        const contextQueuedEntries =
+            request.ctxId === undefined
+                ? []
+                : queuedEntries.filter(
+                      (entry) => entry.request.ctxId === request.ctxId,
+                  );
+        const contextRunningEntries =
+            request.ctxId === undefined
+                ? []
+                : runningEntries.filter(
+                      (entry) => entry.request.ctxId === request.ctxId,
+                  );
 
         return {
             accepted: entries.length,
@@ -373,7 +474,7 @@ export class WorkerToolCallScheduler {
             contextRunning: contextRunningEntries.length,
             toolAccepted: toolEntries.length,
             toolQueued: toolQueuedEntries.length,
-            toolRunning: toolRunningEntries.length
+            toolRunning: toolRunningEntries.length,
         };
     }
 
@@ -381,21 +482,31 @@ export class WorkerToolCallScheduler {
         const override = this.#limits.byTool[toolName] ?? {};
         return {
             maxRunning: override.maxRunning ?? this.#limits.maxRunning,
-            queueDepth: override.queueDepth ?? this.#limits.queueDepth
+            queueDepth: override.queueDepth ?? this.#limits.queueDepth,
         };
     }
 }
 
-export function resolveWorkerToolSchedulerLimits(input?: Partial<WorkerToolSchedulerLimits>): WorkerToolSchedulerLimits {
+export function resolveWorkerToolSchedulerLimits(
+    input?: Partial<WorkerToolSchedulerLimits>,
+): WorkerToolSchedulerLimits {
     return {
         byTool: {
             ...defaultWorkerToolSchedulerLimits.byTool,
-            ...(input?.byTool ?? {})
+            ...(input?.byTool ?? {}),
         },
-        maxRunning: input?.maxRunning ?? defaultWorkerToolSchedulerLimits.maxRunning,
-        maxRunningPerSession: input?.maxRunningPerSession ?? defaultWorkerToolSchedulerLimits.maxRunningPerSession,
-        queueDepth: input?.queueDepth ?? defaultWorkerToolSchedulerLimits.queueDepth,
-        queueDepthPerSession: input?.queueDepthPerSession ?? defaultWorkerToolSchedulerLimits.queueDepthPerSession,
-        queueTimeoutMs: input?.queueTimeoutMs ?? defaultWorkerToolSchedulerLimits.queueTimeoutMs
+        maxRunning:
+            input?.maxRunning ?? defaultWorkerToolSchedulerLimits.maxRunning,
+        maxRunningPerSession:
+            input?.maxRunningPerSession ??
+            defaultWorkerToolSchedulerLimits.maxRunningPerSession,
+        queueDepth:
+            input?.queueDepth ?? defaultWorkerToolSchedulerLimits.queueDepth,
+        queueDepthPerSession:
+            input?.queueDepthPerSession ??
+            defaultWorkerToolSchedulerLimits.queueDepthPerSession,
+        queueTimeoutMs:
+            input?.queueTimeoutMs ??
+            defaultWorkerToolSchedulerLimits.queueTimeoutMs,
     };
 }

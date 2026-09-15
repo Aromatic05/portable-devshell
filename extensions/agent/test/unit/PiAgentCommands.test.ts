@@ -24,7 +24,7 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 
 function fakeSession(
     streaming: boolean,
-    options: { holdTurn?: boolean; preflightError?: Error } = {}
+    options: { holdTurn?: boolean; preflightError?: Error } = {},
 ) {
     const calls: PromptCall[] = [];
     const followUps: string[] = [];
@@ -38,14 +38,18 @@ function fakeSession(
             followUps.push(text);
         },
         async prompt(text: string, promptOptions?: PromptOptionsLike) {
-            calls.push(promptOptions === undefined ? { text } : { options: promptOptions, text });
+            calls.push(
+                promptOptions === undefined
+                    ? { text }
+                    : { options: promptOptions, text },
+            );
             if (options.preflightError !== undefined) {
                 promptOptions?.preflightResult?.(false);
                 throw options.preflightError;
             }
             promptOptions?.preflightResult?.(true);
             if (options.holdTurn === true) await turn.promise;
-        }
+        },
     } as PiSessionLike;
     return { calls, followUps, session, turn };
 }
@@ -53,7 +57,11 @@ function fakeSession(
 test("Pi prompt is accepted after preflight without waiting for the active turn", async () => {
     const idle = fakeSession(false, { holdTurn: true });
     let delivered = false;
-    const delivery = deliverPiAgentMessage(idle.session, "prompt", "implement").then(() => {
+    const delivery = deliverPiAgentMessage(
+        idle.session,
+        "prompt",
+        "implement",
+    ).then(() => {
         delivered = true;
     });
 
@@ -74,7 +82,7 @@ test("Pi prompt still returns the original preflight rejection", async () => {
 
     await assert.rejects(
         deliverPiAgentMessage(idle.session, "prompt", "implement"),
-        (error) => error === expected
+        (error) => error === expected,
     );
 });
 

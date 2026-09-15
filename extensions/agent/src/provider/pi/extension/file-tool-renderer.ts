@@ -6,7 +6,7 @@ import type {
     PiThemeLike,
     PiToolRenderContextLike,
     PiToolRenderResultLike,
-    PiToolRenderResultOptionsLike
+    PiToolRenderResultOptionsLike,
 } from "./renderer-types.js";
 import {
     asRecord,
@@ -19,60 +19,113 @@ import {
     stringArrayField,
     stringField,
     style,
-    textContentLines
+    textContentLines,
 } from "./renderer-utils.js";
 
-export function formatReadCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
+export function formatReadCall(
+    record: Record<string, unknown>,
+    theme?: PiThemeLike,
+): string {
     const title = style(theme, "toolTitle", "read", true);
     const files = record.files;
     if (Array.isArray(files)) {
-        const requests = files.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined);
-        if (requests.length === 1) return formatReadRequest(title, requests[0]!, theme);
-        const paths = requests.map((entry) => stringField(entry, "path")).filter((value): value is string => value !== undefined);
-        const preview = paths.length <= 3 ? paths.join(", ") : `${paths.slice(0, 3).join(", ")} +${paths.length - 3}`;
-        return joinCall(title, [`${requests.length} files`, preview || undefined], theme);
+        const requests = files
+            .map(asRecord)
+            .filter(
+                (entry): entry is Record<string, unknown> =>
+                    entry !== undefined,
+            );
+        if (requests.length === 1)
+            return formatReadRequest(title, requests[0]!, theme);
+        const paths = requests
+            .map((entry) => stringField(entry, "path"))
+            .filter((value): value is string => value !== undefined);
+        const preview =
+            paths.length <= 3
+                ? paths.join(", ")
+                : `${paths.slice(0, 3).join(", ")} +${paths.length - 3}`;
+        return joinCall(
+            title,
+            [`${requests.length} files`, preview || undefined],
+            theme,
+        );
     }
     return formatReadRequest(title, record, theme);
 }
 
-export function formatGrepCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
+export function formatGrepCall(
+    record: Record<string, unknown>,
+    theme?: PiThemeLike,
+): string {
     const title = style(theme, "toolTitle", "grep", true);
     const pattern = stringField(record, "pattern");
     const paths = stringArrayField(record, "paths");
     const syntax = stringField(record, "syntax");
-    const patternDisplay = pattern === undefined
-        ? undefined
-        : syntax === "literal" ? JSON.stringify(pattern) : `/${pattern}/`;
-    return joinCall(title, [
-        patternDisplay,
-        paths.length === 0 ? "in ." : `in ${paths.join(", ")}`,
-        numberField(record, "context") === undefined ? undefined : `context ${numberField(record, "context")}`
-    ], theme);
+    const patternDisplay =
+        pattern === undefined
+            ? undefined
+            : syntax === "literal"
+              ? JSON.stringify(pattern)
+              : `/${pattern}/`;
+    return joinCall(
+        title,
+        [
+            patternDisplay,
+            paths.length === 0 ? "in ." : `in ${paths.join(", ")}`,
+            numberField(record, "context") === undefined
+                ? undefined
+                : `context ${numberField(record, "context")}`,
+        ],
+        theme,
+    );
 }
 
-export function formatGlobCall(record: Record<string, unknown>, theme?: PiThemeLike): string {
+export function formatGlobCall(
+    record: Record<string, unknown>,
+    theme?: PiThemeLike,
+): string {
     const title = style(theme, "toolTitle", "glob", true);
-    if (typeof record.cursor === "string") return joinCall(title, ["next page"], theme);
+    if (typeof record.cursor === "string")
+        return joinCall(title, ["next page"], theme);
     const paths = stringArrayField(record, "patterns");
     const type = stringField(record, "type");
-    return joinCall(title, [paths.length === 0 ? "." : paths.join(", "), type === undefined || type === "any" ? undefined : type], theme);
+    return joinCall(
+        title,
+        [
+            paths.length === 0 ? "." : paths.join(", "),
+            type === undefined || type === "any" ? undefined : type,
+        ],
+        theme,
+    );
 }
 
 export function renderFileReadComponent(
     result: PiToolRenderResultLike,
     options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
-    context: PiToolRenderContextLike
+    context: PiToolRenderContextLike,
 ) {
     const sections = fileReadSections(result.details, context.args);
-    if (!options.expanded && !sections.some((section) => section.metadata !== undefined || section.error !== undefined)) {
+    if (
+        !options.expanded &&
+        !sections.some(
+            (section) =>
+                section.metadata !== undefined || section.error !== undefined,
+        )
+    ) {
         return clearComponent(context.lastComponent);
     }
     const rendered: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) rendered.push("");
         if (section.error !== undefined) {
-            rendered.push(style(theme, "warning", renderReadErrorRow(section.path, section.error)));
+            rendered.push(
+                style(
+                    theme,
+                    "warning",
+                    renderReadErrorRow(section.path, section.error),
+                ),
+            );
             continue;
         }
         if (section.metadata !== undefined) {
@@ -81,17 +134,40 @@ export function renderFileReadComponent(
         }
         if (!options.expanded) continue;
         if (sections.length > 1 && section.path !== undefined) {
-            rendered.push(`${style(theme, "toolTitle", "read", true)} ${style(theme, "accent", section.path)}`);
+            rendered.push(
+                `${style(theme, "toolTitle", "read", true)} ${style(theme, "accent", section.path)}`,
+            );
         }
-        rendered.push(...highlightNumberedContent(section.content, section.language, theme));
+        rendered.push(
+            ...highlightNumberedContent(
+                section.content,
+                section.language,
+                theme,
+            ),
+        );
         rendered.push(...renderReadWarnings(section, theme));
     }
-    return setText(context.lastComponent, rendered.length === 0 ? textContentLines(result).join("\n") : `\n${rendered.join("\n")}`);
+    return setText(
+        context.lastComponent,
+        rendered.length === 0
+            ? textContentLines(result).join("\n")
+            : `\n${rendered.join("\n")}`,
+    );
 }
 
-export function renderFileRead(value: JsonValue | undefined, expanded: boolean): string[] {
+export function renderFileRead(
+    value: JsonValue | undefined,
+    expanded: boolean,
+): string[] {
     const sections = fileReadSections(value);
-    if (!expanded && !sections.some((section) => section.metadata !== undefined || section.error !== undefined)) return [];
+    if (
+        !expanded &&
+        !sections.some(
+            (section) =>
+                section.metadata !== undefined || section.error !== undefined,
+        )
+    )
+        return [];
     const lines: string[] = [];
     for (const [index, section] of sections.entries()) {
         if (index > 0) lines.push("");
@@ -104,16 +180,21 @@ export function renderFileRead(value: JsonValue | undefined, expanded: boolean):
             continue;
         }
         if (!expanded) continue;
-        if (sections.length > 1 && section.path !== undefined) lines.push(`read ${section.path}`);
+        if (sections.length > 1 && section.path !== undefined)
+            lines.push(`read ${section.path}`);
         lines.push(...section.content.split("\n"));
-        if (section.nextSelector !== undefined) lines.push(`[More available: selector ${section.nextSelector}]`);
+        if (section.nextSelector !== undefined)
+            lines.push(`[More available: selector ${section.nextSelector}]`);
         else if (section.truncated) lines.push("[Truncated]");
         if (section.parseStatus === "partial") lines.push("[Partial parse]");
     }
     return lines;
 }
 
-export function renderFileGrep(value: JsonValue | undefined, expanded: boolean): string[] {
+export function renderFileGrep(
+    value: JsonValue | undefined,
+    expanded: boolean,
+): string[] {
     const record = asRecord(value);
     if (record === undefined || !Array.isArray(record.files)) return [];
     const lines: string[] = [];
@@ -123,24 +204,40 @@ export function renderFileGrep(value: JsonValue | undefined, expanded: boolean):
         const path = stringField(file, "path");
         const content = stringField(file, "content");
         if (path !== undefined) lines.push(path);
-        if (content !== undefined) lines.push(...content.split("\n").map((line) => `  ${line}`));
+        if (content !== undefined)
+            lines.push(...content.split("\n").map((line) => `  ${line}`));
         if (file.truncated === true) {
             const nextLine = numberField(file, "nextLine");
-            lines.push(`  [More matches${nextLine === undefined ? "" : ` from line ${nextLine}`}]`);
+            lines.push(
+                `  [More matches${nextLine === undefined ? "" : ` from line ${nextLine}`}]`,
+            );
         }
     }
-    if (typeof record.nextCursor === "string") lines.push("[More results available: continue with next cursor]");
+    if (typeof record.nextCursor === "string")
+        lines.push("[More results available: continue with next cursor]");
     return clipHead(lines, expanded ? 160 : 15);
 }
 
-export function renderFileGlob(value: JsonValue | undefined, expanded: boolean): string[] {
+export function renderFileGlob(
+    value: JsonValue | undefined,
+    expanded: boolean,
+): string[] {
     const record = asRecord(value);
     if (record === undefined || !Array.isArray(record.entries)) return [];
-    const lines = record.entries.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => {
-        const path = stringField(entry, "path") ?? "?";
-        return stringField(entry, "type") === "directory" && !path.endsWith("/") ? `${path}/` : path;
-    });
-    if (typeof record.nextCursor === "string") lines.push("[More results available: continue with next cursor]");
+    const lines = record.entries
+        .map(asRecord)
+        .filter(
+            (entry): entry is Record<string, unknown> => entry !== undefined,
+        )
+        .map((entry) => {
+            const path = stringField(entry, "path") ?? "?";
+            return stringField(entry, "type") === "directory" &&
+                !path.endsWith("/")
+                ? `${path}/`
+                : path;
+        });
+    if (typeof record.nextCursor === "string")
+        lines.push("[More results available: continue with next cursor]");
     return clipHead(lines, expanded ? 160 : 20);
 }
 
@@ -149,25 +246,46 @@ export function renderFileSummaryComponent(
     result: PiToolRenderResultLike,
     options: PiToolRenderResultOptionsLike,
     theme: PiThemeLike,
-    context: PiToolRenderContextLike
+    context: PiToolRenderContextLike,
 ) {
-    const lines = toolName === "file_glob"
-        ? renderFileGlob(result.details, options.expanded)
-        : renderFileGrep(result.details, options.expanded);
+    const lines =
+        toolName === "file_glob"
+            ? renderFileGlob(result.details, options.expanded)
+            : renderFileGrep(result.details, options.expanded);
     return setText(
         context.lastComponent,
-        lines.map((line) => style(theme, line.trimStart().startsWith("[") ? "warning" : "toolOutput", line)).join("\n")
+        lines
+            .map((line) =>
+                style(
+                    theme,
+                    line.trimStart().startsWith("[") ? "warning" : "toolOutput",
+                    line,
+                ),
+            )
+            .join("\n"),
     );
 }
 
-function formatReadRequest(title: string, record: Record<string, unknown>, theme?: PiThemeLike): string {
+function formatReadRequest(
+    title: string,
+    record: Record<string, unknown>,
+    theme?: PiThemeLike,
+): string {
     const path = stringField(record, "path");
     const selector = stringField(record, "selector");
     const view = stringField(record, "view");
-    return joinCall(title, [
-        path === undefined ? undefined : `${path}${selector === undefined ? "" : style(theme, "warning", `:${selector}`)}`,
-        view === undefined || view === "auto" || view === "content" ? undefined : view
-    ], theme);
+    return joinCall(
+        title,
+        [
+            path === undefined
+                ? undefined
+                : `${path}${selector === undefined ? "" : style(theme, "warning", `:${selector}`)}`,
+            view === undefined || view === "auto" || view === "content"
+                ? undefined
+                : view,
+        ],
+        theme,
+    );
 }
 
 interface FileReadSection {
@@ -181,41 +299,61 @@ interface FileReadSection {
     truncated: boolean;
 }
 
-function fileReadSections(value: JsonValue | undefined, args?: unknown): FileReadSection[] {
+function fileReadSections(
+    value: JsonValue | undefined,
+    args?: unknown,
+): FileReadSection[] {
     const record = asRecord(value);
     if (record === undefined) return [];
     if (Array.isArray(record.files)) {
-        return record.files.map(asRecord).filter((entry): entry is Record<string, unknown> => entry !== undefined).map((entry) => ({
-            content: stringField(entry, "content") ?? "",
-            error: asRecord(entry.error),
-            language: stringField(entry, "language"),
-            metadata: asRecord(entry.metadata),
-            nextSelector: stringField(entry, "nextSelector"),
-            parseStatus: stringField(entry, "parseStatus"),
-            path: stringField(entry, "path"),
-            truncated: entry.truncated === true
-        }));
+        return record.files
+            .map(asRecord)
+            .filter(
+                (entry): entry is Record<string, unknown> =>
+                    entry !== undefined,
+            )
+            .map((entry) => ({
+                content: stringField(entry, "content") ?? "",
+                error: asRecord(entry.error),
+                language: stringField(entry, "language"),
+                metadata: asRecord(entry.metadata),
+                nextSelector: stringField(entry, "nextSelector"),
+                parseStatus: stringField(entry, "parseStatus"),
+                path: stringField(entry, "path"),
+                truncated: entry.truncated === true,
+            }));
     }
     const argRecord = asRecord(args);
-    return [{
-        content: stringField(record, "content") ?? "",
-        error: asRecord(record.error),
-        language: stringField(record, "language"),
-        metadata: asRecord(record.metadata),
-        nextSelector: stringField(record, "nextSelector"),
-        parseStatus: stringField(record, "parseStatus"),
-        path: argRecord === undefined ? undefined : stringField(argRecord, "path"),
-        truncated: record.truncated === true
-    }];
+    return [
+        {
+            content: stringField(record, "content") ?? "",
+            error: asRecord(record.error),
+            language: stringField(record, "language"),
+            metadata: asRecord(record.metadata),
+            nextSelector: stringField(record, "nextSelector"),
+            parseStatus: stringField(record, "parseStatus"),
+            path:
+                argRecord === undefined
+                    ? undefined
+                    : stringField(argRecord, "path"),
+            truncated: record.truncated === true,
+        },
+    ];
 }
 
-function renderReadErrorRow(path: string | undefined, error: Record<string, unknown>): string {
+function renderReadErrorRow(
+    path: string | undefined,
+    error: Record<string, unknown>,
+): string {
     const code = stringField(error, "code") ?? "file.readFailed";
     const message = stringField(error, "message");
     return `${path ?? "?"} · ${code}${message === undefined ? "" : `: ${message}`}`;
 }
 
-function renderMetadataRow(path: string | undefined, metadata: Record<string, unknown>): string {
+function renderMetadataRow(
+    path: string | undefined,
+    metadata: Record<string, unknown>,
+): string {
     const displayPath = path ?? "?";
     if (metadata.exists === false) return `${displayPath} · missing`;
     const type = stringField(metadata, "type") ?? "unknown";
@@ -226,31 +364,65 @@ function renderMetadataRow(path: string | undefined, metadata: Record<string, un
         displayPath,
         type === "symlink" && target !== undefined ? `symlink→${target}` : type,
         size === undefined ? undefined : formatBytes(size),
-        mode === undefined ? undefined : `0${mode.toString(8).slice(-3)}`
-    ].filter((item): item is string => item !== undefined).join(" · ");
+        mode === undefined ? undefined : `0${mode.toString(8).slice(-3)}`,
+    ]
+        .filter((item): item is string => item !== undefined)
+        .join(" · ");
 }
 
-function highlightNumberedContent(content: string, language: string | undefined, theme: PiThemeLike): string[] {
+function highlightNumberedContent(
+    content: string,
+    language: string | undefined,
+    theme: PiThemeLike,
+): string[] {
     if (content.length === 0) return [];
     const parsed = content.split("\n").map((line) => {
         const match = line.match(/^(\d+):(.*)$/u);
-        return match === null ? { code: line, line: undefined } : { code: match[2]!, line: match[1]! };
+        return match === null
+            ? { code: line, line: undefined }
+            : { code: match[2]!, line: match[1]! };
     });
-    const resolvedLanguage = language === undefined || language === "text" ? undefined : language;
-    const highlighted = resolvedLanguage === undefined
-        ? parsed.map((entry) => style(theme, "toolOutput", entry.code.replace(/\t/gu, "   ")))
-        : highlightCode(parsed.map((entry) => entry.code.replace(/\t/gu, "   ")).join("\n"), resolvedLanguage);
-    const width = Math.max(1, ...parsed.map((entry) => entry.line?.length ?? 0));
+    const resolvedLanguage =
+        language === undefined || language === "text" ? undefined : language;
+    const highlighted =
+        resolvedLanguage === undefined
+            ? parsed.map((entry) =>
+                  style(theme, "toolOutput", entry.code.replace(/\t/gu, "   ")),
+              )
+            : highlightCode(
+                  parsed
+                      .map((entry) => entry.code.replace(/\t/gu, "   "))
+                      .join("\n"),
+                  resolvedLanguage,
+              );
+    const width = Math.max(
+        1,
+        ...parsed.map((entry) => entry.line?.length ?? 0),
+    );
     return highlighted.map((line, index) => {
         const lineNumber = parsed[index]?.line;
-        return lineNumber === undefined ? line : `${style(theme, "muted", lineNumber.padStart(width, " "))} ${line}`;
+        return lineNumber === undefined
+            ? line
+            : `${style(theme, "muted", lineNumber.padStart(width, " "))} ${line}`;
     });
 }
 
-function renderReadWarnings(section: FileReadSection, theme: PiThemeLike): string[] {
+function renderReadWarnings(
+    section: FileReadSection,
+    theme: PiThemeLike,
+): string[] {
     const lines: string[] = [];
-    if (section.nextSelector !== undefined) lines.push(style(theme, "warning", `[More available: selector ${section.nextSelector}]`));
-    else if (section.truncated) lines.push(style(theme, "warning", "[Truncated]"));
-    if (section.parseStatus === "partial") lines.push(style(theme, "warning", "[Partial parse]"));
+    if (section.nextSelector !== undefined)
+        lines.push(
+            style(
+                theme,
+                "warning",
+                `[More available: selector ${section.nextSelector}]`,
+            ),
+        );
+    else if (section.truncated)
+        lines.push(style(theme, "warning", "[Truncated]"));
+    if (section.parseStatus === "partial")
+        lines.push(style(theme, "warning", "[Partial parse]"));
     return lines;
 }

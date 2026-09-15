@@ -12,9 +12,13 @@ test("WorkerToolCallScheduler runs up to the configured limit and keeps later ca
         maxRunningPerSession: 2,
         queueDepth: 2,
         queueDepthPerSession: 2,
-        queueTimeoutMs: 1_000
+        queueTimeoutMs: 1_000,
     });
-    const completions = [createDeferred<string>(), createDeferred<string>(), createDeferred<string>()];
+    const completions = [
+        createDeferred<string>(),
+        createDeferred<string>(),
+        createDeferred<string>(),
+    ];
     const started: string[] = [];
     const calls = [0, 1, 2].map((index) =>
         scheduler
@@ -23,12 +27,12 @@ test("WorkerToolCallScheduler runs up to the configured limit and keeps later ca
                 instanceName,
                 ctxId: "context-1",
                 source: "mcp",
-                toolName: "bash_run"
+                toolName: "bash_run",
             })
             .run(async () => {
                 started.push(`call-${index}`);
                 return await completions[index]!.promise;
-            })
+            }),
     );
 
     await waitFor(() => started.length === 2);
@@ -52,19 +56,42 @@ test("WorkerToolCallScheduler rejects requests that exceed the bounded queue", (
         maxRunningPerSession: 10,
         queueDepth: 1,
         queueDepthPerSession: 10,
-        queueTimeoutMs: 1_000
+        queueTimeoutMs: 1_000,
     });
 
-    scheduler.reserve({ callId: "running", instanceName, source: "mcp", toolName: "bash_run" });
-    scheduler.reserve({ callId: "queued", instanceName, source: "mcp", toolName: "bash_run" });
+    scheduler.reserve({
+        callId: "running",
+        instanceName,
+        source: "mcp",
+        toolName: "bash_run",
+    });
+    scheduler.reserve({
+        callId: "queued",
+        instanceName,
+        source: "mcp",
+        toolName: "bash_run",
+    });
 
     assert.throws(
-        () => scheduler.reserve({ callId: "rejected", instanceName, source: "mcp", toolName: "bash_run" }),
+        () =>
+            scheduler.reserve({
+                callId: "rejected",
+                instanceName,
+                source: "mcp",
+                toolName: "bash_run",
+            }),
         (error: unknown) => {
-            assert.equal((error as { code?: string }).code, errorCodes.coreToolSchedulerFull);
-            assert.deepEqual((error as { details?: { fullReasons?: string[] } }).details?.fullReasons, ["instance", "tool"]);
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.coreToolSchedulerFull,
+            );
+            assert.deepEqual(
+                (error as { details?: { fullReasons?: string[] } }).details
+                    ?.fullReasons,
+                ["instance", "tool"],
+            );
             return true;
-        }
+        },
     );
 });
 
@@ -76,12 +103,18 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
         maxRunningPerSession: 2,
         queueDepth: 2,
         queueDepthPerSession: 2,
-        queueTimeoutMs: 1_000
+        queueTimeoutMs: 1_000,
     });
     const blocker = createDeferred<string>();
     const started: string[] = [];
     const running = scheduler
-        .reserve({ callId: "running", instanceName, ctxId: "context-1", source: "mcp", toolName: "bash_run" })
+        .reserve({
+            callId: "running",
+            instanceName,
+            ctxId: "context-1",
+            source: "mcp",
+            toolName: "bash_run",
+        })
         .run(async () => {
             started.push("running");
             return await blocker.promise;
@@ -91,8 +124,14 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
     const controller = new AbortController();
     const queued = scheduler
         .reserve(
-            { callId: "queued", instanceName, ctxId: "context-1", source: "mcp", toolName: "bash_run" },
-            controller.signal
+            {
+                callId: "queued",
+                instanceName,
+                ctxId: "context-1",
+                source: "mcp",
+                toolName: "bash_run",
+            },
+            controller.signal,
         )
         .run(async () => {
             started.push("queued");
@@ -101,7 +140,10 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
     controller.abort("client cancelled");
 
     await assert.rejects(queued, (error: unknown) => {
-        assert.equal((error as { code?: string }).code, errorCodes.coreToolCallCancelled);
+        assert.equal(
+            (error as { code?: string }).code,
+            errorCodes.coreToolCallCancelled,
+        );
         return true;
     });
     assert.deepEqual(started, ["running"]);
@@ -109,7 +151,11 @@ test("WorkerToolCallScheduler cancels a queued request when its abort signal fir
     assert.equal(await running, "done");
 });
 
-function createDeferred<T>(): { promise: Promise<T>; reject: (error: unknown) => void; resolve: (value: T) => void } {
+function createDeferred<T>(): {
+    promise: Promise<T>;
+    reject: (error: unknown) => void;
+    resolve: (value: T) => void;
+} {
     let resolve!: (value: T) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<T>((promiseResolve, promiseReject) => {
@@ -139,16 +185,26 @@ test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal ins
         maxRunningPerSession: 2,
         queueDepth: 2,
         queueDepthPerSession: 2,
-        queueTimeoutMs: 1_000
+        queueTimeoutMs: 1_000,
     });
     const first = createDeferred<string>();
     const second = createDeferred<string>();
     const urgent = createDeferred<string>();
     const started: string[] = [];
 
-    const run = (callId: string, toolName: string, deferred: ReturnType<typeof createDeferred<string>>) =>
+    const run = (
+        callId: string,
+        toolName: string,
+        deferred: ReturnType<typeof createDeferred<string>>,
+    ) =>
         scheduler
-            .reserve({ callId, instanceName, ctxId: "context-1", source: "mcp", toolName })
+            .reserve({
+                callId,
+                instanceName,
+                ctxId: "context-1",
+                source: "mcp",
+                toolName,
+            })
             .run(async () => {
                 started.push(callId);
                 return await deferred.promise;
@@ -165,7 +221,11 @@ test("WorkerToolCallScheduler admits one urgent tmux operation beyond normal ins
     urgent.resolve("interrupted");
     first.resolve("first");
     second.resolve("second");
-    assert.deepEqual(await Promise.all([firstCall, secondCall, urgentCall]), ["first", "second", "interrupted"]);
+    assert.deepEqual(await Promise.all([firstCall, secondCall, urgentCall]), [
+        "first",
+        "second",
+        "interrupted",
+    ]);
 });
 
 test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async () => {
@@ -176,13 +236,17 @@ test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async 
         maxRunningPerSession: 10,
         queueDepth: 4,
         queueDepthPerSession: 10,
-        queueTimeoutMs: 1_000
+        queueTimeoutMs: 1_000,
     });
     const blocker = createDeferred<string>();
     const normal = createDeferred<string>();
     const urgent = createDeferred<string>();
     const started: string[] = [];
-    const reserve = (callId: string, toolName: string, deferred: ReturnType<typeof createDeferred<string>>) =>
+    const reserve = (
+        callId: string,
+        toolName: string,
+        deferred: ReturnType<typeof createDeferred<string>>,
+    ) =>
         scheduler
             .reserve({ callId, instanceName, source: "mcp", toolName })
             .run(async () => {
@@ -202,5 +266,8 @@ test("WorkerToolCallScheduler prioritizes queued urgent tmux operations", async 
     await blockerCall;
     await waitFor(() => started.includes("normal"));
     normal.resolve("normal");
-    assert.deepEqual(await Promise.all([normalCall, urgentCall]), ["normal", "urgent"]);
+    assert.deepEqual(await Promise.all([normalCall, urgentCall]), [
+        "normal",
+        "urgent",
+    ]);
 });

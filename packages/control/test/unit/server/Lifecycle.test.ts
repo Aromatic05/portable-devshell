@@ -16,12 +16,19 @@ import {
     ControlPathRuntime,
     SocketChannel,
     type Event,
-    type JsonValue
+    type InstanceListEntry,
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
-import { createTestIpcPath, installUniqueWindowsTestIdentity } from "../../../../../test/TestPlatformSupport.ts";
-import { encodeGlobalConfig, encodeInstanceConfig } from "../control/config/persistence/Support.ts";
+import {
+    createTestIpcPath,
+    installUniqueWindowsTestIdentity,
+} from "../../../../../test/TestPlatformSupport.ts";
+import {
+    encodeGlobalConfig,
+    encodeInstanceConfig,
+} from "../control/config/persistence/Support.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
@@ -38,7 +45,10 @@ test("start creates control directory, socket, pid and status uses rpc", async (
         await assertPathExists(harness.paths.socketFile);
     }
     await assertPathExists(join(harness.paths.controlHomeDir, "control.pid"));
-    const startupLog = await readFile(join(harness.paths.controlHomeDir, "logs", "control.startup.log"), "utf8");
+    const startupLog = await readFile(
+        join(harness.paths.controlHomeDir, "logs", "control.startup.log"),
+        "utf8",
+    );
     assert.match(startupLog, /STARTUP control state load started/u);
     assert.match(startupLog, /STARTUP control runtime composition started/u);
     assert.match(startupLog, /STARTUP control runtime start completed/u);
@@ -81,12 +91,12 @@ test("concurrent lifecycle managers create only one control daemon", async (t) =
         daemonModulePath: controlDaemonModulePath(),
         homeDirectory: harness.homeDirectory,
         xdgRuntimeDir: harness.xdgRuntimeDir,
-        waitTimeoutMs: 10_000
+        waitTimeoutMs: 10_000,
     });
 
     const [firstStatus, secondStatus] = await Promise.all([
         harness.manager.start(),
-        second.start()
+        second.start(),
     ]);
 
     assert.equal(firstStatus.pid, secondStatus.pid);
@@ -99,7 +109,11 @@ test("stale pid does not mark control as running and start replaces it", async (
     t.after(() => harness.cleanup());
 
     await mkdir(harness.paths.controlHomeDir, { recursive: true });
-    await writeFile(join(harness.paths.controlHomeDir, "control.pid"), "999999\n", "utf8");
+    await writeFile(
+        join(harness.paths.controlHomeDir, "control.pid"),
+        "999999\n",
+        "utf8",
+    );
 
     const beforeStart = await harness.manager.status();
     assert.equal(beforeStart.running, false);
@@ -118,17 +132,21 @@ test("start terminates a verified stale Control process before replacing it", as
         daemonModulePath: controlDaemonModulePath(),
         pidFile: {
             read: async () => recordedPid,
-            remove: async () => { recordedPid = undefined; },
-            write: async (pid) => { recordedPid = pid; },
-            path: "/tmp/control.pid"
+            remove: async () => {
+                recordedPid = undefined;
+            },
+            write: async (pid) => {
+                recordedPid = pid;
+            },
+            path: "/tmp/control.pid",
         },
-        processIdentity: async (pid) => pid === 123 ? "control" : "unknown",
-        processIsRunning: (pid) => pid === 123 ? staleRunning : pid === 456,
+        processIdentity: async (pid) => (pid === 123 ? "control" : "unknown"),
+        processIsRunning: (pid) => (pid === 123 ? staleRunning : pid === 456),
         rpcClient: {
             async request() {
                 if (recordedPid === 456) return { instanceCount: 0, pid: 456 };
                 throw new Error("offline");
-            }
+            },
         },
         signalProcess(pid, signal) {
             signals.push({ pid, signal });
@@ -138,12 +156,12 @@ test("start terminates a verified stale Control process before replacing it", as
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
         spawnFunction() {
             return { pid: 456, unref() {} } as never;
         },
-        waitTimeoutMs: 100
+        waitTimeoutMs: 100,
     });
 
     const started = await manager.start();
@@ -160,17 +178,21 @@ test("start replaces stale metadata without signalling a verified unrelated proc
         daemonModulePath: controlDaemonModulePath(),
         pidFile: {
             read: async () => recordedPid,
-            remove: async () => { recordedPid = undefined; },
-            write: async (pid) => { recordedPid = pid; },
-            path: "/tmp/control.pid"
+            remove: async () => {
+                recordedPid = undefined;
+            },
+            write: async (pid) => {
+                recordedPid = pid;
+            },
+            path: "/tmp/control.pid",
         },
-        processIdentity: async (pid) => pid === 123 ? "other" : "unknown",
+        processIdentity: async (pid) => (pid === 123 ? "other" : "unknown"),
         processIsRunning: (pid) => pid === 123 || pid === 456,
         rpcClient: {
             async request() {
                 if (recordedPid === 456) return { instanceCount: 0, pid: 456 };
                 throw new Error("offline");
-            }
+            },
         },
         signalProcess(pid, signal) {
             signals.push({ pid, signal });
@@ -179,12 +201,12 @@ test("start replaces stale metadata without signalling a verified unrelated proc
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
         spawnFunction() {
             return { pid: 456, unref() {} } as never;
         },
-        waitTimeoutMs: 100
+        waitTimeoutMs: 100,
     });
 
     const started = await manager.start();
@@ -201,30 +223,38 @@ test("start still refuses a live pid whose process identity is unknown", async (
             read: async () => 123,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         processIdentity: async () => "unknown",
         processIsRunning: () => true,
         rpcClient: {
             async request() {
                 throw new Error("offline");
-            }
+            },
         },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
-        waitTimeoutMs: 50
+        waitTimeoutMs: 50,
     });
 
-    await assert.rejects(manager.start(), /process identity could not be verified/u);
+    await assert.rejects(
+        manager.start(),
+        /process identity could not be verified/u,
+    );
 });
 
 test(
     "Linux process identity recognizes and stops a matching detached Control command",
-    { skip: process.platform === "linux" ? false : "requires Linux /proc process identity" },
+    {
+        skip:
+            process.platform === "linux"
+                ? false
+                : "requires Linux /proc process identity",
+    },
     async (t) => {
         const root = await createTestTempDirectory("control-process-identity");
         const homeDirectory = join(root, "home");
@@ -232,21 +262,26 @@ test(
         const daemonModulePath = join(root, "ControlDaemon.mjs");
         await mkdir(homeDirectory, { recursive: true });
         await mkdir(xdgRuntimeDir, { recursive: true });
-        await writeFile(daemonModulePath, "setInterval(() => {}, 1000);\n", "utf8");
+        await writeFile(
+            daemonModulePath,
+            "setInterval(() => {}, 1000);\n",
+            "utf8",
+        );
         const child = spawn(process.execPath, [daemonModulePath], {
             detached: true,
             env: {
                 ...process.env,
                 HOME: homeDirectory,
-                XDG_RUNTIME_DIR: xdgRuntimeDir
+                XDG_RUNTIME_DIR: xdgRuntimeDir,
             },
-            stdio: "ignore"
+            stdio: "ignore",
         });
         const pid = child.pid;
         assert.notEqual(pid, undefined);
         child.unref();
         t.after(async () => {
-            if (pid !== undefined && isProcessRunning(pid)) process.kill(pid, "SIGKILL");
+            if (pid !== undefined && isProcessRunning(pid))
+                process.kill(pid, "SIGKILL");
             await rm(root, { force: true, recursive: true });
         });
 
@@ -256,31 +291,38 @@ test(
             homeDirectory,
             pidFile: {
                 read: async () => recordedPid,
-                remove: async () => { recordedPid = undefined; },
-                write: async (nextPid) => { recordedPid = nextPid; },
-                path: join(homeDirectory, "control.pid")
+                remove: async () => {
+                    recordedPid = undefined;
+                },
+                write: async (nextPid) => {
+                    recordedPid = nextPid;
+                },
+                path: join(homeDirectory, "control.pid"),
             },
             rpcClient: {
                 async request() {
                     throw new Error("offline");
-                }
+                },
             },
             socketFile: {
                 ensureRuntimeDir: async () => undefined,
                 path: join(xdgRuntimeDir, "control.sock"),
                 remove: async () => undefined,
-                runtimeDir: xdgRuntimeDir
+                runtimeDir: xdgRuntimeDir,
             },
             waitTimeoutMs: 1_000,
-            xdgRuntimeDir
+            xdgRuntimeDir,
         });
 
         const stopped = await manager.stop();
 
         assert.equal(stopped.running, false);
         assert.equal(recordedPid, undefined);
-        await waitFor(async () => isProcessRunning(pid!) ? undefined : true, 3_000);
-    }
+        await waitFor(
+            async () => (isProcessRunning(pid!) ? undefined : true),
+            3_000,
+        );
+    },
 );
 
 test("start failure reports only the current startup attempt", async () => {
@@ -293,25 +335,25 @@ test("start failure reports only the current startup attempt", async () => {
                 error: async () => undefined,
                 info: async () => undefined,
                 path: join(root, "control.log"),
-                readAll: async () => "stale historical failure"
+                readAll: async () => "stale historical failure",
             },
             pidFile: {
                 read: async () => undefined,
                 remove: async () => undefined,
                 write: async () => undefined,
-                path: join(root, "control.pid")
+                path: join(root, "control.pid"),
             },
             processIsRunning: (pid) => pid === 424_242,
             rpcClient: {
                 async request() {
                     throw new Error("offline");
-                }
+                },
             },
             socketFile: {
                 ensureRuntimeDir: async () => undefined,
                 path: join(root, "control.sock"),
                 remove: async () => undefined,
-                runtimeDir: root
+                runtimeDir: root,
             },
             spawnFunction(_command, _args, options) {
                 const stdio = options.stdio as [unknown, number, number];
@@ -319,7 +361,7 @@ test("start failure reports only the current startup attempt", async () => {
                 return { pid: 424_242, unref() {} } as never;
             },
             startupLogPath,
-            waitTimeoutMs: 25
+            waitTimeoutMs: 25,
         });
 
         await assert.rejects(manager.start(), (error: unknown) => {
@@ -344,13 +386,17 @@ test("default lifecycle start accepts a control that becomes ready after five se
             error: async () => undefined,
             info: async () => undefined,
             path: "/tmp/control-delayed-ready.log",
-            readAll: async () => ""
+            readAll: async () => "",
         },
         pidFile: {
             read: async () => recordedPid,
-            remove: async () => { recordedPid = undefined; },
-            write: async (nextPid) => { recordedPid = nextPid; },
-            path: "/tmp/control-delayed-ready.pid"
+            remove: async () => {
+                recordedPid = undefined;
+            },
+            write: async (nextPid) => {
+                recordedPid = nextPid;
+            },
+            path: "/tmp/control-delayed-ready.pid",
         },
         processIsRunning: (candidate) => candidate === pid && alive,
         rpcClient: {
@@ -359,20 +405,22 @@ test("default lifecycle start accepts a control that becomes ready after five se
                     throw new Error("offline");
                 }
                 return { instanceCount: 0, pid };
-            }
+            },
         },
-        signalProcess: () => { alive = false; },
+        signalProcess: () => {
+            alive = false;
+        },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control-delayed-ready.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
         spawnFunction() {
             spawnedAt = Date.now();
             return { pid, unref() {} } as never;
         },
-        startupLogPath: "/tmp/control-delayed-ready.startup.log"
+        startupLogPath: "/tmp/control-delayed-ready.startup.log",
     });
 
     const started = await manager.start();
@@ -395,7 +443,7 @@ test("pid publication failure terminates the spawned control process", async (t)
             error: async () => undefined,
             info: async () => undefined,
             path: join(root, "control.log"),
-            readAll: async () => ""
+            readAll: async () => "",
         },
         pidFile: {
             read: async () => undefined,
@@ -403,33 +451,40 @@ test("pid publication failure terminates the spawned control process", async (t)
             async write() {
                 throw new Error("pid write failed");
             },
-            path: join(root, "control.pid")
+            path: join(root, "control.pid"),
         },
         rpcClient: {
             async request() {
                 throw new Error("offline");
-            }
+            },
         },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: join(root, "control.sock"),
             remove: async () => undefined,
-            runtimeDir: root
+            runtimeDir: root,
         },
         spawnFunction() {
-            const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-                detached: true,
-                stdio: "ignore"
-            });
+            const child = spawn(
+                process.execPath,
+                ["-e", "setInterval(() => {}, 1000)"],
+                {
+                    detached: true,
+                    stdio: "ignore",
+                },
+            );
             childPid = child.pid;
             return child;
         },
-        waitTimeoutMs: 500
+        waitTimeoutMs: 500,
     });
 
     await assert.rejects(manager.start(), /pid write failed/u);
     assert.notEqual(childPid, undefined);
-    await waitFor(async () => isProcessRunning(childPid!) ? undefined : true, 3_000);
+    await waitFor(
+        async () => (isProcessRunning(childPid!) ? undefined : true),
+        3_000,
+    );
 });
 
 test("stop sends control.shutdown over rpc", async () => {
@@ -441,7 +496,7 @@ test("stop sends control.shutdown over rpc", async () => {
             read: async () => 123,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         processIsRunning: () => false,
         rpcClient: {
@@ -458,15 +513,15 @@ test("stop sends control.shutdown over rpc", async () => {
 
                 running = false;
                 return { accepted: true };
-            }
+            },
         },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
-        waitTimeoutMs: 100
+        waitTimeoutMs: 100,
     });
 
     const stopped = await manager.stop();
@@ -485,7 +540,7 @@ test("stop waits for the daemon process after the control socket closes", async 
             read: async () => 123,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         processIsRunning: () => {
             if (!shutdownRequested) return true;
@@ -503,15 +558,15 @@ test("stop waits for the daemon process after the control socket closes", async 
                     throw new Error("offline");
                 }
                 return { instanceCount: 1 };
-            }
+            },
         },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
-        waitTimeoutMs: 500
+        waitTimeoutMs: 500,
     });
 
     const stopped = await manager.stop();
@@ -527,25 +582,28 @@ test("stop refuses to signal a live pid that cannot be verified over rpc", async
             read: async () => 123,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         processIdentity: async () => "unknown",
         processIsRunning: () => true,
         rpcClient: {
             async request() {
                 throw new Error("offline");
-            }
+            },
         },
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: "/tmp/control.sock",
             remove: async () => undefined,
-            runtimeDir: "/tmp"
+            runtimeDir: "/tmp",
         },
-        waitTimeoutMs: 50
+        waitTimeoutMs: 50,
     });
 
-    await assert.rejects(manager.stop(), /Refusing to signal an unverified process/u);
+    await assert.rejects(
+        manager.stop(),
+        /Refusing to signal an unverified process/u,
+    );
 });
 
 test("status times out when a control endpoint accepts but never replies", async (t) => {
@@ -574,15 +632,15 @@ test("status times out when a control endpoint accepts but never replies", async
             read: async () => undefined,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         requestTimeoutMs: 50,
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: socketPath,
             remove: async () => undefined,
-            runtimeDir: runtimeRoot
-        }
+            runtimeDir: runtimeRoot,
+        },
     });
 
     const status = await manager.status();
@@ -604,26 +662,30 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
         const codec = new Codec(channel, { local: "server" });
         codec.onEvent((event) => {
             if (event.name === "service.hello") {
-                void codec.send({
-                    id: `reply-${event.id}`,
-                    replyTo: event.id,
-                    destination: "@control",
-                    name: "service.hello",
-                    payload: {
-                        capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
-                    },
-                }).catch(() => undefined);
+                void codec
+                    .send({
+                        id: `reply-${event.id}`,
+                        replyTo: event.id,
+                        destination: "@control",
+                        name: "service.hello",
+                        payload: {
+                            capabilities: ["request", "stream", "streamResume"],
+                            protocolVersion: 1,
+                        },
+                    })
+                    .catch(() => undefined);
                 return;
             }
             if (event.name === "service.status") {
-                void codec.send({
-                    id: `reply-${event.id}`,
-                    replyTo: event.id,
-                    destination: "@control",
-                    name: "service.status",
-                    payload: { instanceCount: 1 }
-                }).catch(() => undefined);
+                void codec
+                    .send({
+                        id: `reply-${event.id}`,
+                        replyTo: event.id,
+                        destination: "@control",
+                        name: "service.status",
+                        payload: { instanceCount: 1 },
+                    })
+                    .catch(() => undefined);
                 return;
             }
 
@@ -642,7 +704,9 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 
     t.after(async () => {
         await new Promise<void>((resolve, reject) => {
-            server.close((error) => error === undefined ? resolve() : reject(error));
+            server.close((error) =>
+                error === undefined ? resolve() : reject(error),
+            );
         });
         await rm(runtimeRoot, { force: true, recursive: true });
     });
@@ -653,16 +717,16 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
             read: async () => 123,
             remove: async () => undefined,
             write: async () => undefined,
-            path: "/tmp/control.pid"
+            path: "/tmp/control.pid",
         },
         processIsRunning: () => false,
         socketFile: {
             ensureRuntimeDir: async () => undefined,
             path: socketPath,
             remove: async () => undefined,
-            runtimeDir: runtimeRoot
+            runtimeDir: runtimeRoot,
         },
-        waitTimeoutMs: 500
+        waitTimeoutMs: 500,
     });
 
     const stopped = await manager.stop();
@@ -674,16 +738,20 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
 test("start keeps real worker config registered and does not auto-start worker", async (t) => {
     const homeDirectory = await createTestTempDirectory("control-real-home");
     const xdgRuntimeDir = await createTestTempDirectory("control-real-runtime");
-    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-registered-config");
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
+        "control-registered-config",
+    );
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
         xdgRuntimeDir,
-        waitTimeoutMs: 10_000
+        waitTimeoutMs: 10_000,
     });
-    const fixturePath = fileURLToPath(new URL("../../fixtures/config-valid.toml", import.meta.url));
+    const fixturePath = fileURLToPath(
+        new URL("../../fixtures/config-valid.toml", import.meta.url),
+    );
 
     t.after(async () => {
         await manager.stop().catch(() => undefined);
@@ -695,8 +763,11 @@ test("start keeps real worker config registered and does not auto-start worker",
     await mkdir(homePaths.controlHomeDir, { recursive: true });
     await writeFile(
         homePaths.configFile,
-        (await readFile(fixturePath, "utf8")).replace('listenPort = 17890', "listenPort = 0"),
-        "utf8"
+        (await readFile(fixturePath, "utf8")).replace(
+            "listenPort = 17890",
+            "listenPort = 0",
+        ),
+        "utf8",
     );
     await mkdir(homePaths.instancesDir, { recursive: true });
     await writeFile(
@@ -708,7 +779,7 @@ test("start keeps real worker config registered and does not auto-start worker",
             name: "demo-local",
             provider: "local",
         }),
-        "utf8"
+        "utf8",
     );
 
     const started = await manager.start();
@@ -731,12 +802,14 @@ async function createHarness(): Promise<{
 }> {
     const homeDirectory = await createTestTempDirectory("control-home");
     const xdgRuntimeDir = await createTestTempDirectory("control-runtime");
-    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("control-lifecycle-harness");
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
+        "control-lifecycle-harness",
+    );
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
         homeDirectory,
         xdgRuntimeDir,
-        waitTimeoutMs: 10_000
+        waitTimeoutMs: 10_000,
     });
     const homePaths = new ControlPathHome(homeDirectory);
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
@@ -747,15 +820,15 @@ async function createHarness(): Promise<{
             homePaths.configFile,
             encodeGlobalConfig({
                 control: {
-                    logLevel: "info"
+                    logLevel: "info",
                 },
                 mcp: {
                     enabled: false,
                     listenHost: "127.0.0.1",
-                    listenPort: 0
-                }
+                    listenPort: 0,
+                },
             }),
-            "utf8"
+            "utf8",
         );
     } catch (error) {
         restoreWindowsIdentity();
@@ -775,9 +848,9 @@ async function createHarness(): Promise<{
         manager,
         paths: {
             ...homePaths,
-            ...runtimePaths
+            ...runtimePaths,
         },
-        xdgRuntimeDir
+        xdgRuntimeDir,
     };
 }
 
@@ -792,7 +865,10 @@ async function assertPathExists(path: string): Promise<void> {
     });
 }
 
-async function waitFor<T>(factory: () => Promise<T | undefined>, timeoutMs = 10_000): Promise<T> {
+async function waitFor<T>(
+    factory: () => Promise<T | undefined>,
+    timeoutMs = 10_000,
+): Promise<T> {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
@@ -813,19 +889,29 @@ function isProcessRunning(pid: number): boolean {
         process.kill(pid, 0);
         return true;
     } catch (error) {
-        return !(typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH");
+        return !(
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ESRCH"
+        );
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function request(socketPath: string, operation: Event["name"], params?: JsonValue): Promise<any> {
+async function request(
+    socketPath: string,
+    operation: Event["name"],
+    params?: JsonValue,
+): Promise<InstanceListEntry[]> {
     const [module, method] = operation.split(".");
     const client = new ClientConnection({
-        connectChannel: (signal) => SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) => error instanceof Error ? error : new Error(String(error)),
+        connectChannel: (signal) =>
+            SocketChannel.connect(socketPath, { signal }),
+        mapError: (error) =>
+            error instanceof Error ? error : new Error(String(error)),
         mapRemoteError: (error) => createError(error),
         mode: "persistent",
-        peer: "cli"
+        peer: "cli",
     });
     try {
         await client.request("@control", "service", "hello", {
@@ -833,7 +919,12 @@ async function request(socketPath: string, operation: Event["name"], params?: Js
             maxProtocolVersion: 1,
             minProtocolVersion: 1,
         });
-        return await client.request("@control", module!, method!, params);
+        return await client.request<InstanceListEntry[]>(
+            "@control",
+            module!,
+            method!,
+            params,
+        );
     } finally {
         client.close();
     }

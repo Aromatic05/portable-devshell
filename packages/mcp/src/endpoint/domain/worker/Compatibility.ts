@@ -182,11 +182,16 @@ const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
     },
 };
 
-export function resolveMcpLegacyTool(toolName: string): McpLegacyToolCompatibility | undefined {
+export function resolveMcpLegacyTool(
+    toolName: string,
+): McpLegacyToolCompatibility | undefined {
     return legacyTools[toolName];
 }
 
-export function adaptMcpLegacyFileToolInput(toolName: string, input: JsonValue): JsonValue {
+export function adaptMcpLegacyFileToolInput(
+    toolName: string,
+    input: JsonValue,
+): JsonValue {
     if (toolName !== "file_find" && toolName !== "file_info") return input;
     const record = asRecord(input);
     if (record === undefined) return input;
@@ -208,7 +213,7 @@ export function adaptMcpLegacyFileToolInput(toolName: string, input: JsonValue):
 
 export function adaptMcpLegacyTmuxToolInput(
     compatibility: McpLegacyTmuxToolAlias,
-    input: JsonValue
+    input: JsonValue,
 ): JsonValue {
     const record = asRecord(input);
     if (record === undefined) return input;
@@ -218,7 +223,7 @@ export function adaptMcpLegacyTmuxToolInput(
 export function adaptMcpLegacyFileToolResult(
     toolName: string,
     result: JsonValue,
-    originalInput?: JsonValue
+    originalInput?: JsonValue,
 ): JsonValue {
     if (toolName !== "file_info") return result;
     const record = asRecord(result);
@@ -232,17 +237,27 @@ export function adaptMcpLegacyFileToolResult(
             path: file.path,
             ...(metadata.exists === false ? { exists: false } : {}),
             ...(metadata.type === undefined ? {} : { type: metadata.type }),
-            ...(!includeDetails || metadata.sizeBytes === undefined ? {} : { sizeBytes: metadata.sizeBytes }),
-            ...(!includeDetails || metadata.modifiedAtMs === undefined ? {} : { modifiedAtMs: metadata.modifiedAtMs }),
-            ...(!includeDetails || metadata.mode === undefined ? {} : { mode: metadata.mode }),
-            ...(metadata.targetType === undefined ? {} : { targetType: metadata.targetType }),
+            ...(!includeDetails || metadata.sizeBytes === undefined
+                ? {}
+                : { sizeBytes: metadata.sizeBytes }),
+            ...(!includeDetails || metadata.modifiedAtMs === undefined
+                ? {}
+                : { modifiedAtMs: metadata.modifiedAtMs }),
+            ...(!includeDetails || metadata.mode === undefined
+                ? {}
+                : { mode: metadata.mode }),
+            ...(metadata.targetType === undefined
+                ? {}
+                : { targetType: metadata.targetType }),
         };
     });
     const { files: _files, ...rest } = record;
     return { ...rest, entries };
 }
 
-function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function asRecord(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
@@ -250,24 +265,29 @@ function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | und
 
 export function mcpLegacyToolTombstone(
     toolName: string,
-    compatibility: McpLegacyToolTombstone
+    compatibility: McpLegacyToolTombstone,
 ): McpNativeToolResult {
-    const instruction = compatibility.replacement === undefined
-        ? compatibility.help
-        : `${compatibility.help} Refresh the tool list and use ${compatibility.replacement} when appropriate.`;
+    const instruction =
+        compatibility.replacement === undefined
+            ? compatibility.help
+            : `${compatibility.help} Refresh the tool list and use ${compatibility.replacement} when appropriate.`;
     return new McpNativeToolResult({
-        content: [{
-            type: "text",
-            text: `Cached tool ${toolName} was removed in portable-devshell ${compatibility.removedIn}. ${instruction}`
-        }],
+        content: [
+            {
+                type: "text",
+                text: `Cached tool ${toolName} was removed in portable-devshell ${compatibility.removedIn}. ${instruction}`,
+            },
+        ],
         structuredContent: {
             staleToolSnapshot: {
                 assistantInstruction: instruction,
                 help: compatibility.help,
                 name: toolName,
                 removedIn: compatibility.removedIn,
-                ...(compatibility.replacement === undefined ? {} : { replacement: compatibility.replacement }),
-            }
-        }
+                ...(compatibility.replacement === undefined
+                    ? {}
+                    : { replacement: compatibility.replacement }),
+            },
+        },
     });
 }

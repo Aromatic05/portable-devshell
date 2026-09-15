@@ -2,7 +2,10 @@ import type { ControlErrorBody } from "../../protocol/Error.js";
 import { createError } from "../../protocol/Error.js";
 import type { InstanceEvent } from "../../protocol/instance/activity/Event.js";
 import type { JsonValue } from "../../protocol/JsonValue.js";
-import { asInstanceName, type InstanceName } from "../../protocol/instance/Identity.js";
+import {
+    asInstanceName,
+    type InstanceName,
+} from "../../protocol/instance/Identity.js";
 import type {
     ClientEvent,
     ClientStream,
@@ -33,7 +36,10 @@ export class InstanceEventStream implements InstanceEventStreamPort {
 
     constructor(instance: InstanceName, opened: OpenedClientStream) {
         this.#stream = opened.stream;
-        this.#initial = readInitialEvents(instance, opened.acknowledgement.payload);
+        this.#initial = readInitialEvents(
+            instance,
+            opened.acknowledgement.payload,
+        );
     }
 
     async next(): Promise<InstanceStreamMessage> {
@@ -50,16 +56,20 @@ export class InstanceEventStream implements InstanceEventStreamPort {
         } catch (error) {
             this.#closed = true;
             return {
-                error: error instanceof Error ? error : new Error(String(error)),
+                error:
+                    error instanceof Error ? error : new Error(String(error)),
                 kind: "closed",
             };
         }
         if (event.name === "stream.gap") {
             const value = record(event.payload);
             return {
-                ...(event.payload === undefined ? {} : { details: event.payload }),
+                ...(event.payload === undefined
+                    ? {}
+                    : { details: event.payload }),
                 ...(event.error === undefined ? {} : { error: event.error }),
-                ...(readNumber(value, "requestedFromSeq", "fromSeq") === undefined
+                ...(readNumber(value, "requestedFromSeq", "fromSeq") ===
+                undefined
                     ? {}
                     : {
                           fromSeq: readNumber(
@@ -74,11 +84,8 @@ export class InstanceEventStream implements InstanceEventStreamPort {
                     : {
                           lastSeq: readNumber(value, "latestSeq", "lastSeq"),
                       }),
-                ...(readNumber(
-                    value,
-                    "oldestAvailableSeq",
-                    "nextSeq",
-                ) === undefined
+                ...(readNumber(value, "oldestAvailableSeq", "nextSeq") ===
+                undefined
                     ? {}
                     : {
                           nextSeq: readNumber(
@@ -89,7 +96,10 @@ export class InstanceEventStream implements InstanceEventStreamPort {
                       }),
             };
         }
-        if (event.name === "stream.completed" || event.name === "stream.cancelled") {
+        if (
+            event.name === "stream.completed" ||
+            event.name === "stream.cancelled"
+        ) {
             this.#closed = true;
             return {
                 ...(event.error === undefined
@@ -158,19 +168,26 @@ function readInitialEvents(
     value: JsonValue | undefined,
 ): InstanceEvent[] {
     const acknowledgement = record(value);
-    if (acknowledgement === undefined || !Array.isArray(acknowledgement.events)) {
+    if (
+        acknowledgement === undefined ||
+        !Array.isArray(acknowledgement.events)
+    ) {
         throw new Error("Invalid subscription acknowledgement.");
     }
     return acknowledgement.events.map((event) => {
         const decoded = readInstanceEvent(event);
         if (decoded.instanceName !== instance) {
-            throw new Error("Subscription acknowledgement contains another instance.");
+            throw new Error(
+                "Subscription acknowledgement contains another instance.",
+            );
         }
         return decoded;
     });
 }
 
-function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+function record(
+    value: JsonValue | undefined,
+): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;

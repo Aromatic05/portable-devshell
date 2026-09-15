@@ -4,7 +4,7 @@ import {
     type JsonValue,
     type PrefixRouteContext,
     type PrefixRouteModuleDefinition,
-    type WebApplicationDescriptor
+    type WebApplicationDescriptor,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../Route.js";
@@ -14,13 +14,13 @@ export interface WebApplicationCatalogPort {
 }
 
 export function createWebApplicationRouteModule(
-    port: WebApplicationCatalogPort
+    port: WebApplicationCatalogPort,
 ): PrefixRouteModuleDefinition {
     return routeModule("web", {
         applications: (_request, context) => {
             requireWeb(context);
             return [...port.list()] as unknown as JsonValue;
-        }
+        },
     });
 }
 
@@ -29,6 +29,6 @@ function requireWeb(context: PrefixRouteContext): void {
     throw createError({
         code: errorCodes.controlWebAccessDenied,
         message: "Web application discovery is available only to Web clients.",
-        retryable: false
+        retryable: false,
     });
 }

@@ -16,21 +16,25 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
     const firstStopGate = new Promise<void>((resolve) => {
         releaseFirstStop = resolve;
     });
-    let controls: { restart(): Promise<void>; shutdown(): Promise<void> } | undefined;
+    let controls:
+        { restart(): Promise<void>; shutdown(): Promise<void> } | undefined;
     let runtimeNumber = 0;
     const server = new ControlServer({
         configStore: {
             async readOrCreate() {
                 return {};
-            }
+            },
         } as never,
         instanceRegistryBuilder: {
             build() {
                 return {};
-            }
+            },
         } as never,
         runtimeFactory: {
-            async create(options: { restart(): Promise<void>; shutdown(): Promise<void> }) {
+            async create(options: {
+                restart(): Promise<void>;
+                shutdown(): Promise<void>;
+            }) {
                 controls ??= options;
                 runtimeNumber += 1;
                 const current = runtimeNumber;
@@ -43,11 +47,11 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
                         if (current === 1) {
                             await firstStopGate;
                         }
-                    }
+                    },
                 };
-            }
+            },
         } as never,
-        xdgRuntimeDir
+        xdgRuntimeDir,
     });
 
     await server.start();
@@ -60,7 +64,6 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
 
     assert.deepEqual(events, ["start-1", "stop-1", "start-2", "stop-2"]);
 });
-
 
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 1_000;
