@@ -16,8 +16,8 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { ContextMessageService } from "../../../control/src/instance/context/ContextMessageService.ts";
-import { ControlSocketServer } from "../../../control/src/server/socket/ControlSocketServer.ts";
+import { ContextMessageService } from "../../../control/src/instance/context/Service.ts";
+import { ControlSocketServer } from "../../../control/src/server/endpoint/Socket.ts";
 import { createTuiClients } from "../../src/runtime/client/TuiClientComposition.ts";
 import { TuiRuntime } from "../../src/runtime/TuiRuntime.js";
 import {

@@ -1,0 +1,652 @@
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { TODO_MAX_ARCHIVED, TODO_MAX_CHECKPOINT_BLOCKERS, TODO_MAX_ID_LENGTH, TODO_MAX_ITEMS, TODO_MAX_TEXT_LENGTH, TODO_MAX_TITLE_LENGTH, createError, errorCodes } from "@portable-devshell/shared";
+import type { ActiveTodoSummary, InstanceEventType, JsonValue, TodoCheckpoint, TodoCheckpointInput, TodoItem, TodoReadInput, TodoReadResult, TodoState as SharedTodoState, TodoStatus, TodoSummary, TodoTaskControlAction, TodoTaskSummary, TodoWriteInput, ToolCallAssociation } from "@portable-devshell/shared";
+import { cleanupStaleAtomicStateTemps } from "../../AtomicState.js";
+
+export interface TodoStoreOptions {
+    filePath: string;
+    instanceName: string;
+    state: TodoState;
+}
+
+export class TodoStore {
+    readonly #filePath: string;
+    readonly #instanceName: string;
+    readonly #state: TodoState;
+    #document?: TodoDocument;
+
+    constructor(options: TodoStoreOptions) {
+        this.#filePath = options.filePath;
+        this.#instanceName = options.instanceName;
+        this.#state = options.state;
+    }
+
+    get filePath(): string {
+        return this.#filePath;
+    }
+
+    exists(): boolean {
+        return existsSync(this.#filePath);
+    }
+
+    read(): TodoDocument {
+        return structuredClone(this.#current());
+    }
+
+    readActive(): TodoDocument {
+        return { active: structuredClone(this.#current().active), archived: [], version: 4 };
+    }
+
+    reload(): TodoDocument {
+        this.#document = this.#loadFromDisk();
+        return this.read();
+    }
+
+    async write(document: TodoDocument): Promise<TodoDocument> {
+        const normalized = this.#state.normalizeDocument(document);
+        await this.#writeAtomic(normalized);
+        this.#document = normalized;
+        return this.read();
+    }
+
+    async update(
+        operation: (document: TodoDocument) => TodoDocument | Promise<TodoDocument>
+    ): Promise<TodoDocument> {
+        const next = await operation(this.read());
+        return await this.write(next);
+    }
+
+    async transition<T>(
+        operation: (document: TodoDocument) => { document: TodoDocument; result: T }
+    ): Promise<T> {
+        const current = this.#current();
+        const next = operation(current);
+        if (next.document !== current) {
+            await this.#writeAtomic(next.document);
+            this.#document = next.document;
+        }
+        return structuredClone(next.result);
+    }
+
+    #current(): TodoDocument {
+        if (this.#document === undefined) {
+            cleanupStaleAtomicStateTemps(this.#filePath);
+            this.#document = this.#loadFromDisk();
+        }
+        return this.#document;
+    }
+
+    #loadFromDisk(): TodoDocument {
+        if (!existsSync(this.#filePath)) {
+            return this.#state.emptyDocument();
+        }
+
+        try {
+            const value = JSON.parse(readFileSync(this.#filePath, "utf8")) as unknown;
+            return this.#state.normalizeDocument(value);
+        } catch (error) {
+            throw createError({
+                cause: error,
+                code: errorCodes.todoInvalid,
+                details: { filePath: this.#filePath },
+                message: `Todo state for ${this.#instanceName} is invalid.`,
+                retryable: false
+            });
+        }
+    }
+
+    async #writeAtomic(document: TodoDocument): Promise<void> {
+        const directory = dirname(this.#filePath);
+        await mkdir(directory, { mode: 0o700, recursive: true });
+        const temporary = `${this.#filePath}.tmp.${process.pid}.${randomUUID()}`;
+
+        try {
+            const handle = await open(temporary, "wx", 0o600);
+            try {
+                await handle.writeFile(
+                    `${JSON.stringify(document)}\n`,
+                    "utf8"
+                );
+                await handle.sync();
+            } finally {
+                await handle.close();
+            }
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            await unlink(temporary).catch(() => undefined);
+            throw error;
+        }
+
+        await this.#syncDirectory(directory);
+    }
+
+    async #syncDirectory(directory: string): Promise<void> {
+        if (process.platform === "win32") {
+            return;
+        }
+        const handle = await open(directory, "r");
+        try {
+            await handle.sync();
+        } finally {
+            await handle.close();
+        }
+    }
+}
+
+export interface TodoDocument {
+    active: SharedTodoState[];
+    archived: SharedTodoState[];
+    version: 4;
+}
+
+export interface TodoTransition {
+    document: TodoDocument;
+    events: Array<{
+        data: JsonValue;
+        type: Extract<InstanceEventType, `todo.${string}`>;
+    }>;
+}
+
+export class TodoState {
+    readonly #instanceName: string;
+    readonly #now: () => string;
+    readonly #taskId: () => string;
+
+    constructor(
+        instanceName: string,
+        options: { now?: () => string; taskId?: () => string } = {}
+    ) {
+        this.#instanceName = instanceName;
+        this.#now = options.now ?? (() => new Date().toISOString());
+        this.#taskId = options.taskId ?? (() => `task-${randomUUID()}`);
+    }
+
+    emptyDocument(): TodoDocument {
+        return { active: [], archived: [], version: 4 };
+    }
+
+    normalizeDocument(value: unknown): TodoDocument {
+        if (!isRecord(value) || !Array.isArray(value.archived)) {
+            throw new Error("todo document must contain a supported version and archived array");
+        }
+
+        const version = value.version;
+        let activeValues: unknown[];
+        if (version === 1) {
+            activeValues = value.active === undefined ? [] : [value.active];
+        } else if (version === 2 || version === 3 || version === 4) {
+            if (!Array.isArray(value.active)) {
+                throw new Error(`todo document version ${version} must contain an active array`);
+            }
+            if (version === 4 && Object.hasOwn(value, "comments")) {
+                throw new Error("todo document version 4 must not contain comments");
+            }
+            activeValues = value.active;
+        } else {
+            throw new Error("todo document version is unsupported");
+        }
+
+        const active = activeValues.map((entry) => this.#normalizeStoredState(entry, version === 1));
+        const titles = new Set(active.map((entry) => entry.title));
+        if (titles.size !== active.length) throw new Error("active todo titles must be unique");
+        return this.compact({
+            active,
+            archived: value.archived.map((entry) => this.#normalizeStoredState(entry, version === 1)),
+            version: 4
+        });
+    }
+
+    transition(document: TodoDocument, input: TodoWriteInput, ctxId: string): TodoTransition {
+        const normalized = normalizeInput(input);
+        const previousIndex = document.active.findIndex((entry) => (
+            normalized.taskId === undefined
+                ? entry.title === normalized.title
+                : entry.taskId === normalized.taskId
+        ));
+        const previous = previousIndex === -1 ? undefined : document.active[previousIndex];
+        const events: TodoTransition["events"] = [];
+        const active = [...document.active];
+        const archived = [...document.archived];
+        let next: SharedTodoState;
+
+        if (previous === undefined) {
+            if (normalized.taskId !== undefined) {
+                throw invalidTodo(`todo task ${normalized.taskId} was not found`);
+            }
+            requireRevision(normalized.revision, 0);
+            next = this.#createState(normalized, ctxId);
+            active.push(next);
+            events.push(todoEvent("todo.created", next));
+        } else {
+            if (previous.title !== normalized.title) {
+                throw invalidTodo(`todo task ${previous.taskId} title is immutable`);
+            }
+            requireRevision(normalized.revision, previous.revision);
+            const updatedAt = this.#now();
+            next = {
+                ...previous,
+                activeCtxId: ctxId,
+                ...(normalized.checkpoint === undefined
+                    ? {}
+                    : { checkpoint: checkpoint(normalized.checkpoint, updatedAt) }),
+                items: normalized.todos,
+                revision: previous.revision + 1,
+                updatedAt
+            };
+            events.push(todoEvent(
+                !isCompleted(previous) && isCompleted(next) ? "todo.completed" : "todo.updated",
+                next
+            ));
+            active[previousIndex] = next;
+        }
+
+        if (isTerminal(next)) {
+            const archivedState = { ...next, archivedAt: this.#now() };
+            const activeIndex = active.findIndex((entry) => entry.taskId === next.taskId);
+            active.splice(activeIndex, 1);
+            archived.push(archivedState);
+            events.push(todoEvent("todo.archived", archivedState));
+        }
+        return { document: this.compact({ active, archived, version: 4 }), events };
+    }
+
+    control(
+        document: TodoDocument,
+        taskId: string,
+        action: TodoTaskControlAction,
+        ctxId: string,
+        expectedRevision?: number
+    ): TodoTransition {
+        const previousIndex = document.active.findIndex((entry) => entry.taskId === taskId);
+        if (previousIndex === -1) {
+            const archived = document.archived.find((entry) => entry.taskId === taskId);
+            if (action === "cancel" && archived?.cancelledAt !== undefined) {
+                return { document, events: [] };
+            }
+            throw invalidTodo(`todo task ${taskId} is not active`);
+        }
+
+        const previous = document.active[previousIndex]!;
+        if (expectedRevision !== undefined && previous.revision !== expectedRevision) {
+            throw invalidTodo(`todo task ${taskId} changed from revision ${expectedRevision} to ${previous.revision}; refresh before retrying`);
+        }
+        if (action === "pause" && previous.pausedAt !== undefined) return { document, events: [] };
+        if (action === "resume" && previous.pausedAt === undefined) return { document, events: [] };
+
+        const now = this.#now();
+        const active = [...document.active];
+        const archived = [...document.archived];
+        let next: SharedTodoState;
+        if (action === "resume") {
+            const { pausedAt: _pausedAt, ...rest } = previous;
+            next = {
+                ...rest,
+                activeCtxId: ctxId,
+                revision: previous.revision + 1,
+                updatedAt: now
+            };
+        } else {
+            next = {
+                ...previous,
+                activeCtxId: ctxId,
+                ...(action === "pause" ? { pausedAt: now } : { cancelledAt: now }),
+                revision: previous.revision + 1,
+                updatedAt: now
+            };
+        }
+
+        if (action === "cancel") {
+            active.splice(previousIndex, 1);
+            const archivedState = { ...next, archivedAt: now };
+            archived.push(archivedState);
+            return {
+                document: this.compact({ active, archived, version: 4 }),
+                events: [todoEvent("todo.updated", next), todoEvent("todo.archived", archivedState)]
+            };
+        }
+
+        active[previousIndex] = next;
+        return {
+            document: this.compact({ active, archived, version: 4 }),
+            events: [todoEvent("todo.updated", next)]
+        };
+    }
+
+    delete(document: TodoDocument, taskId: string): TodoTransition {
+        const state = [...document.active, ...document.archived].find(
+            (entry) => entry.taskId === taskId
+        );
+        if (state === undefined) throw new Error(`Todo task ${taskId} was not found.`);
+        return {
+            document: {
+                active: document.active.filter((entry) => entry.taskId !== taskId),
+                archived: document.archived.filter((entry) => entry.taskId !== taskId),
+                version: 4
+            },
+            events: [todoEvent("todo.deleted", state)]
+        };
+    }
+
+    compact(document: TodoDocument): TodoDocument {
+        const archived = [...document.archived]
+            .sort((left, right) => (right.archivedAt ?? right.updatedAt).localeCompare(left.archivedAt ?? left.updatedAt))
+            .slice(0, TODO_MAX_ARCHIVED)
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+        return { active: document.active, archived, version: 4 };
+    }
+
+    readResult(document: TodoDocument, input: TodoReadInput | string = {}): TodoReadResult {
+        const selector = typeof input === "string" ? { title: input } : input;
+        if (selector.taskId === undefined && selector.title === undefined) {
+            return {
+                items: [],
+                revision: 0,
+                summary: { completed: 0, total: 0 },
+                tasks: this.#taskSummaries(document),
+            };
+        }
+        const state = [...document.active, ...document.archived].find((entry) => (
+            selector.taskId === undefined
+                ? entry.title === selector.title
+                : entry.taskId === selector.taskId
+        ));
+        if (state === undefined) {
+            return { items: [], revision: 0, summary: { completed: 0, total: 0 } };
+        }
+        return {
+            ...(state.cancelledAt === undefined ? {} : { cancelledAt: state.cancelledAt }),
+            ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
+            items: state.items.map((item) => ({ ...item })),
+            ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
+            revision: state.revision,
+            summary: summarize(state.items),
+            taskId: state.taskId,
+            title: state.title,
+        };
+    }
+
+    activeSummaries(document: TodoDocument): ActiveTodoSummary[] {
+        return document.active.flatMap((state) => {
+            const status = deriveStateStatus(state);
+            if (status === "completed" || status === "cancelled" || status === "none") {
+                return [];
+            }
+            const summary = summarize(state.items);
+            const current = summary.currentItemId === undefined
+                ? undefined
+                : state.items.find((item) => item.id === summary.currentItemId);
+            return [{
+                completed: summary.completed,
+                ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
+                currentItem: current?.content,
+                ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
+                revision: state.revision,
+                status,
+                taskId: state.taskId,
+                title: state.title,
+                total: summary.total
+            }];
+        });
+    }
+
+    currentAssociation(document: TodoDocument, ctxId?: string): ToolCallAssociation | undefined {
+        if (ctxId === undefined) return undefined;
+        const associations = document.active.flatMap((active) => {
+            if (active.activeCtxId !== ctxId) return [];
+            if (active.pausedAt !== undefined || active.cancelledAt !== undefined) return [];
+            const current = active.items.find((item) => item.status === "in_progress");
+            return current === undefined
+                ? []
+                : [{ taskId: active.taskId, todoItemId: current.id }];
+        });
+        return associations.length === 1 ? associations[0] : undefined;
+    }
+
+    #createState(input: TodoWriteInput, ctxId: string): SharedTodoState {
+        const now = this.#now();
+        return {
+            activeCtxId: ctxId,
+            ...(input.checkpoint === undefined ? {} : { checkpoint: checkpoint(input.checkpoint, now) }),
+            createdAt: now,
+            createdByCtxId: ctxId,
+            items: input.todos,
+            originInstance: this.#instanceName,
+            revision: 1,
+            taskId: this.#taskId(),
+            title: input.title,
+            updatedAt: now
+        };
+    }
+
+    #normalizeStoredState(value: unknown, allowMissingTitle = false): SharedTodoState {
+        if (!isRecord(value)) throw new Error("todo state must be an object");
+        const activeCtxId = optionalString(value.activeCtxId ?? value.activeSessionId);
+        const archivedAt = optionalString(value.archivedAt);
+        const cancelledAt = optionalString(value.cancelledAt);
+        const storedCheckpoint = value.checkpoint === undefined ? undefined : normalizeStoredCheckpoint(value.checkpoint);
+        const pausedAt = optionalString(value.pausedAt);
+        const taskId = requiredString(value.taskId, "taskId");
+        const title = optionalString(value.title) ?? (allowMissingTitle ? taskId : requiredString(value.title, "title"));
+        const state: SharedTodoState = {
+            ...(activeCtxId === undefined ? {} : { activeCtxId }),
+            ...(archivedAt === undefined ? {} : { archivedAt }),
+            ...(cancelledAt === undefined ? {} : { cancelledAt }),
+            ...(storedCheckpoint === undefined ? {} : { checkpoint: storedCheckpoint }),
+            createdAt: requiredString(value.createdAt, "createdAt"),
+            createdByCtxId: requiredString(
+                value.createdByCtxId ?? value.createdBySessionId,
+                "createdByCtxId"
+            ),
+            items: normalizeItems(value.items),
+            originInstance: requiredString(value.originInstance, "originInstance"),
+            ...(pausedAt === undefined ? {} : { pausedAt }),
+            revision: requiredRevision(value.revision),
+            taskId,
+            title,
+            updatedAt: requiredString(value.updatedAt, "updatedAt")
+        };
+        if (state.originInstance !== this.#instanceName) {
+            throw new Error("todo state belongs to another instance");
+        }
+        return state;
+    }
+
+    #taskSummaries(document: TodoDocument): TodoTaskSummary[] {
+        return document.active.map((state) => {
+            const summary = summarize(state.items);
+            const current = summary.currentItemId === undefined
+                ? undefined
+                : state.items.find((item) => item.id === summary.currentItemId);
+            return {
+                completed: summary.completed,
+                ...(state.checkpoint === undefined ? {} : { checkpoint: { ...state.checkpoint } }),
+                ...(state.activeCtxId === undefined ? {} : { ctxId: state.activeCtxId }),
+                currentItem: current?.content,
+                ...(state.pausedAt === undefined ? {} : { pausedAt: state.pausedAt }),
+                revision: state.revision,
+                status: deriveStateStatus(state),
+                taskId: state.taskId,
+                title: state.title,
+                total: summary.total,
+                updatedAt: state.updatedAt
+            };
+        });
+    }
+}
+
+function normalizeInput(input: TodoWriteInput): TodoWriteInput {
+    if (!isRecord(input)) throw invalidTodo("todo_write requires an object input");
+    return {
+        ...(input.checkpoint === undefined ? {} : { checkpoint: normalizeCheckpointInput(input.checkpoint) }),
+        revision: requiredRevision(input.revision),
+        ...(input.taskId === undefined ? {} : { taskId: normalizeText(input.taskId, "taskId", TODO_MAX_ID_LENGTH) }),
+        title: normalizeText(input.title, "title", TODO_MAX_TITLE_LENGTH),
+        todos: normalizeItems(input.todos)
+    };
+}
+
+function normalizeItems(value: unknown): TodoItem[] {
+    if (!Array.isArray(value)) throw invalidTodo("todos must be an array");
+    if (value.length > TODO_MAX_ITEMS) throw invalidTodo(`todos may contain at most ${TODO_MAX_ITEMS} items`);
+    const ids = new Set<string>();
+    let inProgress = 0;
+    return value.map((entry, index) => {
+        if (!isRecord(entry)) throw invalidTodo(`todos[${index}] must be an object`);
+        const id = normalizeText(entry.id, `todos[${index}].id`, TODO_MAX_ID_LENGTH);
+        const content = normalizeText(entry.content, `todos[${index}].content`, TODO_MAX_TEXT_LENGTH);
+        const status = readStatus(entry.status, index);
+        const detail = entry.detail === undefined
+            ? undefined
+            : normalizeText(entry.detail, `todos[${index}].detail`, TODO_MAX_TEXT_LENGTH);
+        if (ids.has(id)) throw invalidTodo(`todo id must be unique: ${id}`);
+        ids.add(id);
+        if (status === "in_progress" && ++inProgress > 1) {
+            throw invalidTodo("at most one todo item may be in_progress");
+        }
+        if ((status === "blocked" || status === "failed") && detail === undefined) {
+            throw invalidTodo(`${status} todo item ${id} requires detail`);
+        }
+        return { content, ...(detail === undefined ? {} : { detail }), id, status };
+    });
+}
+
+function normalizeCheckpointInput(value: unknown): TodoCheckpointInput {
+    if (!isRecord(value)) throw invalidTodo("checkpoint must be an object");
+    const blockers = value.blockers === undefined
+        ? undefined
+        : normalizeTextArray(value.blockers, "checkpoint.blockers");
+    const next = value.next === undefined ? undefined : normalizeText(value.next, "checkpoint.next", TODO_MAX_TEXT_LENGTH);
+    return {
+        ...(blockers === undefined ? {} : { blockers }),
+        ...(next === undefined ? {} : { next }),
+        summary: normalizeText(value.summary, "checkpoint.summary", TODO_MAX_TEXT_LENGTH)
+    };
+}
+
+function normalizeStoredCheckpoint(value: unknown): TodoCheckpoint {
+    const input = normalizeCheckpointInput(value);
+    return { ...input, updatedAt: requiredString((value as Record<string, unknown>).updatedAt, "checkpoint.updatedAt") };
+}
+
+function checkpoint(input: TodoCheckpointInput, updatedAt: string): TodoCheckpoint {
+    return { ...input, updatedAt };
+}
+
+function normalizeTextArray(value: unknown, field: string): string[] {
+    if (!Array.isArray(value)) throw invalidTodo(`${field} must be an array`);
+    if (value.length > TODO_MAX_CHECKPOINT_BLOCKERS) throw invalidTodo(`${field} may contain at most ${TODO_MAX_CHECKPOINT_BLOCKERS} entries`);
+    return value.map((entry, index) => normalizeText(entry, `${field}[${index}]`, TODO_MAX_TEXT_LENGTH));
+}
+
+function summarize(items: readonly TodoItem[]): TodoSummary {
+    const included = items.filter((item) => item.status !== "cancelled");
+    const current = items.find((item) => item.status === "in_progress");
+    return {
+        completed: included.filter((item) => item.status === "completed").length,
+        ...(current === undefined ? {} : { currentItemId: current.id }),
+        total: included.length
+    };
+}
+
+function deriveStatus(items: readonly TodoItem[]): ActiveTodoSummary["status"] {
+    if (items.some((item) => item.status === "in_progress")) return "in_progress";
+    if (items.some((item) => item.status === "failed")) return "failed";
+    if (items.some((item) => item.status === "blocked")) return "blocked";
+    if (isCompletedItems(items)) return "completed";
+    if (items.some((item) => item.status === "pending")) return "pending";
+    if (items.length > 0 && items.every((item) => item.status === "cancelled")) return "cancelled";
+    return "none";
+}
+
+function deriveStateStatus(state: SharedTodoState): ActiveTodoSummary["status"] {
+    if (state.cancelledAt !== undefined) return "cancelled";
+    if (state.pausedAt !== undefined) return "paused";
+    return deriveStatus(state.items);
+}
+
+function isCompleted(state: SharedTodoState): boolean {
+    return isCompletedItems(state.items);
+}
+
+function isTerminal(state: SharedTodoState): boolean {
+    if (state.cancelledAt !== undefined) return true;
+    return !state.items.some(
+        (item) => item.status === "pending" || item.status === "in_progress" || item.status === "blocked"
+    );
+}
+
+function isCompletedItems(items: readonly TodoItem[]): boolean {
+    const included = items.filter((item) => item.status !== "cancelled");
+    return included.length > 0 && included.every((item) => item.status === "completed");
+}
+
+function todoEvent(
+    type: Extract<InstanceEventType, `todo.${string}`>,
+    state: SharedTodoState
+): TodoTransition["events"][number] {
+    return {
+        data: {
+            ...(state.activeCtxId === undefined ? {} : { ctxId: state.activeCtxId }),
+            revision: state.revision,
+            summary: summarize(state.items),
+            taskId: state.taskId,
+            title: state.title
+        } as unknown as JsonValue,
+        type
+    };
+}
+
+function requireRevision(actual: number, expected: number): void {
+    if (actual !== expected) {
+        throw createError({
+            code: errorCodes.todoRevisionConflict,
+            details: { actualRevision: actual, expectedRevision: expected },
+            message: `Todo revision conflict: expected ${expected}, received ${actual}.`,
+            retryable: true
+        });
+    }
+}
+
+function requiredRevision(value: unknown): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw invalidTodo("revision must be a non-negative safe integer");
+    }
+    return value;
+}
+
+function readStatus(value: unknown, index: number): TodoStatus {
+    if (
+        value === "pending" || value === "in_progress" || value === "blocked" ||
+        value === "completed" || value === "failed" || value === "cancelled"
+    ) return value;
+    throw invalidTodo(`todos[${index}].status is invalid`);
+}
+
+function normalizeText(value: unknown, field: string, maxLength = TODO_MAX_TEXT_LENGTH): string {
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
+        throw invalidTodo(`${field} must be a non-empty string`);
+    }
+    return value.trim();
+}
+
+function requiredString(value: unknown, field: string): string {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new Error(`${field} must be a non-empty string`);
+    }
+    return value;
+}
+
+function optionalString(value: unknown): string | undefined {
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function invalidTodo(message: string) {
+    return createError({ code: errorCodes.todoInvalid, message, retryable: false });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}

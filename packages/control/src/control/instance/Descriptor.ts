@@ -1,0 +1,110 @@
+import type { WorkerInstance, WorkerRpcInboundConnector } from "@portable-devshell/core";
+import type { TerminalBackend } from "../../instance/execution/terminal/Backend.js";
+import type { ContextMessageQueueInput, ContextMessageReadResult, ContextMessageRecord } from "@portable-devshell/shared";
+import type {
+    ActiveTodoSummary,
+    ControlMcpContextMode,
+    GoalActivityKind,
+    GoalContinuationInput,
+    GoalManageInput,
+    GoalSnapshot,
+    JsonValue,
+    TodoReadInput,
+    TodoReadResult,
+    TodoTaskControlAction,
+    TodoWriteInput,
+    ToolCallAssociation,
+    ConversationEntry,
+    ConversationListInput,
+    WaitCreateInput,
+    WaitRecord
+} from "@portable-devshell/shared";
+
+export interface InstanceConversationPort {
+    close(): void;
+    list(input?: ConversationListInput): Promise<ConversationEntry[]>;
+    recordReport(input: {
+        callId: string;
+        createdAt?: string;
+        ctxId: string;
+        replyCommentId?: string;
+        text: string;
+    }): Promise<void>;
+}
+
+export type ContextMessageControlDecision =
+    | { kind: "allow" }
+    | { commentId: string; kind: "push"; toolCallBudget: number }
+    | { comment: string; commentId: string; kind: "resume" }
+    | { comment?: string; commentId: string; kind: "stop" };
+
+export interface InstanceContextMessagePort {
+    beforeModelToolCall(ctxId: string, toolName: string, requestId?: string): Promise<ContextMessageControlDecision>;
+    failAllPending(reason: string): Promise<ContextMessageRecord[]>;
+    failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
+    pendingReplyCommentId(ctxId: string): Promise<string | undefined>;
+    list(ctxId?: string): Promise<ContextMessageRecord[]>;
+    queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
+    consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult>;
+}
+
+export interface InstanceTodoPort {
+    cancelAll(): Promise<void>;
+    control(taskId: string, action: TodoTaskControlAction, ctxId: string, expectedRevision?: number): Promise<TodoReadResult>;
+    currentAssociation(): ToolCallAssociation | undefined;
+    delete(taskId: string): Promise<void>;
+    read(input?: TodoReadInput): Promise<TodoReadResult>;
+    summaries(): ActiveTodoSummary[];
+    write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult>;
+}
+
+export interface InstanceGoalPort {
+    continuation(ctxId: string, input: GoalContinuationInput): Promise<JsonValue>;
+    list(): Promise<GoalSnapshot[]>;
+    stopAll(): Promise<GoalSnapshot[]>;
+    manage(ctxId: string, input: GoalManageInput): Promise<GoalSnapshot | undefined>;
+    read(ctxId: string): Promise<GoalSnapshot | undefined>;
+    recordReentry(ctxId: string, progressEpoch?: number): Promise<void>;
+    touch(ctxId: string, kind?: GoalActivityKind): Promise<void>;
+}
+
+export interface InstanceWaitPort {
+    cancel(waitId: string): Promise<WaitRecord>;
+    claimRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    completeRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    consume(waitId: string): Promise<WaitRecord>;
+    create(input: WaitCreateInput): Promise<WaitRecord>;
+    detach(waitId: string): Promise<WaitRecord>;
+    disableRecovery(waitId: string): Promise<WaitRecord>;
+    dismissRecovery(waitId: string, recoveryMessageId: string): Promise<WaitRecord>;
+    get(waitId: string): Promise<WaitRecord | undefined>;
+    list(taskId?: string): Promise<WaitRecord[]>;
+    markRecoveryAttempted(waitId: string, claimId: string, goalProgressEpoch?: number): Promise<WaitRecord>;
+    reattach(waitId: string, ownerCallId?: string): Promise<WaitRecord>;
+    rejectRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    releaseRecovery(waitId: string, claimId: string): Promise<WaitRecord>;
+    resolve(
+        waitId: string,
+        result?: JsonValue,
+        options?: { consumeIfDetached?: boolean },
+    ): Promise<WaitRecord>;
+    waitForResolution(waitId: string): Promise<WaitRecord>;
+}
+
+export interface InstanceDescriptor {
+    conversation: InstanceConversationPort;
+    contextMessages?: InstanceContextMessagePort;
+    enabled: boolean;
+    goal: InstanceGoalPort;
+    mcpContextMode?: ControlMcpContextMode;
+    mcpEnabled: boolean;
+    mcpPath: string;
+    modelExtensions: readonly string[];
+    name: string;
+    provider: "docker" | "local" | "podman" | "reverse" | "ssh";
+    reverseConnector?: WorkerRpcInboundConnector;
+    terminal?: TerminalBackend;
+    todo: InstanceTodoPort;
+    wait?: InstanceWaitPort;
+    worker: WorkerInstance;
+}

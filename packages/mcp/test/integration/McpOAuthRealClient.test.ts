@@ -23,7 +23,7 @@ import { asInstanceName, type JsonValue, type ToolCallContext } from "@portable-
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
-import { ContextMessageService } from "../../../control/src/instance/context/ContextMessageService.ts";
+import { ContextMessageService } from "../../../control/src/instance/context/Service.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
