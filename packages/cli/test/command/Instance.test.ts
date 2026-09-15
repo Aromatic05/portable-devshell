@@ -1,0 +1,900 @@
+import assert from "node:assert/strict";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer, type Socket } from "node:net";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { Readable } from "node:stream";
+import test from "node:test";
+
+import { Codec, SocketChannel, resolveControlSocketPath, type Event, type JsonValue } from "@portable-devshell/shared";
+
+import { createCliClients } from "../../src/transport/Client.js";
+import { CliMain } from "../../src/app/Main.js";
+import { createTestIpcPath, installUniqueWindowsTestIdentity, ipcEndpointAcceptsConnections, realWorkerTestOptions, readRelativeMarkerCommand, resolveTestWorkerBinary, workerPathEnvironmentName } from "../../../../test/TestPlatformSupport.js";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.js";
+
+const workerBinaryPath = resolveTestWorkerBinary();
+
+async function runInstanceCommandsThroughControlRpc(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
+    const runtimeRoot = await createTestTempDirectory("cli-instance");
+    const socketPath = createTestIpcPath("cli-instance", runtimeRoot);
+    const harness = createInstanceHarness();
+    const server = createServer((socket) => {
+        harness.attach(socket);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, resolve);
+    });
+
+    t.after(async () => {
+        await closeServer(server);
+        await rm(runtimeRoot, { force: true, recursive: true });
+    });
+
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const runCli = async (args: string[]) => await new CliMain({
+        createCliClients: () => createCliClients({ socketPath }),
+        followEventLimit: 1,
+        stderr,
+        stdout,
+        xdgRuntimeDir: runtimeRoot
+    }).run(args);
+
+    assert.equal(await runCli(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /demo-local\tstopped/u);
+
+    assert.equal(await runCli(["instance", "status", "demo-local"]), 0);
+    assert.match(stdout.flush(), /instance: demo-local/u);
+
+    assert.equal(await runCli(["instance", "start", "demo-local"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
+
+    assert.equal(await runCli(["instance", "stop", "demo-local"]), 0);
+    assert.match(stdout.flush(), /status: stopped/u);
+
+    assert.equal(await runCli(["instance", "logs", "demo-local"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n");
+
+    assert.equal(await runCli(["instance", "logs", "demo-local", "-f"]), 0);
+    assert.equal(stdout.flush(), "[1] stdout before\n[2] stdout after\n");
+
+    assert.equal(await runCli(["instance", "call", "demo-local", "/tmp/ws", "bash_run", "{\"command\":\"pwd\",\"timeoutMs\":30000}"]), 0);
+    const callOutput = stdout.flush();
+    assert.match(callOutput, /tool: bash_run/u);
+    assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
+    assert.equal(stderr.flush(), "");
+}
+
+async function runRealWorkerSmoke(): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-real-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-real-runtime");
+    const workspacePath = await createTestTempDirectory("cli-real-workspace");
+    const workspaceMarkerName = "cli-real-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-cli-real-workspace";
+    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    await writeFile(join(workspacePath, "secret.env"), "PASSWORD = 'real-secret-value-123'\n", "utf8");
+    const skillDirectory = join(workspacePath, ".agents", "skills", "review");
+    const skillContent = "# Review\n\nRead and review the requested changes.\n";
+    await mkdir(skillDirectory, { recursive: true });
+    await writeFile(join(skillDirectory, "SKILL.md"), skillContent, "utf8");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const workerEnvName = workerPathEnvironmentName();
+    const previousWorkerPath = process.env[workerEnvName];
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-real-worker");
+    let controlStopped = false;
+    const runCli = async (args: string[]) => await new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+
+    process.env[workerEnvName] = workerBinaryPath!;
+    let controlPid: number | undefined;
+
+    try {
+        await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+        await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "config.toml"),
+            createRealConfig(),
+            "utf8"
+        );
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
+            createLocalInstanceConfig("aromatic-pc"),
+            "utf8"
+        );
+        assert.equal(await runCli(["start"]), 0);
+        assert.match(stdout.flush(), /control: running/u);
+        controlPid = await readControlPid(homeDirectory);
+
+        assert.equal(await runCli(["status"]), 0);
+        assert.match(stdout.flush(), /instances: 1/u);
+
+        const secretExitCode = await runCli(["secret", "scan", workspacePath]);
+        if (secretExitCode !== 0) {
+            assert.fail(`secret scan failed with exit ${secretExitCode}: ${stderr.flush()}`);
+        }
+        const secretScan = JSON.parse(stdout.flush()) as { findings: Array<{ line: number; path: string; type: string }> };
+        assert.deepEqual(secretScan.findings, [{ line: 1, path: "secret.env", type: "generic_assignment" }]);
+
+        assert.equal(await runCli(["instance", "list"]), 0);
+        assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+        assert.equal(await runCli(["instance", "status", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /status: stopped/u);
+
+        assert.equal(await runCli(["instance", "start", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /status: ready/u);
+
+        assert.equal(await runCli(["instance", "status", "aromatic-pc"]), 0);
+        assert.match(stdout.flush(), /ready: true/u);
+
+        assert.equal(
+            await runCli([
+                "skill",
+                "get",
+                "review",
+                "aromatic-pc",
+                "--workspace",
+                workspacePath
+            ]),
+            0
+        );
+        const skillGet = JSON.parse(stdout.flush()) as {
+            projection: { transferredBytes: number };
+            target: { collection: string; instance: string; key: string };
+        };
+        assert.deepEqual(skillGet.target, { collection: "managed", instance: "aromatic-pc", key: "review" });
+        assert.ok(skillGet.projection.transferredBytes > 0);
+        const installedSkill = join(
+            homeDirectory,
+            ".devshell",
+            "aromatic-pc",
+            "extensions",
+            "skill",
+            "resources",
+            "managed",
+            "review",
+            "SKILL.md"
+        );
+        assert.equal(await readFile(installedSkill, "utf8"), skillContent);
+
+        assert.equal(
+            await runCli([
+                "instance",
+                "call",
+                "aromatic-pc",
+                workspacePath,
+                "file_read",
+                JSON.stringify({ path: installedSkill })
+            ]),
+            0
+        );
+        assert.match(stdout.flush(), /Read and review the requested changes\./u);
+
+        assert.equal(
+            await runCli([
+                "instance",
+                "call",
+                "aromatic-pc",
+                workspacePath,
+                "bash_run",
+                JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName), timeoutMs: 30_000 })
+            ]),
+            0
+        );
+        const markerOutput = stdout.flush();
+        assert.match(markerOutput, new RegExp(workspaceMarker, "u"));
+
+        assert.equal(
+            await runCli(["instance", "call", "aromatic-pc", workspacePath, "bash_run", "{\"command\":\"echo portable-devshell\",\"timeoutMs\":30000}"]),
+            0
+        );
+        assert.match(stdout.flush(), /portable-devshell/u);
+
+        assert.equal(await runCli(["instance", "logs", "aromatic-pc"]), 0);
+        const logsOutput = stdout.flush();
+        assert.match(logsOutput, /portable-devshell/u);
+        assert.match(logsOutput, new RegExp(workspaceMarker, "u"));
+
+        assert.equal(await runCli(["stop"]), 0);
+        controlStopped = true;
+        await waitForControlShutdown(xdgRuntimeDir);
+        await ensureProcessExit(controlPid);
+        assert.equal(stdout.flush(), "control: stopped\n");
+        assert.equal(stderr.flush(), "");
+
+        const auditDatabase = await stat(join(homeDirectory, ".devshell", "aromatic-pc", "control-worker", "audit.sqlite3"));
+        assert.equal(auditDatabase.size > 0, true);
+    } finally {
+        if (!controlStopped) {
+            await runCli(["stop"]).catch(() => undefined);
+            await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
+        }
+        await ensureProcessExit(controlPid).catch(() => undefined);
+        restoreEnv(workerEnvName, previousWorkerPath);
+        restoreWindowsIdentity();
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        await rm(workspacePath, { force: true, recursive: true });
+    }
+}
+
+async function runStartupFailureDiagnostics(): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-startup-failure-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-startup-failure-runtime");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const runCli = async (args: string[]) => await new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+
+    try {
+        const controlDirectory = join(homeDirectory, ".devshell", "control");
+        const logDirectory = join(controlDirectory, "logs");
+        await mkdir(logDirectory, { recursive: true });
+        await writeFile(join(logDirectory, "control.log"), "HISTORICAL_STARTUP_MARKER\n", "utf8");
+        await writeFile(join(controlDirectory, "config.toml"), "this is not valid toml = [\n", "utf8");
+
+        assert.notEqual(await runCli(["start"]), 0);
+        const failure = stderr.flush();
+        assert.match(failure, /control startup log/u);
+        assert.match(failure, /STARTUP control state load started/u);
+        assert.match(failure, /Invalid TOML document/u);
+        assert.doesNotMatch(failure, /HISTORICAL_STARTUP_MARKER/u);
+        assert.equal(stdout.flush(), "");
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    }
+}
+
+async function runControlStartupWithLockedAudit(): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-locked-audit-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-locked-audit-runtime");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const workerEnvName = workerPathEnvironmentName();
+    const previousWorkerPath = process.env[workerEnvName];
+    const runCli = async (args: string[]) => await new CliMain({
+        homeDirectory,
+        stderr,
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+    const auditDirectory = join(homeDirectory, ".devshell", "aromatic-pc", "control-worker");
+    const auditDatabaseFile = join(auditDirectory, "audit.sqlite3");
+    let controlStarted = false;
+    let database: DatabaseSync | undefined;
+
+    try {
+        process.env[workerEnvName] = workerBinaryPath!;
+        await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+        await mkdir(auditDirectory, { recursive: true });
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "config.toml"),
+            createRealConfig(),
+            "utf8"
+        );
+        await writeFile(
+            join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"),
+            createLocalInstanceConfig("aromatic-pc"),
+            "utf8"
+        );
+
+        database = new DatabaseSync(auditDatabaseFile);
+        database.exec(`
+            CREATE TABLE audit_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                occurred_at_ms INTEGER NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                payload TEXT NOT NULL,
+                body BLOB,
+                body_codec TEXT
+            ) STRICT;
+            CREATE TABLE audit_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            ) STRICT;
+            BEGIN EXCLUSIVE;
+        `);
+
+        assert.equal(await runCli(["start"]), 0);
+        controlStarted = true;
+        assert.match(stdout.flush(), /control: running/u);
+        assert.equal(stderr.flush(), "");
+
+        database.exec("ROLLBACK");
+        database.close();
+        database = undefined;
+
+        assert.equal(await runCli(["stop"]), 0);
+        controlStarted = false;
+        assert.equal(stdout.flush(), "control: stopped\n");
+        assert.equal(stderr.flush(), "");
+    } finally {
+        if (database !== undefined) {
+            try {
+                database.exec("ROLLBACK");
+            } catch {
+                // Ignore rollback after a failed setup.
+            }
+            database.close();
+        }
+        if (controlStarted) {
+            await runCli(["stop"]).catch(() => undefined);
+        }
+        restoreEnv(workerEnvName, previousWorkerPath);
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    }
+}
+
+async function runInteractiveCreateFlow(t: { after(callback: () => Promise<void> | void): void }): Promise<void> {
+    const homeDirectory = await createTestTempDirectory("cli-create-home");
+    const xdgRuntimeDir = await createTestTempDirectory("cli-create-runtime");
+    const workspacePath = await createTestTempDirectory("cli-create-workspace");
+    const workspaceMarkerName = "cli-create-workspace-marker.txt";
+    const workspaceMarker = "portable-devshell-cli-create-workspace";
+    await writeFile(join(workspacePath, workspaceMarkerName), workspaceMarker, "utf8");
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const workerEnvName = workerPathEnvironmentName();
+    const previousWorkerPath = process.env[workerEnvName];
+    const restoreWindowsIdentity = installUniqueWindowsTestIdentity("cli-create");
+    let controlStopped = false;
+    const createInput = () => Readable.from([
+        "aromatic-pc\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n",
+        "\n"
+    ]);
+    const runCli = async (args: string[], stdin?: NodeJS.ReadableStream) => await new CliMain({
+        homeDirectory,
+        stderr,
+        ...(stdin === undefined ? {} : { stdin }),
+        stdout,
+        xdgRuntimeDir
+    }).run(args);
+
+    let controlPid: number | undefined = undefined;
+
+    t.after(async () => {
+        if (!controlStopped) {
+            await runCli(["stop"]).catch(() => undefined);
+            await waitForControlShutdown(xdgRuntimeDir).catch(() => undefined);
+        }
+        await ensureProcessExit(controlPid).catch(() => undefined);
+        restoreEnv(workerEnvName, previousWorkerPath);
+        restoreWindowsIdentity();
+        await rm(homeDirectory, { force: true, recursive: true });
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+        await rm(workspacePath, { force: true, recursive: true });
+    });
+
+    process.env[workerEnvName] = workerBinaryPath!;
+    await mkdir(join(homeDirectory, ".devshell", "control"), { recursive: true });
+    await mkdir(join(homeDirectory, ".devshell", "control", "instances"), { recursive: true });
+    await writeFile(join(homeDirectory, ".devshell", "control", "config.toml"), createCreateConfig(), "utf8");
+
+    assert.equal(await runCli(["start"]), 0);
+    assert.match(stdout.flush(), /control: running/u);
+    controlPid = await readControlPid(homeDirectory);
+
+    assert.equal(await runCli(["instance", "create"], createInput()), 0);
+    const createOutput = stdout.flush();
+    assert.match(createOutput, /Summary/u);
+    assert.match(createOutput, /instance created: aromatic-pc/u);
+    assert.doesNotMatch(createOutput, /worker binary path:/u);
+
+    assert.equal(await runCli(["instance", "list"]), 0);
+    assert.match(stdout.flush(), /aromatic-pc\tstopped/u);
+
+    assert.equal(await runCli(["instance", "start", "aromatic-pc"]), 0);
+    assert.match(stdout.flush(), /status: ready/u);
+
+    const previousControlPid = controlPid;
+    const restartExit = await runCli(["restart"]);
+    assert.equal(restartExit, 0, stderr.flush());
+    assert.match(stdout.flush(), /control: running/u);
+    controlPid = await readControlPid(homeDirectory);
+    assert.notEqual(controlPid, previousControlPid);
+    await ensureProcessExit(previousControlPid);
+
+    assert.equal(
+        await runCli([
+            "instance",
+            "call",
+            "aromatic-pc",
+            workspacePath,
+            "bash_run",
+            JSON.stringify({ command: readRelativeMarkerCommand(workspaceMarkerName), timeoutMs: 30_000 })
+        ]),
+        0
+    );
+    assert.match(stdout.flush(), new RegExp(workspaceMarker, "u"));
+
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /\[\[instances\]\]/u);
+    assert.match(
+        await readFile(join(homeDirectory, ".devshell", "control", "instances", "aromatic-pc.toml"), "utf8"),
+        /name = "aromatic-pc"/u
+    );
+    assert.doesNotMatch(await readFile(join(homeDirectory, ".devshell", "control", "config.toml"), "utf8"), /workerBinaryPath/u);
+
+    assert.equal(await runCli(["stop"]), 0);
+    controlStopped = true;
+    await waitForControlShutdown(xdgRuntimeDir);
+    await ensureProcessExit(controlPid);
+    assert.equal(stdout.flush(), "control: stopped\n");
+    assert.equal(stderr.flush(), "");
+}
+
+test("CliInstance integration", async (t) => {
+    await t.test("CliMain covers Task 11 instance commands through control rpc", async (subtest) => {
+        await runInstanceCommandsThroughControlRpc(subtest);
+    });
+    await t.test("CliMain reports only the current daemon startup failure", async () => {
+        await runStartupFailureDiagnostics();
+    });
+    await t.test("CliMain starts Control without touching a locked instance audit database", realWorkerTestOptions(workerBinaryPath), async () => {
+        await runControlStartupWithLockedAudit();
+    });
+    await t.test("CliMain runs Task 12 real worker smoke through control lifecycle", realWorkerTestOptions(workerBinaryPath), async () => {
+        await runRealWorkerSmoke();
+    });
+    await t.test("CliMain creates an instance interactively and uses it through the real control lifecycle", realWorkerTestOptions(workerBinaryPath), async (subtest) => {
+        await runInteractiveCreateFlow(subtest);
+    });
+});
+
+function createInstanceHarness(): { attach: (socket: Socket) => void } {
+    return {
+        attach(socket: Socket) {
+            const codec = new Codec(SocketChannel.accept(socket), { local: "server" });
+            codec.onEvent((event) => {
+                void handleHarnessEvent(codec, event).catch(() => undefined);
+            });
+        }
+    };
+}
+
+async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
+    switch (event.name) {
+        case "service.hello":
+            await reply(codec, event, {
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: 1,
+            });
+            return;
+        case "cli.commands":
+            await reply(codec, event, []);
+            return;
+        case "cli.commandStream":
+            await handleCliCommandStream(codec, event);
+            return;
+        case "instance.list":
+            await reply(codec, event, [
+                {
+                    mcpEnabled: true,
+                    name: "demo-local",
+                    snapshot: stoppedSnapshot()
+                }
+            ]);
+            return;
+        case "runtime.snapshot":
+        case "runtime.refresh":
+            await reply(codec, event, { lastSeq: 1, snapshot: stoppedSnapshot() });
+            return;
+        case "runtime.start":
+            await codec.send({
+                id: `ack-${event.id}`,
+                replyTo: event.id,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: event.name,
+                payload: { accepted: true }
+            });
+            await codec.send({
+                id: `complete-${event.id}`,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: "stream.completed",
+                payload: readySnapshot()
+            });
+            return;
+        case "runtime.stop":
+            await reply(codec, event, stoppedSnapshot());
+            return;
+        case "runtime.readLogs":
+            await reply(
+                codec,
+                event,
+                isRecord(event.payload) && event.payload.fromSeq === 2
+                    ? [{ at: "", instanceName: "demo-local", message: "after\n", seq: 2, stream: "stdout" }]
+                    : [{ at: "", instanceName: "demo-local", message: "before\n", seq: 1, stream: "stdout" }]
+            );
+            return;
+        case "runtime.subscribe":
+            await codec.send({
+                id: `ack-${event.id}`,
+                replyTo: event.id,
+                streamId: `stream-${event.id}`,
+                destination: event.destination,
+                name: event.name,
+                payload: { events: [], lastSeq: 1 }
+            });
+            setTimeout(() => {
+                void codec.send({
+                    id: `event-${event.id}`,
+                    streamId: `stream-${event.id}`,
+                    destination: event.destination,
+                    name: "toolCall.completed",
+                    payload: {
+                        at: "",
+                        data: { toolName: "bash_run" },
+                        instanceName: "demo-local",
+                        seq: 2,
+                        type: "toolCall.completed"
+                    },
+                    seq: 2
+                }).catch(() => undefined);
+            }, 5);
+            return;
+        case "tool.call":
+            await reply(codec, event, { exitCode: 0, stderr: "", stdout: "/tmp/ws\n" });
+            return;
+        default:
+            await codec.send({
+                id: `error-${event.id}`,
+                replyTo: event.id,
+                destination: event.destination,
+                name: event.name,
+                error: {
+                    code: "control.methodNotFound",
+                    message: `unknown operation ${event.name}`,
+                    retryable: false
+                }
+            });
+    }
+}
+
+async function handleCliCommandStream(codec: Codec, event: Event): Promise<void> {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    const argv = Array.isArray(payload.argv) && payload.argv.every((value) => typeof value === "string")
+        ? payload.argv as string[]
+        : [];
+    const commandId = payload.commandId;
+    if (commandId !== "instance") {
+        await codec.send({
+            id: `error-${event.id}`,
+            replyTo: event.id,
+            destination: event.destination,
+            name: event.name,
+            error: {
+                code: "control.cliCommandFailed",
+                message: `unknown CLI command ${String(commandId)}`,
+                retryable: false
+            }
+        });
+        return;
+    }
+
+    const streamId = `stream-${event.id}`;
+    await codec.send({
+        id: `ack-${event.id}`,
+        replyTo: event.id,
+        streamId,
+        destination: event.destination,
+        name: event.name,
+        payload: { accepted: true }
+    });
+
+    const operation = argv[0];
+    if (operation === "logs" && argv[2] === "-f") {
+        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", { chunk: "[1] stdout before\n" });
+        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", { chunk: "[2] stdout after\n" });
+        await completeCliCommand(codec, event, streamId, "");
+        return;
+    }
+
+    const text = operation === "list"
+        ? "demo-local\tstopped\tready=false\n"
+        : operation === "status"
+            ? renderHarnessSnapshot(stoppedSnapshot())
+            : operation === "start"
+                ? renderHarnessSnapshot(readySnapshot())
+                : operation === "stop"
+                    ? renderHarnessSnapshot(stoppedSnapshot())
+                    : operation === "logs"
+                        ? "[1] stdout before\n"
+                        : operation === "call"
+                            ? "instance: demo-local\ntool: bash_run\nexitCode: 0\nstdout:\n/tmp/ws\n"
+                            : undefined;
+    if (text === undefined) {
+        await codec.send({
+            id: `cancel-${event.id}`,
+            streamId,
+            destination: event.destination,
+            name: "stream.cancelled",
+            error: {
+                code: "cli.usage",
+                message: `unsupported instance test command: ${String(operation)}`,
+                retryable: false
+            }
+        });
+        return;
+    }
+    await completeCliCommand(codec, event, streamId, text);
+}
+
+async function sendCliStreamEvent(
+    codec: Codec,
+    event: Event,
+    streamId: string,
+    name: `${string}.${string}`,
+    payload: JsonValue
+): Promise<void> {
+    await codec.send({
+        id: `${name}-${event.id}-${Math.random()}`,
+        streamId,
+        destination: event.destination,
+        name,
+        payload
+    });
+}
+
+async function completeCliCommand(codec: Codec, event: Event, streamId: string, text: string): Promise<void> {
+    await codec.send({
+        id: `complete-${event.id}`,
+        streamId,
+        destination: event.destination,
+        name: "stream.completed",
+        payload: { kind: "text", text }
+    });
+}
+
+function renderHarnessSnapshot(value: ReturnType<typeof stoppedSnapshot>): string {
+    return [
+        `instance: ${value.name}`,
+        `status: ${value.status}`,
+        `ready: ${value.ready}`,
+        `daemonState: ${value.daemonState}`,
+        `connectionState: ${value.connectionState}`,
+        `lastSeq: ${value.lastSeq}`,
+        "Todo: none",
+        ""
+    ].join("\n");
+}
+
+async function reply(codec: Codec, event: Event, payload: JsonValue): Promise<void> {
+    await codec.send({
+        id: `reply-${event.id}`,
+        replyTo: event.id,
+        destination: event.destination,
+        name: event.name,
+        payload
+    });
+}
+
+function isRecord(value: JsonValue | undefined): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stoppedSnapshot() {
+    return {
+        connectionState: "disconnected",
+        daemonState: "stopped",
+        lastSeq: 1,
+        name: "demo-local",
+        ready: false,
+        status: "stopped"
+    };
+}
+
+function readySnapshot() {
+    return {
+        connectionState: "connected",
+        daemonState: "running",
+        lastSeq: 2,
+        name: "demo-local",
+        ready: true,
+        status: "ready"
+    };
+}
+
+function createBuffer(): { flush: () => string; write: (chunk: string) => void } {
+    const chunks: string[] = [];
+
+    return {
+        flush() {
+            const value = chunks.join("");
+            chunks.length = 0;
+            return value;
+        },
+        write(chunk: string) {
+            chunks.push(chunk);
+        }
+    };
+}
+
+function createRealConfig(): string {
+    return [
+        "version = 1",
+        "",
+        "[control]",
+        'logLevel = "info"',
+        "",
+        "[mcp]",
+        "enabled = false",
+        'listenHost = "127.0.0.1"',
+        "listenPort = 17890",
+        "",
+        "[mcp.auth]",
+        'mode = "none"',
+        ""
+    ].join("\n");
+}
+
+function createCreateConfig(): string {
+    return [
+        "version = 1",
+        "",
+        "[control]",
+        'logLevel = "info"',
+        "",
+        "[mcp]",
+        "enabled = false",
+        'listenHost = "127.0.0.1"',
+        "listenPort = 17890",
+        'publicBaseUrl = "http://127.0.0.1:17890"',
+        "",
+        "[mcp.auth]",
+        'mode = "none"',
+        ""
+    ].join("\n");
+}
+
+function createLocalInstanceConfig(name: string): string {
+    return [
+        "version = 3",
+        `name = ${JSON.stringify(name)}`,
+        "enabled = true",
+        'provider = "local"',
+        "",
+        "[mcp]",
+        "enabled = false",
+        "",
+        "[mcp.tools]",
+        'groups = ["file", "bash", "artifact"]',
+        'capabilities = ["read", "write", "execute"]',
+        "",
+        "[logs]",
+        "eventBufferSize = 50",
+        ""
+    ].join("\n");
+}
+
+async function readControlPid(homeDirectory: string): Promise<number | undefined> {
+    try {
+        const source = (await readFile(join(homeDirectory, ".devshell", "control", "control.pid"), "utf8")).trim();
+        const pid = Number.parseInt(source, 10);
+        return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+async function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
+    const origin = captureStack("closeServer");
+    await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+            if (error !== undefined) {
+                reject(appendTimeoutOrigin(error, origin));
+                return;
+            }
+
+            resolve();
+        });
+    });
+}
+
+async function waitForControlShutdown(xdgRuntimeDir: string, timeoutMs = 3_000): Promise<void> {
+    const origin = captureStack(`waitForControlShutdown(${xdgRuntimeDir})`);
+    const socketPath = resolveControlSocketPath(xdgRuntimeDir);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (!await ipcEndpointAcceptsConnections(socketPath)) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(`timed out waiting for control shutdown at ${socketPath}\n${origin}`);
+}
+
+async function ensureProcessExit(pid: number | undefined, timeoutMs = 3_000): Promise<void> {
+    if (pid === undefined) {
+        return;
+    }
+
+    const origin = captureStack(`ensureProcessExit(${pid})`);
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") {
+                return;
+            }
+
+            throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    process.kill(pid, "SIGKILL");
+
+    for (let attempts = 0; attempts < 50; attempts += 1) {
+        try {
+            process.kill(pid, 0);
+        } catch (error) {
+            if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") {
+                return;
+            }
+
+            throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(`timed out waiting for process ${pid} to exit after SIGKILL\n${origin}`);
+}
+
+function captureStack(label: string): string {
+    return new Error(`Timeout origin: ${label}`).stack ?? `Timeout origin: ${label}`;
+}
+
+function appendTimeoutOrigin(error: unknown, origin: string): Error {
+    if (error instanceof Error) {
+        error.stack = `${error.stack ?? `${error.name}: ${error.message}`}\n${origin}`;
+        return error;
+    }
+
+    return new Error(`${String(error)}\n${origin}`);
+}
+
+function restoreEnv(name: keyof NodeJS.ProcessEnv, value: string | undefined): void {
+    if (value === undefined) {
+        delete process.env[name];
+        return;
+    }
+
+    process.env[name] = value;
+}

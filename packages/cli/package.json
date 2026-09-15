@@ -6,7 +6,7 @@
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "bin": {
-        "devshell": "./dist/CliMain.js"
+        "devshell": "./dist/app/Entry.js"
     },
     "dependencies": {
         "@portable-devshell/artifact-extension": "workspace:*",
@@ -31,6 +31,6 @@
     "scripts": {
         "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
-        "test": "node ../../test/RunPackageTests.mjs --loader ../mcp/test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\" \"test/integration/*.test.ts\""
+        "test": "node ../../test/RunPackageTests.mjs --loader ../mcp/test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/app/*.test.ts\" \"test/command/*.test.ts\" \"test/command/*/*.test.ts\" \"test/transport/*.test.ts\""
     }
 }
