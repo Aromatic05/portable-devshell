@@ -1,0 +1,1982 @@
+pub mod patch;
+pub mod publish;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::instance::sandbox::path::{ResolvedPath, ResolvedTarget};
+use crate::tool::file::edit::patch as context_patch;
+use crate::tool::file::edit::patch::diff;
+use crate::tool::file::edit::patch::stream as context_patch_stream;
+use crate::tool::file::edit::publish::PublishMode;
+use crate::tool::file::model::{
+    FileChangeAction, FileChangeError, FileChangeOperationOutput, FileChangeResultDetail,
+    FileChangeSetInput, FileChangeSetOutput, FileChangeStatus,
+};
+use crate::tool::file::state::{
+    ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextFormat, TextInspection,
+};
+use crate::tool::file::{FileToolState, resolve_create};
+use crate::tool::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
+
+const MAX_CHANGE_OPERATIONS: usize = 256;
+const MAX_RENDERED_DETAIL_BYTES: usize = 64 * 1024;
+const MAX_SERIALIZED_OUTPUT_BYTES: usize = 1024 * 1024;
+
+pub struct FileEditTool {
+    name: ToolName,
+    state: Arc<FileToolState>,
+}
+
+impl FileEditTool {
+    pub fn new(state: Arc<FileToolState>) -> Self {
+        Self {
+            name: ToolName::parse("file_edit").unwrap(),
+            state,
+        }
+    }
+}
+
+impl ToolHandler for FileEditTool {
+    fn name(&self) -> &ToolName {
+        &self.name
+    }
+
+    fn catalog_entry(&self) -> ToolCatalogEntry {
+        crate::tool::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
+            &self.name,
+            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
+            [ToolCapability::Write],
+        )
+    }
+
+    fn call(&self, call: ToolCall) -> Result<serde_json::Value, ToolError> {
+        call.check_cancelled()?;
+        let input: FileChangeSetInput = call.parse_params()?;
+        let detail = input.result_detail.unwrap_or_default();
+        let parsed = parse_change_set(&input.changes)?;
+        call.check_cancelled()?;
+        let prepared = self.preflight(&call, parsed)?;
+        if prepared.len() > 1
+            && let Err((failed_index, error)) = self.validate_semantics(&call, &prepared)
+        {
+            let mut operations = Vec::with_capacity(prepared.len());
+            for (offset, operation) in prepared.iter().enumerate() {
+                let index = offset + 1;
+                if index == failed_index {
+                    operations.push(failed_output(index, operation, error.clone()));
+                } else {
+                    operations.push(not_executed(index, operation));
+                }
+            }
+            let mut output = FileChangeSetOutput { operations };
+            enforce_output_budget(&mut output)?;
+            return crate::tool::contract::serialize(output);
+        }
+        let mut output = self.execute(&call, prepared, detail);
+        if detail == FileChangeResultDetail::Summary {
+            for operation in &mut output.operations {
+                operation.diff = None;
+                operation.truncated = None;
+            }
+        }
+        enforce_output_budget(&mut output)?;
+        crate::tool::contract::serialize(output)
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ParsedOperation {
+    Write { path: String, content: String },
+    Patch { path: String, patch: String },
+    Rewrite { path: String, content: String },
+    Delete { path: String },
+    Move { source: String, target: String },
+}
+
+#[derive(Clone)]
+enum PreparedOperation {
+    Write {
+        display: String,
+        path: PathBuf,
+        content: String,
+    },
+    Patch {
+        display: String,
+        path: PathBuf,
+        patch: String,
+        base: Option<ContextFileSnapshot>,
+    },
+    Rewrite {
+        display: String,
+        path: PathBuf,
+        content: String,
+        base: Option<ContextFileSnapshot>,
+    },
+    Delete {
+        display: String,
+        path: PathBuf,
+        base: Option<ContextFileSnapshot>,
+    },
+    Move {
+        source_display: String,
+        source: PathBuf,
+        target_display: String,
+        target: PathBuf,
+        base: Option<ContextFileSnapshot>,
+    },
+}
+
+#[derive(Clone)]
+struct SemanticFile {
+    text: TextFile,
+}
+
+#[derive(Clone, Copy)]
+struct VirtualEntry {
+    exists: bool,
+    known: bool,
+}
+
+impl FileEditTool {
+    fn preflight(
+        &self,
+        call: &ToolCall,
+        operations: Vec<ParsedOperation>,
+    ) -> Result<Vec<PreparedOperation>, ToolError> {
+        let mut virtual_entries = HashMap::<PathBuf, VirtualEntry>::new();
+        let mut prepared = Vec::with_capacity(operations.len());
+
+        for operation in operations {
+            call.check_cancelled()?;
+            match operation {
+                ParsedOperation::Write { path, content } => {
+                    ensure_text(&content)?;
+                    let (display, resolved) = resolve_for_plan(call, &path)?;
+                    require_existing_parent(&resolved)?;
+                    let entry = virtual_entry(&mut virtual_entries, &resolved);
+                    if entry.exists {
+                        return Err(ToolError::new(
+                            "file.alreadyExists",
+                            format!("Write File target already exists: {path}"),
+                        ));
+                    }
+                    virtual_entries.insert(
+                        resolved.clone(),
+                        VirtualEntry {
+                            exists: true,
+                            known: true,
+                        },
+                    );
+                    prepared.push(PreparedOperation::Write {
+                        display,
+                        path: resolved,
+                        content,
+                    });
+                }
+                ParsedOperation::Patch { path, patch } => {
+                    context_patch::validate(&patch)?;
+                    let (display, resolved) = resolve_for_plan(call, &path)?;
+                    let mut entry = virtual_entry(&mut virtual_entries, &resolved);
+                    if !entry.exists {
+                        return Err(ToolError::new(
+                            "file.notFound",
+                            format!("Patch File target does not exist: {path}"),
+                        ));
+                    }
+                    let base = if entry.known {
+                        None
+                    } else {
+                        Some(self.require_snapshot(call, &resolved)?)
+                    };
+                    entry.known = true;
+                    virtual_entries.insert(resolved.clone(), entry);
+                    prepared.push(PreparedOperation::Patch {
+                        display,
+                        path: resolved,
+                        patch,
+                        base,
+                    });
+                }
+                ParsedOperation::Rewrite { path, content } => {
+                    ensure_text(&content)?;
+                    let (display, resolved) = resolve_for_plan(call, &path)?;
+                    let mut entry = virtual_entry(&mut virtual_entries, &resolved);
+                    if !entry.exists {
+                        return Err(ToolError::new(
+                            "file.notFound",
+                            format!("Rewrite File target does not exist: {path}"),
+                        ));
+                    }
+                    let base = if entry.known {
+                        None
+                    } else {
+                        Some(self.require_snapshot(call, &resolved)?)
+                    };
+                    entry.known = true;
+                    virtual_entries.insert(resolved.clone(), entry);
+                    prepared.push(PreparedOperation::Rewrite {
+                        display,
+                        path: resolved,
+                        content,
+                        base,
+                    });
+                }
+                ParsedOperation::Delete { path } => {
+                    let (display, resolved) = resolve_for_plan(call, &path)?;
+                    let entry = virtual_entry(&mut virtual_entries, &resolved);
+                    if !entry.exists {
+                        return Err(ToolError::new(
+                            "file.notFound",
+                            format!("Delete File target does not exist: {path}"),
+                        ));
+                    }
+                    let base = if entry.known {
+                        None
+                    } else {
+                        Some(self.require_snapshot(call, &resolved)?)
+                    };
+                    virtual_entries.insert(
+                        resolved.clone(),
+                        VirtualEntry {
+                            exists: false,
+                            known: false,
+                        },
+                    );
+                    prepared.push(PreparedOperation::Delete {
+                        display,
+                        path: resolved,
+                        base,
+                    });
+                }
+                ParsedOperation::Move { source, target } => {
+                    let (source_display, source_path) = resolve_for_plan(call, &source)?;
+                    let (target_display, target_path) = resolve_for_plan(call, &target)?;
+                    require_existing_parent(&target_path)?;
+                    if source_path == target_path {
+                        return Err(ToolError::new(
+                            "file.pathConflict",
+                            "Move File source and target resolve to the same path",
+                        ));
+                    }
+                    let source_entry = virtual_entry(&mut virtual_entries, &source_path);
+                    if !source_entry.exists {
+                        return Err(ToolError::new(
+                            "file.notFound",
+                            format!("Move File source does not exist: {source}"),
+                        ));
+                    }
+                    let target_entry = virtual_entry(&mut virtual_entries, &target_path);
+                    if target_entry.exists {
+                        return Err(ToolError::new(
+                            "file.alreadyExists",
+                            format!("Move File target already exists: {target}"),
+                        ));
+                    }
+                    let base = if source_entry.known {
+                        None
+                    } else {
+                        Some(self.require_snapshot(call, &source_path)?)
+                    };
+                    virtual_entries.insert(
+                        source_path.clone(),
+                        VirtualEntry {
+                            exists: false,
+                            known: false,
+                        },
+                    );
+                    virtual_entries.insert(
+                        target_path.clone(),
+                        VirtualEntry {
+                            exists: true,
+                            known: true,
+                        },
+                    );
+                    prepared.push(PreparedOperation::Move {
+                        source_display,
+                        source: source_path,
+                        target_display,
+                        target: target_path,
+                        base,
+                    });
+                }
+            }
+        }
+
+        Ok(prepared)
+    }
+
+    fn validate_semantics(
+        &self,
+        call: &ToolCall,
+        operations: &[PreparedOperation],
+    ) -> Result<(), (usize, ToolError)> {
+        let mut virtual_files = HashMap::<PathBuf, Option<SemanticFile>>::new();
+        let mut local_snapshots = HashMap::<PathBuf, ContextFileSnapshot>::new();
+
+        for (offset, operation) in operations.iter().cloned().enumerate() {
+            let index = offset + 1;
+            let result = (|| -> Result<(), ToolError> {
+                call.check_cancelled()?;
+                let operation = bind_local_snapshot(operation, &local_snapshots)?;
+                match operation {
+                    PreparedOperation::Write {
+                        display,
+                        path,
+                        content,
+                    } => {
+                        if !virtual_files.contains_key(&path) {
+                            require_semantic_absent(call, &display, &path)?;
+                        }
+                        let text = TextFile::from_normalized_format(
+                            TextFormat {
+                                bom: false,
+                                final_newline: content.ends_with('\n'),
+                                line_ending: "\n",
+                            },
+                            &content,
+                        )?;
+                        let seen = (1..=text.lines.len()).collect::<BTreeSet<_>>();
+                        let snapshot = semantic_snapshot(&path, &text, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Patch {
+                        display,
+                        path,
+                        patch,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        let (original, may_merge) = match &base.content {
+                            SnapshotContent::Full(content) => (content.clone(), true),
+                            SnapshotContent::Sparse => {
+                                require_revision(&base, &current)?;
+                                (current.normalized(), false)
+                            }
+                        };
+                        let application = context_patch::apply(&original, &patch)?;
+                        require_coverage(&base, &application.required_lines)?;
+                        let (normalized, merged) = if current.revision == base.revision {
+                            (application.normalized.clone(), false)
+                        } else if may_merge {
+                            (
+                                diff::merge_changes(
+                                    &original,
+                                    &current.normalized(),
+                                    &application.normalized,
+                                )?,
+                                true,
+                            )
+                        } else {
+                            return Err(revision_mismatch());
+                        };
+                        let updated = TextFile::from_normalized(&current, &normalized)?;
+                        let seen = if merged {
+                            application.resulting_known_lines.clone()
+                        } else {
+                            application.remap_seen_lines(&base.seen_lines)
+                        };
+                        let snapshot = semantic_snapshot(&path, &updated, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text: updated }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Rewrite {
+                        display,
+                        path,
+                        content,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        let updated = TextFile::from_normalized(&current, &content)?;
+                        let seen = (1..=updated.lines.len()).collect::<BTreeSet<_>>();
+                        let snapshot = semantic_snapshot(&path, &updated, seen);
+                        virtual_files.insert(path.clone(), Some(SemanticFile { text: updated }));
+                        local_snapshots.insert(path, snapshot);
+                    }
+                    PreparedOperation::Delete {
+                        display,
+                        path,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current = semantic_current(call, &display, &path, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        virtual_files.insert(path.clone(), None);
+                        local_snapshots.remove(&path);
+                    }
+                    PreparedOperation::Move {
+                        source_display,
+                        source,
+                        target_display,
+                        target,
+                        base,
+                    } => {
+                        let base = require_bound_base(base)?;
+                        let current =
+                            semantic_current(call, &source_display, &source, &virtual_files)?;
+                        require_revision(&base, &current)?;
+                        if !virtual_files.contains_key(&target) {
+                            require_semantic_absent(call, &target_display, &target)?;
+                        }
+                        let source_snapshot = local_snapshots.get(&source).cloned().unwrap_or(base);
+                        let mut target_snapshot = source_snapshot;
+                        target_snapshot.canonical_path = target.display().to_string();
+                        let moved = SemanticFile { text: current };
+                        virtual_files.insert(source.clone(), None);
+                        virtual_files.insert(target.clone(), Some(moved));
+                        local_snapshots.remove(&source);
+                        local_snapshots.insert(target, target_snapshot);
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                return Err((index, error));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn require_snapshot(
+        &self,
+        call: &ToolCall,
+        path: &Path,
+    ) -> Result<ContextFileSnapshot, ToolError> {
+        self.state
+            .context_snapshots
+            .lock()
+            .unwrap()
+            .latest_for_path(&call.ctx_id, path)
+    }
+
+    fn execute(
+        &self,
+        call: &ToolCall,
+        operations: Vec<PreparedOperation>,
+        detail: FileChangeResultDetail,
+    ) -> FileChangeSetOutput {
+        let mut outputs = Vec::with_capacity(operations.len());
+        let mut local_snapshots = HashMap::<PathBuf, ContextFileSnapshot>::new();
+        let mut failed = false;
+
+        for (offset, operation) in operations.into_iter().enumerate() {
+            let index = offset + 1;
+            if failed {
+                outputs.push(not_executed(index, &operation));
+                continue;
+            }
+            if let Err(error) = call.check_cancelled() {
+                outputs.push(failed_output(index, &operation, error));
+                failed = true;
+                continue;
+            }
+            let bound = match bind_local_snapshot(operation.clone(), &local_snapshots) {
+                Ok(bound) => bound,
+                Err(error) => {
+                    outputs.push(failed_output(index, &operation, error));
+                    failed = true;
+                    continue;
+                }
+            };
+            match self.execute_one(call, index, bound, detail, &mut local_snapshots) {
+                Ok(output) => outputs.push(output),
+                Err(error) => {
+                    outputs.push(failed_output(index, &operation, error));
+                    failed = true;
+                }
+            }
+        }
+
+        FileChangeSetOutput {
+            operations: outputs,
+        }
+    }
+
+    fn execute_one(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        operation: PreparedOperation,
+        detail: FileChangeResultDetail,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        match operation {
+            PreparedOperation::Write {
+                display,
+                path,
+                content,
+            } => self.execute_write(call, index, display, path, content, local_snapshots),
+            PreparedOperation::Patch {
+                display,
+                path,
+                patch,
+                base,
+            } => self.execute_patch(
+                call,
+                index,
+                display,
+                path,
+                patch,
+                base,
+                detail,
+                local_snapshots,
+            ),
+            PreparedOperation::Rewrite {
+                display,
+                path,
+                content,
+                base,
+            } => self.execute_rewrite(
+                call,
+                index,
+                display,
+                path,
+                content,
+                base,
+                detail,
+                local_snapshots,
+            ),
+            PreparedOperation::Delete {
+                display,
+                path,
+                base,
+            } => self.execute_delete(call, index, display, path, base, detail, local_snapshots),
+            PreparedOperation::Move {
+                source_display,
+                source,
+                target_display,
+                target,
+                base,
+            } => self.execute_move(
+                call,
+                index,
+                source_display,
+                source,
+                target_display,
+                target,
+                base,
+                local_snapshots,
+            ),
+        }
+    }
+
+    fn execute_write(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        content: String,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let resolved = rebind_for_execution(call, &display, &path)?;
+        let target = resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        let lock = self.state.write_lock(&path);
+        let _guard = lock.lock().unwrap();
+        if target
+            .metadata(false)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .is_some()
+        {
+            return Err(ToolError::new(
+                "file.alreadyExists",
+                "Write File target already exists",
+            ));
+        }
+        publish::write_atomic(
+            &target,
+            content.as_bytes(),
+            PublishMode::NoClobber,
+            None,
+            || Ok(()),
+        )?;
+        let text = TextFile::read_file(
+            target
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
+        )?;
+        let snapshot = self.remember_complete(call, &path, &text);
+        local_snapshots.insert(path.clone(), snapshot);
+        Ok(applied_text_output(
+            index,
+            FileChangeAction::Write,
+            display,
+            false,
+            "",
+            &text.normalized(),
+            &text,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_rewrite(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        content: String,
+        base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let base = require_bound_base(base)?;
+        let resolved = rebind_for_execution(call, &display, &path)?;
+        let lock = self.state.write_lock(&path);
+        let _guard = lock.lock().unwrap();
+        let inspection = TextInspection::inspect_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
+        )?;
+        require_revision_value(&base, &inspection.metadata.revision)?;
+        let rewritten = TextFile::from_normalized_format(inspection.format, &content)?;
+        let sparse_before = if detail == FileChangeResultDetail::Diff
+            && matches!(base.content, SnapshotContent::Sparse)
+        {
+            Some(
+                TextFile::read_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    &call.cancellation,
+                )?
+                .normalized(),
+            )
+        } else {
+            None
+        };
+        publish_text(
+            &resolved,
+            &rewritten,
+            Some(&base.revision),
+            &call.cancellation,
+        )?;
+        let snapshot = self.remember_complete(call, &path, &rewritten);
+        local_snapshots.insert(path.clone(), snapshot);
+        let before = match &base.content {
+            SnapshotContent::Full(content) => Some(content.as_str()),
+            SnapshotContent::Sparse => sparse_before.as_deref(),
+        };
+        if let Some(before) = before {
+            return Ok(applied_text_output(
+                index,
+                FileChangeAction::Rewrite,
+                display,
+                false,
+                before,
+                &rewritten.normalized(),
+                &rewritten,
+            ));
+        }
+        Ok(FileChangeOperationOutput {
+            added_lines: (!rewritten.lines.is_empty()).then_some(rewritten.lines.len()),
+            removed_lines: (inspection.metadata.total_lines > 0)
+                .then_some(inspection.metadata.total_lines),
+            ..base_output(
+                index,
+                FileChangeAction::Rewrite,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_patch(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        patch: String,
+        base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let base = require_bound_base(base)?;
+        let resolved = rebind_for_execution(call, &display, &path)?;
+        let lock = self.state.write_lock(&path);
+        let _guard = lock.lock().unwrap();
+        if matches!(base.content, SnapshotContent::Sparse)
+            && detail == FileChangeResultDetail::Summary
+        {
+            return self.execute_sparse_patch(
+                call,
+                index,
+                display,
+                path,
+                patch,
+                base,
+                &resolved,
+                local_snapshots,
+            );
+        }
+        let current = TextFile::read_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
+        )?;
+        let (original, may_merge) = match &base.content {
+            SnapshotContent::Full(content) => (content.clone(), true),
+            SnapshotContent::Sparse => {
+                require_revision(&base, &current)?;
+                (current.normalized(), false)
+            }
+        };
+        let application = context_patch::apply(&original, &patch)?;
+        require_coverage(&base, &application.required_lines)?;
+        let (normalized, merged) = if current.revision == base.revision {
+            (application.normalized.clone(), false)
+        } else if may_merge {
+            (
+                diff::merge_changes(&original, &current.normalized(), &application.normalized)?,
+                true,
+            )
+        } else {
+            return Err(revision_mismatch());
+        };
+        let updated = TextFile::from_normalized(&current, &normalized)?;
+        publish_text(
+            &resolved,
+            &updated,
+            Some(&current.revision),
+            &call.cancellation,
+        )?;
+
+        let seen = if merged {
+            application.resulting_known_lines.clone()
+        } else {
+            application.remap_seen_lines(&base.seen_lines)
+        };
+        let snapshot = self.remember_with_seen(call, &path, &updated, seen);
+        local_snapshots.insert(path.clone(), snapshot);
+        let mut output = applied_text_output(
+            index,
+            FileChangeAction::Patch,
+            display,
+            merged,
+            &current.normalized(),
+            &updated.normalized(),
+            &updated,
+        );
+        output.added_lines = (application.added_lines > 0).then_some(application.added_lines);
+        output.removed_lines = (application.removed_lines > 0).then_some(application.removed_lines);
+        Ok(output)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_sparse_patch(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        patch: String,
+        base: ContextFileSnapshot,
+        resolved: &ResolvedPath,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let plan = context_patch_stream::plan_streaming(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &patch,
+            &call.cancellation,
+        )?;
+        require_revision_value(&base, &plan.inspection.metadata.revision)?;
+        require_coverage(&base, &plan.required_lines)?;
+        let seen = plan.remap_seen_lines(&base.seen_lines);
+        let target = resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        #[cfg(unix)]
+        let permissions = Some(
+            resolved
+                .metadata()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+                .mode(),
+        );
+        #[cfg(not(unix))]
+        let permissions = None;
+        let expected_revision = base.revision.clone();
+        let mut updated_metadata = None;
+        publish::write_atomic_with(
+            &target,
+            PublishMode::Replace,
+            permissions,
+            |writer| {
+                updated_metadata =
+                    Some(plan.write(
+                        resolved.open_file().map_err(|error| {
+                            ToolError::new("file.readFailed", error.to_string())
+                        })?,
+                        writer,
+                        &call.cancellation,
+                    )?);
+                Ok(())
+            },
+            || {
+                let current = crate::tool::file::state::TextMetadata::inspect_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    &call.cancellation,
+                )?;
+                if current.revision != expected_revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while preparing the write",
+                    ));
+                }
+                Ok(())
+            },
+        )?;
+        let updated_metadata = updated_metadata.ok_or_else(|| {
+            ToolError::new(
+                "tool.internalError",
+                "streaming patch did not produce output metadata",
+            )
+        })?;
+        let ordinal = self.state.next_snapshot_ordinal();
+        self.state
+            .context_snapshots
+            .lock()
+            .unwrap()
+            .remember_sparse(
+                &call.ctx_id,
+                &path,
+                &updated_metadata,
+                seen.iter().copied(),
+                ordinal,
+            );
+        local_snapshots.insert(
+            path.clone(),
+            ContextFileSnapshot {
+                canonical_path: path.display().to_string(),
+                revision: updated_metadata.revision.clone(),
+                seen_lines: seen,
+                total_lines: updated_metadata.total_lines,
+                content: SnapshotContent::Sparse,
+                ordinal,
+                last_accessed_at_ms: 0,
+            },
+        );
+        Ok(FileChangeOperationOutput {
+            added_lines: (plan.added_lines > 0).then_some(plan.added_lines),
+            removed_lines: (plan.removed_lines > 0).then_some(plan.removed_lines),
+            ..base_output(
+                index,
+                FileChangeAction::Patch,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
+        })
+    }
+
+    fn execute_delete(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        display: String,
+        path: PathBuf,
+        base: Option<ContextFileSnapshot>,
+        detail: FileChangeResultDetail,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let base = require_bound_base(base)?;
+        let resolved = rebind_for_execution(call, &display, &path)?;
+        let lock = self.state.write_lock(&path);
+        let _guard = lock.lock().unwrap();
+        let inspection = TextInspection::inspect_file(
+            resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
+        )?;
+        require_revision_value(&base, &inspection.metadata.revision)?;
+        let before = if detail == FileChangeResultDetail::Diff {
+            match &base.content {
+                SnapshotContent::Full(content) => Some(content.clone()),
+                SnapshotContent::Sparse => Some(
+                    TextFile::read_file(
+                        resolved.open_file().map_err(|error| {
+                            ToolError::new("file.readFailed", error.to_string())
+                        })?,
+                        &call.cancellation,
+                    )?
+                    .normalized(),
+                ),
+            }
+        } else {
+            None
+        };
+        resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .remove()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        self.state
+            .context_snapshots
+            .lock()
+            .unwrap()
+            .remove_path(&call.ctx_id, &path);
+        local_snapshots.remove(&path);
+        let diff = before
+            .as_deref()
+            .map(|before| limit_detail(diff::render(before, "")));
+        Ok(FileChangeOperationOutput {
+            removed_lines: (inspection.metadata.total_lines > 0)
+                .then_some(inspection.metadata.total_lines),
+            diff: diff.as_ref().map(|diff| diff.0.clone()),
+            truncated: diff.as_ref().and_then(|diff| diff.1.then_some(true)),
+            ..base_output(
+                index,
+                FileChangeAction::Delete,
+                display,
+                None,
+                FileChangeStatus::Applied,
+            )
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_move(
+        &self,
+        call: &ToolCall,
+        index: usize,
+        source_display: String,
+        source: PathBuf,
+        target_display: String,
+        target: PathBuf,
+        base: Option<ContextFileSnapshot>,
+        local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
+    ) -> Result<FileChangeOperationOutput, ToolError> {
+        let base = require_bound_base(base)?;
+        let source_resolved = rebind_for_execution(call, &source_display, &source)?;
+        let target_resolved = rebind_for_execution(call, &target_display, &target)?;
+        let (first, second) = if source <= target {
+            (
+                self.state.write_lock(&source),
+                self.state.write_lock(&target),
+            )
+        } else {
+            (
+                self.state.write_lock(&target),
+                self.state.write_lock(&source),
+            )
+        };
+        let _first_guard = first.lock().unwrap();
+        let _second_guard = second.lock().unwrap();
+        let current = crate::tool::file::state::TextMetadata::inspect_file(
+            source_resolved
+                .open_file()
+                .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+            &call.cancellation,
+        )?;
+        if current.revision != base.revision {
+            return Err(revision_mismatch());
+        }
+        let source_target = source_resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        let target_target = target_resolved
+            .target()
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        if target_target
+            .metadata(false)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+            .is_some()
+        {
+            return Err(ToolError::new(
+                "file.alreadyExists",
+                "Move File target already exists",
+            ));
+        }
+        atomic_move_no_replace_resolved(&source_target, &target_target)?;
+        self.state
+            .context_snapshots
+            .lock()
+            .unwrap()
+            .migrate_path(&call.ctx_id, &source, &target);
+        let mut moved_snapshot = base;
+        moved_snapshot.canonical_path = target.display().to_string();
+        local_snapshots.remove(&source);
+        local_snapshots.insert(target.clone(), moved_snapshot);
+        Ok(FileChangeOperationOutput {
+            ..base_output(
+                index,
+                FileChangeAction::Move,
+                target_display,
+                Some(source_display),
+                FileChangeStatus::Applied,
+            )
+        })
+    }
+
+    fn remember_complete(
+        &self,
+        call: &ToolCall,
+        path: &Path,
+        text: &TextFile,
+    ) -> ContextFileSnapshot {
+        self.remember_with_seen(call, path, text, 1..=text.lines.len())
+    }
+
+    fn remember_with_seen(
+        &self,
+        call: &ToolCall,
+        path: &Path,
+        text: &TextFile,
+        seen: impl IntoIterator<Item = usize>,
+    ) -> ContextFileSnapshot {
+        let seen = seen.into_iter().collect::<BTreeSet<_>>();
+        let ordinal = self.state.next_snapshot_ordinal();
+        if text.total_bytes <= FULL_SNAPSHOT_LIMIT {
+            self.state.context_snapshots.lock().unwrap().remember_full(
+                &call.ctx_id,
+                path,
+                text,
+                seen.iter().copied(),
+                ordinal,
+            );
+        } else {
+            let metadata = crate::tool::file::state::TextMetadata {
+                revision: text.revision.clone(),
+                total_bytes: text.total_bytes,
+                total_lines: text.lines.len(),
+            };
+            self.state
+                .context_snapshots
+                .lock()
+                .unwrap()
+                .remember_sparse(&call.ctx_id, path, &metadata, seen.iter().copied(), ordinal);
+        }
+        context_snapshot(path, text, seen, ordinal)
+    }
+}
+
+fn bind_local_snapshot(
+    operation: PreparedOperation,
+    local: &HashMap<PathBuf, ContextFileSnapshot>,
+) -> Result<PreparedOperation, ToolError> {
+    match operation {
+        PreparedOperation::Patch {
+            display,
+            path,
+            patch,
+            base,
+        } => Ok(PreparedOperation::Patch {
+            display,
+            base: Some(resolve_operation_base(base, local, &path)?),
+            path,
+            patch,
+        }),
+        PreparedOperation::Rewrite {
+            display,
+            path,
+            content,
+            base,
+        } => Ok(PreparedOperation::Rewrite {
+            display,
+            base: Some(resolve_operation_base(base, local, &path)?),
+            path,
+            content,
+        }),
+        PreparedOperation::Delete {
+            display,
+            path,
+            base,
+        } => Ok(PreparedOperation::Delete {
+            display,
+            base: Some(resolve_operation_base(base, local, &path)?),
+            path,
+        }),
+        PreparedOperation::Move {
+            source_display,
+            source,
+            target_display,
+            target,
+            base,
+        } => Ok(PreparedOperation::Move {
+            source_display,
+            base: Some(resolve_operation_base(base, local, &source)?),
+            source,
+            target_display,
+            target,
+        }),
+        write @ PreparedOperation::Write { .. } => Ok(write),
+    }
+}
+
+fn resolve_operation_base(
+    base: Option<ContextFileSnapshot>,
+    local: &HashMap<PathBuf, ContextFileSnapshot>,
+    path: &Path,
+) -> Result<ContextFileSnapshot, ToolError> {
+    base.or_else(|| local.get(path).cloned()).ok_or_else(|| {
+        ToolError::new(
+            "tool.internalError",
+            format!("change-set snapshot chain is missing {}", path.display()),
+        )
+    })
+}
+
+fn require_bound_base(base: Option<ContextFileSnapshot>) -> Result<ContextFileSnapshot, ToolError> {
+    base.ok_or_else(|| {
+        ToolError::new(
+            "tool.internalError",
+            "change-set operation reached execution without a bound snapshot",
+        )
+    })
+}
+
+fn context_snapshot(
+    path: &Path,
+    text: &TextFile,
+    seen_lines: BTreeSet<usize>,
+    ordinal: u64,
+) -> ContextFileSnapshot {
+    ContextFileSnapshot {
+        canonical_path: path.display().to_string(),
+        revision: text.revision.clone(),
+        seen_lines,
+        total_lines: text.lines.len(),
+        content: if text.total_bytes <= FULL_SNAPSHOT_LIMIT {
+            SnapshotContent::Full(text.normalized())
+        } else {
+            SnapshotContent::Sparse
+        },
+        ordinal,
+        last_accessed_at_ms: 0,
+    }
+}
+
+fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
+    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = normalized.split('\n').collect::<Vec<_>>();
+    let first = lines
+        .iter()
+        .position(|line| !line.trim().is_empty())
+        .ok_or_else(|| invalid_edit("change set is empty"))?;
+    if !matches!(lines[first], "*** Begin Edit" | "*** Begin Patch") {
+        return Err(invalid_edit(
+            "change set must start with `*** Begin Edit` or `*** Begin Patch`",
+        ));
+    }
+    let last = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .ok_or_else(|| invalid_edit("change set is empty"))?;
+    if !matches!(lines[last], "*** End Edit" | "*** End Patch") {
+        return Err(invalid_edit(
+            "change set must end with `*** End Edit` or `*** End Patch`",
+        ));
+    }
+
+    let mut operations = Vec::new();
+    let mut index = first + 1;
+    while index < last {
+        if lines[index].trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        if operations.len() >= MAX_CHANGE_OPERATIONS {
+            return Err(ToolError::new(
+                "file.tooManyOperations",
+                format!("change set supports at most {MAX_CHANGE_OPERATIONS} operations"),
+            ));
+        }
+        let line = lines[index];
+        if let Some(path) = line.strip_prefix("*** Write File:") {
+            let path = parse_path(path)?;
+            let (body, next) = collect_body(&lines, index + 1, last);
+            let content = literal_body(body);
+            reject_literal_diff(&content)?;
+            operations.push(ParsedOperation::Write { path, content });
+            index = next;
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Add File:") {
+            let path = parse_path(path)?;
+            let (body, next) = collect_body(&lines, index + 1, last);
+            let content = add_file_body(body);
+            ensure_text(&content)?;
+            operations.push(ParsedOperation::Write { path, content });
+            index = next;
+            continue;
+        }
+        if let Some(path) = line
+            .strip_prefix("*** Patch File:")
+            .or_else(|| line.strip_prefix("*** Update File:"))
+        {
+            let path = parse_path(path)?;
+            let (body, next) = collect_body(&lines, index + 1, last);
+            let patch = body.join("\n");
+            if patch.trim().is_empty() {
+                return Err(invalid_edit("Patch File requires at least one hunk"));
+            }
+            operations.push(ParsedOperation::Patch { path, patch });
+            index = next;
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Rewrite File:") {
+            let path = parse_path(path)?;
+            let (body, next) = collect_body(&lines, index + 1, last);
+            let content = literal_body(body);
+            reject_literal_diff(&content)?;
+            operations.push(ParsedOperation::Rewrite { path, content });
+            index = next;
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Delete File:") {
+            let path = parse_path(path)?;
+            index += 1;
+            index = skip_blank_lines(&lines, index, last);
+            if index < last && !is_operation_header(lines[index]) {
+                return Err(invalid_edit("Delete File does not accept a body"));
+            }
+            operations.push(ParsedOperation::Delete { path });
+            continue;
+        }
+        if let Some(source) = line.strip_prefix("*** Move File:") {
+            let source = parse_path(source)?;
+            index = skip_blank_lines(&lines, index + 1, last);
+            let Some(target) = lines
+                .get(index)
+                .and_then(|line| line.strip_prefix("*** To:"))
+            else {
+                return Err(invalid_edit(
+                    "Move File requires a following `*** To:` line",
+                ));
+            };
+            let target = parse_path(target)?;
+            index += 1;
+            index = skip_blank_lines(&lines, index, last);
+            if index < last && !is_operation_header(lines[index]) {
+                return Err(invalid_edit("Move File does not accept a body"));
+            }
+            operations.push(ParsedOperation::Move { source, target });
+            continue;
+        }
+        if line.starts_with("*** To:") {
+            return Err(invalid_edit("`*** To:` is only valid after Move File"));
+        }
+        return Err(invalid_edit(format!("unexpected change-set line: {line}")));
+    }
+
+    if operations.is_empty() {
+        return Err(ToolError::new(
+            "file.emptyOperation",
+            "change set contains no file operations",
+        ));
+    }
+    Ok(operations)
+}
+
+fn collect_body<'a>(lines: &'a [&'a str], start: usize, end: usize) -> (Vec<&'a str>, usize) {
+    let mut index = start;
+    while index < end && !is_operation_header(lines[index]) {
+        index += 1;
+    }
+    (lines[start..index].to_vec(), index)
+}
+
+fn literal_body(lines: Vec<&str>) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    let mut content = lines.join("\n");
+    content.push('\n');
+    content
+}
+
+fn add_file_body(mut lines: Vec<&str>) -> String {
+    while lines.last() == Some(&"") {
+        lines.pop();
+    }
+    if !lines.is_empty() && lines.iter().all(|line| line.starts_with('+')) {
+        return literal_body(
+            lines
+                .into_iter()
+                .map(|line| line.strip_prefix('+').unwrap_or(line))
+                .collect(),
+        );
+    }
+    literal_body(lines)
+}
+
+const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
+
+fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
+    let mut total = 0usize;
+    let mut prefixed = 0usize;
+    for line in content.split('\n') {
+        if line.trim().is_empty() {
+            continue;
+        }
+        total += 1;
+        if line.starts_with('+') || line.starts_with('-') {
+            prefixed += 1;
+        }
+    }
+    if total > 0 && prefixed as f64 / total as f64 > LITERAL_DIFF_LINE_RATIO {
+        return Err(ToolError::new(
+            "file.literalDiffBody",
+            "Stop pasting diffs into Write File and Rewrite File. They take literal content only; your body is almost entirely `+`/`-` prefixed patch lines, a format only Patch File accepts. Re-output the body as plain text with no diff markers.",
+        ));
+    }
+    Ok(())
+}
+
+fn is_operation_header(line: &str) -> bool {
+    line.starts_with("*** Write File:")
+        || line.starts_with("*** Add File:")
+        || line.starts_with("*** Patch File:")
+        || line.starts_with("*** Update File:")
+        || line.starts_with("*** Rewrite File:")
+        || line.starts_with("*** Delete File:")
+        || line.starts_with("*** Move File:")
+        || matches!(line, "*** End Edit" | "*** End Patch")
+}
+
+fn skip_blank_lines(lines: &[&str], mut index: usize, end: usize) -> usize {
+    while index < end && lines[index].trim().is_empty() {
+        index += 1;
+    }
+    index
+}
+
+fn parse_path(raw: &str) -> Result<String, ToolError> {
+    let path = raw.trim();
+    if path.is_empty() || path.contains('\0') {
+        return Err(ToolError::new(
+            "file.invalidPath",
+            "file path is empty or invalid",
+        ));
+    }
+    Ok(path.to_string())
+}
+
+fn resolve_for_plan(call: &ToolCall, raw: &str) -> Result<(String, PathBuf), ToolError> {
+    let (requested, resolved) = resolve_create(call, raw)?;
+    Ok((requested.raw, resolved.canonical))
+}
+
+fn rebind_for_execution(
+    call: &ToolCall,
+    raw: &str,
+    expected: &Path,
+) -> Result<ResolvedPath, ToolError> {
+    let (_, resolved) = resolve_create(call, raw)?;
+    if resolved.canonical != expected {
+        return Err(ToolError::retryable(
+            "file.revisionMismatch",
+            "path resolved to a different target after preflight",
+        ));
+    }
+    Ok(resolved)
+}
+
+fn semantic_current(
+    call: &ToolCall,
+    display: &str,
+    path: &Path,
+    virtual_files: &HashMap<PathBuf, Option<SemanticFile>>,
+) -> Result<TextFile, ToolError> {
+    match virtual_files.get(path) {
+        Some(Some(file)) => return Ok(file.text.clone()),
+        Some(None) => {
+            return Err(ToolError::new(
+                "tool.internalError",
+                format!(
+                    "semantic change-set state marks {} as absent",
+                    path.display()
+                ),
+            ));
+        }
+        None => {}
+    }
+    let resolved = rebind_for_execution(call, display, path)?;
+    TextFile::read_file(
+        resolved
+            .open_file()
+            .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+        &call.cancellation,
+    )
+}
+
+fn require_semantic_absent(call: &ToolCall, display: &str, path: &Path) -> Result<(), ToolError> {
+    let resolved = rebind_for_execution(call, display, path)?;
+    let target = resolved
+        .target()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    if target
+        .metadata(false)
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .is_some()
+    {
+        return Err(ToolError::new(
+            "file.alreadyExists",
+            format!("target already exists: {display}"),
+        ));
+    }
+    Ok(())
+}
+
+fn semantic_snapshot(
+    path: &Path,
+    text: &TextFile,
+    seen_lines: BTreeSet<usize>,
+) -> ContextFileSnapshot {
+    ContextFileSnapshot {
+        canonical_path: path.display().to_string(),
+        revision: text.revision.clone(),
+        seen_lines,
+        total_lines: text.lines.len(),
+        content: SnapshotContent::Full(text.normalized()),
+        ordinal: 0,
+        last_accessed_at_ms: 0,
+    }
+}
+
+fn virtual_entry(entries: &mut HashMap<PathBuf, VirtualEntry>, path: &Path) -> VirtualEntry {
+    *entries
+        .entry(path.to_path_buf())
+        .or_insert_with(|| VirtualEntry {
+            exists: path.symlink_metadata().is_ok(),
+            known: false,
+        })
+}
+
+fn require_existing_parent(path: &Path) -> Result<(), ToolError> {
+    let Some(parent) = path.parent() else {
+        return Err(ToolError::new(
+            "file.invalidPath",
+            "target has no parent directory",
+        ));
+    };
+    if parent.is_dir() {
+        return Ok(());
+    }
+    Err(ToolError::new(
+        "file.parentNotFound",
+        format!(
+            "target parent directory does not exist: {}",
+            parent.display()
+        ),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn atomic_move_no_replace(source: &Path, target: &Path) -> Result<(), ToolError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| ToolError::new("file.invalidPath", "source path contains NUL"))?;
+    let target = CString::new(target.as_os_str().as_bytes())
+        .map_err(|_| ToolError::new("file.invalidPath", "target path contains NUL"))?;
+    // libc exposes renameat2 only for glibc targets. Invoke the Linux syscall
+    // directly so the same no-replace operation also works in static musl builds.
+    let result = unsafe {
+        nix::libc::syscall(
+            nix::libc::SYS_renameat2,
+            nix::libc::AT_FDCWD,
+            source.as_ptr(),
+            nix::libc::AT_FDCWD,
+            target.as_ptr(),
+            nix::libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        return Ok(());
+    }
+    Err(map_move_error(std::io::Error::last_os_error()))
+}
+
+#[cfg(target_os = "macos")]
+fn atomic_move_no_replace(source: &Path, target: &Path) -> Result<(), ToolError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let source = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| ToolError::new("file.invalidPath", "source path contains NUL"))?;
+    let target = CString::new(target.as_os_str().as_bytes())
+        .map_err(|_| ToolError::new("file.invalidPath", "target path contains NUL"))?;
+    let result =
+        unsafe { nix::libc::renamex_np(source.as_ptr(), target.as_ptr(), nix::libc::RENAME_EXCL) };
+    if result == 0 {
+        return Ok(());
+    }
+    Err(map_move_error(std::io::Error::last_os_error()))
+}
+
+#[cfg(windows)]
+fn atomic_move_no_replace(source: &Path, target: &Path) -> Result<(), ToolError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), 0) };
+    if result != 0 {
+        return Ok(());
+    }
+    Err(map_move_error(std::io::Error::last_os_error()))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
+fn atomic_move_no_replace(_source: &Path, _target: &Path) -> Result<(), ToolError> {
+    Err(ToolError::new(
+        "file.atomicMoveUnsupported",
+        "atomic no-clobber Move File is unsupported on this operating system",
+    ))
+}
+
+fn map_move_error(error: std::io::Error) -> ToolError {
+    match error.raw_os_error() {
+        #[cfg(unix)]
+        Some(code) if code == nix::libc::EEXIST => {
+            ToolError::new("file.alreadyExists", "Move File target already exists")
+        }
+        #[cfg(unix)]
+        Some(code) if code == nix::libc::EXDEV => ToolError::new(
+            "file.crossDeviceMoveUnsupported",
+            "Move File requires source and target on the same filesystem",
+        ),
+        #[cfg(windows)]
+        Some(80 | 183) => ToolError::new("file.alreadyExists", "Move File target already exists"),
+        #[cfg(windows)]
+        Some(17) => ToolError::new(
+            "file.crossDeviceMoveUnsupported",
+            "Move File requires source and target on the same filesystem",
+        ),
+        _ => ToolError::new("file.writeFailed", error.to_string()),
+    }
+}
+
+fn ensure_text(content: &str) -> Result<(), ToolError> {
+    if content.contains('\0') {
+        return Err(ToolError::new(
+            "file.notText",
+            "file content cannot contain NUL bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn require_revision(base: &ContextFileSnapshot, current: &TextFile) -> Result<(), ToolError> {
+    require_revision_value(base, &current.revision)
+}
+
+fn require_revision_value(base: &ContextFileSnapshot, revision: &str) -> Result<(), ToolError> {
+    if revision == base.revision {
+        Ok(())
+    } else {
+        Err(revision_mismatch())
+    }
+}
+
+fn require_coverage(
+    base: &ContextFileSnapshot,
+    required: &BTreeSet<usize>,
+) -> Result<(), ToolError> {
+    let missing = required
+        .iter()
+        .filter(|line| !base.seen_lines.contains(line))
+        .copied()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(ToolError::retryable(
+        "file.unreadRange",
+        "patch modifies or relies on source lines that were not read in this context",
+    )
+    .with_details(serde_json::json!({
+        "missingLines": missing,
+    })))
+}
+
+fn revision_mismatch() -> ToolError {
+    ToolError::retryable(
+        "file.revisionMismatch",
+        "file changed after it was read in this context",
+    )
+}
+
+fn publish_text(
+    resolved: &ResolvedPath,
+    text: &TextFile,
+    expected_revision: Option<&str>,
+    cancellation: &crate::tool::ToolCancellation,
+) -> Result<(), ToolError> {
+    let target = resolved
+        .target()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    #[cfg(unix)]
+    let permissions = expected_revision
+        .map(|_| resolved.metadata())
+        .transpose()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+        .map(|metadata| metadata.mode());
+    #[cfg(not(unix))]
+    let permissions = None;
+    publish::write_atomic(
+        &target,
+        &text.encoded(),
+        PublishMode::Replace,
+        permissions,
+        || {
+            if let Some(expected_revision) = expected_revision {
+                let current = crate::tool::file::state::TextMetadata::inspect_file(
+                    resolved
+                        .open_file()
+                        .map_err(|error| ToolError::new("file.readFailed", error.to_string()))?,
+                    cancellation,
+                )?;
+                if current.revision != expected_revision {
+                    return Err(ToolError::retryable(
+                        "file.revisionMismatch",
+                        "file changed while preparing the write",
+                    ));
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn atomic_move_no_replace_resolved(
+    source: &ResolvedTarget,
+    target: &ResolvedTarget,
+) -> Result<(), ToolError> {
+    if !source.is_anchored() || !target.is_anchored() {
+        return atomic_move_no_replace(source.path(), target.path());
+    }
+    source.hard_link_to(target).map_err(map_move_error)?;
+    if let Err(error) = source.remove() {
+        let _ = target.remove();
+        return Err(ToolError::new("file.writeFailed", error.to_string()));
+    }
+    target
+        .sync_parent()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))
+}
+
+fn applied_text_output(
+    index: usize,
+    action: FileChangeAction,
+    path: String,
+    _merged: bool,
+    before: &str,
+    after: &str,
+    _text: &TextFile,
+) -> FileChangeOperationOutput {
+    let (added_lines, removed_lines) = line_delta(before, after);
+    let diff = limit_detail(diff::render(before, after));
+    FileChangeOperationOutput {
+        added_lines: (added_lines > 0).then_some(added_lines),
+        removed_lines: (removed_lines > 0).then_some(removed_lines),
+        diff: Some(diff.0),
+        truncated: diff.1.then_some(true),
+        ..base_output(index, action, path, None, FileChangeStatus::Applied)
+    }
+}
+
+fn base_output(
+    index: usize,
+    action: FileChangeAction,
+    path: String,
+    moved_from: Option<String>,
+    status: FileChangeStatus,
+) -> FileChangeOperationOutput {
+    let _ = index;
+    FileChangeOperationOutput {
+        action,
+        path,
+        moved_from,
+        status,
+        added_lines: None,
+        removed_lines: None,
+        diff: None,
+        error: None,
+        truncated: None,
+    }
+}
+
+fn line_delta(before: &str, after: &str) -> (usize, usize) {
+    let before_lines = normalized_lines(before);
+    let after_lines = normalized_lines(after);
+    let prefix = before_lines
+        .iter()
+        .zip(&after_lines)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if before_lines == after_lines {
+        return (0, 0);
+    }
+    let suffix = before_lines
+        .iter()
+        .rev()
+        .zip(after_lines.iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(before_lines.len().saturating_sub(prefix))
+        .min(after_lines.len().saturating_sub(prefix));
+    (
+        after_lines.len().saturating_sub(prefix + suffix),
+        before_lines.len().saturating_sub(prefix + suffix),
+    )
+}
+
+fn normalized_lines(value: &str) -> Vec<&str> {
+    let body = value.strip_suffix('\n').unwrap_or(value);
+    if value.is_empty() {
+        Vec::new()
+    } else {
+        body.split('\n').collect()
+    }
+}
+
+fn limit_detail(mut value: String) -> (String, bool) {
+    if value.len() <= MAX_RENDERED_DETAIL_BYTES {
+        return (value, false);
+    }
+    let mut end = MAX_RENDERED_DETAIL_BYTES;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value.push('…');
+    (value, true)
+}
+
+fn enforce_output_budget(output: &mut FileChangeSetOutput) -> Result<(), ToolError> {
+    let serialized_len = |value: &FileChangeSetOutput| {
+        serde_json::to_vec(value)
+            .map(|serialized| serialized.len())
+            .map_err(|error| ToolError::new("tool.internalError", error.to_string()))
+    };
+    if serialized_len(output)? <= MAX_SERIALIZED_OUTPUT_BYTES {
+        return Ok(());
+    }
+    for index in (0..output.operations.len()).rev() {
+        {
+            let operation = &mut output.operations[index];
+            if operation.diff.take().is_some() {
+                operation.truncated = Some(true);
+            }
+        }
+        if serialized_len(output)? <= MAX_SERIALIZED_OUTPUT_BYTES {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn failed_output(
+    index: usize,
+    operation: &PreparedOperation,
+    error: ToolError,
+) -> FileChangeOperationOutput {
+    let (action, path, moved_from) = operation_identity(operation);
+    FileChangeOperationOutput {
+        error: Some(FileChangeError {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable.then_some(true),
+            details: error.details,
+        }),
+        ..base_output(index, action, path, moved_from, FileChangeStatus::Failed)
+    }
+}
+
+fn not_executed(index: usize, operation: &PreparedOperation) -> FileChangeOperationOutput {
+    let (action, path, moved_from) = operation_identity(operation);
+    base_output(
+        index,
+        action,
+        path,
+        moved_from,
+        FileChangeStatus::NotExecuted,
+    )
+}
+
+fn operation_identity(operation: &PreparedOperation) -> (FileChangeAction, String, Option<String>) {
+    match operation {
+        PreparedOperation::Write { display, .. } => {
+            (FileChangeAction::Write, display.clone(), None)
+        }
+        PreparedOperation::Patch { display, .. } => {
+            (FileChangeAction::Patch, display.clone(), None)
+        }
+        PreparedOperation::Rewrite { display, .. } => {
+            (FileChangeAction::Rewrite, display.clone(), None)
+        }
+        PreparedOperation::Delete { display, .. } => {
+            (FileChangeAction::Delete, display.clone(), None)
+        }
+        PreparedOperation::Move {
+            source_display,
+            target_display,
+            ..
+        } => (
+            FileChangeAction::Move,
+            target_display.clone(),
+            Some(source_display.clone()),
+        ),
+    }
+}
+
+fn invalid_edit(message: impl Into<String>) -> ToolError {
+    ToolError::new("file.invalidEdit", message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::{ParsedOperation, atomic_move_no_replace, parse_change_set};
+
+    #[test]
+    fn parses_all_change_set_operations() {
+        let operations = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.txt\n",
+            "new\n",
+            "*** Patch File: ./old.txt\n",
+            "@@\n",
+            "-old\n",
+            "+updated\n",
+            "*** Rewrite File: ./generated.txt\n",
+            "generated\n",
+            "*** Move File: ./from.txt\n",
+            "*** To: ./to.txt\n",
+            "*** Delete File: ./unused.txt\n",
+            "*** End Edit"
+        ))
+        .unwrap();
+        assert_eq!(operations.len(), 5);
+        assert!(matches!(operations[0], ParsedOperation::Write { .. }));
+        assert!(matches!(operations[1], ParsedOperation::Patch { .. }));
+        assert!(matches!(operations[2], ParsedOperation::Rewrite { .. }));
+        assert!(matches!(operations[3], ParsedOperation::Move { .. }));
+        assert!(matches!(operations[4], ParsedOperation::Delete { .. }));
+    }
+
+    #[test]
+    fn literal_body_preserves_trailing_blank_lines() {
+        let operations = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.txt\n",
+            "line\n",
+            "\n",
+            "*** End Edit"
+        ))
+        .unwrap();
+        let ParsedOperation::Write { content, .. } = &operations[0] else {
+            panic!("expected write");
+        };
+        assert_eq!(content, "line\n\n");
+    }
+
+    #[test]
+    fn atomic_move_never_replaces_an_existing_target() {
+        let directory = crate::testing::temp_dir();
+        let source = directory.path().join("source.txt");
+        let target = directory.path().join("target.txt");
+        fs::write(&source, "source").unwrap();
+        fs::write(&target, "target").unwrap();
+
+        let error = atomic_move_no_replace(&source, &target).unwrap_err();
+        assert_eq!(error.code, "file.alreadyExists");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "source");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "target");
+    }
+
+    #[test]
+    fn literal_body_can_contain_non_control_triple_stars() {
+        let operations = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.txt\n",
+            "value = \"***\"\n",
+            "*** End Edit"
+        ))
+        .unwrap();
+        let ParsedOperation::Write { content, .. } = &operations[0] else {
+            panic!("expected write");
+        };
+        assert_eq!(content, "value = \"***\"\n");
+    }
+
+    #[test]
+    fn write_rejects_all_plus_prefixed_patch_body() {
+        let error = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.txt\n",
+            "+line one\n",
+            "+line two\n",
+            "+line three\n",
+            "*** End Edit"
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "file.literalDiffBody");
+    }
+
+    #[test]
+    fn rewrite_rejects_mixed_plus_minus_patch_body() {
+        let error = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Rewrite File: ./existing.txt\n",
+            "-old line\n",
+            "+new line one\n",
+            "+new line two\n",
+            "*** End Edit"
+        ))
+        .unwrap_err();
+        assert_eq!(error.code, "file.literalDiffBody");
+    }
+
+    #[test]
+    fn literal_body_with_few_plus_prefixed_lines_is_allowed() {
+        let operations = parse_change_set(concat!(
+            "*** Begin Edit\n",
+            "*** Write File: ./new.md\n",
+            "plain line\n",
+            "another plain line\n",
+            "+ a markdown bullet\n",
+            "plain end\n",
+            "*** End Edit"
+        ))
+        .unwrap();
+        let ParsedOperation::Write { content, .. } = &operations[0] else {
+            panic!("expected write");
+        };
+        assert_eq!(
+            content,
+            "plain line\nanother plain line\n+ a markdown bullet\nplain end\n"
+        );
+    }
+}

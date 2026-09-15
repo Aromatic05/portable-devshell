@@ -1,22 +1,17 @@
+mod capability;
 mod cli;
 mod daemon;
+mod host;
 mod instance;
-mod model_devshell;
-mod platform;
-mod reverse;
-mod rpc;
-mod security;
-mod socket;
-mod storage;
-mod terminal;
 #[cfg(test)]
 mod testing;
-mod tools;
+mod tool;
+mod transport;
 
 use instance::InstanceName;
 
 fn main() {
-    if let Some(result) = model_devshell::try_run_shim() {
+    if let Some(result) = capability::rpc::command::client::try_run_shim() {
         match result {
             Ok(code) => std::process::exit(code),
             Err(error) => {
@@ -40,7 +35,7 @@ fn main() {
 
 fn run() -> Result<String, String> {
     #[cfg(unix)]
-    if let Some(result) = tools::tmux::output::try_run_transcript_logger() {
+    if let Some(result) = tool::tmux::transcript::try_run_transcript_logger() {
         result?;
         return Ok(String::new());
     }
@@ -51,8 +46,8 @@ fn run() -> Result<String, String> {
             .map_err(|_| "internal daemon instance name is not valid utf-8".to_string())?;
         let instance = InstanceName::parse(&raw_instance)?;
         if let Err(error) = daemon::server::serve(instance.clone()) {
-            if let Ok(paths) = storage::InstancePaths::resolve(&instance) {
-                let _ = daemon::log_writer::append_log(&paths, &format!("daemon failed: {error}"));
+            if let Ok(paths) = instance::storage::InstancePaths::resolve(&instance) {
+                let _ = daemon::log::append_log(&paths, &format!("daemon failed: {error}"));
             }
             return Err(error);
         }

@@ -1,0 +1,163 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::tool::ToolError;
+
+const BASH_INTEGRATION: &str = include_str!("../assets/bash.sh");
+const FISH_INTEGRATION: &str = include_str!("../assets/fish.fish");
+const ZSH_INTEGRATION: &str = include_str!("../assets/zsh.sh");
+
+pub struct ShellLaunch {
+    pub command: String,
+}
+
+pub fn prepare_shell_launch(
+    shell_root: &Path,
+    status_dir: &Path,
+    pane_id: &str,
+) -> Result<ShellLaunch, ToolError> {
+    fs::create_dir_all(shell_root).map_err(io_error)?;
+    fs::create_dir_all(status_dir).map_err(io_error)?;
+    let shell = managed_shell();
+    let launch = match shell.file_name().and_then(|name| name.to_str()) {
+        Some("fish") => prepare_fish(shell_root, status_dir, pane_id, &shell),
+        Some("zsh") => prepare_zsh(shell_root, status_dir, pane_id, &shell),
+        _ => prepare_bash(shell_root, status_dir, pane_id, &shell),
+    }?;
+    let loop_command = format!("while :; do {}; /bin/sleep 0.05; done", launch.command);
+    Ok(ShellLaunch {
+        command: format!("exec /bin/sh -c {}", quote(&loop_command)),
+    })
+}
+
+fn managed_shell() -> PathBuf {
+    let configured = std::env::var_os("SHELL").map(PathBuf::from);
+    match configured
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+    {
+        Some("bash" | "fish" | "zsh") => configured.unwrap(),
+        _ => PathBuf::from("/bin/bash"),
+    }
+}
+
+fn prepare_bash(
+    root: &Path,
+    status_dir: &Path,
+    pane_id: &str,
+    shell: &Path,
+) -> Result<ShellLaunch, ToolError> {
+    let integration = root.join("bash-integration.sh");
+    let rc = root.join("bashrc");
+    fs::write(&integration, BASH_INTEGRATION).map_err(io_error)?;
+    fs::write(
+        &rc,
+        format!(
+            "if [ -f \"$HOME/.bashrc\" ]; then\n  . \"$HOME/.bashrc\"\nfi\nexport DEVSHELL_TMUX_PANE_STATUS_DIR={}\n. {}\n",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(integration.to_string_lossy().as_ref())
+        ),
+    )
+    .map_err(io_error)?;
+    Ok(ShellLaunch {
+        command: format!(
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} {} --rcfile {} -i",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(pane_id),
+            quote(shell.to_string_lossy().as_ref()),
+            quote(rc.to_string_lossy().as_ref())
+        ),
+    })
+}
+
+fn prepare_fish(
+    root: &Path,
+    status_dir: &Path,
+    pane_id: &str,
+    shell: &Path,
+) -> Result<ShellLaunch, ToolError> {
+    let integration = root.join("fish-integration.fish");
+    fs::write(&integration, FISH_INTEGRATION).map_err(io_error)?;
+    Ok(ShellLaunch {
+        command: format!(
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} DEVSHELL_TMUX_FISH_INTEGRATION={} {} -C {} -i",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(pane_id),
+            quote(integration.to_string_lossy().as_ref()),
+            quote(shell.to_string_lossy().as_ref()),
+            quote("source \"$DEVSHELL_TMUX_FISH_INTEGRATION\"")
+        ),
+    })
+}
+
+fn prepare_zsh(
+    root: &Path,
+    status_dir: &Path,
+    pane_id: &str,
+    shell: &Path,
+) -> Result<ShellLaunch, ToolError> {
+    let integration = root.join("zsh-integration.sh");
+    let zdotdir = root.join("zdotdir");
+    fs::create_dir_all(&zdotdir).map_err(io_error)?;
+    let zshrc = zdotdir.join(".zshrc");
+    fs::write(&integration, ZSH_INTEGRATION).map_err(io_error)?;
+    fs::write(
+        &zshrc,
+        format!(
+            "if [ -f \"$HOME/.zshrc\" ]; then\n  source \"$HOME/.zshrc\"\nfi\nexport DEVSHELL_TMUX_PANE_STATUS_DIR={}\nsource {}\n",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(integration.to_string_lossy().as_ref())
+        ),
+    )
+    .map_err(io_error)?;
+    Ok(ShellLaunch {
+        command: format!(
+            "/usr/bin/env -u DEVSHELL_WORKER_INTERNAL_INSTANCE -u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE -u DEVSHELL_WORKER_INTERNAL_WORKSPACE -u TMUX -u TMUX_PANE -u TMUX_TMPDIR DEVSHELL_TMUX_PANE_STATUS_DIR={} DEVSHELL_TMUX_PANE_ID={} ZDOTDIR={} {} -d -i",
+            quote(status_dir.to_string_lossy().as_ref()),
+            quote(pane_id),
+            quote(zdotdir.to_string_lossy().as_ref()),
+            quote(shell.to_string_lossy().as_ref())
+        ),
+    })
+}
+
+fn quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn io_error(error: std::io::Error) -> ToolError {
+    ToolError::new("tmux.storageFailed", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_shell_launch;
+
+    #[test]
+    fn managed_shell_unsets_worker_internal_environment() {
+        let root = crate::testing::temp_dir();
+        let launch = prepare_shell_launch(
+            &root.path().join("shell"),
+            &root.path().join("status"),
+            "pane-1",
+        )
+        .unwrap();
+
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_INSTANCE")
+        );
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_SECURITY_MODE")
+        );
+        assert!(
+            launch
+                .command
+                .contains("-u DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+        );
+    }
+}

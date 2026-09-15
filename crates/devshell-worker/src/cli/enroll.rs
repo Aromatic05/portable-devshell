@@ -1,5 +1,5 @@
 use crate::cli::EnrollArgs;
-use crate::reverse::enroll::{self, EnrollOptions};
+use crate::host::lifecycle::enroll::{self, EnrollOptions};
 
 pub fn run(args: EnrollArgs) -> Result<String, String> {
     enroll::run(EnrollOptions {

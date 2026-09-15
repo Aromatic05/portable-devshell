@@ -4,21 +4,24 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::daemon::log_writer::append_log;
+use crate::capability::artifact::payload::ArtifactPayloadStore;
+use crate::capability::artifact::receive::ArtifactReceiveStore;
+use crate::capability::artifact::store::ArtifactStore;
+use crate::capability::rpc::codec::{
+    decode_request_frame, read_frame, write_frame, write_response,
+};
+use crate::capability::rpc::error::RpcError;
+use crate::capability::rpc::response::RpcResponse;
+use crate::capability::rpc::reverse::ReverseRpcPayload;
+use crate::capability::rpc::router::RpcRouter;
+use crate::daemon::log::append_log;
 use crate::daemon::process;
+use crate::instance::storage::InstancePaths;
+use crate::instance::storage::{ensure_dir, ensure_file_mode};
 use crate::instance::{InstanceLock, InstanceName, read_config};
-use crate::reverse::connector::ReverseConnector;
-use crate::rpc::codec::{decode_request_frame, read_frame, write_frame, write_response};
-use crate::rpc::error::RpcError;
-use crate::rpc::response::RpcResponse;
-use crate::rpc::router::RpcRouter;
-use crate::socket::{LocalIpcListener, LocalIpcStream, SocketPaths};
-use crate::storage::InstancePaths;
-use crate::storage::permissions::{ensure_dir, ensure_file_mode};
-use crate::tools::artifact::payload::ArtifactPayloadStore;
-use crate::tools::artifact::receive::ArtifactReceiveStore;
-use crate::tools::artifact::store::ArtifactStore;
-use crate::tools::builtin_registry;
+use crate::tool::builtin_registry;
+use crate::transport::reverse::ReverseConnector;
+use crate::transport::socket::{LocalIpcListener, LocalIpcStream, SocketPaths};
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
 const FAIL_ACCEPT_LOOP_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP";
@@ -73,7 +76,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let receives = ArtifactReceiveStore::new(instance_paths.artifacts_dir.join("receives"))
         .map_err(|error| error.message)?;
-    let resources = Arc::new(crate::storage::ExtensionResourceStore::new(
+    let resources = Arc::new(crate::instance::storage::ExtensionResourceStore::new(
         instance_paths.instance_root.clone(),
     ));
     let builtin_tools = builtin_registry(
@@ -95,13 +98,8 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     ));
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
-        ReverseConnector::new(
-            instance.clone(),
-            instance_paths.clone(),
-            reverse,
-            Arc::clone(&router),
-        )
-        .spawn()
+        let payload = Arc::new(ReverseRpcPayload::new(Arc::clone(&router)));
+        ReverseConnector::new(instance.clone(), instance_paths.clone(), reverse, payload).spawn()
     });
 
     while !router.shutdown_requested() {
@@ -156,7 +154,7 @@ fn handle_connection(stream: LocalIpcStream, router: Arc<RpcRouter>) -> Result<(
                             "rpc.frameTooLarge",
                             format!(
                                 "RPC frame exceeds maximum allowed size of {} bytes.",
-                                crate::rpc::codec::MAX_FRAME_SIZE
+                                crate::capability::rpc::codec::MAX_FRAME_SIZE
                             ),
                         ),
                     );

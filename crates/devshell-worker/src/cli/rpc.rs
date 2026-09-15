@@ -1,8 +1,8 @@
+use crate::capability::rpc::bridge::run_bridge;
 use crate::cli::InstanceArgs;
 use crate::daemon::process;
 use crate::instance::InstanceName;
-use crate::rpc::bridge::run_bridge;
-use crate::socket::SocketPaths;
+use crate::transport::socket::SocketPaths;
 
 pub fn run(args: InstanceArgs) -> Result<String, String> {
     let instance = InstanceName::parse(&args.instance)?;

@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::instance::InstanceName;
-use crate::storage::InstancePaths;
-use crate::storage::permissions::ensure_file_mode;
+use crate::instance::storage::InstancePaths;
+use crate::instance::storage::ensure_file_mode;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,11 +1,6 @@
 pub mod enroll;
-pub mod gc;
-pub mod logs;
-pub mod retire;
+pub mod instance;
 pub mod rpc;
-pub mod start;
-pub mod status;
-pub mod stop;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -52,12 +47,12 @@ pub fn run() -> Result<String, String> {
     let cli = Cli::parse();
     match cli.command {
         Command::Enroll(args) => enroll::run(args),
-        Command::Start(args) => start::run(args),
-        Command::Stop(args) => stop::run(args),
-        Command::Status(args) => status::run(args),
-        Command::Logs(args) => logs::run(args),
+        Command::Start(args) => instance::lifecycle::start::run(args),
+        Command::Stop(args) => instance::lifecycle::stop::run(args),
+        Command::Status(args) => instance::observe::status::run(args),
+        Command::Logs(args) => instance::observe::logs::run(args),
         Command::Rpc(args) => rpc::run(args),
-        Command::Retire(args) => retire::run(args),
-        Command::Gc(args) => gc::run(args),
+        Command::Retire(args) => instance::maintain::retire::run(args),
+        Command::Gc(args) => instance::maintain::gc::run(args),
     }
 }
