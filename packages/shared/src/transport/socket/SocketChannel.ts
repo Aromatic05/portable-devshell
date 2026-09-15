@@ -1,7 +1,7 @@
 import { createConnection, type Socket } from "node:net";
 
-import type { ErrorCode } from "../../error/ErrorCodeCatalog.js";
-import { createError } from "../../error/ErrorFactoryCreate.js";
+import type { ErrorCode } from "../../protocol/Error.js";
+import { createError } from "../../protocol/Error.js";
 import { encodeFrame, FrameBuffer, TRANSPORT_MAX_FRAME_SIZE, type Frame } from "../protocol/Frame.js";
 import type { Channel } from "../protocol/Channel.js";
 

@@ -1,7 +1,7 @@
 import {
     CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,
     CONTROL_REMOTE_RPC_SUBPROTOCOL,
-} from "../../dto/DtoControlProtocol.js";
+} from "../../protocol/control/ControlProtocol.js";
 import { ChannelBase, asChannelError, type Channel } from "../protocol/Channel.js";
 import type { Frame } from "../protocol/Frame.js";
 

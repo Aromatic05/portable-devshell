@@ -10,7 +10,7 @@ import {
     encodeWorkerRpcMessage,
 } from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
-import { asInstanceName, asWorkspacePath, type JsonValue } from "@portable-devshell/shared";
+import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import { decodeFrame, encodeFrame } from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 

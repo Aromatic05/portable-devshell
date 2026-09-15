@@ -1,7 +1,7 @@
-import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
-import type { JsonValue } from "../type/TypeJsonValue.js";
-import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
-import { attachRequestCanceller, getRequestCanceller } from "../client/RequestTimeout.js";
+import type { ControlErrorBody } from "../protocol/Error.js";
+import type { JsonValue } from "../protocol/JsonValue.js";
+import { asInstanceName } from "../protocol/instance/Identity.js";
+import { attachRequestCanceller, getRequestCanceller } from "../client/connection/RequestTimeout.js";
 import type { Channel } from "./protocol/Channel.js";
 import {
     Codec,

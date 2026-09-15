@@ -1,5 +1,5 @@
-import type { ControlClientKind } from "../dto/DtoControlProtocol.js";
-import type { ControlErrorBody } from "../error/ErrorBodyControl.js";
+import type { ControlClientKind } from "../protocol/control/ControlProtocol.js";
+import type { ControlErrorBody } from "../protocol/Error.js";
 import {
     ClientConnection,
     type ClientConnectionOptions,

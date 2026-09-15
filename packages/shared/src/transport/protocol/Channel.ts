@@ -1,7 +1,7 @@
 import type { Readable, Writable } from "node:stream";
 
-import type { ErrorCode } from "../../error/ErrorCodeCatalog.js";
-import { createError } from "../../error/ErrorFactoryCreate.js";
+import type { ErrorCode } from "../../protocol/Error.js";
+import { createError } from "../../protocol/Error.js";
 import { decodeFrame, encodeFrame, FrameBuffer, type Frame } from "./Frame.js";
 
 export interface Channel {

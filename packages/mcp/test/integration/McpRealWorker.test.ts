@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { requireTcpPort } from "../../../../test/TestHttpSupport.ts";
 
-import { asInstanceName, asWorkspacePath, errorCodes } from "@portable-devshell/shared";
+import { asInstanceName, errorCodes } from "@portable-devshell/shared";
 import { WorkerTransportDriverLocal, WorkerBinary, WorkerInstanceFactory } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {

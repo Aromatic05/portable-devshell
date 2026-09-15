@@ -1,8 +1,8 @@
-import type { ControlErrorBody } from "../../error/ErrorBodyControl.js";
-import { toControlErrorBody } from "../../error/ErrorBodyControl.js";
-import { errorCodes } from "../../error/ErrorCodeCatalog.js";
-import { createError } from "../../error/ErrorFactoryCreate.js";
-import type { JsonValue } from "../../type/TypeJsonValue.js";
+import type { ControlErrorBody } from "../../protocol/Error.js";
+import { toControlErrorBody } from "../../protocol/Error.js";
+import { errorCodes } from "../../protocol/Error.js";
+import { createError } from "../../protocol/Error.js";
+import type { JsonValue } from "../../protocol/JsonValue.js";
 import {
     Codec,
     createTransportId,

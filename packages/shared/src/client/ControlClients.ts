@@ -1,97 +1,89 @@
-import type {
-    ArtifactShareInput,
-    ArtifactShareResult,
-    ArtifactShareRevokeResult,
-    ArtifactStoredImageResult,
-    ArtifactTransferRecord,
-    ArtifactTransferResult,
-    ArtifactTransferStartInput,
-    ArtifactViewImageInput,
-    ArtifactViewImageResult,
-} from "../dto/artifact/DtoArtifact.js";
+import type { ArtifactStoredImageResult, ArtifactViewImageInput, ArtifactViewImageResult } from "../protocol/artifact/Image.js";
+import type { ArtifactShareInput, ArtifactShareResult, ArtifactShareRevokeResult } from "../protocol/artifact/Share.js";
+import type { ArtifactTransferRecord, ArtifactTransferResult, ArtifactTransferStartInput } from "../protocol/artifact/Transfer.js";
 import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
     ConfigUpdateInstanceRequest,
     ConfigUpdateMcpRequest,
     ConfigUpdateWebRequest,
-} from "../config/ConfigModel.js";
+} from "../protocol/control/config/model/ConfigEdit.js";
 import type {
     ContextMessageListInput,
     ContextMessageQueueInput,
     ContextMessageRecord,
-} from "../dto/context/DtoContextMessage.js";
+} from "../protocol/interaction/context/ContextMessage.js";
 import type {
     ConversationEntry,
     ConversationListInput,
     ConversationPreferencesPatch,
     ConversationPreferencesSnapshot,
-} from "../dto/context/DtoConversation.js";
-import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
+} from "../protocol/interaction/context/Conversation.js";
+import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
 import {
     CONTROL_PROTOCOL_VERSION,
     type ControlClientKind,
     type ControlProtocolHelloResponse,
-} from "../dto/DtoControlProtocol.js";
+} from "../protocol/control/ControlProtocol.js";
 import type {
     DebugPatchLoadRequest,
     DebugPatchSummary,
     DebugTargetSummary,
-} from "../dto/DtoDebug.js";
+} from "../protocol/control/Debug.js";
 import type {
     ExtensionRemoveResult,
     ExtensionRuntimeRecord,
-} from "../dto/DtoExtension.js";
+} from "../protocol/control/extension/Extension.js";
 import type {
     CliCommandDescriptor,
     CliCommandWireResult
-} from "../dto/cli/DtoCliCommand.js";
-import type { WebApplicationDescriptor } from "../dto/web/DtoWebApplication.js";
+} from "../protocol/control/extension/CliCommand.js";
+import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
 import type {
     InstanceCreateDraft,
     InstanceCreateResult,
     InstanceCreateSchema,
     InstanceCreateSummary,
-} from "../dto/instance/DtoInstanceCreate.js";
-import type { InstanceLogEntry } from "../dto/instance/DtoInstanceLog.js";
+} from "../protocol/instance/Create.js";
+import type { InstanceLogEntry } from "../protocol/instance/activity/Log.js";
 import type {
     InstanceListEntry,
     InstanceRuntimeEnvelope,
-} from "../dto/instance/DtoInstanceRuntime.js";
-import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
-import type { GoalRpcEnvelope } from "../dto/instance/DtoGoal.js";
-import type { TodoReadInput, TodoRpcEnvelope } from "../dto/instance/DtoTodo.js";
+} from "../protocol/instance/activity/State.js";
+import type { InstanceSnapshot } from "../protocol/instance/activity/State.js";
+import type { GoalRpcEnvelope } from "../protocol/instance/task/Goal.js";
+import type { TodoReadInput, TodoRpcEnvelope } from "../protocol/instance/task/Todo.js";
 import type {
     OAuthApprovalDecision,
     OAuthApprovalRequest,
-} from "../dto/oauth/DtoOAuthApproval.js";
-import type { OperationalOverview } from "../dto/overview/DtoOperationalOverview.js";
-import type { ReverseDeviceCodeResult } from "../dto/reverse/DtoReverseConnection.js";
+} from "../protocol/interaction/OAuth.js";
+import type { OperationalOverview } from "../protocol/control/Overview.js";
+import type { ReverseDeviceCodeResult } from "../protocol/instance/Connection.js";
 import type {
     TerminalAttachInput,
     TerminalOpenInput,
     TerminalOpenResult,
     TerminalSessionDescriptor,
     TerminalVersionedIdentity,
-} from "../dto/terminal/DtoTerminal.js";
+} from "../protocol/interaction/Terminal.js";
 import type {
     ApprovalDecision,
     ApprovalRequest,
-} from "../dto/tool/DtoToolApproval.js";
+} from "../protocol/tool/Approval.js";
 import type {
     ToolCallQuery,
     ToolCallRecord,
-} from "../dto/tool/DtoToolCallRecord.js";
-import type { JsonValue } from "../type/TypeJsonValue.js";
-import { asInstanceName } from "../type/identity/TypeIdentityInstanceName.js";
+} from "../protocol/tool/Call.js";
+import type { JsonValue } from "../protocol/JsonValue.js";
+import { asInstanceName } from "../protocol/instance/Identity.js";
 import {
     controlClientModule,
     instanceClientModule,
     type ClientConnection,
     type OpenedClientStream,
 } from "../transport/ClientConnection.js";
-import { InstanceEventStream } from "./InstanceEventStream.js";
-import { getRequestCanceller } from "./RequestTimeout.js";
+import { InstanceEventStream } from "./connection/InstanceEventStream.js";
+import { getRequestCanceller } from "./connection/RequestTimeout.js";
 
 export interface ControlServiceStatus {
     instanceCount: number;
@@ -263,7 +255,7 @@ export interface ControlClients {
         getApproval(instance: string, approvalId: string): Promise<ApprovalRequest>;
         listApprovals(instance: string, options?: { pendingOnly?: boolean }): Promise<ApprovalRequest[]>;
         listCalls(instance: string, query?: ToolCallQuery): Promise<ToolCallRecord[]>;
-        openSession(instance: string, workspace: string): Promise<import("../dto/tool/DtoToolDefinition.js").ToolSessionOpenResult>;
+        openSession(instance: string, workspace: string): Promise<import("../protocol/tool/Definition.js").ToolSessionOpenResult>;
     };
     web: {
         applications(): Promise<WebApplicationDescriptor[]>;

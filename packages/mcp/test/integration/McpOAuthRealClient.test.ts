@@ -19,7 +19,7 @@ import type {
     OAuthDiscoveryState,
     OAuthTokens
 } from "@modelcontextprotocol/client";
-import { asInstanceName, asWorkspacePath, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
+import { asInstanceName, type JsonValue, type ToolCallContext } from "@portable-devshell/shared";
 import { WorkerBinary, WorkerInstanceFactory, WorkerTransportDriverLocal } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";

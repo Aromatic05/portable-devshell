@@ -1,36 +1,37 @@
-export { ControlReadModel, createInitialControlReadModelState } from "./read-model/ControlReadModel.js";
+export { ControlReadModel } from "./read-model/ControlReadModel.js";
+export { createInitialControlReadModelState } from "./read-model/ControlReadState.js";
 export { ControlRefreshScheduler } from "./read-model/ControlRefreshScheduler.js";
 export type { ControlRefreshKind, ControlRefreshSchedulerOptions } from "./read-model/ControlRefreshScheduler.js";
+export type { ControlReadModelOptions } from "./read-model/ControlReadModel.js";
 export type {
     ControlGlobalReadKey,
     ControlInstanceReadKey,
     ControlInstanceReadState,
     ControlReadFailure,
     ControlReadModelLoadOptions,
-    ControlReadModelOptions,
     ControlReadModelState
-} from "./read-model/ControlReadModel.js";
+} from "./read-model/ControlReadState.js";
 export { createControlClients, readInstanceSnapshot } from "./client/ControlClients.js";
 export { ControlCommands } from "./client/ControlCommands.js";
 export type { ControlCommandsOptions } from "./client/ControlCommands.js";
 export { createPersistentControlClients } from "./client/ControlClientSession.js";
 export type { PersistentControlClients, PersistentControlClientOptions } from "./client/ControlClientSession.js";
-export { RequestTimeoutError, withRequestTimeout } from "./client/RequestTimeout.js";
+export { RequestTimeoutError, withRequestTimeout } from "./client/connection/RequestTimeout.js";
 export type {
     ControlClients,
     ControlServiceStatus,
     McpRuntimeStatus,
     RuntimeStartOptions
 } from "./client/ControlClients.js";
-export type { CliCommandDescriptor, CliCommandWireResult } from "./dto/cli/DtoCliCommand.js";
-export type { WebApplicationDescriptor } from "./dto/web/DtoWebApplication.js";
-export { InstanceEventStream, readInstanceEvent } from "./client/InstanceEventStream.js";
+export type { CliCommandDescriptor, CliCommandWireResult } from "./protocol/control/extension/CliCommand.js";
+export type { WebApplicationDescriptor } from "./protocol/control/extension/WebApplication.js";
+export { InstanceEventStream, readInstanceEvent } from "./client/connection/InstanceEventStream.js";
 export type {
     InstanceEventStreamPort,
     InstanceStreamMessage
-} from "./client/InstanceEventStream.js";
-export { createError, errorMessage, toControlError } from "./error/ErrorFactoryCreate.js";
-export type { ControlErrorBody } from "./error/ErrorBodyControl.js";
+} from "./client/connection/InstanceEventStream.js";
+export { createError, errorMessage, toControlError } from "./protocol/Error.js";
+export type { ControlErrorBody } from "./protocol/Error.js";
 export {
     ClientConnection,
     ClientStream,
@@ -58,62 +59,62 @@ export {
     CONTROL_WEB_SESSION_PATH,
     controlRemoteRpcPath,
     controlWebBasePath
-} from "./dto/DtoControlProtocol.js";
+} from "./protocol/control/ControlProtocol.js";
 export type {
     ControlClientKind,
     ControlProtocolCapability,
     ControlProtocolHelloRequest,
     ControlProtocolHelloResponse
-} from "./dto/DtoControlProtocol.js";
+} from "./protocol/control/ControlProtocol.js";
 export type {
     ApprovalDecisionValue,
     ApprovalRequest
-} from "./dto/tool/DtoToolApproval.js";
-export type { ArtifactStoredImageResult } from "./dto/artifact/DtoArtifact.js";
+} from "./protocol/tool/Approval.js";
+export type { ArtifactStoredImageResult } from "./protocol/artifact/Image.js";
 export type {
     ToolCallQuery,
     ToolCallRecord,
     ToolCallSource,
     ToolCallStatus
-} from "./dto/tool/DtoToolCallRecord.js";
+} from "./protocol/tool/Call.js";
 export type {
     ContextMessageDirective,
     ContextMessageQueueInput,
     ContextMessageRecord,
     ContextMessageStatus
-} from "./dto/context/DtoContextMessage.js";
-export { parseContextMessageDirective } from "./dto/context/DtoContextMessage.js";
+} from "./protocol/interaction/context/ContextMessage.js";
+export { parseContextMessageDirective } from "./protocol/interaction/context/ContextMessage.js";
 export {
     CONVERSATION_PREFERENCES_VERSION,
     createEmptyConversationPreferences,
-} from "./dto/context/DtoConversation.js";
+} from "./protocol/interaction/context/Conversation.js";
 export type {
     ConversationEntry,
     ConversationEntryKind,
     ConversationListInput,
     ConversationPreferencesPatch,
     ConversationPreferencesSnapshot,
-} from "./dto/context/DtoConversation.js";
+} from "./protocol/interaction/context/Conversation.js";
 export type {
     McpContextRecord,
     McpContextStatus
-} from "./dto/context/DtoContextRecord.js";
-export type { InstanceEvent } from "./dto/instance/DtoInstanceEvent.js";
+} from "./protocol/interaction/context/ContextRecord.js";
+export type { InstanceEvent } from "./protocol/instance/activity/Event.js";
 export type {
     InstanceListEntry,
     InstanceRuntimeEnvelope
-} from "./dto/instance/DtoInstanceRuntime.js";
-export type { InstanceLogEntry } from "./dto/instance/DtoInstanceLog.js";
-export type { InstanceSnapshot } from "./dto/instance/DtoInstanceSnapshot.js";
+} from "./protocol/instance/activity/State.js";
+export type { InstanceLogEntry } from "./protocol/instance/activity/Log.js";
+export type { InstanceSnapshot } from "./protocol/instance/activity/State.js";
 export type {
     TodoReadResult,
     TodoRpcEnvelope
-} from "./dto/instance/DtoTodo.js";
-export type { WaitKind, WaitRecord, WaitStatus } from "./dto/instance/DtoWait.js";
+} from "./protocol/instance/task/Todo.js";
+export type { WaitKind, WaitRecord, WaitStatus } from "./protocol/instance/task/Wait.js";
 export type {
     OAuthApprovalDecision,
     OAuthApprovalRequest
-} from "./dto/oauth/DtoOAuthApproval.js";
+} from "./protocol/interaction/OAuth.js";
 export type {
     OperationalAlertSeverity,
     OperationalHealth,
@@ -126,10 +127,10 @@ export type {
     OperationalOverviewSystem,
     OperationalOverviewTodo,
     OperationalOverviewWorker
-} from "./dto/overview/DtoOperationalOverview.js";
-export { asInstanceName } from "./type/identity/TypeIdentityInstanceName.js";
-export type { InstanceName } from "./type/identity/TypeIdentityInstanceName.js";
-export type { JsonValue } from "./type/TypeJsonValue.js";
+} from "./protocol/control/Overview.js";
+export { asInstanceName } from "./protocol/instance/Identity.js";
+export type { InstanceName } from "./protocol/instance/Identity.js";
+export type { JsonValue } from "./protocol/JsonValue.js";
 
 export type {
     TerminalAttachInput,
@@ -141,7 +142,9 @@ export type {
     TerminalSessionState,
     TerminalStreamCommandIdentity,
     TerminalVersionedIdentity
-} from "./dto/terminal/DtoTerminal.js";
+} from "./protocol/interaction/Terminal.js";
 
-export { compactContextId, formatBytes, formatDuration, formatJsonSummary, formatJsonValue, formatPercent, formatRelativeTime, humanConversationTitle, jsonDetailLimits, jsonSearchLimits, parseJsonFallback, projectTodoTaskSummaries, resolveToolOutput, toolCallOutcome, toolCallOutput, workspaceFolderName } from "./presentation/ControlPresentation.js";
-export type { JsonFormatLimits } from "./presentation/ControlPresentation.js";
+export { compactContextId, formatRelativeTime, humanConversationTitle, workspaceFolderName } from "./presentation/ContextPresentation.js";
+export { formatBytes, formatDuration, formatJsonSummary, formatJsonValue, formatPercent, jsonDetailLimits, jsonSearchLimits, parseJsonFallback } from "./presentation/ValuePresentation.js";
+export type { JsonFormatLimits } from "./presentation/ValuePresentation.js";
+export { projectTodoTaskSummaries, resolveToolOutput, toolCallOutcome, toolCallOutput } from "./presentation/ActivityPresentation.js";

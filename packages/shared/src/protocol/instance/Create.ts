@@ -1,0 +1,154 @@
+import type { ConfigInstanceDraft } from "../control/config/model/ConfigEdit.js";
+import type {
+    ControlInstanceLogsConfig,
+    ControlInstanceToolsConfig,
+    ControlMcpAuthMode,
+    ControlMcpContextMode,
+    ControlMcpOAuth2Config,
+    ControlProviderKind,
+    ControlSecurityMode,
+} from "../control/config/model/ControlConfig.js";
+import type { ApprovalPolicy } from "../tool/Approval.js";
+import type { InstanceSnapshot } from "./activity/State.js";
+
+export type InstanceContainerMode =
+    | "preset"
+    | "dockerfile"
+    | "compose"
+    | "existingImage"
+    | "existingStoppedContainer";
+
+export type InstanceContainerMountMode = "ro" | "rw";
+export type InstanceContainerMountSelinuxMode = "private" | "shared";
+
+export interface InstanceContainerMountConfig {
+    mode: InstanceContainerMountMode;
+    selinux?: InstanceContainerMountSelinuxMode;
+    source: string;
+    target: string;
+}
+
+export interface InstanceContainerPresetSchema {
+    image: string;
+    preset: string;
+}
+
+export interface InstanceContainerPresetConfig {
+    containerName: string;
+    env?: Record<string, string>;
+    image: string;
+    mode: "preset";
+    mounts?: InstanceContainerMountConfig[];
+    network?: string;
+    preset: string;
+    user?: string;
+}
+
+export interface InstanceContainerDockerfileConfig {
+    build: {
+        context: string;
+        dockerfile?: string;
+        tag?: string;
+    };
+    containerName: string;
+    env?: Record<string, string>;
+    mode: "dockerfile";
+    mounts?: InstanceContainerMountConfig[];
+    network?: string;
+    user?: string;
+}
+
+export interface InstanceContainerComposeConfig {
+    compose: {
+        file: string;
+        projectName?: string;
+        service: string;
+    };
+    mode: "compose";
+}
+
+export interface InstanceContainerExistingImageConfig {
+    containerName: string;
+    env?: Record<string, string>;
+    image: string;
+    mode: "existingImage";
+    mounts?: InstanceContainerMountConfig[];
+    network?: string;
+    user?: string;
+}
+
+export interface InstanceContainerExistingStoppedContainerConfig {
+    adoptLifecycle?: boolean;
+    containerName: string;
+    mode: "existingStoppedContainer";
+}
+
+export type InstanceContainerConfig =
+    | InstanceContainerPresetConfig
+    | InstanceContainerDockerfileConfig
+    | InstanceContainerComposeConfig
+    | InstanceContainerExistingImageConfig
+    | InstanceContainerExistingStoppedContainerConfig;
+
+export type InstanceCreateProvider = ControlProviderKind;
+
+export interface InstanceCreateSchema {
+    container: {
+        defaultMode: InstanceContainerMode;
+        modes: readonly [
+            "preset",
+            "dockerfile",
+            "compose",
+            "existingImage",
+            "existingStoppedContainer"
+        ];
+        presets: readonly InstanceContainerPresetSchema[];
+    };
+    providers: readonly InstanceCreateProvider[];
+    defaultProvider: InstanceCreateProvider;
+    defaultEnabled: boolean;
+    defaultMcpContextMode?: ControlMcpContextMode;
+    defaultMcpEnabled: boolean;
+    defaultModelExtensions: readonly string[];
+    defaultSecurityMode: ControlSecurityMode;
+}
+
+export type InstanceCreateDraft = ConfigInstanceDraft;
+
+export interface InstanceCreateSummary {
+    approvalPolicy?: ApprovalPolicy;
+    container?: InstanceContainerConfig;
+    dockerBinary?: string;
+    enabled: boolean;
+    env?: Record<string, string>;
+    extensions: {
+        model: string[];
+    };
+    logs?: ControlInstanceLogsConfig;
+    mcp: {
+        auth: {
+            mode: ControlMcpAuthMode;
+            oauth2?: ControlMcpOAuth2Config;
+        };
+        contextMode?: ControlMcpContextMode;
+        enabled: boolean;
+        path: string;
+    };
+    name: string;
+    podmanBinary?: string;
+    provider: InstanceCreateProvider;
+    security: {
+        mode: ControlSecurityMode;
+    };
+    ssh?: {
+        command?: string;
+    };
+    tools?: ControlInstanceToolsConfig;
+}
+
+export interface InstanceCreateResult {
+    enabled: boolean;
+    mcpPath?: string;
+    name: string;
+    snapshot?: InstanceSnapshot;
+}

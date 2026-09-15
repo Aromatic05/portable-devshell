@@ -1,11 +1,11 @@
-import type { ContextMessageRecord } from "../dto/context/DtoContextMessage.js";
-import type { McpContextRecord } from "../dto/context/DtoContextRecord.js";
-import type { InstanceSnapshot } from "../dto/instance/DtoInstanceSnapshot.js";
-import type { OAuthApprovalDecision, OAuthApprovalRequest } from "../dto/oauth/DtoOAuthApproval.js";
-import type { ApprovalDecision, ApprovalRequest } from "../dto/tool/DtoToolApproval.js";
+import type { ContextMessageRecord } from "../protocol/interaction/context/ContextMessage.js";
+import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
+import type { InstanceSnapshot } from "../protocol/instance/activity/State.js";
+import type { OAuthApprovalDecision, OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
+import type { ApprovalDecision, ApprovalRequest } from "../protocol/tool/Approval.js";
 import type { ControlReadModel } from "../read-model/ControlReadModel.js";
 import type { ControlClients, RuntimeStartOptions } from "./ControlClients.js";
-import { withRequestTimeout } from "./RequestTimeout.js";
+import { withRequestTimeout } from "./connection/RequestTimeout.js";
 
 export interface ControlCommandsOptions {
     clients: ControlClients;

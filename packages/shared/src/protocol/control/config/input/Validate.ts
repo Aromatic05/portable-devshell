@@ -1,0 +1,265 @@
+import { configInputError } from "../ConfigIssue.js";
+import { minimumAuditStorageBytes } from "../model/ConfigDefaults.js";
+import type {
+    ControlConfig,
+    ControlInstanceAlertsConfig,
+    ControlInstanceConfig,
+    ControlToolSchedulerConfig,
+} from "../model/ControlConfig.js";
+
+export function validateConfigSemantics(config: ControlConfig): ControlConfig {
+    const names = new Set<string>();
+
+    for (const [index, instance] of config.instances.entries()) {
+        validateInstance(instance, index);
+        if (names.has(instance.name)) {
+            throw configInputError(
+                "semantic",
+                ["instances", index, "name"],
+                "config.instance.duplicateName",
+                `duplicates instance ${instance.name}`
+            );
+        }
+        names.add(instance.name);
+    }
+
+    if (config.instances.some((instance) => instance.provider === "reverse")) {
+        if (!config.mcp.enabled) {
+            throw configInputError(
+                "semantic",
+                ["mcp", "enabled"],
+                "config.reverse.mcpRequired",
+                "must be true when reverse instances are configured"
+            );
+        }
+        if (config.mcp.publicBaseUrl === undefined) {
+            throw configInputError(
+                "semantic",
+                ["mcp", "publicBaseUrl"],
+                "config.reverse.publicBaseUrlRequired",
+                "is required when reverse instances are configured"
+            );
+        }
+    }
+
+    validateGlobalMcp(config);
+    validateWeb(config);
+    return config;
+}
+
+function validateInstance(instance: ControlInstanceConfig, index: number): void {
+    const base = ["instances", index] as const;
+    if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+$/u.test(instance.name)) {
+        throw configInputError(
+            "semantic",
+            [...base, "name"],
+            "config.instance.nameInvalid",
+            "must contain at least one '-' and only letters, digits, and '-'"
+        );
+    }
+
+    const expectedPath = `/${instance.name}/mcp`;
+    if (instance.mcp.path !== expectedPath) {
+        throw configInputError("semantic", [...base, "mcp", "path"], "config.instance.mcpPath", `must be ${expectedPath}`);
+    }
+
+    validateAlerts(instance.alerts, base);
+    validateLogs(instance, base);
+    validateScheduler(instance.tools?.scheduler, base);
+    validateApprovalPolicy(instance, base);
+    validateContainer(instance, base);
+    validateModelExtensions(instance, base);
+    validateMcpAuth(instance, base);
+}
+
+function validateModelExtensions(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    for (const [index, extensionId] of instance.extensions.model.entries()) {
+        if (!/^[a-z][a-z0-9-]*$/u.test(extensionId)) {
+            throw configInputError(
+                "semantic",
+                [...base, "extensions", "model", index],
+                "config.instance.modelExtensionInvalid",
+                "must match [a-z][a-z0-9-]*"
+            );
+        }
+    }
+}
+
+function validateAlerts(alerts: ControlInstanceAlertsConfig | undefined, base: readonly (string | number)[]): void {
+    if (alerts === undefined) return;
+    if (alerts.intervalMs !== undefined && (!Number.isSafeInteger(alerts.intervalMs) || alerts.intervalMs < 1_000)) {
+        throw configInputError(
+            "semantic",
+            [...base, "alerts", "intervalMs"],
+            "config.alerts.intervalMs",
+            "must be an integer of at least 1000"
+        );
+    }
+    nonNegativeInteger(alerts.maxUncommittedChanges, [...base, "alerts", "maxUncommittedChanges"]);
+    positiveInteger(alerts.workerMemoryBytes, [...base, "alerts", "workerMemoryBytes"]);
+    for (const [index, script] of (alerts.scripts ?? []).entries()) {
+        if (script.id.trim().length === 0 || script.command.length === 0 || script.command.some((part) => part.trim().length === 0)) {
+            throw configInputError(
+                "semantic",
+                [...base, "alerts", "scripts", index],
+                "config.alerts.scriptInvalid",
+                "must contain a non-empty id and command"
+            );
+        }
+        positiveInteger(script.timeoutMs, [...base, "alerts", "scripts", index, "timeoutMs"]);
+    }
+}
+
+function validateGlobalMcp(config: ControlConfig): void {
+    if (!Number.isSafeInteger(config.mcp.listenPort) || config.mcp.listenPort < 0 || config.mcp.listenPort > 65535) {
+        throw configInputError(
+            "semantic",
+            ["mcp", "listenPort"],
+            "config.mcp.listenPort",
+            "must be an integer between 0 and 65535"
+        );
+    }
+
+    if (config.mcp.publicBaseUrl !== undefined) {
+        parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
+    }
+}
+
+function validateWeb(config: ControlConfig): void {
+    if (!Number.isSafeInteger(config.web.listenPort) || config.web.listenPort < 0 || config.web.listenPort > 65535) {
+        throw configInputError(
+            "semantic",
+            ["web", "listenPort"],
+            "config.web.listenPort",
+            "must be an integer between 0 and 65535"
+        );
+    }
+    parseUrl(config.web.publicBaseUrl, ["web", "publicBaseUrl"]);
+
+    const auth = config.web.auth;
+    if (auth.mode === "token" && Buffer.byteLength(auth.token, "utf8") < 32) {
+        throw configInputError(
+            "semantic",
+            ["web", "auth", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes"
+        );
+    }
+    if (auth.mode === "oauth2" && auth.oauth2.documentationUrl !== undefined) {
+        parseUrl(auth.oauth2.documentationUrl, ["web", "auth", "oauth2", "documentationUrl"]);
+    }
+}
+
+function validateMcpAuth(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    if (instance.mcp.contextMode === "openai-session" && instance.mcp.auth.mode === "token") {
+        throw configInputError(
+            "semantic",
+            [...base, "mcp", "contextMode"],
+            "config.instance.mcpContextAuth",
+            "openai-session requires MCP auth none or oauth2; ChatGPT does not support custom token credentials"
+        );
+    }
+    if (instance.mcp.auth.mode === "oauth2") {
+        const oauth2 = instance.mcp.auth.oauth2;
+        if (oauth2.documentationUrl !== undefined) {
+            parseUrl(oauth2.documentationUrl, [...base, "mcp", "auth", "oauth2", "documentationUrl"]);
+        }
+    }
+    if (instance.mcp.auth.mode === "token" && Buffer.byteLength(instance.mcp.auth.token, "utf8") < 32) {
+        throw configInputError(
+            "semantic",
+            [...base, "mcp", "auth", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes"
+        );
+    }
+}
+
+function validateLogs(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    const logs = instance.logs;
+    if (logs === undefined) return;
+    positiveInteger(logs.eventBufferSize, [...base, "logs", "eventBufferSize"]);
+    positiveInteger(logs.retentionDays, [...base, "logs", "retentionDays"]);
+    if (logs.maxBytes !== undefined && (!Number.isSafeInteger(logs.maxBytes) || logs.maxBytes < minimumAuditStorageBytes)) {
+        throw configInputError(
+            "semantic",
+            [...base, "logs", "maxBytes"],
+            "config.logs.maxBytes",
+            `must be an integer of at least ${minimumAuditStorageBytes}`
+        );
+    }
+}
+
+function validateScheduler(scheduler: ControlToolSchedulerConfig | undefined, base: readonly (string | number)[]): void {
+    if (scheduler === undefined) return;
+    positiveInteger(scheduler.maxRunning, [...base, "tools", "scheduler", "maxRunning"]);
+    nonNegativeInteger(scheduler.queueDepth, [...base, "tools", "scheduler", "queueDepth"]);
+    positiveInteger(scheduler.queueTimeoutMs, [...base, "tools", "scheduler", "queueTimeoutMs"]);
+    positiveInteger(scheduler.maxRunningPerSession, [...base, "tools", "scheduler", "maxRunningPerSession"]);
+    nonNegativeInteger(scheduler.queueDepthPerSession, [...base, "tools", "scheduler", "queueDepthPerSession"]);
+    for (const [toolName, limits] of Object.entries(scheduler.byTool ?? {})) {
+        positiveInteger(limits.maxRunning, [...base, "tools", "scheduler", "byTool", toolName, "maxRunning"]);
+        nonNegativeInteger(limits.queueDepth, [...base, "tools", "scheduler", "byTool", toolName, "queueDepth"]);
+    }
+}
+
+function validateApprovalPolicy(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    for (const [index, rule] of (instance.approvalPolicy?.rules ?? []).entries()) {
+        if (rule.toolName !== undefined && rule.toolName.trim().length === 0) {
+            throw configInputError(
+                "semantic",
+                [...base, "approvalPolicy", "rules", index, "toolName"],
+                "config.approval.toolName",
+                "must not be empty"
+            );
+        }
+    }
+}
+
+function validateContainer(instance: ControlInstanceConfig, base: readonly (string | number)[]): void {
+    const container = instance.container;
+    if (container === undefined) return;
+    if (container.mode === "preset" && container.preset.length === 0) {
+        throw configInputError("semantic", [...base, "container", "preset"], "config.container.preset", "must not be empty");
+    }
+    if ("env" in container) {
+        for (const [key, value] of Object.entries(container.env ?? {})) {
+            if (key.length === 0 || value.length === 0) {
+                throw configInputError(
+                    "semantic",
+                    [...base, "container", "env", key],
+                    "config.container.env",
+                    "key and value must not be empty"
+                );
+            }
+        }
+    }
+    for (const [index, mount] of ("mounts" in container ? container.mounts ?? [] : []).entries()) {
+        if (mount.source.length === 0) {
+            throw configInputError("semantic", [...base, "container", "mounts", index, "source"], "config.mount.source", "must not be empty");
+        }
+        if (mount.target.length === 0) {
+            throw configInputError("semantic", [...base, "container", "mounts", index, "target"], "config.mount.target", "must not be empty");
+        }
+    }
+}
+
+function positiveInteger(value: number | undefined, path: readonly (string | number)[]): void {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
+        throw configInputError("semantic", path, "config.number.positive", "must be a positive integer");
+    }
+}
+
+function nonNegativeInteger(value: number | undefined, path: readonly (string | number)[]): void {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+        throw configInputError("semantic", path, "config.number.nonNegative", "must be a non-negative integer");
+    }
+}
+
+function parseUrl(value: string, path: readonly (string | number)[]): URL {
+    try {
+        return new URL(value);
+    } catch {
+        throw configInputError("semantic", path, "config.url.invalid", "must be a valid URL");
+    }
+}

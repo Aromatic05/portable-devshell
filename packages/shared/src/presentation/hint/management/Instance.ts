@@ -1,0 +1,50 @@
+import type { ControlErrorBody } from "../../../protocol/Error.js";
+import { asRecord, asString } from "../common/JsonRead.js";
+import { errorHint, type ToolDiagnosticHint } from "../ToolDiagnosticHint.js";
+
+export function instanceErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
+    switch (body.code) {
+        case "control.instanceAlreadyExists":
+            return [errorHint(
+                "control.instanceAlreadyExists",
+                "Reuse it or choose another name explicitly."
+            )];
+        case "control.instanceNotFound":
+            return [errorHint(
+                "control.instanceNotFound",
+                "Run devshell instance list for a valid name."
+            )];
+        case "instance.conflict":
+            return [errorHint(
+                "instance.conflict",
+                "Run devshell instance status before retrying."
+            )];
+        case "control.configInvalid":
+            return [errorHint(
+                "control.configInvalid",
+                configInvalidDetail(body)
+            )];
+        case "control.configValidationFailed":
+            return [errorHint(
+                "control.configValidationFailed",
+                "Fix the reported configuration fields."
+            )];
+        default:
+            return [];
+    }
+}
+
+function configInvalidDetail(body: ControlErrorBody): string {
+    const details = asRecord(body.details);
+    const fieldPath = asString(details?.fieldPath);
+    const issueCode = asString(details?.issueCode);
+    const fallback = "Fix the invalid configuration field.";
+    if (fieldPath === undefined && issueCode === undefined) {
+        return fallback;
+    }
+    const where = [
+        ...(fieldPath === undefined ? [] : [`field '${fieldPath}'`]),
+        ...(issueCode === undefined ? [] : [`(${issueCode})`])
+    ].join(" ");
+    return `Fix invalid configuration ${where}.`;
+}

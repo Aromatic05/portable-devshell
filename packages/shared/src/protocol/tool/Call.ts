@@ -1,0 +1,71 @@
+import type { InstanceName } from "../instance/Identity.js";
+import type { JsonValue } from "../JsonValue.js";
+
+export type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "extension";
+
+export interface ToolCallAssociation {
+    taskId: string;
+    todoItemId: string;
+}
+
+export interface ToolCallContext {
+    requestId?: string;
+    operationId?: string;
+    ctxId?: string;
+    extensionId?: string;
+    workspace?: string;
+    source: ToolCallSource;
+}
+
+export interface ToolCallProvenance {
+    explanation?: string;
+    purpose?: string;
+}
+
+export type ToolCallStatus = "queued" | "pendingApproval" | "running" | "completed" | "failed" | "denied" | "expired" | "queueTimeout" | "cancelled";
+
+export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
+
+export interface ToolCallQuery {
+    after?: string;
+    before?: string;
+    callIds?: string[];
+    ctxId?: string;
+    extensionId?: string;
+    includeInput?: boolean;
+    includeOutput?: boolean;
+    limit?: number;
+    maxBytes?: number;
+    source?: ToolCallSource;
+    status?: ToolCallStatus;
+    toolName?: string;
+}
+
+export interface ToolCallRecord extends ToolCallProvenance {
+    callId: string;
+    completedAt?: string;
+    decision?: ToolCallApprovalDecision;
+    error?: string;
+    exitCode?: number | null;
+    inputSummary: string;
+    input?: JsonValue;
+    output?: JsonValue;
+    instance: InstanceName;
+    approvalId?: string;
+    requestId?: string;
+    ctxId?: string;
+    extensionId?: string;
+    source: ToolCallSource;
+    taskId?: string;
+    todoItemId?: string;
+    startedAt: string;
+    status: ToolCallStatus;
+    stderrBytes?: number;
+    stdoutBytes?: number;
+    termSignal?: number;
+    termination?: ToolTermination;
+    toolName: string;
+    workspace?: string;
+}
+
+export type ToolTermination = "exited" | "signaled" | "timeout";

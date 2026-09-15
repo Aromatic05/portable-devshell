@@ -1,0 +1,816 @@
+import type {
+    ApprovalPolicy,
+    ApprovalPolicyDecision,
+    ApprovalPolicyMode,
+    ApprovalPolicySourceScope,
+} from "../../../tool/Approval.js";
+import { configInputError, type ConfigPathSegment } from "../ConfigIssue.js";
+import type {
+    ConfigBatchUpdateRequest,
+    ConfigContainerDraft,
+    ConfigDraft,
+    ConfigGlobalDraft,
+    ConfigInstanceDraft,
+    ConfigInstancePatch,
+    ConfigInstanceTargetRequest,
+    ConfigMcpAuthDraft,
+    ConfigMcpPatch,
+    ConfigPatch,
+    ConfigUpdateInstanceRequest,
+    ConfigUpdateMcpRequest,
+    ConfigUpdateWebRequest,
+    ConfigWebOAuth2Draft,
+    ConfigWebPatch,
+} from "../model/ConfigEdit.js";
+import type {
+    ControlInstanceAlertsConfig,
+    ControlInstanceLogsConfig,
+    ControlInstanceToolsConfig,
+    ControlProviderKind,
+    ControlSecurityMode,
+    ControlToolSchedulerConfig,
+} from "../model/ControlConfig.js";
+
+const instanceKeys = [
+    "approvalPolicy",
+    "alerts",
+    "container",
+    "dockerBinary",
+    "enabled",
+    "env",
+    "extensions",
+    "logs",
+    "mcp",
+    "name",
+    "podmanBinary",
+    "provider",
+    "security",
+    "ssh",
+    "tools",
+    "workspace"
+] as const;
+
+const instancePatchKeys = instanceKeys.filter((key) => key !== "name");
+
+export function parseConfigDraft(value: unknown): ConfigDraft {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["control", "instances", "mcp", "web"], []);
+
+    return {
+        control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
+        instances:
+            record.instances === undefined
+                ? undefined
+                : readArray(record.instances, ["instances"]).map((entry, index) =>
+                      parseConfigInstanceDraft(entry, ["instances", index])
+                  ),
+        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseGlobalWebDraft(record.web, ["web"])
+    };
+}
+
+export function parseConfigGlobalDraft(value: unknown): ConfigGlobalDraft {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["control", "mcp", "web"], []);
+
+    return {
+        control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
+        mcp: record.mcp === undefined ? undefined : parseGlobalMcpDraft(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseGlobalWebDraft(record.web, ["web"])
+    };
+}
+
+export function parseConfigInstanceDraft(
+    value: unknown,
+    path: readonly ConfigPathSegment[] = []
+): ConfigInstanceDraft {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, instanceKeys, path);
+
+    return {
+        approvalPolicy:
+            record.approvalPolicy === undefined
+                ? undefined
+                : parseApprovalPolicy(record.approvalPolicy, [...path, "approvalPolicy"]),
+        alerts: record.alerts === undefined ? undefined : parseAlerts(record.alerts, [...path, "alerts"]),
+        container:
+            record.container === undefined
+                ? undefined
+                : parseContainerDraft(record.container, [...path, "container"]),
+        dockerBinary: readOptionalTrimmedString(record.dockerBinary, [...path, "dockerBinary"]),
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        env: readOptionalStringRecord(record.env, [...path, "env"]),
+        extensions:
+            record.extensions === undefined
+                ? undefined
+                : parseInstanceExtensions(record.extensions, [...path, "extensions"]),
+        logs: record.logs === undefined ? undefined : parseLogs(record.logs, [...path, "logs"]),
+        mcp: record.mcp === undefined ? undefined : parseInstanceMcpDraft(record.mcp, [...path, "mcp"]),
+        name: readRequiredTrimmedString(record.name, [...path, "name"]),
+        podmanBinary: readOptionalTrimmedString(record.podmanBinary, [...path, "podmanBinary"]),
+        provider: readEnum(record.provider, [...path, "provider"], ["local", "ssh", "docker", "podman", "reverse"]),
+        security:
+            record.security === undefined
+                ? undefined
+                : parseSecurityDraft(record.security, [...path, "security"]),
+        ssh: record.ssh === undefined ? undefined : parseSshDraft(record.ssh, [...path, "ssh"]),
+        tools: record.tools === undefined ? undefined : parseTools(record.tools, [...path, "tools"]),
+        workspace: record.workspace === undefined ? undefined : parseWorkspaceDraft(record.workspace, [...path, "workspace"])
+    };
+}
+
+export function parseConfigPatch(value: unknown): ConfigPatch {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["control", "mcp", "web"], []);
+
+    return {
+        control: record.control === undefined ? undefined : parseControlDraft(record.control, ["control"]),
+        mcp: record.mcp === undefined ? undefined : parseConfigMcpPatch(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseConfigWebPatch(record.web, ["web"])
+    };
+}
+
+export function parseConfigInstancePatch(
+    value: unknown,
+    path: readonly ConfigPathSegment[] = []
+): ConfigInstancePatch {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, instancePatchKeys, path);
+
+    return {
+        approvalPolicy: readNullable(
+            record.approvalPolicy,
+            (entry) => parseApprovalPolicy(entry, [...path, "approvalPolicy"])
+        ),
+        alerts: readNullable(record.alerts, (entry) => parseAlerts(entry, [...path, "alerts"])),
+        container: readNullable(record.container, (entry) => parseContainerDraft(entry, [...path, "container"])),
+        dockerBinary: readNullable(record.dockerBinary, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "dockerBinary"])
+        ),
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        env: readNullable(record.env, (entry) => readStringRecord(entry, [...path, "env"])),
+        extensions:
+            record.extensions === undefined
+                ? undefined
+                : parseInstanceExtensions(record.extensions, [...path, "extensions"]),
+        logs: readNullable(record.logs, (entry) => parseLogs(entry, [...path, "logs"])),
+        mcp: record.mcp === undefined ? undefined : parseInstanceMcpPatch(record.mcp, [...path, "mcp"]),
+        podmanBinary: readNullable(record.podmanBinary, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "podmanBinary"])
+        ),
+        provider:
+            record.provider === undefined
+                ? undefined
+                : readEnum<ControlProviderKind>(record.provider, [...path, "provider"], [
+                      "local",
+                      "ssh",
+                      "docker",
+                      "podman",
+                      "reverse"
+                  ]),
+        security:
+            record.security === undefined
+                ? undefined
+                : parseSecurityDraft(record.security, [...path, "security"]),
+        ssh: readNullable(record.ssh, (entry) => parseSshDraft(entry, [...path, "ssh"])),
+        tools: readNullable(record.tools, (entry) => parseTools(entry, [...path, "tools"])),
+        workspace: record.workspace === undefined ? undefined : parseWorkspaceDraft(record.workspace, [...path, "workspace"])
+    };
+}
+
+export function parseConfigMcpPatch(
+    value: unknown,
+    path: readonly ConfigPathSegment[] = []
+): ConfigMcpPatch {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
+
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
+        listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
+        publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
+        )
+    };
+}
+
+export function parseConfigWebPatch(
+    value: unknown,
+    path: readonly ConfigPathSegment[] = []
+): ConfigWebPatch {
+    return parseGlobalWebDraft(value, path);
+}
+
+export function parseConfigUpdateInstanceRequest(value: unknown): ConfigUpdateInstanceRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["instanceName", "patch"], []);
+    return {
+        instanceName: readRequiredTrimmedString(record.instanceName, ["instanceName"]),
+        patch: parseConfigInstancePatch(record.patch, ["patch"])
+    };
+}
+
+export function parseConfigUpdateMcpRequest(value: unknown): ConfigUpdateMcpRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["patch"], []);
+    return {
+        patch: parseConfigMcpPatch(record.patch, ["patch"])
+    };
+}
+
+export function parseConfigUpdateWebRequest(value: unknown): ConfigUpdateWebRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["patch"], []);
+    return { patch: parseConfigWebPatch(record.patch, ["patch"]) };
+}
+
+export function parseConfigBatchUpdateRequest(value: unknown): ConfigBatchUpdateRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["instance", "mcp", "web"], []);
+    return {
+        instance: record.instance === undefined ? undefined : parseConfigUpdateInstanceRequest(record.instance),
+        mcp: record.mcp === undefined ? undefined : parseConfigMcpPatch(record.mcp, ["mcp"]),
+        web: record.web === undefined ? undefined : parseConfigWebPatch(record.web, ["web"])
+    };
+}
+
+export function parseConfigInstanceTargetRequest(value: unknown): ConfigInstanceTargetRequest {
+    const record = readRecord(value, []);
+    assertKnownKeys(record, ["instanceName"], []);
+    return {
+        instanceName: readRequiredTrimmedString(record.instanceName, ["instanceName"])
+    };
+}
+
+function parseControlDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigGlobalDraft["control"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["artifactDirectTransfer", "logLevel"], path);
+    return {
+        artifactDirectTransfer: readOptionalBoolean(record.artifactDirectTransfer, [...path, "artifactDirectTransfer"]),
+        logLevel: readOptionalTrimmedString(record.logLevel, [...path, "logLevel"])
+    };
+}
+
+function parseGlobalWebDraft(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigGlobalDraft["web"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(
+        record,
+        ["auth", "enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl", "token"],
+        path
+    );
+    return {
+        ...parseWebAuth(record, path),
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
+        listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
+        publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
+        )
+    };
+}
+
+function parseWebAuth(
+    record: Record<string, unknown>,
+    path: readonly ConfigPathSegment[]
+): Pick<NonNullable<ConfigGlobalDraft["web"]>, "auth" | "oauth2" | "token"> {
+    const auth =
+        record.auth === undefined
+            ? undefined
+            : readEnum(record.auth, [...path, "auth"], ["none", "oauth2", "token"]);
+    if (auth === "none") {
+        if (record.oauth2 !== undefined || record.token !== undefined) {
+            throw configInputError(
+                "parse",
+                [...path, "auth"],
+                "config.auth.unexpectedParameters",
+                "must not configure oauth2 or token when auth=none"
+            );
+        }
+        return { auth };
+    }
+    if (auth === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when auth=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when auth=token");
+        }
+        return { auth, token: readRequiredTrimmedString(record.token, [...path, "token"]) };
+    }
+    if (auth === "oauth2") {
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when auth=oauth2");
+        }
+        if (record.oauth2 === undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when auth=oauth2");
+        }
+        return { auth, oauth2: parseWebOAuth2Draft(record.oauth2, [...path, "oauth2"]) };
+    }
+    if (record.oauth2 !== undefined || record.token !== undefined) {
+        throw configInputError(
+            "parse",
+            [...path, "auth"],
+            "config.auth.authRequired",
+            "is required when configuring oauth2 or token"
+        );
+    }
+    return {};
+}
+
+function parseWebOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[]): ConfigWebOAuth2Draft {
+    const oauth2 = readRecord(value, path);
+    assertKnownKeys(oauth2, ["documentationUrl", "requiredScopes", "resourceName"], path);
+    return {
+        documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "documentationUrl"]),
+        requiredScopes:
+            oauth2.requiredScopes === undefined
+                ? undefined
+                : readStringArray(oauth2.requiredScopes, [...path, "requiredScopes"]),
+        resourceName: readRequiredTrimmedString(oauth2.resourceName, [...path, "resourceName"])
+    };
+}
+
+function parseGlobalMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigGlobalDraft["mcp"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled", "listenHost", "listenPort", "publicBaseUrl"], path);
+
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        listenHost: readOptionalTrimmedString(record.listenHost, [...path, "listenHost"]),
+        listenPort: readOptionalInteger(record.listenPort, [...path, "listenPort"]),
+        publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
+            readRequiredTrimmedString(entry, [...path, "publicBaseUrl"])
+        )
+    };
+}
+
+export function parseMcpAuthDraft(value: unknown, path: readonly ConfigPathSegment[] = []): ConfigMcpAuthDraft {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["mode", "oauth2", "token"], path);
+    const mode = readEnum(record.mode, [...path, "mode"], ["none", "oauth2", "token"]);
+
+    if (mode === "none") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", `must be omitted when mode=${mode}`);
+        }
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when mode=none");
+        }
+        return { mode };
+    }
+
+    if (mode === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when mode=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when mode=token");
+        }
+        return {
+            mode,
+            token: readRequiredTrimmedString(record.token, [...path, "token"])
+        };
+    }
+
+    if (record.token !== undefined) {
+        throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when mode=oauth2");
+    }
+
+    if (record.oauth2 === undefined) {
+        throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when mode=oauth2");
+    }
+
+    const oauth2 = parseMcpOAuth2Draft(record.oauth2, [...path, "oauth2"]);
+
+    return { mode, oauth2 };
+}
+
+function parseMcpOAuth2Draft(value: unknown, path: readonly ConfigPathSegment[]) {
+    const oauth2 = readRecord(value, path);
+    assertKnownKeys(
+        oauth2,
+        ["documentationUrl", "requiredScopes", "resourceName"],
+        path
+    );
+
+    return {
+            documentationUrl: readOptionalTrimmedString(oauth2.documentationUrl, [...path, "documentationUrl"]),
+            requiredScopes:
+                oauth2.requiredScopes === undefined
+                    ? undefined
+                    : readStringArray(oauth2.requiredScopes, [...path, "requiredScopes"]),
+            resourceName: readRequiredTrimmedString(oauth2.resourceName, [...path, "resourceName"])
+    };
+}
+
+function parseInstanceMcpDraft(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstanceDraft["mcp"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token"], path);
+
+    return {
+        ...parseMcpNamespaceAuth(record, path),
+        contextMode:
+            record.contextMode === undefined
+                ? undefined
+                : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        path: readOptionalTrimmedString(record.path, [...path, "path"])
+    };
+}
+
+function parseInstanceMcpPatch(value: unknown, path: readonly ConfigPathSegment[]): NonNullable<ConfigInstancePatch["mcp"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["auth", "contextMode", "enabled", "oauth2", "path", "token"], path);
+
+    return {
+        ...parseMcpNamespaceAuth(record, path),
+        contextMode:
+            record.contextMode === undefined
+                ? undefined
+                : readEnum(record.contextMode, [...path, "contextMode"], ["explicit", "openai-session"] as const),
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"]),
+        path: readNullable(record.path, (entry) => readRequiredTrimmedString(entry, [...path, "path"]))
+    };
+}
+
+function parseInstanceExtensions(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigInstanceDraft["extensions"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["model"], path);
+    return {
+        model: record.model === undefined ? undefined : readStringArray(record.model, [...path, "model"])
+    };
+}
+
+function parseWorkspaceDraft(
+    value: unknown,
+    path: readonly ConfigPathSegment[]
+): NonNullable<ConfigInstanceDraft["workspace"]> {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["enabled"], path);
+    return {
+        enabled: readOptionalBoolean(record.enabled, [...path, "enabled"])
+    };
+}
+
+function parseMcpNamespaceAuth(
+    record: Record<string, unknown>,
+    path: readonly ConfigPathSegment[]
+): Pick<NonNullable<ConfigInstanceDraft["mcp"]>, "auth" | "oauth2" | "token"> {
+    const auth = record.auth === undefined
+        ? undefined
+        : readEnum(record.auth, [...path, "auth"], ["none", "oauth2", "token"]);
+    if (auth === "none") {
+        if (record.oauth2 !== undefined || record.token !== undefined) {
+            throw configInputError("parse", [...path, "auth"], "config.auth.unexpectedParameters", "must not configure oauth2 or token when auth=none");
+        }
+        return { auth };
+    }
+    if (auth === "token") {
+        if (record.oauth2 !== undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.unexpectedOauth2", "must be omitted when auth=token");
+        }
+        if (record.token === undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.tokenRequired", "is required when auth=token");
+        }
+        return { auth, token: readRequiredTrimmedString(record.token, [...path, "token"]) };
+    }
+    if (auth === "oauth2") {
+        if (record.token !== undefined) {
+            throw configInputError("parse", [...path, "token"], "config.auth.unexpectedToken", "must be omitted when auth=oauth2");
+        }
+        if (record.oauth2 === undefined) {
+            throw configInputError("parse", [...path, "oauth2"], "config.auth.oauth2Required", "is required when auth=oauth2");
+        }
+        return { auth, oauth2: parseMcpOAuth2Draft(record.oauth2, [...path, "oauth2"]) };
+    }
+    if (record.oauth2 !== undefined || record.token !== undefined) {
+        throw configInputError("parse", [...path, "auth"], "config.auth.authRequired", "is required when configuring oauth2 or token");
+    }
+    return {};
+}
+
+function parseContainerDraft(value: unknown, path: readonly ConfigPathSegment[]): ConfigContainerDraft {
+    const record = readRecord(value, path);
+    const mode = readEnum(record.mode, [...path, "mode"], [
+        "preset",
+        "dockerfile",
+        "compose",
+        "existingImage",
+        "existingStoppedContainer"
+    ]);
+
+    switch (mode) {
+        case "preset":
+            assertKnownKeys(record, ["containerName", "env", "image", "mode", "mounts", "network", "preset", "user"], path);
+            return {
+                ...parseManagedContainer(record, path),
+                image: readOptionalTrimmedString(record.image, [...path, "image"]),
+                mode,
+                preset: readRequiredTrimmedString(record.preset, [...path, "preset"])
+            };
+        case "dockerfile": {
+            assertKnownKeys(record, ["build", "containerName", "env", "mode", "mounts", "network", "user"], path);
+            const build = readRecord(record.build, [...path, "build"]);
+            assertKnownKeys(build, ["context", "dockerfile", "tag"], [...path, "build"]);
+            return {
+                ...parseManagedContainer(record, path),
+                build: {
+                    context: readRequiredTrimmedString(build.context, [...path, "build", "context"]),
+                    dockerfile: readOptionalTrimmedString(build.dockerfile, [...path, "build", "dockerfile"]),
+                    tag: readOptionalTrimmedString(build.tag, [...path, "build", "tag"])
+                },
+                mode
+            };
+        }
+        case "compose": {
+            assertKnownKeys(record, ["compose", "mode"], path);
+            const compose = readRecord(record.compose, [...path, "compose"]);
+            assertKnownKeys(compose, ["file", "projectName", "service"], [...path, "compose"]);
+            return {
+                compose: {
+                    file: readRequiredTrimmedString(compose.file, [...path, "compose", "file"]),
+                    projectName: readOptionalTrimmedString(compose.projectName, [...path, "compose", "projectName"]),
+                    service: readRequiredTrimmedString(compose.service, [...path, "compose", "service"])
+                },
+                mode
+            };
+        }
+        case "existingImage":
+            assertKnownKeys(record, ["containerName", "env", "image", "mode", "mounts", "network", "user"], path);
+            return {
+                ...parseManagedContainer(record, path),
+                image: readRequiredTrimmedString(record.image, [...path, "image"]),
+                mode
+            };
+        case "existingStoppedContainer":
+            assertKnownKeys(record, ["adoptLifecycle", "containerName", "mode"], path);
+            return {
+                adoptLifecycle: readOptionalBoolean(record.adoptLifecycle, [...path, "adoptLifecycle"]),
+                containerName: readRequiredTrimmedString(record.containerName, [...path, "containerName"]),
+                mode
+            };
+    }
+}
+
+function parseManagedContainer(record: Record<string, unknown>, path: readonly ConfigPathSegment[]) {
+    return {
+        containerName: readOptionalTrimmedString(record.containerName, [...path, "containerName"]),
+        env: readOptionalStringRecord(record.env, [...path, "env"]),
+        mounts:
+            record.mounts === undefined
+                ? undefined
+                : readArray(record.mounts, [...path, "mounts"]).map((entry, index) => {
+                      const mountPath = [...path, "mounts", index] as const;
+                      const mount = readRecord(entry, mountPath);
+                      assertKnownKeys(mount, ["mode", "selinux", "source", "target"], mountPath);
+                      return {
+                          mode: readEnum(mount.mode, [...mountPath, "mode"], ["ro", "rw"]),
+                          selinux:
+                              mount.selinux === undefined
+                                  ? undefined
+                                  : readEnum(mount.selinux, [...mountPath, "selinux"], ["private", "shared"]),
+                          source: readRequiredTrimmedString(mount.source, [...mountPath, "source"]),
+                          target: readRequiredTrimmedString(mount.target, [...mountPath, "target"])
+                      };
+                  }),
+        network: readOptionalTrimmedString(record.network, [...path, "network"]),
+        user: readOptionalTrimmedString(record.user, [...path, "user"])
+    };
+}
+
+function parseApprovalPolicy(value: unknown, path: readonly ConfigPathSegment[]): ApprovalPolicy {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["mode", "rules"], path);
+
+    return {
+        mode: readEnum<ApprovalPolicyMode>(record.mode, [...path, "mode"], ["disabled", "allow", "ask", "deny"]),
+        rules:
+            record.rules === undefined
+                ? undefined
+                : readArray(record.rules, [...path, "rules"]).map((entry, index) => {
+                      const rulePath = [...path, "rules", index] as const;
+                      const rule = readRecord(entry, rulePath);
+                      assertKnownKeys(rule, ["decision", "match", "source", "toolName"], rulePath);
+                      return {
+                          decision: readEnum<ApprovalPolicyDecision>(rule.decision, [...rulePath, "decision"], [
+                              "allow",
+                              "ask",
+                              "deny"
+                          ]),
+                          match: readEnum(rule.match, [...rulePath, "match"], ["exact"]),
+                          source: readEnum<ApprovalPolicySourceScope>(rule.source, [...rulePath, "source"], [
+                              "all",
+                              "cli",
+                              "tui",
+                              "mcp"
+                          ]),
+                          toolName: readOptionalTrimmedString(rule.toolName, [...rulePath, "toolName"])
+                      };
+                  })
+    };
+}
+
+function parseLogs(value: unknown, path: readonly ConfigPathSegment[]): ControlInstanceLogsConfig {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["eventBufferSize", "maxBytes", "retentionDays"], path);
+    return {
+        eventBufferSize: readOptionalInteger(record.eventBufferSize, [...path, "eventBufferSize"]),
+        maxBytes: readOptionalInteger(record.maxBytes, [...path, "maxBytes"]),
+        retentionDays: readOptionalInteger(record.retentionDays, [...path, "retentionDays"])
+    };
+}
+
+function parseAlerts(value: unknown, path: readonly ConfigPathSegment[]): ControlInstanceAlertsConfig {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["intervalMs", "maxUncommittedChanges", "scripts", "workerMemoryBytes"], path);
+    return {
+        intervalMs: readOptionalInteger(record.intervalMs, [...path, "intervalMs"]),
+        maxUncommittedChanges: readOptionalInteger(record.maxUncommittedChanges, [...path, "maxUncommittedChanges"]),
+        scripts: record.scripts === undefined ? undefined : readArray(record.scripts, [...path, "scripts"]).map((entry, index) => {
+            const scriptPath = [...path, "scripts", index] as const;
+            const script = readRecord(entry, scriptPath);
+            assertKnownKeys(script, ["command", "id", "timeoutMs"], scriptPath);
+            return {
+                command: readArray(script.command, [...scriptPath, "command"]).map((value, commandIndex) =>
+                    readRequiredTrimmedString(value, [...scriptPath, "command", commandIndex])
+                ),
+                id: readRequiredTrimmedString(script.id, [...scriptPath, "id"]),
+                timeoutMs: readOptionalInteger(script.timeoutMs, [...scriptPath, "timeoutMs"])
+            };
+        }),
+        workerMemoryBytes: readOptionalInteger(record.workerMemoryBytes, [...path, "workerMemoryBytes"])
+    };
+}
+
+function parseSecurityDraft(value: unknown, path: readonly ConfigPathSegment[]): { mode?: ControlSecurityMode } {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["mode"], path);
+    return {
+        mode:
+            record.mode === undefined
+                ? undefined
+                : readEnum<ControlSecurityMode>(record.mode, [...path, "mode"], ["disabled", "workspace"])
+    };
+}
+
+function parseSshDraft(value: unknown, path: readonly ConfigPathSegment[]): { command?: string } {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["command"], path);
+    return {
+        command: readOptionalOpaqueString(record.command, [...path, "command"])
+    };
+}
+
+function parseTools(value: unknown, path: readonly ConfigPathSegment[]): ControlInstanceToolsConfig {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["scheduler"], path);
+    return {
+        scheduler:
+            record.scheduler === undefined
+                ? undefined
+                : parseScheduler(record.scheduler, [...path, "scheduler"])
+    };
+}
+
+function parseScheduler(value: unknown, path: readonly ConfigPathSegment[]): ControlToolSchedulerConfig {
+    const record = readRecord(value, path);
+    assertKnownKeys(
+        record,
+        ["byTool", "maxRunning", "maxRunningPerSession", "queueDepth", "queueDepthPerSession", "queueTimeoutMs"],
+        path
+    );
+
+    let byTool: Record<string, { maxRunning?: number; queueDepth?: number }> | undefined;
+    if (record.byTool !== undefined) {
+        const rawByTool = readRecord(record.byTool, [...path, "byTool"]);
+        byTool = Object.fromEntries(
+            Object.entries(rawByTool).map(([toolName, value]) => {
+                if (toolName.trim().length === 0) {
+                    throw configInputError("parse", [...path, "byTool", toolName], "config.scheduler.toolName", "must not be empty");
+                }
+                const toolPath = [...path, "byTool", toolName] as const;
+                const tool = readRecord(value, toolPath);
+                assertKnownKeys(tool, ["maxRunning", "queueDepth"], toolPath);
+                return [
+                    toolName,
+                    {
+                        maxRunning: readOptionalInteger(tool.maxRunning, [...toolPath, "maxRunning"]),
+                        queueDepth: readOptionalInteger(tool.queueDepth, [...toolPath, "queueDepth"])
+                    }
+                ];
+            })
+        );
+    }
+
+    return {
+        byTool,
+        maxRunning: readOptionalInteger(record.maxRunning, [...path, "maxRunning"]),
+        maxRunningPerSession: readOptionalInteger(record.maxRunningPerSession, [...path, "maxRunningPerSession"]),
+        queueDepth: readOptionalInteger(record.queueDepth, [...path, "queueDepth"]),
+        queueDepthPerSession: readOptionalInteger(record.queueDepthPerSession, [...path, "queueDepthPerSession"]),
+        queueTimeoutMs: readOptionalInteger(record.queueTimeoutMs, [...path, "queueTimeoutMs"])
+    };
+}
+
+function readRecord(value: unknown, path: readonly ConfigPathSegment[]): Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw configInputError("parse", path, "config.type.object", "must be an object");
+    }
+    return value as Record<string, unknown>;
+}
+
+function readArray(value: unknown, path: readonly ConfigPathSegment[]): unknown[] {
+    if (!Array.isArray(value)) {
+        throw configInputError("parse", path, "config.type.array", "must be an array");
+    }
+    return value;
+}
+
+function readRequiredTrimmedString(value: unknown, path: readonly ConfigPathSegment[]): string {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw configInputError("parse", path, "config.type.nonEmptyString", "must be a non-empty string");
+    }
+    return value.trim();
+}
+
+function readOptionalTrimmedString(value: unknown, path: readonly ConfigPathSegment[]): string | undefined {
+    if (value === undefined) return undefined;
+    return readRequiredTrimmedString(value, path);
+}
+
+function readOptionalOpaqueString(value: unknown, path: readonly ConfigPathSegment[]): string | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw configInputError("parse", path, "config.type.nonEmptyString", "must be a non-empty string");
+    }
+    return value;
+}
+
+function readOptionalBoolean(value: unknown, path: readonly ConfigPathSegment[]): boolean | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "boolean") {
+        throw configInputError("parse", path, "config.type.boolean", "must be a boolean");
+    }
+    return value;
+}
+
+function readOptionalInteger(value: unknown, path: readonly ConfigPathSegment[]): number | undefined {
+    if (value === undefined) return undefined;
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+        throw configInputError("parse", path, "config.type.integer", "must be an integer");
+    }
+    return value;
+}
+
+function readStringArray(value: unknown, path: readonly ConfigPathSegment[]): string[] {
+    return readArray(value, path).map((entry, index) => readRequiredTrimmedString(entry, [...path, index]));
+}
+
+function readStringRecord(value: unknown, path: readonly ConfigPathSegment[]): Record<string, string> {
+    const record = readRecord(value, path);
+    return Object.fromEntries(
+        Object.entries(record).map(([key, entry]) => {
+            if (typeof entry !== "string") {
+                throw configInputError("parse", [...path, key], "config.type.string", "must be a string");
+            }
+            return [key, entry];
+        })
+    );
+}
+
+function readOptionalStringRecord(value: unknown, path: readonly ConfigPathSegment[]): Record<string, string> | undefined {
+    return value === undefined ? undefined : readStringRecord(value, path);
+}
+
+function readEnum<T extends string>(value: unknown, path: readonly ConfigPathSegment[], values: readonly T[]): T {
+    const normalized = readRequiredTrimmedString(value, path);
+    if ((values as readonly string[]).includes(normalized)) return normalized as T;
+    throw configInputError("parse", path, "config.enum.invalid", `must be one of ${values.join(", ")}`);
+}
+
+function readNullable<T>(value: unknown, parse: (value: unknown) => T): T | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    return parse(value);
+}
+
+function assertKnownKeys(
+    record: Record<string, unknown>,
+    allowed: readonly string[],
+    path: readonly ConfigPathSegment[]
+): void {
+    const allowedKeys = new Set(allowed);
+    const unknown = Object.keys(record).find((key) => !allowedKeys.has(key));
+    if (unknown !== undefined) {
+        throw configInputError("parse", [...path, unknown], "config.field.unknown", "is not supported");
+    }
+}
+
+export type ParsedControlProviderKind = ControlProviderKind;

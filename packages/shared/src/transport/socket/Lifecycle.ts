@@ -5,9 +5,9 @@ import { createConnection } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { createError } from "../../error/ErrorFactoryCreate.js";
-import { CONTROL_PROTOCOL_VERSION } from "../../dto/DtoControlProtocol.js";
-import type { JsonValue } from "../../type/TypeJsonValue.js";
+import { createError } from "../../protocol/Error.js";
+import { CONTROL_PROTOCOL_VERSION } from "../../protocol/control/ControlProtocol.js";
+import type { JsonValue } from "../../protocol/JsonValue.js";
 import { ClientConnection } from "../ClientConnection.js";
 import { SocketChannel } from "./SocketChannel.js";
 import {

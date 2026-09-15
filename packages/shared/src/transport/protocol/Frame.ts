@@ -1,5 +1,5 @@
-import type { ErrorCode } from "../../error/ErrorCodeCatalog.js";
-import { createError } from "../../error/ErrorFactoryCreate.js";
+import type { ErrorCode } from "../../protocol/Error.js";
+import { createError } from "../../protocol/Error.js";
 
 const FRAME_HEADER_SIZE = 4;
 export const TRANSPORT_MAX_FRAME_SIZE = 16 * 1024 * 1024;

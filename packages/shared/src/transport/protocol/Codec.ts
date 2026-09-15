@@ -1,8 +1,8 @@
-import { isControlErrorBody, type ControlErrorBody } from "../../error/ErrorBodyControl.js";
-import type { ErrorCode } from "../../error/ErrorCodeCatalog.js";
-import { createError } from "../../error/ErrorFactoryCreate.js";
-import type { JsonValue } from "../../type/TypeJsonValue.js";
-import type { InstanceName } from "../../type/identity/TypeIdentityInstanceName.js";
+import { isControlErrorBody, type ControlErrorBody } from "../../protocol/Error.js";
+import type { ErrorCode } from "../../protocol/Error.js";
+import { createError } from "../../protocol/Error.js";
+import type { JsonValue } from "../../protocol/JsonValue.js";
+import type { InstanceName } from "../../protocol/instance/Identity.js";
 import type { Channel } from "./Channel.js";
 
 interface TransportIdCrypto {
