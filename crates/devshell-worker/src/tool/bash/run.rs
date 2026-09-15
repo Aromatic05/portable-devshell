@@ -32,6 +32,7 @@ const MAX_CAPTURE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDIN_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INLINE_JSON_BYTES_PER_STREAM: usize = 6 * 1024 * 1024;
 const FALLBACK_INLINE_BYTES_PER_STREAM: usize = 512 * 1024;
+const INLINE_TRUNCATION_MARKER: &[u8] = b"\n... [output omitted] ...\n";
 const RECOVERY_OUTPUT_BYTES: usize = 24 * 1024;
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const PROGRESS_TAIL_BYTES: usize = 64 * 1024;
@@ -580,10 +581,12 @@ fn enforce_inline_rpc_budget(output: &mut StreamOutput) {
     if json_string_upper_bound(&output.kept) <= MAX_INLINE_JSON_BYTES_PER_STREAM {
         return;
     }
-    if output.kept.len() > FALLBACK_INLINE_BYTES_PER_STREAM {
-        let head = FALLBACK_INLINE_BYTES_PER_STREAM / 2;
-        let tail = FALLBACK_INLINE_BYTES_PER_STREAM - head;
-        let mut kept = Vec::with_capacity(FALLBACK_INLINE_BYTES_PER_STREAM);
+    let kept_budget =
+        FALLBACK_INLINE_BYTES_PER_STREAM.saturating_sub(INLINE_TRUNCATION_MARKER.len());
+    if output.kept.len() > kept_budget {
+        let head = kept_budget / 2;
+        let tail = kept_budget - head;
+        let mut kept = Vec::with_capacity(kept_budget);
         kept.extend_from_slice(&output.kept[..head]);
         kept.extend_from_slice(&output.kept[output.kept.len() - tail..]);
         output.kept = kept;
@@ -595,11 +598,10 @@ fn render_inline_stream(output: &StreamOutput) -> String {
     if !output.truncated {
         return String::from_utf8_lossy(&output.kept).to_string();
     }
-    const MARKER: &[u8] = b"\n... [output omitted] ...\n";
     let split = output.kept.len() / 2;
-    let mut rendered = Vec::with_capacity(output.kept.len() + MARKER.len());
+    let mut rendered = Vec::with_capacity(output.kept.len() + INLINE_TRUNCATION_MARKER.len());
     rendered.extend_from_slice(&output.kept[..split]);
-    rendered.extend_from_slice(MARKER);
+    rendered.extend_from_slice(INLINE_TRUNCATION_MARKER);
     rendered.extend_from_slice(&output.kept[split..]);
     String::from_utf8_lossy(&rendered).to_string()
 }
