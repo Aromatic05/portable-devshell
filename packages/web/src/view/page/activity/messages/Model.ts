@@ -335,6 +335,7 @@ export function readLegacyConversationPreferences():
         return {
             legacyOrder,
             preferences: {
+                hiddenContexts: {},
                 orderByWorkspace,
                 titles,
                 version: 1,

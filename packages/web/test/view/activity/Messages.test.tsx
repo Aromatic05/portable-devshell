@@ -25,6 +25,7 @@ import { Messages } from "../../../src/view/page/activity/messages/Page.js";
 const state: WebState = {
     connection: "online",
     conversationPreferences: {
+        hiddenContexts: {},
         orderByWorkspace: {},
         titles: {},
         version: 1,

@@ -457,6 +457,7 @@ function createRouteSnapshot(calls: {
                             handle: () => {
                                 calls.preferences += 1;
                                 return {
+                                    hiddenContexts: {},
                                     orderByWorkspace: {},
                                     titles: {},
                                     version: 1,
@@ -467,6 +468,7 @@ function createRouteSnapshot(calls: {
                         {
                             name: "updatePreferences",
                             handle: () => ({
+                                hiddenContexts: {},
                                 orderByWorkspace: {},
                                 titles: {},
                                 version: 1,

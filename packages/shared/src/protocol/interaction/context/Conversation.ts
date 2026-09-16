@@ -25,6 +25,7 @@ export interface ConversationListInput {
 export const CONVERSATION_PREFERENCES_VERSION = 1 as const;
 
 export interface ConversationPreferencesSnapshot {
+    hiddenContexts: Record<string, true>;
     orderByWorkspace: Record<string, string[]>;
     titles: Record<string, string>;
     version: typeof CONVERSATION_PREFERENCES_VERSION;
@@ -32,6 +33,7 @@ export interface ConversationPreferencesSnapshot {
 }
 
 export interface ConversationPreferencesPatch {
+    hiddenContexts?: Record<string, true | null>;
     ifMissing?: boolean;
     orderByWorkspace?: Record<string, string[]>;
     titles?: Record<string, string | null>;
@@ -40,6 +42,7 @@ export interface ConversationPreferencesPatch {
 
 export function createEmptyConversationPreferences(): ConversationPreferencesSnapshot {
     return {
+        hiddenContexts: {},
         orderByWorkspace: {},
         titles: {},
         version: CONVERSATION_PREFERENCES_VERSION,

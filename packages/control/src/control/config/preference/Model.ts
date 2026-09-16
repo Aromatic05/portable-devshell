@@ -13,6 +13,7 @@ export function parseConversationPreferencesPatch(
 ): ConversationPreferencesPatch {
     const record = requireRecord(value, "Conversation preferences patch");
     rejectUnknownKeys(record, [
+        "hiddenContexts",
         "ifMissing",
         "orderByWorkspace",
         "titles",
@@ -27,6 +28,14 @@ export function parseConversationPreferencesPatch(
         );
     }
     return {
+        ...(record.hiddenContexts === undefined
+            ? {}
+            : {
+                  hiddenContexts: parseHiddenContexts(
+                      record.hiddenContexts,
+                      true,
+                  ),
+              }),
         ...(record.ifMissing === undefined
             ? {}
             : { ifMissing: record.ifMissing }),
@@ -56,6 +65,7 @@ export function parseConversationPreferencesSnapshot(
 ): ConversationPreferencesSnapshot {
     const record = requireRecord(value, "Conversation preferences");
     rejectUnknownKeys(record, [
+        "hiddenContexts",
         "orderByWorkspace",
         "titles",
         "version",
@@ -67,6 +77,13 @@ export function parseConversationPreferencesSnapshot(
         );
     }
     return {
+        hiddenContexts:
+            record.hiddenContexts === undefined
+                ? {}
+                : (parseHiddenContexts(record.hiddenContexts, false) as Record<
+                      string,
+                      true
+                  >),
         orderByWorkspace: parseOrderByWorkspace(record.orderByWorkspace),
         titles: parseTitles(record.titles, false) as Record<string, string>,
         version: CONVERSATION_PREFERENCES_VERSION,
@@ -82,6 +99,13 @@ export function applyPatch(
     patch: ConversationPreferencesPatch,
 ): ConversationPreferencesSnapshot {
     const missingOnly = patch.ifMissing === true;
+    const hiddenContexts = { ...current.hiddenContexts };
+    for (const [ctxId, hidden] of Object.entries(patch.hiddenContexts ?? {})) {
+        if (missingOnly && Object.hasOwn(current.hiddenContexts, ctxId))
+            continue;
+        if (hidden === null) delete hiddenContexts[ctxId];
+        else hiddenContexts[ctxId] = true;
+    }
     const titles = { ...current.titles };
     for (const [key, title] of Object.entries(patch.titles ?? {})) {
         if (missingOnly && Object.hasOwn(current.titles, key)) continue;
@@ -114,11 +138,39 @@ export function applyPatch(
                 ]
               : [...patch.workspaceOrder];
     return {
+        hiddenContexts,
         orderByWorkspace,
         titles,
         version: CONVERSATION_PREFERENCES_VERSION,
         workspaceOrder,
     };
+}
+
+function parseHiddenContexts(
+    value: unknown,
+    allowNull: boolean,
+): Record<string, true | null> {
+    const record = requireRecord(
+        value,
+        "Conversation preferences hiddenContexts",
+    );
+    const entries = Object.entries(record);
+    if (entries.length > MAX_KEYS)
+        throw new TypeError(
+            "Conversation preferences contains too many hidden Contexts.",
+        );
+    return Object.fromEntries(
+        entries.map(([ctxId, hidden]) => {
+            validateKey(ctxId, "Context id");
+            if (allowNull && hidden === null) return [ctxId, null];
+            if (hidden !== true) {
+                throw new TypeError(
+                    "Conversation hidden Context values must be true or null.",
+                );
+            }
+            return [ctxId, true];
+        }),
+    );
 }
 
 function parseOrderByWorkspace(value: unknown): Record<string, string[]> {
@@ -223,6 +275,7 @@ export function clonePreferences(
     value: ConversationPreferencesSnapshot,
 ): ConversationPreferencesSnapshot {
     return {
+        hiddenContexts: { ...value.hiddenContexts },
         orderByWorkspace: Object.fromEntries(
             Object.entries(value.orderByWorkspace).map(([key, order]) => [
                 key,

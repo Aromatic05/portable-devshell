@@ -36,6 +36,7 @@ describe("WebStore", () => {
                 }),
         );
         clients.conversation.preferences = vi.fn(async () => ({
+            hiddenContexts: {},
             orderByWorkspace: {},
             titles: {},
             version: 1 as const,
@@ -58,12 +59,14 @@ describe("WebStore", () => {
     it("loads and updates server-backed Conversation preferences", async () => {
         const clients = fakeClients();
         clients.conversation.preferences = vi.fn(async () => ({
+            hiddenContexts: {},
             orderByWorkspace: { "/work/demo": ["demo\u0000ctx-a"] },
             titles: { "demo\u0000ctx-a": "Server title" },
             version: 1 as const,
             workspaceOrder: ["/work/demo"],
         }));
         clients.conversation.updatePreferences = vi.fn(async (patch) => ({
+            hiddenContexts: {},
             orderByWorkspace: {
                 "/work/demo": ["demo\u0000ctx-b", "demo\u0000ctx-a"],
             },
@@ -101,6 +104,7 @@ describe("WebStore", () => {
     it("does not replay queued Conversation preference mutations after the store generation changes", async () => {
         const clients = fakeClients();
         const snapshot = {
+            hiddenContexts: {},
             orderByWorkspace: {},
             titles: {},
             version: 1 as const,
@@ -669,12 +673,14 @@ function fakeClients(
         conversation: {
             list: vi.fn(async () => []),
             preferences: vi.fn(async () => ({
+                hiddenContexts: {},
                 orderByWorkspace: {},
                 titles: {},
                 version: 1 as const,
                 workspaceOrder: [],
             })),
             updatePreferences: vi.fn(async () => ({
+                hiddenContexts: {},
                 orderByWorkspace: {},
                 titles: {},
                 version: 1 as const,

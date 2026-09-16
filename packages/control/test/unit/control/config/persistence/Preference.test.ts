@@ -11,12 +11,16 @@ test("ConversationPreferenceStore persists titles and ordering across reopen", a
     const first = new ConversationPreferenceStore(filePath);
 
     assert.deepEqual(await first.read(), {
+        hiddenContexts: {},
         orderByWorkspace: {},
         titles: {},
         version: 1,
         workspaceOrder: [],
     });
     await first.update({
+        hiddenContexts: {
+            "ctx-hidden": true,
+        },
         orderByWorkspace: {
             "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
@@ -28,6 +32,9 @@ test("ConversationPreferenceStore persists titles and ordering across reopen", a
 
     const reopened = new ConversationPreferenceStore(filePath);
     assert.deepEqual(await reopened.read(), {
+        hiddenContexts: {
+            "ctx-hidden": true,
+        },
         orderByWorkspace: {
             "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
@@ -48,11 +55,15 @@ test("ConversationPreferenceStore applies incremental patches without clobbering
     );
 
     await store.update({
+        hiddenContexts: { "ctx-a": true },
         orderByWorkspace: { "/work/a": ["alpha\u0000ctx-a"] },
         titles: { "alpha\u0000ctx-a": "A" },
         workspaceOrder: ["/work/a"],
     });
     await store.update({ titles: { "alpha\u0000ctx-b": "B" } });
+    await store.update({
+        hiddenContexts: { "ctx-a": null, "ctx-b": true },
+    });
     await store.update({
         orderByWorkspace: {
             "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
@@ -60,6 +71,9 @@ test("ConversationPreferenceStore applies incremental patches without clobbering
     });
 
     assert.deepEqual(await store.read(), {
+        hiddenContexts: {
+            "ctx-b": true,
+        },
         orderByWorkspace: {
             "/work/a": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
