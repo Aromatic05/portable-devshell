@@ -5,7 +5,9 @@ import {
     spawnSync,
     type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -17,11 +19,15 @@ import {
     SocketChannel,
     type ClientEvent,
     type ClientStream,
+    type ControlConfig,
     type Destination,
     type JsonValue,
 } from "@portable-devshell/shared";
+import type { FrameStream } from "@portable-devshell/shared/transport/frame";
 
 import { ControlServer } from "../../../src/server/Server.ts";
+import { InstanceRegistryFactory } from "../../../src/control/instance/registry/Factory.ts";
+import type { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ReverseCredentialStore } from "../../../src/control/reverse/credential/Store.ts";
 import {
@@ -46,6 +52,25 @@ import {
 
 const workerBinary = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
+
+class CapturingInstanceRegistryFactory extends InstanceRegistryFactory {
+    registry?: InstanceRegistry;
+
+    override build(config: ControlConfig): InstanceRegistry {
+        const registry = super.build(config);
+        this.registry = registry;
+        return registry;
+    }
+}
+
+async function readServiceStream(stream: FrameStream): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    while (true) {
+        const chunk = await stream.read();
+        if (chunk === undefined) return Buffer.concat(chunks);
+        chunks.push(Buffer.from(chunk));
+    }
+}
 
 test(
     "real Rust reverse worker connects to the TS gateway and executes a tool call",
@@ -79,7 +104,12 @@ test(
             "reverse-real-worker",
         );
         const paths = new ControlPathHome(homeDirectory);
-        const server = new ControlServer({ homeDirectory, xdgRuntimeDir });
+        const instanceRegistryBuilder = new CapturingInstanceRegistryFactory();
+        const server = new ControlServer({
+            homeDirectory,
+            instanceRegistryBuilder,
+            xdgRuntimeDir,
+        });
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
         let workerStdout = "";
         let workerStderr = "";
@@ -210,6 +240,55 @@ test(
         );
         assert.equal(result.exitCode, 0);
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
+
+        const workerInstance = instanceRegistryBuilder.registry?.get(
+            "reverse-test",
+        )?.worker;
+        assert.ok(workerInstance);
+        const httpBody = "reverse-http-over-devshell";
+        const httpServer = createHttpServer((request, response) => {
+            assert.equal(request.url, "/reverse-probe");
+            response.writeHead(200, {
+                Connection: "close",
+                "Content-Length": Buffer.byteLength(httpBody),
+                "Content-Type": "text/plain",
+            });
+            response.end(httpBody);
+        });
+        httpServer.listen(0, "127.0.0.1");
+        await once(httpServer, "listening");
+        t.after(() => httpServer.close());
+        const httpAddress = httpServer.address();
+        assert.ok(httpAddress !== null && typeof httpAddress !== "string");
+
+        const tcp = await workerInstance.connectTcp({
+            host: "127.0.0.1",
+            port: httpAddress.port,
+        });
+        await tcp.write(
+            Buffer.from(
+                "GET /reverse-probe HTTP/1.1\r\nHost: devshell\r\nConnection: close\r\n\r\n",
+            ),
+        );
+        await tcp.finish();
+        const httpResponse = (await readServiceStream(tcp)).toString("utf8");
+        assert.match(httpResponse, /^HTTP\/1\.1 200 OK\r\n/u);
+        assert.match(httpResponse, /\r\n\r\nreverse-http-over-devshell$/u);
+
+        const processStream = await workerInstance.execProcess({
+            executable: process.execPath,
+            args: [
+                "-e",
+                "let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>process.stdout.write(process.cwd()+'\\n'+input));",
+            ],
+            cwd: workspace,
+        });
+        await processStream.write(Buffer.from("reverse-process-over-devshell"));
+        await processStream.finish();
+        assert.equal(
+            (await readServiceStream(processStream)).toString("utf8"),
+            `${workspace}\nreverse-process-over-devshell`,
+        );
 
         const transfer = await request(
             server.socketPath,

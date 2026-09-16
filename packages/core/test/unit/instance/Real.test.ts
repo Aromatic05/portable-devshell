@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
-import { spawn as nodeSpawn } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import {
+    execFile,
+    spawn as nodeSpawn,
+    spawnSync,
+} from "node:child_process";
+import { once } from "node:events";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createNetServer, type Socket } from "node:net";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
     asInstanceName,
@@ -14,6 +23,7 @@ import {
 import {
     encodePacket,
     FrameProtocol,
+    frameResetCodes,
     PacketBuffer,
     type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
@@ -21,6 +31,7 @@ import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
+    type WorkerInstance,
     WORKER_PROTOCOL_VERSION,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
@@ -35,8 +46,124 @@ import {
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
+const execFileAsync = promisify(execFile);
+const rsyncAvailable =
+    process.platform !== "win32" &&
+    spawnSync("rsync", ["--version"], { stdio: "ignore" }).status === 0;
 
 const cliToolCallContext = { source: "cli" } as const;
+
+async function readServiceStream(stream: FrameStream): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    while (true) {
+        const chunk = await stream.read();
+        if (chunk === undefined) return Buffer.concat(chunks);
+        chunks.push(Buffer.from(chunk));
+    }
+}
+
+function rsyncWorkerTestOptions(): { skip: false | string } {
+    const worker = realWorkerTestOptions(workerBinaryPath);
+    if (worker.skip !== false) return worker;
+    return {
+        skip: rsyncAvailable ? false : "requires rsync on a non-Windows host",
+    };
+}
+
+async function readSocketLine(
+    socket: Socket,
+): Promise<{ line: string; remainder: Buffer }> {
+    return await new Promise((resolve, reject) => {
+        let buffered = Buffer.alloc(0);
+        const cleanup = () => {
+            socket.off("data", onData);
+            socket.off("end", onEnd);
+            socket.off("error", onError);
+        };
+        const onData = (chunk: Buffer) => {
+            buffered = Buffer.concat([buffered, chunk]);
+            const newline = buffered.indexOf(0x0a);
+            if (newline < 0) return;
+            socket.pause();
+            cleanup();
+            resolve({
+                line: buffered.subarray(0, newline).toString("utf8"),
+                remainder: buffered.subarray(newline + 1),
+            });
+        };
+        const onEnd = () => {
+            cleanup();
+            reject(new Error("rsync remote shell closed before its handshake"));
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        socket.on("data", onData);
+        socket.once("end", onEnd);
+        socket.once("error", onError);
+    });
+}
+
+async function bridgeRsyncRemoteShell(
+    instance: WorkerInstance,
+    socket: Socket,
+    cwd: string,
+): Promise<void> {
+    let stream: FrameStream | undefined;
+    try {
+        const handshake = await readSocketLine(socket);
+        const parsed = JSON.parse(handshake.line) as {
+            command?: unknown;
+            host?: unknown;
+        };
+        if (
+            parsed.host !== "dummy" ||
+            !Array.isArray(parsed.command) ||
+            parsed.command.length === 0 ||
+            !parsed.command.every((value) => typeof value === "string")
+        ) {
+            throw new Error("invalid rsync remote shell handshake");
+        }
+        const [executable, ...args] = parsed.command as string[];
+        stream = await instance.execProcess({ executable: executable!, args, cwd });
+        if (handshake.remainder.byteLength > 0) {
+            await stream.write(handshake.remainder);
+        }
+        socket.resume();
+
+        const upload = (async () => {
+            for await (const chunk of socket) {
+                await stream!.write(Buffer.from(chunk));
+            }
+            await stream!.finish();
+        })();
+        const download = (async () => {
+            while (true) {
+                const chunk = await stream!.read();
+                if (chunk === undefined) {
+                    socket.end();
+                    return;
+                }
+                if (!socket.write(Buffer.from(chunk))) {
+                    await once(socket, "drain");
+                }
+            }
+        })();
+        await Promise.all([upload, download]);
+    } catch (error) {
+        if (stream !== undefined && !stream.closed) {
+            await stream
+                .reset(
+                    frameResetCodes.cancelled,
+                    error instanceof Error ? error.message : String(error),
+                )
+                .catch(() => undefined);
+        }
+        socket.destroy(error instanceof Error ? error : new Error(String(error)));
+        throw error;
+    }
+}
 
 test(
     "WorkerInstance completes lifecycle against frozen devshell-worker",
@@ -205,6 +332,202 @@ test(
         assert.equal(finished.bytes, source.byteLength);
         assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
         await instance.closeArtifactPayload(opened.payloadId);
+    },
+);
+
+test(
+    "WorkerInstance exposes HTTP over tcp and process exec Frame services",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("service-consumer");
+        const homeDirectory = await createTestTempDirectory("service-consumer-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("service-consumer-runtime");
+        const instanceName = asInstanceName(`service-consumer-${process.pid}`);
+        const httpBody = "http-over-devshell";
+        const server = createHttpServer((request, response) => {
+            assert.equal(request.url, "/probe");
+            response.writeHead(200, {
+                Connection: "close",
+                "Content-Length": Buffer.byteLength(httpBody),
+                "Content-Type": "text/plain",
+            });
+            response.end(httpBody);
+        });
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        const address = server.address();
+        assert.ok(address !== null && typeof address !== "string");
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: instanceName,
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        t.after(async () => {
+            await instance.stop();
+            await instance.close();
+            server.close();
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        const tcp = await instance.connectTcp({
+            host: "127.0.0.1",
+            port: address.port,
+        });
+        await tcp.write(
+            Buffer.from(
+                "GET /probe HTTP/1.1\r\nHost: devshell\r\nConnection: close\r\n\r\n",
+            ),
+        );
+        await tcp.finish();
+        const httpResponse = (await readServiceStream(tcp)).toString("utf8");
+        assert.match(httpResponse, /^HTTP\/1\.1 200 OK\r\n/u);
+        assert.match(httpResponse, /\r\n\r\nhttp-over-devshell$/u);
+
+        const processStream = await instance.execProcess({
+            executable: process.execPath,
+            args: [
+                "-e",
+                "let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>process.stdout.write(process.cwd()+'\\n'+input));",
+            ],
+            cwd: workspacePath,
+        });
+        await processStream.write(Buffer.from("process-over-devshell"));
+        await processStream.finish();
+        assert.equal(
+            (await readServiceStream(processStream)).toString("utf8"),
+            `${workspacePath}\nprocess-over-devshell`,
+        );
+    },
+);
+
+test(
+    "WorkerInstance carries a real rsync session over process exec Frame service",
+    rsyncWorkerTestOptions(),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("rsync-worker");
+        const sourcePath = await createTestTempDirectory("rsync-source");
+        const homeDirectory = await createTestTempDirectory("rsync-worker-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("rsync-worker-runtime");
+        const targetPath = join(workspacePath, "target");
+        const nestedSource = join(sourcePath, "nested");
+        await mkdir(targetPath, { recursive: true });
+        await mkdir(nestedSource, { recursive: true });
+        const payload = Buffer.alloc(700 * 1024);
+        for (let index = 0; index < payload.length; index += 1) {
+            payload[index] = index % 251;
+        }
+        await writeFile(join(sourcePath, "payload.bin"), payload);
+        await writeFile(join(nestedSource, "note.txt"), "rsync-over-devshell\n");
+
+        const remoteShellPath = join(workspacePath, "rsync-remote-shell.mjs");
+        await writeFile(
+            remoteShellPath,
+            `#!/usr/bin/env node
+import { createConnection } from "node:net";
+const [host, ...command] = process.argv.slice(2);
+const port = Number(process.env.DEVSHELL_RSYNC_BRIDGE_PORT);
+if (!Number.isInteger(port) || port <= 0) {
+    throw new Error("DEVSHELL_RSYNC_BRIDGE_PORT is invalid");
+}
+const socket = createConnection({ allowHalfOpen: true, host: "127.0.0.1", port });
+socket.once("connect", () => {
+    socket.write(JSON.stringify({ host, command }) + "\\n");
+    process.stdin.pipe(socket);
+    socket.pipe(process.stdout, { end: false });
+});
+socket.on("end", () => {
+    process.stdin.unpipe(socket);
+    process.stdin.pause();
+    socket.end();
+});
+socket.on("error", (error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+});
+`,
+            { mode: 0o700 },
+        );
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: asInstanceName(`rsync-worker-${process.pid}`),
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        const bridgeServer = createNetServer({ allowHalfOpen: true });
+        const bridgeCompleted = new Promise<void>((resolve, reject) => {
+            bridgeServer.once("connection", (socket) => {
+                bridgeServer.close();
+                void bridgeRsyncRemoteShell(instance, socket, workspacePath).then(
+                    resolve,
+                    reject,
+                );
+            });
+            bridgeServer.once("error", reject);
+        });
+        bridgeServer.listen(0, "127.0.0.1");
+        await once(bridgeServer, "listening");
+        const bridgeAddress = bridgeServer.address();
+        assert.ok(bridgeAddress !== null && typeof bridgeAddress !== "string");
+
+        t.after(async () => {
+            bridgeServer.close();
+            await instance.stop();
+            await instance.close();
+            await rm(sourcePath, { force: true, recursive: true });
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        await Promise.all([
+            execFileAsync(
+                "rsync",
+                [
+                    "-a",
+                    "-e",
+                    remoteShellPath,
+                    `${sourcePath}/`,
+                    `dummy:${targetPath}/`,
+                ],
+                {
+                    env: {
+                        ...process.env,
+                        DEVSHELL_RSYNC_BRIDGE_PORT: String(bridgeAddress.port),
+                    },
+                    timeout: 30_000,
+                },
+            ),
+            bridgeCompleted,
+        ]);
+
+        assert.deepEqual(await readFile(join(targetPath, "payload.bin")), payload);
+        assert.equal(
+            await readFile(join(targetPath, "nested", "note.txt"), "utf8"),
+            "rsync-over-devshell\n",
+        );
     },
 );
 
