@@ -32,7 +32,6 @@ export class TuiCommandDispatcherViewport {
                     ? this.#moveAcrossScopes(intent.direction)
                     : this.#moveWithinScope(intent.direction);
             case "screen.pageUp":
-                this.#focus.pauseLogFollow();
                 return this.#focus.scrollMainColumn(
                     -Math.max(1, this.#focus.boxViewportRows() - 1),
                 );
@@ -41,10 +40,8 @@ export class TuiCommandDispatcherViewport {
                     Math.max(1, this.#focus.boxViewportRows() - 1),
                 );
             case "screen.scroll":
-                if (intent.delta < 0) this.#focus.pauseLogFollow();
                 return this.#focus.scrollMainColumn(intent.delta);
             case "screen.home":
-                this.#focus.pauseLogFollow();
                 return this.#focus.setMainColumnOffset(0);
             case "screen.end":
                 return this.#focus.setMainColumnOffset(
@@ -52,10 +49,6 @@ export class TuiCommandDispatcherViewport {
                 );
             case "screen.toggle":
                 return this.#toggleCurrentBox();
-            case "logs.toggleFollow":
-                return this.#toggleLogsFollow();
-            case "logs.clearBuffer":
-                return this.#clearLogsBuffer();
             default:
                 return undefined;
         }
@@ -110,39 +103,6 @@ export class TuiCommandDispatcherViewport {
             this.#store.getState().ui.selectedPage,
             expanded ? "Collapsed box." : "Expanded box.",
         );
-        return true;
-    }
-
-    #toggleLogsFollow(): boolean {
-        const state = this.#store.getState();
-        const instance = state.ui.selectedInstance;
-        if (state.ui.selectedPage !== "logs" || instance === undefined) {
-            return false;
-        }
-        const follow = state.ui.logsFollowByInstance[instance] === false;
-        this.#store.setLogsFollow(instance, follow);
-        if (follow) {
-            this.#store.setLogsPausedAtSeq(instance, undefined);
-            this.#focus.setMainColumnOffset(this.#focus.maxMainScrollOffset());
-        } else {
-            this.#store.setLogsPausedAtSeq(
-                instance,
-                state.readModel.instanceState[instance]?.logs?.at(-1)?.seq,
-            );
-        }
-        this.#store.setScreenStatus(
-            "logs",
-            follow ? "Following new log entries." : "Log follow paused.",
-        );
-        return true;
-    }
-
-    #clearLogsBuffer(): boolean {
-        if (this.#store.getState().ui.selectedPage !== "logs") {
-            return false;
-        }
-        this.#store.clearLogsBuffer();
-        this.#store.setScreenStatus("logs", "Cleared local log buffer only.");
         return true;
     }
 

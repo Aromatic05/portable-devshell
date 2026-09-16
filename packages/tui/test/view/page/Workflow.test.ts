@@ -53,7 +53,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 () => runtime.store.getState().instances.length === 1,
             );
 
-            await runtime.handleInput("7", {});
+            await runtime.handleInput("6", {});
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "todo",
             );

@@ -119,7 +119,6 @@ export type TuiAppAction =
           type: "control.setConnectionState";
       }
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
-    | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
     | { type: "messages.project.toggle"; workspaceKey: string }
     | { scope: TuiMessageScope; type: "messages.scope.set" }
@@ -143,8 +142,6 @@ export type TuiAppAction =
     | { type: "route.reset" }
     | { key: string; type: "ui.toggleExpanded" }
     | { key: string; offset: number; type: "ui.setScrollOffset" }
-    | { follow: boolean; instance: string; type: "logs.setFollow" }
-    | { instance: string; seq?: number; type: "logs.setPausedAtSeq" }
     | { required: boolean; type: "control.setRestartRequired" }
     | { type: "ui.bumpRedrawNonce" }
     | { maxEvents?: number; rawEvent: TuiRawEventRecord; type: "event.append" };
@@ -162,8 +159,5 @@ export function selectTuiLogs(
     state: TuiAppState,
     instance: string,
 ): InstanceLogEntry[] {
-    const throughSeq = state.ui.logsClearedThroughSeqByInstance[instance] ?? 0;
-    return (state.readModel.instanceState[instance]?.logs ?? []).filter(
-        (entry) => entry.seq > throughSeq,
-    );
+    return state.readModel.instanceState[instance]?.logs ?? [];
 }

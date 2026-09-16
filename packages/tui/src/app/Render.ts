@@ -177,11 +177,6 @@ export function isRenderRelevantChange(
                 before?.contextMessages !== after?.contextMessages ||
                 before?.snapshot !== after?.snapshot
             );
-        case "logs":
-            return (
-                before?.logs !== after?.logs ||
-                before?.snapshot !== after?.snapshot
-            );
         case "todo":
             return (
                 before?.todo !== after?.todo ||

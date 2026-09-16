@@ -274,10 +274,6 @@ export class TuiRuntimeControlOperations {
         );
     }
 
-    async reloadLogs(): Promise<void> {
-        await this.options.session.refreshLogs();
-    }
-
     async reloadPage(
         page: TuiPageId,
         instance: string | undefined,
@@ -309,10 +305,6 @@ export class TuiRuntimeControlOperations {
             case "audit":
                 if (instance !== undefined)
                     await this.options.session.refreshAudit(instance);
-                return;
-            case "logs":
-                if (instance !== undefined)
-                    await this.options.session.refreshLogsForInstance(instance);
                 return;
         }
     }

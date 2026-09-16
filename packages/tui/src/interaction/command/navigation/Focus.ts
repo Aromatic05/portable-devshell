@@ -27,16 +27,6 @@ export class TuiCommandDispatcherFocus {
         this.#store = options.store;
     }
 
-    pauseLogFollow(): void {
-        const state = this.#store.getState();
-        if (
-            state.ui.selectedPage === "logs" &&
-            state.ui.selectedInstance !== undefined
-        ) {
-            this.#store.setLogsFollow(state.ui.selectedInstance, false);
-        }
-    }
-
     syncMainFocus(): void {
         const boxIds = this.#projection.selectMainBoxIds(
             this.#store.getState(),

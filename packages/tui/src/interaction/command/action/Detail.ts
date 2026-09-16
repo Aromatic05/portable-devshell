@@ -1,5 +1,4 @@
 import type { TuiAppStore } from "../../../state/store/App.js";
-import { selectTuiLogs } from "../../../state/store/Model.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
 import type { TuiUiIntent } from "../../../state/Interaction.js";
 import type { TuiCommandDispatcherAudit } from "./Audit.js";
@@ -300,68 +299,6 @@ export class TuiCommandDispatcherDetail {
         ) {
             this.#store.setSearchQuery(state.ui.selectedPage, "");
             this.#focus.syncMainFocus();
-            return true;
-        }
-        if (button !== undefined && state.ui.selectedPage === "logs") {
-            switch (button) {
-                case "reload":
-                    return await this.#dispatch({ type: "page.reload" });
-                case "toggle-follow":
-                    return await this.#dispatch({ type: "logs.toggleFollow" });
-                case "clear-filter":
-                    this.#store.setSearchQuery("logs", "");
-                    this.#focus.syncMainFocus();
-                    return true;
-                case "clear-buffer":
-                    return await this.#dispatch({ type: "logs.clearBuffer" });
-            }
-        }
-        if (state.ui.selectedPage === "logs" && actionId?.startsWith("log:")) {
-            const entry = selectTuiLogs(
-                state,
-                state.ui.selectedInstance ?? "",
-            ).find(
-                (candidate) =>
-                    candidate.seq === Number(actionId.slice("log:".length)),
-            );
-            if (entry?.callId === undefined) {
-                this.#store.setScreenStatus(
-                    "logs",
-                    "This log entry has no linked tool call.",
-                );
-                return false;
-            }
-            this.#store.setSelectedPage("audit");
-            await this.#dispatch({ type: "page.reload" });
-            const call = this.#store
-                .getState()
-                .readModel.instanceState[
-                    state.ui.selectedInstance ?? ""
-                ]?.toolCalls.find(
-                    (candidate) => candidate.callId === entry.callId,
-                );
-            if (call === undefined) {
-                this.#store.setScreenStatus(
-                    "audit",
-                    "Linked tool call is no longer available in Audit history.",
-                );
-                this.#focus.syncMainFocus();
-                return false;
-            }
-            this.#store.replaceRoute(
-                call.ctxId === undefined || call.ctxId.length === 0
-                    ? { page: "audit", scope: "unscoped", view: "context" }
-                    : {
-                          ctxId: call.ctxId,
-                          page: "audit",
-                          scope: "context",
-                          view: "context",
-                      },
-            );
-            this.#store.setMainFocusId(`audit-call:${call.callId}`);
-            this.#store.setFocusScope("mainBoxes");
-            this.#focus.ensureMainFocusVisible();
-            this.#store.setScreenStatus("audit", undefined);
             return true;
         }
         if (button !== undefined && state.ui.selectedPage === "instances") {

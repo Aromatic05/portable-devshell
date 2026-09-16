@@ -55,7 +55,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             assert.match(terminal.output, /instances 0 \| live 0/u);
             assert.match(terminal.output, /Create Instance/u);
 
-            terminal.write("8");
+            terminal.write("7");
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "help",
             );
@@ -648,7 +648,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 terminal.output.includes("control server is not running."),
             );
 
-            terminal.write("8");
+            terminal.write("7");
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "help",
             );
@@ -695,7 +695,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             await waitUntil(
                 () =>
                     runtime.store.getState().interaction.sidebarCursor?.id ===
-                    "audit",
+                    "messages",
             );
             assert.equal(runtime.store.getState().ui.selectedPage, "overview");
             runtime.store.setSidebarCursor({ id: "help", kind: "context" });
@@ -990,7 +990,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 () =>
                     runtime.store.getState().connection.status === "connected",
             );
-            terminal.write("8");
+            terminal.write("7");
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "help",
             );
@@ -1225,7 +1225,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 assert.equal(runtime.rows, terminalOptions.rows);
                 if (terminalOptions.columns === 80) {
                     const beforeTerminal = terminal.output.length;
-                    terminal.write("9");
+                    terminal.write("8");
                     await waitUntil(
                         () =>
                             runtime.store.getState().ui.selectedPage ===
@@ -1234,7 +1234,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                     await waitUntil(() =>
                         terminal.output
                             .slice(beforeTerminal)
-                            .includes("▶9:terminal"),
+                            .includes("▶8:terminal"),
                     );
                     assert.match(
                         terminal.output.slice(beforeTerminal),
@@ -1305,7 +1305,6 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 "connections",
                 "messages",
                 "audit",
-                "logs",
                 "todo",
                 "help",
                 "terminal",
@@ -1622,7 +1621,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             runtime.store.setSelectedInstance("alpha");
             runtime.store.setSelectedPage("instances");
 
-            host.write("9");
+            host.write("8");
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "terminal",
             );
@@ -1893,7 +1892,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
             );
             runtime.store.setSelectedInstance("alpha");
 
-            host.write("9");
+            host.write("8");
             await waitUntil(
                 () => runtime.store.getState().ui.selectedPage === "terminal",
             );

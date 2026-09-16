@@ -231,39 +231,6 @@ export function reduceTuiStoreReducerInteraction(
                     },
                 },
             };
-        case "logs.setFollow":
-            if (
-                state.ui.logsFollowByInstance[action.instance] === action.follow
-            ) {
-                return state;
-            }
-            return {
-                ...state,
-                ui: {
-                    ...state.ui,
-                    logsFollowByInstance: {
-                        ...state.ui.logsFollowByInstance,
-                        [action.instance]: action.follow,
-                    },
-                },
-            };
-        case "logs.setPausedAtSeq":
-            if (
-                state.ui.logsPausedAtSeqByInstance[action.instance] ===
-                action.seq
-            ) {
-                return state;
-            }
-            return {
-                ...state,
-                ui: {
-                    ...state.ui,
-                    logsPausedAtSeqByInstance: {
-                        ...state.ui.logsPausedAtSeqByInstance,
-                        [action.instance]: action.seq,
-                    },
-                },
-            };
         case "ui.bumpRedrawNonce":
             return {
                 ...state,

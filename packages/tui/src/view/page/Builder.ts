@@ -7,10 +7,8 @@ import { buildConnectionsPageBoxes } from "./instance/connection/Overview.js";
 import { buttonLine } from "../component/Editor.js";
 import { buildHelpPageBoxes } from "./Help.js";
 import { buildInstancesPageBoxes } from "./instance/Instances.js";
-import { buildLogsPageBoxes } from "./activity/logs/Page.js";
 import { buildTodoPageBoxes } from "./workflow/Overview.js";
 import { makeBox } from "./Support.js";
-import { currentTuiRoute } from "../../state/route/State.js";
 
 export function buildBoxesForPage(
     state: TuiAppState,
@@ -18,14 +16,11 @@ export function buildBoxesForPage(
     instanceName: string | undefined,
 ): BoxModel[] {
     const boxes = buildUnfilteredBoxes(state, page, instanceName);
-    const logsContextList =
-        page === "logs" && currentTuiRoute(state).view === "contexts";
     if (
         page !== "instances" &&
         page !== "todo" &&
         page !== "config" &&
-        page !== "audit" &&
-        !logsContextList
+        page !== "audit"
     ) {
         return boxes;
     }
@@ -79,10 +74,6 @@ function buildUnfilteredBoxes(
             return instanceName === undefined
                 ? []
                 : buildAuditPageBoxes(state, instanceName);
-        case "logs":
-            return instanceName === undefined
-                ? []
-                : buildLogsPageBoxes(state, instanceName);
         case "terminal":
             return [];
     }
@@ -90,7 +81,7 @@ function buildUnfilteredBoxes(
 
 function filterStatusBox(
     state: TuiAppState,
-    page: "instances" | "todo" | "config" | "audit" | "logs",
+    page: "instances" | "todo" | "config" | "audit",
     instanceName: string | undefined,
     query: string,
     visible: number,

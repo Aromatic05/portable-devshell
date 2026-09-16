@@ -49,7 +49,6 @@ export interface TuiCommandDispatcherOptions {
     onOpenTerminal(instance: string): Promise<void>;
     onTerminalKill?(instance: string): Promise<void>;
     mainViewportRows(): number;
-    onLogsReload(): Promise<void>;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
     onQuit(): Promise<void>;
     onRedraw(): void;
@@ -146,7 +145,6 @@ export class TuiCommandDispatcher {
             focus: this.#focus,
             focusManager: this.#focusManager,
             onContextMessage: options.onContextMessage,
-            onLogsReload: options.onLogsReload,
             onPageReload: options.onPageReload,
             onRedraw: options.onRedraw,
             projection: options.projection,

@@ -34,7 +34,6 @@ export class TuiRuntimeOperations {
     readonly disableContext: TuiRuntimeControlOperations["disableContext"];
     readonly getInstanceCreateSchema: TuiRuntimeControlOperations["getInstanceCreateSchema"];
     readonly queueContextMessage: TuiRuntimeControlOperations["queueContextMessage"];
-    readonly reloadLogs: TuiRuntimeControlOperations["reloadLogs"];
     readonly reloadPage: TuiRuntimeControlOperations["reloadPage"];
     readonly renewContext: TuiRuntimeControlOperations["renewContext"];
     readonly restartControl: TuiRuntimeControlOperations["restartControl"];
@@ -80,7 +79,6 @@ export class TuiRuntimeOperations {
         this.getInstanceCreateSchema =
             control.getInstanceCreateSchema.bind(control);
         this.queueContextMessage = control.queueContextMessage.bind(control);
-        this.reloadLogs = control.reloadLogs.bind(control);
         this.reloadPage = control.reloadPage.bind(control);
         this.renewContext = control.renewContext.bind(control);
         this.restartControl = control.restartControl.bind(control);
@@ -178,8 +176,6 @@ export interface TuiRuntimeOperationSession {
     refreshConfig(): Promise<unknown>;
     refreshInstance(instance: string): Promise<unknown>;
     refreshInstances(): Promise<unknown>;
-    refreshLogs(): Promise<unknown>;
-    refreshLogsForInstance(instance: string): Promise<unknown>;
     refreshMessages(): Promise<unknown>;
     refreshOAuth(): Promise<unknown>;
     refreshOverview(): Promise<unknown>;

@@ -417,7 +417,6 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
             },
             onOpenTerminal: async () => undefined,
             onInstanceAction: async () => undefined,
-            onLogsReload: async () => undefined,
             onPageReload: async () => undefined,
             onQuit: async () => undefined,
             onRedraw: () => undefined,

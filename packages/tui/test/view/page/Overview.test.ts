@@ -194,7 +194,6 @@ import {
                 syncMainFocus() {},
             } as unknown as TuiCommandDispatcherFocus,
             focusManager: {} as unknown as TuiFocusManager,
-            async onLogsReload() {},
             async onPageReload() {},
             onRedraw() {},
             projection: tuiViewProjection,

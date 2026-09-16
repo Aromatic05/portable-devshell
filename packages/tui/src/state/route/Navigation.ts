@@ -12,7 +12,6 @@ export const tuiPageEntries: readonly TuiPageEntry[] = [
     { id: "connections", label: "connections" },
     { id: "messages", label: "messages" },
     { id: "audit", label: "audit" },
-    { id: "logs", label: "logs" },
     { id: "todo", label: "todo" },
     { id: "help", label: "help" },
     { id: "terminal", label: "terminal" },
@@ -28,7 +27,6 @@ export const tuiShortcutPages: readonly TuiPageId[] = [
     "connections",
     "messages",
     "audit",
-    "logs",
     "todo",
     "help",
     "terminal",
@@ -41,7 +39,6 @@ const searchablePages = new Set<TuiPageId>([
     "config",
     "messages",
     "audit",
-    "logs",
 ]);
 
 export function isTuiSearchablePage(page: TuiPageId): boolean {

@@ -63,30 +63,9 @@ import {
         store.setMainFocusId("audit-call:call-2");
         store.setScrollOffset(selectMainScrollKey(store.getState()), 11);
 
-        store.setSelectedPage("logs");
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-31T00:00:01.000Z",
-                            ctxId: "ctx-a",
-                            instanceName: "alpha",
-                            message: "done",
-                            seq: 18,
-                            stream: "stdout",
-                        },
-                    ],
-                },
-            },
-        });
-        store.pushRoute({
-            ctxId: "ctx-a",
-            page: "logs",
-            scope: "context",
-            view: "context",
-        });
-        store.setMainFocusId("log-entry:18");
+        store.setSelectedPage("config");
+        store.setMainFocusId("provider");
+        store.setScrollOffset(selectMainScrollKey(store.getState()), 3);
 
         store.setSelectedPage("audit");
         assert.deepEqual(currentTuiRoute(store.getState()), {
@@ -359,101 +338,6 @@ import {
             "todo",
             "Implement router",
         ]);
-    });
-
-    test("Logs groups one instance by context and Enter opens only the focused context", () => {
-        const store = createStore();
-        store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-31T00:00:01.000Z",
-                            ctxId: "ctx-a",
-                            instanceName: "alpha",
-                            message: "ctx-a message",
-                            seq: 1,
-                            stream: "stdout",
-                        },
-                        {
-                            at: "2026-07-31T00:00:02.000Z",
-                            ctxId: "ctx-b",
-                            instanceName: "alpha",
-                            message: "ctx-b message",
-                            seq: 2,
-                            stream: "stderr",
-                        },
-                        {
-                            at: "2026-07-31T00:00:03.000Z",
-                            instanceName: "alpha",
-                            message: "control message",
-                            seq: 3,
-                            stream: "stdout",
-                        },
-                        {
-                            at: "2026-07-31T00:00:04.000Z",
-                            ctxId: "unscoped",
-                            instanceName: "alpha",
-                            message: "real unscoped context",
-                            seq: 4,
-                            stream: "stdout",
-                        },
-                    ],
-                },
-            },
-        });
-        store.setSelectedPage("logs");
-
-        assert.deepEqual(
-            selectMainScreenModel(store.getState()).boxes.map((box) => box.id),
-            [
-                "log-context:unscoped",
-                "log-context:unscoped",
-                "log-context:ctx-b",
-                "log-context:ctx-a",
-            ],
-        );
-
-        store.setMainFocusId("log-context:ctx-a");
-        const navigation = new TuiCommandDispatcherNavigation({
-            focus: {
-                syncMainFocus() {},
-            } as unknown as TuiCommandDispatcherFocus,
-            focusManager: {} as unknown as TuiFocusManager,
-            async onLogsReload() {},
-            async onPageReload() {},
-            onRedraw() {},
-            projection: tuiViewProjection,
-            store,
-        });
-
-        assert.equal(navigation.openFocusedRoute(), true);
-        assert.deepEqual(currentTuiRoute(store.getState()), {
-            ctxId: "ctx-a",
-            page: "logs",
-            scope: "context",
-            view: "context",
-        });
-        const collapsedDetail = selectMainScreenModel(
-            store.getState(),
-        ).boxes.find((box) => box.id === "logs");
-        assert.ok(collapsedDetail !== undefined);
-        store.toggleExpanded(collapsedDetail.expandedKey);
-        const detail = selectMainScreenModel(store.getState()).boxes.find(
-            (box) => box.id === "logs",
-        );
-        assert.equal(
-            detail?.expandedLines.some((line) =>
-                line.text.includes("ctx-a message"),
-            ),
-            true,
-        );
-        assert.equal(
-            detail?.expandedLines.some((line) =>
-                line.text.includes("ctx-b message"),
-            ),
-            false,
-        );
     });
 
     test("page changes made from the sidebar preserve sidebar focus until the user enters the page", () => {

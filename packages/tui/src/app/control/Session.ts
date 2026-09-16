@@ -21,7 +21,6 @@ import {
 } from "./Client.js";
 import { TuiAppStore } from "../../state/store/App.js";
 import type { TuiInstanceListEntry } from "../../state/store/Model.js";
-import { selectMainScrollKey } from "../../view/projection/View.js";
 
 export interface TuiControlSessionOptions {
     clients?: TuiClients;
@@ -271,16 +270,6 @@ export class TuiControlSession {
         return await this.#model.readToolCallDetail(instance, callId);
     }
 
-    async refreshLogsForInstance(
-        instance: string,
-        generation = this.#generation,
-        signal?: AbortSignal,
-    ): Promise<void> {
-        if (this.#canRefresh(generation, signal)) {
-            await this.#model.refreshInstance(instance, ["logs"]);
-        }
-    }
-
     async refreshTodo(
         instance: string,
         generation = this.#generation,
@@ -294,11 +283,6 @@ export class TuiControlSession {
 
     async refreshArtifacts(generation = this.#generation): Promise<void> {
         if (this.#current(generation)) await this.#model.refreshArtifacts();
-    }
-
-    async refreshLogs(generation = this.#generation): Promise<void> {
-        if (this.#current(generation))
-            await this.#model.refreshAllInstanceLogs();
     }
 
     async refreshInstance(
@@ -418,18 +402,6 @@ export class TuiControlSession {
             isOverviewRefreshEvent(event.type)
         )
             this.#refreshScheduler.scheduleOverview(75);
-        const state = this.#store.getState();
-        if (
-            event.type === "log.appended" &&
-            state.ui.selectedPage === "logs" &&
-            state.ui.selectedInstance === event.instanceName &&
-            state.ui.logsFollowByInstance[event.instanceName] !== false
-        ) {
-            this.#store.setScrollOffset(
-                selectMainScrollKey(state),
-                Number.MAX_SAFE_INTEGER,
-            );
-        }
     }
 
     #handleDisconnected(): void {
@@ -498,7 +470,7 @@ function tuiFailurePanel(
     const instance = failure.instance ?? "-";
     if (failure.key === "snapshot") return `instances:${instance}:snapshot`;
     if (failure.key === "stream") return `instances:${instance}:subscription`;
-    if (failure.key === "logs") return `logs:${instance}:logs`;
+    if (failure.key === "logs") return `audit:${instance}:readModels`;
     if (failure.key === "todo") return `todo:${instance}:todo`;
     if (["approvals", "toolCalls", "comments"].includes(failure.key)) {
         return `audit:${instance}:readModels`;

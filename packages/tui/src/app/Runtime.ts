@@ -345,9 +345,6 @@ export class TuiRuntime {
             onInstanceEnabledChange: async (instance, enabled) => {
                 await this.#operations.setInstanceEnabled(instance, enabled);
             },
-            onLogsReload: async () => {
-                await this.#operations.reloadLogs();
-            },
             onOAuthApprovalDecision: async (approvalId, decision) => {
                 await this.#operations.decideOAuthApproval(
                     approvalId,

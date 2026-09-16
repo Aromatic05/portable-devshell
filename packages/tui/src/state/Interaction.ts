@@ -95,8 +95,6 @@ export type TuiUiIntent =
           section: "context" | "instances";
           type: "sidebar.scroll";
       }
-    | { type: "logs.toggleFollow" }
-    | { type: "logs.clearBuffer" }
     | {
           body: string;
           cancelLabel?: string;

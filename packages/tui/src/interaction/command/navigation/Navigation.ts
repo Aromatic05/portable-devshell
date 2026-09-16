@@ -33,7 +33,6 @@ export interface TuiCommandDispatcherNavigationOptions {
         ctxId: string,
         text: string,
     ): Promise<void>;
-    onLogsReload(): Promise<void>;
     onPageReload(page: TuiPageId, instance: string | undefined): Promise<void>;
     onRedraw(): void;
     projection: TuiInteractionProjection;
@@ -44,7 +43,6 @@ export class TuiCommandDispatcherNavigation {
     readonly #focus: TuiCommandDispatcherFocus;
     readonly #focusManager: TuiFocusManager;
     readonly #onContextMessage?: TuiCommandDispatcherNavigationOptions["onContextMessage"];
-    readonly #onLogsReload: () => Promise<void>;
     readonly #onPageReload: TuiCommandDispatcherNavigationOptions["onPageReload"];
     readonly #onRedraw: () => void;
     readonly #projection: TuiInteractionProjection;
@@ -56,7 +54,6 @@ export class TuiCommandDispatcherNavigation {
         this.#focus = options.focus;
         this.#focusManager = options.focusManager;
         this.#onContextMessage = options.onContextMessage;
-        this.#onLogsReload = options.onLogsReload;
         this.#onPageReload = options.onPageReload;
         this.#onRedraw = options.onRedraw;
         this.#projection = options.projection;
@@ -537,17 +534,10 @@ export class TuiCommandDispatcherNavigation {
     async #reloadPage(): Promise<boolean> {
         const state = this.#store.getState();
         try {
-            if (
-                state.ui.selectedPage === "logs" &&
-                state.ui.selectedInstance !== undefined
-            ) {
-                await this.#onLogsReload();
-            } else {
-                await this.#onPageReload(
-                    state.ui.selectedPage,
-                    state.ui.selectedInstance,
-                );
-            }
+            await this.#onPageReload(
+                state.ui.selectedPage,
+                state.ui.selectedInstance,
+            );
             this.#store.setScreenStatus(
                 state.ui.selectedPage,
                 "Page reloaded.",

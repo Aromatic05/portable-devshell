@@ -1,5 +1,4 @@
 import { type TuiAppStore } from "../../state/store/App.js";
-import { selectTuiLogs } from "../../state/store/Model.js";
 import { type TuiControlSession } from "./Session.js";
 import { tuiRouteIdentity, type TuiRoute } from "../../state/route/Model.js";
 import { currentTuiRoute } from "../../state/route/State.js";
@@ -53,28 +52,6 @@ export class TuiRouteDataLoader {
                         signal,
                         input,
                     );
-                }
-                return;
-            case "logs":
-                if (instance === undefined) return;
-                await this.options.session.refreshLogsForInstance(
-                    instance,
-                    undefined,
-                    signal,
-                );
-                if (route.view === "context") {
-                    this.options.store.setLogsFollow(instance, true);
-                    return () => {
-                        const logs = selectTuiLogs(
-                            this.options.store.getState(),
-                            instance,
-                        );
-                        this.options.store.setLogsFollow(instance, false);
-                        this.options.store.setLogsPausedAtSeq(
-                            instance,
-                            logs.at(-1)?.seq,
-                        );
-                    };
                 }
                 return;
             case "help":

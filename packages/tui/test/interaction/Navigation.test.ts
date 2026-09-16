@@ -104,12 +104,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         const navigation = new TuiCommandDispatcherNavigation({
             focus,
             focusManager,
-            onLogsReload: async () => {
-                reloads.push({
-                    instance: store.getState().ui.selectedInstance,
-                    page: "logs-buffer",
-                });
-            },
             onPageReload: async (page, instance) => {
                 reloads.push({ instance, page });
             },
@@ -245,7 +239,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
     test("navigation controller preserves and restores focus around search and confirm overlays", async () => {
         const harness = createHarness();
         await harness.navigation.dispatch({
-            page: "logs",
+            page: "audit",
             type: "page.select",
         });
 
@@ -258,7 +252,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             text: "error",
             type: "search.append",
         });
-        assert.equal(harness.store.getState().ui.searchQueries.logs, "error");
+        assert.equal(harness.store.getState().ui.searchQueries.audit, "error");
         assert.equal(
             await harness.navigation.dispatch({ type: "search.submit" }),
             true,
@@ -394,7 +388,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.equal(harness.store.getState().ui.messageScope, "active");
     });
 
-    test("navigation controller owns box expansion, scrolling, logs follow, reload, and redraw", async () => {
+    test("navigation controller owns box expansion, scrolling, reload, and redraw", async () => {
         const harness = createHarness();
         await harness.navigation.dispatch({
             direction: "next",
@@ -421,31 +415,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             true,
         );
 
-        await harness.navigation.dispatch({
-            page: "logs",
-            type: "page.select",
-        });
         assert.deepEqual(harness.reloads, []);
-        assert.equal(
-            await harness.navigation.dispatch({ type: "logs.toggleFollow" }),
-            true,
-        );
-        assert.equal(
-            harness.store.getState().ui.logsFollowByInstance.alpha,
-            false,
-        );
-        assert.equal(
-            await harness.navigation.dispatch({ type: "logs.clearBuffer" }),
-            true,
-        );
-
         assert.equal(
             await harness.navigation.dispatch({ type: "page.reload" }),
             true,
         );
         assert.deepEqual(harness.reloads.at(-1), {
             instance: "alpha",
-            page: "logs-buffer",
+            page: "instances",
         });
         assert.equal(
             await harness.navigation.dispatch({ type: "ui.redraw" }),
@@ -560,12 +537,10 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             await harness.press("r");
         }
 
-        assert.equal(harness.logsReloadCount(), pages.includes("logs") ? 1 : 0);
         const reloaded = new Set(
             harness.pageReloads().map((entry) => entry.page),
         );
         for (const page of pages) {
-            if (page === "logs") continue;
             assert.equal(
                 reloaded.has(page),
                 true,
@@ -641,7 +616,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
     });
 
-    test("search filters instances, config, messages, audit, and logs", async () => {
+    test("search filters instances, config, messages, and audit", async () => {
         const harness = createHarness();
 
         harness.store.setSelectedPage("instances");
@@ -712,17 +687,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 (box) => box.id,
             ),
             ["audit-filter-status", "audit-context:ctx-alpha"],
-        );
-        await harness.dispatch({ type: "search.submit" });
-
-        harness.store.setSelectedPage("logs");
-        await harness.dispatch({ type: "search.open" });
-        await harness.dispatch({ text: "ctx-alpha", type: "search.append" });
-        assert.deepEqual(
-            selectMainScreenModel(harness.store.getState()).boxes.map(
-                (box) => box.id,
-            ),
-            ["logs-filter-status", "log-context:ctx-alpha"],
         );
         await harness.dispatch({ type: "search.submit" });
 
@@ -3198,61 +3162,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
     });
 
-    test("Prompt 3 detail line selection clamps to a valid line after data replacement", () => {
-        const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-31T00:00:01.000Z",
-                            ctxId: "ctx-alpha",
-                            instanceName: "alpha",
-                            message: "one",
-                            seq: 1,
-                            stream: "stdout",
-                        },
-                        {
-                            at: "2026-07-31T00:00:02.000Z",
-                            ctxId: "ctx-alpha",
-                            instanceName: "alpha",
-                            message: "two",
-                            seq: 2,
-                            stream: "stdout",
-                        },
-                    ],
-                },
-            },
-        });
-        enterLogContext(harness, "ctx-alpha");
-        let logs = expandBox(harness, "logs");
-        harness.store.setMainFocusId(logs.id);
-        harness.store.setSelectedDetailLine(logs.expandedKey, "logs:log:2");
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-31T00:00:01.000Z",
-                            ctxId: "ctx-alpha",
-                            instanceName: "alpha",
-                            message: "one",
-                            seq: 1,
-                            stream: "stdout",
-                        },
-                    ],
-                },
-            },
-        });
-        harness.focusManager.syncPanel(
-            harness.store.getState().ui.selectedPage,
-            harness.store.getState().interaction.focusScope,
-        );
-        logs = selectMainScreenModel(harness.store.getState()).boxes.find(
-            (box) => box.id === "logs",
-        )!;
-        assert.equal(logs.selectedDetailLineId, "logs:log:1");
-    });
     test("connector editor presents only live endpoints and scopes unsaved feedback", () => {
         const harness = createHarness();
         enterConnectionsRoute(harness, "connector");
@@ -3810,149 +3719,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             "oauth-approval-oauth-completed:client",
         );
     });
-    test("logs render timestamps and correlation metadata", () => {
-        const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                ["alpha"]: {
-                    logs: [
-                        {
-                            at: "2026-07-11T12:34:56.000Z",
-                            callId: "call-1",
-                            ctxId: "session-1",
-                            instanceName: "alpha",
-                            message: "done",
-                            requestId: "req-1",
-                            seq: 21,
-                            source: "mcp",
-                            stream: "stdout",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
-            },
-        });
-        enterLogContext(harness, "session-1");
-        const logs = expandBox(harness, "logs");
-        const rendered = logs.expandedLines[0]?.text ?? "";
-        for (const value of [
-            "2026-07-11T12:34:56.000Z",
-            "stdout",
-            "21",
-            "bash_run",
-            "call-1",
-            "req-1",
-            "session-1",
-            "mcp",
-            "done",
-        ]) {
-            assert.equal(rendered.includes(value), true, value);
-        }
-    });
-    test("Logs linked call opens the matching inline ToolCall in its Audit Context", async () => {
-        const harness = createHarness();
-        harness.store.patchControlReadModel({
-            instanceState: {
-                alpha: {
-                    logs: [
-                        {
-                            at: "2026-07-11T12:34:56.000Z",
-                            callId: "call-linked",
-                            ctxId: "ctx-alpha",
-                            instanceName: "alpha",
-                            message: "linked output",
-                            seq: 1,
-                            source: "mcp",
-                            stream: "stdout",
-                            toolName: "bash_run",
-                        },
-                    ],
-                    toolCalls: [
-                        {
-                            callId: "call-linked",
-                            ctxId: "ctx-alpha",
-                            inputSummary: "{}",
-                            instance: asInstanceName("alpha"),
-                            output: {},
-                            source: "mcp",
-                            startedAt: "2026-07-11T12:34:55.000Z",
-                            status: "completed",
-                            toolName: "bash_run",
-                        },
-                    ],
-                },
-            },
-        });
-        enterLogContext(harness, "ctx-alpha");
-        const logs = expandBox(harness, "logs");
-        harness.store.setMainFocusId(logs.id);
-        harness.store.setFocusScope("boxDetail");
-        harness.store.setSelectedDetailLine(logs.expandedKey, "logs:log:1");
-
-        await harness.dispatch({ type: "focus.activate" });
-
-        assert.equal(harness.store.getState().ui.selectedPage, "audit");
-        assert.deepEqual(currentTuiRoute(harness.store.getState()), {
-            ctxId: "ctx-alpha",
-            page: "audit",
-            scope: "context",
-            view: "context",
-        });
-        assert.equal(
-            harness.store.getState().ui.mainFocusId,
-            "audit-call:call-linked",
-        );
-    });
-    test("Logs controls drive follow state", async () => {
-        const harness = createHarness();
-        enterLogContext(harness, "ctx-alpha");
-        const controls = expandBox(harness, "logs-controls");
-        harness.store.setMainFocusId(controls.id);
-        harness.store.setFocusScope("boxDetail");
-        harness.store.setSelectedDetailLine(
-            controls.expandedKey,
-            "logs-controls:button:toggle-follow",
-        );
-        await harness.dispatch({ type: "focus.activate" });
-        assert.equal(
-            harness.store.getState().ui.logsFollowByInstance.alpha,
-            false,
-        );
-        await harness.dispatch({ type: "logs.toggleFollow" });
-        assert.equal(
-            harness.store.getState().ui.logsFollowByInstance.alpha,
-            true,
-        );
-        await harness.dispatch({ type: "screen.pageUp" });
-        assert.equal(
-            harness.store.getState().ui.logsFollowByInstance.alpha,
-            false,
-        );
-    });
-    test("Main viewport scrolling uses one page-instance offset instead of per-box offsets", async () => {
-        const harness = createHarness();
-        enterLogContext(harness, "ctx-alpha");
-        const logs = expandBox(harness, "logs");
-        harness.store.setFocusScope("mainBoxes");
-        harness.store.setMainFocusId(logs.id);
-        const key = selectMainScrollKey(harness.store.getState());
-        await harness.dispatch({ type: "screen.pageDown" });
-        assert.equal(
-            (harness.store.getState().ui.scrollOffsets[key] ?? 0) > 0,
-            true,
-        );
-        assert.equal(
-            harness.store.getState().ui.scrollOffsets[logs.expandedKey],
-            undefined,
-        );
-        assert.equal(
-            selectMainScreenModel(harness.store.getState()).boxes.find(
-                (box) => box.id === "logs",
-            )?.expandedLines.length,
-            20,
-        );
-    });
-
     test("Messages scrolling measures wrapped history with the actual main viewport width", async () => {
         const harness = createHarness({ mainContentColumns: 20 });
         harness.store.patchControlReadModel({
@@ -4455,19 +4221,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
     }
 
-    function enterLogContext(
-        harness: ReturnType<typeof createHarness>,
-        ctxId: string,
-    ): void {
-        harness.store.setSelectedPage("logs");
-        harness.store.pushRoute({
-            ctxId,
-            page: "logs",
-            scope: "context",
-            view: "context",
-        });
-    }
-
     function enterConnectionsRoute(
         harness: ReturnType<typeof createHarness>,
         view: "connector" | "oauth",
@@ -4684,7 +4437,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         const enabledChanges: Array<{ enabled: boolean; instance: string }> =
             [];
         const shellAttaches: string[] = [];
-        let logsReloadRequests = 0;
         const pageReloads: Array<{
             instance: string | undefined;
             page: string;
@@ -4734,9 +4486,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 (async (instance) => {
                     shellAttaches.push(instance);
                 }),
-            onLogsReload: async () => {
-                logsReloadRequests += 1;
-            },
             onPageReload: async (page, instance) => {
                 pageReloads.push({ instance, page });
             },
@@ -4812,9 +4561,6 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             focusManager,
             instanceActions() {
                 return instanceActions;
-            },
-            logsReloadCount() {
-                return logsReloadRequests;
             },
             oauthApprovalDecisions() {
                 return oauthApprovalDecisions;

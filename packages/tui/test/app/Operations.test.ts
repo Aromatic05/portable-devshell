@@ -261,12 +261,6 @@ import {
             async refreshInstance(instance: string) {
                 refreshed.push(`instance:${instance}`);
             },
-            async refreshLogsForInstance(instance: string) {
-                refreshed.push(`logs:${instance}`);
-            },
-            async refreshLogs() {
-                refreshed.push("logs");
-            },
             async refreshMessages() {
                 refreshed.push("messages");
             },
@@ -480,7 +474,6 @@ import {
         );
         await harness.operations.reloadPage("config", "alpha");
         await harness.operations.reloadPage("audit", "alpha");
-        await harness.operations.reloadPage("logs", "alpha");
         await harness.operations.reloadPage("todo", "alpha");
         await harness.operations.reloadPage("connections", "alpha");
 
@@ -507,7 +500,6 @@ import {
             "instance:alpha",
             "config",
             "audit:alpha",
-            "logs:alpha",
             "todo:alpha",
             "config",
             "oauth",

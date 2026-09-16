@@ -22,9 +22,9 @@ import {
                 { enabled: true, mcpEnabled: true, name: "beta" },
             ],
         });
-        store.setSelectedPage("logs");
+        store.setSelectedPage("audit");
         store.setSelectedInstance("beta");
-        store.toggleExpanded("logs:beta:logs");
+        store.toggleExpanded("audit:beta:test");
         store.patchControlSnapshot({
             connectionState: "connected",
             daemonState: "running",
@@ -58,9 +58,9 @@ import {
         const state = store.getState();
 
         assert.equal(state.connection.status, "connected");
-        assert.equal(state.ui.selectedPage, "logs");
+        assert.equal(state.ui.selectedPage, "audit");
         assert.equal(state.ui.selectedInstance, "beta");
-        assert.equal(state.ui.expandedBoxes["logs:beta:logs"], true);
+        assert.equal(state.ui.expandedBoxes["audit:beta:test"], true);
         assert.equal(state.readModel.instanceState.beta?.logs.length, 1);
         assert.equal(state.rawEvents.at(-1)?.seq, 3);
         assert.equal(state.globalDerived.connectedInstanceCount, 1);
@@ -118,7 +118,7 @@ import {
         });
 
         store.setConnectionState("connected");
-        store.setSelectedPage("logs");
+        store.setSelectedPage("audit");
         store.setSelectedPage("help");
 
         assert.equal(renderCount, 0);
@@ -223,9 +223,7 @@ import {
         store.setSelectedDetailLine("instance:alpha", "line:alpha");
         store.setScreenStatus("instances", "ready");
         store.setSelectedInstance("alpha");
-        store.setSelectedPage("logs");
-        store.setLogsFollow("alpha", false);
-        store.setLogsPausedAtSeq("alpha", 42);
+        store.setSelectedPage("help");
 
         let notifications = 0;
         const unsubscribe = store.subscribe(() => {
@@ -243,9 +241,7 @@ import {
         store.setSelectedDetailLine("instance:alpha", "line:alpha");
         store.setScreenStatus("instances", "ready");
         store.setSelectedInstance("alpha");
-        store.setSelectedPage("logs");
-        store.setLogsFollow("alpha", false);
-        store.setLogsPausedAtSeq("alpha", 42);
+        store.setSelectedPage("help");
         store.clearFormDraft("missing");
 
         unsubscribe();

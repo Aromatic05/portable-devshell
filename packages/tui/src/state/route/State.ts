@@ -1,6 +1,6 @@
 import type { ToolCallRecord } from "@portable-devshell/shared";
 
-import { selectTuiLogs, type TuiAppState } from "../store/Model.js";
+import type { TuiAppState } from "../store/Model.js";
 import type { TuiPageId } from "../Ui.js";
 import {
     defaultTuiRouteViewState,
@@ -271,15 +271,6 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             if (route.view === "detail")
                 segments.push(resolveTodoBreadcrumbTitle(state, route.todoId));
             break;
-        case "logs":
-            if (route.view === "context") {
-                segments.push(
-                    route.scope === "unscoped"
-                        ? "unscoped"
-                        : truncateTuiBreadcrumbSegment(route.ctxId),
-                );
-            }
-            break;
         case "connections":
             if (route.view === "connector")
                 segments.push(
@@ -452,16 +443,6 @@ function isTuiRouteResourceValid(
             todo?.taskId === route.todoId ||
             todo?.tasks?.some((task) => task.taskId === route.todoId) === true
         );
-    }
-    if (route.page === "logs" && route.view === "context") {
-        if (instance === undefined) return false;
-        const logs = selectTuiLogs(state, instance);
-        return route.scope === "unscoped"
-            ? logs.some(
-                  (entry) =>
-                      entry.ctxId === undefined || entry.ctxId.length === 0,
-              )
-            : logs.some((entry) => entry.ctxId === route.ctxId);
     }
     return true;
 }
