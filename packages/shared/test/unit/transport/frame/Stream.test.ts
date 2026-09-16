@@ -6,6 +6,7 @@ import {
     FrameBuffer,
     FrameProtocol,
     FrameResetError,
+    FrameStreamChannel,
     frameResetCodes,
     type Frame,
     type FrameStream,
@@ -150,6 +151,28 @@ test("FIN is a half-close and the opposite direction remains writable", async ()
     await remote.write(new TextEncoder().encode("response"));
     await remote.finish();
     assert.equal(await readText(local), "response");
+    assert.equal(local.closed, true);
+    assert.equal(remote.closed, true);
+});
+
+test("FrameStreamChannel maps remote FIN to full logical close", async () => {
+    const { opener, acceptor } = pair(4);
+    const { local, remote } = await open(opener, acceptor, "channel-close", 8);
+    const channel = new FrameStreamChannel(local);
+
+    const received = new Promise<string>((resolve) => {
+        let value = "";
+        channel.onData((data) => {
+            value += new TextDecoder().decode(data);
+        });
+        channel.onClose(() => resolve(value));
+    });
+
+    await remote.write(new TextEncoder().encode("done"));
+    await remote.finish();
+
+    assert.equal(await received, "done");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     assert.equal(local.closed, true);
     assert.equal(remote.closed, true);
 });

@@ -51,6 +51,7 @@ export class FrameStreamChannel extends ChannelBase {
             while (!this.closed) {
                 const data = await this.#stream.read();
                 if (data === undefined) {
+                    await this.#stream.finish();
                     this.#finish();
                     return;
                 }
