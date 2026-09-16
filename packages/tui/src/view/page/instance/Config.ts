@@ -1,4 +1,6 @@
 import {
+    configInstanceChangedPaths,
+    configInstanceRequiresRestart,
     defaultConfigNormalizeContext,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -43,7 +45,10 @@ export function buildConfigPageBoxes(
     const comparableDraft = comparableInstanceDraft(draft);
     const dirty = !tuiEditorRecordsEqual(fallback, comparableDraft, true);
     const unsaved = dirty ? " [UNSAVED]" : "";
-    const restartRequired = requiresRestart(fallback, comparableDraft);
+    const restartRequired = configInstanceRequiresRestart(
+        fallback,
+        comparableDraft,
+    );
     const running =
         snapshot?.daemonState === "running" || snapshot?.ready === true;
     const selfManaged = snapshot?.reverse?.managementMode === "selfManaged";
@@ -449,35 +454,13 @@ function draftDiff(
     previous: Record<string, JsonValue>,
     next: Record<string, JsonValue>,
 ): string[] {
-    const paths = collectChangedPaths(previous, next);
+    const paths = configInstanceChangedPaths(previous, next);
     return paths.length === 0
         ? ["No semantic changes detected."]
         : paths.map(
               (path) =>
                   `~ ${path}: ${display(readPath(previous, path))} → ${display(readPath(next, path))}`,
           );
-}
-
-function collectChangedPaths(
-    previous: Record<string, JsonValue>,
-    next: Record<string, JsonValue>,
-    prefix = "",
-): string[] {
-    const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
-    return [...keys].sort().flatMap((key) => {
-        const path = prefix.length === 0 ? key : `${prefix}.${key}`;
-        const before = previous[key];
-        const after = next[key];
-        if (isRecord(before) && isRecord(after))
-            return collectChangedPaths(before, after, path);
-        return JSON.stringify(before) === JSON.stringify(after) ? [] : [path];
-    });
-}
-
-function isRecord(
-    value: JsonValue | undefined,
-): value is Record<string, JsonValue> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function display(value: JsonValue | undefined): string {
@@ -677,25 +660,6 @@ function comparableInstanceDraft(
     value: Record<string, JsonValue>,
 ): Record<string, JsonValue> {
     return normalizeTuiInstanceEditorRecord(value);
-}
-
-function requiresRestart(
-    previous: Record<string, JsonValue>,
-    next: Record<string, JsonValue>,
-): boolean {
-    return [
-        "provider",
-        "ssh",
-        "container",
-        "dockerBinary",
-        "podmanBinary",
-        "logs",
-        "tools",
-    ].some(
-        (path) =>
-            JSON.stringify(readPath(previous, path)) !==
-            JSON.stringify(readPath(next, path)),
-    );
 }
 
 function stringValue(value: JsonValue | undefined, fallback: string): string {

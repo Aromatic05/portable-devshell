@@ -1,5 +1,6 @@
 import type { ApprovalPolicy } from "../../../tool/Approval.js";
 import type { InstanceContainerMountConfig } from "../../../instance/Create.js";
+import type { JsonValue } from "../../../JsonValue.js";
 import type {
     ControlGlobalConfig,
     ControlInstanceAlertsConfig,
@@ -211,6 +212,48 @@ export interface ConfigBatchUpdateRequest {
     instance?: ConfigUpdateInstanceRequest;
     mcp?: ConfigMcpPatch;
     web?: ConfigWebPatch;
+}
+
+export const configInstanceRestartPaths = [
+    "provider",
+    "ssh",
+    "container",
+    "dockerBinary",
+    "podmanBinary",
+    "logs",
+    "tools",
+] as const;
+
+export function configInstanceRequiresRestart(
+    previous: Readonly<Record<string, JsonValue>>,
+    next: Readonly<Record<string, JsonValue>>,
+): boolean {
+    return configInstanceRestartPaths.some(
+        (path) => JSON.stringify(previous[path]) !== JSON.stringify(next[path]),
+    );
+}
+
+export function configInstanceChangedPaths(
+    previous: Readonly<Record<string, JsonValue>>,
+    next: Readonly<Record<string, JsonValue>>,
+    prefix = "",
+): string[] {
+    const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+    return [...keys].sort().flatMap((key) => {
+        const path = prefix.length === 0 ? key : `${prefix}.${key}`;
+        const before = previous[key];
+        const after = next[key];
+        if (isJsonRecord(before) && isJsonRecord(after)) {
+            return configInstanceChangedPaths(before, after, path);
+        }
+        return JSON.stringify(before) === JSON.stringify(after) ? [] : [path];
+    });
+}
+
+function isJsonRecord(
+    value: JsonValue | undefined,
+): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface ConfigInstanceTargetRequest {

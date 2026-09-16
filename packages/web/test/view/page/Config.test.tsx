@@ -21,16 +21,10 @@ describe("Web Config", () => {
         } as unknown as WebStore;
         render(<Config disabled={false} state={state} store={store} />);
 
-        const editor = screen.getByRole("textbox", {
-            name: "Instance configuration JSON",
-        });
-        const draft = JSON.parse(
-            editor.textContent || editor.getAttribute("value") || "{}",
-        ) as Record<string, unknown>;
-        draft.logs = { retentionDays: 30 };
-        fireEvent.change(editor, {
-            target: { value: JSON.stringify(draft, null, 2) },
-        });
+        fireEvent.change(
+            screen.getByRole("spinbutton", { name: "Log retention days" }),
+            { target: { value: "30" } },
+        );
 
         expect(
             screen.getByRole("button", { name: "Save Only" }),
@@ -63,16 +57,9 @@ describe("Web Config", () => {
         } as unknown as WebStore;
         render(<Config disabled={false} state={state} store={store} />);
 
-        const editor = screen.getByRole("textbox", {
-            name: "Instance configuration JSON",
-        });
-        const draft = JSON.parse(
-            (editor as HTMLTextAreaElement).value,
-        ) as Record<string, unknown>;
-        draft.workspace = { enabled: false };
-        fireEvent.change(editor, {
-            target: { value: JSON.stringify(draft, null, 2) },
-        });
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Workspace enabled" }),
+        );
 
         const save = screen.getByRole("button", { name: "Save Only" });
         expect(save).toBeEnabled();
@@ -89,6 +76,24 @@ describe("Web Config", () => {
         );
         expect(store.stop).not.toHaveBeenCalled();
         expect(store.start).not.toHaveBeenCalled();
+    });
+
+    it("keeps raw JSON available as an advanced editor", () => {
+        const state = configState();
+        const store = {
+            state,
+            updateInstanceConfig: vi.fn(async () => true),
+            validateConfig: vi.fn(async () => true),
+        } as unknown as WebStore;
+        render(<Config disabled={false} state={state} store={store} />);
+
+        expect(
+            (
+                screen.getByRole("textbox", {
+                    name: "Advanced instance JSON",
+                }) as HTMLTextAreaElement
+            ).value,
+        ).toContain('"provider": "local"');
     });
 });
 

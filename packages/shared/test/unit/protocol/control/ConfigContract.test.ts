@@ -4,6 +4,8 @@ import test from "node:test";
 import {
     ConfigInputError,
     applyConfigInstancePatch,
+    configInstanceChangedPaths,
+    configInstanceRequiresRestart,
     normalizeConfigDraft,
     normalizeConfigInstanceDraft,
     parseConfigDraft,
@@ -449,6 +451,31 @@ test("semantic validation permits explicitly exposed unauthenticated endpoints a
         ["mcp", "publicBaseUrl"],
         "config.reverse.publicBaseUrlRequired",
     );
+});
+
+test("instance config change semantics distinguish hot and restart-bound fields", () => {
+    const previous = {
+        logs: { retentionDays: 7 },
+        provider: "local",
+        workspace: { enabled: true },
+    };
+    const hot = {
+        ...previous,
+        workspace: { enabled: false },
+    };
+    const restart = {
+        ...previous,
+        logs: { retentionDays: 30 },
+    };
+
+    assert.deepEqual(configInstanceChangedPaths(previous, hot), [
+        "workspace.enabled",
+    ]);
+    assert.equal(configInstanceRequiresRestart(previous, hot), false);
+    assert.deepEqual(configInstanceChangedPaths(previous, restart), [
+        "logs.retentionDays",
+    ]);
+    assert.equal(configInstanceRequiresRestart(previous, restart), true);
 });
 
 function assertConfigIssue(

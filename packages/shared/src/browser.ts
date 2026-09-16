@@ -96,6 +96,11 @@ export type {
     ConfigView,
     ConfigWebPatch,
 } from "./protocol/control/config/model/ConfigEdit.js";
+export {
+    configInstanceChangedPaths,
+    configInstanceRequiresRestart,
+    configInstanceRestartPaths,
+} from "./protocol/control/config/model/ConfigEdit.js";
 export type {
     ApprovalDecisionValue,
     ApprovalPolicyRule,

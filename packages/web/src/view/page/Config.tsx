@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+    configInstanceChangedPaths,
+    configInstanceRequiresRestart,
+} from "@portable-devshell/shared/browser";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
@@ -7,16 +11,6 @@ import type {
 
 import type { WebState } from "../../state/Model.js";
 import type { WebStore } from "../../state/Store.js";
-
-const restartPaths = [
-    "provider",
-    "ssh",
-    "container",
-    "dockerBinary",
-    "podmanBinary",
-    "logs",
-    "tools",
-] as const;
 
 export function Config({
     disabled,
@@ -57,10 +51,17 @@ export function Config({
     }, [baselineText, selectedName]);
 
     const parsed = useMemo(() => parseInstance(draftText), [draftText]);
-    const dirty = draftText !== baselineText;
+    const changedPaths =
+        parsed.value !== undefined && baseline !== undefined
+            ? configInstanceChangedPaths(baseline, parsed.value)
+            : [];
+    const dirty =
+        parsed.value === undefined || baseline === undefined
+            ? draftText !== baselineText
+            : changedPaths.length > 0;
     const restartRequired =
         parsed.value !== undefined && baseline !== undefined
-            ? requiresRestart(baseline, parsed.value)
+            ? configInstanceRequiresRestart(baseline, parsed.value)
             : false;
     const snapshot =
         selectedName === undefined
@@ -72,6 +73,12 @@ export function Config({
     const operationPending = state.operations["config:update"] !== undefined;
     const interactive =
         state.connection === "online" && !disabled && !operationPending;
+
+    function updateDraft(path: string, value: JsonValue | undefined): void {
+        if (parsed.value === undefined) return;
+        setDraftText(stringify(setPath(parsed.value, path, value)));
+        setFeedback(undefined);
+    }
 
     async function validate(): Promise<boolean> {
         if (selectedName === undefined || parsed.value === undefined) {
@@ -214,20 +221,422 @@ export function Config({
                     </span>
                     <span>Worker: {running ? "running" : "stopped"}</span>
                 </div>
-                <label className="form-field wide">
-                    <span>Instance configuration JSON</span>
-                    <textarea
-                        aria-label="Instance configuration JSON"
-                        disabled={!interactive}
-                        onChange={(event) => {
-                            setDraftText(event.target.value);
-                            setFeedback(undefined);
-                        }}
-                        rows={24}
-                        spellCheck={false}
-                        value={draftText}
-                    />
-                </label>
+                <div className="control-grid config-structured-grid">
+                    <article className="card">
+                        <h3>General</h3>
+                        <div className="form-grid">
+                            <Check
+                                checked={booleanValue(
+                                    parsed.value,
+                                    "enabled",
+                                    true,
+                                )}
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Instance enabled"
+                                onChange={(value) =>
+                                    updateDraft("enabled", value)
+                                }
+                            />
+                            <Field label="Provider">
+                                <select
+                                    disabled={
+                                        !interactive ||
+                                        parsed.value === undefined
+                                    }
+                                    onChange={(event) =>
+                                        updateDraft(
+                                            "provider",
+                                            event.target.value,
+                                        )
+                                    }
+                                    value={stringValue(
+                                        parsed.value,
+                                        "provider",
+                                        "local",
+                                    )}
+                                >
+                                    {[
+                                        "local",
+                                        "ssh",
+                                        "docker",
+                                        "podman",
+                                        "reverse",
+                                    ].map((provider) => (
+                                        <option key={provider} value={provider}>
+                                            {provider}
+                                        </option>
+                                    ))}
+                                </select>
+                            </Field>
+                            {stringValue(parsed.value, "provider", "local") ===
+                            "ssh" ? (
+                                <Field label="SSH command" wide>
+                                    <input
+                                        disabled={
+                                            !interactive ||
+                                            parsed.value === undefined
+                                        }
+                                        onChange={(event) =>
+                                            updateDraft(
+                                                "ssh.command",
+                                                event.target.value,
+                                            )
+                                        }
+                                        value={stringValue(
+                                            parsed.value,
+                                            "ssh.command",
+                                            "",
+                                        )}
+                                    />
+                                </Field>
+                            ) : null}
+                            {stringValue(parsed.value, "provider", "local") ===
+                            "docker" ? (
+                                <Field label="Docker binary">
+                                    <input
+                                        disabled={
+                                            !interactive ||
+                                            parsed.value === undefined
+                                        }
+                                        onChange={(event) =>
+                                            updateDraft(
+                                                "dockerBinary",
+                                                optionalText(
+                                                    event.target.value,
+                                                ),
+                                            )
+                                        }
+                                        value={stringValue(
+                                            parsed.value,
+                                            "dockerBinary",
+                                            "",
+                                        )}
+                                    />
+                                </Field>
+                            ) : null}
+                            {stringValue(parsed.value, "provider", "local") ===
+                            "podman" ? (
+                                <Field label="Podman binary">
+                                    <input
+                                        disabled={
+                                            !interactive ||
+                                            parsed.value === undefined
+                                        }
+                                        onChange={(event) =>
+                                            updateDraft(
+                                                "podmanBinary",
+                                                optionalText(
+                                                    event.target.value,
+                                                ),
+                                            )
+                                        }
+                                        value={stringValue(
+                                            parsed.value,
+                                            "podmanBinary",
+                                            "",
+                                        )}
+                                    />
+                                </Field>
+                            ) : null}
+                        </div>
+                    </article>
+
+                    <article className="card">
+                        <h3>MCP & Workspace</h3>
+                        <div className="form-grid">
+                            <Check
+                                checked={booleanValue(
+                                    parsed.value,
+                                    "mcp.enabled",
+                                    true,
+                                )}
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="MCP enabled"
+                                onChange={(value) =>
+                                    updateDraft("mcp.enabled", value)
+                                }
+                            />
+                            <Field label="Context mode">
+                                <select
+                                    disabled={
+                                        !interactive ||
+                                        parsed.value === undefined
+                                    }
+                                    onChange={(event) =>
+                                        updateDraft(
+                                            "mcp.contextMode",
+                                            event.target.value,
+                                        )
+                                    }
+                                    value={stringValue(
+                                        parsed.value,
+                                        "mcp.contextMode",
+                                        "explicit",
+                                    )}
+                                >
+                                    <option value="explicit">explicit</option>
+                                    <option value="openai-session">
+                                        openai-session
+                                    </option>
+                                </select>
+                            </Field>
+                            <Field label="MCP path">
+                                <input
+                                    disabled
+                                    value={stringValue(
+                                        parsed.value,
+                                        "mcp.path",
+                                        `/${selectedName}/mcp`,
+                                    )}
+                                />
+                            </Field>
+                            <Check
+                                checked={booleanValue(
+                                    parsed.value,
+                                    "workspace.enabled",
+                                    true,
+                                )}
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Workspace enabled"
+                                onChange={(value) =>
+                                    updateDraft("workspace.enabled", value)
+                                }
+                            />
+                        </div>
+                    </article>
+
+                    <article className="card">
+                        <h3>Model & Security</h3>
+                        <div className="form-grid">
+                            <Field label="Model extensions" wide>
+                                <input
+                                    disabled={
+                                        !interactive ||
+                                        parsed.value === undefined
+                                    }
+                                    onChange={(event) =>
+                                        updateDraft(
+                                            "extensions.model",
+                                            splitList(event.target.value),
+                                        )
+                                    }
+                                    value={stringListValue(
+                                        parsed.value,
+                                        "extensions.model",
+                                    )}
+                                />
+                            </Field>
+                            <Field label="Security mode">
+                                <select
+                                    disabled={
+                                        !interactive ||
+                                        parsed.value === undefined
+                                    }
+                                    onChange={(event) =>
+                                        updateDraft(
+                                            "security.mode",
+                                            event.target.value,
+                                        )
+                                    }
+                                    value={stringValue(
+                                        parsed.value,
+                                        "security.mode",
+                                        "disabled",
+                                    )}
+                                >
+                                    <option value="disabled">disabled</option>
+                                    <option value="workspace">workspace</option>
+                                </select>
+                            </Field>
+                            <Field label="Approval mode">
+                                <select
+                                    disabled={
+                                        !interactive ||
+                                        parsed.value === undefined
+                                    }
+                                    onChange={(event) =>
+                                        updateDraft(
+                                            "approvalPolicy.mode",
+                                            event.target.value,
+                                        )
+                                    }
+                                    value={stringValue(
+                                        parsed.value,
+                                        "approvalPolicy.mode",
+                                        "disabled",
+                                    )}
+                                >
+                                    <option value="disabled">disabled</option>
+                                    <option value="allow">allow</option>
+                                    <option value="ask">ask</option>
+                                    <option value="deny">deny</option>
+                                </select>
+                            </Field>
+                        </div>
+                    </article>
+
+                    <article className="card">
+                        <h3>Runtime</h3>
+                        <div className="form-grid">
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Log retention days"
+                                onChange={(value) =>
+                                    updateDraft("logs.retentionDays", value)
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "logs.retentionDays",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Log max bytes"
+                                onChange={(value) =>
+                                    updateDraft("logs.maxBytes", value)
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "logs.maxBytes",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Log event buffer size"
+                                onChange={(value) =>
+                                    updateDraft("logs.eventBufferSize", value)
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "logs.eventBufferSize",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Max running tools"
+                                onChange={(value) =>
+                                    updateDraft(
+                                        "tools.scheduler.maxRunning",
+                                        value,
+                                    )
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "tools.scheduler.maxRunning",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Max running per session"
+                                onChange={(value) =>
+                                    updateDraft(
+                                        "tools.scheduler.maxRunningPerSession",
+                                        value,
+                                    )
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "tools.scheduler.maxRunningPerSession",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Queue depth"
+                                onChange={(value) =>
+                                    updateDraft(
+                                        "tools.scheduler.queueDepth",
+                                        value,
+                                    )
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "tools.scheduler.queueDepth",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Queue depth per session"
+                                onChange={(value) =>
+                                    updateDraft(
+                                        "tools.scheduler.queueDepthPerSession",
+                                        value,
+                                    )
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "tools.scheduler.queueDepthPerSession",
+                                )}
+                            />
+                            <NumberField
+                                disabled={
+                                    !interactive || parsed.value === undefined
+                                }
+                                label="Queue timeout ms"
+                                onChange={(value) =>
+                                    updateDraft(
+                                        "tools.scheduler.queueTimeoutMs",
+                                        value,
+                                    )
+                                }
+                                value={numberValue(
+                                    parsed.value,
+                                    "tools.scheduler.queueTimeoutMs",
+                                )}
+                            />
+                        </div>
+                    </article>
+                </div>
+                <details className="config-advanced-editor">
+                    <summary>Advanced instance JSON</summary>
+                    <label className="form-field wide">
+                        <span className="sr-only">Advanced instance JSON</span>
+                        <textarea
+                            aria-label="Advanced instance JSON"
+                            disabled={!interactive}
+                            onChange={(event) => {
+                                setDraftText(event.target.value);
+                                setFeedback(undefined);
+                            }}
+                            rows={18}
+                            spellCheck={false}
+                            value={draftText}
+                        />
+                    </label>
+                </details>
+                {changedPaths.length === 0 ||
+                parsed.value === undefined ? null : (
+                    <details className="config-change-summary">
+                        <summary>
+                            {changedPaths.length} pending change
+                            {changedPaths.length === 1 ? "" : "s"}
+                        </summary>
+                        <ul>
+                            {changedPaths.map((path) => (
+                                <li key={path}>{path}</li>
+                            ))}
+                        </ul>
+                    </details>
+                )}
                 {parsed.error === undefined ? null : (
                     <p className="error" role="alert">
                         {parsed.error}
@@ -412,15 +821,6 @@ function instancePatch(value: Record<string, JsonValue>): ConfigInstancePatch {
     return clone as ConfigInstancePatch;
 }
 
-function requiresRestart(
-    previous: Record<string, JsonValue>,
-    next: Record<string, JsonValue>,
-): boolean {
-    return restartPaths.some(
-        (path) => JSON.stringify(previous[path]) !== JSON.stringify(next[path]),
-    );
-}
-
 function asRecord(
     value: JsonValue | undefined,
 ): Record<string, JsonValue> | undefined {
@@ -431,6 +831,156 @@ function asRecord(
 
 function stringify(value: Record<string, JsonValue> | undefined): string {
     return JSON.stringify(value ?? {}, null, 2);
+}
+
+function readPath(
+    value: Record<string, JsonValue> | undefined,
+    path: string,
+): JsonValue | undefined {
+    let current: JsonValue | undefined = value;
+    for (const segment of path.split(".")) {
+        const record = asRecord(current);
+        if (record === undefined) return undefined;
+        current = record[segment];
+    }
+    return current;
+}
+
+function setPath(
+    value: Record<string, JsonValue>,
+    path: string,
+    next: JsonValue | undefined,
+): Record<string, JsonValue> {
+    const root = structuredClone(value) as Record<string, JsonValue>;
+    const segments = path.split(".");
+    let current = root;
+    for (const segment of segments.slice(0, -1)) {
+        const existing = asRecord(current[segment]);
+        const child = existing === undefined ? {} : { ...existing };
+        current[segment] = child;
+        current = child;
+    }
+    const leaf = segments.at(-1)!;
+    if (next === undefined) delete current[leaf];
+    else current[leaf] = next;
+    return root;
+}
+
+function booleanValue(
+    value: Record<string, JsonValue> | undefined,
+    path: string,
+    fallback: boolean,
+): boolean {
+    const current = readPath(value, path);
+    return typeof current === "boolean" ? current : fallback;
+}
+
+function stringValue(
+    value: Record<string, JsonValue> | undefined,
+    path: string,
+    fallback: string,
+): string {
+    const current = readPath(value, path);
+    return typeof current === "string" ? current : fallback;
+}
+
+function stringListValue(
+    value: Record<string, JsonValue> | undefined,
+    path: string,
+): string {
+    const current = readPath(value, path);
+    return Array.isArray(current)
+        ? current
+              .filter((item): item is string => typeof item === "string")
+              .join(", ")
+        : "";
+}
+
+function splitList(value: string): string[] {
+    return value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function numberValue(
+    value: Record<string, JsonValue> | undefined,
+    path: string,
+): number | undefined {
+    const current = readPath(value, path);
+    return typeof current === "number" ? current : undefined;
+}
+
+function optionalText(value: string): string | undefined {
+    return value.trim().length === 0 ? undefined : value;
+}
+
+function Field({
+    children,
+    label,
+    wide = false,
+}: {
+    children: React.ReactNode;
+    label: string;
+    wide?: boolean;
+}) {
+    return (
+        <label className={wide ? "form-field wide" : "form-field"}>
+            <span>{label}</span>
+            {children}
+        </label>
+    );
+}
+
+function Check({
+    checked,
+    disabled,
+    label,
+    onChange,
+}: {
+    checked: boolean;
+    disabled: boolean;
+    label: string;
+    onChange(value: boolean): void;
+}) {
+    return (
+        <label className="check-field">
+            <input
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) => onChange(event.target.checked)}
+                type="checkbox"
+            />
+            <span>{label}</span>
+        </label>
+    );
+}
+
+function NumberField({
+    disabled,
+    label,
+    onChange,
+    value,
+}: {
+    disabled: boolean;
+    label: string;
+    onChange(value: number | undefined): void;
+    value: number | undefined;
+}) {
+    return (
+        <Field label={label}>
+            <input
+                disabled={disabled}
+                min={0}
+                onChange={(event) => {
+                    const raw = event.target.value;
+                    onChange(raw.length === 0 ? undefined : Number(raw));
+                }}
+                type="number"
+                value={value ?? ""}
+            />
+        </Field>
+    );
 }
 
 function readError(error: unknown): string {
