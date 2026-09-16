@@ -359,6 +359,86 @@ h4 {
 .validation-summary pre {
     max-height: 320px;
 }
+.page-heading-actions {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.page-heading-actions h2,
+.page-heading-actions p {
+    margin-bottom: 0.35rem;
+}
+.compact-field {
+    display: grid;
+    gap: 0.25rem;
+    min-width: min(240px, 100%);
+    color: #b9c5d8;
+    font-size: 0.8rem;
+}
+.compact-field select {
+    min-height: 40px;
+    border: 1px solid #52647d;
+    border-radius: 8px;
+    padding: 0.45rem 0.6rem;
+    color: inherit;
+    background: #101722;
+}
+.config-editor-panel {
+    display: grid;
+    gap: 0.85rem;
+}
+.config-editor-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem 1rem;
+    color: #93a4bd;
+    font-size: 0.82rem;
+}
+.config-editor-summary strong {
+    color: #dce7f7;
+    font-size: 1rem;
+}
+.control-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+.control-grid .card {
+    margin: 0;
+}
+.connection-status-card dl,
+.reverse-connection-panel dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.35rem 0.75rem;
+    margin: 0;
+}
+.connection-status-card dt,
+.reverse-connection-panel dt {
+    color: #93a4bd;
+}
+.connection-status-card dd,
+.reverse-connection-panel dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+.connection-actions,
+.oauth-panel,
+.reverse-connection-panel {
+    margin-top: 1rem;
+}
+@media (max-width: 700px) {
+    .page-heading-actions {
+        flex-direction: column;
+    }
+    .compact-field {
+        width: 100%;
+    }
+}
 .worker-diagnostics {
     margin: 1rem 0;
 }

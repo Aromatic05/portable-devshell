@@ -989,6 +989,23 @@ describe("WebStore recovery and consistency", () => {
 });
 
 describe("WebStore operation and transport boundaries", () => {
+    it("restarts Control through reconnect without cancelling its own result", async () => {
+        const clients = fakeClients();
+        clients.service.restart = vi.fn(async () => ({ accepted: true }));
+        const store = new WebStore(clients, {
+            overviewRefreshIntervalMs: 0,
+        });
+        await store.load();
+
+        await expect(store.restartControl()).resolves.toBe(true);
+
+        expect(clients.service.restart).toHaveBeenCalledOnce();
+        expect(clients.reconnect).toHaveBeenCalledOnce();
+        expect(store.state.connection).toBe("online");
+        expect(store.state.notice).toBe("Control runtime restarted.");
+        store.close();
+    });
+
     it("completes a successful lifecycle operation without waiting for auxiliary reads", async () => {
         const clients = fakeClients();
         const store = new WebStore(clients, {

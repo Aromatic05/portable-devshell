@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 export const webPages = [
     "overview",
     "instances",
+    "config",
+    "connections",
     "messages",
     "audit",
     "approvals",
@@ -19,6 +21,8 @@ export type AuditScope =
 export type WebRoute =
     | { page: "overview" }
     | { page: "instances" }
+    | { page: "config" }
+    | { page: "connections" }
     | { page: "messages"; view: "contexts" }
     | { page: "messages"; view: "thread"; instance: string; ctxId: string }
     | { page: "audit"; view: "timeline"; scope: AuditScope }

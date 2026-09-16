@@ -4,6 +4,11 @@ import {
     ControlRefreshScheduler,
     errorMessage,
     withRequestTimeout,
+    type ConfigBatchUpdateRequest,
+    type ConfigDraft,
+    type ConfigInstancePatch,
+    type ConfigMcpPatch,
+    type ConfigWebPatch,
     type ConversationPreferencesPatch,
     type InstanceCreateDraft,
     type InstanceCreateSchema,
@@ -37,6 +42,7 @@ export class WebStore {
     #stopped = false;
     #loadPromise?: Promise<void>;
     #reconnectPromise?: Promise<void>;
+    #controlRestartPromise?: Promise<boolean>;
     #conversationPreferenceQueue = Promise.resolve();
     #generation = 0;
     #ignoreTransportClose = false;
@@ -487,6 +493,138 @@ export class WebStore {
         };
     }
 
+    async refreshConfig(): Promise<void> {
+        await this.#model.refreshConfig();
+        const failure = webFailures(this.#model.state).config;
+        if (failure !== undefined) throw new Error(failure);
+    }
+
+    async validateConfig(draft: ConfigDraft): Promise<boolean> {
+        try {
+            await withRequestTimeout(
+                this.clients.config.validate(draft),
+                this.#requestTimeoutMs,
+                "config.validate",
+            );
+            return true;
+        } catch (error) {
+            this.#set({
+                ...this.#state,
+                error: errorMessage(error),
+                notice: undefined,
+            });
+            return false;
+        }
+    }
+
+    async updateConfig(request: ConfigBatchUpdateRequest): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            "config:update",
+            "Configuration saved.",
+            generation,
+            async (signal) => {
+                await this.clients.config.update(request);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshConfig();
+                await this.#model.refreshMcp();
+            },
+        );
+    }
+
+    async updateInstanceConfig(
+        instance: string,
+        patch: ConfigInstancePatch,
+    ): Promise<boolean> {
+        return await this.updateConfig({
+            instance: { instanceName: instance, patch },
+        });
+    }
+
+    async updateMcpConfig(patch: ConfigMcpPatch): Promise<boolean> {
+        return await this.updateConfig({ mcp: patch });
+    }
+
+    async updateWebConfig(patch: ConfigWebPatch): Promise<boolean> {
+        return await this.updateConfig({ web: patch });
+    }
+
+    async decideOAuthApproval(
+        approvalId: string,
+        decision: "approve" | "deny",
+    ): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `oauth:${decision}:${approvalId}`,
+            `OAuth request ${decision === "approve" ? "approved" : "denied"}.`,
+            generation,
+            async (signal) => {
+                await this.clients.mcp.decideApproval(approvalId, decision);
+                if (signal.aborted || !this.#current(generation)) return;
+                this.#model.recordOAuthDecision(approvalId);
+                await this.#model.refreshMcp();
+            },
+        );
+    }
+
+    async createReverseCode(instance: string): Promise<string | undefined> {
+        try {
+            const result = await withRequestTimeout(
+                this.clients.reverse.createCode(instance),
+                this.#requestTimeoutMs,
+                `reverse.createCode:${instance}`,
+            );
+            return [
+                "devshell-worker enroll",
+                `--controller ${result.controllerUrl}`,
+                `--device-code ${result.deviceCode}`,
+                `(expires ${result.expiresAt})`,
+            ].join(" ");
+        } catch (error) {
+            this.#set({
+                ...this.#state,
+                error: errorMessage(error),
+                notice: undefined,
+            });
+            return undefined;
+        }
+    }
+
+    async rotateReverseToken(instance: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `reverse:rotate:${instance}`,
+            `${instance} device token rotated.`,
+            generation,
+            async () => {
+                await this.clients.reverse.rotateToken(instance);
+            },
+        );
+    }
+
+    async revokeReverseToken(instance: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `reverse:revoke:${instance}`,
+            `${instance} device token revoked.`,
+            generation,
+            async () => {
+                await this.clients.reverse.revokeToken(instance);
+            },
+        );
+    }
+
+    async restartControl(): Promise<boolean> {
+        if (this.#controlRestartPromise !== undefined)
+            return await this.#controlRestartPromise;
+        const request = this.#restartControl().finally(() => {
+            if (this.#controlRestartPromise === request)
+                this.#controlRestartPromise = undefined;
+        });
+        this.#controlRestartPromise = request;
+        return await request;
+    }
+
     dismissFeedback(kind: "error" | "notice"): void {
         if (kind === "error") {
             if (this.#state.error === undefined) return;
@@ -587,6 +725,44 @@ export class WebStore {
             this.#ignoreTransportClose = false;
         }
         if (this.#current(generation)) await this.load();
+    }
+
+    async #restartControl(): Promise<boolean> {
+        try {
+            await withRequestTimeout(
+                this.clients.service.restart(),
+                this.#requestTimeoutMs,
+                "control.restart",
+            );
+        } catch (error) {
+            this.#set({
+                ...this.#state,
+                error: errorMessage(error),
+                notice: undefined,
+            });
+            return false;
+        }
+        let lastError = "replacement runtime is not ready";
+        const deadline = Date.now() + 30_000;
+        while (!this.#stopped && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            await this.reconnect();
+            if (this.#state.connection === "online") {
+                this.#set({
+                    ...this.#state,
+                    error: undefined,
+                    notice: "Control runtime restarted.",
+                });
+                return true;
+            }
+            lastError = this.#state.error ?? lastError;
+        }
+        this.#set({
+            ...this.#state,
+            error: `Control restart was accepted, but the replacement runtime did not become ready: ${lastError}`,
+            notice: undefined,
+        });
+        return false;
     }
 
     #syncModel(): void {

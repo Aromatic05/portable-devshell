@@ -437,6 +437,22 @@ describe("authenticated application shell", () => {
             await screen.findByRole("heading", { name: "Instances" }),
         ).toBeInTheDocument();
 
+        fireEvent.click(
+            within(primary).getByRole("button", { name: "Config" }),
+        );
+        expect(window.location.hash).toBe("#/config");
+        expect(
+            await screen.findByRole("heading", { name: "Config" }),
+        ).toBeInTheDocument();
+
+        fireEvent.click(
+            within(primary).getByRole("button", { name: "Connections" }),
+        );
+        expect(window.location.hash).toBe("#/connections");
+        expect(
+            await screen.findByRole("heading", { name: "Connections" }),
+        ).toBeInTheDocument();
+
         window.location.hash = "#/overview";
         await screen.findByRole("heading", { name: "Overview" });
         fireEvent.click(

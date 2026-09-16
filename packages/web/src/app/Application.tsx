@@ -9,6 +9,8 @@ import { webFailures } from "../state/Model.js";
 import type { ApplicationBusy } from "./session/Hook.js";
 import { Approvals } from "../view/page/activity/Approvals.js";
 import { Audit } from "../view/page/activity/audit/Page.js";
+import { Config } from "../view/page/Config.js";
+import { Connections } from "../view/page/Connections.js";
 import { Instances } from "../view/page/Instances.js";
 import { Messages } from "../view/page/activity/messages/Page.js";
 import { Overview } from "../view/page/Overview.js";
@@ -114,6 +116,20 @@ export function Application({
                 {route.page === "overview" ? <Overview state={state} /> : null}
                 {route.page === "instances" ? (
                     <Instances disabled={interactionDisabled} store={store} />
+                ) : null}
+                {route.page === "config" ? (
+                    <Config
+                        disabled={interactionDisabled}
+                        state={state}
+                        store={store}
+                    />
+                ) : null}
+                {route.page === "connections" ? (
+                    <Connections
+                        disabled={interactionDisabled}
+                        state={state}
+                        store={store}
+                    />
                 ) : null}
                 {route.page === "approvals" ? (
                     <Approvals disabled={interactionDisabled} store={store} />

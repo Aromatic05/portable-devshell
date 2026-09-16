@@ -85,6 +85,18 @@ export type {
     ControlProtocolHelloResponse,
 } from "./protocol/control/ControlProtocol.js";
 export type {
+    ConfigBatchUpdateRequest,
+    ConfigDraft,
+    ConfigInstanceDraft,
+    ConfigInstancePatch,
+    ConfigMcpPatch,
+    ConfigUpdateInstanceRequest,
+    ConfigUpdateMcpRequest,
+    ConfigUpdateWebRequest,
+    ConfigView,
+    ConfigWebPatch,
+} from "./protocol/control/config/model/ConfigEdit.js";
+export type {
     ApprovalDecisionValue,
     ApprovalPolicyRule,
     ApprovalRequest,

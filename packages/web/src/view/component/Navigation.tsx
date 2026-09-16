@@ -7,6 +7,8 @@ import { pageRoute, type WebPage, type WebRoute } from "../../app/Route.js";
 const pages: Array<{ page: WebPage; label: string }> = [
     { page: "overview", label: "Overview" },
     { page: "instances", label: "Instances" },
+    { page: "config", label: "Config" },
+    { page: "connections", label: "Connections" },
     { page: "messages", label: "Messages" },
     { page: "audit", label: "Audit" },
     { page: "approvals", label: "Approvals" },
