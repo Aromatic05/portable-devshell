@@ -1,4 +1,7 @@
-import { createInitialControlReadModelState } from "@portable-devshell/shared";
+import {
+    createEmptyConversationPreferences,
+    createInitialControlReadModelState,
+} from "@portable-devshell/shared";
 import { createEmptyInteractionState } from "../Interaction.js";
 import type { TuiAppState } from "./Model.js";
 
@@ -8,6 +11,7 @@ export function createInitialTuiAppState(): TuiAppState {
         connection: {
             status: "connecting",
         },
+        conversationPreferences: createEmptyConversationPreferences(),
         globalDerived: {
             connectedInstanceCount: 0,
             pendingApprovalCount: 0,
@@ -29,6 +33,7 @@ export function createInitialTuiAppState(): TuiAppState {
             logsFollowByInstance: {},
             logsPausedAtSeqByInstance: {},
             mainFocusId: undefined,
+            messageCollapsedWorkspaces: {},
             messageScope: "active",
             routeStacks: {},
             routeViewStates: {},

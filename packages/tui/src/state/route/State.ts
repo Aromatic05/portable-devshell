@@ -16,7 +16,7 @@ export function tuiRouteContextKey(
     page: TuiPageId,
     instance: string | undefined,
 ): string {
-    return `${page}${CONTEXT_SEPARATOR}${instance ?? "-"}`;
+    return `${page}${CONTEXT_SEPARATOR}${routeContextInstance(page, instance) ?? "-"}`;
 }
 
 export function tuiRouteViewKey(
@@ -71,13 +71,13 @@ export function currentTuiRouteItemKey(
         route.view === "contexts" ||
         route.view === "index" ||
         route.view === "session";
+    const scopedInstance = routeContextInstance(
+        state.ui.selectedPage,
+        state.ui.selectedInstance,
+    );
     const prefix = rootScoped
-        ? `${state.ui.selectedPage}:${state.ui.selectedInstance}`
-        : tuiRouteViewKey(
-              state.ui.selectedPage,
-              state.ui.selectedInstance,
-              route,
-          );
+        ? `${state.ui.selectedPage}:${scopedInstance}`
+        : tuiRouteViewKey(state.ui.selectedPage, scopedInstance, route);
     return `${prefix}:${itemId}`;
 }
 
@@ -401,15 +401,14 @@ function isTuiRouteResourceValid(
     instance: string | undefined,
 ): boolean {
     if (route.page === "messages" && route.view === "thread") {
-        if (instance === undefined) return false;
         const registered = state.readModel.contexts.some(
             (context) =>
                 context.ctxId === route.ctxId &&
                 context.environments.some(
-                    (environment) => environment.instance === instance,
+                    (environment) => environment.instance === route.instance,
                 ),
         );
-        const instanceState = state.readModel.instanceState[instance];
+        const instanceState = state.readModel.instanceState[route.instance];
         return (
             registered ||
             (instanceState?.conversationEntries ?? []).some(
@@ -465,6 +464,13 @@ function isTuiRouteResourceValid(
             : logs.some((entry) => entry.ctxId === route.ctxId);
     }
     return true;
+}
+
+function routeContextInstance(
+    page: TuiPageId,
+    instance: string | undefined,
+): string | undefined {
+    return page === "messages" ? undefined : instance;
 }
 
 function assertRoutePage(state: TuiAppState, route: TuiRoute): void {

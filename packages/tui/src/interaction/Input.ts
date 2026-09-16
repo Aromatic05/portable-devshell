@@ -282,6 +282,12 @@ export class TuiKeyDispatcher {
         if (press.input === " ") {
             return [{ type: "screen.toggle" }];
         }
+        if (press.input === "d") {
+            return [{ type: "messages.hideFocused" }];
+        }
+        if (press.input === "u") {
+            return [{ type: "messages.restoreFocused" }];
+        }
         if (press.input === "m" || press.input === "M") {
             return [{ type: "contextConversation.openCurrent" }];
         }

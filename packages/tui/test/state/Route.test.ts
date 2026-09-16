@@ -149,7 +149,12 @@ import {
             },
         });
         store.setSelectedPage("messages");
-        store.pushRoute({ ctxId: "ctx-a", page: "messages", view: "thread" });
+        store.pushRoute({
+            ctxId: "ctx-a",
+            instance: "alpha",
+            page: "messages",
+            view: "thread",
+        });
         let key = selectMainScrollKey(store.getState());
         assert.equal(
             store.getState().ui.scrollOffsets[key],
@@ -280,12 +285,20 @@ import {
         store.setFocusScope("sidebarContext");
 
         assert.deepEqual(selectFooterShortcuts(store.getState()), [
-            "enter open",
+            "enter open/toggle",
+            "d hide",
+            "/ search",
             "esc back",
             "? help",
             "0-9 pages",
             "shift+1-9 instances",
         ]);
+
+        store.setMessageScope("hidden");
+        assert.equal(
+            selectFooterShortcuts(store.getState()).includes("u restore"),
+            true,
+        );
     });
 
     test("Audit Comment footer reflects browse and edit modes", () => {

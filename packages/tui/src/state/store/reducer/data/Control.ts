@@ -11,6 +11,13 @@ export function reduceTuiStoreReducerControl(
     action: TuiAppAction,
 ): TuiAppState | undefined {
     switch (action.type) {
+        case "conversationPreferences.replace":
+            return isDeepStrictEqual(
+                state.conversationPreferences,
+                action.preferences,
+            )
+                ? state
+                : { ...state, conversationPreferences: action.preferences };
         case "control.readModel.replace": {
             if (
                 isDeepStrictEqual(state.instances, action.instances) &&

@@ -14,6 +14,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { ContextMessageService } from "../../../../control/src/instance/context/Service.ts";
+import { ConversationPreferenceStore } from "../../../../control/src/control/config/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
 import { createTuiClients } from "../../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.js";
@@ -216,12 +217,12 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             selectSidebarModel(
                 harness.runtime.store.getState(),
             ).context.items.some(
-                (entry) => entry.id === "messages:context:ctx-alpha",
+                (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
         );
         assert.equal(
             harness.runtime.focusManager.setFocus({
-                id: "messages:context:ctx-alpha",
+                id: "messages:context:alpha:ctx-alpha",
                 kind: "context",
             }),
             true,
@@ -276,6 +277,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         );
         assert.deepEqual(currentTuiRoute(harness.runtime.store.getState()), {
             ctxId: "ctx-alpha",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });
@@ -314,11 +316,11 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             selectSidebarModel(
                 harness.runtime.store.getState(),
             ).context.items.some(
-                (entry) => entry.id === "messages:context:ctx-alpha",
+                (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
         );
         harness.runtime.focusManager.setFocus({
-            id: "messages:context:ctx-alpha",
+            id: "messages:context:alpha:ctx-alpha",
             kind: "context",
         });
         harness.terminal.write("\r");
@@ -368,11 +370,11 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             selectSidebarModel(
                 harness.runtime.store.getState(),
             ).context.items.some(
-                (entry) => entry.id === "messages:context:ctx-alpha",
+                (entry) => entry.id === "messages:context:alpha:ctx-alpha",
             ),
         );
         harness.runtime.focusManager.setFocus({
-            id: "messages:context:ctx-alpha",
+            id: "messages:context:alpha:ctx-alpha",
             kind: "context",
         });
         harness.terminal.write("\r");
@@ -554,11 +556,15 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             filePath: join(root, "context-messages.json"),
             instanceName: "alpha",
         });
+        const preferences = new ConversationPreferenceStore(
+            join(root, "conversation-preferences.json"),
+        );
         const routeCalls = { contextQueue: 0 };
         const server = new ControlSocketServer({
             routes: {
                 connectionClosed() {},
-                snapshot: () => createRoutes(messages, toolCalls, routeCalls),
+                snapshot: () =>
+                    createRoutes(messages, preferences, toolCalls, routeCalls),
             },
             socketPath,
         });
@@ -607,6 +613,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
 
     function createRoutes(
         messages: ContextMessageService,
+        preferences: ConversationPreferenceStore,
         toolCalls: readonly ToolCallRecord[],
         routeCalls: { contextQueue: number },
     ): PrefixRouteSnapshot {
@@ -696,6 +703,23 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                         workspace: "/workspace/alpha",
                                     },
                                 ],
+                            },
+                        ],
+                    },
+                    {
+                        name: "conversation",
+                        operations: [
+                            {
+                                name: "preferences",
+                                handle: async () =>
+                                    (await preferences.read()) as unknown as JsonValue,
+                            },
+                            {
+                                name: "updatePreferences",
+                                handle: async (request) =>
+                                    (await preferences.update(
+                                        (request.payload ?? {}) as never,
+                                    )) as unknown as JsonValue,
                             },
                         ],
                     },

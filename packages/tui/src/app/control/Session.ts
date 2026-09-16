@@ -6,6 +6,8 @@ import {
     toControlError,
     withRequestTimeout,
     type ControlReadModelState,
+    type ConversationPreferencesPatch,
+    type ConversationPreferencesSnapshot,
     type InstanceEvent,
     type InstanceListEntry,
     type InstanceSnapshot,
@@ -208,15 +210,48 @@ export class TuiControlSession {
     }
 
     async refreshMessages(
-        instance: string,
         generation = this.#generation,
         signal?: AbortSignal,
     ): Promise<void> {
         if (!this.#canRefresh(generation, signal)) return;
         await Promise.all([
             this.#model.refreshContexts(),
-            this.#model.refreshInstance(instance, ["comments"]),
+            ...this.#model.state.instances.map(
+                async ({ name }) =>
+                    await this.#model.refreshInstance(name, ["comments"]),
+            ),
+            this.refreshConversationPreferences(generation, signal),
         ]);
+    }
+
+    async refreshConversationPreferences(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (!this.#canRefresh(generation, signal)) return;
+        const preferences = await withRequestTimeout(
+            this.#clients.conversation.preferences(),
+            this.#readTimeoutMs,
+            "conversation.preferences",
+        );
+        if (this.#canRefresh(generation, signal)) {
+            this.#store.setConversationPreferences(preferences);
+        }
+    }
+
+    async updateConversationPreferences(
+        patch: ConversationPreferencesPatch,
+    ): Promise<ConversationPreferencesSnapshot> {
+        const generation = this.#generation;
+        const preferences = await withRequestTimeout(
+            this.#clients.conversation.updatePreferences(patch),
+            this.#readTimeoutMs,
+            "conversation.updatePreferences",
+        );
+        if (this.#current(generation)) {
+            this.#store.setConversationPreferences(preferences);
+        }
+        return preferences;
     }
 
     async refreshToolCallsForInstance(

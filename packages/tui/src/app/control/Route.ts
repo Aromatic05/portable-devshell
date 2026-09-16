@@ -39,12 +39,7 @@ export class TuiRouteDataLoader {
                     );
                 return;
             case "messages":
-                if (instance !== undefined)
-                    await this.options.session.refreshMessages(
-                        instance,
-                        undefined,
-                        signal,
-                    );
+                await this.options.session.refreshMessages(undefined, signal);
                 return;
             case "todo":
                 if (instance !== undefined) {

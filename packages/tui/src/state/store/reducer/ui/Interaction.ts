@@ -33,6 +33,20 @@ export function reduceTuiStoreReducerInteraction(
                     messageScope: action.scope,
                 },
             };
+        case "messages.project.toggle":
+            return {
+                ...state,
+                ui: {
+                    ...state.ui,
+                    messageCollapsedWorkspaces: {
+                        ...state.ui.messageCollapsedWorkspaces,
+                        [action.workspaceKey]:
+                            state.ui.messageCollapsedWorkspaces[
+                                action.workspaceKey
+                            ] !== true,
+                    },
+                },
+            };
         case "detailLine.select": {
             if (
                 state.interaction.selectedDetailLineIds[action.key] ===

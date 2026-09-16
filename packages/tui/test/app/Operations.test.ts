@@ -267,8 +267,8 @@ import {
             async refreshLogs() {
                 refreshed.push("logs");
             },
-            async refreshMessages(instance: string) {
-                refreshed.push(`messages:${instance}`);
+            async refreshMessages() {
+                refreshed.push("messages");
             },
             async refreshOAuth() {
                 refreshed.push("oauth");

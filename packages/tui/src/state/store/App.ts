@@ -2,6 +2,7 @@ import {
     type ControlError,
     type ControlInstanceReadState,
     type ControlReadModelState,
+    type ConversationPreferencesSnapshot,
     type InstanceEvent,
 } from "@portable-devshell/shared";
 
@@ -82,6 +83,15 @@ export class TuiAppStore {
             instances,
             readModel,
             type: "control.readModel.replace",
+        });
+    }
+
+    setConversationPreferences(
+        preferences: ConversationPreferencesSnapshot,
+    ): void {
+        this.dispatch({
+            preferences,
+            type: "conversationPreferences.replace",
         });
     }
 
@@ -167,6 +177,10 @@ export class TuiAppStore {
 
     setMessageScope(scope: TuiMessageScope): void {
         this.dispatch({ scope, type: "messages.scope.set" });
+    }
+
+    toggleMessageProject(workspaceKey: string): void {
+        this.dispatch({ type: "messages.project.toggle", workspaceKey });
     }
 
     setSelectedPage(page: TuiPageId): void {

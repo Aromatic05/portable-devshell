@@ -9,6 +9,7 @@ import {
 import {
     renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,
+    selectTuiMessageHiddenSessions,
     selectTuiMessageHistorySessions,
     selectTuiMessageSessions,
     tuiMessagesHistoryRows,
@@ -20,27 +21,22 @@ export function TuiMessagesView(props: {
     width: number;
 }) {
     const route = currentTuiRoute(props.state);
-    const instance = props.state.ui.selectedInstance;
-    if (
-        route.page !== "messages" ||
-        route.view === "contexts" ||
-        instance === undefined
-    ) {
+    if (route.page !== "messages" || route.view === "contexts") {
         const scope = props.state.ui.messageScope;
         const conversations =
-            instance === undefined
-                ? []
-                : scope === "active"
-                  ? selectTuiMessageSessions(props.state, instance)
-                  : selectTuiMessageHistorySessions(props.state, instance);
+            scope === "active"
+                ? selectTuiMessageSessions(props.state)
+                : scope === "history"
+                  ? selectTuiMessageHistorySessions(props.state)
+                  : selectTuiMessageHiddenSessions(props.state);
         const message =
-            instance === undefined
-                ? "Select an Instance from the lower sidebar list."
-                : conversations.length === 0
-                  ? scope === "active"
-                      ? `No active conversations on ${instance}. Open History or switch Instance.`
-                      : `No conversation history on ${instance}. Switch to Active or another Instance.`
-                  : `Select a ${scope === "active" ? "Conversation" : "historical Conversation"} from the sidebar.`;
+            conversations.length === 0
+                ? scope === "active"
+                    ? "No current conversations. Open History or Hidden."
+                    : scope === "history"
+                      ? "No conversation history."
+                      : "No hidden conversations."
+                : "Select a Conversation from the sidebar.";
         return (
             <Box flexDirection="column">
                 <Text bold>Messages</Text>
@@ -48,6 +44,7 @@ export function TuiMessagesView(props: {
             </Box>
         );
     }
+    const instance = route.instance;
 
     const history = renderTuiMessageHistoryLines(
         props.state,

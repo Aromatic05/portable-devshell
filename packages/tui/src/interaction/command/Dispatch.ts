@@ -5,6 +5,7 @@ import type {
     ConfigBatchUpdateRequest,
     ConfigDraft,
     ArtifactViewImageResult,
+    ConversationPreferencesPatch,
     JsonValue,
     ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -14,6 +15,8 @@ import type { TuiUiIntent } from "../../state/Interaction.js";
 import type { TuiAppStore } from "../../state/store/App.js";
 import { topTuiOverlay } from "../../state/Overlay.js";
 import type { TuiPageId } from "../../state/Ui.js";
+import { currentTuiRoute } from "../../state/route/State.js";
+import { selectSidebarModel } from "../../view/projection/View.js";
 import type { TuiInteractionProjection } from "../Projection.js";
 import {
     TuiCommandDispatcherAudit,
@@ -66,6 +69,9 @@ export interface TuiCommandDispatcherOptions {
     ): Promise<void>;
     onContextDisable?(instance: string, ctxId: string): Promise<void>;
     onContextRenew?(instance: string, ctxId: string): Promise<void>;
+    onConversationPreferencesUpdate?(
+        patch: ConversationPreferencesPatch,
+    ): Promise<void>;
     onControlRestart?(): Promise<void>;
     onCreateInstance?(draft: InstanceCreateDraft): Promise<string | undefined>;
     onGetInstanceCreateSchema?(): Promise<InstanceCreateSchema>;
@@ -171,6 +177,10 @@ export class TuiCommandDispatcher {
                 return await this.#activateCurrentScope();
             case "ui.cancel":
                 return this.#cancel();
+            case "messages.hideFocused":
+                return await this.#updateFocusedMessageVisibility(true);
+            case "messages.restoreFocused":
+                return await this.#updateFocusedMessageVisibility(false);
             case "instance.start":
                 await this.#options.onInstanceAction("start", intent.instance);
                 return true;
@@ -452,6 +462,54 @@ export class TuiCommandDispatcher {
     ): Promise<boolean> {
         await this.#options.onApprovalDecision(instance, approvalId, decision);
         this.#audit.returnToPage();
+        return true;
+    }
+
+    async #updateFocusedMessageVisibility(hidden: boolean): Promise<boolean> {
+        const state = this.#store.getState();
+        if (
+            state.ui.selectedPage !== "messages" ||
+            state.interaction.focusScope !== "sidebarContext" ||
+            (hidden && state.ui.messageScope === "hidden") ||
+            (!hidden && state.ui.messageScope !== "hidden")
+        ) {
+            return false;
+        }
+        const cursor = state.interaction.sidebarCursor;
+        if (cursor?.kind !== "context") return false;
+        const entry = selectSidebarModel(state).context.items.find(
+            (candidate) => candidate.id === cursor.id,
+        );
+        if (entry === undefined) return false;
+        const ctxIds =
+            entry.target.kind === "messageConversation"
+                ? [entry.target.route.ctxId]
+                : entry.target.kind === "messageProject"
+                  ? entry.target.ctxIds
+                  : [];
+        if (ctxIds.length === 0) return false;
+        await (this.#options.onConversationPreferencesUpdate ?? unavailable)({
+            hiddenContexts: Object.fromEntries(
+                ctxIds.map((ctxId) => [ctxId, hidden ? true : null]),
+            ),
+        });
+        const route = currentTuiRoute(this.#store.getState());
+        if (
+            hidden &&
+            route.page === "messages" &&
+            route.view === "thread" &&
+            ctxIds.includes(route.ctxId)
+        ) {
+            this.#store.resetRoute();
+        }
+        this.#store.setSidebarCursor({
+            id: `messages:scope:${this.#store.getState().ui.messageScope}`,
+            kind: "context",
+        });
+        this.#store.setScreenStatus(
+            "messages",
+            `${ctxIds.length === 1 ? "Conversation" : `${ctxIds.length} conversations`} ${hidden ? "hidden" : "restored"}.`,
+        );
         return true;
     }
 

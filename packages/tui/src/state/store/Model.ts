@@ -2,6 +2,7 @@ import type {
     ControlError,
     ControlInstanceReadState,
     ControlReadModelState,
+    ConversationPreferencesSnapshot,
     InstanceEvent,
     InstanceLogEntry,
     JsonValue,
@@ -73,6 +74,7 @@ export interface TuiRelayRecord {
 export interface TuiAppState {
     commandRecords: TuiCommandRecord[];
     connection: TuiConnectionState;
+    conversationPreferences: ConversationPreferencesSnapshot;
     globalDerived: TuiGlobalDerivedState;
     interaction: TuiInteractionState;
     instances: TuiInstanceListEntry[];
@@ -97,6 +99,10 @@ export type TuiAppAction =
           readModel: ControlReadModelState;
           type: "control.readModel.replace";
       }
+    | {
+          preferences: ConversationPreferencesSnapshot;
+          type: "conversationPreferences.replace";
+      }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }
     | { commandId: string; chunk: string; type: "relay.appendOutput" }
@@ -115,6 +121,7 @@ export type TuiAppAction =
     | { focusScope: TuiFocusScope; type: "focus.scope.set" }
     | { type: "log.clearBuffer" }
     | { mainFocusId?: string; type: "mainFocus.set" }
+    | { type: "messages.project.toggle"; workspaceKey: string }
     | { scope: TuiMessageScope; type: "messages.scope.set" }
     | { key: string; lineId?: string; type: "detailLine.select" }
     | { cursor?: TuiSidebarCursor; type: "sidebar.cursor.set" }

@@ -161,6 +161,28 @@ export class TuiCommandDispatcherNavigation {
                     this.#store.setSidebarCursor(cursor);
                     this.#store.setFocusScope("sidebarContext");
                     return true;
+                case "messageProject":
+                    this.#store.toggleMessageProject(entry.target.workspaceKey);
+                    this.#store.setSidebarCursor(cursor);
+                    this.#store.setFocusScope("sidebarContext");
+                    return true;
+                case "messageConversation": {
+                    const current = currentTuiRoute(this.#store.getState());
+                    if (current.page !== "messages") return false;
+                    if (current.view === "contexts") {
+                        this.#store.pushRoute(entry.target.route);
+                    } else {
+                        this.#store.replaceRoute(entry.target.route);
+                    }
+                    this.#store.setSidebarCursor(cursor);
+                    this.#store.setScrollOffset(
+                        currentTuiRouteScrollKey(this.#store.getState()),
+                        Number.MAX_SAFE_INTEGER,
+                    );
+                    this.#store.setFocusScope("sidebarContext");
+                    this.#startContextConversationEditing();
+                    return true;
+                }
                 case "route": {
                     const current = currentTuiRoute(this.#store.getState());
                     if (current.page !== entry.target.route.page) return false;
@@ -490,6 +512,13 @@ export class TuiCommandDispatcherNavigation {
         | undefined {
         const state = this.#store.getState();
         const route = currentTuiRoute(state);
+        if (route.page === "messages" && route.view === "thread") {
+            return {
+                ctxId: route.ctxId,
+                instance: route.instance,
+                page: "messages",
+            };
+        }
         if (state.ui.selectedInstance === undefined) return undefined;
         if (
             route.page === "audit" &&
@@ -502,13 +531,7 @@ export class TuiCommandDispatcherNavigation {
                 page: "audit",
             };
         }
-        return route.page === "messages" && route.view === "thread"
-            ? {
-                  ctxId: route.ctxId,
-                  instance: state.ui.selectedInstance,
-                  page: "messages",
-              }
-            : undefined;
+        return undefined;
     }
 
     async #reloadPage(): Promise<boolean> {

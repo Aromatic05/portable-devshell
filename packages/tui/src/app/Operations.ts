@@ -180,7 +180,7 @@ export interface TuiRuntimeOperationSession {
     refreshInstances(): Promise<unknown>;
     refreshLogs(): Promise<unknown>;
     refreshLogsForInstance(instance: string): Promise<unknown>;
-    refreshMessages(instance: string): Promise<unknown>;
+    refreshMessages(): Promise<unknown>;
     refreshOAuth(): Promise<unknown>;
     refreshOverview(): Promise<unknown>;
     refreshTodo(instance: string): Promise<unknown>;

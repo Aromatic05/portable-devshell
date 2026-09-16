@@ -304,6 +304,9 @@ export class TuiRuntime {
             onContextRenew: async (instance, ctxId) => {
                 await this.#operations.renewContext(instance, ctxId);
             },
+            onConversationPreferencesUpdate: async (patch) => {
+                await this.session.updateConversationPreferences(patch);
+            },
             onOpenTerminal: async (instance) => {
                 this.store.setSelectedInstance(instance);
                 this.store.setSelectedPage("terminal");

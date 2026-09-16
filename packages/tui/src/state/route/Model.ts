@@ -11,7 +11,7 @@ export type TuiRoute =
     | { page: "connections"; providerId: string; view: "oauth" }
     | { instanceId: string; page: "connections"; view: "reverse" }
     | { page: "messages"; view: "contexts" }
-    | { ctxId: string; page: "messages"; view: "thread" }
+    | { ctxId: string; instance: string; page: "messages"; view: "thread" }
     | { page: "audit"; view: "contexts" }
     | { page: "audit"; scope: "unscoped"; view: "context" }
     | { ctxId: string; page: "audit"; scope: "context"; view: "context" }
@@ -62,7 +62,7 @@ export function tuiRouteIdentity(route: TuiRoute): string {
         case "messages":
             return route.view === "contexts"
                 ? "messages/contexts"
-                : `messages/context/${encodeURIComponent(route.ctxId)}`;
+                : `messages/context/${encodeURIComponent(route.instance)}/${encodeURIComponent(route.ctxId)}`;
         case "terminal":
             return route.pane === undefined
                 ? `terminal/${route.tab}`

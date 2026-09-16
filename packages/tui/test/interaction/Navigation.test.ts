@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     asInstanceName,
+    type ConversationPreferencesPatch,
     createError,
     type ContextMessageRecord,
     type InstanceCreateDraft,
@@ -360,14 +361,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         );
     });
 
-    test("Messages scope row switches between Active and History without leaving the feature", async () => {
+    test("Messages scope rows switch between Current, History, and Hidden without leaving the feature", async () => {
         const harness = createHarness();
         await harness.navigation.dispatch({
             page: "messages",
             type: "page.select",
         });
         harness.store.setSidebarCursor({
-            id: "messages:scope",
+            id: "messages:scope:history",
             kind: "context",
         });
 
@@ -379,7 +380,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         });
 
         harness.store.setSidebarCursor({
-            id: "messages:scope",
+            id: "messages:scope:hidden",
+            kind: "context",
+        });
+        assert.equal(await harness.navigation.activateSidebarSelection(), true);
+        assert.equal(harness.store.getState().ui.messageScope, "hidden");
+
+        harness.store.setSidebarCursor({
+            id: "messages:scope:active",
             kind: "context",
         });
         assert.equal(await harness.navigation.activateSidebarSelection(), true);
@@ -633,7 +641,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.equal(harness.store.getState().ui.mainFocusId, "instance:alpha");
     });
 
-    test("search filters instances, config, audit, and logs only", async () => {
+    test("search filters instances, config, messages, audit, and logs", async () => {
         const harness = createHarness();
 
         harness.store.setSelectedPage("instances");
@@ -653,6 +661,44 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.equal(
             selectMainScreenModel(harness.store.getState()).boxes.some(
                 (box) => box.id === "configuration",
+            ),
+            true,
+        );
+        await harness.dispatch({ type: "search.submit" });
+
+        const now = new Date().toISOString();
+        harness.store.patchControlReadModel({
+            contexts: [
+                {
+                    createdAt: now,
+                    ctxId: "ctx-message-search",
+                    environments: [
+                        {
+                            instance: "alpha",
+                            workspace: "/workspace/message-search",
+                        },
+                    ],
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    instance: "alpha",
+                    lastAccessedAt: now,
+                    principal: "client",
+                    status: "active",
+                    workspace: "/workspace/message-search",
+                },
+            ],
+        });
+        harness.store.setSelectedPage("messages");
+        harness.store.setSidebarLevel("section");
+        await harness.dispatch({ type: "search.open" });
+        await harness.dispatch({
+            text: "message-search",
+            type: "search.append",
+        });
+        assert.equal(
+            selectSidebarModel(harness.store.getState()).context.items.some(
+                (entry) =>
+                    entry.target.kind === "messageConversation" &&
+                    entry.target.route.ctxId === "ctx-message-search",
             ),
             true,
         );
@@ -1168,11 +1214,12 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         ]);
     });
 
-    test("Messages history-only session remains writable without a current Context registry record", async () => {
-        const sent: Array<{ ctxId: string; text: string }> = [];
+    test("Messages history-only session keeps its route instance when selected Instance changes", async () => {
+        const sent: Array<{ ctxId: string; instance: string; text: string }> =
+            [];
         const harness = createHarness({
-            onContextMessage: async (_instance, ctxId, text) => {
-                sent.push({ ctxId, text });
+            onContextMessage: async (instance, ctxId, text) => {
+                sent.push({ ctxId, instance, text });
             },
         });
         harness.store.patchControlReadModel({
@@ -1195,9 +1242,11 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-history-only",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });
+        harness.store.setSelectedInstance("beta");
 
         await harness.dispatch({ type: "contextConversation.edit" });
         assert.equal(
@@ -1208,13 +1257,117 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         await harness.press("", { return: true });
 
         assert.deepEqual(sent, [
-            { ctxId: "ctx-history-only", text: "continue this conversation" },
+            {
+                ctxId: "ctx-history-only",
+                instance: "alpha",
+                text: "continue this conversation",
+            },
         ]);
         assert.doesNotMatch(
             harness.store.getState().interaction.screenStatusByPage.messages ??
                 "",
             /not active|read-only|unavailable/iu,
         );
+    });
+
+    test("Messages project soft hide and restore patch every current ctxId across instances", async () => {
+        const patches: ConversationPreferencesPatch[] = [];
+        const harness = createHarness({
+            onConversationPreferencesUpdate: async (patch) => {
+                patches.push(patch);
+            },
+        });
+        const now = new Date().toISOString();
+        harness.store.patchControlReadModel({
+            contexts: [
+                {
+                    createdAt: now,
+                    ctxId: "ctx-project-a",
+                    environments: [
+                        { instance: "alpha", workspace: "/workspace/project" },
+                    ],
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    instance: "alpha",
+                    lastAccessedAt: now,
+                    principal: "client",
+                    status: "active",
+                    workspace: "/workspace/project",
+                },
+                {
+                    createdAt: now,
+                    ctxId: "ctx-project-b",
+                    environments: [
+                        { instance: "beta", workspace: "/workspace/project" },
+                    ],
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    instance: "beta",
+                    lastAccessedAt: now,
+                    principal: "client",
+                    status: "active",
+                    workspace: "/workspace/project",
+                },
+            ],
+        });
+        harness.store.setSelectedPage("messages");
+        harness.store.setSidebarLevel("section");
+        harness.store.setFocusScope("sidebarContext");
+
+        const project = selectSidebarModel(
+            harness.store.getState(),
+        ).context.items.find((entry) => entry.target.kind === "messageProject");
+        assert.equal(project?.target.kind, "messageProject");
+        if (project?.target.kind !== "messageProject") return;
+        assert.deepEqual(project.target.ctxIds.sort(), [
+            "ctx-project-a",
+            "ctx-project-b",
+        ]);
+        harness.store.setSidebarCursor({ id: project.id, kind: "context" });
+
+        assert.equal(
+            await harness.commandDispatcher.dispatch({
+                type: "messages.hideFocused",
+            }),
+            true,
+        );
+        assert.deepEqual(patches, [
+            {
+                hiddenContexts: {
+                    "ctx-project-a": true,
+                    "ctx-project-b": true,
+                },
+            },
+        ]);
+
+        harness.store.setConversationPreferences({
+            ...harness.store.getState().conversationPreferences,
+            hiddenContexts: {
+                "ctx-project-a": true,
+                "ctx-project-b": true,
+            },
+        });
+        harness.store.setMessageScope("hidden");
+        const hiddenProject = selectSidebarModel(
+            harness.store.getState(),
+        ).context.items.find((entry) => entry.target.kind === "messageProject");
+        assert.equal(hiddenProject?.target.kind, "messageProject");
+        if (hiddenProject?.target.kind !== "messageProject") return;
+        harness.store.setSidebarCursor({
+            id: hiddenProject.id,
+            kind: "context",
+        });
+
+        assert.equal(
+            await harness.commandDispatcher.dispatch({
+                type: "messages.restoreFocused",
+            }),
+            true,
+        );
+        assert.deepEqual(patches[1], {
+            hiddenContexts: {
+                "ctx-project-a": null,
+                "ctx-project-b": null,
+            },
+        });
     });
 
     test("Comment submit remains writable when Context becomes disabled after editing starts", async () => {
@@ -3831,6 +3984,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-alpha",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });
@@ -3885,6 +4039,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         harness.store.setSelectedPage("messages");
         harness.store.replaceRoute({
             ctxId: "ctx-alpha",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });
@@ -4497,6 +4652,9 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 instance: string,
                 ctxId: string,
             ) => Promise<void>;
+            onConversationPreferencesUpdate?: (
+                patch: ConversationPreferencesPatch,
+            ) => Promise<void>;
             onTodoDelete?: (instance: string, taskId: string) => Promise<void>;
             onToolCall?: (
                 instance: string,
@@ -4591,6 +4749,8 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
                 (async () => ({}))) as never,
             onContextMessage: options.onContextMessage,
             onContextDisable: options.onContextDisable,
+            onConversationPreferencesUpdate:
+                options.onConversationPreferencesUpdate,
             onTodoDelete: options.onTodoDelete,
             onQuit: async () => undefined,
             onRedraw: () => undefined,

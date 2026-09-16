@@ -16,7 +16,7 @@ export type TuiSidebarFocus = "context" | "instances";
 
 export type TuiSidebarLevel = "root" | "section";
 
-export type TuiMessageScope = "active" | "history";
+export type TuiMessageScope = "active" | "history" | "hidden";
 
 export type TuiFocusScope =
     | "sidebarContext"
@@ -52,6 +52,7 @@ export type TuiUiState = {
     sidebarFocus: TuiSidebarFocus;
     sidebarLevel: TuiSidebarLevel;
     mainFocusId?: string;
+    messageCollapsedWorkspaces: Record<string, boolean>;
     messageScope: TuiMessageScope;
     routeStacks: Record<string, readonly TuiRoute[]>;
     routeViewStates: Record<string, TuiRouteViewState>;
@@ -127,6 +128,12 @@ export type TuiSidebarContextTarget =
     | { kind: "page"; page: TuiPageId }
     | { kind: "root" }
     | { kind: "messageScope"; scope: TuiMessageScope }
+    | { ctxIds: string[]; kind: "messageProject"; workspaceKey: string }
+    | {
+          instance: string;
+          kind: "messageConversation";
+          route: Extract<TuiRoute, { page: "messages"; view: "thread" }>;
+      }
     | { kind: "route"; route: TuiRoute };
 
 export interface TuiSidebarContextEntry extends TuiSidebarEntry {

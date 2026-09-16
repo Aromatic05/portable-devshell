@@ -25,6 +25,7 @@ import {
     renderTuiMessageComposerSegments,
     renderTuiMessageHistoryLines,
     selectTuiMessageEntries,
+    selectTuiMessageHiddenSessions,
     selectTuiMessageHistorySessions,
     selectTuiMessageSessions,
     selectTuiMessagesSidebarEntries,
@@ -729,10 +730,10 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         const now = Date.parse("2026-09-10T10:05:00.000Z");
 
         assert.deepEqual(
-            selectTuiMessageSessions(store.getState(), "alpha", now).map(
+            selectTuiMessageSessions(store.getState(), now).map(
                 (session) => session.ctxId,
             ),
-            ["ctx-alpha", "ctx-empty"],
+            ["ctx-empty", "ctx-alpha"],
         );
         assert.deepEqual(
             selectTuiMessageEntries(store.getState(), "alpha", "ctx-alpha").map(
@@ -750,7 +751,87 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 { id: "messages:back", kind: "context" },
                 now,
             ).map((entry) => entry.label),
-            ["← messages", "History", "project", "empty"],
+            [
+                "← messages",
+                "Current",
+                "History",
+                "Hidden",
+                "▾ empty",
+                "  ctx-empty",
+                "▾ project",
+                "  user comment",
+            ],
+        );
+    });
+
+    test("Messages applies server titles and hidden ctxId preferences", () => {
+        const store = new TuiAppStore();
+        const now = new Date().toISOString();
+        store.patchControlReadModel({
+            contexts: [
+                {
+                    createdAt: now,
+                    ctxId: "ctx-visible",
+                    environments: [
+                        { instance: "alpha", workspace: "/workspace/project" },
+                    ],
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    instance: "alpha",
+                    lastAccessedAt: now,
+                    principal: "client",
+                    status: "active",
+                    workspace: "/workspace/project",
+                },
+                {
+                    createdAt: now,
+                    ctxId: "ctx-hidden",
+                    environments: [
+                        { instance: "beta", workspace: "/workspace/project" },
+                    ],
+                    expiresAt: "2099-01-01T00:00:00.000Z",
+                    instance: "beta",
+                    lastAccessedAt: now,
+                    principal: "client",
+                    status: "active",
+                    workspace: "/workspace/project",
+                },
+            ],
+        });
+        store.setConversationPreferences({
+            ...store.getState().conversationPreferences,
+            hiddenContexts: { "ctx-hidden": true },
+            titles: { "alpha\u0000ctx-visible": "Pinned conversation" },
+        });
+        store.setSelectedPage("messages");
+
+        assert.deepEqual(
+            selectTuiMessageSessions(store.getState()).map((session) => [
+                session.ctxId,
+                session.title,
+            ]),
+            [["ctx-visible", "Pinned conversation"]],
+        );
+        assert.deepEqual(
+            selectTuiMessageHiddenSessions(store.getState()).map(
+                (session) => session.ctxId,
+            ),
+            ["ctx-hidden"],
+        );
+        assert.equal(
+            selectTuiMessagesSidebarEntries(store.getState(), true, {
+                id: "messages:back",
+                kind: "context",
+            }).some((entry) => entry.label === "  Pinned conversation"),
+            true,
+        );
+
+        store.setMessageScope("hidden");
+        assert.equal(
+            selectTuiMessagesSidebarEntries(store.getState(), true, {
+                id: "messages:scope:hidden",
+                kind: "context",
+            }).some((entry) => entry.label === "  ctx-hidden"),
+            true,
         );
     });
 
@@ -791,13 +872,13 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         const now = Date.parse("2026-09-10T10:05:00.000Z");
 
         assert.deepEqual(
-            selectTuiMessageSessions(store.getState(), "alpha", now).map(
+            selectTuiMessageSessions(store.getState(), now).map(
                 (session) => session.ctxId,
             ),
             ["ctx-recent"],
         );
         assert.deepEqual(
-            selectTuiMessageHistorySessions(store.getState(), "alpha", now).map(
+            selectTuiMessageHistorySessions(store.getState(), now).map(
                 (session) => session.ctxId,
             ),
             ["ctx-stale"],
@@ -809,7 +890,14 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 { id: "messages:back", kind: "context" },
                 now,
             ).map((entry) => entry.label),
-            ["← messages", "History", "recent"],
+            [
+                "← messages",
+                "Current",
+                "History",
+                "Hidden",
+                "▾ recent",
+                "  ctx-recent",
+            ],
         );
 
         store.setMessageScope("history");
@@ -817,10 +905,17 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
             selectTuiMessagesSidebarEntries(
                 store.getState(),
                 true,
-                { id: "messages:scope", kind: "context" },
+                { id: "messages:scope:history", kind: "context" },
                 now,
             ).map((entry) => entry.label),
-            ["← messages", "Active", "stale"],
+            [
+                "← messages",
+                "Current",
+                "History",
+                "Hidden",
+                "▾ stale",
+                "  ctx-stale",
+            ],
         );
     });
 
@@ -839,9 +934,9 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         assert.match(
             String(view.props.children[1].props.children),
-            /No active conversations on alpha/u,
+            /No current conversations/u,
         );
-        assert.match(String(view.props.children[1].props.children), /History/u);
+        assert.match(String(view.props.children[1].props.children), /Hidden/u);
 
         store.setMessageScope("history");
         view = TuiMessagesView({
@@ -851,7 +946,18 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         });
         assert.match(
             String(view.props.children[1].props.children),
-            /No conversation history on alpha/u,
+            /No conversation history/u,
+        );
+
+        store.setMessageScope("hidden");
+        view = TuiMessagesView({
+            state: store.getState(),
+            viewportRows: 30,
+            width: 80,
+        });
+        assert.match(
+            String(view.props.children[1].props.children),
+            /No hidden conversations/u,
         );
     });
 
@@ -877,6 +983,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         store.setSelectedPage("messages");
         store.replaceRoute({
             ctxId: "ctx-alpha",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });
@@ -935,6 +1042,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
         store.setSelectedPage("messages");
         store.replaceRoute({
             ctxId: "ctx-alpha",
+            instance: "alpha",
             page: "messages",
             view: "thread",
         });

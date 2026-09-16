@@ -112,6 +112,8 @@ export type TuiUiIntent =
     | { button: "cancel" | "confirm"; type: "confirm.focus" }
     | { page: TuiPageId; status: string; type: "screen.setStatus" }
     | { type: "screen.clearStatus" }
+    | { type: "messages.hideFocused" }
+    | { type: "messages.restoreFocused" }
     | { instance: string; type: "instance.start" }
     | { instance: string; type: "instance.restart" }
     | { enabled: boolean; instance: string; type: "instance.setEnabled" }

@@ -38,7 +38,8 @@ export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
         instance:
             state.ui.selectedPage === "overview" ||
-            state.ui.selectedPage === "help"
+            state.ui.selectedPage === "help" ||
+            state.ui.selectedPage === "messages"
                 ? undefined
                 : state.ui.selectedInstance,
         page: state.ui.selectedPage,
@@ -271,13 +272,25 @@ export function selectFooterShortcuts(state: TuiAppState): string[] {
     switch (state.interaction.focusScope) {
         case "sidebarContext":
             return state.ui.sidebarLevel === "section"
-                ? [
-                      "enter open",
-                      "esc back",
-                      "? help",
-                      "0-9 pages",
-                      "shift+1-9 instances",
-                  ]
+                ? state.ui.selectedPage === "messages"
+                    ? [
+                          "enter open/toggle",
+                          state.ui.messageScope === "hidden"
+                              ? "u restore"
+                              : "d hide",
+                          "/ search",
+                          "esc back",
+                          "? help",
+                          "0-9 pages",
+                          "shift+1-9 instances",
+                      ]
+                    : [
+                          "enter open",
+                          "esc back",
+                          "? help",
+                          "0-9 pages",
+                          "shift+1-9 instances",
+                      ]
                 : [
                       "enter open",
                       "→ main",
@@ -433,7 +446,12 @@ export function selectHelpLines(state: TuiAppState): string[] {
 }
 
 function requiresInstance(page: TuiActivePage["page"]): boolean {
-    return page !== "overview" && page !== "instances" && page !== "help";
+    return (
+        page !== "overview" &&
+        page !== "instances" &&
+        page !== "messages" &&
+        page !== "help"
+    );
 }
 
 function pageLoadState(

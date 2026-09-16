@@ -39,6 +39,7 @@ const searchablePages = new Set<TuiPageId>([
     "instances",
     "todo",
     "config",
+    "messages",
     "audit",
     "logs",
 ]);
