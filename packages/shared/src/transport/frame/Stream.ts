@@ -1,3 +1,6 @@
+import { ChannelBase, asChannelError } from "../protocol/Channel.js";
+import { frameResetCodes } from "./Codec.js";
+
 export interface FrameStream {
     readonly id: number;
     readonly service: string;
@@ -8,6 +11,66 @@ export interface FrameStream {
     read(): Promise<Uint8Array | undefined>;
     finish(): Promise<void>;
     reset(code: number, message?: string): Promise<void>;
+}
+
+export class FrameStreamChannel extends ChannelBase {
+    readonly #stream: FrameStream;
+    readonly #closeTransport?: (error?: Error) => void;
+
+    constructor(
+        stream: FrameStream,
+        options: { closeTransport?(error?: Error): void } = {},
+    ) {
+        super();
+        this.#stream = stream;
+        this.#closeTransport = options.closeTransport;
+        void this.#pump();
+    }
+
+    async write(data: Uint8Array): Promise<void> {
+        if (this.closed) throw this.closeError("Frame stream channel is closed.");
+        try {
+            await this.#stream.write(data);
+        } catch (error) {
+            const normalized = asChannelError(error);
+            this.#finish(normalized);
+            throw normalized;
+        }
+    }
+
+    close(error?: Error): void {
+        if (this.closed) return;
+        void this.#stream
+            .reset(frameResetCodes.cancelled, error?.message ?? "Channel closed.")
+            .catch(() => undefined);
+        this.#finish(error);
+    }
+
+    async #pump(): Promise<void> {
+        try {
+            while (!this.closed) {
+                const data = await this.#stream.read();
+                if (data === undefined) {
+                    this.#finish();
+                    return;
+                }
+                this.emitData(data);
+            }
+        } catch (error) {
+            this.#finish(asChannelError(error));
+        }
+    }
+
+    #finish(error?: Error): void {
+        if (this.closed) return;
+        let finalError = error;
+        try {
+            this.#closeTransport?.(error);
+        } catch (closeError) {
+            finalError ??= asChannelError(closeError);
+        }
+        this.finish(finalError);
+    }
 }
 
 export class FrameResetError extends Error {

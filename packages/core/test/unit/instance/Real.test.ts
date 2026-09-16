@@ -7,12 +7,15 @@ import test from "node:test";
 import {
     asInstanceName,
     errorCodes,
+    StreamChannel,
     toolCallOutput,
     type JsonValue,
 } from "@portable-devshell/shared";
 import {
     encodePacket,
+    FrameProtocol,
     PacketBuffer,
+    type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
@@ -1288,7 +1291,7 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
 
     try {
         await instance.start();
-        harness.failNextRpcStarts();
+        harness.failNextRpcConnections();
         harness.disconnect();
 
         await harness.waitForMethodCount("tools.list", 2);
@@ -1314,7 +1317,7 @@ type HarnessTool = {
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
     fail: (method: string, code: string) => void;
-    failNextRpcStarts: (count?: number) => void;
+    failNextRpcConnections: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
     transport: WorkerTransport;
     requestedMethods: () => number;
@@ -1327,7 +1330,7 @@ function createWorkerInstanceHarness(): {
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
-    let rpcSpawnFailures = 0;
+    let rpcConnectFailures = 0;
     let tools: HarnessTool[] = [
         {
             requiredCapabilities: ["execute"] as ["execute"],
@@ -1338,20 +1341,52 @@ function createWorkerInstanceHarness(): {
             outputSchema: { type: "object" },
         },
     ];
-    let activeProcess:
+    let activeConnection:
         | {
-              exitResolve?: (value: {
-                  code: number | null;
-                  signal: NodeJS.Signals | null;
-              }) => void;
-              stdout: PassThrough;
-              write(value: JsonValue): void;
+              protocol: FrameProtocol;
+              stream?: FrameStream;
           }
         | undefined;
 
     const transport: WorkerTransport = {
         async connectWorkerChannel() {
-            throw new Error("channel is unused by the RPC harness");
+            if (rpcConnectFailures > 0) {
+                rpcConnectFailures -= 1;
+                throw new Error("transient rpc connection failure");
+            }
+            const clientToServer = new PassThrough();
+            const serverToClient = new PassThrough();
+            const pair: {
+                client?: StreamChannel;
+                server?: StreamChannel;
+                closed: boolean;
+            } = { closed: false };
+            const closePair = (error?: Error) => {
+                if (pair.closed) return;
+                pair.closed = true;
+                pair.client?.close(error);
+                pair.server?.close(error);
+            };
+            const client = new StreamChannel(serverToClient, clientToServer, {
+                closeTransport: closePair,
+            });
+            const server = new StreamChannel(clientToServer, serverToClient, {
+                closeTransport: closePair,
+            });
+            pair.client = client;
+            pair.server = server;
+            const protocol = new FrameProtocol(server, { role: "acceptor" });
+            const connection = { protocol } as {
+                protocol: FrameProtocol;
+                stream?: FrameStream;
+            };
+            activeConnection = connection;
+            void serveRpcHarness(connection).catch((error: unknown) => {
+                protocol.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
+            return client;
         },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             if (command === "status") {
@@ -1385,83 +1420,78 @@ function createWorkerInstanceHarness(): {
             };
         },
         async spawnWorkerRpc() {
-            if (rpcSpawnFailures > 0) {
-                rpcSpawnFailures -= 1;
-                throw new Error("transient rpc spawn failure");
-            }
-            const stdout = new PassThrough();
-            const stdin = new PassThrough();
-            const stderr = new PassThrough();
-            const reader = new PacketBuffer();
-            const write = (value: JsonValue) => {
-                stdout.write(encodePacket(encodeWorkerRpcMessage(value)));
-            };
-            let exitResolve:
-                | ((value: {
-                      code: number | null;
-                      signal: NodeJS.Signals | null;
-                  }) => void)
-                | undefined;
-
-            stdin.on("data", (chunk: Uint8Array) => {
-                const frames = reader.push(chunk);
-
-                for (const payload of frames) {
-                    const frame = decodeWorkerRpcMessage(payload);
-                    if (!isRequestFrame(frame)) {
-                        continue;
-                    }
-
-                    const pendingIds = pending.get(frame.method) ?? [];
-                    pendingIds.push(frame.id);
-                    pending.set(frame.method, pendingIds);
-                    requestMethods.push(frame.method);
-                    methodWaiters
-                        .get(frame.method)
-                        ?.splice(0)
-                        .forEach((resolve) => resolve());
-
-                    if (
-                        frame.method === "worker.ping" ||
-                        frame.method === "worker.handshake" ||
-                        frame.method === "tools.list"
-                    ) {
-                        write(
-                            createLifecycleResponse(
-                                frame.method,
-                                frame.id,
-                                tools,
-                            ) as unknown as JsonValue,
-                        );
-                    }
-                }
-            });
-
-            activeProcess = { stdout, write };
-            return {
-                stdin,
-                stdout,
-                stderr,
-                kill() {
-                    stdout.end();
-                    exitResolve?.({ code: null, signal: "SIGTERM" });
-                    return true;
-                },
-                exit: new Promise((resolve) => {
-                    exitResolve = resolve;
-                    if (activeProcess !== undefined) {
-                        activeProcess.exitResolve = resolve;
-                    }
-                }),
-            };
+            throw new Error(
+                "spawnWorkerRpc should not be called in Frame lifecycle harness tests.",
+            );
         },
         async installWorker(): Promise<void> {},
     };
 
+    async function serveRpcHarness(connection: {
+        protocol: FrameProtocol;
+        stream?: FrameStream;
+    }): Promise<void> {
+        const open = await connection.protocol.nextOpen();
+        assert.notEqual(open, undefined);
+        assert.equal(open!.service, "worker.rpc");
+        assert.equal(open!.metadata.byteLength, 0);
+        const stream = await open!.accept();
+        connection.stream = stream;
+        const reader = new PacketBuffer();
+
+        while (true) {
+            const chunk = await stream.read();
+            if (chunk === undefined) return;
+            for (const payload of reader.push(chunk)) {
+                const frame = decodeWorkerRpcMessage(payload);
+                if (!isRequestFrame(frame)) continue;
+
+                const pendingIds = pending.get(frame.method) ?? [];
+                pendingIds.push(frame.id);
+                pending.set(frame.method, pendingIds);
+                requestMethods.push(frame.method);
+                methodWaiters
+                    .get(frame.method)
+                    ?.splice(0)
+                    .forEach((resolve) => resolve());
+
+                if (
+                    frame.method === "worker.ping" ||
+                    frame.method === "worker.handshake" ||
+                    frame.method === "tools.list"
+                ) {
+                    await stream.write(
+                        encodePacket(
+                            encodeWorkerRpcMessage(
+                                createLifecycleResponse(
+                                    frame.method,
+                                    frame.id,
+                                    tools,
+                                ) as unknown as JsonValue,
+                            ),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    function writeToActiveStream(value: JsonValue): void {
+        const stream = activeConnection?.stream;
+        if (stream === undefined) {
+            throw new Error("worker.rpc lifecycle harness stream is not connected.");
+        }
+        void stream
+            .write(encodePacket(encodeWorkerRpcMessage(value)))
+            .catch(() => undefined);
+    }
+
     return {
         disconnect() {
-            activeProcess?.stdout.end();
-            activeProcess?.exitResolve?.({ code: 1, signal: null });
+            activeConnection?.protocol.close(
+                new Error("injected rpc transport disconnect"),
+            );
+            activeConnection = undefined;
         },
         fail(method, code) {
             const requestIds = pending.get(method);
@@ -1475,7 +1505,7 @@ function createWorkerInstanceHarness(): {
             if (requestIds.length === 0) {
                 pending.delete(method);
             }
-            activeProcess?.write({
+            writeToActiveStream({
                 error: {
                     code,
                     message: `worker rejected ${method}`,
@@ -1486,8 +1516,8 @@ function createWorkerInstanceHarness(): {
                 type: "response",
             } as unknown as JsonValue);
         },
-        failNextRpcStarts(count = 1) {
-            rpcSpawnFailures = count;
+        failNextRpcConnections(count = 1) {
+            rpcConnectFailures = count;
         },
         setTools(nextTools) {
             tools = nextTools;
@@ -1510,7 +1540,7 @@ function createWorkerInstanceHarness(): {
                 pending.delete(method);
             }
 
-            activeProcess?.write({
+            writeToActiveStream({
                 id: requestId,
                 ok: true,
                 result,

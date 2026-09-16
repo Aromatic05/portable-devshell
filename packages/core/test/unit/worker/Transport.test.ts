@@ -20,12 +20,16 @@ import {
     WorkerInstallerRemote,
     WorkerTransportDriverSsh,
     WorkerBinary,
+    decodeWorkerRpcMessage,
+    encodeWorkerRpcMessage,
     getWorkerTargetByKey,
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
 import {
     FrameProtocol,
+    PacketBuffer,
+    encodePacket,
     frameResetCodes,
 } from "@portable-devshell/shared/transport/frame";
 import {
@@ -2421,6 +2425,38 @@ test(
             instanceName,
         });
         assert.equal(logsResult.exitCode, 0);
+
+        const transportChannel = await transport.connectWorkerChannel({
+            env,
+            instanceName,
+        });
+        const frameProtocol = new FrameProtocol(transportChannel, {
+            role: "opener",
+        });
+        const rpcStream = await frameProtocol.open("worker.rpc");
+        const rpcPackets = new PacketBuffer();
+        await rpcStream.write(
+            encodePacket(
+                encodeWorkerRpcMessage({
+                    type: "request",
+                    id: "frame-rpc-ping",
+                    method: "worker.ping",
+                    params: {},
+                }),
+            ),
+        );
+        const rpcChunk = await rpcStream.read();
+        assert.notEqual(rpcChunk, undefined);
+        const responses = rpcPackets.push(rpcChunk!);
+        assert.equal(responses.length, 1);
+        assert.deepEqual(decodeWorkerRpcMessage(responses[0]!), {
+            type: "response",
+            id: "frame-rpc-ping",
+            ok: true,
+            result: { pong: true },
+        });
+        await rpcStream.reset(frameResetCodes.cancelled, "test complete");
+        frameProtocol.close();
 
         const rpcProcess = await transport.spawnWorkerRpc({
             env,

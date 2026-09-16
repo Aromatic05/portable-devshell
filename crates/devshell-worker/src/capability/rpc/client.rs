@@ -129,7 +129,7 @@ fn diagnostic(message: &str) {
     }
 }
 
-fn subscribe_notifications(
+pub(crate) fn subscribe_notifications(
     writer: &mut LocalIpcStream,
     reader: &mut LocalIpcStream,
 ) -> Result<(), String> {

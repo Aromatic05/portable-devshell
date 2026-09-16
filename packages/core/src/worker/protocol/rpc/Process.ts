@@ -7,6 +7,10 @@ import {
     StreamChannel,
     type Channel,
 } from "@portable-devshell/shared";
+import {
+    FrameProtocol,
+    FrameStreamChannel,
+} from "@portable-devshell/shared/transport/frame";
 
 import type { WorkerTransport } from "../../transport/Transport.js";
 import type { WorkerRpcOptions } from "../../transport/command/Model.js";
@@ -157,7 +161,7 @@ export class WorkerRpcProcessAdapter {
 function abortError(signal: AbortSignal): Error {
     return signal.reason instanceof Error
         ? signal.reason
-        : new Error("Worker RPC process connection was aborted.");
+        : new Error("Worker RPC connection was aborted.");
 }
 
 export class WorkerRpcProcessConnector implements WorkerRpcConnector {
@@ -194,4 +198,73 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
         );
         return channel;
     }
+}
+
+export class WorkerRpcTransportConnector implements WorkerRpcConnector {
+    readonly #transport: WorkerTransport;
+    readonly #options: WorkerRpcOptions;
+
+    constructor(transport: WorkerTransport, options: WorkerRpcOptions) {
+        this.#transport = transport;
+        this.#options = options;
+    }
+
+    async connect(signal?: AbortSignal): Promise<Channel> {
+        throwIfAborted(signal);
+        let transportChannel: Channel;
+        try {
+            transportChannel = await this.#transport.connectWorkerChannel(
+                this.#options,
+            );
+        } catch (error) {
+            throw this.#connectError(error);
+        }
+        if (signal?.aborted === true) {
+            transportChannel.close();
+            throw abortError(signal);
+        }
+
+        const protocol = new FrameProtocol(transportChannel, { role: "opener" });
+        try {
+            const stream = await protocol.open("worker.rpc");
+            if (isAborted(signal)) {
+                protocol.close();
+                throw abortError(signal);
+            }
+            return new FrameStreamChannel(stream, {
+                closeTransport: (error) => protocol.close(error),
+            });
+        } catch (error) {
+            protocol.close(
+                error instanceof Error ? error : new Error(String(error)),
+            );
+            if (isAborted(signal)) throw abortError(signal);
+            throw this.#connectError(error);
+        }
+    }
+
+    #connectError(error: unknown): Error {
+        if (
+            error instanceof Error &&
+            "code" in error &&
+            error.code === errorCodes.coreWorkerRpcSpawnFailed
+        ) {
+            return error;
+        }
+        return createError({
+            code: errorCodes.coreWorkerRpcSpawnFailed,
+            cause: error,
+            details: { instance: this.#options.instanceName },
+            message: `Worker RPC connection failed for instance ${this.#options.instanceName}.`,
+            retryable: false,
+        });
+    }
+}
+
+function isAborted(signal: AbortSignal | undefined): signal is AbortSignal {
+    return signal?.aborted === true;
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+    if (isAborted(signal)) throw abortError(signal);
 }

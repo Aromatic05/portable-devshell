@@ -560,5 +560,5 @@ export {
     frameResetCodes,
 } from "./Codec.js";
 export type { Frame, FrameResetCode } from "./Codec.js";
-export { FrameResetError } from "./Stream.js";
+export { FrameResetError, FrameStreamChannel } from "./Stream.js";
 export type { FrameStream } from "./Stream.js";

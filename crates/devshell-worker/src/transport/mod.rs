@@ -6,7 +6,7 @@ pub mod service;
 pub mod socket;
 
 pub fn run(instance: &str) -> Result<String, String> {
-    let _ = InstanceName::parse(instance)?;
-    service::serve_stdio()?;
+    let instance = InstanceName::parse(instance)?;
+    service::serve_stdio(&instance)?;
     Ok(String::new())
 }

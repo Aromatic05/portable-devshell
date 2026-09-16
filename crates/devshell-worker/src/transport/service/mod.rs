@@ -4,6 +4,7 @@ mod tcp;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
+use std::path::Path;
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
@@ -12,10 +13,13 @@ use std::time::Duration;
 use exec::ExecService;
 use tcp::TcpService;
 
+use crate::capability::rpc::client::subscribe_notifications;
+use crate::instance::InstanceName;
 use crate::transport::frame::{
     FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, FrameEvent, FrameProtocol, FrameRole,
     RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE, encode_frame,
 };
+use crate::transport::socket::{LocalIpcStream, SocketPaths};
 
 const SERVICE_RECEIVE_WINDOW: u32 = 256 * 1024;
 const EVENT_QUEUE_CAPACITY: usize = 64;
@@ -25,17 +29,19 @@ const SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 pub enum ServiceConnection {
     Tcp(TcpService),
     Exec(ExecService),
+    Rpc(RpcService),
 }
 
 impl ServiceConnection {
     pub fn supports(service: &str) -> bool {
-        matches!(service, "network.tcp" | "process.exec")
+        matches!(service, "network.tcp" | "process.exec" | "worker.rpc")
     }
 
-    pub fn open(service: &str, metadata: &[u8]) -> Result<Self, String> {
+    pub fn open(service: &str, metadata: &[u8], rpc_socket: Option<&Path>) -> Result<Self, String> {
         match service {
             "network.tcp" => TcpService::open(metadata).map(Self::Tcp),
             "process.exec" => ExecService::open(metadata).map(Self::Exec),
+            "worker.rpc" => RpcService::open(metadata, rpc_socket).map(Self::Rpc),
             _ => Err(format!("unsupported transport Service {service}")),
         }
     }
@@ -45,6 +51,7 @@ impl ServiceConnection {
         match self {
             Self::Tcp(service) => service.write(data),
             Self::Exec(service) => service.write(data),
+            Self::Rpc(service) => service.write(data),
         }
     }
 
@@ -53,6 +60,7 @@ impl ServiceConnection {
         match self {
             Self::Tcp(service) => service.finish_input(),
             Self::Exec(service) => service.finish_input(),
+            Self::Rpc(service) => service.finish_input(),
         }
     }
 
@@ -61,6 +69,7 @@ impl ServiceConnection {
         match self {
             Self::Tcp(service) => service.read(buffer),
             Self::Exec(service) => service.read(buffer),
+            Self::Rpc(service) => service.read(buffer),
         }
     }
 
@@ -68,6 +77,7 @@ impl ServiceConnection {
         match self {
             Self::Tcp(service) => service.reset(),
             Self::Exec(service) => service.reset(),
+            Self::Rpc(service) => service.reset(),
         }
     }
 
@@ -77,6 +87,9 @@ impl ServiceConnection {
             Self::Exec(service) => service
                 .take_stdin()
                 .map(|stdin| ServiceInput::Exec(Some(stdin))),
+            Self::Rpc(service) => service
+                .take_input()
+                .map(|input| ServiceInput::Rpc(Some(input))),
         }
     }
 
@@ -84,6 +97,7 @@ impl ServiceConnection {
         match self {
             Self::Tcp(service) => service.clone_stream().map(ServiceOutput::Tcp),
             Self::Exec(service) => service.take_stdout().map(ServiceOutput::Exec),
+            Self::Rpc(service) => service.take_output().map(ServiceOutput::Rpc),
         }
     }
 
@@ -91,13 +105,90 @@ impl ServiceConnection {
         match self {
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
+            Self::Rpc(_) => Ok(true),
         }
+    }
+}
+
+pub struct RpcService {
+    input: Option<LocalIpcStream>,
+    output: Option<LocalIpcStream>,
+}
+
+impl RpcService {
+    fn open(metadata: &[u8], rpc_socket: Option<&Path>) -> Result<Self, String> {
+        if !metadata.is_empty() {
+            return Err("worker.rpc metadata must be empty.".to_string());
+        }
+        let rpc_socket = rpc_socket.ok_or_else(|| "worker.rpc is unavailable.".to_string())?;
+        let mut input = LocalIpcStream::connect(rpc_socket)
+            .map_err(|error| format!("failed to connect {}: {error}", rpc_socket.display()))?;
+        let mut output = input
+            .try_clone()
+            .map_err(|error| format!("failed to clone {}: {error}", rpc_socket.display()))?;
+        subscribe_notifications(&mut input, &mut output)?;
+        Ok(Self {
+            input: Some(input),
+            output: Some(output),
+        })
+    }
+
+    #[cfg(test)]
+    fn write(&mut self, data: &[u8]) -> Result<(), String> {
+        self.input
+            .as_mut()
+            .ok_or_else(|| "worker.rpc input is closed.".to_string())?
+            .write_all(data)
+            .map_err(|error| format!("worker.rpc write failed: {error}"))
+    }
+
+    #[cfg(test)]
+    fn finish_input(&mut self) -> Result<(), String> {
+        if let Some(input) = self.input.take() {
+            input
+                .shutdown_write()
+                .map_err(|error| format!("worker.rpc half-close failed: {error}"))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
+        self.output
+            .as_mut()
+            .ok_or_else(|| "worker.rpc output is closed.".to_string())?
+            .read(buffer)
+            .map_err(|error| format!("worker.rpc read failed: {error}"))
+    }
+
+    fn take_input(&mut self) -> Result<LocalIpcStream, String> {
+        self.input
+            .take()
+            .ok_or_else(|| "worker.rpc input is already attached.".to_string())
+    }
+
+    fn take_output(&mut self) -> Result<LocalIpcStream, String> {
+        self.output
+            .take()
+            .ok_or_else(|| "worker.rpc output is already attached.".to_string())
+    }
+
+    fn reset(&mut self) {
+        if let Some(input) = self.input.as_ref() {
+            let _ = input.shutdown_both();
+        }
+        if let Some(output) = self.output.as_ref() {
+            let _ = output.shutdown_both();
+        }
+        self.input.take();
+        self.output.take();
     }
 }
 
 enum ServiceInput {
     Tcp(TcpStream),
     Exec(Option<ChildStdin>),
+    Rpc(Option<LocalIpcStream>),
 }
 
 impl ServiceInput {
@@ -111,6 +202,11 @@ impl ServiceInput {
                 .ok_or_else(|| "process.exec stdin is closed.".to_string())?
                 .write_all(data)
                 .map_err(|error| format!("process.exec stdin write failed: {error}")),
+            Self::Rpc(input) => input
+                .as_mut()
+                .ok_or_else(|| "worker.rpc input is closed.".to_string())?
+                .write_all(data)
+                .map_err(|error| format!("worker.rpc write failed: {error}")),
         }
     }
 
@@ -123,6 +219,14 @@ impl ServiceInput {
                 stdin.take();
                 Ok(())
             }
+            Self::Rpc(input) => {
+                if let Some(stream) = input.take() {
+                    stream
+                        .shutdown_write()
+                        .map_err(|error| format!("worker.rpc half-close failed: {error}"))?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -130,6 +234,7 @@ impl ServiceInput {
 enum ServiceOutput {
     Tcp(TcpStream),
     Exec(ChildStdout),
+    Rpc(LocalIpcStream),
 }
 
 impl ServiceOutput {
@@ -141,6 +246,9 @@ impl ServiceOutput {
             Self::Exec(stdout) => stdout
                 .read(buffer)
                 .map_err(|error| format!("process.exec stdout read failed: {error}")),
+            Self::Rpc(output) => output
+                .read(buffer)
+                .map_err(|error| format!("worker.rpc read failed: {error}")),
         }
     }
 }
@@ -184,9 +292,10 @@ impl ActiveService {
         stream_id: u32,
         service: &str,
         metadata: &[u8],
+        rpc_socket: &Path,
         events: SyncSender<ServerEvent>,
     ) -> Result<Self, String> {
-        let mut connection = ServiceConnection::open(service, metadata)?;
+        let mut connection = ServiceConnection::open(service, metadata, Some(rpc_socket))?;
         let input = connection.take_input()?;
         let output = connection.take_output()?;
         let (input_tx, input_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
@@ -212,11 +321,16 @@ impl ActiveService {
     }
 }
 
-pub fn serve_stdio() -> Result<(), String> {
-    serve(std::io::stdin(), std::io::stdout())
+pub fn serve_stdio(instance: &InstanceName) -> Result<(), String> {
+    let socket_paths = SocketPaths::resolve(instance)?;
+    serve(
+        std::io::stdin(),
+        std::io::stdout(),
+        &socket_paths.socket_file,
+    )
 }
 
-fn serve<R, W>(input: R, mut output: W) -> Result<(), String>
+fn serve<R, W>(input: R, mut output: W, rpc_socket: &Path) -> Result<(), String>
 where
     R: Read + Send + 'static,
     W: Write,
@@ -232,7 +346,14 @@ where
         match events_rx.recv_timeout(SERVICE_POLL_INTERVAL) {
             Ok(ServerEvent::ChannelData(data)) => {
                 for frame in decoder.push(&data)? {
-                    accept_frame(&mut protocol, &mut services, &events_tx, frame, &mut output)?;
+                    accept_frame(
+                        &mut protocol,
+                        &mut services,
+                        &events_tx,
+                        frame,
+                        rpc_socket,
+                        &mut output,
+                    )?;
                 }
             }
             Ok(ServerEvent::ChannelClosed) => {
@@ -453,6 +574,7 @@ fn accept_frame<W: Write>(
     services: &mut HashMap<u32, ActiveService>,
     events: &SyncSender<ServerEvent>,
     frame: Frame,
+    rpc_socket: &Path,
     output: &mut W,
 ) -> Result<(), String> {
     let stream_id = frame.stream_id();
@@ -473,7 +595,7 @@ fn accept_frame<W: Write>(
                 write_frame(output, &reset)?;
                 return Ok(());
             }
-            match ActiveService::open(stream_id, &service, &metadata, events.clone()) {
+            match ActiveService::open(stream_id, &service, &metadata, rpc_socket, events.clone()) {
                 Ok(active) => {
                     services.insert(stream_id, active);
                     let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
@@ -773,7 +895,8 @@ mod tests {
             } => (stream_id, service, metadata),
             _ => panic!("expected OPEN event"),
         };
-        let mut connection = ServiceConnection::open(&service, &metadata).expect("spawn rsync");
+        let mut connection =
+            ServiceConnection::open(&service, &metadata, None).expect("spawn rsync");
         let window = worker
             .accept_open(opened_id, 64 * 1024)
             .expect("accept process.exec");
@@ -812,9 +935,10 @@ mod tests {
 
     #[test]
     fn service_dispatch_rejects_unknown_names_and_metadata() {
-        assert!(ServiceConnection::open("unknown", b"{}").is_err());
-        assert!(ServiceConnection::open("network.tcp", br#"{"host":"127.0.0.1"}"#).is_err());
-        assert!(ServiceConnection::open("process.exec", br#"{"executable":""}"#).is_err());
+        assert!(ServiceConnection::open("unknown", b"{}", None).is_err());
+        assert!(ServiceConnection::open("network.tcp", br#"{"host":"127.0.0.1"}"#, None).is_err());
+        assert!(ServiceConnection::open("process.exec", br#"{"executable":""}"#, None).is_err());
+        assert!(ServiceConnection::open("worker.rpc", b"", None).is_err());
     }
 
     fn run_frame_service(
@@ -836,7 +960,7 @@ mod tests {
             } => (stream_id, service, metadata),
             _ => return Err("Expected OPEN event.".to_string()),
         };
-        let mut connection = ServiceConnection::open(&service, &metadata)?;
+        let mut connection = ServiceConnection::open(&service, &metadata, None)?;
         let window = worker.accept_open(opened_id, 64 * 1024)?;
         client.accept_frame(window)?;
 

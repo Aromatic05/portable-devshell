@@ -4,10 +4,16 @@ import { rm } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { errorCodes, type JsonValue } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    StreamChannel,
+    type JsonValue,
+} from "@portable-devshell/shared";
 import {
     encodePacket,
+    FrameProtocol,
     PacketBuffer,
+    type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
@@ -33,7 +39,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
-test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", async () => {
+test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple calls", async () => {
     const harness = createRpcHarness();
     const bridge = new WorkerRpcBridge({
         transport: harness.transport,
@@ -55,7 +61,7 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
     assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
     assert.equal("tools" in handshake, false);
     assert.equal(tools.tools[0]?.name, "bash_run");
-    assert.equal(harness.spawnCount, 1);
+    assert.equal(harness.connectionCount, 1);
     assert.deepEqual(harness.requestMethods, [
         "worker.ping",
         "worker.handshake",
@@ -362,25 +368,25 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
         assert.equal(error.code, workerRpcDisconnectedErrorCode);
         return true;
     });
-    assert.equal(harness.spawnCount, 1);
+    assert.equal(harness.connectionCount, 1);
     assert.deepEqual(disconnects, [workerRpcDisconnectedErrorCode]);
 });
 
-test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", async () => {
+test("WorkerRpcBridge surfaces transport connection failures with the compatible rpc error code", async () => {
     const bridge = new WorkerRpcBridge({
         transport: {
             async connectWorkerChannel() {
-                throw new Error("unused");
+                throw new Error("connect denied");
             },
             async installWorker() {},
             async runWorkerCommand(): Promise<WorkerCommandResult> {
                 throw new Error("unused");
             },
             async spawnWorkerRpc() {
-                throw new Error("spawn denied");
+                throw new Error("legacy rpc process must not be spawned");
             },
         },
-        rpcOptions: { instanceName: "task-4-spawn" },
+        rpcOptions: { instanceName: "task-4-connect" },
     });
 
     await assert.rejects(bridge.connect(), (error: unknown) => {
@@ -391,7 +397,7 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
         );
         assert.equal(
             (error as { details?: Record<string, unknown> }).details?.instance,
-            "task-4-spawn",
+            "task-4-connect",
         );
         return true;
     });
@@ -636,7 +642,7 @@ test(
 
 function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     transport: WorkerTransport;
-    spawnCount: number;
+    connectionCount: number;
     requestMethods: string[];
     requestContexts: Array<
         | {
@@ -685,21 +691,42 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         };
     }> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
-    const stdout = new PassThrough();
-    const stdin = new PassThrough();
-    const stderr = new PassThrough();
-    const reader = new PacketBuffer();
-    let spawnCount = 0;
-    let exitResolve:
-        | ((value: {
-              code: number | null;
-              signal: NodeJS.Signals | null;
-          }) => void)
-        | undefined;
+    let connectionCount = 0;
+    let activeProtocol: FrameProtocol | undefined;
+    let activeStream: FrameStream | undefined;
     const methodWaiters = new Map<string, Array<() => void>>();
     const transport: WorkerTransport = {
         async connectWorkerChannel() {
-            throw new Error("connectWorkerChannel should not be called in RPC harness tests.");
+            connectionCount += 1;
+            const clientToServer = new PassThrough();
+            const serverToClient = new PassThrough();
+            const pair: {
+                client?: StreamChannel;
+                server?: StreamChannel;
+                closed: boolean;
+            } = { closed: false };
+            const closePair = (error?: Error) => {
+                if (pair.closed) return;
+                pair.closed = true;
+                pair.client?.close(error);
+                pair.server?.close(error);
+            };
+            const client = new StreamChannel(serverToClient, clientToServer, {
+                closeTransport: closePair,
+            });
+            const server = new StreamChannel(clientToServer, serverToClient, {
+                closeTransport: closePair,
+            });
+            pair.client = client;
+            pair.server = server;
+            const protocol = new FrameProtocol(server, { role: "acceptor" });
+            activeProtocol = protocol;
+            void serveRpcHarness(protocol).catch((error: unknown) => {
+                protocol.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
+            return client;
         },
         async runWorkerCommand(): Promise<WorkerCommandResult> {
             throw new Error(
@@ -707,69 +734,75 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
             );
         },
         async spawnWorkerRpc() {
-            spawnCount += 1;
-            return {
-                stdin,
-                stdout,
-                stderr,
-                kill() {
-                    stdout.end();
-                    exitResolve?.({ code: null, signal: "SIGTERM" });
-                    return true;
-                },
-                exit: new Promise((resolve) => {
-                    exitResolve = resolve;
-                }),
-            };
+            throw new Error(
+                "spawnWorkerRpc should not be called in Frame RPC harness tests.",
+            );
         },
         async installWorker(): Promise<void> {},
     };
 
-    stdin.on("data", (chunk: Uint8Array) => {
-        const frames = reader.push(chunk);
+    async function serveRpcHarness(protocol: FrameProtocol): Promise<void> {
+        const open = await protocol.nextOpen();
+        assert.notEqual(open, undefined);
+        assert.equal(open!.service, "worker.rpc");
+        assert.equal(open!.metadata.byteLength, 0);
+        const stream = await open!.accept();
+        activeStream = stream;
+        const reader = new PacketBuffer();
 
-        for (const payload of frames) {
-            const frame = decodeWorkerRpcMessage(payload);
-            if (!isRequestFrame(frame)) {
-                continue;
-            }
+        while (true) {
+            const chunk = await stream.read();
+            if (chunk === undefined) return;
 
-            requestMethods.push(frame.method);
-            requestContexts.push(frame.context);
-            requests.push(frame);
-            methodWaiters
-                .get(frame.method)
-                ?.splice(0)
-                .forEach((resolve) => resolve());
+            for (const payload of reader.push(chunk)) {
+                const frame = decodeWorkerRpcMessage(payload);
+                if (!isRequestFrame(frame)) continue;
 
-            if (slowMethods.has(frame.method)) {
-                continue;
-            }
+                requestMethods.push(frame.method);
+                requestContexts.push(frame.context);
+                requests.push(frame);
+                methodWaiters
+                    .get(frame.method)
+                    ?.splice(0)
+                    .forEach((resolve) => resolve());
 
-            stdout.write(
-                encodePacket(
-                    encodeWorkerRpcMessage(
-                        createResponse(
-                            frame.method,
-                            frame.id,
-                        ) as unknown as JsonValue,
+                if (slowMethods.has(frame.method)) continue;
+                await stream.write(
+                    encodePacket(
+                        encodeWorkerRpcMessage(
+                            createResponse(
+                                frame.method,
+                                frame.id,
+                            ) as unknown as JsonValue,
+                        ),
                     ),
-                ),
-            );
+                );
+            }
         }
-    });
+    }
+
+    function writeToActiveStream(value: JsonValue): void {
+        const stream = activeStream;
+        if (stream === undefined) {
+            throw new Error("worker.rpc harness stream is not connected.");
+        }
+        void stream
+            .write(encodePacket(encodeWorkerRpcMessage(value)))
+            .catch(() => undefined);
+    }
 
     return {
         transport,
-        get spawnCount() {
-            return spawnCount;
+        get connectionCount() {
+            return connectionCount;
         },
         requestMethods,
         requestContexts,
         requests,
         disconnect() {
-            stdout.end();
-            exitResolve?.({ code: 1, signal: null });
+            activeProtocol?.close(new Error("injected rpc transport disconnect"));
+            activeProtocol = undefined;
+            activeStream = undefined;
         },
         respondMethod(method: string) {
             const request = [...requests]
@@ -777,27 +810,16 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
                 .find((candidate) => candidate.method === method);
             if (request === undefined)
                 throw new Error(`No request available for ${method}.`);
-            stdout.write(
-                encodePacket(
-                    encodeWorkerRpcMessage(
-                        createResponse(
-                            method,
-                            request.id,
-                        ) as unknown as JsonValue,
-                    ),
-                ),
+            writeToActiveStream(
+                createResponse(method, request.id) as unknown as JsonValue,
             );
         },
         sendNotification(method: string, params: JsonValue) {
-            stdout.write(
-                encodePacket(
-                    encodeWorkerRpcMessage({
-                        method,
-                        params,
-                        type: "notification",
-                    } as unknown as JsonValue),
-                ),
-            );
+            writeToActiveStream({
+                method,
+                params,
+                type: "notification",
+            } as unknown as JsonValue);
         },
         waitForMethod(method: string) {
             if (requestMethods.includes(method)) {

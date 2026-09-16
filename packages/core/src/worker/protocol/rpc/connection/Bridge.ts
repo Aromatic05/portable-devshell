@@ -23,7 +23,7 @@ import type {
     WorkerRpcResponseEnvelope,
 } from "../Message.js";
 import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "../Message.js";
-import { WorkerRpcProcessConnector } from "../Process.js";
+import { WorkerRpcTransportConnector } from "../Process.js";
 
 const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
 
@@ -107,7 +107,7 @@ export class WorkerRpcBridge {
             options.preservePendingOnDisconnect === true;
         this.#connector =
             options.connector ??
-            new WorkerRpcProcessConnector(
+            new WorkerRpcTransportConnector(
                 options.transport!,
                 options.rpcOptions,
             );
