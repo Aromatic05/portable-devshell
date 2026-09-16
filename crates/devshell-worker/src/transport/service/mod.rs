@@ -14,12 +14,11 @@ use exec::ExecService;
 use tcp::TcpService;
 
 use crate::capability::rpc::client::subscribe_notifications;
-use crate::instance::InstanceName;
 use crate::transport::frame::{
     FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, FrameEvent, FrameProtocol, FrameRole,
     RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE, encode_frame,
 };
-use crate::transport::socket::{LocalIpcStream, SocketPaths};
+use crate::transport::socket::LocalIpcStream;
 
 const SERVICE_RECEIVE_WINDOW: u32 = 256 * 1024;
 const EVENT_QUEUE_CAPACITY: usize = 64;
@@ -321,13 +320,11 @@ impl ActiveService {
     }
 }
 
-pub fn serve_stdio(instance: &InstanceName) -> Result<(), String> {
-    let socket_paths = SocketPaths::resolve(instance)?;
-    serve(
-        std::io::stdin(),
-        std::io::stdout(),
-        &socket_paths.socket_file,
-    )
+pub fn serve_ipc(stream: LocalIpcStream, rpc_socket: &Path) -> Result<(), String> {
+    let input = stream
+        .try_clone()
+        .map_err(|error| format!("failed to clone transport IPC stream: {error}"))?;
+    serve(input, stream, rpc_socket)
 }
 
 fn serve<R, W>(input: R, mut output: W, rpc_socket: &Path) -> Result<(), String>

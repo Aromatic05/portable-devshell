@@ -1341,9 +1341,8 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     let rpc = TransportRpcWriter::new(transport.stdin.take().unwrap()).unwrap();
     drop(rpc);
     let mut output = TransportRpcReader::new(transport.stdout.take().unwrap());
-    let error = output.read_to_end(&mut Vec::new()).unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
-    transport.wait().unwrap();
+    assert_eq!(output.read_to_end(&mut Vec::new()).unwrap(), 0);
+    assert!(!transport.wait().unwrap().success());
 
     let restarted = env
         .command()

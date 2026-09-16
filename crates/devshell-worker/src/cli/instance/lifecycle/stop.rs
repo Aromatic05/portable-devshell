@@ -48,7 +48,7 @@ pub fn stop_instance(instance: &InstanceName) -> Result<bool, String> {
         DaemonState::Stopped => false,
     };
 
-    process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
+    process::clear_runtime_files(&instance_paths, &socket_paths)?;
     Ok(stopped)
 }
 

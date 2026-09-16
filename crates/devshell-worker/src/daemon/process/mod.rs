@@ -191,10 +191,11 @@ pub fn clear_pid(paths: &InstancePaths) -> Result<(), String> {
 
 pub fn clear_runtime_files(
     instance_paths: &InstancePaths,
-    socket_path: &Path,
+    socket_paths: &SocketPaths,
 ) -> Result<(), String> {
     clear_pid(instance_paths)?;
-    remove_ipc_endpoint_if_exists(socket_path)
+    remove_ipc_endpoint_if_exists(&socket_paths.socket_file)?;
+    remove_ipc_endpoint_if_exists(&socket_paths.transport_socket_file)
 }
 
 pub fn daemon_is_responsive(socket_paths: &SocketPaths) -> bool {

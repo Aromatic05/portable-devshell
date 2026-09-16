@@ -12,6 +12,7 @@ const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
 pub struct SocketPaths {
     pub instance_runtime_dir: PathBuf,
     pub socket_file: PathBuf,
+    pub transport_socket_file: PathBuf,
     #[cfg(unix)]
     pub tmux_socket_file: PathBuf,
 }
@@ -23,8 +24,8 @@ impl SocketPaths {
             .join(instance.as_str());
         #[cfg(unix)]
         let instance_runtime_dir = {
-            let socket_file = default_runtime_dir.join("worker.sock");
-            if socket_file.as_os_str().as_bytes().len() <= MAX_UNIX_SOCKET_PATH_BYTES {
+            let transport_socket_file = default_runtime_dir.join("transport.sock");
+            if transport_socket_file.as_os_str().as_bytes().len() <= MAX_UNIX_SOCKET_PATH_BYTES {
                 default_runtime_dir
             } else {
                 short_runtime_dir(instance)?
@@ -34,14 +35,23 @@ impl SocketPaths {
         let instance_runtime_dir = default_runtime_dir;
         #[cfg(unix)]
         let socket_file = instance_runtime_dir.join("worker.sock");
+        #[cfg(unix)]
+        let transport_socket_file = instance_runtime_dir.join("transport.sock");
         #[cfg(windows)]
         let socket_file = PathBuf::from(format!(
             r"\\.\pipe\devshell-worker-{}-{}",
             windows_user_identity(),
             instance.as_str()
         ));
+        #[cfg(windows)]
+        let transport_socket_file = PathBuf::from(format!(
+            r"\\.\pipe\devshell-worker-{}-{}-transport",
+            windows_user_identity(),
+            instance.as_str()
+        ));
         Ok(Self {
             socket_file,
+            transport_socket_file,
             #[cfg(unix)]
             tmux_socket_file: instance_runtime_dir.join("tmux.sock"),
             instance_runtime_dir,

@@ -186,6 +186,18 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         assert.ok(workerBinaryPath);
+        const homeDirectory = await createTestTempDirectory(
+            "transport-frame-home",
+        );
+        const runtimeDirectory = await createTestTempDirectory(
+            "transport-frame-runtime",
+        );
+        const instanceName = `transport-frame-local-${process.pid}`;
+        const env = {
+            ...process.env,
+            HOME: homeDirectory,
+            XDG_RUNTIME_DIR: runtimeDirectory,
+        };
         const server = createServer((socket) => {
             const chunks: Buffer[] = [];
             socket.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -203,11 +215,22 @@ test(
         const transport = new WorkerTransportDriverLocal({
             workerBinary: new WorkerBinary(workerBinaryPath),
         });
+        assert.equal(
+            (await transport.runWorkerCommand("start", { env, instanceName }))
+                .exitCode,
+            0,
+        );
         const channel = await transport.connectWorkerChannel({
-            instanceName: "transport-frame-local",
+            env,
+            instanceName,
         });
         const protocol = new FrameProtocol(channel, { role: "opener" });
-        t.after(() => protocol.close());
+        t.after(async () => {
+            protocol.close();
+            await transport.runWorkerCommand("stop", { env, instanceName });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
 
         const tcp = await protocol.open(
             "network.tcp",
