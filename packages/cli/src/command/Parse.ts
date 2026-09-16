@@ -1,4 +1,3 @@
-import type { JsonValue } from "@portable-devshell/shared";
 import { CliRenderError } from "../app/Failure.js";
 import { parseConfigCommand } from "./control/Parse.js";
 import { parseOAuthCommand } from "./control/OAuth.js";
@@ -14,19 +13,25 @@ import { parseApprovalCommand, parseToolCommand } from "./instance/Tool.js";
 import type { CliHelpTopic } from "./Usage.js";
 
 export type CliParsedCommand =
-    | { kind: "help"; topic?: CliHelpTopic }
+    | { command?: string; kind: "help"; topic?: CliHelpTopic }
     | { kind: "version" }
     | { kind: "overview" }
     | { kind: "config.get" }
-    | { draft: JsonValue; kind: "config.validate" }
-    | { request: JsonValue; kind: "config.update" }
+    | { draftSource: string; kind: "config.validate" }
+    | {
+          input:
+              | { kind: "batch"; source: string }
+              | { instance: string; kind: "instance"; source: string }
+              | { kind: "mcp" | "web"; source: string };
+          kind: "config.update";
+      }
     | { kind: "approval.list"; instance: string }
     | {
           approvalId: string;
           decision: "approve" | "deny";
           instance: string;
           kind: "approval.decide";
-          policyPatch?: JsonValue;
+          policyPatchSource?: string;
           reason?: string;
           remember?: boolean;
       }
@@ -75,7 +80,7 @@ export type CliParsedCommand =
     | { extensionId: string; kind: "extension.remove"; purge: boolean }
     | { args: string[]; commandId: string; kind: "cli.command" }
     | {
-          input: JsonValue;
+          inputSource: string;
           instance: string;
           kind: "instance.call";
           toolName: string;
@@ -85,7 +90,7 @@ export type CliParsedCommand =
     | { instance: string; kind: "instance.delete" }
     | { instance: string; kind: "instance.enable" }
     | { instance: string; kind: "instance.disable" }
-    | { kind: "instance.help" }
+    | { command?: string; kind: "instance.help" }
     | { instance: string; kind: "instance.deviceCode" }
     | { kind: "instance.list" }
     | { follow: boolean; instance: string; kind: "instance.logs" }
@@ -97,7 +102,7 @@ export type CliParsedCommand =
     | { instance: string; kind: "instance.rotateToken" }
     | { instance: string; kind: "watch.logs" }
     | { instance: string; kind: "watch.status" }
-    | { kind: "watch.help" };
+    | { command?: string; kind: "watch.help" };
 
 export class CliParser {
     parse(argv: readonly string[]): CliParsedCommand {
@@ -159,18 +164,34 @@ function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
     switch (argv[0]) {
         case "extension":
             return { kind: "extension.help" };
-        case "instance":
-            return { kind: "instance.help" };
-        case "watch":
-            return { kind: "watch.help" };
+        case "instance": {
+            const command = argv.slice(1, -1).join(" ");
+            return {
+                ...(command.length === 0 ? {} : { command }),
+                kind: "instance.help",
+            };
+        }
+        case "watch": {
+            const command = argv.slice(1, -1).join(" ");
+            return {
+                ...(command.length === 0 ? {} : { command }),
+                kind: "watch.help",
+            };
+        }
         case "config":
         case "approval":
         case "oauth":
         case "context":
         case "debug":
         case "tool":
-        case "todo":
-            return { kind: "help", topic: argv[0] };
+        case "todo": {
+            const command = argv.slice(1, -1).join(" ");
+            return {
+                ...(command.length === 0 ? {} : { command }),
+                kind: "help",
+                topic: argv[0],
+            };
+        }
         case "start":
         case "restart":
         case "stop":

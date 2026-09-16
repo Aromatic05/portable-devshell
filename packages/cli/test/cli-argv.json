@@ -33,7 +33,7 @@
             "{\"command\":\"pwd\",\"timeoutMs\":30000}"
         ],
         "expected": {
-            "input": { "command": "pwd", "timeoutMs": 30000 },
+            "inputSource": "{\"command\":\"pwd\",\"timeoutMs\":30000}",
             "instance": "demo-local",
             "kind": "instance.call",
             "toolName": "bash_run",

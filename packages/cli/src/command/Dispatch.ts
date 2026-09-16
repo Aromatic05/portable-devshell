@@ -1,4 +1,5 @@
 import type { CliClients } from "../transport/Client.js";
+import type { JsonValue } from "@portable-devshell/shared";
 import { negotiateCliControl } from "../transport/Client.js";
 import type { CliLifecycleManagerLike } from "./control/service/Lifecycle.js";
 import { executeControlLifecycle } from "./control/service/Lifecycle.js";
@@ -31,6 +32,7 @@ export interface CliDispatchContext {
     stdout: { write(chunk: string): void };
     lifecycle(): Promise<CliLifecycleManagerLike>;
     negotiate(): Promise<void>;
+    readJson(source: string, label: string): Promise<JsonValue>;
     rootUsage(): Promise<string>;
     startTui(): Promise<void>;
     version(): string;
@@ -49,7 +51,7 @@ export async function dispatchCliCommand(
     }
     if (command.kind === "help") {
         context.stdout.write(
-            `${command.topic === undefined ? await context.rootUsage() : renderCliTopicUsage(command.topic)}\n`,
+            `${command.topic === undefined ? await context.rootUsage() : renderCliTopicUsage(command.topic, command.command)}\n`,
         );
         return;
     }
@@ -58,11 +60,11 @@ export async function dispatchCliCommand(
         return;
     }
     if (command.kind === "instance.help") {
-        context.stdout.write(`${renderInstanceUsage()}\n`);
+        context.stdout.write(`${renderInstanceUsage(command.command)}\n`);
         return;
     }
     if (command.kind === "watch.help") {
-        context.stdout.write(`${renderWatchUsage()}\n`);
+        context.stdout.write(`${renderWatchUsage(command.command)}\n`);
         return;
     }
     const handlers = [

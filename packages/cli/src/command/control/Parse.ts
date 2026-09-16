@@ -1,4 +1,3 @@
-import type { JsonValue } from "@portable-devshell/shared";
 import { CliRenderError } from "../../app/Failure.js";
 import type { CliParsedCommand } from "../Parse.js";
 import { renderCliTopicUsage } from "../Usage.js";
@@ -13,19 +12,22 @@ export function parseConfigCommand(argv: readonly string[]): CliParsedCommand {
             return expectNoExtra(argv, { kind: "config.get" });
         case "validate":
             return {
-                draft: parseSingleJson(
+                draftSource: singleJsonSource(
                     argv,
-                    "config validate requires <jsonDraft>",
+                    "config validate requires <jsonDraft|@file|->",
                 ),
                 kind: "config.validate",
             };
         case "update":
             return {
+                input: {
+                    kind: "batch",
+                    source: singleJsonSource(
+                        argv,
+                        "config update requires <jsonUpdate|@file|->",
+                    ),
+                },
                 kind: "config.update",
-                request: parseSingleJson(
-                    argv,
-                    "config update requires <jsonUpdate>",
-                ),
             };
         case "instance":
             return parsePatch(argv.slice(1), "instance");
@@ -50,18 +52,12 @@ function parsePatch(
                 "config instance patch requires <instance> <jsonPatch>",
             );
         return {
-            kind: "config.update",
-            request: {
-                instance: {
-                    instanceName: required(
-                        argv[1],
-                        "instance name is required",
-                    ),
-                    patch: parseJson(
-                        required(argv[2], "JSON patch is required"),
-                    ),
-                },
+            input: {
+                instance: required(argv[1], "instance name is required"),
+                kind: "instance",
+                source: required(argv[2], "JSON patch source is required"),
             },
+            kind: "config.update",
         };
     }
     if (argv[0] !== "patch" || argv.length !== 2)
@@ -69,23 +65,17 @@ function parsePatch(
             `config ${target} patch requires <jsonPatch>`,
         );
     return {
-        kind: "config.update",
-        request: {
-            [target]: parseJson(required(argv[1], "JSON patch is required")),
+        input: {
+            kind: target,
+            source: required(argv[1], "JSON patch source is required"),
         },
+        kind: "config.update",
     };
 }
 
-function parseSingleJson(argv: readonly string[], message: string): JsonValue {
+function singleJsonSource(argv: readonly string[], message: string): string {
     if (argv.length !== 2) throw CliRenderError.usage(message);
-    return parseJson(required(argv[1], "JSON input is required"));
-}
-function parseJson(source: string): JsonValue {
-    try {
-        return JSON.parse(source) as JsonValue;
-    } catch {
-        throw CliRenderError.usage("tool input must be valid JSON");
-    }
+    return required(argv[1], "JSON source is required");
 }
 function required(value: string | undefined, message: string): string {
     if (value) return value;

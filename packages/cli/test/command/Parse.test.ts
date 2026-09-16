@@ -109,6 +109,7 @@ test("CliParser accepts trailing help consistently across command levels", () =>
 
     assert.deepEqual(parser.parse(["status", "--help"]), { kind: "help" });
     assert.deepEqual(parser.parse(["instance", "status", "--help"]), {
+        command: "status",
         kind: "instance.help",
     });
     assert.deepEqual(parser.parse(["artifact", "share", "--help"]), {
@@ -117,20 +118,74 @@ test("CliParser accepts trailing help consistently across command levels", () =>
         kind: "cli.command",
     });
     assert.deepEqual(parser.parse(["config", "update", "--help"]), {
+        command: "update",
         kind: "help",
         topic: "config",
     });
     assert.deepEqual(parser.parse(["debug", "load", "--help"]), {
+        command: "load",
         kind: "help",
         topic: "debug",
     });
     assert.deepEqual(parser.parse(["approval", "approve", "-h"]), {
+        command: "approve",
         kind: "help",
         topic: "approval",
     });
     assert.deepEqual(parser.parse(["extension", "--help"]), {
         kind: "extension.help",
     });
+});
+
+test("CliParser preserves JSON sources for execution-time materialization", () => {
+    const parser = new CliParser();
+
+    assert.deepEqual(parser.parse(["config", "validate", "@draft.json"]), {
+        draftSource: "@draft.json",
+        kind: "config.validate",
+    });
+    assert.deepEqual(parser.parse(["config", "update", "-"]), {
+        input: { kind: "batch", source: "-" },
+        kind: "config.update",
+    });
+    assert.deepEqual(
+        parser.parse(["config", "instance", "patch", "demo", "@patch.json"]),
+        {
+            input: {
+                instance: "demo",
+                kind: "instance",
+                source: "@patch.json",
+            },
+            kind: "config.update",
+        },
+    );
+    assert.deepEqual(
+        parser.parse(["instance", "call", "demo", "/repo", "bash_run", "-"]),
+        {
+            inputSource: "-",
+            instance: "demo",
+            kind: "instance.call",
+            toolName: "bash_run",
+            workspace: "/repo",
+        },
+    );
+    assert.deepEqual(
+        parser.parse([
+            "approval",
+            "approve",
+            "demo",
+            "approval-1",
+            "--policy-patch",
+            "@policy.json",
+        ]),
+        {
+            approvalId: "approval-1",
+            decision: "approve",
+            instance: "demo",
+            kind: "approval.decide",
+            policyPatchSource: "@policy.json",
+        },
+    );
 });
 
 test("CliParser accepts standard version flags", () => {

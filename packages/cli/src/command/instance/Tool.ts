@@ -156,11 +156,11 @@ function parseToolCallOptions(argv: readonly string[]): {
     };
 }
 function parseApprovalOptions(argv: readonly string[]): {
-    policyPatch?: import("@portable-devshell/shared").JsonValue;
+    policyPatchSource?: string;
     reason?: string;
     remember?: boolean;
 } {
-    let policyPatch: import("@portable-devshell/shared").JsonValue | undefined,
+    let policyPatchSource: string | undefined,
         reason: string | undefined,
         remember = false;
     for (let i = 0; i < argv.length; i += 1) {
@@ -179,19 +179,15 @@ function parseApprovalOptions(argv: readonly string[]): {
             );
         if (option === "--reason")
             reason = required(value, "reason is required");
-        else {
-            try {
-                policyPatch = JSON.parse(
-                    required(value, "policy patch is required"),
-                );
-            } catch {
-                throw CliRenderError.usage("tool input must be valid JSON");
-            }
-        }
+        else
+            policyPatchSource = required(
+                value,
+                "policy patch source is required",
+            );
         i += 1;
     }
     return {
-        ...(policyPatch === undefined ? {} : { policyPatch }),
+        ...(policyPatchSource === undefined ? {} : { policyPatchSource }),
         ...(reason === undefined ? {} : { reason }),
         ...(remember ? { remember: true } : {}),
     };
@@ -236,16 +232,21 @@ export async function executeToolCommand(
                 ),
             );
             return true;
-        case "approval.decide":
+        case "approval.decide": {
+            const policyPatch =
+                command.policyPatchSource === undefined
+                    ? undefined
+                    : await context.readJson(
+                          command.policyPatchSource,
+                          "approval policy patch",
+                      );
             context.writeJson(
                 await context.clients.tool.decideApproval(
                     command.instance,
                     command.approvalId,
                     command.decision,
                     {
-                        ...(command.policyPatch === undefined
-                            ? {}
-                            : { policyPatch: command.policyPatch }),
+                        ...(policyPatch === undefined ? {} : { policyPatch }),
                         ...(command.reason === undefined
                             ? {}
                             : { reason: command.reason }),
@@ -256,6 +257,7 @@ export async function executeToolCommand(
                 ),
             );
             return true;
+        }
         case "tool.calls":
             context.writeJson(
                 await context.clients.tool.listCalls(
@@ -274,19 +276,24 @@ export async function executeToolCommand(
                 ),
             );
             return true;
-        case "instance.call":
+        case "instance.call": {
+            const input = await context.readJson(
+                command.inputSource,
+                "tool input",
+            );
             context.stdout.write(
                 renderToolCall(command.instance, command.toolName) +
                     renderToolResult(
                         await context.clients.tool.call(
                             command.instance,
                             command.toolName,
-                            command.input,
+                            input,
                             command.workspace,
                         ),
                     ),
             );
             return true;
+        }
         default:
             return false;
     }

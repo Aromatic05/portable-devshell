@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
@@ -203,6 +205,10 @@ test("CliMain keeps static help available without depending on Control business 
     assert.notEqual(stdout.flush().length, 0);
     assert.equal(await cli.run(["instance", "-h"]), 0);
     assert.notEqual(stdout.flush().length, 0);
+    assert.equal(await cli.run(["instance", "status", "--help"]), 0);
+    const instanceStatusHelp = stdout.flush();
+    assert.match(instanceStatusHelp, /instance status <instance>/u);
+    assert.doesNotMatch(instanceStatusHelp, /instance create/u);
     assert.equal(await cli.run(["watch", "help"]), 0);
     assert.notEqual(stdout.flush().length, 0);
     assert.equal(await cli.run(["extension", "--help"]), 0);
@@ -218,10 +224,66 @@ test("CliMain keeps static help available without depending on Control business 
         assert.equal(await cli.run([topic, "--help"]), 0);
         assert.match(stdout.flush(), new RegExp(topic, "iu"));
     }
+    assert.equal(await cli.run(["config", "update", "--help"]), 0);
+    const configUpdateHelp = stdout.flush();
+    assert.match(configUpdateHelp, /config update <jsonUpdate\|@file\|->/u);
+    assert.doesNotMatch(configUpdateHelp, /config validate/u);
     assert.equal(stderr.flush(), "");
 
     assert.equal(await cli.run(["Bad_Command"]), 2);
     assert.notEqual(stderr.flush().length, 0);
+});
+
+test("CliMain materializes JSON arguments from stdin and @file at execution time", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "devshell-cli-json-"));
+    t.after(async () => await rm(directory, { force: true, recursive: true }));
+    const updateFile = join(directory, "update.json");
+    await writeFile(updateFile, '{"web":{"enabled":false}}', "utf8");
+    const calls: string[] = [];
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const cli = new CliMain({
+        createCliClients: () =>
+            testClients({
+                async updateConfig(request: unknown) {
+                    calls.push(`update:${JSON.stringify(request)}`);
+                    return request;
+                },
+                async validateConfig(draft: unknown) {
+                    calls.push(`validate:${JSON.stringify(draft)}`);
+                    return draft;
+                },
+            }) as never,
+        stderr,
+        stdin: Readable.from(['{"mcp":{"enabled":true}}']),
+        stdout,
+    });
+
+    assert.equal(await cli.run(["config", "validate", "-"]), 0);
+    stdout.flush();
+    assert.equal(await cli.run(["config", "update", `@${updateFile}`]), 0);
+    stdout.flush();
+
+    assert.deepEqual(calls, [
+        'validate:{"mcp":{"enabled":true}}',
+        'update:{"web":{"enabled":false}}',
+    ]);
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain reports the concrete JSON input name on parse failures", async () => {
+    const stderr = createBuffer();
+    const stdout = createBuffer();
+    const cli = new CliMain({
+        createCliClients: () => testClients({}) as never,
+        stderr,
+        stdin: Readable.from(["{bad"]),
+        stdout,
+    });
+
+    assert.equal(await cli.run(["config", "validate", "-"]), 2);
+    assert.equal(stderr.flush(), "config draft must be valid JSON\n");
+    assert.equal(stdout.flush(), "");
 });
 
 test("CliMain root help discovers installed Extension commands when Control is online", async () => {

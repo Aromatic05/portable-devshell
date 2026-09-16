@@ -1,4 +1,3 @@
-import type { JsonValue } from "@portable-devshell/shared";
 import { CliRenderError } from "../../app/Failure.js";
 import type { CliParsedCommand } from "../Parse.js";
 import { renderInstanceUsage, renderWatchUsage } from "../Usage.js";
@@ -50,12 +49,10 @@ export function parseInstanceCommand(
         case "call":
             if (argv.length !== 5)
                 throw CliRenderError.usage(
-                    "instance call requires <instance> <workspace> <toolName> <jsonInput>",
+                    "instance call requires <instance> <workspace> <toolName> <json|@file|->",
                 );
             return {
-                input: parseJson(
-                    required(argv[4], "tool input JSON is required"),
-                ),
+                inputSource: required(argv[4], "tool input source is required"),
                 instance: required(argv[1], "instance name is required"),
                 kind: "instance.call",
                 toolName: required(argv[3], "tool name is required"),
@@ -134,13 +131,6 @@ function expectTodoArgs(argv: readonly string[]): void {
 function expectLogsArgs(argv: readonly string[]): void {
     if (argv.length === 2 || (argv.length === 3 && argv[2] === "-f")) return;
     throw CliRenderError.usage("instance logs requires <instance> [-f]");
-}
-function parseJson(source: string): JsonValue {
-    try {
-        return JSON.parse(source) as JsonValue;
-    } catch {
-        throw CliRenderError.usage("tool input must be valid JSON");
-    }
 }
 function required(value: string | undefined, message: string): string {
     if (value) return value;

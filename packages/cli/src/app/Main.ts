@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { JsonValue } from "@portable-devshell/shared";
 import { CliParser, type CliParsedCommand } from "../command/Parse.js";
 import { dispatchCliCommand } from "../command/Dispatch.js";
 import { renderCliUsage } from "../command/Usage.js";
@@ -87,6 +89,8 @@ export class CliMain {
                 stdout: this.#stdout,
                 lifecycle: async () => await this.#lifecycle(),
                 negotiate: async () => await negotiateCliControl(this.#clients),
+                readJson: async (source, label) =>
+                    await readCliJsonSource(source, label, this.#stdin),
                 rootUsage: async () =>
                     await this.#rootUsage(resolved.controlNegotiated),
                 startTui: async () => await this.#startTui(),
@@ -206,6 +210,42 @@ export class CliMain {
             xdgRuntimeDir: this.#xdgRuntimeDir,
         });
     }
+}
+
+async function readCliJsonSource(
+    source: string,
+    label: string,
+    stdin: NodeJS.ReadableStream,
+): Promise<JsonValue> {
+    let text = source;
+    if (source === "-") {
+        text = await readCliStdin(stdin);
+    } else if (source.startsWith("@")) {
+        const path = source.slice(1);
+        if (path.length === 0)
+            throw CliRenderError.usage(
+                `${label} file path is required after @`,
+            );
+        try {
+            text = await readFile(path, "utf8");
+        } catch (error) {
+            throw CliRenderError.usage(
+                `Could not read ${label} from ${path}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
+    }
+    try {
+        return JSON.parse(text) as JsonValue;
+    } catch {
+        throw CliRenderError.usage(`${label} must be valid JSON`);
+    }
+}
+
+async function readCliStdin(stdin: NodeJS.ReadableStream): Promise<string> {
+    let text = "";
+    for await (const chunk of stdin as AsyncIterable<string | Buffer>)
+        text += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    return text;
 }
 
 const builtinCliCommands = [
