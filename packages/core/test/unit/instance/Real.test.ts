@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
@@ -134,6 +134,77 @@ test(
         assert.equal(stopped.daemonState, "stopped");
         assert.equal(stopped.connectionState, "disconnected");
         assert.equal(stopped.ready, false);
+    },
+);
+
+test(
+    "WorkerInstance transfers artifact bytes over Frame services against frozen devshell-worker",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("artifact-frame");
+        const homeDirectory = await createTestTempDirectory("artifact-frame-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("artifact-frame-runtime");
+        const instanceName = asInstanceName(`artifact-frame-${process.pid}`);
+        const source = Buffer.alloc(700 * 1024);
+        for (let index = 0; index < source.length; index += 1) {
+            source[index] = index % 251;
+        }
+        await writeFile(`${workspacePath}/source.bin`, source);
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: instanceName,
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        t.after(async () => {
+            await instance.stop();
+            await instance.close();
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        const opened = await instance.openArtifactPayload({
+            expiresAtMs: Date.now() + 60_000,
+            path: "./source.bin",
+            workspace: workspacePath,
+        });
+        const chunk = await instance.readArtifactPayload({
+            maxBytes: source.byteLength,
+            offsetBytes: 0,
+            payloadId: opened.payloadId,
+        });
+        assert.equal(chunk.returnedBytes, source.byteLength);
+        assert.equal(chunk.totalBytes, source.byteLength);
+        assert.equal(chunk.eof, true);
+        assert.deepEqual(Buffer.from(chunk.content, "base64"), source);
+
+        const receive = await instance.beginArtifactReceive({
+            descriptor: opened.descriptor,
+            overwrite: false,
+            targetPath: "./copy.bin",
+            workspace: workspacePath,
+        });
+        const written = await instance.writeArtifactReceive({
+            content: chunk.content,
+            offsetBytes: receive.nextOffsetBytes,
+            receiveId: receive.receiveId,
+        });
+        assert.equal(written.receivedBytes, source.byteLength);
+        const finished = await instance.finishArtifactReceive(receive.receiveId);
+        assert.equal(finished.bytes, source.byteLength);
+        assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
+        await instance.closeArtifactPayload(opened.payloadId);
     },
 );
 

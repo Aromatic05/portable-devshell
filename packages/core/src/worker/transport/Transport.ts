@@ -2,6 +2,8 @@ import type { Channel } from "@portable-devshell/shared";
 import {
     FrameProtocol,
     FrameStreamChannel,
+    frameResetCodes,
+    type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 
 import type {
@@ -64,16 +66,27 @@ export class WorkerTransportConnection {
     }
 
     async openService(service: string, signal?: AbortSignal): Promise<Channel> {
+        return new FrameStreamChannel(
+            await this.openStream(service, new Uint8Array(), signal),
+        );
+    }
+
+    async openStream(
+        service: string,
+        metadata: Uint8Array = new Uint8Array(),
+        signal?: AbortSignal,
+    ): Promise<FrameStream> {
         throwIfAborted(signal);
         const protocol = await this.#ensureProtocol();
         throwIfAborted(signal);
-        const stream = await protocol.open(service);
+        const stream = await protocol.open(service, metadata);
         if (isAborted(signal)) {
-            const channel = new FrameStreamChannel(stream);
-            channel.close(abortError(signal));
+            await stream
+                .reset(frameResetCodes.cancelled, abortError(signal).message)
+                .catch(() => undefined);
             throw abortError(signal);
         }
-        return new FrameStreamChannel(stream);
+        return stream;
     }
 
     close(error?: Error): void {

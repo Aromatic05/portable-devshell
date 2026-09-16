@@ -118,6 +118,94 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
     ]);
 });
 
+test("worker artifact facade carries chunk bytes over Frame services when a transport connection is available", async () => {
+    const opens: Array<[string, unknown]> = [];
+    const writes: Array<[string, Buffer]> = [];
+    const finishes: string[] = [];
+    const totalHeader = Buffer.alloc(8);
+    totalHeader.writeBigUInt64BE(4n);
+
+    const transportConnection = {
+        async openStream(service: string, metadata: Uint8Array) {
+            opens.push([
+                service,
+                JSON.parse(Buffer.from(metadata).toString("utf8")) as unknown,
+            ]);
+            const reads =
+                service === "artifact.payload"
+                    ? [Buffer.concat([totalHeader, Buffer.from("est")])]
+                    : [];
+            return {
+                closed: false,
+                id: 1,
+                metadata,
+                service,
+                async finish() {
+                    finishes.push(service);
+                },
+                async read() {
+                    return reads.shift();
+                },
+                async reset() {},
+                async write(data: Uint8Array) {
+                    writes.push([service, Buffer.from(data)]);
+                },
+            };
+        },
+    };
+    const artifact = new WorkerInstanceArtifact({
+        assertReady() {},
+        protocolClient: {
+            async readArtifactPayload() {
+                throw new Error("payload data must use the Frame service");
+            },
+            async writeArtifactReceive() {
+                throw new Error("receive data must use the Frame service");
+            },
+        } as never,
+        transportConnection: transportConnection as never,
+    });
+
+    assert.deepEqual(
+        await artifact.readPayload({
+            maxBytes: 3,
+            offsetBytes: 1,
+            payloadId: "payload-1",
+        }),
+        {
+            content: "ZXN0",
+            encoding: "base64",
+            eof: true,
+            offsetBytes: 1,
+            payloadId: "payload-1",
+            returnedBytes: 3,
+            totalBytes: 4,
+        },
+    );
+    assert.deepEqual(
+        await artifact.writeReceive({
+            content: "dGVzdA==",
+            offsetBytes: 4,
+            receiveId: "receive-1",
+        }),
+        {
+            nextOffsetBytes: 8,
+            receivedBytes: 8,
+            receiveId: "receive-1",
+        },
+    );
+
+    assert.deepEqual(opens, [
+        [
+            "artifact.payload",
+            { maxBytes: 3, offsetBytes: 1, payloadId: "payload-1" },
+        ],
+        ["artifact.receive", { offsetBytes: 4, receiveId: "receive-1" }],
+    ]);
+    assert.deepEqual(writes, [["artifact.receive", Buffer.from("test")]]);
+    assert.deepEqual(finishes, ["artifact.payload", "artifact.receive"]);
+});
+
 test("worker artifact facade never calls the protocol client when readiness fails", async () => {
     let protocolCalls = 0;
     const expected = new Error("instance not ready");

@@ -159,6 +159,10 @@ export class WorkerInstance {
         this.#artifact = new WorkerInstanceArtifact({
             assertReady: () => this.#assertReady(),
             protocolClient: dependencies.protocolClient,
+            transportConnection:
+                this.#config.managementMode === "controllerManaged"
+                    ? dependencies.transportConnection
+                    : undefined,
         });
         this.#audit = new WorkerInstanceAudit({
             appendEvent: (type, data) => this.#state.appendEvent(type, data),
