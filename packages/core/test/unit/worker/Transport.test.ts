@@ -668,6 +668,32 @@ test("ssh transport starts the worker without a workspace cwd", async () => {
     });
 });
 
+test("ssh transport preserves provider routing options from ssh.command", async () => {
+    const recorder = createSpawnRecorder();
+    const transport = new WorkerTransportDriverSsh({
+        command:
+            "ssh-bin -J bastion -o 'ProxyCommand=nc -x 127.0.0.1:1080 %h %p' devbox",
+        workerBinary: new WorkerBinary("/usr/local/bin/devshell-worker"),
+        spawnFunction: recorder.spawn,
+    });
+
+    await transport.runWorkerCommand("status", {
+        instanceName: "routed-ssh",
+    });
+
+    assert.deepEqual(recorder.calls[0]?.args.slice(0, 9), [
+        "-oBatchMode=yes",
+        "-oNumberOfPasswordPrompts=0",
+        "-oKbdInteractiveAuthentication=no",
+        "-oPasswordAuthentication=no",
+        "-J",
+        "bastion",
+        "-o",
+        "ProxyCommand=nc -x 127.0.0.1:1080 %h %p",
+        "devbox",
+    ]);
+});
+
 test("ssh transport uploads instance environment without replacing the local ssh environment", async () => {
     const recorder = createSpawnRecorder((call, child, callIndex) => {
         if (callIndex === 0) {

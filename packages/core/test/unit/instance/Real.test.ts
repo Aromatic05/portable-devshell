@@ -7,7 +7,11 @@ import {
 import { once } from "node:events";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
-import { createServer as createNetServer, type Socket } from "node:net";
+import {
+    connect as connectNet,
+    createServer as createNetServer,
+    type Socket,
+} from "node:net";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -395,6 +399,154 @@ test(
         const httpResponse = (await readServiceStream(tcp)).toString("utf8");
         assert.match(httpResponse, /^HTTP\/1\.1 200 OK\r\n/u);
         assert.match(httpResponse, /\r\n\r\nhttp-over-devshell$/u);
+
+        const socksServer = createNetServer(
+            { allowHalfOpen: true },
+            (client) => {
+                let buffered = Buffer.alloc(0);
+                let connecting = false;
+                let stage: "greeting" | "request" | "tunnel" = "greeting";
+                let upstream: Socket | undefined;
+
+                const fail = (message: string) => {
+                    client.destroy(new Error(message));
+                };
+                const flush = () => {
+                    if (stage === "tunnel") {
+                        if (buffered.byteLength > 0) {
+                            upstream!.write(buffered);
+                            buffered = Buffer.alloc(0);
+                        }
+                        return;
+                    }
+                    if (connecting) return;
+                    if (stage === "greeting") {
+                        if (buffered.byteLength < 2) return;
+                        const methodCount = buffered[1]!;
+                        if (buffered.byteLength < 2 + methodCount) return;
+                        const methods = buffered.subarray(2, 2 + methodCount);
+                        if (
+                            buffered[0] !== 0x05 ||
+                            !methods.includes(0x00)
+                        ) {
+                            fail("unsupported SOCKS5 greeting");
+                            return;
+                        }
+                        buffered = buffered.subarray(2 + methodCount);
+                        client.write(Buffer.from([0x05, 0x00]));
+                        stage = "request";
+                    }
+                    if (stage !== "request" || buffered.byteLength < 4)
+                        return;
+                    if (
+                        buffered[0] !== 0x05 ||
+                        buffered[1] !== 0x01 ||
+                        buffered[2] !== 0x00 ||
+                        buffered[3] !== 0x01
+                    ) {
+                        fail("unsupported SOCKS5 CONNECT request");
+                        return;
+                    }
+                    if (buffered.byteLength < 10) return;
+                    const host = Array.from(buffered.subarray(4, 8)).join(".");
+                    const port = buffered.readUInt16BE(8);
+                    buffered = buffered.subarray(10);
+                    connecting = true;
+                    const remote = connectNet({ host, port }, () => {
+                        upstream = remote;
+                        connecting = false;
+                        stage = "tunnel";
+                        client.write(
+                            Buffer.from([
+                                0x05,
+                                0x00,
+                                0x00,
+                                0x01,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                            ]),
+                        );
+                        flush();
+                    });
+                    remote.on("data", (chunk) => client.write(chunk));
+                    remote.on("end", () => client.end());
+                    remote.on("error", (error) => client.destroy(error));
+                };
+
+                client.on("data", (chunk) => {
+                    if (stage === "tunnel") {
+                        upstream!.write(chunk);
+                        return;
+                    }
+                    buffered = Buffer.concat([buffered, chunk]);
+                    flush();
+                });
+                client.on("end", () => upstream?.end());
+                client.on("error", () => upstream?.destroy());
+            },
+        );
+        socksServer.listen(0, "127.0.0.1");
+        await once(socksServer, "listening");
+        t.after(() => socksServer.close());
+        const socksAddress = socksServer.address();
+        assert.ok(socksAddress !== null && typeof socksAddress !== "string");
+
+        const socks = await instance.connectTcp({
+            host: "127.0.0.1",
+            port: socksAddress.port,
+        });
+        let socksBuffered = Buffer.alloc(0);
+        const readSocksBytes = async (byteLength: number): Promise<Buffer> => {
+            while (socksBuffered.byteLength < byteLength) {
+                const chunk = await socks.read();
+                if (chunk === undefined)
+                    throw new Error("SOCKS5 stream ended during handshake");
+                socksBuffered = Buffer.concat([
+                    socksBuffered,
+                    Buffer.from(chunk),
+                ]);
+            }
+            const value = socksBuffered.subarray(0, byteLength);
+            socksBuffered = socksBuffered.subarray(byteLength);
+            return value;
+        };
+        await socks.write(Buffer.from([0x05, 0x01, 0x00]));
+        assert.deepEqual(await readSocksBytes(2), Buffer.from([0x05, 0x00]));
+        await socks.write(
+            Buffer.from([
+                0x05,
+                0x01,
+                0x00,
+                0x01,
+                127,
+                0,
+                0,
+                1,
+                (address.port >> 8) & 0xff,
+                address.port & 0xff,
+            ]),
+        );
+        const socksReply = await readSocksBytes(10);
+        assert.deepEqual(socksReply.subarray(0, 4), Buffer.from([5, 0, 0, 1]));
+        await socks.write(
+            Buffer.from(
+                "GET /probe HTTP/1.1\r\nHost: devshell\r\nConnection: close\r\n\r\n",
+            ),
+        );
+        await socks.finish();
+        const proxiedChunks = [socksBuffered];
+        while (true) {
+            const chunk = await socks.read();
+            if (chunk === undefined) break;
+            proxiedChunks.push(Buffer.from(chunk));
+        }
+        const proxiedResponse = Buffer.concat(proxiedChunks).toString("utf8");
+        assert.match(proxiedResponse, /^HTTP\/1\.1 200 OK\r\n/u);
+        assert.match(proxiedResponse, /\r\n\r\nhttp-over-devshell$/u);
 
         const processStream = await instance.execProcess({
             executable: process.execPath,
