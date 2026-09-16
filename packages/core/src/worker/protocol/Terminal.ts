@@ -1,6 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { WorkerRpcBridge } from "./rpc/connection/Bridge.js";
+import type { WorkerRpcBridge } from "./rpc/Bridge.js";
 import type { WorkerRpcClient } from "./rpc/Client.js";
 import type { WorkerRpcError } from "./rpc/Message.js";
 

@@ -13,26 +13,21 @@ import {
     TRANSPORT_MAX_FRAME_SIZE,
 } from "@portable-devshell/shared/transport/frame";
 
-import { readWorkerAbortReason } from "../../../AbortReason.js";
-import {
-    connectWorkerService,
-    type WorkerTransport,
-} from "../../../transport/Transport.js";
-import type { WorkerRpcOptions } from "../../../transport/command/Model.js";
-import { WorkerRpcError } from "../Message.js";
+import { readWorkerAbortReason } from "../../AbortReason.js";
+import { WorkerTransportConnection } from "../../transport/Transport.js";
+import type { WorkerRpcOptions } from "../../transport/command/Model.js";
+import { WorkerRpcError } from "./Message.js";
 import type {
     WorkerRpcNotificationEnvelope,
     WorkerRpcRequestEnvelope,
     WorkerRpcResponseEnvelope,
-} from "../Message.js";
-import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "../Message.js";
+} from "./Message.js";
+import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "./Message.js";
 
 const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
 
 export interface WorkerRpcConnector {
-    attach?(channel: Channel): void;
     connect(signal?: AbortSignal): Promise<Channel>;
-    detach?(channel?: Channel): void;
 }
 
 interface PendingResponse {
@@ -52,10 +47,10 @@ type WorkerRpcResponseFrame = Record<string, JsonValue> &
 
 export interface WorkerRpcBridgeOptions {
     cancellationRetentionMs?: number;
+    connection?: WorkerTransportConnection;
     connector?: WorkerRpcConnector;
     preservePendingOnDisconnect?: boolean;
     rpcOptions: WorkerRpcOptions;
-    transport?: WorkerTransport;
 }
 
 export class WorkerRpcBridge {
@@ -78,18 +73,18 @@ export class WorkerRpcBridge {
     constructor(options: WorkerRpcBridgeOptions) {
         if (
             options.connector === undefined &&
-            options.transport === undefined
+            options.connection === undefined
         ) {
             throw new TypeError(
-                "WorkerRpcBridge requires connector or transport.",
+                "WorkerRpcBridge requires connector or transport connection.",
             );
         }
         if (
             options.connector !== undefined &&
-            options.transport !== undefined
+            options.connection !== undefined
         ) {
             throw new TypeError(
-                "WorkerRpcBridge accepts connector or transport, not both.",
+                "WorkerRpcBridge accepts connector or transport connection, not both.",
             );
         }
 
@@ -109,8 +104,8 @@ export class WorkerRpcBridge {
             options.preservePendingOnDisconnect === true;
         this.#connector =
             options.connector ??
-            new WorkerRpcTransportConnector(
-                options.transport!,
+            new WorkerRpcServiceConnector(
+                options.connection!,
                 options.rpcOptions,
             );
     }
@@ -593,23 +588,18 @@ export class WorkerRpcBridge {
     }
 }
 
-class WorkerRpcTransportConnector implements WorkerRpcConnector {
-    readonly #transport: WorkerTransport;
+class WorkerRpcServiceConnector implements WorkerRpcConnector {
+    readonly #connection: WorkerTransportConnection;
     readonly #options: WorkerRpcOptions;
 
-    constructor(transport: WorkerTransport, options: WorkerRpcOptions) {
-        this.#transport = transport;
+    constructor(connection: WorkerTransportConnection, options: WorkerRpcOptions) {
+        this.#connection = connection;
         this.#options = options;
     }
 
     async connect(signal?: AbortSignal): Promise<Channel> {
         try {
-            return await connectWorkerService(
-                this.#transport,
-                this.#options,
-                "worker.rpc",
-                signal,
-            );
+            return await this.#connection.openService("worker.rpc", signal);
         } catch (error) {
             if (signal?.aborted === true) {
                 throw signal.reason instanceof Error

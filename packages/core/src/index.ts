@@ -5,7 +5,10 @@ export {
     SqliteSchemaVersionTooNewError,
 } from "./storage/SqliteSchema.js";
 export type { WorkerCommandInteractiveSession } from "./worker/transport/command/Transport.js";
-export type { WorkerTransport } from "./worker/transport/Transport.js";
+export {
+    WorkerTransportConnection,
+    type WorkerTransport,
+} from "./worker/transport/Transport.js";
 export type {
     WorkerCommandSessionClose,
     WorkerCommandSessionCompletion,
@@ -33,8 +36,7 @@ export type {
     WorkerArtifactReceiveWriteInput,
     WorkerArtifactReceiveWriteResult,
 } from "./worker/protocol/Client.js";
-export type { WorkerRpcConnector } from "./worker/protocol/rpc/connection/Bridge.js";
-export { WorkerRpcInboundConnector } from "./worker/protocol/rpc/connection/InboundConnector.js";
+export type { WorkerRpcConnector } from "./worker/protocol/rpc/Bridge.js";
 export { WorkerTransportFactory } from "./worker/transport/Factory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/Factory.js";
 

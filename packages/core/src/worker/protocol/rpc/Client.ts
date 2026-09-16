@@ -7,7 +7,7 @@ import type {
     WorkerRpcRequestContext,
     WorkerRpcRequestEnvelope,
 } from "./Message.js";
-import { WorkerRpcBridge } from "./connection/Bridge.js";
+import { WorkerRpcBridge } from "./Bridge.js";
 
 export class WorkerRpcClient {
     readonly #bridge: WorkerRpcBridge;

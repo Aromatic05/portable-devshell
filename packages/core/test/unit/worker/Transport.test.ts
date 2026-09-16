@@ -20,14 +20,21 @@ import {
     WorkerInstallerRemote,
     WorkerTransportDriverSsh,
     WorkerBinary,
+    WorkerTransportConnection,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     getWorkerTargetByKey,
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    StreamChannel,
+    type Channel,
+} from "@portable-devshell/shared";
 import {
     FrameProtocol,
+    type FrameStream,
     PacketBuffer,
     encodePacket,
     frameResetCodes,
@@ -42,6 +49,84 @@ const workerBinaryPath = resolveTestWorkerBinary();
 
 const shellEscape = (value: string): string =>
     `'${value.replaceAll("'", `'\\''`)}'`;
+
+test("transport connection multiplexes Service streams over one physical Channel", async () => {
+    const pair = createFrameChannelPair();
+    let connects = 0;
+    const connection = new WorkerTransportConnection(async () => {
+        connects += 1;
+        return pair.controller;
+    });
+
+    const rpcOpen = acceptService(pair.worker, "worker.rpc");
+    const rpc = await connection.openService("worker.rpc");
+    const workerRpc = await rpcOpen;
+
+    const processOpen = acceptService(pair.worker, "process.exec");
+    const processService = await connection.openService("process.exec");
+    const workerProcess = await processOpen;
+
+    assert.equal(connects, 1);
+    await rpc.write(Buffer.from("rpc"));
+    assert.equal(Buffer.from((await workerRpc.read()) ?? []).toString(), "rpc");
+
+    rpc.close();
+    assert.equal(pair.controller.closed, false);
+    await processService.write(Buffer.from("process"));
+    assert.equal(
+        Buffer.from((await workerProcess.read()) ?? []).toString(),
+        "process",
+    );
+
+    connection.close();
+    assert.equal(pair.controller.closed, true);
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+    assert.equal(processService.closed, true);
+});
+
+function createFrameChannelPair(): {
+    controller: Channel;
+    worker: FrameProtocol;
+} {
+    const controllerToWorker = new PassThrough();
+    const workerToController = new PassThrough();
+    const pair: {
+        controller?: StreamChannel;
+        worker?: StreamChannel;
+        closed: boolean;
+    } = { closed: false };
+    const closePair = (error?: Error) => {
+        if (pair.closed) return;
+        pair.closed = true;
+        pair.controller?.close(error);
+        pair.worker?.close(error);
+    };
+    const controller = new StreamChannel(workerToController, controllerToWorker, {
+        closeTransport: closePair,
+    });
+    const workerChannel = new StreamChannel(
+        controllerToWorker,
+        workerToController,
+        { closeTransport: closePair },
+    );
+    pair.controller = controller;
+    pair.worker = workerChannel;
+    return {
+        controller,
+        worker: new FrameProtocol(workerChannel, { role: "acceptor" }),
+    };
+}
+
+async function acceptService(
+    protocol: FrameProtocol,
+    service: string,
+): Promise<FrameStream> {
+    const open = await protocol.nextOpen();
+    assert.notEqual(open, undefined);
+    assert.equal(open!.service, service);
+    assert.equal(open!.metadata.byteLength, 0);
+    return await open!.accept();
+}
 
 function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };

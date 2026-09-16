@@ -1,7 +1,7 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerProtocolClient } from "./Client.js";
-import type { WorkerRpcBridge } from "./rpc/connection/Bridge.js";
+import type { WorkerRpcBridge } from "./rpc/Bridge.js";
 import type { WorkerRpcNotificationEnvelope } from "./rpc/Message.js";
 
 export interface WorkerCommandSessionOpen {

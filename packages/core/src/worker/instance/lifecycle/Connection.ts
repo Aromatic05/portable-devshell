@@ -14,9 +14,10 @@ import type {
     WorkerProtocolClient,
     WorkerHandshakeResult,
 } from "../../protocol/Client.js";
-import type { WorkerRpcBridge } from "../../protocol/rpc/connection/Bridge.js";
+import type { WorkerRpcBridge } from "../../protocol/rpc/Bridge.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../../tool/Catalog.js";
+import type { WorkerTransportConnection } from "../../transport/Transport.js";
 import type { ResolvedWorkerInstanceConfig } from "../Config.js";
 import {
     getErrorCode,
@@ -39,6 +40,7 @@ interface WorkerInstanceConnectionOptions {
     protocolClient: WorkerProtocolClient;
     rpcBridge: WorkerRpcBridge;
     snapshot(): InstanceSnapshot;
+    transportConnection: WorkerTransportConnection;
 }
 
 export class WorkerInstanceConnection {
@@ -49,6 +51,7 @@ export class WorkerInstanceConnection {
     readonly #protocolClient: WorkerProtocolClient;
     readonly #rpcBridge: WorkerRpcBridge;
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
+    readonly #transportConnection: WorkerTransportConnection;
     #closed = false;
     #handshake?: WorkerHandshakeResult;
     #intentionalRpcCloseDepth = 0;
@@ -63,6 +66,7 @@ export class WorkerInstanceConnection {
         this.#protocolClient = options.protocolClient;
         this.#rpcBridge = options.rpcBridge;
         this.#snapshot = options.snapshot;
+        this.#transportConnection = options.transportConnection;
         if (this.#config.managementMode === "selfManaged") {
             this.#reverseStatus = {
                 availability: "offline",
@@ -208,11 +212,8 @@ export class WorkerInstanceConnection {
         }
 
         const connectedAt = input.connectedAt ?? new Date().toISOString();
-        this.#config.rpcConnector?.attach?.(channel);
-        const rpcChannel =
-            this.#config.rpcConnector === undefined
-                ? channel
-                : await this.#config.rpcConnector.connect();
+        this.#transportConnection.attach(channel);
+        const rpcChannel = await this.#transportConnection.openService("worker.rpc");
         await this.#rpcBridge.replaceChannel(rpcChannel);
         this.#reverseStatus = {
             availability: "online",
@@ -523,7 +524,7 @@ export class WorkerInstanceConnection {
 
         try {
             this.#rpcBridge.close();
-            this.#config.rpcConnector?.detach?.();
+            this.#transportConnection.close();
         } finally {
             this.#intentionalRpcCloseDepth -= 1;
         }

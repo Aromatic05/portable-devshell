@@ -50,7 +50,7 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel: async (): Promise<InstanceSnapshot> => ({
                 connectionState: "connected",
@@ -116,7 +116,7 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel: async (
                 channel: Channel,
@@ -400,7 +400,7 @@ function reverseDescriptor(
     return {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel,
             setReverseEnrollmentState: async (): Promise<InstanceSnapshot> =>

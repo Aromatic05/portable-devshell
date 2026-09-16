@@ -5,7 +5,7 @@ import test from "node:test";
 
 import {
     WorkerInstanceFactory,
-    WorkerRpcInboundConnector,
+    WorkerTransportConnection,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
 } from "@portable-devshell/core/testing";
@@ -34,12 +34,12 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("WSS reverse connection authenticates, handshakes, and a higher generation replaces the old channel", async () => {
     const home = await createTestTempDirectory("devshell-reverse-gateway");
-    const connector = new WorkerRpcInboundConnector();
+    const connection = new WorkerTransportConnection();
     const worker = new WorkerInstanceFactory().create({
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
-        rpcConnector: connector,
+        transportConnection: connection,
     });
     const todo = new TodoService({
         appendEvent: async () => undefined,
@@ -59,7 +59,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
-            reverseConnector: connector,
+            reverseConnection: connection,
             conversation: {
                 close() {},
                 async list() {
@@ -181,12 +181,12 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
 
 test("SSE plus POST fallback completes RPC handshake and deduplicates repeated upstream frames", async () => {
     const home = await createTestTempDirectory("devshell-reverse-sse");
-    const connector = new WorkerRpcInboundConnector();
+    const connection = new WorkerTransportConnection();
     const worker = new WorkerInstanceFactory().create({
         homeDirectory: home,
         managementMode: "selfManaged",
         name: asInstanceName("reverse-test"),
-        rpcConnector: connector,
+        transportConnection: connection,
     });
     const registry = new InstanceRegistry([
         {
@@ -196,7 +196,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             modelExtensions: ["instance"],
             name: "reverse-test",
             provider: "reverse",
-            reverseConnector: connector,
+            reverseConnection: connection,
             conversation: {
                 close() {},
                 async list() {

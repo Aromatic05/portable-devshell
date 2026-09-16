@@ -260,7 +260,7 @@ export class ReverseConnectionService {
         }
         if (
             descriptor.provider !== "reverse" ||
-            descriptor.reverseConnector === undefined
+            descriptor.reverseConnection === undefined
         ) {
             throw createError({
                 code: errorCodes.reverseInstanceNotReverse,

@@ -12,12 +12,13 @@ import { LogStoreInstance } from "../../storage/log/Store.js";
 import { AuditToolCallHistory } from "../../storage/audit/ToolCallHistory.js";
 import { WorkerCommandClient } from "../transport/command/Client.js";
 import { WorkerProtocolClient } from "../protocol/Client.js";
-import { WorkerRpcBridge } from "../protocol/rpc/connection/Bridge.js";
+import { WorkerRpcBridge } from "../protocol/rpc/Bridge.js";
 import { WorkerRpcClient } from "../protocol/rpc/Client.js";
 import { WorkerToolCatalog } from "../tool/Catalog.js";
 import { WorkerToolInvoker } from "../tool/Invoker.js";
 import { WorkerToolCallScheduler } from "../tool/Scheduler.js";
 import { WorkerTerminalClient } from "../protocol/Terminal.js";
+import { WorkerTransportConnection } from "../transport/Transport.js";
 import { InstancePaths } from "../../instance/Paths.js";
 import { InstanceStateMachine } from "../../instance/state/Machine.js";
 import { WorkerInstance } from "./Instance.js";
@@ -39,7 +40,8 @@ export class WorkerInstanceFactory {
         const resolved = resolveWorkerInstanceConfig(config);
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
         const catalog = new WorkerToolCatalog();
-        const rpcBridge = this.#createRpcBridge(resolved);
+        const transportConnection = this.#createTransportConnection(resolved);
+        const rpcBridge = this.#createRpcBridge(resolved, transportConnection);
         const rpcClient = new WorkerRpcClient(rpcBridge);
         const auditDatabase = new AuditDatabase(
             paths.auditDatabaseFile,
@@ -99,6 +101,7 @@ export class WorkerInstanceFactory {
                 toolCallStore,
             ),
             terminalClient: new WorkerTerminalClient(rpcClient, rpcBridge),
+            transportConnection,
             toolCallScheduler: new WorkerToolCallScheduler(
                 resolved.toolScheduler,
             ),
@@ -106,22 +109,31 @@ export class WorkerInstanceFactory {
         });
     }
 
-    #createRpcBridge(config: ResolvedWorkerInstanceConfig): WorkerRpcBridge {
+    #createTransportConnection(
+        config: ResolvedWorkerInstanceConfig,
+    ): WorkerTransportConnection {
+        if (config.managementMode === "selfManaged") {
+            return config.transportConnection!;
+        }
+        return WorkerTransportConnection.fromTransport(config.transport!, {
+            env: config.env,
+            instanceName: config.name,
+        });
+    }
+
+    #createRpcBridge(
+        config: ResolvedWorkerInstanceConfig,
+        connection: WorkerTransportConnection,
+    ): WorkerRpcBridge {
         const rpcOptions = {
             env: config.env,
             instanceName: config.name,
         };
 
-        if (config.managementMode === "selfManaged") {
-            return new WorkerRpcBridge({
-                connector: config.rpcConnector,
-                preservePendingOnDisconnect: true,
-                rpcOptions,
-            });
-        }
-
         return new WorkerRpcBridge({
-            transport: config.transport,
+            connection,
+            preservePendingOnDisconnect:
+                config.managementMode === "selfManaged",
             rpcOptions,
         });
     }

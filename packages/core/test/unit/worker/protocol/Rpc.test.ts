@@ -23,6 +23,7 @@ import {
     WorkerRpcBridge,
     WorkerRpcClient,
     WorkerRpcError,
+    WorkerTransportConnection,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     workerRpcDisconnectedErrorCode,
@@ -39,11 +40,20 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
+function createTransportRpcBridge(
+    transport: WorkerTransport,
+    rpcOptions: Parameters<typeof WorkerTransportConnection.fromTransport>[1],
+): WorkerRpcBridge {
+    return new WorkerRpcBridge({
+        connection: WorkerTransportConnection.fromTransport(transport, rpcOptions),
+        rpcOptions,
+    });
+}
+
 test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple calls", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "task-4-bridge" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "task-4-bridge",
     });
     const rpcClient = new WorkerRpcClient(bridge);
     const protocolClient = new WorkerProtocolClient(rpcClient);
@@ -72,9 +82,8 @@ test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple cal
 
 test("WorkerProtocolClient routes artifact payload and receive lifecycle through internal RPC methods", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "artifact-rpc" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "artifact-rpc",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 
@@ -131,9 +140,8 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
 
 test("WorkerProtocolClient prepares private Extension resource collections through internal RPC", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "resource-rpc" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "resource-rpc",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 
@@ -153,9 +161,8 @@ test("WorkerProtocolClient prepares private Extension resource collections throu
 
 test("WorkerRpcClient keeps context identity while assigning each call a distinct operation id", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "session-context" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "session-context",
     });
     const client = new WorkerRpcClient(bridge);
 
@@ -210,9 +217,8 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
 
 test("WorkerRpcClient routes only increasing progress for the matching operation id", async () => {
     const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "rpc-progress" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "rpc-progress",
     });
     const client = new WorkerRpcClient(bridge);
     const progress: JsonValue[] = [];
@@ -259,9 +265,8 @@ test("WorkerRpcClient routes only increasing progress for the matching operation
 
 test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
     const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "rpc-cancel" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "rpc-cancel",
     });
     const client = new WorkerRpcClient(bridge);
     const controller = new AbortController();
@@ -301,9 +306,8 @@ test("WorkerProtocolClient propagates artifact abort as tool.call.cancel", async
     const harness = createRpcHarness({
         slowMethods: new Set(["artifact.payload.open"]),
     });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "artifact-rpc-cancel" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "artifact-rpc-cancel",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
     const controller = new AbortController();
@@ -348,9 +352,8 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
     const harness = createRpcHarness({
         slowMethods: new Set(["tools.list"]),
     });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "task-4-disconnect" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "task-4-disconnect",
     });
     const disconnects: string[] = [];
     bridge.onDisconnect((error) => {
@@ -373,8 +376,8 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
 });
 
 test("WorkerRpcBridge surfaces transport connection failures with the compatible rpc error code", async () => {
-    const bridge = new WorkerRpcBridge({
-        transport: {
+    const bridge = createTransportRpcBridge(
+        {
             async connectWorkerChannel() {
                 throw new Error("connect denied");
             },
@@ -383,8 +386,8 @@ test("WorkerRpcBridge surfaces transport connection failures with the compatible
                 throw new Error("unused");
             },
         },
-        rpcOptions: { instanceName: "task-4-connect" },
-    });
+        { instanceName: "task-4-connect" },
+    );
 
     await assert.rejects(bridge.connect(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
@@ -424,13 +427,18 @@ test(
 
         assert.equal(commandResult.exitCode, 0);
 
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
 
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
@@ -484,12 +492,17 @@ test(
                 .exitCode,
             0,
         );
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
@@ -573,12 +586,17 @@ test(
                 .exitCode,
             0,
         );
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });

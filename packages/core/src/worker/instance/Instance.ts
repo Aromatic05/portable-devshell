@@ -23,6 +23,7 @@ import type { LogQuery } from "../../storage/log/Query.js";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 import type { WorkerCommandClient } from "../transport/command/Client.js";
 import type { WorkerCommandInteractiveSession } from "../transport/command/Transport.js";
+import type { WorkerTransportConnection } from "../transport/Transport.js";
 import {
     WorkerCommandSessionBridge,
     type WorkerCommandSessionClose,
@@ -49,7 +50,7 @@ import type {
     WorkerHandshakeResult,
     WorkerProtocolClient,
 } from "../protocol/Client.js";
-import type { WorkerRpcBridge } from "../protocol/rpc/connection/Bridge.js";
+import type { WorkerRpcBridge } from "../protocol/rpc/Bridge.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../tool/Catalog.js";
 import type { WorkerToolInvoker } from "../tool/Invoker.js";
@@ -89,6 +90,7 @@ interface WorkerInstanceDependencies {
     rpcBridge: WorkerRpcBridge;
     stateMachine: InstanceStateMachine;
     terminalClient: WorkerTerminalClient;
+    transportConnection: WorkerTransportConnection;
     toolCallAssociationProvider?: (
         context: ToolCallContext,
     ) => ToolCallAssociation | undefined;
@@ -139,6 +141,7 @@ export class WorkerInstance {
             protocolClient: dependencies.protocolClient,
             rpcBridge: dependencies.rpcBridge,
             snapshot: () => this.snapshot(),
+            transportConnection: dependencies.transportConnection,
         });
         this.#commandSessions = new WorkerCommandSessionBridge(
             dependencies.rpcBridge,

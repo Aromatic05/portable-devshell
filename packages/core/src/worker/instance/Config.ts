@@ -6,12 +6,14 @@ import type {
     InstanceName,
 } from "@portable-devshell/shared";
 
-import type { WorkerTransport } from "../transport/Transport.js";
+import type {
+    WorkerTransport,
+    WorkerTransportConnection,
+} from "../transport/Transport.js";
 import {
     WORKER_PROTOCOL_VERSION,
     type WorkerHandshakeParams,
 } from "../protocol/Client.js";
-import type { WorkerRpcConnector } from "../protocol/rpc/connection/Bridge.js";
 import {
     resolveWorkerToolSchedulerLimits,
     type WorkerToolSchedulerLimits,
@@ -40,12 +42,12 @@ interface WorkerInstanceConfigCommon {
 export type WorkerInstanceConfig =
     | (WorkerInstanceConfigCommon & {
           managementMode?: "controllerManaged";
-          rpcConnector?: never;
+          transportConnection?: never;
           transport: WorkerTransport;
       })
     | (WorkerInstanceConfigCommon & {
           managementMode: "selfManaged";
-          rpcConnector: WorkerRpcConnector;
+          transportConnection: WorkerTransportConnection;
           transport?: never;
       });
 
@@ -55,7 +57,7 @@ export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon
     eventBufferSize: number;
     handshake: WorkerHandshakeParams;
     managementMode: WorkerManagementMode;
-    rpcConnector?: WorkerRpcConnector;
+    transportConnection?: WorkerTransportConnection;
     toolScheduler: WorkerToolSchedulerLimits;
     transport?: WorkerTransport;
 }
@@ -73,9 +75,12 @@ export function resolveWorkerInstanceConfig(
             "controller-managed worker requires a command transport",
         );
     }
-    if (managementMode === "selfManaged" && config.rpcConnector === undefined) {
+    if (
+        managementMode === "selfManaged" &&
+        config.transportConnection === undefined
+    ) {
         throw new TypeError(
-            "self-managed worker requires an inbound RPC connector",
+            "self-managed worker requires an inbound transport connection",
         );
     }
 
