@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
 import test from "node:test";
 
-import { ReverseRpcSseChannel } from "../../../src/control/reverse/connection/SseChannel.ts";
+import { ReverseSseChannel } from "../../../src/control/reverse/connection/SseChannel.ts";
 
 class FakeServerResponse extends EventEmitter {
     writableEnded = false;
@@ -26,7 +26,7 @@ class FakeServerResponse extends EventEmitter {
 
 test("reverse SSE commits upstream sequence only after ordered raw payload delivery", () => {
     const response = new FakeServerResponse();
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
     );
     const values: string[] = [];
@@ -47,7 +47,7 @@ test("reverse SSE commits upstream sequence only after ordered raw payload deliv
 test("reverse SSE write failures close the channel", async () => {
     const response = new FakeServerResponse();
     response.writeError = new Error("SSE write failed");
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
     );
     const closed = new Promise<Error | undefined>((resolve) =>
@@ -68,7 +68,7 @@ test("reverse SSE write failures close the channel", async () => {
 test("reverse SSE heartbeat write failures close the channel", async () => {
     const response = new FakeServerResponse();
     response.writeError = new Error("heartbeat write failed");
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
         0,
         {
@@ -86,7 +86,7 @@ test("reverse SSE heartbeat write failures close the channel", async () => {
 test("reverse SSE close reports response.end failures", async () => {
     const response = new FakeServerResponse();
     response.endError = new Error("SSE end failed");
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
     );
     const closed = new Promise<Error | undefined>((resolve) =>
@@ -101,7 +101,7 @@ test("reverse SSE close reports response.end failures", async () => {
 test("reverse SSE removes temporary drain listeners after backpressure clears", async () => {
     const response = new FakeServerResponse();
     response.writeResult = false;
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
     );
 
@@ -119,7 +119,7 @@ test("reverse SSE removes temporary drain listeners after backpressure clears", 
 test("reverse SSE rejects a backpressured send when the response closes", async () => {
     const response = new FakeServerResponse();
     response.writeResult = false;
-    const channel = new ReverseRpcSseChannel(
+    const channel = new ReverseSseChannel(
         response as unknown as ServerResponse,
     );
 

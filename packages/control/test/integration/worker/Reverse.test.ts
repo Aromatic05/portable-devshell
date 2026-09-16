@@ -5,7 +5,7 @@ import {
     spawnSync,
     type ChildProcessWithoutNullStreams,
 } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -61,11 +61,18 @@ test(
         );
         const workspaceMarkerName = "reverse-real-workspace-marker.txt";
         const workspaceMarker = "portable-devshell-reverse-workspace";
+        const artifactSourceName = "reverse-artifact-source.bin";
+        const artifactTargetName = "reverse-artifact-copy.bin";
+        const artifactSource = Buffer.alloc(700 * 1024);
+        for (let index = 0; index < artifactSource.length; index += 1) {
+            artifactSource[index] = index % 251;
+        }
         await writeFile(
             join(workspace, workspaceMarkerName),
             workspaceMarker,
             "utf8",
         );
+        await writeFile(join(workspace, artifactSourceName), artifactSource);
         const proxy = await startLoopbackHttpProxy();
         const publicBaseUrl = proxy.origin;
         const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
@@ -203,6 +210,43 @@ test(
         );
         assert.equal(result.exitCode, 0);
         assert.match(result.stdout, new RegExp(workspaceMarker, "u"));
+
+        const transfer = await request(
+            server.socketPath,
+            "artifact.startTransfer",
+            "@control",
+            {
+                instance: "reverse-test",
+                sourcePath: `./${artifactSourceName}`,
+                sourceWorkspace: workspace,
+                targetInstance: "reverse-test",
+                targetPath: `./${artifactTargetName}`,
+                targetWorkspace: workspace,
+            },
+        );
+        const transferId = transfer.transfer.transferId as string;
+        await waitUntil(
+            async () => {
+                const status = await request(
+                    server.socketPath,
+                    "artifact.getTransfer",
+                    "@control",
+                    { transferId },
+                );
+                if (status.status === "failed") {
+                    throw new Error(
+                        `reverse artifact transfer failed: ${JSON.stringify(status.failure)}`,
+                    );
+                }
+                return status.status === "completed";
+            },
+            () =>
+                `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
+        );
+        assert.deepEqual(
+            await readFile(join(workspace, artifactTargetName)),
+            artifactSource,
+        );
 
         const terminalClient = createClient(server.socketPath);
         t.after(() => terminalClient.close());

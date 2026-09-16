@@ -18,7 +18,7 @@ import {
 } from "./Service.js";
 import { ReverseCredentialStore } from "../credential/Store.js";
 import type { ReverseInstanceLookupPort } from "../Port.js";
-import { ReverseRpcSseChannel } from "./SseChannel.js";
+import { ReverseSseChannel } from "./SseChannel.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";
@@ -148,7 +148,7 @@ export class ReverseConnectionGateway {
                 "X-Accel-Buffering": "no",
             });
             response.flushHeaders();
-            const channel = new ReverseRpcSseChannel(
+            const channel = new ReverseSseChannel(
                 response,
                 readLastEventId(request),
             );

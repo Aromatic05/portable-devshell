@@ -120,7 +120,7 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
             instance.clone(),
             instance_paths.clone(),
             reverse,
-            "worker.rpc".to_string(),
+            socket_paths.transport_socket_file.clone(),
             payload,
         )
         .spawn()

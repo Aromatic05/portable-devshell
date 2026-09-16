@@ -12,7 +12,7 @@ import type {
     ReverseInstanceLookupPort,
     ReverseInstancePort,
 } from "../Port.js";
-import { ReverseRpcSseChannel } from "./SseChannel.js";
+import { ReverseSseChannel } from "./SseChannel.js";
 
 interface ActiveReverseConnection {
     channel: Channel;
@@ -196,7 +196,7 @@ export class ReverseConnectionService {
             active === undefined ||
             active.transport !== "sse" ||
             active.generation !== identity.generation ||
-            !(active.channel instanceof ReverseRpcSseChannel)
+            !(active.channel instanceof ReverseSseChannel)
         ) {
             throw createError({
                 code: errorCodes.reverseConnectionSuperseded,

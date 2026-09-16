@@ -4,12 +4,12 @@ import { ChannelBase } from "@portable-devshell/shared";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
-export interface ReverseRpcSseChannelOptions {
+export interface ReverseSseChannelOptions {
     heartbeatIntervalMs?: number;
     now?: () => number;
 }
 
-export class ReverseRpcSseChannel extends ChannelBase {
+export class ReverseSseChannel extends ChannelBase {
     readonly #response: ServerResponse;
     readonly #heartbeat: NodeJS.Timeout;
     readonly #now: () => number;
@@ -19,7 +19,7 @@ export class ReverseRpcSseChannel extends ChannelBase {
     constructor(
         response: ServerResponse,
         lastDownstreamAck = 0,
-        options: ReverseRpcSseChannelOptions = {},
+        options: ReverseSseChannelOptions = {},
     ) {
         super();
         this.#response = response;
