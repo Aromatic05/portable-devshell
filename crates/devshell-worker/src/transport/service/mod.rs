@@ -72,14 +72,11 @@ enum ServiceConnection {
 }
 
 impl ServiceConnection {
-    fn supports(service: &str) -> bool {
-        matches!(
-            service,
-            "artifact.payload" | "artifact.receive" | "network.tcp" | "process.exec" | "worker.rpc"
-        )
-    }
-
-    fn open(service: &str, metadata: &[u8], context: &ServiceContext) -> Result<Self, String> {
+    fn open(
+        service: &str,
+        metadata: &[u8],
+        context: &ServiceContext,
+    ) -> Result<Option<Self>, String> {
         match service {
             "artifact.payload" => PayloadService::open(
                 metadata,
@@ -90,7 +87,8 @@ impl ServiceConnection {
                         .ok_or_else(|| "artifact.payload is unavailable.".to_string())?,
                 ),
             )
-            .map(Self::ArtifactPayload),
+            .map(Self::ArtifactPayload)
+            .map(Some),
             "artifact.receive" => ReceiveService::open(
                 metadata,
                 Arc::clone(
@@ -100,13 +98,14 @@ impl ServiceConnection {
                         .ok_or_else(|| "artifact.receive is unavailable.".to_string())?,
                 ),
             )
-            .map(Self::ArtifactReceive),
-            "network.tcp" => TcpService::open(metadata).map(Self::Tcp),
-            "process.exec" => ExecService::open(metadata).map(Self::Exec),
-            "worker.rpc" => {
-                RpcService::open(metadata, context.rpc_socket.as_deref()).map(Self::Rpc)
-            }
-            _ => Err(format!("unsupported transport Service {service}")),
+            .map(Self::ArtifactReceive)
+            .map(Some),
+            "network.tcp" => TcpService::open(metadata).map(Self::Tcp).map(Some),
+            "process.exec" => ExecService::open(metadata).map(Self::Exec).map(Some),
+            "worker.rpc" => RpcService::open(metadata, context.rpc_socket.as_deref())
+                .map(Self::Rpc)
+                .map(Some),
+            _ => Ok(None),
         }
     }
 
@@ -327,15 +326,17 @@ impl ActiveService {
         metadata: &[u8],
         context: &ServiceContext,
         events: SyncSender<ServerEvent>,
-    ) -> Result<Self, String> {
-        let mut connection = ServiceConnection::open(service, metadata, context)?;
+    ) -> Result<Option<Self>, String> {
+        let Some(mut connection) = ServiceConnection::open(service, metadata, context)? else {
+            return Ok(None);
+        };
         let input = connection.take_input()?;
         let output = connection.take_output()?;
         let (input_tx, input_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
         let (output_ack_tx, output_ack_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
         spawn_service_input(stream_id, input, input_rx, events.clone());
         spawn_service_output(stream_id, output, output_ack_rx, events);
-        Ok(Self {
+        Ok(Some(Self {
             connection,
             input: input_tx,
             output_ack: output_ack_tx,
@@ -346,7 +347,7 @@ impl ActiveService {
             output_eof: false,
             local_fin_sent: false,
             pending_output: None,
-        })
+        }))
     }
 
     fn reset(&mut self) {
@@ -616,28 +617,25 @@ fn accept_frame<W: Write>(
             stream_id,
             service,
             metadata,
-        }) => {
-            if !ServiceConnection::supports(&service) {
+        }) => match ActiveService::open(stream_id, &service, &metadata, context, events.clone()) {
+            Ok(Some(active)) => {
+                services.insert(stream_id, active);
+                let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
+                write_frame(output, &window)?;
+            }
+            Ok(None) => {
                 let reset = protocol.reject_open(
                     stream_id,
                     RESET_UNSUPPORTED_SERVICE,
                     format!("Unsupported transport Service {service}."),
                 )?;
                 write_frame(output, &reset)?;
-                return Ok(());
             }
-            match ActiveService::open(stream_id, &service, &metadata, context, events.clone()) {
-                Ok(active) => {
-                    services.insert(stream_id, active);
-                    let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
-                    write_frame(output, &window)?;
-                }
-                Err(error) => {
-                    let reset = protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
-                    write_frame(output, &reset)?;
-                }
+            Err(error) => {
+                let reset = protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
+                write_frame(output, &reset)?;
             }
-        }
+        },
         Some(FrameEvent::Data { stream_id }) => {
             dispatch_input(protocol, services, stream_id)?;
         }
@@ -1030,7 +1028,8 @@ mod tests {
         };
         let mut connection =
             ServiceConnection::open(&service, &metadata, &ServiceContext::default())
-                .expect("spawn rsync");
+                .expect("spawn rsync")
+                .expect("process.exec is supported");
         let mut service_output = connection.take_output().expect("attach rsync output");
         let window = worker
             .accept_open(opened_id, 64 * 1024)
@@ -1071,7 +1070,11 @@ mod tests {
     #[test]
     fn service_dispatch_rejects_unknown_names_and_metadata() {
         let context = ServiceContext::default();
-        assert!(ServiceConnection::open("unknown", b"{}", &context).is_err());
+        assert!(
+            ServiceConnection::open("unknown", b"{}", &context)
+                .unwrap()
+                .is_none()
+        );
         assert!(
             ServiceConnection::open("network.tcp", br#"{"host":"127.0.0.1"}"#, &context).is_err()
         );
@@ -1109,7 +1112,8 @@ mod tests {
             } => (stream_id, service, metadata),
             _ => return Err("Expected OPEN event.".to_string()),
         };
-        let mut connection = ServiceConnection::open(&service, &metadata, context)?;
+        let mut connection = ServiceConnection::open(&service, &metadata, context)?
+            .ok_or_else(|| format!("Unsupported transport Service {service}."))?;
         let mut service_input = connection.take_input()?;
         let mut service_output = connection.take_output()?;
         let window = worker.accept_open(opened_id, 64 * 1024)?;
