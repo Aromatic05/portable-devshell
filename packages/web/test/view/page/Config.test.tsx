@@ -19,7 +19,15 @@ describe("Web Config", () => {
             updateInstanceConfig: vi.fn(async () => true),
             validateConfig: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Config disabled={false} state={state} store={store} />);
+        render(
+            <Config
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ instance: "alpha", page: "config" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         fireEvent.change(
             screen.getByRole("spinbutton", { name: "Log retention days" }),
@@ -55,7 +63,15 @@ describe("Web Config", () => {
             updateInstanceConfig: vi.fn(async () => true),
             validateConfig: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Config disabled={false} state={state} store={store} />);
+        render(
+            <Config
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ instance: "alpha", page: "config" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Workspace enabled" }),
@@ -85,7 +101,15 @@ describe("Web Config", () => {
             updateInstanceConfig: vi.fn(async () => true),
             validateConfig: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Config disabled={false} state={state} store={store} />);
+        render(
+            <Config
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ instance: "alpha", page: "config" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         expect(
             (

@@ -30,7 +30,15 @@ describe("Web Connections", () => {
             rotateReverseToken: vi.fn(async () => true),
             revokeReverseToken: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Connections disabled={false} state={state} store={store} />);
+        render(
+            <Connections
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ instance: "reverse-one", page: "connections" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         const mcpCard = screen.getByRole("heading", {
             name: "[Global] MCP listener",
@@ -68,7 +76,15 @@ describe("Web Connections", () => {
             rotateReverseToken: vi.fn(async () => true),
             revokeReverseToken: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Connections disabled={false} state={state} store={store} />);
+        render(
+            <Connections
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ instance: "reverse-one", page: "connections" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
@@ -111,7 +127,15 @@ describe("Web Connections", () => {
             validateConfig: vi.fn(async () => true),
             restartControl: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(<Connections disabled={false} state={state} store={store} />);
+        render(
+            <Connections
+                disabled={false}
+                navigate={vi.fn()}
+                route={{ page: "connections" }}
+                state={state}
+                store={store}
+            />,
+        );
 
         expect(
             screen.getByRole("heading", { name: "[Global] MCP listener" }),

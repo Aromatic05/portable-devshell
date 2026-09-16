@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
     ArtifactShareResult,
@@ -14,18 +14,23 @@ import {
 
 import { ConfirmationDialog } from "../component/Confirm.js";
 import type { WebStore } from "../../state/Store.js";
+import { webRouteHref, type WebRoute } from "../../app/Route.js";
 import { InstanceCreate } from "./InstancesCreate.js";
 
 export function Instances({
     disabled = false,
+    navigate,
+    route,
     store,
 }: {
     disabled?: boolean;
+    navigate(route: WebRoute): void;
+    route: Extract<WebRoute, { page: "instances" }>;
     store: WebStore;
 }) {
     const state = store.state;
     const model = state.readModel;
-    const [selected, setSelected] = useState<string>();
+    const selected = route.instance;
     const [confirmation, setConfirmation] = useState<{
         action: "Delete" | "Disable" | "Restart" | "Stop";
         instance: string;
@@ -72,6 +77,41 @@ export function Instances({
                   model.artifactTransfers,
               );
 
+    useEffect(() => {
+        if (
+            selected === undefined ||
+            !store.state.readModel.instances.some(
+                (item) => item.name === selected,
+            )
+        )
+            return;
+        const generation = ++refreshGeneration.current;
+        selectedRef.current = selected;
+        setDetailFailure(undefined);
+        setLifecycleFailure(undefined);
+        setRefreshingInstance(selected);
+        void store
+            .refreshInstance(selected)
+            .catch((error: unknown) => {
+                if (
+                    refreshGeneration.current === generation &&
+                    selectedRef.current === selected
+                ) {
+                    setDetailFailure(
+                        error instanceof Error
+                            ? error.message
+                            : "Instance details could not be refreshed.",
+                    );
+                }
+            })
+            .finally(() => {
+                if (refreshGeneration.current === generation)
+                    setRefreshingInstance((current) =>
+                        current === selected ? undefined : current,
+                    );
+            });
+    }, [selected, store]);
+
     return (
         <section className="instances-view">
             <div className="instances-heading">
@@ -82,7 +122,7 @@ export function Instances({
                     onClick={() => {
                         refreshGeneration.current += 1;
                         selectedRef.current = undefined;
-                        setSelected(undefined);
+                        navigate({ page: "instances" });
                         setCreating(true);
                         setCreateNotice(undefined);
                     }}
@@ -122,43 +162,10 @@ export function Instances({
                                     className={`instance card${selected === item.name ? " selected" : ""}`}
                                     key={item.name}
                                     onClick={() => {
-                                        const generation =
-                                            ++refreshGeneration.current;
-                                        selectedRef.current = item.name;
-                                        setSelected(item.name);
-                                        setDetailFailure(undefined);
-                                        setLifecycleFailure(undefined);
-                                        setRefreshingInstance(item.name);
-                                        void store
-                                            .refreshInstance(item.name)
-                                            .catch((error: unknown) => {
-                                                if (
-                                                    refreshGeneration.current ===
-                                                        generation &&
-                                                    selectedRef.current ===
-                                                        item.name
-                                                ) {
-                                                    setDetailFailure(
-                                                        error instanceof Error
-                                                            ? error.message
-                                                            : "Instance details could not be refreshed.",
-                                                    );
-                                                }
-                                            })
-                                            .finally(() => {
-                                                if (
-                                                    refreshGeneration.current ===
-                                                    generation
-                                                ) {
-                                                    setRefreshingInstance(
-                                                        (current) =>
-                                                            current ===
-                                                            item.name
-                                                                ? undefined
-                                                                : current,
-                                                    );
-                                                }
-                                            });
+                                        navigate({
+                                            page: "instances",
+                                            instance: item.name,
+                                        });
                                     }}
                                 >
                                     <strong>{item.name}</strong>
@@ -185,7 +192,7 @@ export function Instances({
                                 onClick={() => {
                                     refreshGeneration.current += 1;
                                     selectedRef.current = undefined;
-                                    setSelected(undefined);
+                                    navigate({ page: "instances" });
                                     setDetailFailure(undefined);
                                     setLifecycleFailure(undefined);
                                 }}
@@ -193,6 +200,24 @@ export function Instances({
                                 Back to instances
                             </button>
                             <h3>{entry.name}</h3>
+                            <div className="actions">
+                                <a
+                                    href={webRouteHref({
+                                        instance: entry.name,
+                                        page: "config",
+                                    })}
+                                >
+                                    Config
+                                </a>
+                                <a
+                                    href={webRouteHref({
+                                        instance: entry.name,
+                                        page: "connections",
+                                    })}
+                                >
+                                    Connections
+                                </a>
+                            </div>
                             {refreshingInstance === entry.name ? (
                                 <p className="hint" role="status">
                                     Refreshing instance details…
@@ -485,7 +510,7 @@ export function Instances({
                                 if (confirmation.action === "Delete") {
                                     refreshGeneration.current += 1;
                                     selectedRef.current = undefined;
-                                    setSelected(undefined);
+                                    navigate({ page: "instances" });
                                 }
                                 setConfirmation(undefined);
                             } else {

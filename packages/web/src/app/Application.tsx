@@ -115,11 +115,18 @@ export function Application({
                 </div>
                 {route.page === "overview" ? <Overview state={state} /> : null}
                 {route.page === "instances" ? (
-                    <Instances disabled={interactionDisabled} store={store} />
+                    <Instances
+                        disabled={interactionDisabled}
+                        navigate={navigate}
+                        route={route}
+                        store={store}
+                    />
                 ) : null}
                 {route.page === "config" ? (
                     <Config
                         disabled={interactionDisabled}
+                        navigate={navigate}
+                        route={route}
                         state={state}
                         store={store}
                     />
@@ -127,6 +134,8 @@ export function Application({
                 {route.page === "connections" ? (
                     <Connections
                         disabled={interactionDisabled}
+                        navigate={navigate}
+                        route={route}
                         state={state}
                         store={store}
                     />

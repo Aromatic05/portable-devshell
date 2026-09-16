@@ -723,8 +723,11 @@ function RouteProbe() {
 }
 
 describe("hash routing", () => {
-    it("round-trips Messages and Audit hierarchy through bookmarkable URLs", () => {
+    it("round-trips instance selections, Messages, and Audit hierarchy through bookmarkable URLs", () => {
         const routes: WebRoute[] = [
+            { page: "instances", instance: "dev/main" },
+            { page: "config", instance: "dev/main" },
+            { page: "connections", instance: "dev/main" },
             { page: "messages", view: "contexts" },
             {
                 page: "messages",

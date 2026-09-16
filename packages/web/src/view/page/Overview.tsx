@@ -121,7 +121,14 @@ export function Overview({ state }: { state: WebState }) {
                         <ul className="summary-list">
                             {overview.instances.slice(0, 6).map((instance) => (
                                 <li key={instance.name}>
-                                    <strong>{instance.name}</strong>{" "}
+                                    <a
+                                        href={webRouteHref({
+                                            instance: instance.name,
+                                            page: "instances",
+                                        })}
+                                    >
+                                        <strong>{instance.name}</strong>
+                                    </a>{" "}
                                     {instance.snapshot.status} ·{" "}
                                     {instance.snapshot.connectionState} ·{" "}
                                     {instance.pendingApprovals} pending

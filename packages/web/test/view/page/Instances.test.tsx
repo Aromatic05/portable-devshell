@@ -160,9 +160,24 @@ function localStore(status: "ready" | "stopped"): WebStore {
     } as unknown as WebStore;
 }
 
+function renderInstances(store: WebStore, instance?: string) {
+    const navigate = vi.fn();
+    const view = render(
+        <Instances
+            navigate={navigate}
+            route={
+                instance === undefined
+                    ? { page: "instances" }
+                    : { instance, page: "instances" }
+            }
+            store={store}
+        />,
+    );
+    return { ...view, navigate };
+}
+
 it("does not offer Start or Stop for an offline self-managed reverse instance", () => {
-    render(<Instances store={reverseStore("offline")} />);
-    fireEvent.click(screen.getByRole("button", { name: /reverse-mac/u }));
+    renderInstances(reverseStore("offline"), "reverse-mac");
 
     expect(
         screen.queryByRole("button", { name: "Start" }),
@@ -174,8 +189,7 @@ it("does not offer Start or Stop for an offline self-managed reverse instance", 
 });
 
 it("does not offer Control lifecycle actions for an online self-managed reverse instance", () => {
-    render(<Instances store={reverseStore("online")} />);
-    fireEvent.click(screen.getByRole("button", { name: /reverse-mac/u }));
+    renderInstances(reverseStore("online"), "reverse-mac");
 
     expect(
         screen.queryByRole("button", { name: "Stop" }),
@@ -190,11 +204,18 @@ it("does not offer Control lifecycle actions for an online self-managed reverse 
 
 it("starts a stopped local instance directly and marks the selected card", () => {
     const store = localStore("stopped");
-    render(<Instances store={store} />);
+    renderInstances(store, "local-one");
     const card = screen.getByRole("button", { name: /local-one/u });
-    fireEvent.click(card);
 
     expect(card).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Config" })).toHaveAttribute(
+        "href",
+        "#/config/local-one",
+    );
+    expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute(
+        "href",
+        "#/connections/local-one",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(store.start).toHaveBeenCalledWith("local-one");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -202,7 +223,7 @@ it("starts a stopped local instance directly and marks the selected card", () =>
 
 it("creates an instance through schema defaults and server validation", async () => {
     const store = localStore("ready");
-    render(<Instances store={store} />);
+    renderInstances(store);
 
     fireEvent.click(screen.getByRole("button", { name: "New instance" }));
     const name = await screen.findByRole("textbox", { name: "Name" });
@@ -235,8 +256,7 @@ it("creates an instance through schema defaults and server validation", async ()
 
 it("keeps confirmation for stopping a running local instance", () => {
     const store = localStore("ready");
-    render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
     expect(store.stop).not.toHaveBeenCalled();
@@ -248,8 +268,7 @@ it("keeps confirmation for stopping a running local instance", () => {
 
 it("offers restart, disable, delete, and refresh actions for a managed instance", async () => {
     const store = localStore("ready");
-    render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>
@@ -283,8 +302,7 @@ it("offers restart, disable, delete, and refresh actions for a managed instance"
 
 it("shows per-instance artifact activity and confirms revoke and cancel", async () => {
     const store = localStore("ready");
-    render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
 
     const activity = screen.getByRole("region", { name: "Artifact activity" });
     expect(
@@ -330,8 +348,7 @@ it("enables a disabled instance without a confirmation dialog", () => {
         Record<string, unknown>
     >;
     instances[0]!.enabled = false;
-    render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
 
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
     expect(store.setInstanceEnabled).toHaveBeenCalledWith("local-one", true);
@@ -342,8 +359,7 @@ it("keeps a failed Stop confirmation open and shows the failure in place", async
     const store = localStore("ready");
     Object.assign(store.state, { error: "Stop failed." });
     store.stop = vi.fn(async () => false) as unknown as WebStore["stop"];
-    render(<Instances store={store} />);
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     fireEvent.click(
         within(screen.getByRole("dialog", { name: "Confirm stop" })).getByRole(
@@ -362,9 +378,7 @@ it("shows instance refresh failures beside the selected detail instead of failin
     store.refreshInstance = vi.fn(async () => {
         throw new Error("Instance refresh failed.");
     });
-    render(<Instances store={store} />);
-
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    renderInstances(store, "local-one");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
         "Instance refresh failed.",
@@ -372,4 +386,16 @@ it("shows instance refresh failures beside the selected detail instead of failin
     expect(
         screen.getByRole("heading", { name: "local-one", level: 3 }),
     ).toBeInTheDocument();
+});
+
+it("routes an instance card to a bookmarkable detail URL", () => {
+    const store = localStore("ready");
+    const { navigate } = renderInstances(store);
+
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+
+    expect(navigate).toHaveBeenCalledWith({
+        instance: "local-one",
+        page: "instances",
+    });
 });

@@ -20,9 +20,9 @@ export type AuditScope =
 
 export type WebRoute =
     | { page: "overview" }
-    | { page: "instances" }
-    | { page: "config" }
-    | { page: "connections" }
+    | { page: "instances"; instance?: string }
+    | { page: "config"; instance?: string }
+    | { page: "connections"; instance?: string }
     | { page: "messages"; view: "contexts" }
     | { page: "messages"; view: "thread"; instance: string; ctxId: string }
     | { page: "audit"; view: "timeline"; scope: AuditScope }
@@ -55,6 +55,9 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
         .map(decodeSegment);
     const [page, first, second, third, fourth] = segments;
     if (page === "activity") return pageRoute("audit");
+    if (page === "instances" || page === "config" || page === "connections") {
+        return first === undefined ? { page } : { page, instance: first };
+    }
     if (page === "messages") {
         return first !== undefined && second !== undefined
             ? { page, view: "thread", instance: first, ctxId: second }
@@ -102,6 +105,12 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
 
 export function webRouteHref(route: WebRoute): string {
     switch (route.page) {
+        case "instances":
+        case "config":
+        case "connections":
+            return route.instance === undefined
+                ? `#/${route.page}`
+                : `#/${route.page}/${encodeSegment(route.instance)}`;
         case "messages":
             return route.view === "contexts"
                 ? "#/messages"

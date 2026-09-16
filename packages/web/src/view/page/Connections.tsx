@@ -10,6 +10,7 @@ import type {
 
 import type { WebState } from "../../state/Model.js";
 import type { WebStore } from "../../state/Store.js";
+import type { WebRoute } from "../../app/Route.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 
 interface ConnectionDrafts {
@@ -20,10 +21,14 @@ interface ConnectionDrafts {
 
 export function Connections({
     disabled,
+    navigate,
+    route,
     state,
     store,
 }: {
     disabled: boolean;
+    navigate(route: WebRoute): void;
+    route: Extract<WebRoute, { page: "connections" }>;
     state: WebState;
     store: WebStore;
 }) {
@@ -31,12 +36,11 @@ export function Connections({
         () => configInstances(state),
         [state.readModel.configView],
     );
-    const [selected, setSelected] = useState<string>();
     const selectedName =
-        selected !== undefined &&
-        instances.some((entry) => entry.name === selected)
-            ? selected
-            : instances[0]?.name;
+        route.instance !== undefined &&
+        instances.some((entry) => entry.name === route.instance)
+            ? route.instance
+            : undefined;
     const base = useMemo(
         () => connectionDrafts(state.readModel.configView, selectedName),
         [state.readModel.configView, selectedName],
@@ -147,11 +151,17 @@ export function Connections({
                     <label className="compact-field">
                         <span>Instance</span>
                         <select
-                            onChange={(event) =>
-                                setSelected(event.target.value)
-                            }
-                            value={selectedName}
+                            onChange={(event) => {
+                                const instance = event.target.value;
+                                navigate(
+                                    instance.length === 0
+                                        ? { page: "connections" }
+                                        : { page: "connections", instance },
+                                );
+                            }}
+                            value={selectedName ?? ""}
                         >
+                            <option value="">Global only</option>
                             {instances.map((entry) => (
                                 <option key={entry.name} value={entry.name}>
                                     {entry.name}

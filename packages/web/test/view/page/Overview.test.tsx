@@ -1,5 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { createInitialControlReadModelState } from "@portable-devshell/shared/browser";
+import {
+    asInstanceName,
+    createInitialControlReadModelState,
+} from "@portable-devshell/shared/browser";
 import { expect, it } from "vitest";
 
 import { WorkerDiagnostics } from "../../../src/view/page/Instances.js";
@@ -70,4 +73,55 @@ it("shows an Overview failure instead of an endless loading message", () => {
     render(<Overview state={state} />);
 
     expect(screen.getByText(/overview timed out/)).toBeInTheDocument();
+});
+
+it("links an Overview instance directly to its bookmarkable detail route", () => {
+    const demo = asInstanceName("demo");
+    const state: WebState = {
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            overview: {
+                activity: [],
+                alerts: [],
+                controller: { pid: 1, uptimeSeconds: 1 },
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: 0,
+                    instancesAttention: 0,
+                    instancesCritical: 0,
+                    instancesReady: 1,
+                    instancesTotal: 1,
+                    pendingApprovals: 0,
+                },
+                generatedAt: "2026-09-16T00:00:00Z",
+                health: "healthy",
+                instances: [
+                    {
+                        mcpEnabled: true,
+                        name: demo,
+                        pendingApprovals: 0,
+                        provider: "local",
+                        snapshot: {
+                            connectionState: "connected",
+                            daemonState: "running",
+                            lastSeq: 1,
+                            name: demo,
+                            ready: true,
+                            status: "ready",
+                        },
+                    },
+                ],
+                todos: [],
+            },
+        },
+    };
+
+    render(<Overview state={state} />);
+
+    expect(screen.getByRole("link", { name: "demo" })).toHaveAttribute(
+        "href",
+        "#/instances/demo",
+    );
 });

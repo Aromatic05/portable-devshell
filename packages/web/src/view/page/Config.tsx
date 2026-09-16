@@ -11,13 +11,18 @@ import type {
 
 import type { WebState } from "../../state/Model.js";
 import type { WebStore } from "../../state/Store.js";
+import type { WebRoute } from "../../app/Route.js";
 
 export function Config({
     disabled,
+    navigate,
+    route,
     state,
     store,
 }: {
     disabled: boolean;
+    navigate(route: WebRoute): void;
+    route: Extract<WebRoute, { page: "config" }>;
     state: WebState;
     store: WebStore;
 }) {
@@ -25,11 +30,10 @@ export function Config({
         () => configInstances(state),
         [state.readModel.configView],
     );
-    const [selected, setSelected] = useState<string>();
     const selectedName =
-        selected !== undefined &&
-        instances.some((entry) => entry.name === selected)
-            ? selected
+        route.instance !== undefined &&
+        instances.some((entry) => entry.name === route.instance)
+            ? route.instance
             : instances[0]?.name;
     const baseline = useMemo(
         () =>
@@ -195,7 +199,12 @@ export function Config({
                 <label className="compact-field">
                     <span>Instance</span>
                     <select
-                        onChange={(event) => setSelected(event.target.value)}
+                        onChange={(event) =>
+                            navigate({
+                                page: "config",
+                                instance: event.target.value,
+                            })
+                        }
                         value={selectedName}
                     >
                         {instances.map((entry) => (
