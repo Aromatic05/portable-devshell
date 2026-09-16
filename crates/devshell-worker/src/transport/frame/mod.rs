@@ -153,10 +153,16 @@ impl FrameProtocol {
         }
 
         let stream_id = frame.stream_id();
+        if !self.streams.contains_key(&stream_id) {
+            if matches!(&frame, Frame::Window { .. }) && self.is_retired_stream_id(stream_id) {
+                return Ok(None);
+            }
+            return Err(format!("Frame references unknown stream {stream_id}."));
+        }
         let stream = self
             .streams
             .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+            .expect("stream existence checked above");
         if !stream.accepted {
             return Err(format!("Frame stream {stream_id} is not accepted yet."));
         }
@@ -288,6 +294,14 @@ impl FrameProtocol {
         self.streams.contains_key(&stream_id)
     }
 
+    fn is_retired_stream_id(&self, stream_id: u32) -> bool {
+        match self.role {
+            FrameRole::Acceptor => stream_id <= self.last_remote_stream_id,
+            #[cfg(test)]
+            FrameRole::Opener => u64::from(stream_id) < self.next_stream_id,
+        }
+    }
+
     fn cleanup(&mut self, stream_id: u32) {
         if self
             .streams
@@ -376,6 +390,34 @@ mod tests {
         assert_eq!(window, None);
         assert!(!opener.stream_open(stream_id));
         assert!(!acceptor.stream_open(stream_id));
+    }
+
+    #[test]
+    fn ignores_late_window_for_a_closed_stream() {
+        let (mut opener, mut acceptor, stream_id) = open_pair(8);
+        let fin = opener.finish(stream_id).unwrap();
+        acceptor.accept_frame(fin).unwrap();
+        let fin = acceptor.finish(stream_id).unwrap();
+        opener.accept_frame(fin).unwrap();
+        assert!(!acceptor.stream_open(stream_id));
+
+        assert_eq!(
+            acceptor
+                .accept_frame(Frame::Window {
+                    stream_id,
+                    credit_delta: 1,
+                })
+                .unwrap(),
+            None
+        );
+        assert!(
+            acceptor
+                .accept_frame(Frame::Window {
+                    stream_id: stream_id + 1,
+                    credit_delta: 1,
+                })
+                .is_err()
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { Channel } from "@portable-devshell/shared";
 import {
+    encodeFrame,
     FrameProtocol,
     type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
@@ -61,7 +62,11 @@ class MemoryChannel implements Channel {
     }
 }
 
-function pair(): { opener: FrameProtocol; acceptor: FrameProtocol } {
+function pair(): {
+    opener: FrameProtocol;
+    acceptor: FrameProtocol;
+    acceptorChannel: MemoryChannel;
+} {
     const left = new MemoryChannel();
     const right = new MemoryChannel();
     left.connect(right);
@@ -69,6 +74,7 @@ function pair(): { opener: FrameProtocol; acceptor: FrameProtocol } {
     return {
         opener: new FrameProtocol(left, { role: "opener" }),
         acceptor: new FrameProtocol(right, { role: "acceptor" }),
+        acceptorChannel: right,
     };
 }
 
@@ -133,6 +139,32 @@ test("per-stream credit blocks only the slow logical stream", async () => {
 
     opener.close();
     acceptor.close();
+});
+
+test("a late WINDOW for a closed stream does not close sibling streams", async () => {
+    const { opener, acceptor, acceptorChannel } = pair();
+    const first = await openPair(opener, acceptor, "first", 8);
+    const sibling = await openPair(opener, acceptor, "sibling", 8);
+
+    await first.local.finish();
+    await first.remote.finish();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assert.equal(first.local.closed, true);
+    assert.equal(first.remote.closed, true);
+
+    await acceptorChannel.write(
+        encodeFrame({
+            creditDelta: 1,
+            streamId: first.local.id,
+            type: "window",
+        }),
+    );
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+    await sibling.local.write(Uint8Array.of(9));
+    assert.deepEqual(await sibling.remote.read(), Uint8Array.of(9));
 });
 
 test("FrameProtocol rejects OPEN in the wrong direction and closes the Channel", async () => {

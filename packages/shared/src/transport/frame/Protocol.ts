@@ -286,6 +286,12 @@ export class FrameProtocol implements FrameStreamHost {
         }
         const stream = this.#streams.get(frame.streamId);
         if (stream === undefined) {
+            if (
+                frame.type === "window" &&
+                this.#isRetiredStreamId(frame.streamId)
+            ) {
+                return;
+            }
             throw this.#connectionError(
                 `Frame references unknown stream ${frame.streamId}.`,
             );
@@ -367,6 +373,12 @@ export class FrameProtocol implements FrameStreamHost {
         const waiter = this.#openWaiters.shift();
         if (waiter !== undefined) waiter.resolve(request);
         else this.#pendingOpen.push(request);
+    }
+
+    #isRetiredStreamId(streamId: number): boolean {
+        return this.#role === "opener"
+            ? streamId < this.#nextStreamId
+            : streamId <= this.#lastRemoteStreamId;
     }
 
     #scheduleData(stream: FrameStreamState, data: Uint8Array): Promise<void> {
