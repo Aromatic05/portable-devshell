@@ -126,6 +126,16 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
     assert.equal(await cli.run(["status"]), 0);
     assert.match(stdout.flush(), /instances: 1/u);
 
+    assert.equal(await cli.run(["--output", "json", "status"]), 0);
+    assert.deepEqual(JSON.parse(stdout.flush()), {
+        instanceCount: 1,
+        pid: 10,
+        running: true,
+    });
+
+    assert.equal(await cli.run(["--output", "yaml", "status"]), 2);
+    assert.match(stderr.flush(), /--output.*text.*json.*jsonl/u);
+
     assert.equal(await cli.run(["logs"]), 0);
     assert.equal(stdout.flush(), "line-1\n");
 
@@ -880,6 +890,74 @@ test("CliMain handles instance logs follow and tool call through injected client
     const callOutput = stdout.flush();
     assert.match(callOutput, /tool: bash_run/u);
     assert.match(callOutput, /stdout:\n\/tmp\/ws/u);
+
+    assert.equal(
+        await cli.run([
+            "--output",
+            "json",
+            "instance",
+            "call",
+            "demo-local",
+            "/tmp/ws",
+            "bash_run",
+            '{"command":"pwd","timeoutMs":30000}',
+        ]),
+        0,
+    );
+    assert.deepEqual(JSON.parse(stdout.flush()), {
+        exitCode: 0,
+        stderr: "",
+        stdout: "/tmp/ws\n",
+    });
+
+    readCount = 0;
+    assert.equal(
+        await cli.run([
+            "--output",
+            "jsonl",
+            "instance",
+            "logs",
+            "demo-local",
+            "-f",
+        ]),
+        0,
+    );
+    assert.deepEqual(
+        stdout
+            .flush()
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line)),
+        [
+            {
+                at: "",
+                instanceName: "demo-local",
+                message: "before\n",
+                seq: 1,
+                stream: "stdout",
+            },
+            {
+                at: "",
+                instanceName: "demo-local",
+                message: "after\n",
+                seq: 2,
+                stream: "stdout",
+            },
+        ],
+    );
+
+    assert.equal(
+        await cli.run([
+            "--output",
+            "json",
+            "instance",
+            "logs",
+            "demo-local",
+            "-f",
+        ]),
+        2,
+    );
+    assert.match(stderr.flush(), /streaming.*jsonl/iu);
     assert.equal(stderr.flush(), "");
 });
 

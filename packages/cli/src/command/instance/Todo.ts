@@ -112,11 +112,13 @@ export async function executeTodoCommand(
         return true;
     }
     if (command.kind !== "instance.todo") return false;
+    if (command.follow)
+        context.requireStreamingOutput("instance todo --follow");
     await new CliCommandInstanceTodo().execute(
         context.clients.todo,
         command.instance,
         command.follow,
-        async (todo) => context.stdout.write(renderInstanceTodo(todo)),
+        async (todo) => context.writeValue(todo, renderInstanceTodo(todo)),
         context.followEventLimit,
     );
     return true;

@@ -10,7 +10,7 @@ export function renderCliUsage(
         "portable-devshell",
         "",
         "Usage:",
-        "  devshell [--verbose|--debug] <command>",
+        "  devshell [--verbose|--debug] [--output text|json|jsonl] <command>",
         "  devshell --version",
         "",
         "Commands:",

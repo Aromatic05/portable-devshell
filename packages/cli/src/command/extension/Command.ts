@@ -116,7 +116,7 @@ export async function executeExtensionCommand(
         case "extension.list": {
             const records = await context.clients.extension.list();
             if (command.json) context.writeJson(records);
-            else context.stdout.write(renderExtensionList(records));
+            else context.writeRecords(records, renderExtensionList(records));
             return true;
         }
         case "extension.install":
@@ -162,14 +162,20 @@ export async function executeExtensionCommand(
                     relay: {
                         input: context.stdin,
                         stderr: context.stderr,
-                        stdout: context.stdout,
+                        stdout:
+                            context.outputFormat === "text"
+                                ? context.stdout
+                                : context.stderr,
                     },
                     workingDirectory: process.cwd(),
                 },
             );
             if (result.kind === "text") {
                 const text = result.text ?? "";
-                context.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+                context.writeValue(
+                    text,
+                    text.endsWith("\n") ? text : `${text}\n`,
+                );
             } else context.writeJson(result.value ?? null);
             return true;
         }

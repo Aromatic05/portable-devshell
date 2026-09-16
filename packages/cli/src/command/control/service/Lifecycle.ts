@@ -42,26 +42,26 @@ export async function executeControlLifecycle(
     context: CliDispatchContext,
 ): Promise<boolean> {
     switch (command.kind) {
-        case "control.start":
-            context.stdout.write(
-                renderControlStatus(await (await context.lifecycle()).start()),
-            );
+        case "control.start": {
+            const status = await (await context.lifecycle()).start();
+            context.writeValue(status, renderControlStatus(status));
             return true;
-        case "control.stop":
-            context.stdout.write(
-                renderControlStatus(await (await context.lifecycle()).stop()),
-            );
+        }
+        case "control.stop": {
+            const status = await (await context.lifecycle()).stop();
+            context.writeValue(status, renderControlStatus(status));
             return true;
-        case "control.status":
-            context.stdout.write(
-                renderControlStatus(await (await context.lifecycle()).status()),
-            );
+        }
+        case "control.status": {
+            const status = await (await context.lifecycle()).status();
+            context.writeValue(status, renderControlStatus(status));
             return true;
-        case "control.logs":
-            context.stdout.write(
-                renderControlLogs(await (await context.lifecycle()).logs()),
-            );
+        }
+        case "control.logs": {
+            const logs = await (await context.lifecycle()).logs();
+            context.writeValue(logs, renderControlLogs(logs));
             return true;
+        }
         case "control.restart": {
             const lifecycle = await context.lifecycle();
             const current = await lifecycle.status();
@@ -84,7 +84,7 @@ export async function executeControlLifecycle(
             }
             for (const entry of restore)
                 await context.clients.runtime.start(entry.name);
-            context.stdout.write(renderControlStatus(status));
+            context.writeValue(status, renderControlStatus(status));
             return true;
         }
         default:

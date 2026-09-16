@@ -53,18 +53,23 @@ export async function executeInstanceLogs(
         return false;
     const follow = command.kind === "watch.logs" ? true : command.follow;
     if (follow) {
+        context.requireStreamingOutput(
+            command.kind === "watch.logs"
+                ? "watch logs"
+                : "instance logs --follow",
+        );
         await new CliCommandWatchLogs().execute(
             context.clients.runtime,
             command.instance,
             async (entries) =>
-                context.stdout.write(renderInstanceLogs(entries)),
+                context.writeRecords(entries, renderInstanceLogs(entries)),
             context.followEventLimit,
         );
-    } else
-        context.stdout.write(
-            renderInstanceLogs(
-                await context.clients.runtime.readLogs(command.instance),
-            ),
+    } else {
+        const entries = await context.clients.runtime.readLogs(
+            command.instance,
         );
+        context.writeRecords(entries, renderInstanceLogs(entries));
+    }
     return true;
 }

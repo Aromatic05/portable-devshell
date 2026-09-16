@@ -27,17 +27,23 @@ export interface CliDispatchContext {
     clients: CliClients;
     controlNegotiated: boolean;
     followEventLimit?: number;
+    outputFormat: CliOutputFormat;
     stdin: NodeJS.ReadableStream;
     stderr: { write(chunk: string): void };
     stdout: { write(chunk: string): void };
     lifecycle(): Promise<CliLifecycleManagerLike>;
     negotiate(): Promise<void>;
     readJson(source: string, label: string): Promise<JsonValue>;
+    requireStreamingOutput(label: string): void;
     rootUsage(): Promise<string>;
     startTui(): Promise<void>;
     version(): string;
     writeJson(value: unknown): void;
+    writeRecords(values: readonly unknown[], text: string): void;
+    writeValue(value: unknown, text: string): void;
 }
+
+export type CliOutputFormat = "json" | "jsonl" | "text";
 
 export async function dispatchCliCommand(
     command: CliParsedCommand,
@@ -46,7 +52,8 @@ export async function dispatchCliCommand(
     if (commandUsesControlClient(command) && !context.controlNegotiated)
         await context.negotiate();
     if (command.kind === "version") {
-        context.stdout.write(`devshell ${context.version()}\n`);
+        const version = context.version();
+        context.writeValue({ version }, `devshell ${version}\n`);
         return;
     }
     if (command.kind === "help") {

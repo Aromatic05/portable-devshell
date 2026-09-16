@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import type { JsonValue } from "@portable-devshell/shared";
 import { CliParser, type CliParsedCommand } from "../command/Parse.js";
-import { dispatchCliCommand } from "../command/Dispatch.js";
+import {
+    dispatchCliCommand,
+    type CliOutputFormat,
+} from "../command/Dispatch.js";
 import { renderCliUsage } from "../command/Usage.js";
 import type { CliLifecycleManagerLike } from "../command/control/service/Lifecycle.js";
 import { cliBuiltinExtensionSources } from "../command/extension/Builtin.js";
@@ -77,13 +80,19 @@ export class CliMain {
     }
 
     async run(argv: readonly string[]): Promise<number> {
-        const { commandArgs, debug, verbose } = splitGlobalFlags(argv);
+        let debug = false;
+        let verbose = false;
         try {
+            const global = splitGlobalFlags(argv);
+            debug = global.debug;
+            verbose = global.verbose;
+            const { commandArgs, outputFormat } = global;
             const resolved = await this.#resolve(commandArgs);
             await dispatchCliCommand(resolved.command, {
                 clients: this.#clients,
                 controlNegotiated: resolved.controlNegotiated,
                 followEventLimit: this.#followEventLimit,
+                outputFormat,
                 stdin: this.#stdin,
                 stderr: this.#stderr,
                 stdout: this.#stdout,
@@ -91,12 +100,45 @@ export class CliMain {
                 negotiate: async () => await negotiateCliControl(this.#clients),
                 readJson: async (source, label) =>
                     await readCliJsonSource(source, label, this.#stdin),
+                requireStreamingOutput: (label) => {
+                    if (outputFormat === "json")
+                        throw CliRenderError.usage(
+                            `${label} is streaming; use --output jsonl or text.`,
+                        );
+                },
                 rootUsage: async () =>
                     await this.#rootUsage(resolved.controlNegotiated),
                 startTui: async () => await this.#startTui(),
                 version: () => resolvePortableDevshellApplicationVersion(),
-                writeJson: (value) =>
-                    this.#stdout.write(`${JSON.stringify(value, null, 2)}\n`),
+                writeJson: (value) => {
+                    if (outputFormat === "jsonl" && Array.isArray(value)) {
+                        for (const record of value)
+                            writeCliJson(this.#stdout, record, true);
+                        return;
+                    }
+                    writeCliJson(this.#stdout, value, outputFormat === "jsonl");
+                },
+                writeRecords: (values, text) => {
+                    if (outputFormat === "text") {
+                        this.#stdout.write(text);
+                        return;
+                    }
+                    if (outputFormat === "json") {
+                        writeCliJson(this.#stdout, values, false);
+                        return;
+                    }
+                    for (const value of values)
+                        writeCliJson(this.#stdout, value, true);
+                },
+                writeValue: (value, text) => {
+                    if (outputFormat === "text") this.#stdout.write(text);
+                    else
+                        writeCliJson(
+                            this.#stdout,
+                            value,
+                            outputFormat === "jsonl",
+                        );
+                },
             });
             return cliExitCodes.success;
         } catch (error) {
@@ -321,19 +363,54 @@ function normalizeExtensionCommandArgs(args: readonly string[]): string[] {
 function splitGlobalFlags(argv: readonly string[]): {
     commandArgs: string[];
     debug: boolean;
+    outputFormat: CliOutputFormat;
     verbose: boolean;
 } {
     const commandArgs = [...argv];
     let debug = false;
+    let outputFormat: CliOutputFormat = "text";
     let verbose = false;
-    while (commandArgs[0] === "--verbose" || commandArgs[0] === "--debug") {
-        if (commandArgs[0] === "--debug") {
+    while (true) {
+        const option = commandArgs[0];
+        if (option === "--debug") {
             debug = true;
             verbose = true;
-        } else verbose = true;
-        commandArgs.shift();
+            commandArgs.shift();
+            continue;
+        }
+        if (option === "--verbose") {
+            verbose = true;
+            commandArgs.shift();
+            continue;
+        }
+        if (option === "--output") {
+            commandArgs.shift();
+            outputFormat = parseCliOutputFormat(commandArgs.shift());
+            continue;
+        }
+        if (option?.startsWith("--output=") === true) {
+            commandArgs.shift();
+            outputFormat = parseCliOutputFormat(
+                option.slice("--output=".length),
+            );
+            continue;
+        }
+        break;
     }
-    return { commandArgs, debug, verbose };
+    return { commandArgs, debug, outputFormat, verbose };
+}
+
+function parseCliOutputFormat(value: string | undefined): CliOutputFormat {
+    if (value === "text" || value === "json" || value === "jsonl") return value;
+    throw CliRenderError.usage("--output requires one of: text, json, jsonl");
+}
+
+function writeCliJson(
+    output: { write(chunk: string): void },
+    value: unknown,
+    compact: boolean,
+): void {
+    output.write(`${JSON.stringify(value, null, compact ? undefined : 2)}\n`);
 }
 
 function resolvePortableDevshellApplicationVersion(

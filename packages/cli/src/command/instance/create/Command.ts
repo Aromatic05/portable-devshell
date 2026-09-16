@@ -51,10 +51,13 @@ export async function executeInstanceCreate(
         context.clients.reverse,
         new CliWizardInstanceCreate({
             input: context.stdin,
-            output: context.stdout,
+            output:
+                context.outputFormat === "text"
+                    ? context.stdout
+                    : context.stderr,
         }),
     );
     if (result !== undefined)
-        context.stdout.write(renderInstanceCreateResult(result));
+        context.writeValue(result, renderInstanceCreateResult(result));
     return true;
 }

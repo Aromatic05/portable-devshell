@@ -33,11 +33,12 @@ export async function executeWatchStatus(
     context: CliDispatchContext,
 ): Promise<boolean> {
     if (command.kind !== "watch.status") return false;
+    context.requireStreamingOutput("watch status");
     await new CliCommandWatchStatus().execute(
         context.clients.runtime,
         command.instance,
         async (snapshot) =>
-            context.stdout.write(renderInstanceSnapshot(snapshot)),
+            context.writeValue(snapshot, renderInstanceSnapshot(snapshot)),
         context.followEventLimit,
     );
     return true;

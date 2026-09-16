@@ -12,11 +12,11 @@ export async function executeInstanceLifecycle(
     context: CliDispatchContext,
 ): Promise<boolean> {
     switch (command.kind) {
-        case "instance.list":
-            context.stdout.write(
-                renderInstanceList(await context.clients.instance.list()),
-            );
+        case "instance.list": {
+            const instances = await context.clients.instance.list();
+            context.writeRecords(instances, renderInstanceList(instances));
             return true;
+        }
         case "instance.delete":
             context.writeJson(
                 await context.clients.instance.delete(command.instance),
@@ -32,52 +32,52 @@ export async function executeInstanceLifecycle(
                 await context.clients.instance.disable(command.instance),
             );
             return true;
-        case "instance.deviceCode":
-            context.stdout.write(
-                renderReverseDeviceCode(
-                    await context.clients.reverse.createCode(command.instance),
-                ),
+        case "instance.deviceCode": {
+            const result = await context.clients.reverse.createCode(
+                command.instance,
             );
+            context.writeValue(result, renderReverseDeviceCode(result));
             return true;
-        case "instance.rotateToken":
-            context.stdout.write(
-                renderReverseTokenRotation(
-                    await context.clients.reverse.rotateToken(command.instance),
-                ),
+        }
+        case "instance.rotateToken": {
+            const result = await context.clients.reverse.rotateToken(
+                command.instance,
             );
+            context.writeValue(result, renderReverseTokenRotation(result));
             return true;
-        case "instance.revokeToken":
-            context.stdout.write(
-                renderReverseTokenRevocation(
-                    await context.clients.reverse.revokeToken(command.instance),
-                ),
+        }
+        case "instance.revokeToken": {
+            const result = await context.clients.reverse.revokeToken(
+                command.instance,
             );
+            context.writeValue(result, renderReverseTokenRevocation(result));
             return true;
-        case "instance.status":
-            context.stdout.write(
-                renderInstanceSnapshot(
-                    (await context.clients.runtime.snapshot(command.instance))
-                        .snapshot,
-                ),
+        }
+        case "instance.status": {
+            const snapshot = (
+                await context.clients.runtime.snapshot(command.instance)
+            ).snapshot;
+            context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
+            return true;
+        }
+        case "instance.start": {
+            const snapshot = await context.clients.runtime.start(
+                command.instance,
+                {
+                    input: context.stdin,
+                    output: context.stderr,
+                },
             );
+            context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
             return true;
-        case "instance.start":
-            context.stdout.write(
-                renderInstanceSnapshot(
-                    await context.clients.runtime.start(command.instance, {
-                        input: context.stdin,
-                        output: context.stderr,
-                    }),
-                ),
+        }
+        case "instance.stop": {
+            const snapshot = await context.clients.runtime.stop(
+                command.instance,
             );
+            context.writeValue(snapshot, renderInstanceSnapshot(snapshot));
             return true;
-        case "instance.stop":
-            context.stdout.write(
-                renderInstanceSnapshot(
-                    await context.clients.runtime.stop(command.instance),
-                ),
-            );
-            return true;
+        }
         default:
             return false;
     }

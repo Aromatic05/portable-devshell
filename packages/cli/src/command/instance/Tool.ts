@@ -281,16 +281,16 @@ export async function executeToolCommand(
                 command.inputSource,
                 "tool input",
             );
-            context.stdout.write(
+            const result = await context.clients.tool.call(
+                command.instance,
+                command.toolName,
+                input,
+                command.workspace,
+            );
+            context.writeValue(
+                result,
                 renderToolCall(command.instance, command.toolName) +
-                    renderToolResult(
-                        await context.clients.tool.call(
-                            command.instance,
-                            command.toolName,
-                            input,
-                            command.workspace,
-                        ),
-                    ),
+                    renderToolResult(result),
             );
             return true;
         }
