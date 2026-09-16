@@ -3,6 +3,7 @@ import test from "node:test";
 import {
     CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
     parseContextMessageDirective,
+    toControlErrorBody,
 } from "@portable-devshell/shared";
 
 import {
@@ -233,16 +234,24 @@ function createTodoReportHarness() {
     };
 }
 
-async function assertRateLimited(
+async function assertTodoUseOtherTools(
     operation: Promise<unknown>,
-    retryAfterMs: number,
 ): Promise<void> {
     await assert.rejects(operation, (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "todo.invalid");
+        const body = toControlErrorBody(error);
+        assert.equal(body?.code, "todo.invalid");
+        assert.equal(body?.retryable, false);
         assert.equal(
-            (error as { details?: { retryAfterMs?: number } }).details
-                ?.retryAfterMs,
-            retryAfterMs,
+            body?.message,
+            "You have performed too many useless operations. Use other tools.",
+        );
+        assert.equal(
+            typeof body?.details === "object" &&
+                body.details !== null &&
+                !Array.isArray(body.details)
+                ? body.details.action
+                : undefined,
+            "use_other_tools",
         );
         return true;
     });
@@ -327,15 +336,15 @@ test("todo_report autonomous updates use a two-token bucket with fractional refi
 
     await harness.report("first");
     await harness.report("second");
-    await assertRateLimited(harness.report("third"), 30_000);
+    await assertTodoUseOtherTools(harness.report("third"));
     harness.advance(15_000);
-    await assertRateLimited(harness.report("third"), 15_000);
+    await assertTodoUseOtherTools(harness.report("third"));
     harness.advance(15_000);
     await harness.report("third");
     harness.advance(60_000);
     await harness.report("fourth");
     await harness.report("fifth");
-    await assertRateLimited(harness.report("sixth"), 30_000);
+    await assertTodoUseOtherTools(harness.report("sixth"));
 
     assert.deepEqual(harness.reports, [
         "first",
@@ -359,7 +368,62 @@ test("todo_report rejects an unchanged autonomous report without spending a toke
         return true;
     });
     await harness.report("second");
-    await assertRateLimited(harness.report("third"), 30_000);
+    await assertTodoUseOtherTools(harness.report("third"));
+});
+
+test("four todo.invalid failures within two minutes disable Todo for five minutes", async () => {
+    const harness = createTodoReportHarness();
+
+    await harness.report("same");
+    for (let index = 0; index < 4; index += 1) {
+        await assert.rejects(
+            harness.report("same"),
+            (error: unknown) =>
+                toControlErrorBody(error)?.code === "todo.invalid",
+        );
+    }
+
+    await assertTodoUseOtherTools(
+        harness.gateway.beforeModelToolCall(
+            "local",
+            "todo_read",
+            harness.context,
+        ),
+    );
+    harness.advance(299_999);
+    await assertTodoUseOtherTools(
+        harness.gateway.beforeModelToolCall(
+            "local",
+            "todo_report",
+            harness.context,
+        ),
+    );
+    harness.advance(1);
+    await harness.gateway.beforeModelToolCall(
+        "local",
+        "todo_report",
+        harness.context,
+    );
+});
+
+test("todo.invalid failures outside the two-minute window do not accumulate", async () => {
+    const harness = createTodoReportHarness();
+
+    await harness.report("same");
+    for (let index = 0; index < 3; index += 1) {
+        await assert.rejects(
+            harness.report("same"),
+            (error: unknown) =>
+                toControlErrorBody(error)?.code === "todo.invalid",
+        );
+    }
+    harness.advance(120_000);
+    await assert.rejects(
+        harness.report("same"),
+        (error: unknown) => toControlErrorBody(error)?.code === "todo.invalid",
+    );
+
+    await harness.report("new information");
 });
 
 test("todo_report serializes concurrent autonomous bursts through the same bucket", async () => {
@@ -395,25 +459,23 @@ test("todo_read and todo_write share a bucket that is independent from todo_repo
         "todo_write",
         harness.context,
     );
-    await assertRateLimited(
+    await assertTodoUseOtherTools(
         harness.gateway.beforeModelToolCall(
             "local",
             "todo_read",
             harness.context,
         ),
-        30_000,
     );
 
     await harness.report("report one");
     await harness.report("report two");
-    await assertRateLimited(harness.report("report three"), 30_000);
-    await assertRateLimited(
+    await assertTodoUseOtherTools(harness.report("report three"));
+    await assertTodoUseOtherTools(
         harness.gateway.beforeModelToolCall(
             "local",
             "todo_read",
             harness.context,
         ),
-        30_000,
     );
 
     harness.advance(30_000);
@@ -474,7 +536,7 @@ test("a normal Comment never limits tools and its reply bypasses the autonomous 
         "file_read",
         harness.context,
     );
-    await assertRateLimited(harness.report("autonomous exhausted"), 30_000);
+    await assertTodoUseOtherTools(harness.report("autonomous exhausted"));
     harness.advance(30_000);
     await harness.report("autonomous after refill");
 });
@@ -653,7 +715,7 @@ test("failed reports neither spend a token nor satisfy a Comment obligation", as
     await assert.rejects(harness.report("first"), /report failed/u);
     await harness.report("first");
     await harness.report("second");
-    await assertRateLimited(harness.report("third"), 30_000);
+    await assertTodoUseOtherTools(harness.report("third"));
 
     harness.deliverComment(
         "comment-failure",

@@ -14,10 +14,24 @@ export function todoErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
             return [
                 errorHint(
                     "todo.invalid",
-                    "Fix the reported invariant and resubmit the full plan.",
+                    todoInvalidAction(body) === "use_other_tools"
+                        ? "Use other tools."
+                        : "Fix the reported invariant and resubmit the full plan.",
                 ),
             ];
         default:
             return [];
     }
+}
+
+function todoInvalidAction(body: ControlErrorBody): string | undefined {
+    if (
+        typeof body.details !== "object" ||
+        body.details === null ||
+        Array.isArray(body.details)
+    )
+        return undefined;
+    return typeof body.details.action === "string"
+        ? body.details.action
+        : undefined;
 }

@@ -461,6 +461,17 @@ test("todo revision conflict and invalid invariants are classified", () => {
     );
     const invalid = resolveErrorHints("todo_write", body("todo.invalid"));
     assert.deepEqual(codes(invalid), ["todo.invalid"]);
+    assert.equal(
+        invalid[0].text,
+        "Fix the reported invariant and resubmit the full plan.",
+    );
+
+    const useOtherTools = resolveErrorHints(
+        "todo_write",
+        body("todo.invalid", { details: { action: "use_other_tools" } }),
+    );
+    assert.deepEqual(codes(useOtherTools), ["todo.invalid"]);
+    assert.equal(useOtherTools[0].text, "Use other tools.");
 });
 
 test("cross-tool error hints apply to any tool and walk the cause chain", () => {

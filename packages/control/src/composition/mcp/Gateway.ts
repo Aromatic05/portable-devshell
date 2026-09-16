@@ -1,5 +1,9 @@
 import type { McpInstanceGateway } from "@portable-devshell/mcp";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    toControlErrorBody,
+} from "@portable-devshell/shared";
 import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
@@ -31,6 +35,12 @@ const TODO_ACCESS_BUCKET_CAPACITY = 2;
 
 const TODO_ACCESS_REFILL_INTERVAL_MS = 30_000;
 
+const TODO_INVALID_WINDOW_MS = 120_000;
+
+const TODO_INVALID_DISABLE_MS = 300_000;
+
+const TODO_INVALID_LIMIT = 3;
+
 interface TodoAccessPolicyState {
     lastRefillAt: number;
     tokens: number;
@@ -40,6 +50,11 @@ interface TodoReportPolicyState {
     lastRefillAt: number;
     lastReportMessage?: string;
     tokens: number;
+}
+
+interface TodoInvalidPolicyState {
+    disabledUntil?: number;
+    invalidAt: number[];
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
@@ -52,6 +67,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     readonly #todoAccessPolicyOperations = new Map<string, Promise<void>>();
     readonly #todoReportPolicy = new Map<string, TodoReportPolicyState>();
     readonly #todoReportPolicyOperations = new Map<string, Promise<void>>();
+    readonly #todoInvalidPolicy = new Map<string, TodoInvalidPolicyState>();
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
@@ -102,6 +118,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             context.requestId,
         )) ?? { kind: "allow" as const };
         if (decision.kind === "allow") {
+            if (isTodoTool(toolName)) {
+                this.#assertTodoEnabled(instance, ctxId);
+            }
             if (toolName === "todo_read" || toolName === "todo_write") {
                 await this.#consumeTodoAccessToken(instance, ctxId);
             }
@@ -587,10 +606,18 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         context: ToolCallContext,
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
-        return (await descriptor.todo.write(
-            input as unknown as import("@portable-devshell/shared").TodoWriteInput,
-            requireCtxId(context),
-        )) as unknown as JsonValue;
+        const ctxId = requireCtxId(context);
+        try {
+            return (await descriptor.todo.write(
+                input as unknown as import("@portable-devshell/shared").TodoWriteInput,
+                ctxId,
+            )) as unknown as JsonValue;
+        } catch (error) {
+            if (toControlErrorBody(error)?.code === errorCodes.todoInvalid) {
+                this.#recordTodoInvalid(instance, ctxId);
+            }
+            throw error;
+        }
     }
 
     async reportTodo(
@@ -611,6 +638,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
             if (replyCommentId === undefined) {
                 if (state.lastReportMessage === message) {
+                    this.#recordTodoInvalid(instance, ctxId);
                     throw createError({
                         code: errorCodes.todoInvalid,
                         details: { ctxId, reason: "duplicate" },
@@ -620,20 +648,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                     });
                 }
                 if (state.tokens < 1) {
-                    const retryAfterMs = Math.ceil(
-                        (1 - state.tokens) * TODO_REPORT_REFILL_INTERVAL_MS,
-                    );
-                    throw createError({
-                        code: errorCodes.todoInvalid,
-                        details: {
-                            capacity: TODO_REPORT_BUCKET_CAPACITY,
-                            ctxId,
-                            refillIntervalMs: TODO_REPORT_REFILL_INTERVAL_MS,
-                            retryAfterMs,
-                        },
-                        message: `todo_report is rate-limited; the next autonomous report token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue useful work instead of retrying early.`,
-                        retryable: false,
-                    });
+                    this.#recordTodoInvalid(instance, ctxId);
+                    throw todoUseOtherToolsError();
                 }
             }
 
@@ -708,24 +724,54 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 );
                 state.lastRefillAt = now;
                 if (state.tokens < 1) {
-                    const retryAfterMs = Math.ceil(
-                        (1 - state.tokens) * TODO_ACCESS_REFILL_INTERVAL_MS,
-                    );
-                    throw createError({
-                        code: errorCodes.todoInvalid,
-                        details: {
-                            capacity: TODO_ACCESS_BUCKET_CAPACITY,
-                            ctxId,
-                            refillIntervalMs: TODO_ACCESS_REFILL_INTERVAL_MS,
-                            retryAfterMs,
-                            tools: ["todo_read", "todo_write"],
-                        },
-                        message: `todo_read/todo_write are rate-limited by a shared bucket; the next token is available in about ${Math.ceil(retryAfterMs / 1000)}s. Continue the actual task instead of polling Todo state.`,
-                        retryable: false,
-                    });
+                    this.#recordTodoInvalid(instance, ctxId);
+                    throw todoUseOtherToolsError();
                 }
                 state.tokens -= 1;
             },
+        );
+    }
+
+    #assertTodoEnabled(instance: string, ctxId: string): void {
+        const key = todoPolicyKey(instance, ctxId);
+        const state = this.#todoInvalidPolicy.get(key);
+        if (state === undefined) return;
+
+        const now = this.#now();
+        if (state.disabledUntil !== undefined) {
+            if (now < state.disabledUntil) throw todoUseOtherToolsError();
+            this.#todoInvalidPolicy.delete(key);
+            return;
+        }
+
+        state.invalidAt = state.invalidAt.filter(
+            (timestamp) => now - timestamp < TODO_INVALID_WINDOW_MS,
+        );
+        if (state.invalidAt.length === 0) this.#todoInvalidPolicy.delete(key);
+    }
+
+    #recordTodoInvalid(instance: string, ctxId: string): void {
+        const key = todoPolicyKey(instance, ctxId);
+        const now = this.#now();
+        const previous = this.#todoInvalidPolicy.get(key);
+        if (
+            previous?.disabledUntil !== undefined &&
+            now < previous.disabledUntil
+        )
+            return;
+
+        const invalidAt = (previous?.invalidAt ?? []).filter(
+            (timestamp) => now - timestamp < TODO_INVALID_WINDOW_MS,
+        );
+        invalidAt.push(now);
+        this.#todoInvalidPolicy.set(
+            key,
+            invalidAt.length > TODO_INVALID_LIMIT
+                ? {
+                      disabledUntil: now + TODO_INVALID_DISABLE_MS,
+                      invalidAt: [],
+                  }
+                : { invalidAt },
         );
     }
 
@@ -793,6 +839,24 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
 
 function todoPolicyKey(instance: string, ctxId: string): string {
     return `${instance}\u0000${ctxId}`;
+}
+
+function isTodoTool(toolName: string): boolean {
+    return (
+        toolName === "todo_read" ||
+        toolName === "todo_report" ||
+        toolName === "todo_write"
+    );
+}
+
+function todoUseOtherToolsError() {
+    return createError({
+        code: errorCodes.todoInvalid,
+        details: { action: "use_other_tools" },
+        message:
+            "You have performed too many useless operations. Use other tools.",
+        retryable: false,
+    });
 }
 
 function withTodoSummaries<T extends object>(
