@@ -220,7 +220,7 @@ function conversationSummary(text: string): string | undefined {
         : `${compact.slice(0, 61).trimEnd()}…`;
 }
 
-export function groupHistorySessionsByWorkspace(
+export function groupMessageSessionsByWorkspace(
     sessions: readonly WebMessageSession[],
 ): Array<{
     key: string;
@@ -238,12 +238,12 @@ export function groupHistorySessionsByWorkspace(
         }
     >();
     for (const session of sessions) {
-        const key = session.workspace ?? "\u0000other";
+        const key = workspacePreferenceKey(session);
         const group = groups.get(key) ?? {
             key,
             label:
                 session.workspace === undefined
-                    ? "Other"
+                    ? session.instance
                     : workspaceFolderName(session.workspace),
             sessions: [],
             ...(session.workspace === undefined
@@ -254,6 +254,13 @@ export function groupHistorySessionsByWorkspace(
         groups.set(key, group);
     }
     return [...groups.values()];
+}
+
+export function isConversationHidden(
+    preferences: ConversationPreferencesSnapshot,
+    session: Pick<WebMessageSession, "ctxId">,
+): boolean {
+    return preferences.hiddenContexts?.[session.ctxId] === true;
 }
 
 export interface LegacyConversationPreferences {

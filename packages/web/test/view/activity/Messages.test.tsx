@@ -894,6 +894,80 @@ describe("Messages", () => {
         ).toBeNull();
     });
 
+    it("soft-hides conversations and whole projects and restores them from Hidden", async () => {
+        const nextState = twoActiveConversationState();
+        const updateConversationPreferences = vi.fn(async () => true);
+        const navigate = vi.fn();
+        render(
+            <Messages
+                navigate={navigate}
+                route={{ page: "messages", view: "contexts" }}
+                state={nextState}
+                store={messageStore({ updateConversationPreferences })}
+            />,
+        );
+
+        const reviewRow = screen
+            .getByRole("button", { name: /Review the Messages navigation/u })
+            .closest(".conversation-row")!;
+        fireEvent.click(
+            within(reviewRow).getByRole("button", {
+                name: "Hide conversation",
+            }),
+        );
+        await waitFor(() =>
+            expect(updateConversationPreferences).toHaveBeenCalledWith({
+                hiddenContexts: { "ctx-second": true },
+            }),
+        );
+        expect(
+            screen.queryByRole("button", {
+                name: /Review the Messages navigation/u,
+            }),
+        ).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Hidden" }));
+        expect(
+            screen.getByRole("button", {
+                name: /Review the Messages navigation/u,
+            }),
+        ).toBeInTheDocument();
+        const hiddenReviewRow = screen
+            .getByRole("button", { name: /Review the Messages navigation/u })
+            .closest(".conversation-row")!;
+        fireEvent.click(
+            within(hiddenReviewRow).getByRole("button", {
+                name: "Restore conversation",
+            }),
+        );
+        await waitFor(() =>
+            expect(updateConversationPreferences).toHaveBeenLastCalledWith({
+                hiddenContexts: { "ctx-second": null },
+            }),
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Current" }));
+        fireEvent.click(
+            within(
+                screen.getByRole("group", { name: "portable-devshell" }),
+            ).getByRole("button", { name: "Hide project" }),
+        );
+        await waitFor(() =>
+            expect(updateConversationPreferences).toHaveBeenLastCalledWith({
+                hiddenContexts: {
+                    "ctx-first": true,
+                    "ctx-second": true,
+                },
+            }),
+        );
+        expect(
+            screen.queryByRole("button", {
+                name: /Investigate the first regression/u,
+            }),
+        ).not.toBeInTheDocument();
+        expect(navigate).not.toHaveBeenCalled();
+    });
+
     it("migrates legacy browser preferences once and deletes them only after server persistence succeeds", async () => {
         const nextState = twoActiveConversationState();
         localStorage.setItem(
@@ -1166,7 +1240,7 @@ describe("Messages", () => {
         expect(
             screen.queryByRole("button", { name: /Check the route model/u }),
         ).not.toBeInTheDocument();
-        const groupToggle = screen.getByRole("button", { name: /Other/u });
+        const groupToggle = screen.getByRole("button", { name: /alpha/u });
         fireEvent.click(groupToggle);
         expect(
             screen.getByRole("button", { name: /Historical conversation/u }),

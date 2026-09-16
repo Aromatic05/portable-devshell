@@ -17,7 +17,8 @@ import {
     applyConversationPreferences,
     conversationKey,
     filterWebMessageSessions,
-    groupHistorySessionsByWorkspace,
+    groupMessageSessionsByWorkspace,
+    isConversationHidden,
     reorderConversationKeys,
     workspacePreferenceKey,
     type WebMessageSession,
@@ -58,9 +59,9 @@ export function ConversationSidebar({
     open: boolean;
 }) {
     const [query, setQuery] = useState("");
-    const [sessionScope, setSessionScope] = useState<"current" | "history">(
-        "current",
-    );
+    const [sessionScope, setSessionScope] = useState<
+        "current" | "history" | "hidden"
+    >("current");
     const [expandedHistoryGroups, setExpandedHistoryGroups] = useState<
         Set<string>
     >(() => new Set());
@@ -75,28 +76,43 @@ export function ConversationSidebar({
 
     const currentSessions = useMemo(
         () =>
-            allBaseSessions.filter((session) =>
-                currentConversationKeys.has(conversationKey(session)),
+            allBaseSessions.filter(
+                (session) =>
+                    !isConversationHidden(conversationPreferences, session) &&
+                    currentConversationKeys.has(conversationKey(session)),
             ),
-        [allBaseSessions, currentConversationKeys],
+        [allBaseSessions, conversationPreferences, currentConversationKeys],
     );
     const historySessions = useMemo(
         () =>
             allBaseSessions.filter(
                 (session) =>
+                    !isConversationHidden(conversationPreferences, session) &&
                     !currentConversationKeys.has(conversationKey(session)),
             ),
-        [allBaseSessions, currentConversationKeys],
+        [allBaseSessions, conversationPreferences, currentConversationKeys],
+    );
+    const hiddenSessions = useMemo(
+        () =>
+            allBaseSessions.filter((session) =>
+                isConversationHidden(conversationPreferences, session),
+            ),
+        [allBaseSessions, conversationPreferences],
     );
     const sessions = useMemo(
         () =>
             applyConversationPreferences(
-                sessionScope === "current" ? currentSessions : historySessions,
+                sessionScope === "current"
+                    ? currentSessions
+                    : sessionScope === "history"
+                      ? historySessions
+                      : hiddenSessions,
                 conversationPreferences,
             ),
         [
             conversationPreferences,
             currentSessions,
+            hiddenSessions,
             historySessions,
             sessionScope,
         ],
@@ -117,9 +133,13 @@ export function ConversationSidebar({
         () => filterWebMessageSessions(sessions, query),
         [query, sessions],
     );
-    const historyGroups = useMemo(
-        () => groupHistorySessionsByWorkspace(visibleSessions),
+    const visibleGroups = useMemo(
+        () => groupMessageSessionsByWorkspace(visibleSessions),
         [visibleSessions],
+    );
+    const allGroups = useMemo(
+        () => groupMessageSessionsByWorkspace(allSessions),
+        [allSessions],
     );
     const idleCurrentCount = currentSessions.filter(
         (session) =>
@@ -243,6 +263,42 @@ export function ConversationSidebar({
         );
     }
 
+    function setContextsHidden(
+        ctxIds: readonly string[],
+        hidden: boolean,
+    ): void {
+        if (!preferencesAvailable) return;
+        const uniqueIds = [...new Set(ctxIds)];
+        if (uniqueIds.length === 0) return;
+        const hiddenContexts = { ...conversationPreferences.hiddenContexts };
+        const patch: Record<string, true | null> = {};
+        for (const ctxId of uniqueIds) {
+            if (hidden) hiddenContexts[ctxId] = true;
+            else delete hiddenContexts[ctxId];
+            patch[ctxId] = hidden ? true : null;
+        }
+        persistPreferences(
+            { ...conversationPreferences, hiddenContexts },
+            { hiddenContexts: patch },
+        );
+        if (
+            hidden &&
+            route.view === "thread" &&
+            uniqueIds.includes(route.ctxId)
+        ) {
+            navigate({ page: "messages", view: "contexts" });
+        }
+    }
+
+    function projectContextIds(workspaceKey: string): string[] {
+        const group = allGroups.find(
+            (candidate) => candidate.key === workspaceKey,
+        );
+        return [
+            ...new Set((group?.sessions ?? []).map((session) => session.ctxId)),
+        ];
+    }
+
     function renderSession(session: WebMessageSession) {
         const active =
             route.view === "thread" &&
@@ -333,38 +389,65 @@ export function ConversationSidebar({
                         </div>
                     </div>
                 ) : (
-                    <button
-                        aria-current={active ? "page" : undefined}
-                        className="conversation-open"
-                        onClick={() => {
-                            onClose();
-                            navigate({
-                                page: "messages",
-                                view: "thread",
-                                instance: session.instance,
-                                ctxId: session.ctxId,
-                            });
-                        }}
-                        onDoubleClick={(event) => {
-                            event.preventDefault();
-                            setEditingConversationKey(key);
-                            setEditingTitle(session.title);
-                        }}
-                        type="button"
-                    >
-                        <strong>{session.title}</strong>
-                        <span>
-                            {session.instance} ·{" "}
-                            {sessionScope === "current"
-                                ? activeConversationKeys.has(key)
-                                    ? "active"
-                                    : "idle"
-                                : (session.status ?? "history")}
-                        </span>
-                        <time dateTime={session.latestAt}>
-                            {formatConversationDate(session.latestAt)}
-                        </time>
-                    </button>
+                    <>
+                        <button
+                            aria-current={active ? "page" : undefined}
+                            className="conversation-open"
+                            onClick={() => {
+                                onClose();
+                                navigate({
+                                    page: "messages",
+                                    view: "thread",
+                                    instance: session.instance,
+                                    ctxId: session.ctxId,
+                                });
+                            }}
+                            onDoubleClick={(event) => {
+                                event.preventDefault();
+                                setEditingConversationKey(key);
+                                setEditingTitle(session.title);
+                            }}
+                            type="button"
+                        >
+                            <strong>{session.title}</strong>
+                            <span>
+                                {session.instance} ·{" "}
+                                {sessionScope === "current"
+                                    ? activeConversationKeys.has(key)
+                                        ? "active"
+                                        : "idle"
+                                    : sessionScope === "hidden"
+                                      ? "hidden"
+                                      : (session.status ?? "history")}
+                            </span>
+                            <time dateTime={session.latestAt}>
+                                {formatConversationDate(session.latestAt)}
+                            </time>
+                        </button>
+                        <button
+                            aria-label={
+                                sessionScope === "hidden"
+                                    ? "Restore conversation"
+                                    : "Hide conversation"
+                            }
+                            className="conversation-visibility-action"
+                            disabled={!preferencesAvailable}
+                            onClick={() =>
+                                setContextsHidden(
+                                    [session.ctxId],
+                                    sessionScope !== "hidden",
+                                )
+                            }
+                            title={
+                                sessionScope === "hidden"
+                                    ? `Restore ${session.title}`
+                                    : `Hide ${session.title}`
+                            }
+                            type="button"
+                        >
+                            {sessionScope === "hidden" ? "↩" : "×"}
+                        </button>
+                    </>
                 )}
             </div>
         );
@@ -404,6 +487,13 @@ export function ConversationSidebar({
                         >
                             History
                         </button>
+                        <button
+                            aria-pressed={sessionScope === "hidden"}
+                            onClick={() => setSessionScope("hidden")}
+                            type="button"
+                        >
+                            Hidden
+                        </button>
                     </div>
                     <button
                         aria-label="Close conversations"
@@ -442,10 +532,8 @@ export function ConversationSidebar({
                 <nav aria-label="Conversations" className="conversation-list">
                     {visibleSessions.length === 0 ? (
                         <p className="empty">No conversations found.</p>
-                    ) : sessionScope === "current" ? (
-                        visibleSessions.map(renderSession)
                     ) : (
-                        historyGroups.map((group) => {
+                        visibleGroups.map((group) => {
                             const containsSelected =
                                 route.view === "thread" &&
                                 group.sessions.some(
@@ -454,6 +542,7 @@ export function ConversationSidebar({
                                         session.ctxId === route.ctxId,
                                 );
                             const expanded =
+                                sessionScope !== "history" ||
                                 query.trim().length > 0 ||
                                 containsSelected ||
                                 expandedHistoryGroups.has(group.key);
@@ -464,30 +553,68 @@ export function ConversationSidebar({
                                     key={group.key}
                                     role="group"
                                 >
-                                    <button
-                                        aria-expanded={expanded}
-                                        className="conversation-workspace-heading"
-                                        onClick={() =>
-                                            setExpandedHistoryGroups(
-                                                (current) => {
-                                                    const next = new Set(
-                                                        current,
-                                                    );
-                                                    if (next.has(group.key))
-                                                        next.delete(group.key);
-                                                    else next.add(group.key);
-                                                    return next;
-                                                },
-                                            )
-                                        }
-                                        title={group.workspace}
-                                        type="button"
-                                    >
-                                        <span>
-                                            {expanded ? "▾" : "▸"} {group.label}
-                                        </span>
-                                        <span>{group.sessions.length}</span>
-                                    </button>
+                                    <div className="conversation-workspace-header">
+                                        <button
+                                            aria-expanded={expanded}
+                                            className="conversation-workspace-heading"
+                                            onClick={() =>
+                                                setExpandedHistoryGroups(
+                                                    (current) => {
+                                                        const next = new Set(
+                                                            current,
+                                                        );
+                                                        if (next.has(group.key))
+                                                            next.delete(
+                                                                group.key,
+                                                            );
+                                                        else
+                                                            next.add(group.key);
+                                                        return next;
+                                                    },
+                                                )
+                                            }
+                                            title={group.workspace}
+                                            type="button"
+                                        >
+                                            <span>
+                                                {expanded ? "▾" : "▸"}{" "}
+                                                {group.label}
+                                            </span>
+                                            <span>{group.sessions.length}</span>
+                                        </button>
+                                        <button
+                                            aria-label={
+                                                sessionScope === "hidden"
+                                                    ? "Restore project"
+                                                    : "Hide project"
+                                            }
+                                            className="conversation-workspace-action"
+                                            disabled={!preferencesAvailable}
+                                            onClick={() =>
+                                                setContextsHidden(
+                                                    sessionScope === "hidden"
+                                                        ? group.sessions.map(
+                                                              (session) =>
+                                                                  session.ctxId,
+                                                          )
+                                                        : projectContextIds(
+                                                              group.key,
+                                                          ),
+                                                    sessionScope !== "hidden",
+                                                )
+                                            }
+                                            title={
+                                                sessionScope === "hidden"
+                                                    ? `Restore ${group.label} conversations`
+                                                    : `Hide ${group.label} conversations`
+                                            }
+                                            type="button"
+                                        >
+                                            {sessionScope === "hidden"
+                                                ? "Restore"
+                                                : "Hide"}
+                                        </button>
+                                    </div>
                                     {expanded ? (
                                         <div className="conversation-workspace-sessions">
                                             {group.sessions.map(renderSession)}
