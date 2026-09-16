@@ -9,26 +9,36 @@ import { buildOAuthPageBoxes } from "./OAuth.js";
 
 export function buildConnectionsOverviewBoxes(
     state: TuiAppState,
-    instance: string,
+    instance: string | undefined,
 ): BoxModel[] {
     const entry = state.instances.find(
         (candidate) => candidate.name === instance,
     );
     const mcp = asRecord(state.readModel.configView?.mcp);
-    const instanceConfig = Array.isArray(state.readModel.configView?.instances)
-        ? state.readModel.configView.instances.find(
-              (candidate) => asRecord(candidate)?.name === instance,
-          )
-        : undefined;
+    const instanceConfig =
+        instance !== undefined &&
+        Array.isArray(state.readModel.configView?.instances)
+            ? state.readModel.configView.instances.find(
+                  (candidate) => asRecord(candidate)?.name === instance,
+              )
+            : undefined;
     const instanceMcp = asRecord(asRecord(instanceConfig)?.mcp);
     const authMode =
         typeof instanceMcp?.auth === "string" ? instanceMcp.auth : "none";
+    const oauthMode =
+        state.readModel.mcpStatus?.authMode === "oauth2" ? "oauth2" : authMode;
     const running = state.readModel.mcpStatus?.running === true;
     const pendingOAuth = state.readModel.oauthApprovals.filter(
         (approval) => approval.status === "pending",
     ).length;
-    const snapshot = state.readModel.instanceState[instance]?.snapshot;
-    const enabled = entry?.mcpEnabled === true;
+    const snapshot =
+        instance === undefined
+            ? undefined
+            : state.readModel.instanceState[instance]?.snapshot;
+    const enabled =
+        instance === undefined
+            ? mcp?.enabled === true
+            : entry?.mcpEnabled === true;
     const restartPending = state.ui.controlRestartRequired;
     const runtime = restartPending
         ? "restart required"
@@ -37,23 +47,34 @@ export function buildConnectionsOverviewBoxes(
           : running
             ? "running"
             : "stopped";
-    const path = entry?.mcpPath ?? `/${instance}/mcp`;
+    const path =
+        instance === undefined
+            ? undefined
+            : (entry?.mcpPath ?? `/${instance}/mcp`);
     const oauthBlocked =
         authMode === "oauth2" && state.readModel.mcpStatus?.oauthReady !== true;
     const usable = !restartPending && running && enabled && !oauthBlocked;
     const publicEndpoint = restartPending
         ? "pending Control restart"
-        : usable
+        : usable && path !== undefined
           ? publicMcpEndpoint(mcp?.publicBaseUrl, path)
-          : "unavailable";
+          : usable && typeof mcp?.publicBaseUrl === "string"
+            ? mcp.publicBaseUrl
+            : "unavailable";
 
     return [
         makeBox(state, "connections", instance, {
             detailLines: [
+                ...(instance === undefined
+                    ? [formatField("Scope", "global")]
+                    : []),
                 formatField("Enabled", String(enabled)),
-                formatField("Path", path),
+                ...(path === undefined ? [] : [formatField("Path", path)]),
                 formatField("Runtime", runtime),
-                formatField("Public MCP", publicEndpoint),
+                formatField(
+                    instance === undefined ? "Public base URL" : "Public MCP",
+                    publicEndpoint,
+                ),
             ],
             id: "connections:connector:mcp",
             primaryRoute: {
@@ -67,15 +88,21 @@ export function buildConnectionsOverviewBoxes(
                   ? "disabled"
                   : "warning",
             summaryLines: [
-                compactSummary(["runtime", runtime], ["path", path]),
+                compactSummary(
+                    ["runtime", runtime],
+                    [
+                        "scope",
+                        instance === undefined ? "global" : (path ?? "-"),
+                    ],
+                ),
             ],
-            title: "Connector",
+            title: instance === undefined ? "Global Connector" : "Connector",
         }),
-        ...(authMode === "oauth2"
+        ...(oauthMode === "oauth2"
             ? [
                   makeBox(state, "connections", instance, {
                       detailLines: [
-                          formatField("Provider", authMode),
+                          formatField("Provider", oauthMode),
                           formatField(
                               "Ready",
                               restartPending
@@ -108,7 +135,7 @@ export function buildConnectionsOverviewBoxes(
                   }),
               ]
             : []),
-        ...(entry?.provider === "reverse"
+        ...(entry?.provider === "reverse" && instance !== undefined
             ? [
                   makeBox(state, "connections", instance, {
                       detailLines: [
@@ -177,7 +204,7 @@ function asRecord(
 
 export function buildConnectionsPageBoxes(
     state: TuiAppState,
-    instanceName: string,
+    instanceName: string | undefined,
 ): BoxModel[] {
     const route = currentTuiRoute(state);
     if (route.page !== "connections") return [];
@@ -191,7 +218,7 @@ export function buildConnectionsPageBoxes(
         case "reverse":
             return buildReverseConnectionBoxes(
                 state,
-                instanceName,
+                instanceName ?? route.instanceId,
                 route.instanceId,
             );
     }

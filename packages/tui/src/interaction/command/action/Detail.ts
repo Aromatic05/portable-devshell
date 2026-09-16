@@ -189,7 +189,7 @@ export class TuiCommandDispatcherDetail {
             if (state.interaction.editor?.kind !== "connector") {
                 this.#store.setEditor({
                     editing: false,
-                    key: `connector:${state.ui.selectedInstance}`,
+                    key: "connector",
                     kind: "connector",
                 });
             }

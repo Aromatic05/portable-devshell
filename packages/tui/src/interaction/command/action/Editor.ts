@@ -121,14 +121,14 @@ export class TuiCommandDispatcherEditor {
     openPageEditor(kind: "config" | "connector", boxId: string): boolean {
         const state = this.#store.getState();
         const instance = state.ui.selectedInstance;
-        if (instance === undefined) {
+        if (kind === "config" && instance === undefined) {
             return false;
         }
-        const key = kind === "config" ? `config:${instance}` : "connector";
+        const key = kind === "config" ? `config:${instance!}` : "connector";
         if (state.ui.formDrafts[key] === undefined) {
             const source =
                 kind === "config"
-                    ? this.#instanceDraft(instance)
+                    ? this.#instanceDraft(instance!)
                     : this.#mcpDraft();
             this.#store.setFormDraft(key, source, false);
         }
@@ -453,18 +453,22 @@ export class TuiCommandDispatcherEditor {
         if (editor.kind === "create") {
             return await this.#createFromWizard();
         }
-        if (instance === undefined) {
+        if (editor.kind === "config" && instance === undefined) {
             return false;
         }
         if (!(await this.validate())) {
             return false;
         }
         const state = this.#store.getState();
-        const snapshot = state.readModel.instanceState[instance]?.snapshot;
+        const snapshot =
+            instance === undefined
+                ? undefined
+                : state.readModel.instanceState[instance]?.snapshot;
         const wasRunning =
             snapshot?.daemonState === "running" || snapshot?.ready === true;
         if (
             restartInstance &&
+            instance !== undefined &&
             snapshot?.reverse?.managementMode === "selfManaged"
         ) {
             this.#store.setEditor({
@@ -476,23 +480,32 @@ export class TuiCommandDispatcherEditor {
         }
         let stoppedForRestart = false;
         try {
-            if (restartInstance && wasRunning) {
+            if (restartInstance && wasRunning && instance !== undefined) {
                 await this.#options.onInstanceAction("stop", instance);
                 stoppedForRestart = true;
             }
-            const instanceKey = `config:${instance}`;
+            const instanceKey =
+                instance === undefined ? undefined : `config:${instance}`;
             const globalKey = "connector";
             const webKey = "web";
-            const instanceDraft = coerceTuiEditorRecord(
-                this.#editorDraft(instanceKey, this.#instanceDraft(instance)),
-            );
+            const instanceDraft =
+                instanceKey === undefined || instance === undefined
+                    ? undefined
+                    : coerceTuiEditorRecord(
+                          this.#editorDraft(
+                              instanceKey,
+                              this.#instanceDraft(instance),
+                          ),
+                      );
             const globalDraft = coerceTuiEditorRecord(
                 this.#editorDraft(globalKey, this.#mcpDraft()),
             );
             const webDraft = coerceTuiEditorRecord(
                 this.#editorDraft(webKey, this.#webDraft()),
             );
-            const instanceDirty = state.ui.dirtyForms[instanceKey] === true;
+            const instanceDirty =
+                instanceKey !== undefined &&
+                state.ui.dirtyForms[instanceKey] === true;
             const globalDirty =
                 editor.kind === "connector" &&
                 state.ui.dirtyForms[globalKey] === true;
@@ -500,7 +513,9 @@ export class TuiCommandDispatcherEditor {
                 editor.kind === "connector" &&
                 state.ui.dirtyForms[webKey] === true;
             const request: ConfigBatchUpdateRequest = {
-                ...(instanceDirty
+                ...(instanceDirty &&
+                instance !== undefined &&
+                instanceDraft !== undefined
                     ? {
                           instance: {
                               instanceName: instance,
@@ -518,15 +533,13 @@ export class TuiCommandDispatcherEditor {
             if (asRecord(applyResult)?.restartControlRequired === true) {
                 this.#store.setControlRestartRequired(true);
             }
-            if (stoppedForRestart) {
+            if (stoppedForRestart && instance !== undefined) {
                 await this.#options.onInstanceAction("start", instance);
                 stoppedForRestart = false;
             }
-            this.#store.setFormDraft(
-                `config:${instance}`,
-                instanceDraft,
-                false,
-            );
+            if (instanceKey !== undefined && instanceDraft !== undefined) {
+                this.#store.setFormDraft(instanceKey, instanceDraft, false);
+            }
             if (editor.kind === "connector") {
                 this.#store.setFormDraft(globalKey, globalDraft, false);
                 this.#store.setFormDraft(webKey, webDraft, false);
@@ -543,7 +556,7 @@ export class TuiCommandDispatcherEditor {
             return true;
         } catch (error) {
             let reported = error;
-            if (stoppedForRestart) {
+            if (stoppedForRestart && instance !== undefined) {
                 try {
                     await this.#options.onInstanceAction("start", instance);
                 } catch (restoreError) {
@@ -699,7 +712,12 @@ export class TuiCommandDispatcherEditor {
             };
         }
         if (editor.kind === "connector" && field.startsWith("instance.")) {
-            const name = instance!;
+            if (instance === undefined) {
+                throw new Error(
+                    "Instance connection settings require a selected instance.",
+                );
+            }
+            const name = instance;
             return {
                 fallback: this.#instanceDraft(name),
                 key: `config:${name}`,
@@ -753,7 +771,7 @@ export class TuiCommandDispatcherEditor {
 
         const instance = this.#store.getState().ui.selectedInstance;
         return instance === undefined
-            ? [editor.key]
+            ? [editor.key, "web"]
             : [editor.key, `config:${instance}`, "web"];
     }
 
@@ -815,7 +833,7 @@ export class TuiCommandDispatcherEditor {
 
     #fullConfigDraft(includeGlobal: boolean): ConfigDraft {
         const state = this.#store.getState();
-        const instance = state.ui.selectedInstance!;
+        const instance = state.ui.selectedInstance;
         const config = cloneRecord(
             state.readModel.configView ?? {
                 control: {},
@@ -827,7 +845,7 @@ export class TuiCommandDispatcherEditor {
         const instances = Array.isArray(rawInstances)
             ? rawInstances.map((entry) => {
                   const record = asRecord(entry);
-                  return record?.name === instance
+                  return instance !== undefined && record?.name === instance
                       ? toTuiInstanceEditorRecord(
                             coerceTuiEditorRecord(
                                 this.#editorDraft(

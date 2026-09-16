@@ -6,7 +6,7 @@ import { compactSummary, makeBox } from "../../Support.js";
 
 export function buildOAuthPageBoxes(
     state: TuiAppState,
-    instanceName: string,
+    instanceName: string | undefined,
 ): BoxModel[] {
     const status = oauthRuntimeStatus(state);
     const statusBox = makeBox(state, "connections", instanceName, {
@@ -65,7 +65,7 @@ export function buildOAuthPageBoxes(
 
 function oauthApprovalBox(
     state: TuiAppState,
-    instanceName: string,
+    instanceName: string | undefined,
     approval: OAuthApprovalRequest,
 ): BoxModel {
     return makeBox(state, "connections", instanceName, {

@@ -71,7 +71,6 @@ export function Connections({
         state.readModel.configView?.restartControlRequired === true;
 
     async function validate(): Promise<boolean> {
-        if (selectedName === undefined) return false;
         const draft = fullValidationDraft(
             state.readModel.configView,
             selectedName,
@@ -94,12 +93,16 @@ export function Connections({
     }
 
     async function save(): Promise<void> {
-        if (selectedName === undefined || !(await validate())) return;
+        if (!(await validate())) return;
         const succeeded = await store.updateConfig({
-            instance: {
-                instanceName: selectedName,
-                patch: { mcp: drafts.instanceMcp },
-            },
+            ...(selectedName === undefined
+                ? {}
+                : {
+                      instance: {
+                          instanceName: selectedName,
+                          patch: { mcp: drafts.instanceMcp },
+                      },
+                  }),
             mcp: drafts.mcp,
             web: drafts.web,
         });
@@ -125,15 +128,6 @@ export function Connections({
         });
     }
 
-    if (selectedName === undefined) {
-        return (
-            <section>
-                <h2>Connections</h2>
-                <p className="empty">No instances are available.</p>
-            </section>
-        );
-    }
-
     return (
         <section className="connections-page">
             <div className="page-heading-actions">
@@ -144,19 +138,28 @@ export function Connections({
                         enrollment.
                     </p>
                 </div>
-                <label className="compact-field">
-                    <span>Instance</span>
-                    <select
-                        onChange={(event) => setSelected(event.target.value)}
-                        value={selectedName}
-                    >
-                        {instances.map((entry) => (
-                            <option key={entry.name} value={entry.name}>
-                                {entry.name}
-                            </option>
-                        ))}
-                    </select>
-                </label>
+                {instances.length === 0 ? (
+                    <p className="hint">
+                        No instances are configured. Global connection settings
+                        remain available.
+                    </p>
+                ) : (
+                    <label className="compact-field">
+                        <span>Instance</span>
+                        <select
+                            onChange={(event) =>
+                                setSelected(event.target.value)
+                            }
+                            value={selectedName}
+                        >
+                            {instances.map((entry) => (
+                                <option key={entry.name} value={entry.name}>
+                                    {entry.name}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                )}
             </div>
 
             <div className="control-grid">
@@ -164,9 +167,17 @@ export function Connections({
                     <h3>Connection endpoints</h3>
                     <dl>
                         <dt>Local MCP</dt>
-                        <dd>{localMcpEndpoint(selectedName, drafts)}</dd>
+                        <dd>
+                            {selectedName === undefined
+                                ? "Select an instance"
+                                : localMcpEndpoint(selectedName, drafts)}
+                        </dd>
                         <dt>Public MCP</dt>
-                        <dd>{publicMcpEndpoint(drafts)}</dd>
+                        <dd>
+                            {selectedName === undefined
+                                ? "Select an instance"
+                                : publicMcpEndpoint(drafts)}
+                        </dd>
                         <dt>Web UI</dt>
                         <dd>{webEndpoint(drafts)}</dd>
                         <dt>MCP runtime</dt>
@@ -175,8 +186,12 @@ export function Connections({
                                 ? "running"
                                 : "stopped"}
                         </dd>
-                        <dt>Auth</dt>
-                        <dd>{String(drafts.instanceMcp?.auth ?? "none")}</dd>
+                        <dt>Instance auth</dt>
+                        <dd>
+                            {selectedName === undefined
+                                ? "not selected"
+                                : String(drafts.instanceMcp?.auth ?? "none")}
+                        </dd>
                     </dl>
                     {controlRestartRequired ? (
                         <p className="notice">
@@ -186,55 +201,57 @@ export function Connections({
                     ) : null}
                 </article>
 
-                <article className="card">
-                    <h3>[Instance] MCP</h3>
-                    <div className="form-grid">
-                        <Check
-                            checked={drafts.instanceMcp?.enabled !== false}
-                            label="Enabled"
-                            onChange={(enabled) =>
-                                setDrafts((current) => ({
-                                    ...current,
-                                    instanceMcp: {
-                                        ...current.instanceMcp,
-                                        enabled,
-                                    },
-                                }))
-                            }
-                        />
-                        <Field label="Path">
-                            <input
-                                onChange={(event) =>
+                {selectedName === undefined ? null : (
+                    <article className="card">
+                        <h3>[Instance] MCP</h3>
+                        <div className="form-grid">
+                            <Check
+                                checked={drafts.instanceMcp?.enabled !== false}
+                                label="Enabled"
+                                onChange={(enabled) =>
                                     setDrafts((current) => ({
                                         ...current,
                                         instanceMcp: {
                                             ...current.instanceMcp,
-                                            path: event.target.value,
+                                            enabled,
                                         },
                                     }))
                                 }
-                                value={String(
-                                    drafts.instanceMcp?.path ??
-                                        `/${selectedName}/mcp`,
-                                )}
                             />
-                        </Field>
-                        <AuthFields
-                            auth={drafts.instanceMcp?.auth ?? "none"}
-                            oauth2={drafts.instanceMcp?.oauth2}
-                            onChange={(patch) =>
-                                setDrafts((current) => ({
-                                    ...current,
-                                    instanceMcp: {
-                                        ...current.instanceMcp,
-                                        ...patch,
-                                    },
-                                }))
-                            }
-                            token={drafts.instanceMcp?.token}
-                        />
-                    </div>
-                </article>
+                            <Field label="Path">
+                                <input
+                                    onChange={(event) =>
+                                        setDrafts((current) => ({
+                                            ...current,
+                                            instanceMcp: {
+                                                ...current.instanceMcp,
+                                                path: event.target.value,
+                                            },
+                                        }))
+                                    }
+                                    value={String(
+                                        drafts.instanceMcp?.path ??
+                                            `/${selectedName}/mcp`,
+                                    )}
+                                />
+                            </Field>
+                            <AuthFields
+                                auth={drafts.instanceMcp?.auth ?? "none"}
+                                oauth2={drafts.instanceMcp?.oauth2}
+                                onChange={(patch) =>
+                                    setDrafts((current) => ({
+                                        ...current,
+                                        instanceMcp: {
+                                            ...current.instanceMcp,
+                                            ...patch,
+                                        },
+                                    }))
+                                }
+                                token={drafts.instanceMcp?.token}
+                            />
+                        </div>
+                    </article>
+                )}
 
                 <article className="card">
                     <h3>[Global] MCP listener</h3>
@@ -448,7 +465,7 @@ export function Connections({
 
             {selectedEntry?.provider === "reverse" ? (
                 <article className="detail reverse-connection-panel">
-                    <h3>Reverse connection · {selectedName}</h3>
+                    <h3>Reverse connection · {selectedEntry.name}</h3>
                     <dl>
                         <dt>Connection</dt>
                         <dd>{snapshot?.connectionState ?? "unknown"}</dd>
@@ -463,7 +480,7 @@ export function Connections({
                             disabled={!interactive}
                             onClick={() =>
                                 void store
-                                    .createReverseCode(selectedName)
+                                    .createReverseCode(selectedEntry.name)
                                     .then((value) => {
                                         if (value !== undefined)
                                             setEnrollment(value);
@@ -492,28 +509,29 @@ export function Connections({
                 </article>
             ) : null}
 
-            {confirm === undefined ? null : (
+            {confirm === undefined ||
+            selectedEntry?.provider !== "reverse" ? null : (
                 <ConfirmationDialog
                     actionLabel={confirm === "rotate" ? "Rotate" : "Revoke"}
                     busy={
                         state.operations[
                             confirm === "rotate"
-                                ? `reverse:rotate:${selectedName}`
-                                : `reverse:revoke:${selectedName}`
+                                ? `reverse:rotate:${selectedEntry.name}`
+                                : `reverse:revoke:${selectedEntry.name}`
                         ] !== undefined
                     }
                     description={
                         confirm === "rotate"
-                            ? `Rotate the device token for ${selectedName}? Existing credentials will stop working.`
-                            : `Revoke the device token for ${selectedName}? The remote worker must enroll again.`
+                            ? `Rotate the device token for ${selectedEntry.name}? Existing credentials will stop working.`
+                            : `Revoke the device token for ${selectedEntry.name}? The remote worker must enroll again.`
                     }
                     variant="destructive"
                     onCancel={() => setConfirm(undefined)}
                     onConfirm={() => {
                         const request =
                             confirm === "rotate"
-                                ? store.rotateReverseToken(selectedName)
-                                : store.revokeReverseToken(selectedName);
+                                ? store.rotateReverseToken(selectedEntry.name)
+                                : store.revokeReverseToken(selectedEntry.name);
                         void request.then((succeeded) => {
                             if (succeeded) setConfirm(undefined);
                         });
@@ -753,7 +771,7 @@ function configWebPatch(value: JsonValue | undefined): ConfigWebPatch {
 
 function fullValidationDraft(
     configView: Record<string, JsonValue> | undefined,
-    selected: string,
+    selected: string | undefined,
     drafts: ConnectionDrafts,
 ): ConfigDraft {
     const instances = Array.isArray(configView?.instances)

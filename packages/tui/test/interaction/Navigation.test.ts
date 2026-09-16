@@ -3479,6 +3479,100 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             ["Connector"],
         );
     });
+    test("connections keeps global controls editable without a selected instance", async () => {
+        const updates: Array<Record<string, unknown>> = [];
+        const harness = createHarness({
+            onConfigUpdate: async (value) => {
+                updates.push(value);
+                return {};
+            },
+        });
+        harness.store.patchControlReadModel({
+            configView: {
+                instances: [],
+                mcp: {
+                    enabled: true,
+                    listenHost: "127.0.0.1",
+                    listenPort: 3210,
+                    publicBaseUrl: "https://example.test/mcp",
+                },
+                web: {
+                    auth: "none",
+                    enabled: true,
+                    listenHost: "127.0.0.1",
+                    listenPort: 3211,
+                    publicBaseUrl: "https://example.test/web",
+                },
+            },
+            instances: [],
+            mcpStatus: { authMode: "oauth2", oauthReady: true, running: true },
+        });
+        harness.store.setSelectedInstance(undefined);
+        harness.store.setSelectedPage("connections");
+
+        const overview = selectMainScreenModel(harness.store.getState());
+        assert.equal(overview.emptyState, undefined);
+        assert.deepEqual(
+            overview.boxes.map((box) => box.title),
+            ["Global Connector", "OAuth Provider"],
+        );
+
+        enterConnectionsRoute(harness, "connector");
+        const connector = selectMainScreenModel(harness.store.getState());
+        assert.equal(
+            connector.boxes.some((box) => box.title.startsWith("[Instance]")),
+            false,
+        );
+        assert.equal(
+            connector.boxes.some((box) =>
+                box.title.startsWith("[Global] Web UI"),
+            ),
+            true,
+        );
+        harness.store.setFormDraft(
+            "connector",
+            {
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3220,
+                publicBaseUrl: "https://example.test/mcp",
+            },
+            true,
+        );
+        harness.store.setFormDraft(
+            "web",
+            {
+                auth: "none",
+                enabled: true,
+                listenHost: "127.0.0.1",
+                listenPort: 3211,
+                publicBaseUrl: "https://example.test/web",
+            },
+            false,
+        );
+        harness.store.setEditor({
+            editing: false,
+            key: "connector",
+            kind: "connector",
+        });
+        const actions = expandBox(harness, "connector-actions");
+        harness.store.setMainFocusId(actions.id);
+        harness.store.setFocusScope("boxDetail");
+        harness.store.setSelectedDetailLine(
+            actions.expandedKey,
+            "connector-actions:button:save",
+        );
+        await harness.dispatch({ type: "focus.activate" });
+
+        assert.equal(updates.length, 1);
+        assert.equal(updates[0]?.instance, undefined);
+        assert.deepEqual(updates[0]?.mcp, {
+            enabled: true,
+            listenHost: "127.0.0.1",
+            listenPort: 3220,
+            publicBaseUrl: "https://example.test/mcp",
+        });
+    });
     test("connector page actions send all affected scopes in one configuration transaction", async () => {
         const updates: Array<Record<string, unknown>> = [];
         const harness = createHarness({

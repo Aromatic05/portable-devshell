@@ -100,6 +100,55 @@ describe("Web Connections", () => {
         );
         expect(rotate).not.toBeInTheDocument();
     });
+
+    it("keeps global connection controls available without any instances", async () => {
+        const state = connectionState();
+        state.readModel.configView!.instances = [];
+        state.readModel.instanceState = {};
+        const store = {
+            state,
+            updateConfig: vi.fn(async () => true),
+            validateConfig: vi.fn(async () => true),
+            restartControl: vi.fn(async () => true),
+        } as unknown as WebStore;
+        render(<Connections disabled={false} state={state} store={store} />);
+
+        expect(
+            screen.getByRole("heading", { name: "[Global] MCP listener" }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("heading", { name: "[Global] Web UI" }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole("heading", { name: "OAuth runtime" }),
+        ).toBeInTheDocument();
+        expect(
+            screen.queryByRole("heading", { name: "[Instance] MCP" }),
+        ).toBeNull();
+
+        const mcpCard = screen.getByRole("heading", {
+            name: "[Global] MCP listener",
+        }).parentElement!;
+        fireEvent.change(within(mcpCard).getByLabelText("Listen port"), {
+            target: { value: "3200" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+        await waitFor(() =>
+            expect(store.validateConfig).toHaveBeenCalledOnce(),
+        );
+        await waitFor(() =>
+            expect(store.updateConfig).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    mcp: expect.objectContaining({ listenPort: 3200 }),
+                    web: expect.any(Object),
+                }),
+            ),
+        );
+        expect(store.updateConfig.mock.calls[0]?.[0]).not.toHaveProperty(
+            "instance",
+        );
+    });
 });
 
 function connectionState(): WebState {

@@ -65,9 +65,7 @@ function buildUnfilteredBoxes(
                 ? []
                 : buildConfigPageBoxes(state, instanceName);
         case "connections":
-            return instanceName === undefined
-                ? []
-                : buildConnectionsPageBoxes(state, instanceName);
+            return buildConnectionsPageBoxes(state, instanceName);
         case "messages":
             return [];
         case "audit":

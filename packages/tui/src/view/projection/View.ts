@@ -449,6 +449,7 @@ function requiresInstance(page: TuiActivePage["page"]): boolean {
     return (
         page !== "overview" &&
         page !== "instances" &&
+        page !== "connections" &&
         page !== "messages" &&
         page !== "help"
     );
