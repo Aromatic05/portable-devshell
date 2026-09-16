@@ -220,6 +220,32 @@ Worker RPC completed-result cache     1024 条
 
 这些是当前实现默认值，不属于 Frame wire-level 兼容性要求。
 
+## Provider 路由与 Proxy
+
+Reverse 自己的出站路径属于 Provider 层，不复用 `network.tcp` Service。
+
+当前实现能力：
+
+```text
+WSS
+    tungstenite 直接建立 TCP/TLS/WebSocket
+    不读取 DevShell-specific proxy config
+
+SSE / HTTPS POST
+    reqwest 默认读取 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY
+    当前构建未启用 reqwest socks feature
+```
+
+因此：
+
+- OS routing、Tailscale、WireGuard、透明代理等对两种 carrier 都透明；
+- HTTP(S) proxy 环境变量可以作用于 SSE/POST fallback；
+- 当前 WSS 不通过这些 proxy 环境变量建立 CONNECT tunnel；
+- `socks5://` proxy URL 不是当前 Reverse Provider 的受支持能力；
+- 当前没有持久化 `reverse.proxy` 配置字段。
+
+如果未来需要显式 Reverse SOCKS / HTTP proxy，应在 Reverse Provider 的 Channel 建立逻辑中统一实现 WSS 与 SSE/POST routing；不能把 proxy 信息塞进 Frame OPEN 或 `network.tcp` metadata。
+
 ## 验收要求
 
 Reverse integration 必须至少覆盖：

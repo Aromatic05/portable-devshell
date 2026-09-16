@@ -272,6 +272,32 @@ artifact.receive
 
 Service 名称只允许出现在 Service dispatcher / consumer；Frame codec、stream state、scheduler 与 Channel 都不得按 Service 名分支。
 
+### 3.6 Routing / Proxy
+
+`route` 不是新的公共 Transport 层，也不是 `network.tcp` metadata 的一部分。必须先区分两类路径：
+
+```text
+Provider path
+    Control / Worker 之间如何建立 Channel
+
+Service destination path
+    Worker 建立 network.tcp 时，bytes 最终如何到目标 endpoint
+```
+
+当前规则：
+
+- SSH Provider 直接使用 `ssh.command`；OpenSSH `ProxyJump`、`ProxyCommand`、ssh config 等 Provider 路由能力由该命令表达，DevShell 不复制一套 SSH route schema；
+- Docker / Podman 的路径由对应 container network 决定；
+- Tailscale / WireGuard 等已经进入 Worker OS routing table 的路径，对 `network.tcp` 完全透明；host 可以直接使用 tailnet IP / DNS name；
+- `network.tcp` metadata 始终只描述 `{ host, port }`，表示要连接的当前 byte endpoint；
+- 若最终目标需要通过 SOCKS，Consumer 先 `network.tcp(proxyHost, proxyPort)`，再在得到的 `FrameStream` 上执行 SOCKS CONNECT；隧道建立后继续承载 HTTP / TLS / database protocol；
+- SOCKS 因而是 Protocol / Consumer 组合，不新增 `network.socks` Service，也不向 Frame 增加 `route` 字段；
+- Reverse Provider 自己如何经 proxy 连接 Control 属于 Provider 实现，和 Worker 上的 `network.tcp` 无关。
+
+该分层已由真实 Worker e2e 验证：Consumer 通过 `network.tcp` 连接 SOCKS5 proxy，完成 no-auth CONNECT 后在同一个 `FrameStream` 上发送 HTTP/1.1 request/response。
+
+如果未来多个调用方重复需要 SOCKS consumer，可以增加 domain-level SOCKS helper，但它只能包装 `FrameStream`；不能改变 Frame wire contract 或固定 primitive Service 集。
+
 ## 4. Channel 与 Frame 的依赖方向
 
 历史问题：
@@ -1079,6 +1105,7 @@ Client 与 Control 之间的 `ClientConnection` / `PrefixRoute` 是另一条已�
 
 ```text
 HTTP/1.1 over network.tcp
+SOCKS5 CONNECT + HTTP/1.1 over network.tcp(proxy)
 rsync wire protocol over process.exec
 700 KiB Artifact raw data plane
 real WSS Reverse Worker with sibling Services
@@ -1132,6 +1159,7 @@ real WSS Reverse Worker with sibling Services
 
 - TCP echo；
 - HTTP request/response；
+- SOCKS5 CONNECT 后继续承载 HTTP；
 - half-close；
 - connect failure -> RESET；
 - large bidirectional transfer。
