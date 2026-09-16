@@ -1,18 +1,23 @@
+mod artifact;
 mod exec;
 mod tcp;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, ChildStdout};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread;
 use std::time::Duration;
 
+use artifact::{PayloadOutput, PayloadService, ReceiveInput, ReceiveService};
 use exec::ExecService;
 use tcp::TcpService;
 
+use crate::capability::artifact::payload::ArtifactPayloadStore;
+use crate::capability::artifact::receive::ArtifactReceiveStore;
 use crate::capability::rpc::client::subscribe_notifications;
 use crate::transport::frame::{
     FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, FrameEvent, FrameProtocol, FrameRole,
@@ -25,55 +30,90 @@ const EVENT_QUEUE_CAPACITY: usize = 64;
 const SERVICE_QUEUE_CAPACITY: usize = 1;
 const SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-pub enum ServiceConnection {
+#[derive(Clone, Default)]
+pub(crate) struct ServiceContext {
+    artifact_payloads: Option<Arc<ArtifactPayloadStore>>,
+    artifact_receives: Option<Arc<ArtifactReceiveStore>>,
+    rpc_socket: Option<PathBuf>,
+}
+
+impl ServiceContext {
+    pub(crate) fn daemon(
+        rpc_socket: PathBuf,
+        artifact_payloads: Arc<ArtifactPayloadStore>,
+        artifact_receives: Arc<ArtifactReceiveStore>,
+    ) -> Self {
+        Self {
+            artifact_payloads: Some(artifact_payloads),
+            artifact_receives: Some(artifact_receives),
+            rpc_socket: Some(rpc_socket),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_artifacts(
+        artifact_payloads: Arc<ArtifactPayloadStore>,
+        artifact_receives: Arc<ArtifactReceiveStore>,
+    ) -> Self {
+        Self {
+            artifact_payloads: Some(artifact_payloads),
+            artifact_receives: Some(artifact_receives),
+            rpc_socket: None,
+        }
+    }
+}
+
+enum ServiceConnection {
+    ArtifactPayload(PayloadService),
+    ArtifactReceive(ReceiveService),
     Tcp(TcpService),
     Exec(ExecService),
     Rpc(RpcService),
 }
 
 impl ServiceConnection {
-    pub fn supports(service: &str) -> bool {
-        matches!(service, "network.tcp" | "process.exec" | "worker.rpc")
+    fn supports(service: &str) -> bool {
+        matches!(
+            service,
+            "artifact.payload" | "artifact.receive" | "network.tcp" | "process.exec" | "worker.rpc"
+        )
     }
 
-    pub fn open(service: &str, metadata: &[u8], rpc_socket: Option<&Path>) -> Result<Self, String> {
+    fn open(service: &str, metadata: &[u8], context: &ServiceContext) -> Result<Self, String> {
         match service {
+            "artifact.payload" => PayloadService::open(
+                metadata,
+                Arc::clone(
+                    context
+                        .artifact_payloads
+                        .as_ref()
+                        .ok_or_else(|| "artifact.payload is unavailable.".to_string())?,
+                ),
+            )
+            .map(Self::ArtifactPayload),
+            "artifact.receive" => ReceiveService::open(
+                metadata,
+                Arc::clone(
+                    context
+                        .artifact_receives
+                        .as_ref()
+                        .ok_or_else(|| "artifact.receive is unavailable.".to_string())?,
+                ),
+            )
+            .map(Self::ArtifactReceive),
             "network.tcp" => TcpService::open(metadata).map(Self::Tcp),
             "process.exec" => ExecService::open(metadata).map(Self::Exec),
-            "worker.rpc" => RpcService::open(metadata, rpc_socket).map(Self::Rpc),
+            "worker.rpc" => {
+                RpcService::open(metadata, context.rpc_socket.as_deref()).map(Self::Rpc)
+            }
             _ => Err(format!("unsupported transport Service {service}")),
         }
     }
 
-    #[cfg(test)]
-    pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
+    fn reset(&mut self) {
         match self {
-            Self::Tcp(service) => service.write(data),
-            Self::Exec(service) => service.write(data),
-            Self::Rpc(service) => service.write(data),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn finish_input(&mut self) -> Result<(), String> {
-        match self {
-            Self::Tcp(service) => service.finish_input(),
-            Self::Exec(service) => service.finish_input(),
-            Self::Rpc(service) => service.finish_input(),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
-        match self {
-            Self::Tcp(service) => service.read(buffer),
-            Self::Exec(service) => service.read(buffer),
-            Self::Rpc(service) => service.read(buffer),
-        }
-    }
-
-    pub fn reset(&mut self) {
-        match self {
+            Self::ArtifactPayload(service) => service.reset(),
+            Self::ArtifactReceive(service) => service.reset(),
             Self::Tcp(service) => service.reset(),
             Self::Exec(service) => service.reset(),
             Self::Rpc(service) => service.reset(),
@@ -82,6 +122,10 @@ impl ServiceConnection {
 
     fn take_input(&mut self) -> Result<ServiceInput, String> {
         match self {
+            Self::ArtifactPayload(_) => Ok(ServiceInput::Closed),
+            Self::ArtifactReceive(service) => {
+                service.take_input().map(ServiceInput::ArtifactReceive)
+            }
             Self::Tcp(service) => service.clone_stream().map(ServiceInput::Tcp),
             Self::Exec(service) => service
                 .take_stdin()
@@ -94,6 +138,10 @@ impl ServiceConnection {
 
     fn take_output(&mut self) -> Result<ServiceOutput, String> {
         match self {
+            Self::ArtifactPayload(service) => {
+                service.take_output().map(ServiceOutput::ArtifactPayload)
+            }
+            Self::ArtifactReceive(_) => Ok(ServiceOutput::Closed),
             Self::Tcp(service) => service.clone_stream().map(ServiceOutput::Tcp),
             Self::Exec(service) => service.take_stdout().map(ServiceOutput::Exec),
             Self::Rpc(service) => service.take_output().map(ServiceOutput::Rpc),
@@ -102,6 +150,8 @@ impl ServiceConnection {
 
     fn output_complete(&mut self) -> Result<bool, String> {
         match self {
+            Self::ArtifactPayload(_) => Ok(true),
+            Self::ArtifactReceive(service) => Ok(service.output_complete()),
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
             Self::Rpc(_) => Ok(true),
@@ -132,34 +182,6 @@ impl RpcService {
         })
     }
 
-    #[cfg(test)]
-    fn write(&mut self, data: &[u8]) -> Result<(), String> {
-        self.input
-            .as_mut()
-            .ok_or_else(|| "worker.rpc input is closed.".to_string())?
-            .write_all(data)
-            .map_err(|error| format!("worker.rpc write failed: {error}"))
-    }
-
-    #[cfg(test)]
-    fn finish_input(&mut self) -> Result<(), String> {
-        if let Some(input) = self.input.take() {
-            input
-                .shutdown_write()
-                .map_err(|error| format!("worker.rpc half-close failed: {error}"))?;
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
-        self.output
-            .as_mut()
-            .ok_or_else(|| "worker.rpc output is closed.".to_string())?
-            .read(buffer)
-            .map_err(|error| format!("worker.rpc read failed: {error}"))
-    }
-
     fn take_input(&mut self) -> Result<LocalIpcStream, String> {
         self.input
             .take()
@@ -185,6 +207,8 @@ impl RpcService {
 }
 
 enum ServiceInput {
+    ArtifactReceive(ReceiveInput),
+    Closed,
     Tcp(TcpStream),
     Exec(Option<ChildStdin>),
     Rpc(Option<LocalIpcStream>),
@@ -193,6 +217,8 @@ enum ServiceInput {
 impl ServiceInput {
     fn write(&mut self, data: &[u8]) -> Result<(), String> {
         match self {
+            Self::ArtifactReceive(input) => input.write(data),
+            Self::Closed => Err("Service does not accept input DATA.".to_string()),
             Self::Tcp(stream) => stream
                 .write_all(data)
                 .map_err(|error| format!("network.tcp write failed: {error}")),
@@ -211,6 +237,8 @@ impl ServiceInput {
 
     fn finish(&mut self) -> Result<(), String> {
         match self {
+            Self::ArtifactReceive(input) => input.finish(),
+            Self::Closed => Ok(()),
             Self::Tcp(stream) => stream
                 .shutdown(Shutdown::Write)
                 .map_err(|error| format!("network.tcp half-close failed: {error}")),
@@ -231,6 +259,8 @@ impl ServiceInput {
 }
 
 enum ServiceOutput {
+    ArtifactPayload(PayloadOutput),
+    Closed,
     Tcp(TcpStream),
     Exec(ChildStdout),
     Rpc(LocalIpcStream),
@@ -239,6 +269,10 @@ enum ServiceOutput {
 impl ServiceOutput {
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
         match self {
+            Self::ArtifactPayload(output) => output
+                .read(buffer)
+                .map_err(|error| format!("artifact.payload read failed: {error}")),
+            Self::Closed => Ok(0),
             Self::Tcp(stream) => stream
                 .read(buffer)
                 .map_err(|error| format!("network.tcp read failed: {error}")),
@@ -291,10 +325,10 @@ impl ActiveService {
         stream_id: u32,
         service: &str,
         metadata: &[u8],
-        rpc_socket: &Path,
+        context: &ServiceContext,
         events: SyncSender<ServerEvent>,
     ) -> Result<Self, String> {
-        let mut connection = ServiceConnection::open(service, metadata, Some(rpc_socket))?;
+        let mut connection = ServiceConnection::open(service, metadata, context)?;
         let input = connection.take_input()?;
         let output = connection.take_output()?;
         let (input_tx, input_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
@@ -320,14 +354,14 @@ impl ActiveService {
     }
 }
 
-pub fn serve_ipc(stream: LocalIpcStream, rpc_socket: &Path) -> Result<(), String> {
+pub fn serve_ipc(stream: LocalIpcStream, context: ServiceContext) -> Result<(), String> {
     let input = stream
         .try_clone()
         .map_err(|error| format!("failed to clone transport IPC stream: {error}"))?;
-    serve(input, stream, rpc_socket)
+    serve(input, stream, context)
 }
 
-fn serve<R, W>(input: R, mut output: W, rpc_socket: &Path) -> Result<(), String>
+fn serve<R, W>(input: R, mut output: W, context: ServiceContext) -> Result<(), String>
 where
     R: Read + Send + 'static,
     W: Write,
@@ -348,7 +382,7 @@ where
                         &mut services,
                         &events_tx,
                         frame,
-                        rpc_socket,
+                        &context,
                         &mut output,
                     )?;
                 }
@@ -571,7 +605,7 @@ fn accept_frame<W: Write>(
     services: &mut HashMap<u32, ActiveService>,
     events: &SyncSender<ServerEvent>,
     frame: Frame,
-    rpc_socket: &Path,
+    context: &ServiceContext,
     output: &mut W,
 ) -> Result<(), String> {
     let stream_id = frame.stream_id();
@@ -592,7 +626,7 @@ fn accept_frame<W: Write>(
                 write_frame(output, &reset)?;
                 return Ok(());
             }
-            match ActiveService::open(stream_id, &service, &metadata, rpc_socket, events.clone()) {
+            match ActiveService::open(stream_id, &service, &metadata, context, events.clone()) {
                 Ok(active) => {
                     services.insert(stream_id, active);
                     let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
@@ -779,13 +813,20 @@ fn write_frame<W: Write>(output: &mut W, frame: &Frame) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io::{Read, Write};
     use std::net::{Shutdown, TcpListener};
+    use std::sync::Arc;
     use std::thread;
 
     use serde_json::json;
 
     use super::*;
+    use crate::capability::artifact::payload::ArtifactPayloadStore;
+    use crate::capability::artifact::receive::{ArtifactReceiveBeginInput, ArtifactReceiveStore};
+    use crate::capability::artifact::store::ArtifactStore;
+    use crate::capability::artifact::unix_time_millis;
+    use crate::instance::sandbox::policy::DisabledSecurityPolicy;
     use crate::transport::frame::{FrameEvent, FrameProtocol, FrameRole, RESET_CANCELLED};
 
     #[test]
@@ -849,6 +890,101 @@ mod tests {
         assert!(String::from_utf8_lossy(&response).contains("ping"));
     }
 
+    #[test]
+    fn artifact_payload_service_streams_raw_bytes_with_total_length_header() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).expect("workspace");
+        let payload_bytes = b"0123456789artifact";
+        fs::write(workspace.join("source.bin"), payload_bytes).expect("source");
+
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).expect("artifacts");
+        let payloads =
+            ArtifactPayloadStore::new(root.path().join("payloads"), Arc::clone(&artifacts))
+                .expect("payloads");
+        let receives = ArtifactReceiveStore::new(root.path().join("receives")).expect("receives");
+        let opened = payloads
+            .open_path(
+                &workspace,
+                "./source.bin",
+                &DisabledSecurityPolicy,
+                unix_time_millis() + 60_000,
+            )
+            .expect("open payload");
+        let context = ServiceContext::with_artifacts(Arc::clone(&payloads), receives);
+        let metadata = serde_json::to_vec(&json!({
+            "payloadId": opened.payload_id,
+            "offsetBytes": 2,
+            "maxBytes": 7,
+        }))
+        .expect("metadata");
+
+        let response = run_frame_service_with_context("artifact.payload", metadata, b"", &context)
+            .expect("payload stream");
+
+        assert!(response.len() >= 8);
+        assert_eq!(
+            u64::from_be_bytes(response[..8].try_into().expect("header")),
+            payload_bytes.len() as u64,
+        );
+        assert_eq!(&response[8..], &payload_bytes[2..9]);
+    }
+
+    #[test]
+    fn artifact_receive_service_accepts_raw_bytes_before_rpc_finish() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let source_workspace = root.path().join("source");
+        let target_workspace = root.path().join("target");
+        fs::create_dir(&source_workspace).expect("source workspace");
+        fs::create_dir(&target_workspace).expect("target workspace");
+        let payload_bytes = b"raw artifact receive bytes";
+        fs::write(source_workspace.join("source.bin"), payload_bytes).expect("source");
+
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).expect("artifacts");
+        let payloads =
+            ArtifactPayloadStore::new(root.path().join("payloads"), Arc::clone(&artifacts))
+                .expect("payloads");
+        let receives = ArtifactReceiveStore::new(root.path().join("receives")).expect("receives");
+        let opened = payloads
+            .open_path(
+                &source_workspace,
+                "./source.bin",
+                &DisabledSecurityPolicy,
+                unix_time_millis() + 60_000,
+            )
+            .expect("open payload");
+        let receive = receives
+            .begin(
+                &target_workspace,
+                &DisabledSecurityPolicy,
+                ArtifactReceiveBeginInput {
+                    descriptor: opened.descriptor,
+                    overwrite: false,
+                    target_path: "./target.bin".to_string(),
+                },
+            )
+            .expect("begin receive");
+        let context = ServiceContext::with_artifacts(payloads, Arc::clone(&receives));
+        let metadata = serde_json::to_vec(&json!({
+            "receiveId": receive.receive_id,
+            "offsetBytes": receive.next_offset_bytes,
+        }))
+        .expect("metadata");
+
+        let response =
+            run_frame_service_with_context("artifact.receive", metadata, payload_bytes, &context)
+                .expect("receive stream");
+        assert!(response.is_empty());
+
+        receives
+            .finish(&receive.receive_id)
+            .expect("finish receive");
+        assert_eq!(
+            fs::read(target_workspace.join("target.bin")).expect("target"),
+            payload_bytes,
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn process_exec_carries_real_rsync_server_protocol_bytes() {
@@ -893,7 +1029,9 @@ mod tests {
             _ => panic!("expected OPEN event"),
         };
         let mut connection =
-            ServiceConnection::open(&service, &metadata, None).expect("spawn rsync");
+            ServiceConnection::open(&service, &metadata, &ServiceContext::default())
+                .expect("spawn rsync");
+        let mut service_output = connection.take_output().expect("attach rsync output");
         let window = worker
             .accept_open(opened_id, 64 * 1024)
             .expect("accept process.exec");
@@ -902,7 +1040,7 @@ mod tests {
         let mut greeting = [0u8; 4];
         let mut offset = 0;
         while offset < greeting.len() {
-            let read = connection
+            let read = service_output
                 .read(&mut greeting[offset..])
                 .expect("read rsync greeting");
             assert!(read > 0, "rsync closed before protocol greeting");
@@ -932,16 +1070,30 @@ mod tests {
 
     #[test]
     fn service_dispatch_rejects_unknown_names_and_metadata() {
-        assert!(ServiceConnection::open("unknown", b"{}", None).is_err());
-        assert!(ServiceConnection::open("network.tcp", br#"{"host":"127.0.0.1"}"#, None).is_err());
-        assert!(ServiceConnection::open("process.exec", br#"{"executable":""}"#, None).is_err());
-        assert!(ServiceConnection::open("worker.rpc", b"", None).is_err());
+        let context = ServiceContext::default();
+        assert!(ServiceConnection::open("unknown", b"{}", &context).is_err());
+        assert!(
+            ServiceConnection::open("network.tcp", br#"{"host":"127.0.0.1"}"#, &context).is_err()
+        );
+        assert!(
+            ServiceConnection::open("process.exec", br#"{"executable":""}"#, &context).is_err()
+        );
+        assert!(ServiceConnection::open("worker.rpc", b"", &context).is_err());
     }
 
     fn run_frame_service(
         service_name: &str,
         metadata: Vec<u8>,
         request: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        run_frame_service_with_context(service_name, metadata, request, &ServiceContext::default())
+    }
+
+    fn run_frame_service_with_context(
+        service_name: &str,
+        metadata: Vec<u8>,
+        request: &[u8],
+        context: &ServiceContext,
     ) -> Result<Vec<u8>, String> {
         let mut client = FrameProtocol::new(FrameRole::Opener);
         let mut worker = FrameProtocol::new(FrameRole::Acceptor);
@@ -957,7 +1109,9 @@ mod tests {
             } => (stream_id, service, metadata),
             _ => return Err("Expected OPEN event.".to_string()),
         };
-        let mut connection = ServiceConnection::open(&service, &metadata, None)?;
+        let mut connection = ServiceConnection::open(&service, &metadata, context)?;
+        let mut service_input = connection.take_input()?;
+        let mut service_output = connection.take_output()?;
         let window = worker.accept_open(opened_id, 64 * 1024)?;
         client.accept_frame(window)?;
 
@@ -971,7 +1125,7 @@ mod tests {
             let (data, window) = worker
                 .read(stream_id)?
                 .ok_or_else(|| "request DATA event missing.".to_string())?;
-            connection.write(&data)?;
+            service_input.write(&data)?;
             if let Some(window) = window {
                 client.accept_frame(window)?;
             }
@@ -979,12 +1133,12 @@ mod tests {
 
         let fin = client.finish(stream_id)?;
         worker.accept_frame(fin)?;
-        connection.finish_input()?;
+        service_input.finish()?;
 
         let mut response = Vec::new();
         let mut buffer = [0u8; 4096];
         loop {
-            let read = connection.read(&mut buffer)?;
+            let read = service_output.read(&mut buffer)?;
             if read == 0 {
                 break;
             }

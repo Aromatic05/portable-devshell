@@ -1,5 +1,3 @@
-#[cfg(test)]
-use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 
 use serde::Deserialize;
@@ -29,27 +27,6 @@ impl TcpService {
             .map_err(|error| format!("network.tcp connect failed: {error}"))?;
         let _ = stream.set_nodelay(true);
         Ok(Self { stream })
-    }
-
-    #[cfg(test)]
-    pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
-        self.stream
-            .write_all(data)
-            .map_err(|error| format!("network.tcp write failed: {error}"))
-    }
-
-    #[cfg(test)]
-    pub fn finish_input(&mut self) -> Result<(), String> {
-        self.stream
-            .shutdown(Shutdown::Write)
-            .map_err(|error| format!("network.tcp half-close failed: {error}"))
-    }
-
-    #[cfg(test)]
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
-        self.stream
-            .read(buffer)
-            .map_err(|error| format!("network.tcp read failed: {error}"))
     }
 
     pub fn reset(&mut self) {

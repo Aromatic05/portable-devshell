@@ -100,6 +100,11 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let tools = Arc::new(builtin_tools);
     let payload_maintenance = Arc::clone(&payloads);
+    let service_context = crate::transport::service::ServiceContext::daemon(
+        socket_paths.socket_file.clone(),
+        Arc::clone(&payloads),
+        Arc::clone(&receives),
+    );
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
@@ -151,10 +156,12 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
                 stream.set_nonblocking(false).map_err(|error| {
                     format!("failed to set accepted transport stream blocking: {error}")
                 })?;
-                let rpc_socket = socket_paths.socket_file.clone();
+                let service_context = service_context.clone();
                 let instance_paths = instance_paths.clone();
                 thread::spawn(move || {
-                    if let Err(error) = crate::transport::service::serve_ipc(stream, &rpc_socket) {
+                    if let Err(error) =
+                        crate::transport::service::serve_ipc(stream, service_context)
+                    {
                         let _ = append_log(
                             &instance_paths,
                             &format!("transport connection error: {error}"),

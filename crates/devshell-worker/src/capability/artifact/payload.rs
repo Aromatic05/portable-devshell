@@ -117,6 +117,30 @@ pub struct ArtifactPayloadStore {
     guard: Mutex<ArtifactPayloadStoreState>,
 }
 
+pub(crate) struct ArtifactPayloadReader {
+    file: File,
+    remaining_bytes: usize,
+    total_bytes: usize,
+}
+
+impl ArtifactPayloadReader {
+    pub(crate) fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+}
+
+impl Read for ArtifactPayloadReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.remaining_bytes == 0 || buffer.is_empty() {
+            return Ok(0);
+        }
+        let requested = buffer.len().min(self.remaining_bytes);
+        let read = self.file.read(&mut buffer[..requested])?;
+        self.remaining_bytes = self.remaining_bytes.saturating_sub(read);
+        Ok(read)
+    }
+}
+
 struct ArtifactPayloadStoreState {
     payload_count: Option<usize>,
 }
@@ -413,6 +437,48 @@ impl ArtifactPayloadStore {
         file.read_exact(&mut bytes)
             .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
         Ok((bytes, total_bytes))
+    }
+
+    pub(crate) fn open_reader(
+        &self,
+        payload_id: &str,
+        offset_bytes: u64,
+        max_bytes: usize,
+    ) -> Result<ArtifactPayloadReader, ToolError> {
+        validate_id(payload_id)?;
+        if max_bytes == 0 || max_bytes > MAX_READ_BYTES {
+            return Err(ToolError::new(
+                "tool.invalidArguments",
+                format!("maxBytes must be between 1 and {MAX_READ_BYTES}"),
+            ));
+        }
+        let _guard = self.lock()?;
+        let metadata = self.load_metadata(payload_id)?;
+        if metadata.expires_at_ms <= unix_time_millis() {
+            return Err(ToolError::new(
+                "artifact.payloadExpired",
+                "artifact payload has expired",
+            ));
+        }
+        let total_bytes = metadata.descriptor.payload_bytes;
+        if offset_bytes > total_bytes as u64 {
+            return Err(ToolError::new(
+                "artifact.invalidOffset",
+                "offsetBytes exceeds payload size",
+            ));
+        }
+        let data_path = self.resolve_data_path(&metadata)?;
+        let mut file = File::open(data_path)
+            .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
+        file.seek(SeekFrom::Start(offset_bytes))
+            .map_err(|error| ToolError::new("artifact.readFailed", error.to_string()))?;
+        Ok(ArtifactPayloadReader {
+            file,
+            remaining_bytes: total_bytes
+                .saturating_sub(offset_bytes as usize)
+                .min(max_bytes),
+            total_bytes,
+        })
     }
 
     pub fn close(&self, payload_id: &str) -> Result<(), ToolError> {

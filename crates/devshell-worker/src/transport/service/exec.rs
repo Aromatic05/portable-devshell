@@ -1,6 +1,4 @@
 use std::io::Read;
-#[cfg(test)]
-use std::io::Write;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -89,41 +87,6 @@ impl ExecService {
         })
     }
 
-    #[cfg(test)]
-    pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
-        let stdin = self
-            .stdin
-            .as_mut()
-            .ok_or_else(|| "process.exec stdin is closed.".to_string())?;
-        stdin
-            .write_all(data)
-            .map_err(|error| format!("process.exec stdin write failed: {error}"))
-    }
-
-    #[cfg(test)]
-    pub fn finish_input(&mut self) -> Result<(), String> {
-        self.stdin.take();
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
-        if self.finished {
-            return Ok(0);
-        }
-        let read = self
-            .stdout
-            .as_mut()
-            .ok_or_else(|| "process.exec stdout is already attached.".to_string())?
-            .read(buffer)
-            .map_err(|error| format!("process.exec stdout read failed: {error}"))?;
-        if read > 0 {
-            return Ok(read);
-        }
-        self.finish_status()?;
-        Ok(0)
-    }
-
     pub fn reset(&mut self) {
         self.stdin.take();
         if !self.finished {
@@ -161,34 +124,6 @@ impl ExecService {
         self.join_stderr();
         if status.success() {
             return Ok(true);
-        }
-        let summary = self
-            .stderr_summary
-            .lock()
-            .map(|value| String::from_utf8_lossy(&value).trim().to_string())
-            .unwrap_or_default();
-        if summary.is_empty() {
-            Err(format!("process.exec exited with status {status}."))
-        } else {
-            Err(format!(
-                "process.exec exited with status {status}: {summary}"
-            ))
-        }
-    }
-
-    #[cfg(test)]
-    fn finish_status(&mut self) -> Result<(), String> {
-        if self.finished {
-            return Ok(());
-        }
-        let status = self
-            .child
-            .wait()
-            .map_err(|error| format!("process.exec wait failed: {error}"))?;
-        self.finished = true;
-        self.join_stderr();
-        if status.success() {
-            return Ok(());
         }
         let summary = self
             .stderr_summary
