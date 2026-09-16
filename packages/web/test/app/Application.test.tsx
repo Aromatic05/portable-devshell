@@ -576,7 +576,11 @@ function fakeClients(): WebClients {
         reconnect: async () => undefined,
         artifact: {} as WebClients["artifact"],
         cli: {} as WebClients["cli"],
-        config: {} as WebClients["config"],
+        config: {
+            get: async () => ({
+                instances: [{ enabled: true, name: "demo", provider: "local" }],
+            }),
+        } as unknown as WebClients["config"],
         conversation: {
             list: async () => [],
             preferences: async () => ({

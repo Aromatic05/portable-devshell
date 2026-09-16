@@ -216,7 +216,7 @@ describe("WebStore", () => {
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
-    it("loads pending approvals without eagerly reading logs", async () => {
+    it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
         const clients = fakeClients();
         clients.tool.listApprovals = vi.fn(async () => []);
         clients.runtime.readLogs = vi.fn(async () => []);
@@ -229,14 +229,12 @@ describe("WebStore", () => {
         });
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         await store.refreshInstance("demo");
-        expect(clients.runtime.readLogs).toHaveBeenCalledWith("demo", {
-            limit: 100,
-            maxDecodedBytes: 256 * 1024,
-        });
+        expect(clients.runtime.refresh).toHaveBeenCalledWith("demo");
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         store.close();
     });
 
-    it("surfaces recorded snapshot or log failures from a manual Instance refresh", async () => {
+    it("surfaces snapshot failures from a manual Instance refresh without reading logs", async () => {
         const clients = fakeClients();
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
         await store.load();
@@ -248,6 +246,7 @@ describe("WebStore", () => {
         await expect(store.refreshInstance("demo")).rejects.toThrow(
             "snapshot refresh failed",
         );
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
         store.close();
     });
 
@@ -669,7 +668,11 @@ function fakeClients(
         reconnect: vi.fn(async () => undefined),
         artifact: {} as WebClients["artifact"],
         cli: {} as WebClients["cli"],
-        config: {} as WebClients["config"],
+        config: {
+            get: vi.fn(async () => ({
+                instances: [{ enabled: true, name: "demo", provider: "local" }],
+            })),
+        } as unknown as WebClients["config"],
         conversation: {
             list: vi.fn(async () => []),
             preferences: vi.fn(async () => ({

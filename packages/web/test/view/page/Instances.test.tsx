@@ -62,6 +62,15 @@ function localStore(status: "ready" | "stopped"): WebStore {
             operations: {},
             readModel: {
                 ...createInitialControlReadModelState(),
+                configView: {
+                    instances: [
+                        {
+                            enabled: true,
+                            name: "local-one",
+                            provider: "local",
+                        },
+                    ],
+                },
                 instances: [
                     {
                         mcpEnabled: true,
@@ -80,7 +89,10 @@ function localStore(status: "ready" | "stopped"): WebStore {
                 ],
             },
         },
+        deleteInstance: vi.fn(async () => true),
         refreshInstance: vi.fn(async () => undefined),
+        restart: vi.fn(async () => true),
+        setInstanceEnabled: vi.fn(async () => true),
         start: vi.fn(async () => undefined),
         stop: vi.fn(async () => undefined),
     } as unknown as WebStore;
@@ -137,6 +149,55 @@ it("keeps confirmation for stopping a running local instance", () => {
     expect(dialog).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Stop" }));
     expect(store.stop).toHaveBeenCalledWith("local-one");
+});
+
+it("offers restart, disable, delete, and refresh actions for a managed instance", async () => {
+    const store = localStore("ready");
+    render(<Instances store={store} />);
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+        expect(store.refreshInstance).toHaveBeenCalledWith("local-one"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    let dialog = screen.getByRole("dialog", { name: "Confirm restart" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restart" }));
+    await waitFor(() =>
+        expect(store.restart).toHaveBeenCalledWith("local-one"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+    dialog = screen.getByRole("dialog", { name: "Confirm disable" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disable" }));
+    await waitFor(() =>
+        expect(store.setInstanceEnabled).toHaveBeenCalledWith(
+            "local-one",
+            false,
+        ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    dialog = screen.getByRole("dialog", { name: "Confirm delete" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+        expect(store.deleteInstance).toHaveBeenCalledWith("local-one"),
+    );
+});
+
+it("enables a disabled instance without a confirmation dialog", () => {
+    const store = localStore("stopped");
+    const instances = store.state.readModel.configView!.instances as Array<
+        Record<string, unknown>
+    >;
+    instances[0]!.enabled = false;
+    render(<Instances store={store} />);
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    expect(store.setInstanceEnabled).toHaveBeenCalledWith("local-one", true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
 it("keeps a failed Stop confirmation open and shows the failure in place", async () => {

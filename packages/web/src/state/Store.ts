@@ -116,7 +116,7 @@ export class WebStore {
             error: undefined,
         });
         const request = this.#model
-            .load()
+            .load({ config: true })
             .then(
                 async () => {
                     if (!this.#current(generation)) return;
@@ -196,12 +196,11 @@ export class WebStore {
     }
 
     async refreshInstance(name: string): Promise<void> {
-        await this.#model.refreshInstance(name, ["snapshot", "logs"]);
+        await this.#model.refreshInstance(name, ["snapshot"]);
         const failures = webFailures(this.#model.state);
-        const errors = [
-            failures[`instance:${name}`],
-            failures[`logs:${name}`],
-        ].filter((value): value is string => value !== undefined);
+        const errors = [failures[`instance:${name}`]].filter(
+            (value): value is string => value !== undefined,
+        );
         if (errors.length > 0) throw new Error(errors.join("; "));
     }
 
@@ -377,6 +376,52 @@ export class WebStore {
 
     async stop(instance: string): Promise<boolean> {
         return await this.#lifecycle(instance, "stop");
+    }
+
+    async restart(instance: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `restart:${instance}`,
+            `${instance} restart requested.`,
+            generation,
+            async (signal) => {
+                await this.#commands.stopInstance(instance);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#commands.startInstance(instance, { signal });
+            },
+        );
+    }
+
+    async setInstanceEnabled(
+        instance: string,
+        enabled: boolean,
+    ): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `enabled:${instance}`,
+            `${instance} ${enabled ? "enabled" : "disabled"}.`,
+            generation,
+            async (signal) => {
+                if (enabled) await this.clients.instance.enable(instance);
+                else await this.clients.instance.disable(instance);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshControl();
+            },
+        );
+    }
+
+    async deleteInstance(instance: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `delete:${instance}`,
+            `${instance} deleted.`,
+            generation,
+            async (signal) => {
+                await this.clients.instance.delete(instance);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshControl();
+            },
+        );
     }
 
     dismissFeedback(kind: "error" | "notice"): void {
