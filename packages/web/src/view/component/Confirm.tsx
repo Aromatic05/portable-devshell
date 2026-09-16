@@ -8,6 +8,7 @@ export function ConfirmationDialog({
     error,
     onCancel,
     onConfirm,
+    variant = "default",
 }: {
     actionLabel: string;
     busy: boolean;
@@ -16,15 +17,12 @@ export function ConfirmationDialog({
     error?: string;
     onCancel(): void;
     onConfirm(): void;
+    variant?: "default" | "destructive";
 }) {
     const cancelRef = useRef<HTMLButtonElement>(null);
     const confirmRef = useRef<HTMLButtonElement>(null);
     const dialogRef = useRef<HTMLElement>(null);
-    const destructive =
-        actionLabel === "Delete" ||
-        actionLabel === "Deny" ||
-        actionLabel === "Disable" ||
-        actionLabel === "Stop";
+    const destructive = variant === "destructive";
     const progressLabel = actionProgressLabel(actionLabel);
 
     useEffect(() => {

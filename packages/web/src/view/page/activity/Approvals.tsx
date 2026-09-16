@@ -80,6 +80,11 @@ export function Approvals({
                     description={`${selection.decision === "approve" ? "Approve" : "Deny"} ${selection.label}?`}
                     disabled={controlsDisabled}
                     error={failure}
+                    variant={
+                        selection.decision === "deny"
+                            ? "destructive"
+                            : "default"
+                    }
                     onCancel={() => {
                         setFailure(undefined);
                         setSelection(undefined);

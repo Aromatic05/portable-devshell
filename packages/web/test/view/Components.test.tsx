@@ -4,15 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import { ConfirmationDialog } from "../../src/view/component/Confirm.js";
 
 describe("ConfirmationDialog", () => {
-    it("defaults destructive actions to Cancel and closes with Escape", () => {
+    it("defaults explicitly destructive actions to Cancel and closes with Escape", () => {
         const cancel = vi.fn();
         render(
             <ConfirmationDialog
-                actionLabel="Stop"
+                actionLabel="Revoke"
                 busy={false}
-                description="Stop demo?"
+                description="Revoke demo?"
                 onCancel={cancel}
                 onConfirm={vi.fn()}
+                variant="destructive"
             />,
         );
 
@@ -30,6 +31,7 @@ describe("ConfirmationDialog", () => {
                 description="Deny demo?"
                 onCancel={vi.fn()}
                 onConfirm={confirm}
+                variant="destructive"
             />,
         );
         const dialog = screen.getByRole("dialog", { name: "Confirm deny" });
@@ -55,6 +57,7 @@ describe("ConfirmationDialog", () => {
                 disabled
                 onCancel={cancel}
                 onConfirm={vi.fn()}
+                variant="destructive"
             />,
         );
 
@@ -76,6 +79,7 @@ it("keeps focus inside the dialog while an operation is busy", () => {
                 description="Stop demo?"
                 onCancel={vi.fn()}
                 onConfirm={vi.fn()}
+                variant="destructive"
             />
             <button>Background action</button>
         </>,
@@ -88,6 +92,7 @@ it("keeps focus inside the dialog while an operation is busy", () => {
                 description="Stop demo?"
                 onCancel={vi.fn()}
                 onConfirm={vi.fn()}
+                variant="destructive"
             />
             <button>Background action</button>
         </>,
@@ -111,6 +116,7 @@ it("renders a grammatical busy label for Disable", () => {
             description="Disable Context?"
             onCancel={vi.fn()}
             onConfirm={vi.fn()}
+            variant="destructive"
         />,
     );
 

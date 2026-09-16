@@ -93,6 +93,7 @@ export function Todos({
                     description={`Delete ${selected.title} (${selected.taskId}) from instance ${selected.instance}? This permanently removes the project and its history.`}
                     disabled={!interactive}
                     error={failure}
+                    variant="destructive"
                     onCancel={() => {
                         setFailure(undefined);
                         setSelected(undefined);

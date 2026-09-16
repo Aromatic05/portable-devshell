@@ -55,14 +55,13 @@ describe("Web Connections", () => {
         ).toBeEnabled();
     });
 
-    it("reviews OAuth and exposes reverse enrollment and token actions", async () => {
+    it("routes OAuth review to Approvals and exposes reverse enrollment and token actions", async () => {
         const state = connectionState();
         const store = {
             state,
             updateConfig: vi.fn(async () => true),
             validateConfig: vi.fn(async () => true),
             restartControl: vi.fn(async () => true),
-            decideOAuthApproval: vi.fn(async () => true),
             createReverseCode: vi.fn(
                 async () => "devshell-worker enroll --device-code code",
             ),
@@ -71,11 +70,11 @@ describe("Web Connections", () => {
         } as unknown as WebStore;
         render(<Connections disabled={false} state={state} store={store} />);
 
-        fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-        expect(store.decideOAuthApproval).toHaveBeenCalledWith(
-            "oauth-1",
-            "approve",
-        );
+        expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+        expect(
+            screen.getByRole("link", { name: "Review pending approvals" }),
+        ).toHaveAttribute("href", "#/approvals");
 
         fireEvent.click(
             screen.getByRole("button", { name: "Create enrollment code" }),
@@ -90,6 +89,9 @@ describe("Web Connections", () => {
             screen.getByRole("button", { name: "Rotate device token" }),
         );
         const rotate = screen.getByRole("dialog", { name: "Confirm rotate" });
+        expect(
+            within(rotate).getByRole("button", { name: "Cancel" }),
+        ).toHaveFocus();
         fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
         await waitFor(() =>
             expect(store.rotateReverseToken).toHaveBeenCalledWith(

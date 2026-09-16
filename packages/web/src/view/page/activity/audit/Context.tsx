@@ -481,6 +481,7 @@ export function ContextIntervention({
                     description={`Disable Context ${ctxId}${environment?.workspace === undefined ? "" : ` from workspace ${environment.workspace}`} across all attached instances? This cannot be renewed; the client must establish a new Context.`}
                     disabled={!interactive}
                     error={disableFailure}
+                    variant="destructive"
                     onCancel={() => {
                         setDisableFailure(undefined);
                         setDisableConfirmation(false);

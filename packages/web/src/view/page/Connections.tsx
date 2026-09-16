@@ -443,9 +443,7 @@ export function Connections({
 
             <OAuthSection
                 approvals={state.readModel.oauthApprovals}
-                disabled={!interactive}
                 status={mcpStatus}
-                store={store}
             />
 
             {selectedEntry?.provider === "reverse" ? (
@@ -509,6 +507,7 @@ export function Connections({
                             ? `Rotate the device token for ${selectedName}? Existing credentials will stop working.`
                             : `Revoke the device token for ${selectedName}? The remote worker must enroll again.`
                     }
+                    variant="destructive"
                     onCancel={() => setConfirm(undefined)}
                     onConfirm={() => {
                         const request =
@@ -527,75 +526,32 @@ export function Connections({
 
 function OAuthSection({
     approvals,
-    disabled,
     status,
-    store,
 }: {
     approvals: OAuthApprovalRequest[];
-    disabled: boolean;
     status: WebState["readModel"]["mcpStatus"];
-    store: WebStore;
 }) {
+    const pending = approvals.filter(
+        (approval) => approval.status === "pending",
+    );
     return (
         <article className="detail oauth-panel">
             <h3>OAuth runtime</h3>
             <p className="hint">
                 provider={status?.authMode ?? "none"} · runtime=
                 {status?.running === true ? "running" : "stopped"} · pending=
-                {
-                    approvals.filter(
-                        (approval) => approval.status === "pending",
-                    ).length
-                }
+                {pending.length}
             </p>
-            {approvals.length === 0 ? (
+            {pending.length === 0 ? (
                 <p className="empty">
                     No OAuth requests are waiting for review.
                 </p>
             ) : (
-                <div className="approval-list">
-                    {approvals.map((approval) => (
-                        <article className="card" key={approval.approvalId}>
-                            <strong>
-                                {approval.kind} · {approval.clientName}
-                            </strong>
-                            <p className="hint">
-                                scopes=
-                                {approval.requestedScopes.join(", ") || "-"}
-                            </p>
-                            <span className="badge">{approval.status}</span>
-                            {approval.status === "pending" ? (
-                                <div className="actions">
-                                    <button
-                                        className="danger"
-                                        disabled={disabled}
-                                        onClick={() =>
-                                            void store.decideOAuthApproval(
-                                                approval.approvalId,
-                                                "deny",
-                                            )
-                                        }
-                                        type="button"
-                                    >
-                                        Deny
-                                    </button>
-                                    <button
-                                        className="primary"
-                                        disabled={disabled}
-                                        onClick={() =>
-                                            void store.decideOAuthApproval(
-                                                approval.approvalId,
-                                                "approve",
-                                            )
-                                        }
-                                        type="button"
-                                    >
-                                        Approve
-                                    </button>
-                                </div>
-                            ) : null}
-                        </article>
-                    ))}
+                <div>
+                    <p className="hint">
+                        Review OAuth requests in the unified approval queue.
+                    </p>
+                    <a href="#/approvals">Review pending approvals</a>
                 </div>
             )}
         </article>

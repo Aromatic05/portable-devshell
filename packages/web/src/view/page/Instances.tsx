@@ -456,6 +456,11 @@ export function Instances({
                     description={`${confirmation.action} ${confirmation.instance}?`}
                     disabled={!interactive}
                     error={confirmationFailure}
+                    variant={
+                        confirmation.action === "Restart"
+                            ? "default"
+                            : "destructive"
+                    }
                     onCancel={() => {
                         setConfirmationFailure(undefined);
                         setConfirmation(undefined);
@@ -514,6 +519,7 @@ export function Instances({
                     }
                     disabled={!interactive}
                     error={artifactFailure}
+                    variant="destructive"
                     onCancel={() => {
                         setArtifactFailure(undefined);
                         setArtifactConfirmation(undefined);
