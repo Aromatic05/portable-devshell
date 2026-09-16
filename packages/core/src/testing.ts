@@ -40,5 +40,7 @@ export * from "./worker/transport/provider/Local.js";
 export * from "./worker/transport/provider/container/Podman.js";
 export * from "./worker/transport/provider/Ssh.js";
 export * from "./worker/transport/Factory.js";
+export * from "./worker/transport/service/Client.js";
+export * from "./worker/transport/service/Model.js";
 
 export * from "./worker/protocol/Terminal.js";

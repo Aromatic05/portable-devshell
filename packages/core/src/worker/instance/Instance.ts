@@ -24,6 +24,11 @@ import type { InstanceLogEntry } from "../../storage/log/Store.js";
 import type { WorkerCommandClient } from "../transport/command/Client.js";
 import type { WorkerCommandInteractiveSession } from "../transport/command/Transport.js";
 import type { WorkerTransportConnection } from "../transport/Transport.js";
+import { WorkerTransportServiceClient } from "../transport/service/Client.js";
+import type {
+    WorkerExecProcessInput,
+    WorkerTcpConnectInput,
+} from "../transport/service/Model.js";
 import {
     WorkerCommandSessionBridge,
     type WorkerCommandSessionClose,
@@ -64,6 +69,7 @@ import type {
     WorkerTerminalOpenInput,
 } from "../protocol/Terminal.js";
 import type { WorkerRpcError } from "../protocol/rpc/Message.js";
+import type { FrameStream } from "@portable-devshell/shared/transport/frame";
 import { WorkerHandle } from "./capability/Handle.js";
 import type { AuditToolCallHistory } from "../../storage/audit/ToolCallHistory.js";
 import type { InstanceStateMachine } from "../../instance/state/Machine.js";
@@ -111,6 +117,7 @@ export class WorkerInstance {
     readonly #lifecycle: WorkerInstanceLifecycle;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #state: WorkerInstanceState;
+    readonly #services: WorkerTransportServiceClient;
     readonly #terminalClient: WorkerTerminalClient;
     readonly #tool: WorkerInstanceTool;
     readonly #toolInvoker: WorkerToolInvoker;
@@ -146,6 +153,9 @@ export class WorkerInstance {
         this.#commandSessions = new WorkerCommandSessionBridge(
             dependencies.rpcBridge,
             dependencies.protocolClient,
+        );
+        this.#services = new WorkerTransportServiceClient(
+            dependencies.transportConnection,
         );
         this.#terminalClient = dependencies.terminalClient;
         this.#lifecycle = new WorkerInstanceLifecycle({
@@ -219,6 +229,22 @@ export class WorkerInstance {
         },
     ): Promise<InstanceSnapshot> {
         return await this.#connection.acceptReverseChannel(channel, input);
+    }
+
+    async connectTcp(
+        input: WorkerTcpConnectInput,
+        signal?: AbortSignal,
+    ): Promise<FrameStream> {
+        this.#assertReady();
+        return await this.#services.connectTcp(input, signal);
+    }
+
+    async execProcess(
+        input: WorkerExecProcessInput,
+        signal?: AbortSignal,
+    ): Promise<FrameStream> {
+        this.#assertReady();
+        return await this.#services.execProcess(input, signal);
     }
 
     async openTerminal(

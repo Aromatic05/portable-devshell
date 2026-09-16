@@ -39,6 +39,11 @@ export type {
 export type { WorkerRpcConnector } from "./worker/protocol/rpc/Bridge.js";
 export { WorkerTransportFactory } from "./worker/transport/Factory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/Factory.js";
+export { WorkerTransportServiceClient } from "./worker/transport/service/Client.js";
+export type {
+    WorkerExecProcessInput,
+    WorkerTcpConnectInput,
+} from "./worker/transport/service/Model.js";
 
 export type {
     WorkerTerminalAttachResult,

@@ -21,6 +21,7 @@ import {
     WorkerTransportDriverSsh,
     WorkerBinary,
     WorkerTransportConnection,
+    WorkerTransportServiceClient,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     getWorkerTargetByKey,
@@ -82,6 +83,43 @@ test("transport connection multiplexes Service streams over one physical Channel
     assert.equal(pair.controller.closed, true);
     await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
     assert.equal(processService.closed, true);
+});
+
+test("transport service client maps typed tcp and exec inputs onto Frame Service metadata", async () => {
+    const pair = createFrameChannelPair();
+    const connection = new WorkerTransportConnection(async () => pair.controller);
+    const services = new WorkerTransportServiceClient(connection);
+
+    const tcp = await services.connectTcp({ host: "127.0.0.1", port: 8080 });
+    const tcpOpen = await pair.worker.nextOpen();
+    assert.ok(tcpOpen);
+    assert.equal(tcpOpen.service, "network.tcp");
+    assert.deepEqual(
+        JSON.parse(Buffer.from(tcpOpen.metadata).toString("utf8")),
+        { host: "127.0.0.1", port: 8080 },
+    );
+    await tcpOpen.accept();
+    await tcp.reset(frameResetCodes.cancelled, "test complete");
+
+    const processStream = await services.execProcess({
+        executable: "/usr/bin/example",
+        args: ["--flag", "value"],
+        cwd: "/workspace",
+    });
+    const processOpen = await pair.worker.nextOpen();
+    assert.ok(processOpen);
+    assert.equal(processOpen.service, "process.exec");
+    assert.deepEqual(
+        JSON.parse(Buffer.from(processOpen.metadata).toString("utf8")),
+        {
+            args: ["--flag", "value"],
+            cwd: "/workspace",
+            executable: "/usr/bin/example",
+        },
+    );
+    await processOpen.accept();
+    await processStream.reset(frameResetCodes.cancelled, "test complete");
+    connection.close();
 });
 
 function createFrameChannelPair(): {
@@ -220,38 +258,31 @@ test(
                 .exitCode,
             0,
         );
-        const channel = await transport.connectWorkerChannel({
+        const connection = WorkerTransportConnection.fromTransport(transport, {
             env,
             instanceName,
         });
-        const protocol = new FrameProtocol(channel, { role: "opener" });
+        const services = new WorkerTransportServiceClient(connection);
         t.after(async () => {
-            protocol.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
         });
 
-        const tcp = await protocol.open(
-            "network.tcp",
-            Buffer.from(
-                JSON.stringify({ host: "127.0.0.1", port: address.port }),
-            ),
-        );
+        const tcp = await services.connectTcp({
+            host: "127.0.0.1",
+            port: address.port,
+        });
         await tcp.write(Buffer.from("ping"));
         await tcp.finish();
         assert.equal(Buffer.from((await tcp.read()) ?? []).toString(), "pong");
         assert.equal(await tcp.read(), undefined);
 
-        const processStream = await protocol.open(
-            "process.exec",
-            Buffer.from(
-                JSON.stringify({
-                    executable: process.execPath,
-                    args: ["-e", "process.stdin.pipe(process.stdout)"],
-                }),
-            ),
-        );
+        const processStream = await services.execProcess({
+            executable: process.execPath,
+            args: ["-e", "process.stdin.pipe(process.stdout)"],
+        });
         await processStream.write(Buffer.from("frame-process\n"));
         await processStream.finish();
         assert.equal(
@@ -260,27 +291,17 @@ test(
         );
         assert.equal(await processStream.read(), undefined);
 
-        const stalled = await protocol.open(
-            "process.exec",
-            Buffer.from(
-                JSON.stringify({
-                    executable: process.execPath,
-                    args: ["-e", "setInterval(() => {}, 1000)"],
-                }),
-            ),
-        );
+        const stalled = await services.execProcess({
+            executable: process.execPath,
+            args: ["-e", "setInterval(() => {}, 1000)"],
+        });
         const stalledWrite = stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61));
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
 
-        const responsive = await protocol.open(
-            "process.exec",
-            Buffer.from(
-                JSON.stringify({
-                    executable: process.execPath,
-                    args: ["-e", "process.stdin.pipe(process.stdout)"],
-                }),
-            ),
-        );
+        const responsive = await services.execProcess({
+            executable: process.execPath,
+            args: ["-e", "process.stdin.pipe(process.stdout)"],
+        });
         await responsive.write(Buffer.from("still-responsive\n"));
         await responsive.finish();
         assert.equal(
