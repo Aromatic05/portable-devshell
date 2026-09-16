@@ -7,6 +7,7 @@ import type {
 
 import { ConfirmationDialog } from "../component/Confirm.js";
 import type { WebStore } from "../../state/Store.js";
+import { InstanceCreate } from "./InstancesCreate.js";
 
 export function Instances({
     disabled = false,
@@ -26,6 +27,8 @@ export function Instances({
     const [detailFailure, setDetailFailure] = useState<string>();
     const [refreshingInstance, setRefreshingInstance] = useState<string>();
     const [lifecycleFailure, setLifecycleFailure] = useState<string>();
+    const [creating, setCreating] = useState(false);
+    const [createNotice, setCreateNotice] = useState<string>();
     const refreshGeneration = useRef(0);
     const selectedRef = useRef<string>();
     selectedRef.current = selected;
@@ -52,285 +55,343 @@ export function Instances({
 
     return (
         <section className="instances-view">
-            <h2>Instances</h2>
-            {model.instances.length === 0 ? (
-                <p className="empty">No instances are available.</p>
-            ) : (
-                <div
-                    className={`instances${entry === undefined ? "" : " has-selection"}`}
+            <div className="instances-heading">
+                <h2>Instances</h2>
+                <button
+                    className="primary"
+                    disabled={!interactive || creating}
+                    onClick={() => {
+                        refreshGeneration.current += 1;
+                        selectedRef.current = undefined;
+                        setSelected(undefined);
+                        setCreating(true);
+                        setCreateNotice(undefined);
+                    }}
+                    type="button"
                 >
-                    {model.instances.map((item) => (
-                        <button
-                            aria-pressed={selected === item.name}
-                            className={`instance card${selected === item.name ? " selected" : ""}`}
-                            key={item.name}
-                            onClick={() => {
-                                const generation = ++refreshGeneration.current;
-                                selectedRef.current = item.name;
-                                setSelected(item.name);
-                                setDetailFailure(undefined);
-                                setLifecycleFailure(undefined);
-                                setRefreshingInstance(item.name);
-                                void store
-                                    .refreshInstance(item.name)
-                                    .catch((error: unknown) => {
-                                        if (
-                                            refreshGeneration.current ===
-                                                generation &&
-                                            selectedRef.current === item.name
-                                        ) {
-                                            setDetailFailure(
-                                                error instanceof Error
-                                                    ? error.message
-                                                    : "Instance details could not be refreshed.",
-                                            );
-                                        }
-                                    })
-                                    .finally(() => {
-                                        if (
-                                            refreshGeneration.current ===
-                                            generation
-                                        ) {
-                                            setRefreshingInstance((current) =>
-                                                current === item.name
-                                                    ? undefined
-                                                    : current,
-                                            );
-                                        }
-                                    });
-                            }}
-                        >
-                            <strong>{item.name}</strong>
-                            <span>
-                                {item.snapshot.status} ·{" "}
-                                {item.snapshot.connectionState}
-                            </span>
-                            <WorkerSummary
-                                worker={
-                                    model.overview?.instances.find(
-                                        ({ name }) => name === item.name,
-                                    )?.worker
-                                }
-                            />
-                        </button>
-                    ))}
-                </div>
+                    New instance
+                </button>
+            </div>
+            {createNotice === undefined ? null : (
+                <p className="notice" role="status">
+                    {createNotice}
+                </p>
             )}
-            {entry === undefined ? null : (
-                <article className="detail">
-                    <button
-                        className="back"
-                        onClick={() => {
-                            refreshGeneration.current += 1;
-                            selectedRef.current = undefined;
-                            setSelected(undefined);
-                            setDetailFailure(undefined);
-                            setLifecycleFailure(undefined);
-                        }}
-                    >
-                        Back to instances
-                    </button>
-                    <h3>{entry.name}</h3>
-                    {refreshingInstance === entry.name ? (
-                        <p className="hint" role="status">
-                            Refreshing instance details…
-                        </p>
-                    ) : null}
-                    {detailFailure === undefined ? null : (
-                        <p className="error" role="alert">
-                            {detailFailure}
-                        </p>
-                    )}
-                    <p>
-                        Runtime: {entry.snapshot.status}; daemon:{" "}
-                        {entry.snapshot.daemonState}; sequence:{" "}
-                        {entry.snapshot.lastSeq}
-                    </p>
-                    {selfManaged ? (
-                        <p className="hint">
-                            Self-managed reverse worker ·{" "}
-                            {entry.snapshot.reverse?.availability ?? "unknown"}
-                            {entry.snapshot.reverse?.transport === undefined
-                                ? ""
-                                : ` · ${entry.snapshot.reverse.transport}`}
-                            {" · Lifecycle is managed on the remote machine."}
-                        </p>
-                    ) : null}
-                    <WorkerDiagnostics worker={selectedWorker} />
-                    <div className="actions">
-                        <button
-                            disabled={
-                                !interactive ||
-                                refreshingInstance === entry.name
-                            }
-                            onClick={() => {
-                                const generation = ++refreshGeneration.current;
-                                setDetailFailure(undefined);
-                                setRefreshingInstance(entry.name);
-                                void store
-                                    .refreshInstance(entry.name)
-                                    .catch((error: unknown) => {
-                                        if (
-                                            refreshGeneration.current ===
-                                                generation &&
-                                            selectedRef.current === entry.name
-                                        ) {
-                                            setDetailFailure(
-                                                error instanceof Error
-                                                    ? error.message
-                                                    : "Instance details could not be refreshed.",
-                                            );
-                                        }
-                                    })
-                                    .finally(() => {
-                                        if (
-                                            refreshGeneration.current ===
-                                            generation
-                                        )
-                                            setRefreshingInstance(undefined);
-                                    });
-                            }}
-                            type="button"
+            {creating ? (
+                <InstanceCreate
+                    disabled={!interactive}
+                    onCancel={() => setCreating(false)}
+                    onCreated={(enrollment) => {
+                        setCreating(false);
+                        setCreateNotice(
+                            enrollment ?? "Instance created successfully.",
+                        );
+                    }}
+                    store={store}
+                />
+            ) : (
+                <>
+                    {model.instances.length === 0 ? (
+                        <p className="empty">No instances are available.</p>
+                    ) : (
+                        <div
+                            className={`instances${entry === undefined ? "" : " has-selection"}`}
                         >
-                            Refresh
-                        </button>
-                        {lifecycleAction === undefined ? null : (
-                            <button
-                                className={
-                                    lifecycleAction === "Start"
-                                        ? "primary"
-                                        : "danger"
-                                }
-                                disabled={
-                                    !interactive ||
-                                    state.operations[`start:${entry.name}`] !==
-                                        undefined ||
-                                    state.operations[`stop:${entry.name}`] !==
-                                        undefined
-                                }
-                                onClick={() => {
-                                    if (lifecycleAction === "Start") {
+                            {model.instances.map((item) => (
+                                <button
+                                    aria-pressed={selected === item.name}
+                                    className={`instance card${selected === item.name ? " selected" : ""}`}
+                                    key={item.name}
+                                    onClick={() => {
+                                        const generation =
+                                            ++refreshGeneration.current;
+                                        selectedRef.current = item.name;
+                                        setSelected(item.name);
+                                        setDetailFailure(undefined);
                                         setLifecycleFailure(undefined);
+                                        setRefreshingInstance(item.name);
                                         void store
-                                            .start(entry.name)
-                                            .then((succeeded) => {
+                                            .refreshInstance(item.name)
+                                            .catch((error: unknown) => {
                                                 if (
-                                                    !succeeded &&
+                                                    refreshGeneration.current ===
+                                                        generation &&
                                                     selectedRef.current ===
-                                                        entry.name
+                                                        item.name
                                                 ) {
-                                                    setLifecycleFailure(
-                                                        store.state.error ??
-                                                            `${entry.name} could not be started.`,
+                                                    setDetailFailure(
+                                                        error instanceof Error
+                                                            ? error.message
+                                                            : "Instance details could not be refreshed.",
+                                                    );
+                                                }
+                                            })
+                                            .finally(() => {
+                                                if (
+                                                    refreshGeneration.current ===
+                                                    generation
+                                                ) {
+                                                    setRefreshingInstance(
+                                                        (current) =>
+                                                            current ===
+                                                            item.name
+                                                                ? undefined
+                                                                : current,
                                                     );
                                                 }
                                             });
-                                        return;
-                                    }
-                                    setConfirmationFailure(undefined);
-                                    setConfirmation({
-                                        action: "Stop",
-                                        instance: entry.name,
-                                    });
-                                }}
-                            >
-                                {lifecycleAction === "Start" &&
-                                state.operations[`start:${entry.name}`] !==
-                                    undefined
-                                    ? "Starting…"
-                                    : lifecycleAction}
-                            </button>
-                        )}
-                        {selfManaged ||
-                        entry.snapshot.status === "stopped" ? null : (
-                            <button
-                                disabled={
-                                    !interactive ||
-                                    state.operations[
-                                        `restart:${entry.name}`
-                                    ] !== undefined
-                                }
-                                onClick={() => {
-                                    setConfirmationFailure(undefined);
-                                    setConfirmation({
-                                        action: "Restart",
-                                        instance: entry.name,
-                                    });
-                                }}
-                                type="button"
-                            >
-                                Restart
-                            </button>
-                        )}
-                        {enabled === undefined ? null : enabled ? (
-                            <button
-                                disabled={
-                                    !interactive ||
-                                    state.operations[
-                                        `enabled:${entry.name}`
-                                    ] !== undefined
-                                }
-                                onClick={() => {
-                                    setConfirmationFailure(undefined);
-                                    setConfirmation({
-                                        action: "Disable",
-                                        instance: entry.name,
-                                    });
-                                }}
-                                type="button"
-                            >
-                                Disable
-                            </button>
-                        ) : (
-                            <button
-                                disabled={
-                                    !interactive ||
-                                    state.operations[
-                                        `enabled:${entry.name}`
-                                    ] !== undefined
-                                }
-                                onClick={() => {
-                                    setLifecycleFailure(undefined);
-                                    void store
-                                        .setInstanceEnabled(entry.name, true)
-                                        .then((succeeded) => {
-                                            if (!succeeded)
-                                                setLifecycleFailure(
-                                                    store.state.error ??
-                                                        `${entry.name} could not be enabled.`,
-                                                );
-                                        });
-                                }}
-                                type="button"
-                            >
-                                Enable
-                            </button>
-                        )}
-                        <button
-                            className="danger"
-                            disabled={
-                                !interactive ||
-                                state.operations[`delete:${entry.name}`] !==
-                                    undefined
-                            }
-                            onClick={() => {
-                                setConfirmationFailure(undefined);
-                                setConfirmation({
-                                    action: "Delete",
-                                    instance: entry.name,
-                                });
-                            }}
-                            type="button"
-                        >
-                            Delete
-                        </button>
-                    </div>
-                    {lifecycleFailure === undefined ? null : (
-                        <p className="error" role="alert">
-                            {lifecycleFailure}
-                        </p>
+                                    }}
+                                >
+                                    <strong>{item.name}</strong>
+                                    <span>
+                                        {item.snapshot.status} ·{" "}
+                                        {item.snapshot.connectionState}
+                                    </span>
+                                    <WorkerSummary
+                                        worker={
+                                            model.overview?.instances.find(
+                                                ({ name }) =>
+                                                    name === item.name,
+                                            )?.worker
+                                        }
+                                    />
+                                </button>
+                            ))}
+                        </div>
                     )}
-                </article>
+                    {entry === undefined ? null : (
+                        <article className="detail">
+                            <button
+                                className="back"
+                                onClick={() => {
+                                    refreshGeneration.current += 1;
+                                    selectedRef.current = undefined;
+                                    setSelected(undefined);
+                                    setDetailFailure(undefined);
+                                    setLifecycleFailure(undefined);
+                                }}
+                            >
+                                Back to instances
+                            </button>
+                            <h3>{entry.name}</h3>
+                            {refreshingInstance === entry.name ? (
+                                <p className="hint" role="status">
+                                    Refreshing instance details…
+                                </p>
+                            ) : null}
+                            {detailFailure === undefined ? null : (
+                                <p className="error" role="alert">
+                                    {detailFailure}
+                                </p>
+                            )}
+                            <p>
+                                Runtime: {entry.snapshot.status}; daemon:{" "}
+                                {entry.snapshot.daemonState}; sequence:{" "}
+                                {entry.snapshot.lastSeq}
+                            </p>
+                            {selfManaged ? (
+                                <p className="hint">
+                                    Self-managed reverse worker ·{" "}
+                                    {entry.snapshot.reverse?.availability ??
+                                        "unknown"}
+                                    {entry.snapshot.reverse?.transport ===
+                                    undefined
+                                        ? ""
+                                        : ` · ${entry.snapshot.reverse.transport}`}
+                                    {
+                                        " · Lifecycle is managed on the remote machine."
+                                    }
+                                </p>
+                            ) : null}
+                            <WorkerDiagnostics worker={selectedWorker} />
+                            <div className="actions">
+                                <button
+                                    disabled={
+                                        !interactive ||
+                                        refreshingInstance === entry.name
+                                    }
+                                    onClick={() => {
+                                        const generation =
+                                            ++refreshGeneration.current;
+                                        setDetailFailure(undefined);
+                                        setRefreshingInstance(entry.name);
+                                        void store
+                                            .refreshInstance(entry.name)
+                                            .catch((error: unknown) => {
+                                                if (
+                                                    refreshGeneration.current ===
+                                                        generation &&
+                                                    selectedRef.current ===
+                                                        entry.name
+                                                ) {
+                                                    setDetailFailure(
+                                                        error instanceof Error
+                                                            ? error.message
+                                                            : "Instance details could not be refreshed.",
+                                                    );
+                                                }
+                                            })
+                                            .finally(() => {
+                                                if (
+                                                    refreshGeneration.current ===
+                                                    generation
+                                                )
+                                                    setRefreshingInstance(
+                                                        undefined,
+                                                    );
+                                            });
+                                    }}
+                                    type="button"
+                                >
+                                    Refresh
+                                </button>
+                                {lifecycleAction === undefined ? null : (
+                                    <button
+                                        className={
+                                            lifecycleAction === "Start"
+                                                ? "primary"
+                                                : "danger"
+                                        }
+                                        disabled={
+                                            !interactive ||
+                                            state.operations[
+                                                `start:${entry.name}`
+                                            ] !== undefined ||
+                                            state.operations[
+                                                `stop:${entry.name}`
+                                            ] !== undefined
+                                        }
+                                        onClick={() => {
+                                            if (lifecycleAction === "Start") {
+                                                setLifecycleFailure(undefined);
+                                                void store
+                                                    .start(entry.name)
+                                                    .then((succeeded) => {
+                                                        if (
+                                                            !succeeded &&
+                                                            selectedRef.current ===
+                                                                entry.name
+                                                        ) {
+                                                            setLifecycleFailure(
+                                                                store.state
+                                                                    .error ??
+                                                                    `${entry.name} could not be started.`,
+                                                            );
+                                                        }
+                                                    });
+                                                return;
+                                            }
+                                            setConfirmationFailure(undefined);
+                                            setConfirmation({
+                                                action: "Stop",
+                                                instance: entry.name,
+                                            });
+                                        }}
+                                    >
+                                        {lifecycleAction === "Start" &&
+                                        state.operations[
+                                            `start:${entry.name}`
+                                        ] !== undefined
+                                            ? "Starting…"
+                                            : lifecycleAction}
+                                    </button>
+                                )}
+                                {selfManaged ||
+                                entry.snapshot.status === "stopped" ? null : (
+                                    <button
+                                        disabled={
+                                            !interactive ||
+                                            state.operations[
+                                                `restart:${entry.name}`
+                                            ] !== undefined
+                                        }
+                                        onClick={() => {
+                                            setConfirmationFailure(undefined);
+                                            setConfirmation({
+                                                action: "Restart",
+                                                instance: entry.name,
+                                            });
+                                        }}
+                                        type="button"
+                                    >
+                                        Restart
+                                    </button>
+                                )}
+                                {enabled === undefined ? null : enabled ? (
+                                    <button
+                                        disabled={
+                                            !interactive ||
+                                            state.operations[
+                                                `enabled:${entry.name}`
+                                            ] !== undefined
+                                        }
+                                        onClick={() => {
+                                            setConfirmationFailure(undefined);
+                                            setConfirmation({
+                                                action: "Disable",
+                                                instance: entry.name,
+                                            });
+                                        }}
+                                        type="button"
+                                    >
+                                        Disable
+                                    </button>
+                                ) : (
+                                    <button
+                                        disabled={
+                                            !interactive ||
+                                            state.operations[
+                                                `enabled:${entry.name}`
+                                            ] !== undefined
+                                        }
+                                        onClick={() => {
+                                            setLifecycleFailure(undefined);
+                                            void store
+                                                .setInstanceEnabled(
+                                                    entry.name,
+                                                    true,
+                                                )
+                                                .then((succeeded) => {
+                                                    if (!succeeded)
+                                                        setLifecycleFailure(
+                                                            store.state.error ??
+                                                                `${entry.name} could not be enabled.`,
+                                                        );
+                                                });
+                                        }}
+                                        type="button"
+                                    >
+                                        Enable
+                                    </button>
+                                )}
+                                <button
+                                    className="danger"
+                                    disabled={
+                                        !interactive ||
+                                        state.operations[
+                                            `delete:${entry.name}`
+                                        ] !== undefined
+                                    }
+                                    onClick={() => {
+                                        setConfirmationFailure(undefined);
+                                        setConfirmation({
+                                            action: "Delete",
+                                            instance: entry.name,
+                                        });
+                                    }}
+                                    type="button"
+                                >
+                                    Delete
+                                </button>
+                            </div>
+                            {lifecycleFailure === undefined ? null : (
+                                <p className="error" role="alert">
+                                    {lifecycleFailure}
+                                </p>
+                            )}
+                        </article>
+                    )}
+                </>
             )}
             {confirmation === undefined ? null : (
                 <ConfirmationDialog

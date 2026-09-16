@@ -89,12 +89,34 @@ function localStore(status: "ready" | "stopped"): WebStore {
                 ],
             },
         },
+        createInstance: vi.fn(async () => ({ succeeded: true })),
         deleteInstance: vi.fn(async () => true),
+        getInstanceCreateSchema: vi.fn(async () => ({
+            container: {
+                defaultMode: "existingImage" as const,
+                modes: [
+                    "preset",
+                    "dockerfile",
+                    "compose",
+                    "existingImage",
+                    "existingStoppedContainer",
+                ] as const,
+                presets: [],
+            },
+            defaultEnabled: true,
+            defaultMcpContextMode: "explicit" as const,
+            defaultMcpEnabled: true,
+            defaultModelExtensions: ["instance"],
+            defaultProvider: "local" as const,
+            defaultSecurityMode: "disabled" as const,
+            providers: ["local", "ssh", "docker", "podman", "reverse"] as const,
+        })),
         refreshInstance: vi.fn(async () => undefined),
         restart: vi.fn(async () => true),
         setInstanceEnabled: vi.fn(async () => true),
         start: vi.fn(async () => undefined),
         stop: vi.fn(async () => undefined),
+        validateInstanceCreate: vi.fn(async (draft) => draft),
     } as unknown as WebStore;
 }
 
@@ -136,6 +158,39 @@ it("starts a stopped local instance directly and marks the selected card", () =>
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(store.start).toHaveBeenCalledWith("local-one");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("creates an instance through schema defaults and server validation", async () => {
+    const store = localStore("ready");
+    render(<Instances store={store} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New instance" }));
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "web-created" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() =>
+        expect(store.validateInstanceCreate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                enabled: true,
+                name: "web-created",
+                provider: "local",
+            }),
+        ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() =>
+        expect(store.createInstance).toHaveBeenCalledWith(
+            expect.objectContaining({
+                name: "web-created",
+                provider: "local",
+            }),
+        ),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+        "Instance created successfully.",
+    );
 });
 
 it("keeps confirmation for stopping a running local instance", () => {

@@ -3,6 +3,7 @@ import {
     asInstanceName,
     type ContextMessageRecord,
     type ControlProtocolHelloResponse,
+    type InstanceCreateDraft,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
@@ -612,6 +613,86 @@ describe("WebStore", () => {
         expect(store.state.readModel.instances[0]?.snapshot.status).toBe(
             "stopped",
         );
+        store.close();
+    });
+
+    it("creates reverse instances, returns enrollment, and refreshes control state", async () => {
+        const clients = fakeClients();
+        const draft = {
+            approvalPolicy: { mode: "disabled" as const },
+            enabled: true,
+            extensions: { model: ["instance"] },
+            mcp: {
+                auth: "none" as const,
+                contextMode: "explicit" as const,
+                enabled: true,
+            },
+            name: "reverse-web",
+            provider: "reverse" as const,
+            security: { mode: "disabled" as const },
+            workspace: { enabled: true },
+        } satisfies InstanceCreateDraft;
+        clients.instance.create = vi.fn(async () => ({
+            enabled: true,
+            name: "reverse-web",
+        }));
+        clients.instance.createSchema = vi.fn(async () => ({
+            container: {
+                defaultMode: "existingImage" as const,
+                modes: [
+                    "preset",
+                    "dockerfile",
+                    "compose",
+                    "existingImage",
+                    "existingStoppedContainer",
+                ] as const,
+                presets: [],
+            },
+            defaultEnabled: true,
+            defaultMcpEnabled: true,
+            defaultModelExtensions: ["instance"],
+            defaultProvider: "local" as const,
+            defaultSecurityMode: "disabled" as const,
+            providers: ["local", "reverse"] as const,
+        }));
+        clients.instance.validateCreate = vi.fn(async () => ({
+            enabled: true,
+            extensions: { model: ["instance"] },
+            mcp: {
+                auth: { mode: "none" as const },
+                enabled: true,
+                path: "/reverse-web/mcp",
+            },
+            name: "reverse-web",
+            provider: "reverse" as const,
+            security: { mode: "disabled" as const },
+        }));
+        clients.reverse.createCode = vi.fn(async () => ({
+            controllerUrl: "https://controller.example.test",
+            deviceCode: "device-code",
+            expiresAt: "2026-09-16T12:00:00.000Z",
+            instance: asInstanceName("reverse-web"),
+        }));
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+        await store.load();
+
+        await expect(store.getInstanceCreateSchema()).resolves.toMatchObject({
+            defaultProvider: "local",
+        });
+        await expect(
+            store.validateInstanceCreate(draft),
+        ).resolves.toMatchObject({
+            name: "reverse-web",
+        });
+        const result = await store.createInstance(draft);
+
+        expect(clients.instance.create).toHaveBeenCalledWith(draft);
+        expect(clients.reverse.createCode).toHaveBeenCalledWith("reverse-web");
+        expect(result).toEqual({
+            enrollment:
+                "devshell-worker enroll --controller https://controller.example.test --device-code device-code (expires 2026-09-16T12:00:00.000Z)",
+            succeeded: true,
+        });
         store.close();
     });
 

@@ -5,6 +5,9 @@ import {
     errorMessage,
     withRequestTimeout,
     type ConversationPreferencesPatch,
+    type InstanceCreateDraft,
+    type InstanceCreateSchema,
+    type InstanceCreateSummary,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../app/transport/Client.js";
@@ -422,6 +425,66 @@ export class WebStore {
                 await this.#model.refreshControl();
             },
         );
+    }
+
+    async getInstanceCreateSchema(): Promise<InstanceCreateSchema> {
+        return await withRequestTimeout(
+            this.clients.instance.createSchema(),
+            this.#requestTimeoutMs,
+            "instance.createSchema",
+        );
+    }
+
+    async validateInstanceCreate(
+        draft: InstanceCreateDraft,
+    ): Promise<InstanceCreateSummary> {
+        return await withRequestTimeout(
+            this.clients.instance.validateCreate(draft),
+            this.#requestTimeoutMs,
+            `instance.validateCreate:${draft.name}`,
+        );
+    }
+
+    async createInstance(draft: InstanceCreateDraft): Promise<{
+        enrollment?: string;
+        succeeded: boolean;
+    }> {
+        const generation = this.#generation;
+        let enrollment: string | undefined;
+        const succeeded = await this.#operations.run(
+            `instance-create:${draft.name || "new"}`,
+            `${draft.name || "Instance"} created.`,
+            generation,
+            async (signal) => {
+                const result = await this.clients.instance.create(draft);
+                if (signal.aborted || !this.#current(generation)) return;
+                if (draft.provider === "reverse") {
+                    try {
+                        const code = await this.clients.reverse.createCode(
+                            result.name,
+                        );
+                        enrollment = [
+                            "devshell-worker enroll",
+                            `--controller ${code.controllerUrl}`,
+                            `--device-code ${code.deviceCode}`,
+                            `(expires ${code.expiresAt})`,
+                        ].join(" ");
+                    } catch (error) {
+                        enrollment = [
+                            `Reverse instance ${result.name} was created, but device code generation failed:`,
+                            errorMessage(error),
+                            `Recover with: devshell instance device-code ${result.name}`,
+                        ].join(" ");
+                    }
+                }
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshControl();
+            },
+        );
+        return {
+            ...(enrollment === undefined ? {} : { enrollment }),
+            succeeded,
+        };
     }
 
     dismissFeedback(kind: "error" | "notice"): void {

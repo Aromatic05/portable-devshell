@@ -13,7 +13,8 @@ body {
 }
 button,
 input,
-select {
+select,
+textarea {
     font: inherit;
 }
 button {
@@ -27,7 +28,8 @@ button {
 }
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
     outline: 3px solid #8ab4ff;
     outline-offset: 2px;
 }
@@ -263,6 +265,15 @@ h4 {
 .instance.selected {
     border-color: #8ab4ff;
 }
+.instances-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+.instances-heading h2 {
+    margin-bottom: 0;
+}
 .instances.has-selection {
     display: none;
 }
@@ -270,6 +281,83 @@ h4 {
     margin-top: 1rem;
     border-top: 1px solid #34445c;
     padding-top: 1rem;
+}
+.instance-create-panel {
+    max-width: 980px;
+}
+.instance-create-form {
+    display: grid;
+    gap: 1rem;
+}
+.instance-create-form fieldset {
+    min-width: 0;
+    margin: 0;
+    border: 1px solid #34445c;
+    border-radius: 10px;
+    padding: 0.85rem;
+}
+.instance-create-form legend {
+    padding: 0 0.35rem;
+    color: #b9c5d8;
+    font-weight: 650;
+}
+.instance-create-form details {
+    border: 1px solid #34445c;
+    border-radius: 10px;
+    padding: 0.75rem;
+}
+.instance-create-form details > summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+    gap: 0.75rem;
+}
+.form-field {
+    display: grid;
+    align-content: start;
+    gap: 0.3rem;
+    min-width: 0;
+}
+.form-field.wide {
+    grid-column: 1 / -1;
+}
+.form-field > span {
+    color: #b9c5d8;
+    font-size: 0.82rem;
+}
+.form-field input,
+.form-field select,
+.form-field textarea {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid #52647d;
+    border-radius: 8px;
+    padding: 0.55rem 0.65rem;
+    color: inherit;
+    background: #101722;
+}
+.form-field textarea {
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.check-field {
+    display: flex;
+    min-height: 42px;
+    align-items: center;
+    gap: 0.55rem;
+    border: 1px solid #34445c;
+    border-radius: 8px;
+    padding: 0.55rem 0.65rem;
+}
+.check-field input {
+    width: 18px;
+    height: 18px;
+}
+.validation-summary pre {
+    max-height: 320px;
 }
 .worker-diagnostics {
     margin: 1rem 0;

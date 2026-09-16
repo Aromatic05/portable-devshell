@@ -86,6 +86,7 @@ export type {
 } from "./protocol/control/ControlProtocol.js";
 export type {
     ApprovalDecisionValue,
+    ApprovalPolicyRule,
     ApprovalRequest,
 } from "./protocol/tool/Approval.js";
 export type { ArtifactStoredImageResult } from "./protocol/artifact/Image.js";
@@ -118,6 +119,12 @@ export type {
     McpContextStatus,
 } from "./protocol/interaction/context/ContextRecord.js";
 export type { InstanceEvent } from "./protocol/instance/activity/Event.js";
+export type {
+    InstanceCreateDraft,
+    InstanceCreateProvider,
+    InstanceCreateSchema,
+    InstanceCreateSummary,
+} from "./protocol/instance/Create.js";
 export type {
     InstanceListEntry,
     InstanceRuntimeEnvelope,
