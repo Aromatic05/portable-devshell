@@ -10,10 +10,15 @@ import {
     encodeWorkerRpcMessage,
 } from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
-import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import {
-    decodePacket,
+    asInstanceName,
+    type Channel,
+    type JsonValue,
+} from "@portable-devshell/shared";
+import {
     encodePacket,
+    FrameProtocol,
+    PacketBuffer,
 } from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 
@@ -126,14 +131,7 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
         assert.equal(worker.snapshot().reverse?.transport, "wss");
         assert.equal(worker.snapshot().reverse?.generation, 1);
 
-        const bulk = connectWorker(port, enrollment.deviceToken, 1, "bulk");
-        await bulk.opened;
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        assert.equal(worker.snapshot().reverse?.generation, 1);
-        assert.equal(first.socket.readyState, WebSocket.OPEN);
-
         const firstClosed = first.closed;
-        const bulkClosed = bulk.closed;
         const second = connectWorker(port, enrollment.deviceToken, 2);
         await second.opened;
         await waitUntil(
@@ -143,7 +141,6 @@ test("WSS reverse connection authenticates, handshakes, and a higher generation 
             () => JSON.stringify(worker.snapshot()),
         );
         await firstClosed;
-        await bulkClosed;
         assert.equal(worker.snapshot().reverse?.transport, "wss");
 
         const reverseControl = new ReverseCredentialService({
@@ -274,6 +271,46 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         const methods: string[] = [];
         let upstreamSeq = 0;
         let buffered = "";
+        const sseChannel = new TestWorkerChannel(
+            async (data) => {
+                upstreamSeq += 1;
+                const body = {
+                    frames: [
+                        {
+                            frame: Buffer.from(data).toString("base64"),
+                            seq: upstreamSeq,
+                        },
+                    ],
+                    generation: 1,
+                };
+                const post = async () => {
+                    const upload = await fetch(
+                        `http://127.0.0.1:${port}/base/reverse/v1/frames`,
+                        {
+                            body: JSON.stringify(body),
+                            headers: {
+                                ...headers,
+                                "content-type": "application/json",
+                            },
+                            method: "POST",
+                        },
+                    );
+                    assert.equal(upload.status, 200);
+                    assert.deepEqual(await upload.json(), {
+                        acceptedThrough: upstreamSeq,
+                        generation: 1,
+                    });
+                };
+                await post();
+                if (upstreamSeq === 1) await post();
+            },
+            () => undefined,
+        );
+        void serveWorkerRpc(sseChannel, methods).catch((error: unknown) => {
+            sseChannel.finish(
+                error instanceof Error ? error : new Error(String(error)),
+            );
+        });
 
         while (methods.length < 3) {
             const chunk = await reader.read();
@@ -290,62 +327,9 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 if (dataLine === undefined) {
                     continue;
                 }
-                const request = decodeWorkerRpcMessage(
-                    decodePacket(
-                        Buffer.from(dataLine.slice(5).trim(), "base64"),
-                    ),
-                ) as Record<string, JsonValue>;
-                const method = String(request.method);
-                methods.push(method);
-                upstreamSeq += 1;
-                const body = {
-                    frames: [
-                        {
-                            frame: Buffer.from(
-                                encodePacket(
-                                    encodeWorkerRpcMessage({
-                                        id: String(request.id),
-                                        ok: true,
-                                        result: responseFor(method),
-                                        type: "response",
-                                    }),
-                                ),
-                            ).toString("base64"),
-                            seq: upstreamSeq,
-                        },
-                    ],
-                    generation: 1,
-                };
-                const upload = await fetch(
-                    `http://127.0.0.1:${port}/base/reverse/v1/frames`,
-                    {
-                        body: JSON.stringify(body),
-                        headers: {
-                            ...headers,
-                            "content-type": "application/json",
-                        },
-                        method: "POST",
-                    },
+                sseChannel.emit(
+                    Buffer.from(dataLine.slice(5).trim(), "base64"),
                 );
-                assert.equal(upload.status, 200);
-                if (upstreamSeq === 1) {
-                    const duplicate = await fetch(
-                        `http://127.0.0.1:${port}/base/reverse/v1/frames`,
-                        {
-                            body: JSON.stringify(body),
-                            headers: {
-                                ...headers,
-                                "content-type": "application/json",
-                            },
-                            method: "POST",
-                        },
-                    );
-                    assert.equal(duplicate.status, 200);
-                    assert.deepEqual(await duplicate.json(), {
-                        acceptedThrough: 1,
-                        generation: 1,
-                    });
-                }
             }
         }
 
@@ -360,6 +344,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
         ]);
         assert.equal(worker.snapshot().reverse?.transport, "sse");
         await reader.cancel();
+        sseChannel.finish();
         await waitUntil(
             () => worker.snapshot().reverse?.availability === "offline",
             () => JSON.stringify(worker.snapshot()),
@@ -374,7 +359,6 @@ function connectWorker(
     port: number,
     token: string,
     generation: number,
-    lane?: "control" | "bulk",
 ): {
     closed: Promise<{ code: number; reason: string }>;
     errors: string[];
@@ -386,38 +370,44 @@ function connectWorker(
     const errors: string[] = [];
     const socket = new WebSocket(
         `ws://127.0.0.1:${port}/base/reverse/v1/connect`,
-        "devshell-worker-rpc.v1",
+        "devshell-worker-transport.v1",
         {
             headers: {
                 Authorization: `Bearer ${token}`,
                 "X-Devshell-Generation": String(generation),
                 "X-Devshell-Instance": "reverse-test",
-                ...(lane === undefined ? {} : { "X-Devshell-Rpc-Lane": lane }),
             },
         },
     );
+    const channel = new TestWorkerChannel(
+        async (data) =>
+            await new Promise<void>((resolve, reject) => {
+                socket.send(data, { binary: true }, (error) =>
+                    error == null ? resolve() : reject(error),
+                );
+            }),
+        () => socket.close(1000, "worker closed"),
+    );
+    void serveWorkerRpc(channel, methods).catch((error: unknown) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+    });
     socket.on("message", (data, isBinary) => {
         assert.equal(isBinary, true);
-        const request = decodeWorkerRpcMessage(
-            decodePacket(
-                Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer),
-            ),
-        ) as Record<string, JsonValue>;
-        const id = String(request.id);
-        const method = String(request.method);
-        methods.push(method);
-        socket.send(
-            encodePacket(
-                encodeWorkerRpcMessage({
-                    id,
-                    ok: true,
-                    result: responseFor(method),
-                    type: "response",
-                }),
-            ),
+        channel.emit(
+            Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer),
         );
     });
-    socket.on("error", (error) => errors.push(error.message));
+    socket.on("error", (error) => {
+        errors.push(error.message);
+        channel.finish(error);
+    });
+    socket.once("close", (code, reason) => {
+        channel.finish(
+            code === 1000
+                ? undefined
+                : new Error(`WebSocket closed: ${code} ${reason.toString()}`),
+        );
+    });
     return {
         closed: new Promise((resolve) =>
             socket.once("close", (code, reason) =>
@@ -432,6 +422,97 @@ function connectWorker(
         }),
         socket,
     };
+}
+
+class TestWorkerChannel implements Channel {
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
+    readonly #closeListeners = new Set<(error?: Error) => void>();
+    readonly #send: (data: Uint8Array) => Promise<void>;
+    readonly #closeTransport: () => void;
+    #closed = false;
+    #writeTail: Promise<void> = Promise.resolve();
+
+    constructor(
+        send: (data: Uint8Array) => Promise<void>,
+        closeTransport: () => void,
+    ) {
+        this.#send = send;
+        this.#closeTransport = closeTransport;
+    }
+
+    get closed(): boolean {
+        return this.#closed;
+    }
+
+    write(data: Uint8Array): Promise<void> {
+        if (this.#closed) return Promise.reject(new Error("worker channel is closed"));
+        const copy = Uint8Array.from(data);
+        const write = this.#writeTail.then(() => this.#send(copy));
+        this.#writeTail = write.catch(() => undefined);
+        return write;
+    }
+
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
+    }
+
+    onClose(listener: (error?: Error) => void): () => void {
+        this.#closeListeners.add(listener);
+        return () => this.#closeListeners.delete(listener);
+    }
+
+    close(error?: Error): void {
+        if (this.#closed) return;
+        this.#closeTransport();
+        this.finish(error);
+    }
+
+    emit(data: Uint8Array): void {
+        if (this.#closed) return;
+        for (const listener of [...this.#dataListeners]) listener(Uint8Array.from(data));
+    }
+
+    finish(error?: Error): void {
+        if (this.#closed) return;
+        this.#closed = true;
+        for (const listener of [...this.#closeListeners]) listener(error);
+        this.#dataListeners.clear();
+        this.#closeListeners.clear();
+    }
+}
+
+async function serveWorkerRpc(
+    channel: Channel,
+    methods: string[],
+): Promise<void> {
+    const protocol = new FrameProtocol(channel, { role: "acceptor" });
+    const open = await protocol.nextOpen();
+    assert.notEqual(open, undefined);
+    assert.equal(open!.service, "worker.rpc");
+    assert.equal(open!.metadata.byteLength, 0);
+    const stream = await open!.accept();
+    const packets = new PacketBuffer();
+    while (true) {
+        const chunk = await stream.read();
+        if (chunk === undefined) return;
+        for (const payload of packets.push(chunk)) {
+            const request = decodeWorkerRpcMessage(payload) as Record<string, JsonValue>;
+            const id = String(request.id);
+            const method = String(request.method);
+            methods.push(method);
+            await stream.write(
+                encodePacket(
+                    encodeWorkerRpcMessage({
+                        id,
+                        ok: true,
+                        result: responseFor(method),
+                        type: "response",
+                    }),
+                ),
+            );
+        }
+    }
 }
 
 function responseFor(method: string): JsonValue {

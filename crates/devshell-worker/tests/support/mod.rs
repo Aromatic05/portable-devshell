@@ -1,4 +1,4 @@
 mod env;
-mod frame;
+pub(crate) mod frame;
 
 pub use env::TestEnv;

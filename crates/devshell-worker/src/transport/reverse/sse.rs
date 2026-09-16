@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::daemon::log::append_log;
 
-use super::{ReverseConnector, ReversePayload, reverse_endpoint};
+use super::{ReverseConnector, ReverseFramePayload, reverse_endpoint};
 
 impl ReverseConnector {
     pub(super) fn run_sse(&self, client: &Client, generation: u64) -> Result<(), String> {
@@ -131,7 +131,7 @@ impl ReverseConnector {
 
 struct SseUploader {
     handle: Option<thread::JoinHandle<()>>,
-    payload: Arc<dyn ReversePayload>,
+    payload: Arc<ReverseFramePayload>,
     running: Arc<AtomicBool>,
 }
 

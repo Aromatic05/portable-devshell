@@ -1,7 +1,6 @@
 import type { InstanceName } from "./Identity.js";
 
 export type ReverseTransport = "wss" | "sse";
-export type ReverseRpcLane = "control" | "bulk";
 export type ReverseEnrollmentState = "pending" | "enrolled" | "revoked";
 export type ReverseAvailability = "offline" | "online";
 

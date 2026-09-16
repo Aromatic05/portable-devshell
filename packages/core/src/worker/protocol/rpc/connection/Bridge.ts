@@ -14,7 +14,10 @@ import {
 } from "@portable-devshell/shared/transport/frame";
 
 import { readWorkerAbortReason } from "../../../AbortReason.js";
-import type { WorkerTransport } from "../../../transport/Transport.js";
+import {
+    connectWorkerService,
+    type WorkerTransport,
+} from "../../../transport/Transport.js";
 import type { WorkerRpcOptions } from "../../../transport/command/Model.js";
 import { WorkerRpcError } from "../Message.js";
 import type {
@@ -23,12 +26,11 @@ import type {
     WorkerRpcResponseEnvelope,
 } from "../Message.js";
 import { decodeWorkerRpcMessage, encodeWorkerRpcMessage } from "../Message.js";
-import { WorkerRpcTransportConnector } from "../Process.js";
 
 const DEFAULT_CANCELLATION_RETENTION_MS = 30_000;
 
 export interface WorkerRpcConnector {
-    attach?(channel: Channel, lane?: "control" | "bulk"): void;
+    attach?(channel: Channel): void;
     connect(signal?: AbortSignal): Promise<Channel>;
     detach?(channel?: Channel): void;
 }
@@ -588,6 +590,47 @@ export class WorkerRpcBridge {
         const controller = this.#connectAbortController;
         this.#connectAbortController = undefined;
         return controller;
+    }
+}
+
+class WorkerRpcTransportConnector implements WorkerRpcConnector {
+    readonly #transport: WorkerTransport;
+    readonly #options: WorkerRpcOptions;
+
+    constructor(transport: WorkerTransport, options: WorkerRpcOptions) {
+        this.#transport = transport;
+        this.#options = options;
+    }
+
+    async connect(signal?: AbortSignal): Promise<Channel> {
+        try {
+            return await connectWorkerService(
+                this.#transport,
+                this.#options,
+                "worker.rpc",
+                signal,
+            );
+        } catch (error) {
+            if (signal?.aborted === true) {
+                throw signal.reason instanceof Error
+                    ? signal.reason
+                    : new Error("Worker RPC connection was aborted.");
+            }
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                error.code === errorCodes.coreWorkerRpcSpawnFailed
+            ) {
+                throw error;
+            }
+            throw createError({
+                code: errorCodes.coreWorkerRpcSpawnFailed,
+                cause: error,
+                details: { instance: this.#options.instanceName },
+                message: `Worker RPC connection failed for instance ${this.#options.instanceName}.`,
+                retryable: false,
+            });
+        }
     }
 }
 

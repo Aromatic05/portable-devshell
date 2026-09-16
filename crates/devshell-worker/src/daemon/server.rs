@@ -99,7 +99,14 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         let payload = Arc::new(ReverseRpcPayload::new(Arc::clone(&router)));
-        ReverseConnector::new(instance.clone(), instance_paths.clone(), reverse, payload).spawn()
+        ReverseConnector::new(
+            instance.clone(),
+            instance_paths.clone(),
+            reverse,
+            "worker.rpc".to_string(),
+            payload,
+        )
+        .spawn()
     });
 
     while !router.shutdown_requested() {

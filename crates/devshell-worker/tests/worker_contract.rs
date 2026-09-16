@@ -11,6 +11,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use serde_json::Value;
 use support::TestEnv;
+use support::frame::{TransportRpcReader, TransportRpcWriter};
 
 #[test]
 fn start_is_workspace_neutral_and_keeps_config_minimal() {
@@ -1330,10 +1331,19 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
     assert_eq!(stale_status["state"], "stale");
     assert_eq!(stale_status["running"], false);
     assert!(stale_status["workspace"].is_null());
-    env.command()
-        .args(["rpc", "--instance", instance])
-        .assert()
-        .failure();
+    let mut transport = env
+        .std_command()
+        .args(["transport", "--instance", instance])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let rpc = TransportRpcWriter::new(transport.stdin.take().unwrap()).unwrap();
+    drop(rpc);
+    let mut output = TransportRpcReader::new(transport.stdout.take().unwrap());
+    let error = output.read_to_end(&mut Vec::new()).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+    transport.wait().unwrap();
 
     let restarted = env
         .command()
@@ -1627,13 +1637,13 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
 
     let mut bridge = env
         .std_command()
-        .args(["rpc", "--instance", instance])
+        .args(["transport", "--instance", instance])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = bridge.stdin.take().unwrap();
-    let mut stdout = bridge.stdout.take().unwrap();
+    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
+    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
 
     #[cfg(unix)]
     let long_command = "sleep 2; printf done";
@@ -1691,13 +1701,13 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
 
     let mut bridge = env
         .std_command()
-        .args(["rpc", "--instance", instance])
+        .args(["transport", "--instance", instance])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = bridge.stdin.take().unwrap();
-    let mut stdout = bridge.stdout.take().unwrap();
+    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
+    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
     let (frames, received) = mpsc::channel();
     let reader = thread::spawn(move || {
         while let Ok(frame) = try_read_rpc_frame(&mut stdout) {
@@ -1792,13 +1802,13 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
 
     let mut bridge = env
         .std_command()
-        .args(["rpc", "--instance", instance])
+        .args(["transport", "--instance", instance])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = bridge.stdin.take().unwrap();
-    let mut stdout = bridge.stdout.take().unwrap();
+    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
+    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
 
     #[cfg(unix)]
     let cancel_command = format!(

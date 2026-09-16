@@ -111,7 +111,6 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const accepted: Array<{
         channel: Channel;
         generation: number;
-        lane?: "control" | "bulk";
         transport: string;
     }> = [];
     const descriptor = {
@@ -123,11 +122,10 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
                 channel: Channel,
                 options: {
                     generation: number;
-                    lane?: "control" | "bulk";
                     transport: "sse" | "wss";
                 },
             ): Promise<InstanceSnapshot> => {
-                if (options.lane !== "bulk") generation = options.generation;
+                generation = options.generation;
                 accepted.push({ channel, ...options });
                 return {
                     connectionState: "connected",
@@ -170,13 +168,6 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     await service.activate(identityOne, "wss", first);
     assert.equal(accepted.length, 1);
     assert.equal(accepted[0]?.generation, 1);
-    assert.equal(accepted[0]?.lane, "control");
-
-    const bulk = new MemoryRpcChannel();
-    await service.activate(identityOne, "wss", bulk, "bulk");
-    assert.equal(accepted.length, 2);
-    assert.equal(accepted[1]?.generation, 1);
-    assert.equal(accepted[1]?.lane, "bulk");
 
     const duplicate = new MemoryRpcChannel();
     await assert.rejects(
@@ -192,9 +183,8 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     );
     const second = new MemoryRpcChannel();
     await service.activate(identityTwo, "wss", second);
-    assert.equal(accepted.length, 3);
-    assert.equal(accepted[2]?.generation, 2);
-    assert.equal(bulk.closed, true);
+    assert.equal(accepted.length, 2);
+    assert.equal(accepted[1]?.generation, 2);
 
     service.disconnect(descriptor.name);
     assert.equal(second.closed, true);

@@ -1,6 +1,5 @@
 pub mod enroll;
 pub mod instance;
-pub mod rpc;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -18,7 +17,6 @@ enum Command {
     Stop(InstanceArgs),
     Status(InstanceArgs),
     Logs(InstanceArgs),
-    Rpc(InstanceArgs),
     Transport(InstanceArgs),
     Retire(InstanceArgs),
     Gc(GcArgs),
@@ -52,7 +50,6 @@ pub fn run() -> Result<String, String> {
         Command::Stop(args) => instance::lifecycle::stop::run(args),
         Command::Status(args) => instance::observe::status::run(args),
         Command::Logs(args) => instance::observe::logs::run(args),
-        Command::Rpc(args) => rpc::run(args),
         Command::Transport(args) => crate::transport::run(&args.instance),
         Command::Retire(args) => instance::maintain::retire::run(args),
         Command::Gc(args) => instance::maintain::gc::run(args),

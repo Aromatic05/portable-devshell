@@ -51,7 +51,7 @@ function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
     return env;
 }
 
-test("local transport builds start command and rpc bridge", async () => {
+test("local transport builds start command and transport channel", async () => {
     const recorder = createSpawnRecorder();
     const transport = new WorkerTransportDriverLocal({
         workerBinary: new WorkerBinary("/worker/bin"),
@@ -77,41 +77,18 @@ test("local transport builds start command and rpc bridge", async () => {
         "pipe",
     ]);
 
-    const rpcProcess = await transport.spawnWorkerRpc({
+    const channel = await transport.connectWorkerChannel({
         instanceName: "task-3-local",
     });
-
-    assert.equal(rpcProcess.stdin, recorder.children[1].stdin);
-    assert.equal(rpcProcess.stdout, recorder.children[1].stdout);
-    assert.equal(rpcProcess.stderr, recorder.children[1].stderr);
-    assert.equal(rpcProcess.kill("SIGTERM"), true);
-    assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
     assert.equal(recorder.calls[1]?.command, "/worker/bin");
     assert.deepEqual(recorder.calls[1]?.args, [
-        "rpc",
+        "transport",
         "--instance",
         "task-3-local",
     ]);
     assert.equal(recorder.calls[1]?.options.cwd, undefined);
     assert.deepEqual(recorder.calls[1]?.options.env, sanitizedWorkerEnv());
     assert.deepEqual(recorder.calls[1]?.options.stdio, [
-        "pipe",
-        "pipe",
-        "pipe",
-    ]);
-
-    const channel = await transport.connectWorkerChannel({
-        instanceName: "task-3-local",
-    });
-    assert.equal(recorder.calls[2]?.command, "/worker/bin");
-    assert.deepEqual(recorder.calls[2]?.args, [
-        "transport",
-        "--instance",
-        "task-3-local",
-    ]);
-    assert.equal(recorder.calls[2]?.options.cwd, undefined);
-    assert.deepEqual(recorder.calls[2]?.options.env, sanitizedWorkerEnv());
-    assert.deepEqual(recorder.calls[2]?.options.stdio, [
         "pipe",
         "pipe",
         "pipe",
@@ -623,7 +600,7 @@ test("ssh transport uploads instance environment without replacing the local ssh
     );
 });
 
-test("ssh RPC exit cleans an uploaded environment file after an early local termination", async () => {
+test("ssh transport channel exit cleans an uploaded environment file after an early local termination", async () => {
     const recorder = createSpawnRecorder((_call, child, callIndex) => {
         if (callIndex === 0) {
             child.stdin.once("finish", () => closeRecordedChild(child));
@@ -640,13 +617,13 @@ test("ssh RPC exit cleans an uploaded environment file after an early local term
         spawnFunction: recorder.spawn,
     });
 
-    const rpc = await transport.spawnWorkerRpc({
+    const channel = await transport.connectWorkerChannel({
         env: { API_TOKEN: "remote-secret" },
         instanceName: "task-3-ssh",
     });
     assert.equal(recorder.calls.length, 2);
-    assert.equal(rpc.kill("SIGTERM"), true);
-    assert.deepEqual(await rpc.exit, { code: null, signal: "SIGTERM" });
+    channel.close();
+    await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(recorder.calls.length, 3);
     const cleanup = recorder.calls[2];
     assert.ok(cleanup);
@@ -1083,11 +1060,10 @@ test("ssh transport interactive start establishes a reusable control socket", as
             },
         },
     );
-    const rpcProcess = await transport.spawnWorkerRpc({
+    const channel = await transport.connectWorkerChannel({
         instanceName: "demo-ssh",
     });
-    rpcProcess.kill("SIGTERM");
-    await rpcProcess.exit;
+    channel.close();
 
     assert.equal(startResult.exitCode, 0);
     assert.equal(outputs.join(""), "Password: ");
@@ -1147,7 +1123,7 @@ test("ssh transport interactive start establishes a reusable control socket", as
             "sh",
             "-lc",
             shellEscape(
-                "'/usr/local/bin/devshell-worker' 'rpc' '--instance' 'demo-ssh'",
+                "'/usr/local/bin/devshell-worker' 'transport' '--instance' 'demo-ssh'",
             ),
         ],
         options: {
@@ -1688,16 +1664,10 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         spawnFunction: recorder.spawn,
     });
 
-    const rpcProcess = await transport.spawnWorkerRpc({
+    const channel = await transport.connectWorkerChannel({
         instanceName: "task-3-podman",
     });
-    t.after(() => {
-        rpcProcess.kill("SIGTERM");
-    });
-
-    assert.equal(rpcProcess.stdin, recorder.children[5]?.stdin);
-    assert.equal(rpcProcess.stdout, recorder.children[5]?.stdout);
-    assert.equal(rpcProcess.stderr, recorder.children[5]?.stderr);
+    t.after(() => channel.close());
     assert.deepEqual(recorder.calls[0], {
         command: "podman-bin",
         args: [
@@ -1773,7 +1743,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
             "-i",
             "worker-container",
             "/home/dev/.devshell/bin/devshell-worker",
-            "rpc",
+            "transport",
             "--instance",
             "task-3-podman",
         ],
@@ -1787,8 +1757,7 @@ test("podman transport installs default worker before spawning rpc", async (t) =
         Buffer.concat(recorder.children[4]?.stdinChunks ?? []),
         worker.contents,
     );
-    assert.equal(rpcProcess.kill("SIGTERM"), true);
-    assert.deepEqual(await rpcProcess.exit, { code: null, signal: "SIGTERM" });
+    channel.close();
 });
 
 test("docker transport creates and starts managed containers before starting the worker", async () => {
@@ -2382,7 +2351,7 @@ test("podman transport rejects already running existing stopped containers", asy
 });
 
 test(
-    "local transport executes frozen devshell-worker start status logs stop rpc",
+    "local transport executes frozen devshell-worker lifecycle and Frame services",
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         const homeDirectory = await createTestTempDirectory("core-home");
@@ -2457,21 +2426,6 @@ test(
         });
         await rpcStream.reset(frameResetCodes.cancelled, "test complete");
         frameProtocol.close();
-
-        const rpcProcess = await transport.spawnWorkerRpc({
-            env,
-            instanceName,
-        });
-        assert.notEqual(rpcProcess.stdin, null);
-        assert.notEqual(rpcProcess.stdout, null);
-        assert.notEqual(rpcProcess.stderr, null);
-        assert.equal(rpcProcess.kill("SIGTERM"), true);
-        const rpcExit = await rpcProcess.exit;
-        if (process.platform === "win32") {
-            assert.notDeepEqual(rpcExit, { code: 0, signal: null });
-        } else {
-            assert.deepEqual(rpcExit, { code: null, signal: "SIGTERM" });
-        }
 
         const stopResult = await transport.runWorkerCommand("stop", {
             env,
@@ -2553,10 +2507,16 @@ function createSpawnRecorder(
             const stdinChunks: Buffer[] = [];
             const originalEnd = stdin.end.bind(stdin);
             const child = new EventEmitter() as RecordedChild;
+            let exitCode: number | null = null;
+            let signalCode: NodeJS.Signals | null = null;
 
             child.stdin = stdin;
             child.stdout = stdout;
             child.stderr = stderr;
+            Object.defineProperties(child, {
+                exitCode: { get: () => exitCode },
+                signalCode: { get: () => signalCode },
+            });
             child.stdinChunks = stdinChunks;
             stdin.end = ((...args: Parameters<PassThrough["end"]>) => {
                 const result = originalEnd(...args);
@@ -2567,19 +2527,13 @@ function createSpawnRecorder(
             }) as PassThrough["end"];
             child.kill = (signal?: NodeJS.Signals | number) => {
                 setImmediate(() => {
+                    signalCode =
+                        typeof signal === "string" ? signal : "SIGTERM";
                     stdin.end();
                     stdout.end();
                     stderr.end();
-                    child.emit(
-                        "exit",
-                        null,
-                        typeof signal === "string" ? signal : "SIGTERM",
-                    );
-                    child.emit(
-                        "close",
-                        null,
-                        typeof signal === "string" ? signal : "SIGTERM",
-                    );
+                    child.emit("exit", null, signalCode);
+                    child.emit("close", null, signalCode);
                 });
                 return true;
             };
@@ -2608,6 +2562,7 @@ function createSpawnRecorder(
 
             if (!handled && options.stdio?.[0] === "ignore") {
                 setImmediate(() => {
+                    exitCode = 0;
                     stdin.end();
                     stdout.end();
                     stderr.end();

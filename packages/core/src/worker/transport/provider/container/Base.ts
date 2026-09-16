@@ -18,12 +18,7 @@ import type {
     WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
-    WorkerRpcOptions,
 } from "../../command/Model.js";
-import {
-    createWorkerRpcProcess,
-    type WorkerRpcProcess,
-} from "../../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -192,32 +187,6 @@ export class WorkerTransportDriverContainerBase implements WorkerTransport {
                 errorCodes.coreProviderFailed,
             ),
             invocation.context,
-        );
-    }
-
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const environment = this.#workerCommandEnvironment(options.env);
-        await this.#provision.ensureReady("spawnWorkerRpc");
-        const executable = await this.#resolveExecutable();
-        const workerCommand = new WorkerBinary(executable).buildCommand(
-            "rpc",
-            options.instanceName,
-        );
-        const invocation = this.#createExecInvocation(
-            "spawnWorkerRpc",
-            [workerCommand.command, ...workerCommand.args],
-            options.instanceName,
-            environment.keys,
-        );
-        return createWorkerRpcProcess(
-            this.#process.spawn(
-                invocation.context,
-                {
-                    env: environment.processEnv,
-                    stdio: ["pipe", "pipe", "pipe"],
-                },
-                errorCodes.coreWorkerRpcSpawnFailed,
-            ),
         );
     }
 

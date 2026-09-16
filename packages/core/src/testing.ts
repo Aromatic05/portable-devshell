@@ -14,7 +14,6 @@ export * from "./storage/audit/ToolCallHistory.js";
 export * from "./storage/log/Store.js";
 export * from "./worker/transport/Binary.js";
 export * from "./worker/provision/AssetResolver.js";
-export * from "./worker/protocol/rpc/Process.js";
 export * from "./worker/transport/command/Client.js";
 export * from "./worker/transport/command/Model.js";
 export * from "./worker/transport/command/Transport.js";

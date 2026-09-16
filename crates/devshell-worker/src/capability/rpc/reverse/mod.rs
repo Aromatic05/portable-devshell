@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use lru::LruCache;
 
-use crate::capability::rpc::codec::{decode_request_frame, encode_json};
+use crate::capability::rpc::codec::{MAX_FRAME_SIZE, decode_request_frame, encode_json};
 use crate::capability::rpc::response::RpcResponse;
 use crate::capability::rpc::router::RpcRouter;
 use crate::transport::reverse::{ReversePayload, ReversePayloadFrame};
@@ -139,8 +139,42 @@ impl ReverseDispatcher {
     }
 }
 
+#[derive(Default)]
+struct RpcPacketDecoder {
+    buffer: Vec<u8>,
+}
+
+impl RpcPacketDecoder {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+        self.buffer.extend_from_slice(bytes);
+        let mut packets = Vec::new();
+        loop {
+            if self.buffer.len() < 4 {
+                break;
+            }
+            let length = u32::from_be_bytes(self.buffer[..4].try_into().unwrap()) as usize;
+            if length > MAX_FRAME_SIZE {
+                return Err(format!("rpc.frameTooLarge:{length}"));
+            }
+            let packet_len = 4_usize
+                .checked_add(length)
+                .ok_or_else(|| "rpc frame length overflow".to_string())?;
+            if self.buffer.len() < packet_len {
+                break;
+            }
+            packets.push(self.buffer.drain(..packet_len).collect());
+        }
+        Ok(packets)
+    }
+
+    fn clear(&mut self) {
+        self.buffer.clear();
+    }
+}
+
 #[derive(Clone)]
 pub struct ReverseRpcPayload {
+    decoder: Arc<Mutex<RpcPacketDecoder>>,
     router: Arc<RpcRouter>,
     dispatcher: Arc<ReverseDispatcher>,
     responses: Arc<ReverseResponseQueue>,
@@ -154,6 +188,7 @@ impl ReverseRpcPayload {
             Arc::clone(&responses),
         ));
         Self {
+            decoder: Arc::new(Mutex::new(RpcPacketDecoder::default())),
             router,
             dispatcher,
             responses,
@@ -167,11 +202,25 @@ impl ReversePayload for ReverseRpcPayload {
     }
 
     fn prepare_connection(&self) -> Result<(), String> {
+        self.decoder
+            .lock()
+            .map_err(|_| "reverse RPC decoder lock poisoned".to_string())?
+            .clear();
         self.router.clear_notifications()
     }
 
-    fn accept_inbound(&self, frame: &[u8]) -> Result<Option<ReversePayloadFrame>, String> {
-        self.dispatcher.dispatch(frame)
+    fn accept_inbound(&self, bytes: &[u8]) -> Result<Option<ReversePayloadFrame>, String> {
+        let packets = self
+            .decoder
+            .lock()
+            .map_err(|_| "reverse RPC decoder lock poisoned".to_string())?
+            .push(bytes)?;
+        for packet in packets {
+            if let Some(response) = self.dispatcher.dispatch(&packet)? {
+                self.responses.push_back(response)?;
+            }
+        }
+        Ok(None)
     }
 
     fn queue_outbound(&self, frame: ReversePayloadFrame) -> Result<(), String> {

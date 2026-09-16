@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { errorCodes, type Channel } from "@portable-devshell/shared";
-import { encodePacket } from "@portable-devshell/shared/transport/frame";
+import {
+    errorCodes,
+    StreamChannel,
+    type Channel,
+} from "@portable-devshell/shared";
+import {
+    FrameProtocol,
+    type FrameStream,
+} from "@portable-devshell/shared/transport/frame";
 import {
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     WorkerRpcInboundConnector,
-    WorkerRpcProcessConnector,
 } from "@portable-devshell/core/testing";
 
 class MemoryChannel implements Channel {
@@ -42,72 +48,46 @@ class MemoryChannel implements Channel {
     }
 }
 
-test("inbound connector keeps the active control generation until its channel detaches", async () => {
+test("inbound connector opens one worker.rpc Frame stream on the physical reverse channel", async () => {
     const connector = new WorkerRpcInboundConnector();
-    const first = new MemoryChannel();
-    const unrelated = new MemoryChannel();
+    const peer = createFramePeer();
 
     assert.equal(connector.connected, false);
-    connector.attach(first, "control");
+    connector.attach(peer.controller);
+    const [routed, workerRpc] = await Promise.all([
+        connector.connect(),
+        peer.workerRpc,
+    ]);
     assert.equal(connector.connected, true);
-    const routed = await connector.connect();
-    assert.notEqual(routed, first);
+    assert.notEqual(routed, peer.controller);
 
-    connector.detach(unrelated);
-    assert.equal(connector.connected, true);
-    assert.equal(await connector.connect(), routed);
+    const bytes = Uint8Array.from([0, 1, 2, 3, 4]);
+    await routed.write(bytes);
+    assert.deepEqual(await workerRpc.read(), bytes);
 
-    connector.detach(first);
+    connector.detach(peer.controller);
     assert.equal(connector.connected, false);
 });
 
-test("inbound connector routes artifact payload traffic to bulk without blocking control", async () => {
+test("physical reverse replacement creates a new worker.rpc stream and closes the previous generation", async () => {
     const connector = new WorkerRpcInboundConnector();
-    const control = new MemoryChannel();
-    const bulk = new MemoryChannel();
-    connector.attach(control, "control");
-    connector.attach(bulk, "bulk");
-    const routed = await connector.connect();
+    const first = createFramePeer();
+    const second = createFramePeer();
 
-    await routed.write(request("control-1", "worker.ping"));
-    await routed.write(request("bulk-1", "artifact.payload.read"));
-    await routed.write(request("bulk-2", "artifact.receive.write"));
-
-    assert.equal(control.sent.length, 1);
-    assert.equal(bulk.sent.length, 2);
-});
-
-test("bulk lane loss replays pending bulk requests on control while keeping the connector online", async () => {
-    const connector = new WorkerRpcInboundConnector();
-    const control = new MemoryChannel();
-    const bulk = new MemoryChannel();
-    connector.attach(control, "control");
-    connector.attach(bulk, "bulk");
-    const routed = await connector.connect();
-
-    await routed.write(request("bulk-replay", "artifact.payload.read"));
-    assert.equal(bulk.sent.length, 1);
-    bulk.close(new Error("bulk disconnected"));
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    assert.equal(connector.connected, true);
-    assert.equal(control.sent.length, 1);
-    assert.deepEqual(control.sent[0], bulk.sent[0]);
-});
-
-test("control replacement creates a new routed generation and closes the previous generation", async () => {
-    const connector = new WorkerRpcInboundConnector();
-    const first = new MemoryChannel();
-    const second = new MemoryChannel();
-
-    connector.attach(first, "control");
-    const previous = await connector.connect();
-    connector.attach(second, "control");
-    const current = await connector.connect();
+    connector.attach(first.controller);
+    const [previous] = await Promise.all([
+        connector.connect(),
+        first.workerRpc,
+    ]);
+    connector.attach(second.controller);
+    const [current] = await Promise.all([
+        connector.connect(),
+        second.workerRpc,
+    ]);
 
     assert.notEqual(current, previous);
     assert.equal(previous.closed, true);
-    assert.equal(first.closed, true);
+    assert.equal(first.controller.closed, true);
 
     connector.detach();
     assert.equal(connector.connected, false);
@@ -126,15 +106,40 @@ test("offline inbound connector returns a typed retryable reverse transport erro
     });
 });
 
-function request(id: string, method: string): Uint8Array {
-    return encodePacket(
-        encodeWorkerRpcMessage({
-            id,
-            method,
-            params: {},
-            type: "request",
-        }),
-    );
+function createFramePeer(): {
+    controller: Channel;
+    workerRpc: Promise<FrameStream>;
+} {
+    const controllerToWorker = new PassThrough();
+    const workerToController = new PassThrough();
+    const pair: {
+        controller?: StreamChannel;
+        worker?: StreamChannel;
+        closed: boolean;
+    } = { closed: false };
+    const closePair = (error?: Error) => {
+        if (pair.closed) return;
+        pair.closed = true;
+        pair.controller?.close(error);
+        pair.worker?.close(error);
+    };
+    const controller = new StreamChannel(workerToController, controllerToWorker, {
+        closeTransport: closePair,
+    });
+    const worker = new StreamChannel(controllerToWorker, workerToController, {
+        closeTransport: closePair,
+    });
+    pair.controller = controller;
+    pair.worker = worker;
+    const protocol = new FrameProtocol(worker, { role: "acceptor" });
+    const workerRpc = (async () => {
+        const open = await protocol.nextOpen();
+        assert.notEqual(open, undefined);
+        assert.equal(open!.service, "worker.rpc");
+        assert.equal(open!.metadata.byteLength, 0);
+        return await open!.accept();
+    })();
+    return { controller, workerRpc };
 }
 
 function readField(error: unknown, name: string): unknown {
@@ -142,49 +147,6 @@ function readField(error: unknown, name: string): unknown {
     assert.notEqual(error, null);
     return (error as Record<string, unknown>)[name];
 }
-
-test("WorkerRpcProcessConnector aborts immediately and kills a late process", async () => {
-    let releaseSpawn!: () => void;
-    let signalSpawnStarted!: () => void;
-    let killCount = 0;
-    const spawnGate = new Promise<void>((resolve) => {
-        releaseSpawn = resolve;
-    });
-    const spawnStarted = new Promise<void>((resolve) => {
-        signalSpawnStarted = resolve;
-    });
-    const process = {
-        exit: new Promise(() => undefined),
-        stdin: new PassThrough(),
-        stdout: new PassThrough(),
-        stderr: new PassThrough(),
-        kill() {
-            killCount += 1;
-            return true;
-        },
-    };
-    const connector = new WorkerRpcProcessConnector(
-        {
-            async spawnWorkerRpc() {
-                signalSpawnStarted();
-                await spawnGate;
-                return process;
-            },
-        } as never,
-        { instanceName: "late-process" },
-    );
-    const controller = new AbortController();
-    const reason = new Error("spawn cancelled");
-    const connecting = connector.connect(controller.signal);
-    await spawnStarted;
-
-    controller.abort(reason);
-
-    await assert.rejects(withTimeout(connecting), reason);
-    assert.equal(killCount, 0);
-    releaseSpawn();
-    await waitUntil(() => killCount === 1);
-});
 
 test("Worker RPC codec rejects invalid UTF-8", () => {
     const payload = Buffer.concat([
@@ -198,29 +160,3 @@ test("Worker RPC codec rejects invalid UTF-8", () => {
             (error as { code?: string }).code === "protocol.invalidJson",
     );
 });
-
-async function withTimeout<T>(promise: Promise<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-        return await Promise.race([
-            promise,
-            new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(
-                    () => reject(new Error("operation did not settle")),
-                    250,
-                );
-            }),
-        ]);
-    } finally {
-        if (timer !== undefined) clearTimeout(timer);
-    }
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-    const deadline = Date.now() + 2_000;
-    while (!predicate()) {
-        if (Date.now() >= deadline)
-            throw new Error("Timed out waiting for condition.");
-        await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-}

@@ -382,9 +382,6 @@ test("WorkerRpcBridge surfaces transport connection failures with the compatible
             async runWorkerCommand(): Promise<WorkerCommandResult> {
                 throw new Error("unused");
             },
-            async spawnWorkerRpc() {
-                throw new Error("legacy rpc process must not be spawned");
-            },
         },
         rpcOptions: { instanceName: "task-4-connect" },
     });
@@ -731,11 +728,6 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         async runWorkerCommand(): Promise<WorkerCommandResult> {
             throw new Error(
                 "runWorkerCommand should not be called in RPC harness tests.",
-            );
-        },
-        async spawnWorkerRpc() {
-            throw new Error(
-                "spawnWorkerRpc should not be called in Frame RPC harness tests.",
             );
         },
         async installWorker(): Promise<void> {},

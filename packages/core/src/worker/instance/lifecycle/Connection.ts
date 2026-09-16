@@ -4,7 +4,6 @@ import {
     type JsonValue,
     type ReverseEnrollmentState,
     type ReverseInstanceStatus,
-    type ReverseRpcLane,
     type ReverseTransport,
 } from "@portable-devshell/shared";
 
@@ -186,34 +185,11 @@ export class WorkerInstanceConnection {
         input: {
             connectedAt?: string;
             generation: number;
-            lane?: ReverseRpcLane;
             transport: ReverseTransport;
         },
     ): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();
         const previousGeneration = this.#reverseStatus?.generation ?? 0;
-        if (input.lane === "bulk") {
-            if (
-                input.transport !== "wss" ||
-                input.generation !== previousGeneration ||
-                previousGeneration === 0
-            ) {
-                channel.close();
-                throw createError({
-                    code: errorCodes.reverseGenerationInvalid,
-                    details: {
-                        generation: input.generation,
-                        instance: this.#config.name,
-                        previousGeneration,
-                    },
-                    message:
-                        "Reverse bulk lane must join the active WSS generation.",
-                    retryable: true,
-                });
-            }
-            this.#config.rpcConnector?.attach?.(channel, "bulk");
-            return this.#snapshot();
-        }
         if (
             !Number.isInteger(input.generation) ||
             input.generation <= previousGeneration
@@ -232,7 +208,7 @@ export class WorkerInstanceConnection {
         }
 
         const connectedAt = input.connectedAt ?? new Date().toISOString();
-        this.#config.rpcConnector?.attach?.(channel, "control");
+        this.#config.rpcConnector?.attach?.(channel);
         const rpcChannel =
             this.#config.rpcConnector === undefined
                 ? channel

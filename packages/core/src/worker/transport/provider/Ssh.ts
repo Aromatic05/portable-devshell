@@ -23,12 +23,7 @@ import type {
     WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
-    WorkerRpcOptions,
 } from "../command/Model.js";
-import {
-    createWorkerRpcProcess,
-    type WorkerRpcProcess,
-} from "../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -223,49 +218,6 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
         return this.#process.createChannel(child, context);
     }
 
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
-        const executable = await this.#resolveExecutable();
-        const workerCommand = new WorkerBinary(executable).buildCommand(
-            "rpc",
-            options.instanceName,
-        );
-        const commandLine = [workerCommand.command, ...workerCommand.args]
-            .map(shellEscape)
-            .join(" ");
-        const environmentFile = await this.#prepareRemoteEnvironment(
-            options.env,
-        );
-        const remoteCommandLine = this.#withRemoteEnvironment(
-            commandLine,
-            environmentFile,
-        );
-        const context = this.#createRemoteShellContext(
-            "spawnWorkerRpc",
-            remoteCommandLine,
-            { instance: options.instanceName },
-        );
-        let child;
-        try {
-            child = this.#spawnRemoteShell(
-                remoteCommandLine,
-                ["pipe", "pipe", "pipe"],
-                context,
-            );
-        } catch (error) {
-            await this.#removeRemoteEnvironmentFile(environmentFile).catch(
-                () => undefined,
-            );
-            throw error;
-        }
-        const rpcProcess = createWorkerRpcProcess(child);
-        return {
-            ...rpcProcess,
-            exit: rpcProcess.exit.finally(async () => {
-                await this.#removeRemoteEnvironmentFile(environmentFile);
-            }),
-        };
-    }
-
     async #resolveExecutable(
         interactiveSession?: WorkerCommandInteractiveSession,
     ): Promise<string> {
@@ -318,9 +270,7 @@ export class WorkerTransportDriverSsh implements WorkerTransport {
         return this.#process.spawn(
             context,
             { stdio },
-            context.operation === "spawnWorkerRpc"
-                ? errorCodes.coreWorkerRpcSpawnFailed
-                : errorCodes.coreProviderFailed,
+            errorCodes.coreProviderFailed,
         );
     }
 

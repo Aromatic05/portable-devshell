@@ -1025,9 +1025,6 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
                 stdout: "",
             };
         },
-        async spawnWorkerRpc() {
-            throw new Error("rpc must not be spawned after a failed start");
-        },
         async installWorker(): Promise<void> {},
     };
     const instance = new WorkerInstanceFactory().create({
@@ -1418,11 +1415,6 @@ function createWorkerInstanceHarness(): {
                           })
                         : JSON.stringify({ running: false }),
             };
-        },
-        async spawnWorkerRpc() {
-            throw new Error(
-                "spawnWorkerRpc should not be called in Frame lifecycle harness tests.",
-            );
         },
         async installWorker(): Promise<void> {},
     };
