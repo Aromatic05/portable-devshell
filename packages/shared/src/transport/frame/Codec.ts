@@ -229,19 +229,20 @@ function decodeFramePayload(body: Uint8Array): Frame {
                 );
             }
             return { type: "data", streamId, data: Uint8Array.from(payload) };
-        case FrameType.Window:
+        case FrameType.Window: {
             if (payload.byteLength !== WINDOW_PAYLOAD_SIZE) {
                 throw protocolError("WINDOW payload must be exactly 4 bytes.");
             }
             const creditDelta = readU32(payload, 0);
             assertPositiveU32(creditDelta, "WINDOW credit");
             return { type: "window", streamId, creditDelta };
+        }
         case FrameType.Fin:
             if (payload.byteLength !== 0) {
                 throw protocolError("FIN payload must be empty.");
             }
             return { type: "fin", streamId };
-        case FrameType.Reset:
+        case FrameType.Reset: {
             if (payload.byteLength < RESET_CODE_SIZE) {
                 throw protocolError("RESET payload is incomplete.");
             }
@@ -256,6 +257,7 @@ function decodeFramePayload(body: Uint8Array): Frame {
                     "RESET message",
                 ),
             };
+        }
         default:
             throw protocolError(`Unknown Frame type ${String(type)}.`);
     }

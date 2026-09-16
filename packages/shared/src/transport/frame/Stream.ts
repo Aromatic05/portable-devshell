@@ -121,8 +121,7 @@ export class FrameStreamState implements FrameStream {
         if (this.#localFin)
             throw new Error("Frame stream write side is closed.");
         if (data.byteLength === 0) return;
-        const copy = Uint8Array.from(data);
-        await this.#serialize(() => this.#host.writeStream(this, copy));
+        await this.#serialize(() => this.#host.writeStream(this, data));
     }
 
     async read(): Promise<Uint8Array | undefined> {

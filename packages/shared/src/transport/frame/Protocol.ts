@@ -4,7 +4,6 @@ import { createError } from "../../protocol/Error.js";
 import {
     FRAME_MAX_DATA_SIZE,
     FrameBuffer,
-    FrameResetCode,
     encodeFrame,
     frameResetCodes,
     type Frame,
@@ -359,8 +358,7 @@ export class FrameProtocol implements FrameStreamHost {
             receiveCredit: 0,
         });
         this.#streams.set(stream.id, stream);
-        let request: FrameOpenRequestImpl;
-        request = new FrameOpenRequestImpl(
+        const request: FrameOpenRequestImpl = new FrameOpenRequestImpl(
             stream,
             this.#defaultReceiveWindow,
             (window) => this.#acceptOpen(request, window),
