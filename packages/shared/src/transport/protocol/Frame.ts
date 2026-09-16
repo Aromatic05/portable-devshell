@@ -8,7 +8,7 @@ export type Frame = Uint8Array;
 
 export class FrameBuffer {
     readonly #maxFrameSize: number;
-    #buffer = Buffer.alloc(0);
+    #buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
 
     constructor(maxFrameSize = TRANSPORT_MAX_FRAME_SIZE) {
         this.#maxFrameSize = maxFrameSize;
@@ -22,68 +22,80 @@ export class FrameBuffer {
         if (chunk.byteLength === 0) {
             return [];
         }
-        const normalized = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        this.#buffer =
-            this.#buffer.byteLength === 0
-                ? Buffer.from(normalized)
-                : Buffer.concat([this.#buffer, normalized]);
+        this.#buffer = appendBytes(this.#buffer, chunk);
         const frames: Frame[] = [];
         while (this.#buffer.byteLength >= FRAME_HEADER_SIZE) {
-            const payloadLength = this.#buffer.readUInt32BE(0);
+            const payloadLength = readU32(this.#buffer, 0);
             assertFrameSize(payloadLength, this.#maxFrameSize);
             const frameLength = FRAME_HEADER_SIZE + payloadLength;
             if (this.#buffer.byteLength < frameLength) {
                 break;
             }
-            frames.push(
-                Buffer.from(
-                    this.#buffer.subarray(FRAME_HEADER_SIZE, frameLength),
-                ),
-            );
-            this.#buffer = this.#buffer.subarray(frameLength);
+            frames.push(this.#buffer.slice(FRAME_HEADER_SIZE, frameLength));
+            this.#buffer = this.#buffer.slice(frameLength);
         }
         return frames;
     }
 
     reset(): void {
-        this.#buffer = Buffer.alloc(0);
+        this.#buffer = new Uint8Array();
     }
 }
 
 export function encodeFrame(
     payload: Uint8Array,
     maxFrameSize = TRANSPORT_MAX_FRAME_SIZE,
-): Buffer {
-    const normalized = Buffer.isBuffer(payload)
-        ? payload
-        : Buffer.from(payload);
-    assertFrameSize(normalized.byteLength, maxFrameSize);
-    const frame = Buffer.allocUnsafe(FRAME_HEADER_SIZE + normalized.byteLength);
-    frame.writeUInt32BE(normalized.byteLength, 0);
-    normalized.copy(frame, FRAME_HEADER_SIZE);
+): Uint8Array {
+    assertFrameSize(payload.byteLength, maxFrameSize);
+    const frame = new Uint8Array(FRAME_HEADER_SIZE + payload.byteLength);
+    writeU32(frame, 0, payload.byteLength);
+    frame.set(payload, FRAME_HEADER_SIZE);
     return frame;
 }
 
 export function decodeFrame(
     frame: Uint8Array,
     maxFrameSize = TRANSPORT_MAX_FRAME_SIZE,
-): Buffer {
-    const normalized = Buffer.isBuffer(frame) ? frame : Buffer.from(frame);
-    if (normalized.byteLength < FRAME_HEADER_SIZE) {
+): Uint8Array {
+    if (frame.byteLength < FRAME_HEADER_SIZE) {
         throw protocolError(
             "protocol.invalidFrame",
             "Frame header is incomplete.",
         );
     }
-    const payloadLength = normalized.readUInt32BE(0);
+    const payloadLength = readU32(frame, 0);
     assertFrameSize(payloadLength, maxFrameSize);
-    if (normalized.byteLength !== FRAME_HEADER_SIZE + payloadLength) {
+    if (frame.byteLength !== FRAME_HEADER_SIZE + payloadLength) {
         throw protocolError(
             "protocol.invalidFrame",
             "Frame length does not match payload length.",
         );
     }
-    return Buffer.from(normalized.subarray(FRAME_HEADER_SIZE));
+    return frame.slice(FRAME_HEADER_SIZE);
+}
+
+function appendBytes(current: Uint8Array, next: Uint8Array): Uint8Array {
+    if (current.byteLength === 0) return Uint8Array.from(next);
+    const combined = new Uint8Array(current.byteLength + next.byteLength);
+    combined.set(current, 0);
+    combined.set(next, current.byteLength);
+    return combined;
+}
+
+function readU32(bytes: Uint8Array, offset: number): number {
+    return new DataView(
+        bytes.buffer,
+        bytes.byteOffset,
+        bytes.byteLength,
+    ).getUint32(offset, false);
+}
+
+function writeU32(bytes: Uint8Array, offset: number, value: number): void {
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint32(
+        offset,
+        value,
+        false,
+    );
 }
 
 function assertFrameSize(size: number, maxFrameSize: number): void {

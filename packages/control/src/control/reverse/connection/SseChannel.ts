@@ -1,11 +1,6 @@
 import type { ServerResponse } from "node:http";
 
 import { ChannelBase } from "@portable-devshell/shared";
-import {
-    decodeFrame,
-    encodeFrame,
-    type Frame,
-} from "@portable-devshell/shared/transport/frame";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -50,13 +45,13 @@ export class ReverseRpcSseChannel extends ChannelBase {
         return this.#acceptedUpstreamSeq;
     }
 
-    async send(frame: Frame): Promise<void> {
+    async write(data: Uint8Array): Promise<void> {
         if (this.closed || this.#response.writableEnded)
             throw new Error("reverse SSE channel is disconnected");
         const nextSeq = this.#downstreamSeq + 1;
         try {
             const written = this.#response.write(
-                `id: ${nextSeq}\nevent: frame\ndata: ${encodeFrame(frame).toString("base64")}\n\n`,
+                `id: ${nextSeq}\nevent: frame\ndata: ${Buffer.from(data).toString("base64")}\n\n`,
             );
             this.#downstreamSeq = nextSeq;
             if (!written) await this.#waitForDrain();
@@ -76,7 +71,7 @@ export class ReverseRpcSseChannel extends ChannelBase {
                 `upstream sequence gap: expected ${this.#acceptedUpstreamSeq + 1}, received ${seq}`,
             );
         }
-        this.emitFrame(decodeFrame(Buffer.from(encodedFrame, "base64")));
+        this.emitData(Buffer.from(encodedFrame, "base64"));
         this.#acceptedUpstreamSeq = seq;
         return seq;
     }

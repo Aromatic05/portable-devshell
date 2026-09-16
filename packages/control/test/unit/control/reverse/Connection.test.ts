@@ -18,7 +18,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 class MemoryRpcChannel implements Channel {
     readonly sent: Uint8Array[] = [];
     readonly closeListeners = new Set<(error?: Error) => void>();
-    readonly frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly dataListeners = new Set<(data: Uint8Array) => void>();
     closed = false;
 
     close(error?: Error): void {
@@ -33,13 +33,13 @@ class MemoryRpcChannel implements Channel {
         return () => this.closeListeners.delete(listener);
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.frameListeners.add(listener);
-        return () => this.frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.dataListeners.add(listener);
+        return () => this.dataListeners.delete(listener);
     }
 
-    async send(frame: Uint8Array): Promise<void> {
-        this.sent.push(Uint8Array.from(frame));
+    async write(data: Uint8Array): Promise<void> {
+        this.sent.push(Uint8Array.from(data));
     }
 }
 

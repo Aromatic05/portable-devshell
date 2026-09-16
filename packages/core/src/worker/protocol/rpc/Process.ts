@@ -4,7 +4,7 @@ import type { Readable, Writable } from "node:stream";
 import {
     createError,
     errorCodes,
-    FramedStreamChannel,
+    StreamChannel,
     type Channel,
 } from "@portable-devshell/shared";
 
@@ -175,7 +175,7 @@ export class WorkerRpcProcessConnector implements WorkerRpcConnector {
             this.#options,
             signal,
         );
-        const channel = new FramedStreamChannel(process.stdout, process.stdin, {
+        const channel = new StreamChannel(process.stdout, process.stdin, {
             closeTransport: () => {
                 process.kill("SIGTERM");
             },

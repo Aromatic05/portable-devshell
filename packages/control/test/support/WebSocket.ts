@@ -3,7 +3,7 @@ import WebSocket, { type RawData } from "ws";
 
 export class NodeWebSocketChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     readonly #socket: WebSocket;
     #closed = false;
     #closeError?: Error;
@@ -41,20 +41,20 @@ export class NodeWebSocketChannel implements Channel {
         return this.#closed;
     }
 
-    async send(frame: Uint8Array): Promise<void> {
+    async write(data: Uint8Array): Promise<void> {
         if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) {
             throw this.#closeError ?? new Error("WebSocket channel is closed.");
         }
         await new Promise<void>((resolve, reject) => {
-            this.#socket.send(frame, { binary: true }, (error) =>
+            this.#socket.send(data, { binary: true }, (error) =>
                 error == null ? resolve() : reject(error),
             );
         });
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -77,13 +77,13 @@ export class NodeWebSocketChannel implements Channel {
             this.#finish(new Error("Expected binary WebSocket frame."));
             return;
         }
-        const frame = Buffer.isBuffer(data)
+        const bytes = Buffer.isBuffer(data)
             ? data
             : Array.isArray(data)
               ? Buffer.concat(data)
               : Buffer.from(data as ArrayBuffer);
-        for (const listener of [...this.#frameListeners]) {
-            listener(frame);
+        for (const listener of [...this.#dataListeners]) {
+            listener(bytes);
         }
     }
 

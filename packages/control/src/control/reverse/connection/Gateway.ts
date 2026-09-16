@@ -5,7 +5,6 @@ import type { HttpHost } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
-    LengthPrefixedChannel,
     WebSocketServerChannel,
     type JsonValue,
     type ReverseEnrollmentRequest,
@@ -124,8 +123,8 @@ export class ReverseConnectionGateway {
                 socket,
                 head,
                 (webSocket) => {
-                    const channel = new LengthPrefixedChannel(
-                        new WebSocketServerChannel(webSocket as never),
+                    const channel = new WebSocketServerChannel(
+                        webSocket as never,
                     );
                     void this.#connectionService
                         .activate(identity, "wss", channel, lane)

@@ -7,6 +7,7 @@ import { createError } from "../../protocol/Error.js";
 import type { JsonValue } from "../../protocol/JsonValue.js";
 import type { InstanceName } from "../../protocol/instance/Identity.js";
 import type { Channel } from "./Channel.js";
+import { encodeFrame, FrameBuffer } from "./Frame.js";
 
 interface TransportIdCrypto {
     getRandomValues<T extends ArrayBufferView>(array: T): T;
@@ -72,6 +73,7 @@ const encoder = new TextEncoder();
 
 export class Codec {
     readonly #channel: Channel;
+    readonly #frames = new FrameBuffer();
     readonly #local: Peer;
     readonly #eventListeners = new Set<(event: Event) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -83,7 +85,16 @@ export class Codec {
         this.#channel = channel;
         this.#local = options.local;
         this.#remote = options.remote;
-        channel.onFrame((frame) => this.#accept(frame));
+        channel.onData((data) => {
+            try {
+                for (const frame of this.#frames.push(data))
+                    this.#accept(frame);
+            } catch (error) {
+                this.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            }
+        });
         channel.onClose((error) => this.#finishClose(error));
     }
 
@@ -115,7 +126,9 @@ export class Codec {
             to: this.#remote,
         });
         try {
-            await this.#channel.send(encoder.encode(JSON.stringify(event)));
+            await this.#channel.write(
+                encodeFrame(encoder.encode(JSON.stringify(event))),
+            );
         } catch (error) {
             const normalized =
                 error instanceof Error ? error : new Error(String(error));

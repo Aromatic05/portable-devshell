@@ -7,7 +7,11 @@ import {
     type Channel,
     type JsonValue,
 } from "@portable-devshell/shared";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
+import {
+    encodeFrame,
+    FrameBuffer,
+    TRANSPORT_MAX_FRAME_SIZE,
+} from "@portable-devshell/shared/transport/frame";
 
 import { readWorkerAbortReason } from "../../../AbortReason.js";
 import type { WorkerCommandTransport } from "../../../transport/command/Transport.js";
@@ -187,12 +191,14 @@ export class WorkerRpcBridge {
                 if (this.#pending.get(request.id) !== pending) {
                     return;
                 }
-                void channel.send(encodedRequest).catch((error: unknown) => {
-                    this.#disconnectChannel(
-                        channel,
-                        this.#createDisconnectError(error),
-                    );
-                });
+                void channel
+                    .write(encodeFrame(encodedRequest))
+                    .catch((error: unknown) => {
+                        this.#disconnectChannel(
+                            channel,
+                            this.#createDisconnectError(error),
+                        );
+                    });
             },
         );
     }
@@ -314,10 +320,13 @@ export class WorkerRpcBridge {
 
     #attachChannel(channel: Channel): void {
         this.#channel = channel;
-        channel.onFrame((frame) => {
+        const frames = new FrameBuffer();
+        channel.onData((data) => {
             if (this.#channel !== channel) return;
             try {
-                this.#handleMessage(channel, decodeWorkerRpcMessage(frame));
+                for (const frame of frames.push(data)) {
+                    this.#handleMessage(channel, decodeWorkerRpcMessage(frame));
+                }
             } catch (error) {
                 this.#disconnectChannel(
                     channel,
@@ -397,7 +406,9 @@ export class WorkerRpcBridge {
             return;
         }
         for (const pending of this.#pending.values()) {
-            await channel.send(this.#encodeRequest(pending.request));
+            await channel.write(
+                encodeFrame(this.#encodeRequest(pending.request)),
+            );
         }
     }
 
@@ -497,16 +508,18 @@ export class WorkerRpcBridge {
             pending.cleanup();
             return;
         }
-        void channel.send(encodedCancellation).catch((error: unknown) => {
-            if (!this.#preservePendingOnDisconnect) {
-                this.#pending.delete(cancellation.id);
-                pending.cleanup();
-            }
-            this.#disconnectChannel(
-                channel,
-                this.#createDisconnectError(error),
-            );
-        });
+        void channel
+            .write(encodeFrame(encodedCancellation))
+            .catch((error: unknown) => {
+                if (!this.#preservePendingOnDisconnect) {
+                    this.#pending.delete(cancellation.id);
+                    pending.cleanup();
+                }
+                this.#disconnectChannel(
+                    channel,
+                    this.#createDisconnectError(error),
+                );
+            });
     }
 
     #cancellationDetails(

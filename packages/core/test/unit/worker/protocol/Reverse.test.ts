@@ -6,7 +6,11 @@ import {
     type Channel,
     type JsonValue,
 } from "@portable-devshell/shared";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
+import {
+    decodeFrame,
+    encodeFrame,
+    TRANSPORT_MAX_FRAME_SIZE,
+} from "@portable-devshell/shared/transport/frame";
 import {
     WorkerRpcBridge,
     WorkerRpcClient,
@@ -32,22 +36,22 @@ class MemoryChannel implements Channel {
     readonly sent: WorkerRpcRequestEnvelope[] = [];
     closed = false;
     closeError?: Error;
-    sendError?: Error;
-    readonly #frames = new Set<(frame: Uint8Array) => void>();
+    writeError?: Error;
+    readonly #data = new Set<(data: Uint8Array) => void>();
     readonly #closes = new Set<(error?: Error) => void>();
 
-    async send(frame: Uint8Array): Promise<void> {
-        if (this.sendError !== undefined) throw this.sendError;
+    async write(data: Uint8Array): Promise<void> {
+        if (this.writeError !== undefined) throw this.writeError;
         this.sent.push(
             decodeWorkerRpcMessage(
-                frame,
+                decodeFrame(data),
             ) as unknown as WorkerRpcRequestEnvelope,
         );
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.#frames.add(listener);
-        return () => this.#frames.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#data.add(listener);
+        return () => this.#data.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -74,8 +78,8 @@ class MemoryChannel implements Channel {
     }
 
     publish(message: JsonValue): void {
-        const frame = encodeWorkerRpcMessage(message);
-        for (const listener of [...this.#frames]) listener(frame);
+        const data = encodeFrame(encodeWorkerRpcMessage(message));
+        for (const listener of [...this.#data]) listener(data);
     }
 }
 
@@ -280,7 +284,7 @@ test("reverse channel replacement takes over a stalled connector request", async
 test("WorkerRpcBridge rejects a pending request when the initial send fails", async () => {
     const connector = new DeferredConnector();
     const channel = new MemoryChannel();
-    channel.sendError = new Error("send failed");
+    channel.writeError = new Error("send failed");
     connector.channel = channel;
     const bridge = new WorkerRpcBridge({
         connector,
@@ -479,7 +483,7 @@ test("WorkerRpcBridge disconnects a replacement channel when replay fails", asyn
     await waitUntil(() => first.sent.length === 1);
     first.disconnect();
     const failed = new MemoryChannel();
-    failed.sendError = new Error("replay send failed");
+    failed.writeError = new Error("replay send failed");
 
     await assert.rejects(bridge.replaceChannel(failed), /replay send failed/iu);
     assert.equal(bridge.connected, false);

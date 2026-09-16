@@ -21,7 +21,7 @@ import { negotiateControlProtocol } from "../../../../src/server/endpoint/Channe
 
 class MemoryChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     #closeError?: Error;
     #closed = false;
     #peer?: MemoryChannel;
@@ -34,7 +34,7 @@ class MemoryChannel implements Channel {
         this.#peer = peer;
     }
 
-    async send(frame: Uint8Array): Promise<void> {
+    async write(data: Uint8Array): Promise<void> {
         if (this.#closed) {
             throw this.#closeError ?? new Error("Memory channel is closed.");
         }
@@ -47,13 +47,13 @@ class MemoryChannel implements Channel {
                 peer.#closeError ?? new Error("Memory channel peer is closed.")
             );
         }
-        const copy = Uint8Array.from(frame);
+        const copy = Uint8Array.from(data);
         queueMicrotask(() => peer.#accept(copy));
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -69,12 +69,12 @@ class MemoryChannel implements Channel {
         this.#finishClose(error, true);
     }
 
-    #accept(frame: Uint8Array): void {
+    #accept(data: Uint8Array): void {
         if (this.#closed) {
             return;
         }
-        for (const listener of [...this.#frameListeners]) {
-            listener(frame);
+        for (const listener of [...this.#dataListeners]) {
+            listener(data);
         }
     }
 

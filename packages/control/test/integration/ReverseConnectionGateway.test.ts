@@ -301,13 +301,15 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                 const body = {
                     frames: [
                         {
-                            frame: encodeFrame(
-                                encodeWorkerRpcMessage({
-                                    id: String(request.id),
-                                    ok: true,
-                                    result: responseFor(method),
-                                    type: "response",
-                                }),
+                            frame: Buffer.from(
+                                encodeFrame(
+                                    encodeWorkerRpcMessage({
+                                        id: String(request.id),
+                                        ok: true,
+                                        result: responseFor(method),
+                                        type: "response",
+                                    }),
+                                ),
                             ).toString("base64"),
                             seq: upstreamSeq,
                         },

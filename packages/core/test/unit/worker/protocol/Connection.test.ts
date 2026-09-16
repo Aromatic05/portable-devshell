@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { errorCodes, type Channel } from "@portable-devshell/shared";
+import { encodeFrame } from "@portable-devshell/shared/transport/frame";
 import {
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
@@ -12,7 +13,7 @@ import {
 
 class MemoryChannel implements Channel {
     readonly closeListeners = new Set<(error?: Error) => void>();
-    readonly frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly dataListeners = new Set<(data: Uint8Array) => void>();
     readonly sent: Uint8Array[] = [];
     closed = false;
 
@@ -27,17 +28,17 @@ class MemoryChannel implements Channel {
         return () => this.closeListeners.delete(listener);
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.frameListeners.add(listener);
-        return () => this.frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.dataListeners.add(listener);
+        return () => this.dataListeners.delete(listener);
     }
 
-    async send(frame: Uint8Array): Promise<void> {
-        this.sent.push(Uint8Array.from(frame));
+    async write(data: Uint8Array): Promise<void> {
+        this.sent.push(Uint8Array.from(data));
     }
 
-    emit(frame: Uint8Array): void {
-        for (const listener of [...this.frameListeners]) listener(frame);
+    emit(data: Uint8Array): void {
+        for (const listener of [...this.dataListeners]) listener(data);
     }
 }
 
@@ -68,9 +69,9 @@ test("inbound connector routes artifact payload traffic to bulk without blocking
     connector.attach(bulk, "bulk");
     const routed = await connector.connect();
 
-    await routed.send(request("control-1", "worker.ping"));
-    await routed.send(request("bulk-1", "artifact.payload.read"));
-    await routed.send(request("bulk-2", "artifact.receive.write"));
+    await routed.write(request("control-1", "worker.ping"));
+    await routed.write(request("bulk-1", "artifact.payload.read"));
+    await routed.write(request("bulk-2", "artifact.receive.write"));
 
     assert.equal(control.sent.length, 1);
     assert.equal(bulk.sent.length, 2);
@@ -84,7 +85,7 @@ test("bulk lane loss replays pending bulk requests on control while keeping the 
     connector.attach(bulk, "bulk");
     const routed = await connector.connect();
 
-    await routed.send(request("bulk-replay", "artifact.payload.read"));
+    await routed.write(request("bulk-replay", "artifact.payload.read"));
     assert.equal(bulk.sent.length, 1);
     bulk.close(new Error("bulk disconnected"));
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -126,12 +127,14 @@ test("offline inbound connector returns a typed retryable reverse transport erro
 });
 
 function request(id: string, method: string): Uint8Array {
-    return encodeWorkerRpcMessage({
-        id,
-        method,
-        params: {},
-        type: "request",
-    });
+    return encodeFrame(
+        encodeWorkerRpcMessage({
+            id,
+            method,
+            params: {},
+            type: "request",
+        }),
+    );
 }
 
 function readField(error: unknown, name: string): unknown {

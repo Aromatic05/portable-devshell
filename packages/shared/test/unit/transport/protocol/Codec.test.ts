@@ -10,6 +10,7 @@ import {
     type Event,
     type Channel,
 } from "@portable-devshell/shared";
+import { encodeFrame } from "@portable-devshell/shared/transport/frame";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -66,18 +67,18 @@ function onceEvent(codec: Codec): Promise<Event> {
 
 class FailingChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     closed = false;
     closeError?: Error;
-    sendError?: Error;
+    writeError?: Error;
 
-    async send(): Promise<void> {
-        if (this.sendError !== undefined) throw this.sendError;
+    async write(): Promise<void> {
+        if (this.writeError !== undefined) throw this.writeError;
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -179,15 +180,17 @@ test("Codec rejects legacy envelopes", async (t) => {
         value.server.onClose(resolve),
     );
 
-    await value.clientChannel.send(
-        Buffer.from(
-            JSON.stringify({
-                id: "old",
-                method: "control.ping",
-                target: { kind: "control" },
-                type: "request",
-            }),
-            "utf8",
+    await value.clientChannel.write(
+        encodeFrame(
+            Buffer.from(
+                JSON.stringify({
+                    id: "old",
+                    method: "control.ping",
+                    target: { kind: "control" },
+                    type: "request",
+                }),
+                "utf8",
+            ),
         ),
     );
 
@@ -211,16 +214,18 @@ test("Codec rejects a peer change after first-event binding", async (t) => {
         value.server.onClose(resolve),
     );
 
-    await value.clientChannel.send(
-        Buffer.from(
-            JSON.stringify({
-                id: "spoof",
-                from: "cli",
-                to: "server",
-                destination: "@control",
-                name: "service.ping",
-            }),
-            "utf8",
+    await value.clientChannel.write(
+        encodeFrame(
+            Buffer.from(
+                JSON.stringify({
+                    id: "spoof",
+                    from: "cli",
+                    to: "server",
+                    destination: "@control",
+                    name: "service.ping",
+                }),
+                "utf8",
+            ),
         ),
     );
 
@@ -232,7 +237,7 @@ test("Codec rejects a peer change after first-event binding", async (t) => {
 
 test("Codec send failure closes the protocol and notifies listeners", async () => {
     const channel = new FailingChannel();
-    channel.sendError = new Error("frame send failed");
+    channel.writeError = new Error("frame send failed");
     const codec = new Codec(channel, { local: "tui", remote: "server" });
     const closed = new Promise<Error | undefined>((resolve) =>
         codec.onClose(resolve),

@@ -1,4 +1,8 @@
 import type { Channel, JsonValue } from "@portable-devshell/shared";
+import {
+    decodeFrame,
+    FrameBuffer,
+} from "@portable-devshell/shared/transport/frame";
 
 import { decodeWorkerRpcMessage } from "../Message.js";
 
@@ -11,7 +15,8 @@ interface PendingFrame {
 
 export class WorkerRpcLaneChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
+    readonly #incomingFrames = new Map<Channel, FrameBuffer>();
     readonly #pending = new Map<string, PendingFrame>();
     #bulk?: Channel;
     #control?: Channel;
@@ -33,19 +38,29 @@ export class WorkerRpcLaneChannel implements Channel {
         if (lane === "bulk") this.#bulk = channel;
         else this.#control = channel;
         if (previous !== undefined && previous !== channel) previous.close();
+        const frames = new FrameBuffer();
+        this.#incomingFrames.set(channel, frames);
 
-        channel.onFrame((frame) => {
+        channel.onData((data) => {
             if (!this.#isCurrent(channel, lane) || this.#closed) return;
-            const message = asRecord(decodeWorkerRpcMessage(frame));
-            if (
-                message?.type === "response" &&
-                typeof message.id === "string"
-            ) {
-                this.#pending.delete(message.id);
+            try {
+                for (const frame of frames.push(data)) {
+                    const message = asRecord(decodeWorkerRpcMessage(frame));
+                    if (
+                        message?.type === "response" &&
+                        typeof message.id === "string"
+                    ) {
+                        this.#pending.delete(message.id);
+                    }
+                }
+            } catch (error) {
+                this.close(asError(error));
+                return;
             }
-            for (const listener of [...this.#frameListeners]) listener(frame);
+            for (const listener of [...this.#dataListeners]) listener(data);
         });
         channel.onClose((error) => {
+            this.#incomingFrames.delete(channel);
             if (!this.#isCurrent(channel, lane) || this.#closed) return;
             if (lane === "bulk") {
                 this.#bulk = undefined;
@@ -81,10 +96,10 @@ export class WorkerRpcLaneChannel implements Channel {
         }
     }
 
-    async send(frame: Uint8Array): Promise<void> {
+    async write(data: Uint8Array): Promise<void> {
         if (this.#closed)
             throw new Error("Reverse RPC lane channel is closed.");
-        const request = asRecord(decodeWorkerRpcMessage(frame));
+        const request = asRecord(decodeWorkerRpcMessage(decodeFrame(data)));
         const requestId =
             request?.type === "request" && typeof request.id === "string"
                 ? request.id
@@ -96,11 +111,11 @@ export class WorkerRpcLaneChannel implements Channel {
             throw new Error("Reverse RPC control lane is offline.");
         if (requestId !== undefined)
             this.#pending.set(requestId, {
-                frame: Uint8Array.from(frame),
+                frame: Uint8Array.from(data),
                 lane,
             });
         try {
-            await channel.send(frame);
+            await channel.write(data);
         } catch (error) {
             if (
                 lane !== "bulk" ||
@@ -110,17 +125,17 @@ export class WorkerRpcLaneChannel implements Channel {
                 throw error;
             if (requestId !== undefined)
                 this.#pending.set(requestId, {
-                    frame: Uint8Array.from(frame),
+                    frame: Uint8Array.from(data),
                     lane: "control",
                 });
-            await this.#control.send(frame);
+            await this.#control.write(data);
         }
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
+    onData(listener: (data: Uint8Array) => void): () => void {
         if (this.#closed) return () => undefined;
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -142,7 +157,8 @@ export class WorkerRpcLaneChannel implements Channel {
         control?.close(error);
         if (bulk !== control) bulk?.close(error);
         this.#pending.clear();
-        this.#frameListeners.clear();
+        this.#incomingFrames.clear();
+        this.#dataListeners.clear();
         const listeners = [...this.#closeListeners];
         this.#closeListeners.clear();
         for (const listener of listeners) listener(error);
@@ -174,7 +190,7 @@ export class WorkerRpcLaneChannel implements Channel {
         for (const [requestId, pending] of this.#pending) {
             if (pending.lane !== "bulk") continue;
             this.#pending.set(requestId, { ...pending, lane: "control" });
-            await control.send(pending.frame);
+            await control.write(pending.frame);
         }
     }
 }
