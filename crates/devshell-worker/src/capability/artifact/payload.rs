@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+#[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tempfile::{Builder, NamedTempFile};
@@ -64,6 +65,7 @@ pub struct ArtifactPayloadOpenResult {
     pub expires_at_ms: u128,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactPayloadReadResult {
@@ -376,6 +378,7 @@ impl ArtifactPayloadStore {
         })
     }
 
+    #[cfg(test)]
     pub fn read(
         &self,
         payload_id: &str,

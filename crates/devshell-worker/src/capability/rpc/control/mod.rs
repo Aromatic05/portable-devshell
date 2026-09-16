@@ -79,10 +79,6 @@ pub fn register_control_handlers(
         artifact::receive_begin(Arc::clone(&receives), Arc::clone(&policy)),
     );
     handlers.insert(
-        "artifact.receive.write".to_string(),
-        artifact::receive_write(Arc::clone(&receives)),
-    );
-    handlers.insert(
         "artifact.receive.finish".to_string(),
         artifact::receive_finish(Arc::clone(&receives)),
     );
@@ -93,10 +89,6 @@ pub fn register_control_handlers(
     handlers.insert(
         "artifact.payload.open".to_string(),
         artifact::payload_open(Arc::clone(&payloads), Arc::clone(&policy)),
-    );
-    handlers.insert(
-        "artifact.payload.read".to_string(),
-        artifact::payload_read(Arc::clone(&payloads)),
     );
     handlers.insert(
         "artifact.payload.close".to_string(),

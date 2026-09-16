@@ -1883,7 +1883,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
 }
 
 #[test]
-fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
+fn internal_artifact_control_rpc_excludes_chunk_methods_and_is_not_listed_as_a_tool() {
     let env = TestEnv::new();
     let instance = "artifact-payload";
     fs::write(env.workspace().join("payload.txt"), b"rpc payload").unwrap();
@@ -1941,69 +1941,32 @@ fn internal_artifact_payload_rpc_is_persistent_and_not_listed_as_a_tool() {
     assert_eq!(opened["result"]["descriptor"]["type"], "file");
     let payload_id = opened["result"]["payloadId"].as_str().unwrap();
 
-    let read = env.rpc(
+    let retired_read = env.rpc(
         instance,
         &serde_json::json!({
             "type": "request",
             "id": "payload-read",
             "method": "artifact.payload.read",
-            "params": {
-                "payloadId": payload_id,
-                "offsetBytes": 0,
-                "maxBytes": 1024
-            }
+            "params": { "payloadId": payload_id, "offsetBytes": 0, "maxBytes": 1024 }
         }),
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["content"], "cnBjIHBheWxvYWQ=");
-    assert_eq!(read["result"]["eof"], true);
-
-    let descriptor = opened["result"]["descriptor"].clone();
-    let begun = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": "receive-begin",
-            "method": "artifact.receive.begin",
-            "params": {
-                "descriptor": descriptor,
-                "overwrite": false,
-                "targetPath": "./received.txt",
-                "workspace": env.workspace()
-            }
-        }),
-    );
-    assert_eq!(begun["ok"], true, "{begun}");
-    let receive_id = begun["result"]["receiveId"].as_str().unwrap();
-    let written = env.rpc(
+    assert_eq!(retired_read["ok"], false, "{retired_read}");
+    assert_eq!(retired_read["error"]["code"], "rpc.methodNotFound");
+    let retired_write = env.rpc(
         instance,
         &serde_json::json!({
             "type": "request",
             "id": "receive-write",
             "method": "artifact.receive.write",
             "params": {
-                "receiveId": receive_id,
+                "receiveId": "retired",
                 "offsetBytes": 0,
-                "content": read["result"]["content"]
+                "content": ""
             }
         }),
     );
-    assert_eq!(written["ok"], true, "{written}");
-    assert_eq!(written["result"]["nextOffsetBytes"], 11);
-    let finished = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": "receive-finish",
-            "method": "artifact.receive.finish",
-            "params": { "receiveId": receive_id }
-        }),
-    );
-    assert_eq!(finished["ok"], true, "{finished}");
-    assert_eq!(
-        fs::read(env.workspace().join("received.txt")).unwrap(),
-        b"rpc payload"
-    );
+    assert_eq!(retired_write["ok"], false, "{retired_write}");
+    assert_eq!(retired_write["error"]["code"], "rpc.methodNotFound");
 
     let direct_begun = env.rpc(
         instance,

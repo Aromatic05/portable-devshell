@@ -4,6 +4,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[cfg(test)]
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use tempfile::Builder;
@@ -208,6 +209,7 @@ impl ArtifactReceiveStore {
         })
     }
 
+    #[cfg(test)]
     pub fn write(
         &self,
         receive_id: &str,

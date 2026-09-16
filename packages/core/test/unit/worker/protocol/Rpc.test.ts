@@ -80,7 +80,7 @@ test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple cal
     bridge.close();
 });
 
-test("WorkerProtocolClient routes artifact payload and receive lifecycle through internal RPC methods", async () => {
+test("WorkerProtocolClient routes artifact control lifecycle through internal RPC methods", async () => {
     const harness = createRpcHarness();
     const bridge = createTransportRpcBridge(harness.transport, {
         instanceName: "artifact-rpc",
@@ -92,21 +92,11 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
         path: "./result.bin",
         workspace: "/workspace",
     });
-    const chunk = await client.readArtifactPayload({
-        maxBytes: 1024,
-        offsetBytes: 0,
-        payloadId: opened.payloadId,
-    });
     const receive = await client.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
         targetPath: "./copy.bin",
         workspace: "/workspace",
-    });
-    await client.writeArtifactReceive({
-        content: chunk.content,
-        offsetBytes: 0,
-        receiveId: receive.receiveId,
     });
     const direct = await client.openArtifactDirectReceive({
         expiresAtMs: Date.now() + 60_000,
@@ -125,9 +115,7 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
 
     assert.deepEqual(harness.requestMethods, [
         "artifact.payload.open",
-        "artifact.payload.read",
         "artifact.receive.begin",
-        "artifact.receive.write",
         "artifact.receive.direct.open",
         "artifact.payload.direct.push",
         "artifact.receive.direct.close",
@@ -920,42 +908,12 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
         };
     }
 
-    if (method === "artifact.payload.read") {
-        return {
-            type: "response",
-            id,
-            ok: true,
-            result: {
-                payloadId: "payload-1",
-                offsetBytes: 0,
-                returnedBytes: 3,
-                totalBytes: 3,
-                content: "YWJj",
-                encoding: "base64",
-                eof: true,
-            },
-        };
-    }
-
     if (method === "artifact.receive.begin") {
         return {
             type: "response",
             id,
             ok: true,
             result: { receiveId: "receive-1", nextOffsetBytes: 0 },
-        };
-    }
-
-    if (method === "artifact.receive.write") {
-        return {
-            type: "response",
-            id,
-            ok: true,
-            result: {
-                receiveId: "receive-1",
-                receivedBytes: 3,
-                nextOffsetBytes: 3,
-            },
         };
     }
 

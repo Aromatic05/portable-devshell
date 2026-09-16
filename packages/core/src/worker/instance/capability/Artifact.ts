@@ -27,13 +27,13 @@ const CANONICAL_BASE64 =
 interface WorkerInstanceArtifactOptions {
     assertReady(): void;
     protocolClient: WorkerProtocolClient;
-    transportConnection?: Pick<WorkerTransportConnection, "openStream">;
+    transportConnection: Pick<WorkerTransportConnection, "openStream">;
 }
 
 export class WorkerInstanceArtifact {
     readonly #assertReady: WorkerInstanceArtifactOptions["assertReady"];
     readonly #protocolClient: WorkerProtocolClient;
-    readonly #transportConnection?: WorkerInstanceArtifactOptions["transportConnection"];
+    readonly #transportConnection: WorkerInstanceArtifactOptions["transportConnection"];
 
     constructor(options: WorkerInstanceArtifactOptions) {
         this.#assertReady = options.assertReady;
@@ -54,9 +54,6 @@ export class WorkerInstanceArtifact {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactPayloadReadResult> {
         this.#assertReady();
-        if (this.#transportConnection === undefined) {
-            return await this.#protocolClient.readArtifactPayload(input, signal);
-        }
         const stream = await this.#transportConnection.openStream(
             "artifact.payload",
             encodeMetadata(input),
@@ -117,9 +114,6 @@ export class WorkerInstanceArtifact {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactReceiveWriteResult> {
         this.#assertReady();
-        if (this.#transportConnection === undefined) {
-            return await this.#protocolClient.writeArtifactReceive(input, signal);
-        }
         const content = decodeBase64(input.content);
         const stream = await this.#transportConnection.openStream(
             "artifact.receive",

@@ -94,11 +94,7 @@ impl RpcRouter {
     pub fn is_cancellable_control_method(&self, method: &str) -> bool {
         matches!(
             method,
-            "artifact.payload.open"
-                | "artifact.payload.read"
-                | "artifact.receive.begin"
-                | "artifact.receive.write"
-                | "artifact.receive.direct.open"
+            "artifact.payload.open" | "artifact.receive.begin" | "artifact.receive.direct.open"
         )
     }
 
