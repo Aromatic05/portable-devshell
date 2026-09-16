@@ -7,8 +7,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import {
-    decodeFrame,
-    encodeFrame,
+    decodePacket,
+    encodePacket,
     TRANSPORT_MAX_FRAME_SIZE,
 } from "@portable-devshell/shared/transport/frame";
 import {
@@ -44,7 +44,7 @@ class MemoryChannel implements Channel {
         if (this.writeError !== undefined) throw this.writeError;
         this.sent.push(
             decodeWorkerRpcMessage(
-                decodeFrame(data),
+                decodePacket(data),
             ) as unknown as WorkerRpcRequestEnvelope,
         );
     }
@@ -78,7 +78,7 @@ class MemoryChannel implements Channel {
     }
 
     publish(message: JsonValue): void {
-        const data = encodeFrame(encodeWorkerRpcMessage(message));
+        const data = encodePacket(encodeWorkerRpcMessage(message));
         for (const listener of [...this.#data]) listener(data);
     }
 }

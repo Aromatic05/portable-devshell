@@ -10,7 +10,7 @@ export default defineConfig({
         alias: {
             "@portable-devshell/shared/transport/frame": resolve(
                 import.meta.dirname,
-                "../shared/src/transport/protocol/Frame.ts",
+                "../shared/src/transport/frame/Protocol.ts",
             ),
             "@portable-devshell/shared/browser": resolve(
                 import.meta.dirname,

@@ -9,7 +9,7 @@
                 "./packages/shared/dist/browser.d.ts"
             ],
             "@portable-devshell/shared/transport/frame": [
-                "./packages/shared/dist/transport/protocol/Frame.d.ts"
+                "./packages/shared/dist/transport/frame/Protocol.d.ts"
             ],
             "@portable-devshell/core": ["./packages/core/dist/index.d.ts"],
             "@portable-devshell/control": [

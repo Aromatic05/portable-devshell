@@ -27,7 +27,7 @@
                 "./packages/shared/src/browser.ts"
             ],
             "@portable-devshell/shared/transport/frame": [
-                "./packages/shared/src/transport/protocol/Frame.ts"
+                "./packages/shared/src/transport/frame/Protocol.ts"
             ],
             "@portable-devshell/core": ["./packages/core/src/index.ts"],
             "@portable-devshell/core/testing": [

@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { errorCodes, type Channel } from "@portable-devshell/shared";
-import { encodeFrame } from "@portable-devshell/shared/transport/frame";
+import { encodePacket } from "@portable-devshell/shared/transport/frame";
 import {
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
@@ -127,7 +127,7 @@ test("offline inbound connector returns a typed retryable reverse transport erro
 });
 
 function request(id: string, method: string): Uint8Array {
-    return encodeFrame(
+    return encodePacket(
         encodeWorkerRpcMessage({
             id,
             method,

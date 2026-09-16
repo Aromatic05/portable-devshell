@@ -6,8 +6,8 @@ import test from "node:test";
 
 import { errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
-    encodeFrame,
-    FrameBuffer,
+    encodePacket,
+    PacketBuffer,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
@@ -685,7 +685,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
     const stdout = new PassThrough();
     const stdin = new PassThrough();
     const stderr = new PassThrough();
-    const reader = new FrameBuffer();
+    const reader = new PacketBuffer();
     let spawnCount = 0;
     let exitResolve:
         | ((value: {
@@ -741,7 +741,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
             }
 
             stdout.write(
-                encodeFrame(
+                encodePacket(
                     encodeWorkerRpcMessage(
                         createResponse(
                             frame.method,
@@ -772,7 +772,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
             if (request === undefined)
                 throw new Error(`No request available for ${method}.`);
             stdout.write(
-                encodeFrame(
+                encodePacket(
                     encodeWorkerRpcMessage(
                         createResponse(
                             method,
@@ -784,7 +784,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         },
         sendNotification(method: string, params: JsonValue) {
             stdout.write(
-                encodeFrame(
+                encodePacket(
                     encodeWorkerRpcMessage({
                         method,
                         params,

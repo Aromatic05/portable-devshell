@@ -11,8 +11,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import {
-    encodeFrame,
-    FrameBuffer,
+    encodePacket,
+    PacketBuffer,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
@@ -1386,9 +1386,9 @@ function createWorkerInstanceHarness(): {
             const stdout = new PassThrough();
             const stdin = new PassThrough();
             const stderr = new PassThrough();
-            const reader = new FrameBuffer();
+            const reader = new PacketBuffer();
             const write = (value: JsonValue) => {
-                stdout.write(encodeFrame(encodeWorkerRpcMessage(value)));
+                stdout.write(encodePacket(encodeWorkerRpcMessage(value)));
             };
             let exitResolve:
                 | ((value: {

@@ -6,8 +6,8 @@ import {
     type WebSocketClientLike,
 } from "@portable-devshell/shared/browser";
 import {
-    encodeFrame,
-    FrameBuffer,
+    encodePacket,
+    PacketBuffer,
 } from "@portable-devshell/shared/transport/frame";
 
 import {
@@ -232,12 +232,12 @@ describe("web client transport", () => {
 class ReplyChannel implements Channel {
     closed = false;
     private readonly dataListeners = new Set<(data: Uint8Array) => void>();
-    private readonly frames = new FrameBuffer();
+    private readonly packets = new PacketBuffer();
     private readonly closes = new Set<(error?: Error) => void>();
 
     async write(data: Uint8Array): Promise<void> {
-        for (const frame of this.frames.push(data)) {
-            const request = JSON.parse(new TextDecoder().decode(frame)) as {
+        for (const packet of this.packets.push(data)) {
+            const request = JSON.parse(new TextDecoder().decode(packet)) as {
                 destination: string;
                 id: string;
                 name: string;
@@ -255,7 +255,7 @@ class ReplyChannel implements Channel {
                 to: "web",
             };
             queueMicrotask(() => {
-                const encoded = encodeFrame(
+                const encoded = encodePacket(
                     new TextEncoder().encode(JSON.stringify(reply)),
                 );
                 for (const listener of this.dataListeners) listener(encoded);

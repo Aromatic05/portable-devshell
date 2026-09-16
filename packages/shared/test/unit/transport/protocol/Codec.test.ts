@@ -10,7 +10,7 @@ import {
     type Event,
     type Channel,
 } from "@portable-devshell/shared";
-import { encodeFrame } from "@portable-devshell/shared/transport/frame";
+import { encodePacket } from "@portable-devshell/shared/transport/frame";
 import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
@@ -181,7 +181,7 @@ test("Codec rejects legacy envelopes", async (t) => {
     );
 
     await value.clientChannel.write(
-        encodeFrame(
+        encodePacket(
             Buffer.from(
                 JSON.stringify({
                     id: "old",
@@ -215,7 +215,7 @@ test("Codec rejects a peer change after first-event binding", async (t) => {
     );
 
     await value.clientChannel.write(
-        encodeFrame(
+        encodePacket(
             Buffer.from(
                 JSON.stringify({
                     id: "spoof",

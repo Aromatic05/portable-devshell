@@ -12,8 +12,8 @@ import {
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import {
-    decodeFrame,
-    encodeFrame,
+    decodePacket,
+    encodePacket,
 } from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 
@@ -291,7 +291,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                     continue;
                 }
                 const request = decodeWorkerRpcMessage(
-                    decodeFrame(
+                    decodePacket(
                         Buffer.from(dataLine.slice(5).trim(), "base64"),
                     ),
                 ) as Record<string, JsonValue>;
@@ -302,7 +302,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
                     frames: [
                         {
                             frame: Buffer.from(
-                                encodeFrame(
+                                encodePacket(
                                     encodeWorkerRpcMessage({
                                         id: String(request.id),
                                         ok: true,
@@ -399,7 +399,7 @@ function connectWorker(
     socket.on("message", (data, isBinary) => {
         assert.equal(isBinary, true);
         const request = decodeWorkerRpcMessage(
-            decodeFrame(
+            decodePacket(
                 Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer),
             ),
         ) as Record<string, JsonValue>;
@@ -407,7 +407,7 @@ function connectWorker(
         const method = String(request.method);
         methods.push(method);
         socket.send(
-            encodeFrame(
+            encodePacket(
                 encodeWorkerRpcMessage({
                     id,
                     ok: true,

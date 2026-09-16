@@ -8,8 +8,8 @@ import {
     type JsonValue,
 } from "@portable-devshell/shared";
 import {
-    encodeFrame,
-    FrameBuffer,
+    encodePacket,
+    PacketBuffer,
     TRANSPORT_MAX_FRAME_SIZE,
 } from "@portable-devshell/shared/transport/frame";
 
@@ -192,7 +192,7 @@ export class WorkerRpcBridge {
                     return;
                 }
                 void channel
-                    .write(encodeFrame(encodedRequest))
+                    .write(encodePacket(encodedRequest))
                     .catch((error: unknown) => {
                         this.#disconnectChannel(
                             channel,
@@ -320,12 +320,15 @@ export class WorkerRpcBridge {
 
     #attachChannel(channel: Channel): void {
         this.#channel = channel;
-        const frames = new FrameBuffer();
+        const packets = new PacketBuffer();
         channel.onData((data) => {
             if (this.#channel !== channel) return;
             try {
-                for (const frame of frames.push(data)) {
-                    this.#handleMessage(channel, decodeWorkerRpcMessage(frame));
+                for (const packet of packets.push(data)) {
+                    this.#handleMessage(
+                        channel,
+                        decodeWorkerRpcMessage(packet),
+                    );
                 }
             } catch (error) {
                 this.#disconnectChannel(
@@ -407,7 +410,7 @@ export class WorkerRpcBridge {
         }
         for (const pending of this.#pending.values()) {
             await channel.write(
-                encodeFrame(this.#encodeRequest(pending.request)),
+                encodePacket(this.#encodeRequest(pending.request)),
             );
         }
     }
@@ -509,7 +512,7 @@ export class WorkerRpcBridge {
             return;
         }
         void channel
-            .write(encodeFrame(encodedCancellation))
+            .write(encodePacket(encodedCancellation))
             .catch((error: unknown) => {
                 if (!this.#preservePendingOnDisconnect) {
                     this.#pending.delete(cancellation.id);
