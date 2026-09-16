@@ -1,7 +1,7 @@
 import type {
     SpawnFunction,
-    WorkerCommandTransport,
 } from "./command/Transport.js";
+import type { WorkerTransport } from "./Transport.js";
 import { WorkerBinary } from "./Binary.js";
 import {
     WorkerTransportDriverDocker,
@@ -61,7 +61,7 @@ export type WorkerTransportFactoryOptions =
 export class WorkerTransportFactory {
     static create(
         options: WorkerTransportFactoryOptions,
-    ): WorkerCommandTransport {
+    ): WorkerTransport {
         const workerBinary = new WorkerBinary();
 
         switch (options.type) {

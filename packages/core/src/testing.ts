@@ -18,6 +18,7 @@ export * from "./worker/protocol/rpc/Process.js";
 export * from "./worker/transport/command/Client.js";
 export * from "./worker/transport/command/Model.js";
 export * from "./worker/transport/command/Transport.js";
+export * from "./worker/transport/Transport.js";
 export * from "./worker/provision/install/LocalInstaller.js";
 export * from "./worker/provision/install/RemoteInstaller.js";
 export * from "./worker/instance/Instance.js";

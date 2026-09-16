@@ -11,10 +11,9 @@ pub const FRAME_MAX_DATA_SIZE: usize = 64 * 1024;
 pub const TRANSPORT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 pub const RESET_UNSUPPORTED_SERVICE: u16 = 1;
-pub const RESET_SERVICE_REJECTED: u16 = 2;
 pub const RESET_SERVICE_FAILED: u16 = 3;
+#[cfg(test)]
 pub const RESET_CANCELLED: u16 = 4;
-pub const RESET_STREAM_PROTOCOL_ERROR: u16 = 5;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Frame {

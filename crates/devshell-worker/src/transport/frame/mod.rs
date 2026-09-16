@@ -3,15 +3,17 @@ mod stream;
 
 use std::collections::HashMap;
 
+#[cfg(test)]
+pub use codec::RESET_CANCELLED;
 pub use codec::{
-    FRAME_MAX_DATA_SIZE, FRAME_PROTOCOL_VERSION, Frame, FrameDecoder, RESET_CANCELLED,
-    RESET_SERVICE_FAILED, RESET_SERVICE_REJECTED, RESET_STREAM_PROTOCOL_ERROR,
-    RESET_UNSUPPORTED_SERVICE, TRANSPORT_MAX_FRAME_SIZE, decode_frame, encode_frame,
+    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE,
+    encode_frame,
 };
 use stream::StreamState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameRole {
+    #[cfg(test)]
     Opener,
     Acceptor,
 }
@@ -40,6 +42,7 @@ pub enum FrameEvent {
 pub struct FrameProtocol {
     role: FrameRole,
     max_data_size: usize,
+    #[cfg(test)]
     next_stream_id: u64,
     last_remote_stream_id: u32,
     streams: HashMap<u32, StreamState>,
@@ -50,6 +53,7 @@ impl FrameProtocol {
         Self {
             role,
             max_data_size: FRAME_MAX_DATA_SIZE,
+            #[cfg(test)]
             next_stream_id: 1,
             last_remote_stream_id: 0,
             streams: HashMap::new(),
@@ -64,6 +68,7 @@ impl FrameProtocol {
         }
     }
 
+    #[cfg(test)]
     pub fn open(
         &mut self,
         service: String,
@@ -79,17 +84,8 @@ impl FrameProtocol {
         let stream_id = u32::try_from(self.next_stream_id)
             .map_err(|_| "Frame stream id space is exhausted.".to_string())?;
         self.next_stream_id += 1;
-        self.streams.insert(
-            stream_id,
-            StreamState::new(
-                stream_id,
-                service.clone(),
-                metadata.clone(),
-                true,
-                0,
-                receive_window,
-            ),
-        );
+        self.streams
+            .insert(stream_id, StreamState::new(true, 0, receive_window));
         Ok((
             stream_id,
             Frame::Open {
@@ -147,17 +143,8 @@ impl FrameProtocol {
                 return Err(format!("Frame stream {stream_id} is already open."));
             }
             self.last_remote_stream_id = stream_id;
-            self.streams.insert(
-                stream_id,
-                StreamState::new(
-                    stream_id,
-                    service.clone(),
-                    metadata.clone(),
-                    false,
-                    receive_window,
-                    0,
-                ),
-            );
+            self.streams
+                .insert(stream_id, StreamState::new(false, receive_window, 0));
             return Ok(Some(FrameEvent::Open {
                 stream_id,
                 service,
@@ -232,16 +219,22 @@ impl FrameProtocol {
         )))
     }
 
-    pub fn read(&mut self, stream_id: u32) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
+    pub fn read_data(&mut self, stream_id: u32) -> Result<Option<Vec<u8>>, String> {
         let stream = self
             .streams
             .get_mut(&stream_id)
             .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
-        let Some(data) = stream.pop_data() else {
+        Ok(stream.pop_data())
+    }
+
+    pub fn consume(&mut self, stream_id: u32, byte_len: u32) -> Result<Option<Frame>, String> {
+        if byte_len == 0 {
             return Ok(None);
-        };
-        let byte_len =
-            u32::try_from(data.len()).map_err(|_| "Frame DATA length exceeds u32.".to_string())?;
+        }
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
         let window = if stream.remote_fin {
             None
         } else {
@@ -252,6 +245,17 @@ impl FrameProtocol {
             })
         };
         self.cleanup(stream_id);
+        Ok(window)
+    }
+
+    #[cfg(test)]
+    pub fn read(&mut self, stream_id: u32) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
+        let Some(data) = self.read_data(stream_id)? else {
+            return Ok(None);
+        };
+        let byte_len =
+            u32::try_from(data.len()).map_err(|_| "Frame DATA length exceeds u32.".to_string())?;
+        let window = self.consume(stream_id, byte_len)?;
         Ok(Some((data, window)))
     }
 

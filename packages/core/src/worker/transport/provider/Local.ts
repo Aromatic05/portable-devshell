@@ -9,9 +9,10 @@ import {
     createCommandContext,
     type SpawnFunction,
     type ProviderCommandContext,
-    type WorkerCommandTransport,
 } from "../command/Transport.js";
+import type { WorkerTransport } from "../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
     WorkerRpcOptions,
@@ -36,7 +37,7 @@ export interface WorkerTransportDriverLocalOptions {
     spawnFunction?: SpawnFunction;
 }
 
-export class WorkerTransportDriverLocal implements WorkerCommandTransport {
+export class WorkerTransportDriverLocal implements WorkerTransport {
     readonly #installer: WorkerInstallerLocal;
     readonly #resolver: WorkerAssetResolver;
     readonly #workerBinary: WorkerBinary;
@@ -161,6 +162,28 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         );
     }
 
+    async connectWorkerChannel(options: WorkerChannelOptions) {
+        const workerCommand = new WorkerBinary(
+            await this.#resolveActiveExecutable(options.env),
+        ).buildCommand("transport", options.instanceName);
+        const context = this.#createCommandContext(
+            "connectWorkerChannel",
+            [workerCommand.command, ...workerCommand.args],
+            { instance: options.instanceName },
+        );
+        return this.#process.createChannel(
+            this.#process.spawn(
+                context,
+                {
+                    env: this.#mergeEnv(options.env),
+                    stdio: ["pipe", "pipe", "pipe"],
+                },
+                errorCodes.coreProviderFailed,
+            ),
+            context,
+        );
+    }
+
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
         const workerCommand = new WorkerBinary(
             await this.#resolveActiveExecutable(options.env),
@@ -260,7 +283,7 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         command: WorkerCommandName,
         options: WorkerCommandOptions,
     ): Promise<
-        Awaited<ReturnType<WorkerCommandTransport["runWorkerCommand"]>>
+        Awaited<ReturnType<WorkerTransport["runWorkerCommand"]>>
     > {
         const workerCommand = new WorkerBinary(executable).buildCommand(
             command,

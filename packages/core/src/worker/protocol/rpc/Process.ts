@@ -8,7 +8,7 @@ import {
     type Channel,
 } from "@portable-devshell/shared";
 
-import type { WorkerCommandTransport } from "../../transport/command/Transport.js";
+import type { WorkerTransport } from "../../transport/Transport.js";
 import type { WorkerRpcOptions } from "../../transport/command/Model.js";
 import type { WorkerRpcConnector } from "./connection/Bridge.js";
 
@@ -63,7 +63,7 @@ export class WorkerRpcProcessAdapter {
     }
 
     static async spawn(
-        transport: WorkerCommandTransport,
+        transport: WorkerTransport,
         options: WorkerRpcOptions,
         signal?: AbortSignal,
     ): Promise<WorkerRpcProcessAdapter> {
@@ -92,7 +92,7 @@ export class WorkerRpcProcessAdapter {
     }
 
     static async #spawnProcess(
-        transport: WorkerCommandTransport,
+        transport: WorkerTransport,
         options: WorkerRpcOptions,
         signal?: AbortSignal,
     ): Promise<WorkerRpcProcessAdapter> {
@@ -161,10 +161,10 @@ function abortError(signal: AbortSignal): Error {
 }
 
 export class WorkerRpcProcessConnector implements WorkerRpcConnector {
-    readonly #transport: WorkerCommandTransport;
+    readonly #transport: WorkerTransport;
     readonly #options: WorkerRpcOptions;
 
-    constructor(transport: WorkerCommandTransport, options: WorkerRpcOptions) {
+    constructor(transport: WorkerTransport, options: WorkerRpcOptions) {
         this.#transport = transport;
         this.#options = options;
     }

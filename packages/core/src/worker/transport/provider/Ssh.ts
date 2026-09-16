@@ -17,9 +17,10 @@ import {
     type WorkerCommandInteractiveSession,
     type SpawnFunction,
     type ProviderCommandContext,
-    type WorkerCommandTransport,
 } from "../command/Transport.js";
+import type { WorkerTransport } from "../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
     WorkerRpcOptions,
@@ -50,7 +51,7 @@ export interface WorkerTransportDriverSshOptions {
     spawnFunction?: SpawnFunction;
 }
 
-export class WorkerTransportDriverSsh implements WorkerCommandTransport {
+export class WorkerTransportDriverSsh implements WorkerTransport {
     readonly #sshCommand: readonly [string, ...string[]];
     readonly #workerBinary: WorkerBinary;
     readonly #installer: WorkerInstallerRemote;
@@ -180,6 +181,46 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             );
             throw error;
         }
+    }
+
+    async connectWorkerChannel(options: WorkerChannelOptions) {
+        const executable = await this.#resolveExecutable();
+        const workerCommand = new WorkerBinary(executable).buildCommand(
+            "transport",
+            options.instanceName,
+        );
+        const commandLine = [workerCommand.command, ...workerCommand.args]
+            .map(shellEscape)
+            .join(" ");
+        const environmentFile = await this.#prepareRemoteEnvironment(options.env);
+        const remoteCommandLine = this.#withRemoteEnvironment(
+            commandLine,
+            environmentFile,
+        );
+        const context = this.#createRemoteShellContext(
+            "connectWorkerChannel",
+            remoteCommandLine,
+            { instance: options.instanceName },
+        );
+        let child;
+        try {
+            child = this.#spawnRemoteShell(
+                remoteCommandLine,
+                ["pipe", "pipe", "pipe"],
+                context,
+            );
+        } catch (error) {
+            await this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
+            throw error;
+        }
+        child.once("exit", () => {
+            void this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
+        });
+        return this.#process.createChannel(child, context);
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {

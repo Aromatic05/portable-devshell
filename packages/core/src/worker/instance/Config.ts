@@ -6,7 +6,7 @@ import type {
     InstanceName,
 } from "@portable-devshell/shared";
 
-import type { WorkerCommandTransport } from "../transport/command/Transport.js";
+import type { WorkerTransport } from "../transport/Transport.js";
 import {
     WORKER_PROTOCOL_VERSION,
     type WorkerHandshakeParams,
@@ -41,7 +41,7 @@ export type WorkerInstanceConfig =
     | (WorkerInstanceConfigCommon & {
           managementMode?: "controllerManaged";
           rpcConnector?: never;
-          transport: WorkerCommandTransport;
+          transport: WorkerTransport;
       })
     | (WorkerInstanceConfigCommon & {
           managementMode: "selfManaged";
@@ -57,7 +57,7 @@ export interface ResolvedWorkerInstanceConfig extends WorkerInstanceConfigCommon
     managementMode: WorkerManagementMode;
     rpcConnector?: WorkerRpcConnector;
     toolScheduler: WorkerToolSchedulerLimits;
-    transport?: WorkerCommandTransport;
+    transport?: WorkerTransport;
 }
 
 export function resolveWorkerInstanceConfig(

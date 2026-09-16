@@ -1,8 +1,26 @@
 mod exec;
 mod tcp;
 
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpStream};
+use std::process::{ChildStdin, ChildStdout};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::thread;
+use std::time::Duration;
+
 use exec::ExecService;
 use tcp::TcpService;
+
+use crate::transport::frame::{
+    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, FrameEvent, FrameProtocol, FrameRole,
+    RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE, encode_frame,
+};
+
+const SERVICE_RECEIVE_WINDOW: u32 = 256 * 1024;
+const EVENT_QUEUE_CAPACITY: usize = 64;
+const SERVICE_QUEUE_CAPACITY: usize = 1;
+const SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 pub enum ServiceConnection {
     Tcp(TcpService),
@@ -10,6 +28,10 @@ pub enum ServiceConnection {
 }
 
 impl ServiceConnection {
+    pub fn supports(service: &str) -> bool {
+        matches!(service, "network.tcp" | "process.exec")
+    }
+
     pub fn open(service: &str, metadata: &[u8]) -> Result<Self, String> {
         match service {
             "network.tcp" => TcpService::open(metadata).map(Self::Tcp),
@@ -18,6 +40,7 @@ impl ServiceConnection {
         }
     }
 
+    #[cfg(test)]
     pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
         match self {
             Self::Tcp(service) => service.write(data),
@@ -25,6 +48,7 @@ impl ServiceConnection {
         }
     }
 
+    #[cfg(test)]
     pub fn finish_input(&mut self) -> Result<(), String> {
         match self {
             Self::Tcp(service) => service.finish_input(),
@@ -32,6 +56,7 @@ impl ServiceConnection {
         }
     }
 
+    #[cfg(test)]
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
         match self {
             Self::Tcp(service) => service.read(buffer),
@@ -45,6 +70,592 @@ impl ServiceConnection {
             Self::Exec(service) => service.reset(),
         }
     }
+
+    fn take_input(&mut self) -> Result<ServiceInput, String> {
+        match self {
+            Self::Tcp(service) => service.clone_stream().map(ServiceInput::Tcp),
+            Self::Exec(service) => service
+                .take_stdin()
+                .map(|stdin| ServiceInput::Exec(Some(stdin))),
+        }
+    }
+
+    fn take_output(&mut self) -> Result<ServiceOutput, String> {
+        match self {
+            Self::Tcp(service) => service.clone_stream().map(ServiceOutput::Tcp),
+            Self::Exec(service) => service.take_stdout().map(ServiceOutput::Exec),
+        }
+    }
+
+    fn output_complete(&mut self) -> Result<bool, String> {
+        match self {
+            Self::Tcp(_) => Ok(true),
+            Self::Exec(service) => service.poll_status(),
+        }
+    }
+}
+
+enum ServiceInput {
+    Tcp(TcpStream),
+    Exec(Option<ChildStdin>),
+}
+
+impl ServiceInput {
+    fn write(&mut self, data: &[u8]) -> Result<(), String> {
+        match self {
+            Self::Tcp(stream) => stream
+                .write_all(data)
+                .map_err(|error| format!("network.tcp write failed: {error}")),
+            Self::Exec(stdin) => stdin
+                .as_mut()
+                .ok_or_else(|| "process.exec stdin is closed.".to_string())?
+                .write_all(data)
+                .map_err(|error| format!("process.exec stdin write failed: {error}")),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), String> {
+        match self {
+            Self::Tcp(stream) => stream
+                .shutdown(Shutdown::Write)
+                .map_err(|error| format!("network.tcp half-close failed: {error}")),
+            Self::Exec(stdin) => {
+                stdin.take();
+                Ok(())
+            }
+        }
+    }
+}
+
+enum ServiceOutput {
+    Tcp(TcpStream),
+    Exec(ChildStdout),
+}
+
+impl ServiceOutput {
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
+        match self {
+            Self::Tcp(stream) => stream
+                .read(buffer)
+                .map_err(|error| format!("network.tcp read failed: {error}")),
+            Self::Exec(stdout) => stdout
+                .read(buffer)
+                .map_err(|error| format!("process.exec stdout read failed: {error}")),
+        }
+    }
+}
+
+enum ServiceInputCommand {
+    Data(Vec<u8>),
+    Finish,
+}
+
+enum ServerEvent {
+    ChannelData(Vec<u8>),
+    ChannelClosed,
+    ChannelFailed(String),
+    InputConsumed { stream_id: u32, byte_len: u32 },
+    InputFinished { stream_id: u32 },
+    ServiceData { stream_id: u32, data: Vec<u8> },
+    OutputFinished { stream_id: u32 },
+    ServiceFailed { stream_id: u32, error: String },
+}
+
+struct PendingOutput {
+    data: Vec<u8>,
+    offset: usize,
+}
+
+struct ActiveService {
+    connection: ServiceConnection,
+    input: SyncSender<ServiceInputCommand>,
+    output_ack: SyncSender<()>,
+    input_busy: bool,
+    input_finish_sent: bool,
+    input_finished: bool,
+    remote_fin: bool,
+    output_eof: bool,
+    local_fin_sent: bool,
+    pending_output: Option<PendingOutput>,
+}
+
+impl ActiveService {
+    fn open(
+        stream_id: u32,
+        service: &str,
+        metadata: &[u8],
+        events: SyncSender<ServerEvent>,
+    ) -> Result<Self, String> {
+        let mut connection = ServiceConnection::open(service, metadata)?;
+        let input = connection.take_input()?;
+        let output = connection.take_output()?;
+        let (input_tx, input_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
+        let (output_ack_tx, output_ack_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
+        spawn_service_input(stream_id, input, input_rx, events.clone());
+        spawn_service_output(stream_id, output, output_ack_rx, events);
+        Ok(Self {
+            connection,
+            input: input_tx,
+            output_ack: output_ack_tx,
+            input_busy: false,
+            input_finish_sent: false,
+            input_finished: false,
+            remote_fin: false,
+            output_eof: false,
+            local_fin_sent: false,
+            pending_output: None,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.connection.reset();
+    }
+}
+
+pub fn serve_stdio() -> Result<(), String> {
+    serve(std::io::stdin(), std::io::stdout())
+}
+
+fn serve<R, W>(input: R, mut output: W) -> Result<(), String>
+where
+    R: Read + Send + 'static,
+    W: Write,
+{
+    let (events_tx, events_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
+    spawn_channel_input(input, events_tx.clone());
+
+    let mut decoder = FrameDecoder::default();
+    let mut protocol = FrameProtocol::new(FrameRole::Acceptor);
+    let mut services = HashMap::<u32, ActiveService>::new();
+
+    loop {
+        match events_rx.recv_timeout(SERVICE_POLL_INTERVAL) {
+            Ok(ServerEvent::ChannelData(data)) => {
+                for frame in decoder.push(&data)? {
+                    accept_frame(&mut protocol, &mut services, &events_tx, frame, &mut output)?;
+                }
+            }
+            Ok(ServerEvent::ChannelClosed) => {
+                if !decoder.is_empty() {
+                    return Err("Channel closed with an incomplete Frame.".to_string());
+                }
+                reset_all(&mut services);
+                return Ok(());
+            }
+            Ok(ServerEvent::ChannelFailed(error)) => {
+                reset_all(&mut services);
+                return Err(error);
+            }
+            Ok(ServerEvent::InputConsumed {
+                stream_id,
+                byte_len,
+            }) => {
+                if let Some(service) = services.get_mut(&stream_id) {
+                    service.input_busy = false;
+                    if let Some(window) = protocol.consume(stream_id, byte_len)? {
+                        write_frame(&mut output, &window)?;
+                    }
+                    dispatch_input(&mut protocol, &mut services, stream_id)?;
+                    cleanup_closed(&protocol, &mut services, stream_id);
+                }
+            }
+            Ok(ServerEvent::InputFinished { stream_id }) => {
+                if let Some(service) = services.get_mut(&stream_id) {
+                    service.input_finished = true;
+                }
+            }
+            Ok(ServerEvent::ServiceData { stream_id, data }) => {
+                let duplicate = services
+                    .get(&stream_id)
+                    .is_some_and(|service| service.pending_output.is_some());
+                if duplicate {
+                    reset_local(
+                        &mut protocol,
+                        &mut services,
+                        stream_id,
+                        RESET_SERVICE_FAILED,
+                        "Service produced output before the previous chunk was consumed.",
+                        &mut output,
+                    )?;
+                    continue;
+                }
+                if let Some(service) = services.get_mut(&stream_id) {
+                    service.pending_output = Some(PendingOutput { data, offset: 0 });
+                    if let Err(error) =
+                        flush_output(&mut protocol, &mut services, stream_id, &mut output)
+                    {
+                        reset_local(
+                            &mut protocol,
+                            &mut services,
+                            stream_id,
+                            RESET_SERVICE_FAILED,
+                            &error,
+                            &mut output,
+                        )?;
+                    }
+                }
+            }
+            Ok(ServerEvent::OutputFinished { stream_id }) => {
+                if let Some(service) = services.get_mut(&stream_id) {
+                    service.output_eof = true;
+                }
+                finish_output_if_ready(&mut protocol, &mut services, stream_id, &mut output)?;
+            }
+            Ok(ServerEvent::ServiceFailed { stream_id, error }) => {
+                if services.contains_key(&stream_id) {
+                    reset_local(
+                        &mut protocol,
+                        &mut services,
+                        stream_id,
+                        RESET_SERVICE_FAILED,
+                        &error,
+                        &mut output,
+                    )?;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                reset_all(&mut services);
+                return Err("Transport service event loop disconnected.".to_string());
+            }
+        }
+
+        let pending = services
+            .iter()
+            .filter_map(|(stream_id, service)| {
+                (service.output_eof && !service.local_fin_sent).then_some(*stream_id)
+            })
+            .collect::<Vec<_>>();
+        for stream_id in pending {
+            finish_output_if_ready(&mut protocol, &mut services, stream_id, &mut output)?;
+        }
+    }
+}
+
+fn spawn_channel_input<R>(mut input: R, events: SyncSender<ServerEvent>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = vec![0u8; FRAME_MAX_DATA_SIZE];
+        loop {
+            match input.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = events.send(ServerEvent::ChannelClosed);
+                    return;
+                }
+                Ok(read) => {
+                    if events
+                        .send(ServerEvent::ChannelData(buffer[..read].to_vec()))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = events.send(ServerEvent::ChannelFailed(error.to_string()));
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn spawn_service_input(
+    stream_id: u32,
+    mut input: ServiceInput,
+    commands: Receiver<ServiceInputCommand>,
+    events: SyncSender<ServerEvent>,
+) {
+    thread::spawn(move || {
+        while let Ok(command) = commands.recv() {
+            match command {
+                ServiceInputCommand::Data(data) => {
+                    let byte_len = match u32::try_from(data.len()) {
+                        Ok(value) => value,
+                        Err(_) => {
+                            let _ = events.send(ServerEvent::ServiceFailed {
+                                stream_id,
+                                error: "Service input exceeds u32 length.".to_string(),
+                            });
+                            return;
+                        }
+                    };
+                    if let Err(error) = input.write(&data) {
+                        let _ = events.send(ServerEvent::ServiceFailed { stream_id, error });
+                        return;
+                    }
+                    if events
+                        .send(ServerEvent::InputConsumed {
+                            stream_id,
+                            byte_len,
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                ServiceInputCommand::Finish => {
+                    match input.finish() {
+                        Ok(()) => {
+                            let _ = events.send(ServerEvent::InputFinished { stream_id });
+                        }
+                        Err(error) => {
+                            let _ = events.send(ServerEvent::ServiceFailed { stream_id, error });
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn spawn_service_output(
+    stream_id: u32,
+    mut output: ServiceOutput,
+    acknowledgements: Receiver<()>,
+    events: SyncSender<ServerEvent>,
+) {
+    thread::spawn(move || {
+        let mut buffer = vec![0u8; FRAME_MAX_DATA_SIZE];
+        loop {
+            match output.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = events.send(ServerEvent::OutputFinished { stream_id });
+                    return;
+                }
+                Ok(read) => {
+                    if events
+                        .send(ServerEvent::ServiceData {
+                            stream_id,
+                            data: buffer[..read].to_vec(),
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if acknowledgements.recv().is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = events.send(ServerEvent::ServiceFailed { stream_id, error });
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn accept_frame<W: Write>(
+    protocol: &mut FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    events: &SyncSender<ServerEvent>,
+    frame: Frame,
+    output: &mut W,
+) -> Result<(), String> {
+    let stream_id = frame.stream_id();
+    let is_window = matches!(&frame, Frame::Window { .. });
+    let event = protocol.accept_frame(frame)?;
+    match event {
+        Some(FrameEvent::Open {
+            stream_id,
+            service,
+            metadata,
+        }) => {
+            if !ServiceConnection::supports(&service) {
+                let reset = protocol.reject_open(
+                    stream_id,
+                    RESET_UNSUPPORTED_SERVICE,
+                    format!("Unsupported transport Service {service}."),
+                )?;
+                write_frame(output, &reset)?;
+                return Ok(());
+            }
+            match ActiveService::open(stream_id, &service, &metadata, events.clone()) {
+                Ok(active) => {
+                    services.insert(stream_id, active);
+                    let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
+                    write_frame(output, &window)?;
+                }
+                Err(error) => {
+                    let reset = protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
+                    write_frame(output, &reset)?;
+                }
+            }
+        }
+        Some(FrameEvent::Data { stream_id }) => {
+            dispatch_input(protocol, services, stream_id)?;
+        }
+        Some(FrameEvent::Fin { stream_id }) => {
+            if let Some(service) = services.get_mut(&stream_id) {
+                service.remote_fin = true;
+            }
+            dispatch_input(protocol, services, stream_id)?;
+            cleanup_closed(protocol, services, stream_id);
+        }
+        Some(FrameEvent::Reset { stream_id, .. }) => {
+            if let Some(mut service) = services.remove(&stream_id) {
+                service.reset();
+            }
+        }
+        None if is_window => {
+            if let Err(error) = flush_output(protocol, services, stream_id, output) {
+                reset_local(
+                    protocol,
+                    services,
+                    stream_id,
+                    RESET_SERVICE_FAILED,
+                    &error,
+                    output,
+                )?;
+            }
+        }
+        None => {}
+    }
+    Ok(())
+}
+
+fn dispatch_input(
+    protocol: &mut FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    stream_id: u32,
+) -> Result<(), String> {
+    let Some(service) = services.get_mut(&stream_id) else {
+        return Ok(());
+    };
+    if service.input_busy || service.input_finish_sent {
+        return Ok(());
+    }
+    if let Some(data) = protocol.read_data(stream_id)? {
+        service.input_busy = true;
+        if service.input.send(ServiceInputCommand::Data(data)).is_err() {
+            service.input_busy = false;
+            return Err("Service input worker is unavailable.".to_string());
+        }
+        return Ok(());
+    }
+    if service.remote_fin {
+        service.input_finish_sent = true;
+        if service.input.send(ServiceInputCommand::Finish).is_err() {
+            return Err("Service input worker is unavailable.".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn flush_output<W: Write>(
+    protocol: &mut FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    stream_id: u32,
+    output: &mut W,
+) -> Result<(), String> {
+    let Some(service) = services.get_mut(&stream_id) else {
+        return Ok(());
+    };
+    loop {
+        let Some(pending) = service.pending_output.as_mut() else {
+            return Ok(());
+        };
+        let Some((used, frame)) =
+            protocol.next_data_frame(stream_id, &pending.data[pending.offset..])?
+        else {
+            return Ok(());
+        };
+        write_frame(output, &frame)?;
+        pending.offset += used;
+        if pending.offset < pending.data.len() {
+            continue;
+        }
+        service.pending_output = None;
+        service
+            .output_ack
+            .send(())
+            .map_err(|_| "Service output worker is unavailable.".to_string())?;
+    }
+}
+
+fn finish_output_if_ready<W: Write>(
+    protocol: &mut FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    stream_id: u32,
+    output: &mut W,
+) -> Result<(), String> {
+    let state = {
+        let Some(service) = services.get_mut(&stream_id) else {
+            return Ok(());
+        };
+        if !service.output_eof || service.local_fin_sent {
+            return Ok(());
+        }
+        service.connection.output_complete()
+    };
+    match state {
+        Ok(false) => Ok(()),
+        Ok(true) => {
+            let fin = protocol.finish(stream_id)?;
+            write_frame(output, &fin)?;
+            if let Some(service) = services.get_mut(&stream_id) {
+                service.local_fin_sent = true;
+            }
+            cleanup_closed(protocol, services, stream_id);
+            Ok(())
+        }
+        Err(error) => reset_local(
+            protocol,
+            services,
+            stream_id,
+            RESET_SERVICE_FAILED,
+            &error,
+            output,
+        ),
+    }
+}
+
+fn reset_local<W: Write>(
+    protocol: &mut FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    stream_id: u32,
+    code: u16,
+    message: &str,
+    output: &mut W,
+) -> Result<(), String> {
+    if let Some(mut service) = services.remove(&stream_id) {
+        service.reset();
+    }
+    if protocol.stream_open(stream_id) {
+        let reset = protocol.reset(stream_id, code, message.to_string())?;
+        write_frame(output, &reset)?;
+    }
+    Ok(())
+}
+
+fn cleanup_closed(
+    protocol: &FrameProtocol,
+    services: &mut HashMap<u32, ActiveService>,
+    stream_id: u32,
+) {
+    if !protocol.stream_open(stream_id) {
+        services.remove(&stream_id);
+    }
+}
+
+fn reset_all(services: &mut HashMap<u32, ActiveService>) {
+    for service in services.values_mut() {
+        service.reset();
+    }
+    services.clear();
+}
+
+fn write_frame<W: Write>(output: &mut W, frame: &Frame) -> Result<(), String> {
+    let encoded = encode_frame(frame)?;
+    output
+        .write_all(&encoded)
+        .map_err(|error| format!("Transport Channel write failed: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("Transport Channel flush failed: {error}"))
 }
 
 #[cfg(test)]

@@ -939,13 +939,17 @@ manage window
 
 ```text
 packages/shared/src/transport/
+  frame/
+    Codec.ts
+    Protocol.ts
+    Stream.ts
   protocol/
     Channel.ts
     Codec.ts
-    Frame.ts
     PrefixRoute.ts
   socket/
   websocket/
+  ClientConnection.ts
 
 packages/core/src/worker/transport/
   command/
@@ -954,6 +958,7 @@ packages/core/src/worker/transport/
   provider/
   Binary.ts
   Factory.ts
+  Transport.ts
 
 crates/devshell-worker/src/transport/
   frame/
@@ -972,7 +977,8 @@ crates/devshell-worker/src/transport/
 其中：
 
 - `frame/stream.rs` 只是 Frame 协议内部 logical stream state，不代表独立 Stream layer；
-- TypeScript shared 当前已有 `transport/protocol/Frame.ts`，优先扩展现有分类，不为了对称性强行搬目录；
+- TypeScript shared 的 Frame 协议保持在 `transport/frame/`，与 `transport/protocol/` 中已有的 Control codec/route 分类分开；
+- `packages/core/src/worker/transport/Transport.ts` 定义 Provider-level `WorkerTransport`，`command/Transport.ts` 只保留 command 子分类自身的辅助契约；
 - 不新增 `session/`；
 - 不新增 `carrier/`；
 - 不把 `service/` 提升为 package 顶层 domain；
@@ -1022,7 +1028,9 @@ network.tcp
 process.exec
 ```
 
-先证明通用 byte transport 成立，不迁移 Worker RPC。
+Provider 通过 `WorkerTransport.connectWorkerChannel()` 建立 byte Channel；controller-managed Worker 使用 `devshell-worker transport --instance <name>` 承载 Frame/Service。
+
+先证明通用 byte transport 成立，不迁移 Worker RPC。`Local / SSH / Docker / Podman` 共用这一 Provider contract；Reverse 在迁移 RPC 时再收敛到同一 Frame 层。
 
 ### Phase 4 — 迁移既有 Protocol
 

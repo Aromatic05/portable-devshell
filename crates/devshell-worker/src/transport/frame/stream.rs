@@ -2,9 +2,6 @@ use std::collections::VecDeque;
 
 #[derive(Debug)]
 pub(crate) struct StreamState {
-    pub id: u32,
-    pub service: String,
-    pub metadata: Vec<u8>,
     pub accepted: bool,
     pub send_credit: u32,
     pub receive_credit: u32,
@@ -14,18 +11,8 @@ pub(crate) struct StreamState {
 }
 
 impl StreamState {
-    pub fn new(
-        id: u32,
-        service: String,
-        metadata: Vec<u8>,
-        accepted: bool,
-        send_credit: u32,
-        receive_credit: u32,
-    ) -> Self {
+    pub fn new(accepted: bool, send_credit: u32, receive_credit: u32) -> Self {
         Self {
-            id,
-            service,
-            metadata,
             accepted,
             send_credit,
             receive_credit,
@@ -109,7 +96,7 @@ mod tests {
 
     #[test]
     fn receive_credit_bounds_buffering() {
-        let mut stream = StreamState::new(1, "test".into(), Vec::new(), true, 0, 2);
+        let mut stream = StreamState::new(true, 0, 2);
         stream.push_data(vec![1, 2]).expect("within credit");
         assert!(stream.push_data(vec![3]).is_err());
         let data = stream.pop_data().expect("queued data");

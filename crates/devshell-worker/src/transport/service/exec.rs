@@ -1,4 +1,6 @@
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(test)]
+use std::io::Write;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -19,7 +21,7 @@ struct ExecMetadata {
 pub struct ExecService {
     child: Child,
     stdin: Option<ChildStdin>,
-    stdout: ChildStdout,
+    stdout: Option<ChildStdout>,
     stderr_summary: Arc<Mutex<Vec<u8>>>,
     stderr_thread: Option<JoinHandle<()>>,
     finished: bool,
@@ -80,13 +82,14 @@ impl ExecService {
         Ok(Self {
             child,
             stdin: Some(stdin),
-            stdout,
+            stdout: Some(stdout),
             stderr_summary,
             stderr_thread: Some(stderr_thread),
             finished: false,
         })
     }
 
+    #[cfg(test)]
     pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
         let stdin = self
             .stdin
@@ -97,17 +100,21 @@ impl ExecService {
             .map_err(|error| format!("process.exec stdin write failed: {error}"))
     }
 
+    #[cfg(test)]
     pub fn finish_input(&mut self) -> Result<(), String> {
         self.stdin.take();
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
         if self.finished {
             return Ok(0);
         }
         let read = self
             .stdout
+            .as_mut()
+            .ok_or_else(|| "process.exec stdout is already attached.".to_string())?
             .read(buffer)
             .map_err(|error| format!("process.exec stdout read failed: {error}"))?;
         if read > 0 {
@@ -127,6 +134,49 @@ impl ExecService {
         self.join_stderr();
     }
 
+    pub(super) fn take_stdin(&mut self) -> Result<ChildStdin, String> {
+        self.stdin
+            .take()
+            .ok_or_else(|| "process.exec stdin is already attached.".to_string())
+    }
+
+    pub(super) fn take_stdout(&mut self) -> Result<ChildStdout, String> {
+        self.stdout
+            .take()
+            .ok_or_else(|| "process.exec stdout is already attached.".to_string())
+    }
+
+    pub(super) fn poll_status(&mut self) -> Result<bool, String> {
+        if self.finished {
+            return Ok(true);
+        }
+        let Some(status) = self
+            .child
+            .try_wait()
+            .map_err(|error| format!("process.exec wait failed: {error}"))?
+        else {
+            return Ok(false);
+        };
+        self.finished = true;
+        self.join_stderr();
+        if status.success() {
+            return Ok(true);
+        }
+        let summary = self
+            .stderr_summary
+            .lock()
+            .map(|value| String::from_utf8_lossy(&value).trim().to_string())
+            .unwrap_or_default();
+        if summary.is_empty() {
+            Err(format!("process.exec exited with status {status}."))
+        } else {
+            Err(format!(
+                "process.exec exited with status {status}: {summary}"
+            ))
+        }
+    }
+
+    #[cfg(test)]
     fn finish_status(&mut self) -> Result<(), String> {
         if self.finished {
             return Ok(());

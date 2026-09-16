@@ -21,7 +21,7 @@ import {
     encodeWorkerRpcMessage,
     workerRpcDisconnectedErrorCode,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
+    type WorkerTransport,
     type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 import {
@@ -369,6 +369,9 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
 test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", async () => {
     const bridge = new WorkerRpcBridge({
         transport: {
+            async connectWorkerChannel() {
+                throw new Error("unused");
+            },
             async installWorker() {},
             async runWorkerCommand(): Promise<WorkerCommandResult> {
                 throw new Error("unused");
@@ -632,7 +635,7 @@ test(
 );
 
 function createRpcHarness(options?: { slowMethods?: Set<string> }): {
-    transport: WorkerCommandTransport;
+    transport: WorkerTransport;
     spawnCount: number;
     requestMethods: string[];
     requestContexts: Array<
@@ -694,7 +697,10 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
           }) => void)
         | undefined;
     const methodWaiters = new Map<string, Array<() => void>>();
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            throw new Error("connectWorkerChannel should not be called in RPC harness tests.");
+        },
         async runWorkerCommand(): Promise<WorkerCommandResult> {
             throw new Error(
                 "runWorkerCommand should not be called in RPC harness tests.",

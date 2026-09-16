@@ -14,7 +14,7 @@ import {
 } from "@portable-devshell/shared/transport/frame";
 
 import { readWorkerAbortReason } from "../../../AbortReason.js";
-import type { WorkerCommandTransport } from "../../../transport/command/Transport.js";
+import type { WorkerTransport } from "../../../transport/Transport.js";
 import type { WorkerRpcOptions } from "../../../transport/command/Model.js";
 import { WorkerRpcError } from "../Message.js";
 import type {
@@ -53,7 +53,7 @@ export interface WorkerRpcBridgeOptions {
     connector?: WorkerRpcConnector;
     preservePendingOnDisconnect?: boolean;
     rpcOptions: WorkerRpcOptions;
-    transport?: WorkerCommandTransport;
+    transport?: WorkerTransport;
 }
 
 export class WorkerRpcBridge {

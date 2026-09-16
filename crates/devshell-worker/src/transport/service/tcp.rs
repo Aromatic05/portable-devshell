@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 
@@ -30,18 +31,21 @@ impl TcpService {
         Ok(Self { stream })
     }
 
+    #[cfg(test)]
     pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
         self.stream
             .write_all(data)
             .map_err(|error| format!("network.tcp write failed: {error}"))
     }
 
+    #[cfg(test)]
     pub fn finish_input(&mut self) -> Result<(), String> {
         self.stream
             .shutdown(Shutdown::Write)
             .map_err(|error| format!("network.tcp half-close failed: {error}"))
     }
 
+    #[cfg(test)]
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, String> {
         self.stream
             .read(buffer)
@@ -50,6 +54,12 @@ impl TcpService {
 
     pub fn reset(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
+    }
+
+    pub(super) fn clone_stream(&self) -> Result<TcpStream, String> {
+        self.stream
+            .try_clone()
+            .map_err(|error| format!("network.tcp stream clone failed: {error}"))
     }
 }
 

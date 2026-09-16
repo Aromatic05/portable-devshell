@@ -5,8 +5,9 @@ import {
     type SpawnOptions,
 } from "node:child_process";
 import { createHash } from "node:crypto";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
@@ -23,6 +24,10 @@ import {
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
 import { createError, errorCodes } from "@portable-devshell/shared";
+import {
+    FrameProtocol,
+    frameResetCodes,
+} from "@portable-devshell/shared/transport/frame";
 import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
@@ -90,7 +95,115 @@ test("local transport builds start command and rpc bridge", async () => {
         "pipe",
         "pipe",
     ]);
+
+    const channel = await transport.connectWorkerChannel({
+        instanceName: "task-3-local",
+    });
+    assert.equal(recorder.calls[2]?.command, "/worker/bin");
+    assert.deepEqual(recorder.calls[2]?.args, [
+        "transport",
+        "--instance",
+        "task-3-local",
+    ]);
+    assert.equal(recorder.calls[2]?.options.cwd, undefined);
+    assert.deepEqual(recorder.calls[2]?.options.env, sanitizedWorkerEnv());
+    assert.deepEqual(recorder.calls[2]?.options.stdio, [
+        "pipe",
+        "pipe",
+        "pipe",
+    ]);
+    channel.close();
 });
+
+test(
+    "local transport carries tcp and process services over the real Frame channel",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        assert.ok(workerBinaryPath);
+        const server = createServer((socket) => {
+            const chunks: Buffer[] = [];
+            socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+            socket.on("end", () => {
+                assert.equal(Buffer.concat(chunks).toString(), "ping");
+                socket.end("pong");
+            });
+        });
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        t.after(() => server.close());
+        const address = server.address();
+        assert.ok(address !== null && typeof address !== "string");
+
+        const transport = new WorkerTransportDriverLocal({
+            workerBinary: new WorkerBinary(workerBinaryPath),
+        });
+        const channel = await transport.connectWorkerChannel({
+            instanceName: "transport-frame-local",
+        });
+        const protocol = new FrameProtocol(channel, { role: "opener" });
+        t.after(() => protocol.close());
+
+        const tcp = await protocol.open(
+            "network.tcp",
+            Buffer.from(
+                JSON.stringify({ host: "127.0.0.1", port: address.port }),
+            ),
+        );
+        await tcp.write(Buffer.from("ping"));
+        await tcp.finish();
+        assert.equal(Buffer.from((await tcp.read()) ?? []).toString(), "pong");
+        assert.equal(await tcp.read(), undefined);
+
+        const processStream = await protocol.open(
+            "process.exec",
+            Buffer.from(
+                JSON.stringify({
+                    executable: process.execPath,
+                    args: ["-e", "process.stdin.pipe(process.stdout)"],
+                }),
+            ),
+        );
+        await processStream.write(Buffer.from("frame-process\n"));
+        await processStream.finish();
+        assert.equal(
+            Buffer.from((await processStream.read()) ?? []).toString(),
+            "frame-process\n",
+        );
+        assert.equal(await processStream.read(), undefined);
+
+        const stalled = await protocol.open(
+            "process.exec",
+            Buffer.from(
+                JSON.stringify({
+                    executable: process.execPath,
+                    args: ["-e", "setInterval(() => {}, 1000)"],
+                }),
+            ),
+        );
+        const stalledWrite = stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61));
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+
+        const responsive = await protocol.open(
+            "process.exec",
+            Buffer.from(
+                JSON.stringify({
+                    executable: process.execPath,
+                    args: ["-e", "process.stdin.pipe(process.stdout)"],
+                }),
+            ),
+        );
+        await responsive.write(Buffer.from("still-responsive\n"));
+        await responsive.finish();
+        assert.equal(
+            Buffer.from((await responsive.read()) ?? []).toString(),
+            "still-responsive\n",
+        );
+        assert.equal(await responsive.read(), undefined);
+
+        await stalled.reset(frameResetCodes.cancelled, "test complete");
+        await assert.rejects(stalledWrite);
+    },
+);
 
 test("local transport runs installWorker probe", async () => {
     const recorder = createSpawnRecorder();

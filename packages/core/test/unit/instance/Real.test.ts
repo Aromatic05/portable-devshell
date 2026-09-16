@@ -22,7 +22,7 @@ import {
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
+    type WorkerTransport,
     type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 import {
@@ -144,7 +144,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     const startGate = new Promise<void>((resolve) => {
         releaseStart = resolve;
     });
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             commands.push(command);
@@ -1010,7 +1010,10 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     const homeDirectory = await createTestTempDirectory(
         "instance-start-failure",
     );
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            throw new Error("channel must not be connected after a failed start");
+        },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             assert.equal(command, "start");
             return {
@@ -1066,7 +1069,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         "instance-stop-failure",
     );
     const harness = createWorkerInstanceHarness();
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             if (command === "stop") {
@@ -1313,7 +1316,7 @@ function createWorkerInstanceHarness(): {
     fail: (method: string, code: string) => void;
     failNextRpcStarts: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
-    transport: WorkerCommandTransport;
+    transport: WorkerTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
     setStatus: (status: "running" | "stale" | "stopped") => void;
@@ -1346,7 +1349,10 @@ function createWorkerInstanceHarness(): {
           }
         | undefined;
 
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            throw new Error("channel is unused by the RPC harness");
+        },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             if (command === "status") {
                 return {

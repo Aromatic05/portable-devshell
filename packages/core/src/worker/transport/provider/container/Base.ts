@@ -12,9 +12,10 @@ import {
     type ProviderCommandContext,
     type SpawnFunction,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
 } from "../../command/Transport.js";
+import type { WorkerTransport } from "../../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
     WorkerRpcOptions,
@@ -44,7 +45,7 @@ export interface WorkerTransportDriverContainerBaseOptions {
     workerBinary?: WorkerBinary;
 }
 
-export class WorkerTransportDriverContainerBase implements WorkerCommandTransport {
+export class WorkerTransportDriverContainerBase implements WorkerTransport {
     readonly #binary: string;
     readonly #installer: WorkerInstallerRemote;
     readonly #process: WorkerTransportProcessRunner;
@@ -165,6 +166,33 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
                 await this.#provision.finishRuntimeRetire();
             }
         }
+    }
+
+    async connectWorkerChannel(options: WorkerChannelOptions) {
+        const environment = this.#workerCommandEnvironment(options.env);
+        await this.#provision.ensureReady("connectWorkerChannel");
+        const executable = await this.#resolveExecutable();
+        const workerCommand = new WorkerBinary(executable).buildCommand(
+            "transport",
+            options.instanceName,
+        );
+        const invocation = this.#createExecInvocation(
+            "connectWorkerChannel",
+            [workerCommand.command, ...workerCommand.args],
+            options.instanceName,
+            environment.keys,
+        );
+        return this.#process.createChannel(
+            this.#process.spawn(
+                invocation.context,
+                {
+                    env: environment.processEnv,
+                    stdio: ["pipe", "pipe", "pipe"],
+                },
+                errorCodes.coreProviderFailed,
+            ),
+            invocation.context,
+        );
     }
 
     async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {

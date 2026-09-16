@@ -5,6 +5,7 @@ export {
     SqliteSchemaVersionTooNewError,
 } from "./storage/SqliteSchema.js";
 export type { WorkerCommandInteractiveSession } from "./worker/transport/command/Transport.js";
+export type { WorkerTransport } from "./worker/transport/Transport.js";
 export type {
     WorkerCommandSessionClose,
     WorkerCommandSessionCompletion,
