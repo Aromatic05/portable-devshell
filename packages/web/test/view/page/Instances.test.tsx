@@ -62,6 +62,43 @@ function localStore(status: "ready" | "stopped"): WebStore {
             operations: {},
             readModel: {
                 ...createInitialControlReadModelState(),
+                artifactShares: [
+                    {
+                        blake3: "share-blake3",
+                        bytes: 1024,
+                        downloadName: "report.pdf",
+                        expiresAtMs: Date.now() + 60_000,
+                        mediaType: "application/pdf",
+                        shareId: "share-local-one",
+                        source: {
+                            instance: "local-one",
+                            path: "report.pdf",
+                            workspace: "/workspace",
+                        },
+                        state: "active",
+                        url: "https://example.test/share-local-one",
+                    },
+                ],
+                artifactTransfers: [
+                    {
+                        createdAt: "2026-09-16T00:00:00.000Z",
+                        source: {
+                            instance: "local-one",
+                            path: "build.tar",
+                            workspace: "/workspace",
+                        },
+                        status: "transferring",
+                        target: {
+                            instance: "remote-one",
+                            path: "build.tar",
+                            workspace: "/remote",
+                        },
+                        totalBytes: 4096,
+                        transferId: "transfer-local-one",
+                        transferredBytes: 1024,
+                        updatedAt: "2026-09-16T00:00:01.000Z",
+                    },
+                ],
                 configView: {
                     instances: [
                         {
@@ -89,6 +126,7 @@ function localStore(status: "ready" | "stopped"): WebStore {
                 ],
             },
         },
+        cancelArtifactTransfer: vi.fn(async () => true),
         createInstance: vi.fn(async () => ({ succeeded: true })),
         deleteInstance: vi.fn(async () => true),
         getInstanceCreateSchema: vi.fn(async () => ({
@@ -112,7 +150,9 @@ function localStore(status: "ready" | "stopped"): WebStore {
             providers: ["local", "ssh", "docker", "podman", "reverse"] as const,
         })),
         refreshInstance: vi.fn(async () => undefined),
+        refreshArtifacts: vi.fn(async () => undefined),
         restart: vi.fn(async () => true),
+        revokeArtifactShare: vi.fn(async () => true),
         setInstanceEnabled: vi.fn(async () => true),
         start: vi.fn(async () => undefined),
         stop: vi.fn(async () => undefined),
@@ -238,6 +278,49 @@ it("offers restart, disable, delete, and refresh actions for a managed instance"
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() =>
         expect(store.deleteInstance).toHaveBeenCalledWith("local-one"),
+    );
+});
+
+it("shows per-instance artifact activity and confirms revoke and cancel", async () => {
+    const store = localStore("ready");
+    render(<Instances store={store} />);
+    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+
+    const activity = screen.getByRole("region", { name: "Artifact activity" });
+    expect(
+        within(activity).getByText(/Share share-lo · report\.pdf/u),
+    ).toBeInTheDocument();
+    expect(
+        within(activity).getByText(/Transfer transfer · transferring/u),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+        within(activity).getByRole("button", { name: "Refresh artifacts" }),
+    );
+    await waitFor(() => expect(store.refreshArtifacts).toHaveBeenCalledOnce());
+
+    fireEvent.click(
+        within(activity).getByRole("button", { name: "Revoke share" }),
+    );
+    let dialog = screen.getByRole("dialog", { name: "Confirm revoke" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+    await waitFor(() =>
+        expect(store.revokeArtifactShare).toHaveBeenCalledWith(
+            "share-local-one",
+        ),
+    );
+
+    fireEvent.click(
+        within(activity).getByRole("button", { name: "Cancel transfer" }),
+    );
+    dialog = screen.getByRole("dialog", { name: "Confirm cancel transfer" });
+    fireEvent.click(
+        within(dialog).getByRole("button", { name: "Cancel transfer" }),
+    );
+    await waitFor(() =>
+        expect(store.cancelArtifactTransfer).toHaveBeenCalledWith(
+            "transfer-local-one",
+        ),
     );
 });
 

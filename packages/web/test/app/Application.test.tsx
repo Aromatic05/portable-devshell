@@ -590,7 +590,18 @@ function fakeClients(): WebClients {
         close() {},
         onTransportClose: () => () => undefined,
         reconnect: async () => undefined,
-        artifact: {} as WebClients["artifact"],
+        artifact: {
+            cancelTransfer: async (transferId: string) => ({
+                status: "cancelled" as const,
+                transferId,
+            }),
+            listShares: async () => [],
+            listTransfers: async () => [],
+            revokeShare: async (shareId: string) => ({
+                revoked: true as const,
+                shareId,
+            }),
+        } as unknown as WebClients["artifact"],
         cli: {} as WebClients["cli"],
         config: {
             get: async () => ({

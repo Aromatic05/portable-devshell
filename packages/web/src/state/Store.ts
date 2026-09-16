@@ -125,7 +125,7 @@ export class WebStore {
             error: undefined,
         });
         const request = this.#model
-            .load({ config: true })
+            .load({ artifacts: true, config: true })
             .then(
                 async () => {
                     if (!this.#current(generation)) return;
@@ -429,6 +429,40 @@ export class WebStore {
                 await this.clients.instance.delete(instance);
                 if (signal.aborted || !this.#current(generation)) return;
                 await this.#model.refreshControl();
+            },
+        );
+    }
+
+    async refreshArtifacts(): Promise<void> {
+        await this.#model.refreshArtifacts();
+        const failure = webFailures(this.#model.state).artifacts;
+        if (failure !== undefined) throw new Error(failure);
+    }
+
+    async revokeArtifactShare(shareId: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `artifact:revoke:${shareId}`,
+            `Artifact share ${shareId} revoked.`,
+            generation,
+            async (signal) => {
+                await this.clients.artifact.revokeShare(shareId);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshArtifacts();
+            },
+        );
+    }
+
+    async cancelArtifactTransfer(transferId: string): Promise<boolean> {
+        const generation = this.#generation;
+        return await this.#operations.run(
+            `artifact:cancel:${transferId}`,
+            `Artifact transfer ${transferId} cancellation requested.`,
+            generation,
+            async (signal) => {
+                await this.clients.artifact.cancelTransfer(transferId);
+                if (signal.aborted || !this.#current(generation)) return;
+                await this.#model.refreshArtifacts();
             },
         );
     }

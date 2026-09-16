@@ -1,8 +1,15 @@
 import { useRef, useState } from "react";
 
 import type {
+    ArtifactShareResult,
+    ArtifactTransferRecord,
     JsonValue,
     OperationalOverviewWorker,
+} from "@portable-devshell/shared/browser";
+import {
+    formatBytes,
+    formatDuration,
+    isArtifactTransferTerminal,
 } from "@portable-devshell/shared/browser";
 
 import { ConfirmationDialog } from "../component/Confirm.js";
@@ -29,6 +36,10 @@ export function Instances({
     const [lifecycleFailure, setLifecycleFailure] = useState<string>();
     const [creating, setCreating] = useState(false);
     const [createNotice, setCreateNotice] = useState<string>();
+    const [artifactConfirmation, setArtifactConfirmation] = useState<
+        { kind: "share"; id: string } | { kind: "transfer"; id: string }
+    >();
+    const [artifactFailure, setArtifactFailure] = useState<string>();
     const refreshGeneration = useRef(0);
     const selectedRef = useRef<string>();
     selectedRef.current = selected;
@@ -52,6 +63,14 @@ export function Instances({
         entry === undefined
             ? undefined
             : readInstanceEnabled(model.configView, entry.name);
+    const artifactActivity =
+        entry === undefined
+            ? undefined
+            : projectArtifactActivity(
+                  entry.name,
+                  model.artifactShares,
+                  model.artifactTransfers,
+              );
 
     return (
         <section className="instances-view">
@@ -204,6 +223,40 @@ export function Instances({
                                 </p>
                             ) : null}
                             <WorkerDiagnostics worker={selectedWorker} />
+                            {artifactActivity === undefined ? null : (
+                                <ArtifactActivity
+                                    activity={artifactActivity}
+                                    disabled={!interactive}
+                                    failure={artifactFailure}
+                                    onCancelTransfer={(transferId) => {
+                                        setArtifactFailure(undefined);
+                                        setArtifactConfirmation({
+                                            id: transferId,
+                                            kind: "transfer",
+                                        });
+                                    }}
+                                    onRefresh={() => {
+                                        setArtifactFailure(undefined);
+                                        void store
+                                            .refreshArtifacts()
+                                            .catch((error: unknown) =>
+                                                setArtifactFailure(
+                                                    error instanceof Error
+                                                        ? error.message
+                                                        : "Artifact activity could not be refreshed.",
+                                                ),
+                                            );
+                                    }}
+                                    onRevokeShare={(shareId) => {
+                                        setArtifactFailure(undefined);
+                                        setArtifactConfirmation({
+                                            id: shareId,
+                                            kind: "share",
+                                        });
+                                    }}
+                                    operations={state.operations}
+                                />
+                            )}
                             <div className="actions">
                                 <button
                                     disabled={
@@ -440,8 +493,225 @@ export function Instances({
                     }}
                 />
             )}
+            {artifactConfirmation === undefined ? null : (
+                <ConfirmationDialog
+                    actionLabel={
+                        artifactConfirmation.kind === "share"
+                            ? "Revoke"
+                            : "Cancel transfer"
+                    }
+                    busy={
+                        state.operations[
+                            artifactConfirmation.kind === "share"
+                                ? `artifact:revoke:${artifactConfirmation.id}`
+                                : `artifact:cancel:${artifactConfirmation.id}`
+                        ] !== undefined
+                    }
+                    description={
+                        artifactConfirmation.kind === "share"
+                            ? `Revoke artifact share ${shortId(artifactConfirmation.id)}? Existing download links will stop working.`
+                            : `Cancel artifact transfer ${shortId(artifactConfirmation.id)}?`
+                    }
+                    disabled={!interactive}
+                    error={artifactFailure}
+                    onCancel={() => {
+                        setArtifactFailure(undefined);
+                        setArtifactConfirmation(undefined);
+                    }}
+                    onConfirm={() => {
+                        const current = artifactConfirmation;
+                        setArtifactFailure(undefined);
+                        const request =
+                            current.kind === "share"
+                                ? store.revokeArtifactShare(current.id)
+                                : store.cancelArtifactTransfer(current.id);
+                        void request.then((succeeded) => {
+                            if (succeeded) {
+                                setArtifactConfirmation(undefined);
+                            } else {
+                                setArtifactFailure(
+                                    store.state.error ??
+                                        `Artifact ${current.kind === "share" ? "share" : "transfer"} action failed.`,
+                                );
+                            }
+                        });
+                    }}
+                />
+            )}
         </section>
     );
+}
+
+interface ArtifactActivityProjection {
+    active: number;
+    shares: ArtifactShareResult[];
+    transfers: ArtifactTransferRecord[];
+}
+
+function projectArtifactActivity(
+    instance: string,
+    shares: readonly ArtifactShareResult[],
+    transfers: readonly ArtifactTransferRecord[],
+): ArtifactActivityProjection {
+    const instanceShares = shares
+        .filter((share) => share.source.instance === instance)
+        .slice(0, 3);
+    const instanceTransfers = transfers
+        .filter(
+            (transfer) =>
+                transfer.source.instance === instance ||
+                transfer.target.instance === instance,
+        )
+        .slice(0, 5);
+    return {
+        active:
+            instanceShares.filter((share) => share.state === "active").length +
+            instanceTransfers.filter(
+                (transfer) => !isArtifactTransferTerminal(transfer.status),
+            ).length,
+        shares: instanceShares,
+        transfers: instanceTransfers,
+    };
+}
+
+function ArtifactActivity({
+    activity,
+    disabled,
+    failure,
+    onCancelTransfer,
+    onRefresh,
+    onRevokeShare,
+    operations,
+}: {
+    activity: ArtifactActivityProjection;
+    disabled: boolean;
+    failure?: string;
+    onCancelTransfer(transferId: string): void;
+    onRefresh(): void;
+    onRevokeShare(shareId: string): void;
+    operations: Record<string, "pending">;
+}) {
+    return (
+        <section aria-label="Artifact activity" className="artifact-activity">
+            <div className="artifact-activity-heading">
+                <div>
+                    <h4>Artifact activity</h4>
+                    <span className="hint">
+                        shares={activity.shares.length} · transfers=
+                        {activity.transfers.length} · active={activity.active}
+                    </span>
+                </div>
+                <button disabled={disabled} onClick={onRefresh} type="button">
+                    Refresh artifacts
+                </button>
+            </div>
+            {failure === undefined ? null : (
+                <p className="error" role="alert">
+                    {failure}
+                </p>
+            )}
+            {activity.shares.length === 0 && activity.transfers.length === 0 ? (
+                <p className="empty">No active or recent artifact activity.</p>
+            ) : null}
+            {activity.shares.map((share) => {
+                const remainingSeconds = Math.max(
+                    0,
+                    Math.ceil((share.expiresAtMs - Date.now()) / 1000),
+                );
+                return (
+                    <article className="artifact-row" key={share.shareId}>
+                        <div>
+                            <strong>
+                                Share {shortId(share.shareId)} ·{" "}
+                                {share.downloadName}
+                            </strong>
+                            <span>
+                                {share.state} · {formatBytes(share.bytes)} ·
+                                expires {formatDuration(remainingSeconds)}
+                            </span>
+                            <span>{artifactSourceLabel(share.source)}</span>
+                        </div>
+                        {share.state === "active" ? (
+                            <button
+                                className="danger"
+                                disabled={
+                                    disabled ||
+                                    operations[
+                                        `artifact:revoke:${share.shareId}`
+                                    ] !== undefined
+                                }
+                                onClick={() => onRevokeShare(share.shareId)}
+                                type="button"
+                            >
+                                Revoke share
+                            </button>
+                        ) : null}
+                    </article>
+                );
+            })}
+            {activity.transfers.map((transfer) => {
+                const progress =
+                    transfer.totalBytes === undefined
+                        ? formatBytes(transfer.transferredBytes)
+                        : `${formatBytes(transfer.transferredBytes)} / ${formatBytes(transfer.totalBytes)}`;
+                const cancellable =
+                    !isArtifactTransferTerminal(transfer.status) &&
+                    transfer.status !== "cancelling";
+                return (
+                    <article className="artifact-row" key={transfer.transferId}>
+                        <div>
+                            <strong>
+                                Transfer {shortId(transfer.transferId)} ·{" "}
+                                {transfer.status}
+                            </strong>
+                            <span>{progress}</span>
+                            <span>
+                                {artifactSourceLabel(transfer.source)} →{" "}
+                                {artifactTargetLabel(transfer.target)}
+                            </span>
+                            {transfer.failure === undefined ? null : (
+                                <span className="error">
+                                    {transfer.failure.code}:{" "}
+                                    {transfer.failure.message}
+                                </span>
+                            )}
+                        </div>
+                        {cancellable ? (
+                            <button
+                                className="danger"
+                                disabled={
+                                    disabled ||
+                                    operations[
+                                        `artifact:cancel:${transfer.transferId}`
+                                    ] !== undefined
+                                }
+                                onClick={() =>
+                                    onCancelTransfer(transfer.transferId)
+                                }
+                                type="button"
+                            >
+                                Cancel transfer
+                            </button>
+                        ) : null}
+                    </article>
+                );
+            })}
+        </section>
+    );
+}
+
+function artifactSourceLabel(source: ArtifactShareResult["source"]): string {
+    if (source.handle !== undefined)
+        return `${source.instance} · handle=${shortId(source.handle)}`;
+    return `${source.instance} · workspace=${source.workspace ?? "-"} · path=${source.path ?? "-"}`;
+}
+
+function artifactTargetLabel(target: ArtifactTransferRecord["target"]): string {
+    return `${target.instance} · workspace=${target.workspace ?? "-"} · path=${target.path}`;
+}
+
+function shortId(value: string): string {
+    return value.length <= 8 ? value : value.slice(0, 8);
 }
 
 function confirmationOperation(

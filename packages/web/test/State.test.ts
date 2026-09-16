@@ -251,6 +251,66 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("hydrates artifact activity and refreshes it after revoke and cancel", async () => {
+        const clients = fakeClients();
+        const share = {
+            blake3: "share-blake3",
+            bytes: 1024,
+            downloadName: "report.pdf",
+            expiresAtMs: Date.now() + 60_000,
+            mediaType: "application/pdf",
+            shareId: "share-1",
+            source: {
+                instance: "demo",
+                path: "report.pdf",
+                workspace: "/workspace",
+            },
+            state: "active" as const,
+            url: "https://example.test/share-1",
+        };
+        const transfer = {
+            createdAt: "2026-09-16T00:00:00.000Z",
+            source: {
+                instance: "demo",
+                path: "build.tar",
+                workspace: "/workspace",
+            },
+            status: "transferring" as const,
+            target: {
+                instance: "remote",
+                path: "build.tar",
+                workspace: "/remote",
+            },
+            totalBytes: 4096,
+            transferId: "transfer-1",
+            transferredBytes: 1024,
+            updatedAt: "2026-09-16T00:00:01.000Z",
+        };
+        clients.artifact.listShares = vi.fn(async () => [share]);
+        clients.artifact.listTransfers = vi.fn(async () => [transfer]);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+
+        await store.load();
+
+        expect(store.state.readModel.artifactShares).toEqual([share]);
+        expect(store.state.readModel.artifactTransfers).toEqual([transfer]);
+        expect(clients.artifact.listShares).toHaveBeenCalledOnce();
+        expect(clients.artifact.listTransfers).toHaveBeenCalledOnce();
+
+        await expect(store.revokeArtifactShare("share-1")).resolves.toBe(true);
+        expect(clients.artifact.revokeShare).toHaveBeenCalledWith("share-1");
+        expect(clients.artifact.listShares).toHaveBeenCalledTimes(2);
+
+        await expect(store.cancelArtifactTransfer("transfer-1")).resolves.toBe(
+            true,
+        );
+        expect(clients.artifact.cancelTransfer).toHaveBeenCalledWith(
+            "transfer-1",
+        );
+        expect(clients.artifact.listTransfers).toHaveBeenCalledTimes(3);
+        store.close();
+    });
+
     it("surfaces recorded Tool Call or log failures from a manual Tool Call refresh", async () => {
         const clients = fakeClients();
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
@@ -747,7 +807,18 @@ function fakeClients(
             return () => transportListeners.delete(listener);
         },
         reconnect: vi.fn(async () => undefined),
-        artifact: {} as WebClients["artifact"],
+        artifact: {
+            cancelTransfer: vi.fn(async (transferId: string) => ({
+                status: "cancelled" as const,
+                transferId,
+            })),
+            listShares: vi.fn(async () => []),
+            listTransfers: vi.fn(async () => []),
+            revokeShare: vi.fn(async (shareId: string) => ({
+                revoked: true as const,
+                shareId,
+            })),
+        } as unknown as WebClients["artifact"],
         cli: {} as WebClients["cli"],
         config: {
             get: vi.fn(async () => ({

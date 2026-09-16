@@ -172,6 +172,17 @@ export type {
 export { asInstanceName } from "./protocol/instance/Identity.js";
 export type { InstanceName } from "./protocol/instance/Identity.js";
 export type { JsonValue } from "./protocol/JsonValue.js";
+export type {
+    ArtifactShareResult,
+    ArtifactShareState,
+} from "./protocol/artifact/Share.js";
+export { isArtifactTransferTerminal } from "./protocol/artifact/Transfer.js";
+export type {
+    ArtifactSourceDescriptor,
+    ArtifactTargetDescriptor,
+    ArtifactTransferRecord,
+    ArtifactTransferStatus,
+} from "./protocol/artifact/Transfer.js";
 
 export type {
     TerminalAttachInput,
