@@ -634,7 +634,7 @@ RESET 表示整个 logical stream 异常终止。
 - 拒绝该 stream pending read/write；
 - 关闭对应 Service resource；
 - 删除 stream state；
-- 不再接受该 stream 的 DATA / WINDOW / FIN。
+- 该 streamId 进入 retired 状态且永不复用；由于 RESET 与反方向在途 Frame 可以交叉，之后晚到的 DATA / WINDOW / FIN / RESET 直接丢弃，不得扩大为 Channel failure。
 
 RESET 不是 half-close，不区分方向。
 
@@ -809,7 +809,8 @@ Reverse Carrier 的 generation / reconnect 和 Worker RPC completed-result cache
 - DATA 超过对端授予的 credit；
 - WINDOW delta 为 0 或 credit arithmetic overflow；
 - duplicate OPEN；
-- 对已经进入非法状态的 stream 继续发送无法容忍的 Frame；
+- future / 从未退休的未知 streamId 上出现非 OPEN Frame；
+- active stream 上出现 DATA-after-FIN、duplicate FIN 等无法容忍的状态错误；
 - malformed fixed-size payload。
 
 ### 15.2 stream-level error
@@ -1095,7 +1096,7 @@ per-stream credit
 fair DATA scheduling
 ```
 
-TypeScript / Rust 使用相同 wire vectors，并覆盖 split / coalesce、credit、half-close、RESET 和 late WINDOW 关闭竞态。
+TypeScript / Rust 使用相同 wire vectors，并覆盖 split / coalesce、credit、half-close、RESET，以及 retired stream 上 late DATA / WINDOW / FIN / RESET 的关闭竞态。
 
 ### Phase 3 — primitive Service：完成
 
@@ -1202,6 +1203,7 @@ Artifact：
 - `artifact.payload` 返回 8-byte total length + raw bytes；
 - `artifact.receive` 接收 raw bytes，并在控制 RPC `finish` 中校验提交；
 - controller-managed 与 Reverse 都覆盖 700 KiB round-trip；
+- 显式压力验收覆盖 32 MiB payload/receive，以正式 1 MiB chunk 上限连续完成 64 条 data stream；
 - 旧 `artifact.payload.read` / `artifact.receive.write` chunk RPC 不得重新出现。
 
 Reverse：
@@ -1210,6 +1212,41 @@ Reverse：
 - generation replacement 不产生第二套 Frame 状态；
 - `worker.rpc` 与 sibling Service 共用一个 Channel；
 - HTTP over `network.tcp`、`process.exec`、Artifact 都必须在真实 Reverse worker 上可用。
+
+### 21.6 显式压力验收
+
+压力测试**不属于默认 `pnpm test` / package test**，只能显式运行：
+
+```bash
+pnpm stress:transport
+```
+
+专用 runner 会先进入受限 user cgroup；没有有效资源上限时拒绝执行。当前限制为：
+
+```text
+MemoryHigh   1 GiB
+MemoryMax    1.5 GiB
+MemorySwapMax 0
+CPUQuota     150%
+TasksMax     256
+IOWeight     50
+Nice         10
+RuntimeMax   300 s
+```
+
+显式压力矩阵当前覆盖：
+
+- 默认 256 active stream 饱和、释放后复用，以及超量 OPEN 资源保护；
+- 4000 次 fragmented OPEN / DATA / FIN churn；
+- 1000 次低 credit blocked writer 与 RESET race，并持续验证 sibling stream 存活；
+- 48 条并发双向 stream，在任意 Channel fragment 下保持 byte integrity；
+- 8 MiB slow consumer 与 32 条 sibling stream 的 starvation 隔离；
+- 真实 Rust Worker 上 24 条并发 `process.exec`、32 条并发 `network.tcp`、16 MiB 单 stream 与 256 次 process stream churn；
+- 32 MiB Artifact payload / receive round-trip；
+- 8 轮 WSS generation replacement + SSE/POST dedupe；
+- 真实 proxied WSS Reverse 与 direct re-enroll。
+
+active-stream 数量属于实现资源保护，不属于 Frame v1 wire compatibility；当前默认值为 256。常规测试只保留小规模边界语义测试，不运行上述压力负载。
 
 ## 22. 架构验收规则
 
