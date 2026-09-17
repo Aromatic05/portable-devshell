@@ -11,6 +11,8 @@ pub use codec::{
 };
 use stream::StreamState;
 
+const DEFAULT_MAX_ACTIVE_STREAMS: usize = 256;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameRole {
     #[cfg(test)]
@@ -42,6 +44,7 @@ pub enum FrameEvent {
 pub struct FrameProtocol {
     role: FrameRole,
     max_data_size: usize,
+    max_streams: usize,
     #[cfg(test)]
     next_stream_id: u64,
     last_remote_stream_id: u32,
@@ -53,6 +56,7 @@ impl FrameProtocol {
         Self {
             role,
             max_data_size: FRAME_MAX_DATA_SIZE,
+            max_streams: DEFAULT_MAX_ACTIVE_STREAMS,
             #[cfg(test)]
             next_stream_id: 1,
             last_remote_stream_id: 0,
@@ -69,6 +73,15 @@ impl FrameProtocol {
     }
 
     #[cfg(test)]
+    fn with_max_streams(role: FrameRole, max_streams: usize) -> Self {
+        assert!(max_streams > 0);
+        Self {
+            max_streams,
+            ..Self::new(role)
+        }
+    }
+
+    #[cfg(test)]
     pub fn open(
         &mut self,
         service: String,
@@ -80,6 +93,9 @@ impl FrameProtocol {
         }
         if receive_window == 0 {
             return Err("Frame receive window must be positive.".to_string());
+        }
+        if self.streams.len() >= self.max_streams {
+            return Err("Frame active stream limit reached.".to_string());
         }
         let stream_id = u32::try_from(self.next_stream_id)
             .map_err(|_| "Frame stream id space is exhausted.".to_string())?;
@@ -142,6 +158,9 @@ impl FrameProtocol {
             if self.streams.contains_key(&stream_id) {
                 return Err(format!("Frame stream {stream_id} is already open."));
             }
+            if self.streams.len() >= self.max_streams {
+                return Err("Frame active stream limit reached.".to_string());
+            }
             self.last_remote_stream_id = stream_id;
             self.streams
                 .insert(stream_id, StreamState::new(false, receive_window, 0));
@@ -154,7 +173,7 @@ impl FrameProtocol {
 
         let stream_id = frame.stream_id();
         if !self.streams.contains_key(&stream_id) {
-            if matches!(&frame, Frame::Window { .. }) && self.is_retired_stream_id(stream_id) {
+            if self.is_retired_stream_id(stream_id) {
                 return Ok(None);
             }
             return Err(format!("Frame references unknown stream {stream_id}."));
@@ -393,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_late_window_for_a_closed_stream() {
+    fn ignores_late_frames_for_a_retired_stream() {
         let (mut opener, mut acceptor, stream_id) = open_pair(8);
         let fin = opener.finish(stream_id).unwrap();
         acceptor.accept_frame(fin).unwrap();
@@ -406,6 +425,29 @@ mod tests {
                 .accept_frame(Frame::Window {
                     stream_id,
                     credit_delta: 1,
+                })
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            acceptor
+                .accept_frame(Frame::Data {
+                    stream_id,
+                    data: vec![1, 2, 3],
+                })
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            acceptor.accept_frame(Frame::Fin { stream_id }).unwrap(),
+            None
+        );
+        assert_eq!(
+            acceptor
+                .accept_frame(Frame::Reset {
+                    stream_id,
+                    code: RESET_CANCELLED,
+                    message: "late reset".into(),
                 })
                 .unwrap(),
             None
@@ -447,5 +489,45 @@ mod tests {
         assert_eq!(used, 1);
         acceptor.accept_frame(second).unwrap();
         assert!(opener.next_data_frame(stream_id, &[4]).unwrap().is_none());
+    }
+
+    #[test]
+    fn active_stream_limit_rejects_new_local_stream_without_corrupting_existing_state() {
+        let mut opener = FrameProtocol::with_max_streams(FrameRole::Opener, 1);
+        let mut acceptor = FrameProtocol::with_max_streams(FrameRole::Acceptor, 1);
+        let (stream_id, open) = opener
+            .open("service".into(), Vec::new(), 8)
+            .expect("open within limit");
+        acceptor.accept_frame(open).expect("accept open");
+        let window = acceptor.accept_open(stream_id, 8).expect("accept stream");
+        opener.accept_frame(window).expect("grant credit");
+
+        assert!(opener.open("overflow".into(), Vec::new(), 8).is_err());
+        assert!(opener.stream_open(stream_id));
+        assert!(acceptor.stream_open(stream_id));
+        assert!(opener.next_data_frame(stream_id, b"ok").unwrap().is_some());
+    }
+
+    #[test]
+    fn active_stream_limit_rejects_remote_open_flood() {
+        let mut acceptor = FrameProtocol::with_max_streams(FrameRole::Acceptor, 1);
+        acceptor
+            .accept_frame(Frame::Open {
+                stream_id: 1,
+                receive_window: 8,
+                service: "flood".into(),
+                metadata: Vec::new(),
+            })
+            .expect("open within limit");
+        assert!(
+            acceptor
+                .accept_frame(Frame::Open {
+                    stream_id: 2,
+                    receive_window: 8,
+                    service: "flood".into(),
+                    metadata: Vec::new(),
+                })
+                .is_err()
+        );
     }
 }

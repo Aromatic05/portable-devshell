@@ -141,7 +141,7 @@ test("per-stream credit blocks only the slow logical stream", async () => {
     acceptor.close();
 });
 
-test("a late WINDOW for a closed stream does not close sibling streams", async () => {
+test("late frames for a retired stream do not close sibling streams", async () => {
     const { opener, acceptor, acceptorChannel } = pair();
     const first = await openPair(opener, acceptor, "first", 8);
     const sibling = await openPair(opener, acceptor, "sibling", 8);
@@ -157,6 +157,24 @@ test("a late WINDOW for a closed stream does not close sibling streams", async (
             creditDelta: 1,
             streamId: first.local.id,
             type: "window",
+        }),
+    );
+    await acceptorChannel.write(
+        encodeFrame({
+            data: Uint8Array.of(1, 2, 3),
+            streamId: first.local.id,
+            type: "data",
+        }),
+    );
+    await acceptorChannel.write(
+        encodeFrame({ streamId: first.local.id, type: "fin" }),
+    );
+    await acceptorChannel.write(
+        encodeFrame({
+            code: 4,
+            message: "late reset",
+            streamId: first.local.id,
+            type: "reset",
         }),
     );
     await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -179,4 +197,48 @@ test("FrameProtocol rejects OPEN in the wrong direction and closes the Channel",
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(second.closed, true);
     assert.equal(first.closed, true);
+});
+
+test("FrameProtocol enforces a configured active stream bound", async () => {
+    const left = new MemoryChannel();
+    const right = new MemoryChannel();
+    left.connect(right);
+    right.connect(left);
+    const opener = new FrameProtocol(left, { role: "opener", maxStreams: 1 });
+    const acceptor = new FrameProtocol(right, { role: "acceptor", maxStreams: 1 });
+    const stream = await openPair(opener, acceptor, "service", 8);
+
+    await assert.rejects(
+        opener.open("overflow", new Uint8Array(), { receiveWindow: 8 }),
+        /active stream limit/iu,
+    );
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+
+    await stream.local.write(Uint8Array.of(1, 2, 3));
+    assert.deepEqual(await stream.remote.read(), Uint8Array.of(1, 2, 3));
+});
+
+test("FrameProtocol rejects a remote OPEN beyond a configured stream bound", async () => {
+    const left = new MemoryChannel();
+    const right = new MemoryChannel();
+    left.connect(right);
+    right.connect(left);
+    const acceptor = new FrameProtocol(right, { role: "acceptor", maxStreams: 1 });
+
+    for (let streamId = 1; streamId <= 2; streamId += 1) {
+        await left.write(
+            encodeFrame({
+                type: "open",
+                streamId,
+                receiveWindow: 8,
+                service: "flood",
+                metadata: new Uint8Array(),
+            }),
+        );
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(acceptor.closed, true);
+    assert.equal(left.closed, true);
 });

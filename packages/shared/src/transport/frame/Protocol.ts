@@ -16,11 +16,13 @@ import {
 } from "./Stream.js";
 
 const DEFAULT_RECEIVE_WINDOW = 256 * 1024;
+const DEFAULT_MAX_ACTIVE_STREAMS = 256;
 const UINT32_MAX = 0xffff_ffff;
 
 export interface FrameProtocolOptions {
     role: "opener" | "acceptor";
     maxDataSize?: number;
+    maxStreams?: number;
     receiveWindow?: number;
 }
 
@@ -52,6 +54,7 @@ export class FrameProtocol implements FrameStreamHost {
     readonly #frames = new FrameBuffer();
     readonly #role: FrameProtocolOptions["role"];
     readonly #maxDataSize: number;
+    readonly #maxStreams: number;
     readonly #defaultReceiveWindow: number;
     readonly #streams = new Map<number, FrameStreamState>();
     readonly #pendingOpen: FrameOpenRequestImpl[] = [];
@@ -68,9 +71,11 @@ export class FrameProtocol implements FrameStreamHost {
         this.#channel = channel;
         this.#role = options.role;
         this.#maxDataSize = options.maxDataSize ?? FRAME_MAX_DATA_SIZE;
+        this.#maxStreams = options.maxStreams ?? DEFAULT_MAX_ACTIVE_STREAMS;
         this.#defaultReceiveWindow =
             options.receiveWindow ?? DEFAULT_RECEIVE_WINDOW;
         assertPositiveU32(this.#defaultReceiveWindow, "receiveWindow");
+        assertPositiveU32(this.#maxStreams, "maxStreams");
         if (
             !Number.isInteger(this.#maxDataSize) ||
             this.#maxDataSize <= 0 ||
@@ -106,6 +111,9 @@ export class FrameProtocol implements FrameStreamHost {
         this.#assertOpen();
         if (this.#role !== "opener") {
             throw new Error("Only the Frame opener can open a Service stream.");
+        }
+        if (this.#streams.size >= this.#maxStreams) {
+            throw new Error("Frame active stream limit reached.");
         }
         const receiveWindow =
             options.receiveWindow ?? this.#defaultReceiveWindow;
@@ -286,10 +294,7 @@ export class FrameProtocol implements FrameStreamHost {
         }
         const stream = this.#streams.get(frame.streamId);
         if (stream === undefined) {
-            if (
-                frame.type === "window" &&
-                this.#isRetiredStreamId(frame.streamId)
-            ) {
+            if (this.#isRetiredStreamId(frame.streamId)) {
                 return;
             }
             throw this.#connectionError(
@@ -352,6 +357,9 @@ export class FrameProtocol implements FrameStreamHost {
             throw this.#connectionError(
                 `Frame stream ${frame.streamId} is already open.`,
             );
+        }
+        if (this.#streams.size >= this.#maxStreams) {
+            throw this.#connectionError("Frame active stream limit reached.");
         }
         this.#lastRemoteStreamId = frame.streamId;
         const stream = new FrameStreamState({
