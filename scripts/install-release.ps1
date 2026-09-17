@@ -171,8 +171,11 @@ function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
 
     $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $controlProcessId" -ErrorAction SilentlyContinue
     $commandLine = if ($null -eq $processInfo) { "" } else { [string]$processInfo.CommandLine }
-    if (-not $commandLine.Contains("ControlDaemon.js") -or -not $commandLine.ToLowerInvariant().Contains("portable-devshell")) {
-        throw "拒绝终止 PID ${controlProcessId}：PID 文件指向的进程不是可验证的 portable-devshell ControlDaemon.js。"
+    $normalized = $commandLine.Replace('\', '/')
+    $daemonEntry = "/node_modules/@portable-devshell/control/dist/server/Daemon.js"
+    $legacyDaemonEntry = "/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js"
+    if (-not $normalized.Contains($daemonEntry) -and -not $normalized.Contains($legacyDaemonEntry)) {
+        throw "拒绝终止 PID ${controlProcessId}：PID 文件指向的进程不是可验证的 portable-devshell Control daemon。"
     }
 
     try {
@@ -248,7 +251,9 @@ function Assert-RunningControlMatchesApplication([string]$ApplicationDirectory, 
     $commandLine = [string]$processInfo.CommandLine
     $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\').Replace('\', '/')
     $normalized = $commandLine.Replace('\', '/')
-    if (-not $normalized.Contains("ControlDaemon.js") -or -not $normalized.Contains("$root/")) {
+    $daemonEntry = "$root/node_modules/@portable-devshell/control/dist/server/Daemon.js"
+    $legacyDaemonEntry = "$root/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js"
+    if (-not $normalized.Contains($daemonEntry) -and -not $normalized.Contains($legacyDaemonEntry)) {
         throw "正在运行的 Control PID $($RuntimeState.Pid) 不属于当前激活的 application generation；安装在停机前取消。"
     }
 }

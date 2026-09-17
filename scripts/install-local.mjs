@@ -31,7 +31,10 @@ import {
     restoreInstalledInstances,
     restoreInstalledRuntimeState,
 } from "./install-runtime-state.mjs";
-import { assertRunningControlMatchesApplication } from "./install-runtime-identity.mjs";
+import {
+    assertRunningControlMatchesApplication,
+    isPortableDevshellControlCommand,
+} from "./install-runtime-identity.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const installStepTotal = 5;
@@ -211,7 +214,10 @@ try {
     let workerTransactionStarted = false;
     let installedCli;
     try {
-        await stopInstalledControl(frozenCurrentCli);
+        await stopInstalledControl(
+            frozenCurrentCli,
+            activatedApplicationDirectory,
+        );
         const installedWorkers = {};
         workerTransactionStarted = true;
         for (const target of targets) {
@@ -257,7 +263,7 @@ try {
         const rollbackFailures = [];
         if (installedCli !== undefined) {
             try {
-                await stopInstalledControl(installedCli);
+                await stopInstalledControl(installedCli, versionDirectory);
             } catch (rollbackError) {
                 rollbackFailures.push(rollbackError);
             }
@@ -736,7 +742,7 @@ async function readRecordedControlPid() {
     return pid;
 }
 
-async function stopInstalledControl(currentCli) {
+async function stopInstalledControl(currentCli, applicationDirectory) {
     const pidFile = resolve(devshellHome, "control", "control.pid");
     if (
         currentCli !== undefined &&
@@ -779,9 +785,20 @@ async function stopInstalledControl(currentCli) {
     const commandLine = readProcessCommandLine(pid);
     if (!isPortableDevshellControlCommand(commandLine)) {
         throw new Error(
-            `Refusing to terminate PID ${pid}: the process named by ${pidFile} is not a verified portable-devshell ControlDaemon.js process.`,
+            `Refusing to terminate PID ${pid}: the process named by ${pidFile} is not a verified portable-devshell Control daemon.`,
         );
     }
+    if (applicationDirectory === undefined) {
+        throw new Error(
+            `Refusing to terminate PID ${pid}: the activated application generation cannot be verified.`,
+        );
+    }
+    assertRunningControlMatchesApplication({
+        applicationDirectory,
+        commandLine,
+        controlRunning: true,
+        pid,
+    });
 
     if (
         signalProcess(pid, "SIGTERM") &&
@@ -843,13 +860,6 @@ function readProcessCommandLine(pid) {
         encoding: "utf8",
     });
     return result.status === 0 ? result.stdout.trim() : "";
-}
-
-function isPortableDevshellControlCommand(commandLine) {
-    return (
-        commandLine.includes("ControlDaemon.js") &&
-        commandLine.toLowerCase().includes("portable-devshell")
-    );
 }
 
 function signalProcess(pid, signal) {

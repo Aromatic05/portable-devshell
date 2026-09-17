@@ -1409,12 +1409,14 @@ async function writeTransactionalReleaseFixture({
 async function startFakeControl(applicationDirectory, devshellHome) {
     const daemon = resolve(
         applicationDirectory,
-        "test-runtime",
-        "ControlDaemon.js",
+        "node_modules",
+        "@portable-devshell",
+        "control",
+        "dist",
+        "server",
+        "Daemon.js",
     );
-    await mkdir(resolve(applicationDirectory, "test-runtime"), {
-        recursive: true,
-    });
+    await mkdir(resolve(daemon, ".."), { recursive: true });
     await mkdir(resolve(devshellHome, "control"), { recursive: true });
     await writeFile(daemon, "setInterval(() => {}, 1000);\n", "utf8");
     const child = spawn(process.execPath, [daemon], { stdio: "ignore" });

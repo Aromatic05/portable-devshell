@@ -106,9 +106,14 @@ test(
 
             const daemon = resolve(
                 runningVersionDirectory,
-                "test-runtime",
-                "ControlDaemon.js",
+                "node_modules",
+                "@portable-devshell",
+                "control",
+                "dist",
+                "server",
+                "Daemon.js",
             );
+            await mkdir(resolve(daemon, ".."), { recursive: true });
             await writeFile(daemon, "setInterval(() => {}, 1000);\n", "utf8");
             liveControl = spawn(process.execPath, [daemon], {
                 stdio: "ignore",
@@ -340,9 +345,14 @@ test(
 
             const daemon = resolve(
                 activatedVersionDirectory,
-                "test-runtime",
-                "ControlDaemon.js",
+                "node_modules",
+                "@portable-devshell",
+                "control",
+                "dist",
+                "server",
+                "Daemon.js",
             );
+            await mkdir(resolve(daemon, ".."), { recursive: true });
             await writeFile(daemon, "setInterval(() => {}, 1000);\n", "utf8");
             liveControl = spawn(process.execPath, [daemon], {
                 stdio: "ignore",
@@ -526,9 +536,14 @@ test(
 
             const daemon = resolve(
                 activatedVersionDirectory,
-                "test-runtime",
-                "ControlDaemon.js",
+                "node_modules",
+                "@portable-devshell",
+                "control",
+                "dist",
+                "server",
+                "Daemon.js",
             );
+            await mkdir(resolve(daemon, ".."), { recursive: true });
             await writeFile(daemon, "setInterval(() => {}, 1000);\n", "utf8");
             liveControl = spawn(process.execPath, [daemon], {
                 stdio: "ignore",
@@ -703,9 +718,14 @@ test(
 
             const daemon = resolve(
                 activatedVersionDirectory,
-                "test-runtime",
-                "ControlDaemon.js",
+                "node_modules",
+                "@portable-devshell",
+                "control",
+                "dist",
+                "server",
+                "Daemon.js",
             );
+            await mkdir(resolve(daemon, ".."), { recursive: true });
             await writeFile(daemon, "setInterval(() => {}, 1000);\n", "utf8");
             liveControl = spawn(process.execPath, [daemon], {
                 stdio: "ignore",

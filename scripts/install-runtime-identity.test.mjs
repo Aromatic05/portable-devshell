@@ -8,6 +8,18 @@ test("installer accepts a running Control owned by the activated application gen
         assertRunningControlMatchesApplication({
             applicationDirectory: "/opt/devshell/versions/0.6.16",
             commandLine:
+                "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/Daemon.js",
+            controlRunning: true,
+            pid: 123,
+        }),
+    );
+});
+
+test("installer accepts the legacy Control daemon entrypoint during upgrades", () => {
+    assert.doesNotThrow(() =>
+        assertRunningControlMatchesApplication({
+            applicationDirectory: "/opt/devshell/versions/0.6.16",
+            commandLine:
                 "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
             controlRunning: true,
             pid: 123,
@@ -21,7 +33,7 @@ test("installer rejects a stale activation before stopping a different running C
             assertRunningControlMatchesApplication({
                 applicationDirectory: "/opt/devshell/versions/0.6.8",
                 commandLine:
-                    "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
+                    "/usr/bin/node /opt/devshell/versions/0.6.16/node_modules/@portable-devshell/control/dist/server/Daemon.js",
                 controlRunning: true,
                 pid: 123,
             }),

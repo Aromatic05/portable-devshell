@@ -195,7 +195,11 @@ assert_running_control_matches_application() {
 const path = require("path");
 const root = path.resolve(process.argv[2]).replaceAll("\\", "/").replace(/\/+$/u, "");
 const command = String(process.argv[3] ?? "").replaceAll("\\", "/");
-if (!command.includes("ControlDaemon.js") || !command.includes(`${root}/`)) process.exit(1);
+const entries = [
+    "node_modules/@portable-devshell/control/dist/server/Daemon.js",
+    "node_modules/@portable-devshell/control/dist/server/ControlDaemon.js",
+];
+if (!entries.some((entry) => command.includes(`${root}/${entry}`))) process.exit(1);
 NODE
     then
         echo "正在运行的 Control PID $runtime_control_pid 不属于当前激活的 application generation；安装在停机前取消。" >&2
@@ -296,12 +300,8 @@ stop_installed_control() {
 
     command_line=$(ps -p "$control_pid" -o command= 2>/dev/null || true)
     case "$command_line" in
-        *ControlDaemon.js*) ;;
-        *) echo "拒绝终止 PID ${control_pid}：PID 文件指向的进程不是可验证的 ControlDaemon.js。" >&2; return 1 ;;
-    esac
-    case "$command_line" in
-        *portable-devshell*) ;;
-        *) echo "拒绝终止 PID ${control_pid}：进程命令行不属于 portable-devshell。" >&2; return 1 ;;
+        *node_modules/@portable-devshell/control/dist/server/Daemon.js*|*node_modules/@portable-devshell/control/dist/server/ControlDaemon.js*) ;;
+        *) echo "拒绝终止 PID ${control_pid}：PID 文件指向的进程不是可验证的 portable-devshell Control daemon。" >&2; return 1 ;;
     esac
 
     if ! kill -TERM "$control_pid" 2>/dev/null; then
