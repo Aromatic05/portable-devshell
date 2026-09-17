@@ -161,7 +161,7 @@ export class ToolCallExecution {
 
         let boundaryLease;
         try {
-            boundaryLease = await this.#boundary();
+            boundaryLease = await this.#boundary(boundaryContext);
         } catch (error) {
             if (hostRecorded) await this.#audit.failActive(scope, error);
             throw error;

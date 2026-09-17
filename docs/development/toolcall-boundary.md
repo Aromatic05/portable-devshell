@@ -218,13 +218,13 @@ rewrite
 例如：
 
 ```text
-curl -H "Token: ${SECRET:github}" ...
+curl -H "Token: ${SECRET:GITHUB_TOKEN}" ...
 ```
 
 Approval 只能看到：
 
 ```text
-${SECRET:github}
+${SECRET:GITHUB_TOKEN}
 ```
 
 而不能看到 inbound Rewrite 后的真实 token。
@@ -325,11 +325,51 @@ outbound    B -> A
 
 ## 9. Secret 示例
 
+Secret 是 `toolcall.rewrite` 的第一个真实 consumer。第一版不新增独立 vault；placeholder 直接引用当前 instance 已有的 `env`：
+
+```text
+${SECRET:NAME} = current instance env.NAME
+```
+
+Control 对 `instance.env` 已经采用统一 secret redaction，因此这条映射沿用现有安全语义，而不是再定义第二套 Secret storage。
+
 Outer ToolCall：
 
 ```text
-curl -H "Token: ${SECRET:github}" ...
+curl -H "Token: ${SECRET:GITHUB_TOKEN}" ...
 ```
+
+Secret Extension 注册：
+
+```text
+toolcall.rewrite / secret
+```
+
+它不获得 config 或 env resource capability。Control 只在一次 `toolcall.rewrite` invocation 内提供：
+
+```text
+secret.environment
+    -> current instance env snapshot
+```
+
+这个 interface 不接受 Extension 提供的 instance/name/input；目标 instance 来自当前 Boundary invocation 的 authoritative context。Control 在每个 ToolCall Boundary lease 获取时从 live config 固定一份当前 instance env snapshot，同一调用的 inbound / outbound 始终使用这同一份 snapshot；后续 ToolCall 才会看到更新后的 env。因此配置更新不要求重启 Secret Extension，同时也不会因为调用执行期间配置变化而漏掉旧 secret 的 outbound masking。只有 builtin `secret` registration 可以请求该 operation。
+
+Inbound 行为：
+
+```text
+${SECRET:NAME}
+    -> env.NAME
+```
+
+不存在的 `NAME` 直接拒绝本次 ToolCall，不能把 unresolved placeholder 交给 Executor。
+
+Outbound 行为：
+
+- result / error / progress 的所有字符串叶子都经过同一个 Secret Rewrite；
+- 当前 instance `env` 中所有非空 value 都恢复成对应 `${SECRET:NAME}`；
+- 已经存在的 `${SECRET:NAME}` 保持不变；
+- value 按长度从长到短匹配，避免较短 secret 截断较长 secret；
+- 多个 env key 具有相同 value 时，用稳定 key 顺序选择一个 canonical placeholder。
 
 完整边界：
 
@@ -337,16 +377,16 @@ curl -H "Token: ${SECRET:github}" ...
 outer call
   ↓
 inbound review
-  sees ${SECRET:github}
+  sees ${SECRET:GITHUB_TOKEN}
   ↓
 approval
-  sees ${SECRET:github}
+  sees ${SECRET:GITHUB_TOKEN}
   ↓
 audit
-  persists ${SECRET:github}
+  persists ${SECRET:GITHUB_TOKEN}
   ↓
 inbound rewrite
-  expands real token
+  expands env.GITHUB_TOKEN
   ↓
 execute
   sees real token
@@ -355,15 +395,15 @@ outbound rewrite
   masks token from result/error/progress
   ↓
 audit
-  persists masked outer payload
+  persists ${SECRET:GITHUB_TOKEN}
   ↓
 outbound review
-  sees masked outer payload
+  sees ${SECRET:GITHUB_TOKEN}
   ↓
 model / client
 ```
 
-这条链同时说明为什么 Review 必须在 Rewrite 外面，以及为什么 Audit 不能直接记录 Executor payload。
+因此真实 env value 只存在于 Rewrite 内侧。Review、Approval、Audit 和最终 caller 都只处理 outer representation。
 
 ## 10. Scheduler
 
@@ -515,16 +555,22 @@ Control adapter 位于：
 packages/control/src/control/extension/toolcall/
 ├── Binding.ts
 ├── Point.ts
-└── Sandbox.ts
+├── Sandbox.ts
+└── interface/
+    ├── Comment.ts
+    ├── Secret.ts
+    └── index.ts
 ```
 
-这三个文件分别承担同一 domain 下的三个正交职责：
+根目录三个文件分别承担同一 domain 下的三个正交职责：
 
 ```text
 Point       Extension Point declaration / validation
 Binding     active registrations -> Core Boundary port
 Sandbox     sandbox codec
 ```
+
+`interface/` 只包含 invocation-scoped host interfaces。它们不是新的 Extension Points，也不是 resource capabilities；`Binding` 在单次 Boundary lease 内把 authoritative host state 收窄后注入对应 registration。
 
 不新增：
 

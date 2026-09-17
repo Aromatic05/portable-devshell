@@ -56,6 +56,14 @@ export type ToolCallReviewBinding = (
     context: ToolCallReviewContext,
 ) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
 
+/** Host interfaces scoped to exactly one toolcall.rewrite invocation. */
+export interface ToolCallRewriteContext {
+    requestInterface(
+        operation: string,
+        input?: ExtensionJsonValue,
+    ): Promise<ExtensionJsonValue | undefined>;
+}
+
 export interface ToolCallRewriteInvocation {
     readonly context: ToolCallContext;
     readonly direction: ToolCallDirection;
@@ -68,6 +76,7 @@ export interface ToolCallRewriteInvocation {
 
 export type ToolCallRewriteBinding = (
     input: ToolCallRewriteInvocation,
+    context: ToolCallRewriteContext,
 ) => Promise<string> | string;
 
 export const review = defineExtensionPoint<

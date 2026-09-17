@@ -1,5 +1,6 @@
 import {
     ToolCallBoundarySequence,
+    type ToolCallBoundaryContext,
     type ToolCallBoundaryLease,
     type ToolCallReview,
     type ToolCallRewrite,
@@ -10,13 +11,18 @@ import {
     type ToolCallReviewBinding,
     type ToolCallReviewInvocation,
     type ToolCallRewriteBinding,
+    type ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 
 import type { ExtensionHost } from "../Host.js";
-import { ToolCallCommentReview } from "./Comment.js";
+import {
+    ToolCallCommentReview,
+    ToolCallSecretRewrite,
+} from "./interface/index.js";
 
 export class ToolCallExtensionBinding {
     readonly #comment: ToolCallCommentReview;
+    readonly #secret: ToolCallSecretRewrite;
     readonly #extensions: Pick<
         ExtensionHost,
         "acquireRegistration" | "listDeclarations"
@@ -28,16 +34,20 @@ export class ToolCallExtensionBinding {
             "acquireRegistration" | "listDeclarations"
         >,
         comment: ToolCallCommentReview = new ToolCallCommentReview(),
+        secret: ToolCallSecretRewrite = new ToolCallSecretRewrite(),
     ) {
         this.#comment = comment;
+        this.#secret = secret;
         this.#extensions = extensions;
     }
 
-    async acquire(): Promise<ToolCallBoundaryLease> {
+    async acquire(
+        context: ToolCallBoundaryContext,
+    ): Promise<ToolCallBoundaryLease> {
         const releases: Array<() => void> = [];
         try {
             const reviews = await this.#acquireReviews(releases);
-            const rewrites = await this.#acquireRewrites(releases);
+            const rewrites = await this.#acquireRewrites(releases, context);
             let released = false;
             return {
                 sequence: new ToolCallBoundarySequence({ reviews, rewrites }),
@@ -75,13 +85,19 @@ export class ToolCallExtensionBinding {
 
     async #acquireRewrites(
         releases: Array<() => void>,
+        context: ToolCallBoundaryContext,
     ): Promise<readonly ToolCallRewrite[]> {
         const bindings: ToolCallRewrite[] = [];
         for (const { id } of this.#extensions.listDeclarations(rewrite.id)) {
-            const { lease, registration } =
+            const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(rewrite.id, id);
             releases.push(() => lease.release());
-            bindings.push(registration.binding as ToolCallRewriteBinding);
+            const binding = registration.binding as ToolCallRewriteBinding;
+            const secret = this.#secret.scope(extensionId, context.instance);
+            bindings.push(async (input) => {
+                const invocation = input as ToolCallRewriteInvocation;
+                return await binding(invocation, secret.context(invocation));
+            });
         }
         return bindings;
     }

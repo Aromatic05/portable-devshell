@@ -2,6 +2,7 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import {
     reviewToolCall,
+    type ToolCallBoundaryContext,
     type ToolCallReview,
     type ToolCallReviewInput,
     type ToolCallReviewResult,
@@ -22,9 +23,9 @@ export interface ToolCallBoundaryLease {
     release(): void;
 }
 
-export type ToolCallBoundaryProvider = () =>
-    | Promise<ToolCallBoundaryLease>
-    | ToolCallBoundaryLease;
+export type ToolCallBoundaryProvider = (
+    context: ToolCallBoundaryContext,
+) => Promise<ToolCallBoundaryLease> | ToolCallBoundaryLease;
 
 export class ToolCallBoundarySequence {
     readonly #reviews: readonly ToolCallReview[];

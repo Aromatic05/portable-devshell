@@ -10,7 +10,7 @@ import type {
     CliModelCommandInvocationContext,
 } from "@portable-devshell/extension/cli";
 
-import { scanSecretText, type SecretScanFinding } from "./SecretScan.js";
+import { scanSecretText, type SecretScanFinding } from "../scan/SecretScan.js";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 1_000;

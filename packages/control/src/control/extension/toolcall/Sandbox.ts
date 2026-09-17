@@ -10,6 +10,7 @@ import {
     type ToolCallReviewInvocation,
     type ToolCallReviewResult,
     type ToolCallRewriteBinding,
+    type ToolCallRewriteContext,
     type ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 
@@ -66,6 +67,7 @@ export const toolCallRewriteSandboxCodec: ExtensionSandboxPointCodec =
             validateToolCallRewriteBinding(binding, context);
             const result = await (binding as ToolCallRewriteBinding)(
                 decodeRewriteInvocation(input, signal),
+                createSandboxRewriteContext(context),
             );
             if (typeof result !== "string")
                 throw new TypeError("ToolCall rewrite binding must return a string.");
@@ -102,12 +104,18 @@ export function createToolCallRewriteSandboxBinding(
     bridge: ExtensionPointSandboxBridge,
 ): ToolCallRewriteBinding {
     assertDescriptor(descriptor, "rewrite", context, rewrite.id);
-    return async (input: ToolCallRewriteInvocation): Promise<string> => {
+    return async (
+        input: ToolCallRewriteInvocation,
+        invocation: ToolCallRewriteContext,
+    ): Promise<string> => {
         const result = await bridge.invokeBinding(
             rewrite.id,
             context.id,
             encodeRewriteInvocation(input),
-            { signal: input.signal },
+            {
+                interfacePort: createRewriteInterfacePort(invocation),
+                signal: input.signal,
+            },
         );
         if (typeof result !== "string")
             throw new TypeError("ToolCall rewrite sandbox result must be a string.");
@@ -313,6 +321,28 @@ function readUnknownRecord(value: unknown, label: string): Record<string, unknow
     if (typeof value === "object" && value !== null && !Array.isArray(value))
         return value as Record<string, unknown>;
     throw new TypeError(`${label} must be an object.`);
+}
+
+function createSandboxRewriteContext(
+    context: ExtensionPointSandboxInvocationContext,
+): ToolCallRewriteContext {
+    return Object.freeze({
+        requestInterface: async (
+            operation: string,
+            input?: ExtensionJsonValue,
+        ) => await context.requestInterface(operation, input),
+    });
+}
+
+function createRewriteInterfacePort(
+    context: ToolCallRewriteContext,
+): ExtensionPointSandboxInterfacePort {
+    return Object.freeze({
+        request: async (
+            operation: string,
+            input?: ExtensionJsonValue,
+        ) => await context.requestInterface(operation, input),
+    });
 }
 
 function createSandboxReviewContext(

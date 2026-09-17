@@ -33,6 +33,10 @@
         "./comment": {
             "types": "./dist/domain/comment.d.ts",
             "default": "./dist/domain/comment.js"
+        },
+        "./secret": {
+            "types": "./dist/domain/secret.d.ts",
+            "default": "./dist/domain/secret.js"
         }
     },
     "files": [

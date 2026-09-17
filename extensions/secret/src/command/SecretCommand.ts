@@ -6,7 +6,7 @@ import type {
     CliCommandResult,
 } from "@portable-devshell/extension/cli";
 
-import { scanSecrets } from "./SecretScan.js";
+import { scanSecrets } from "../scan/SecretScan.js";
 
 export const SECRET_USAGE = [
     "Usage:",

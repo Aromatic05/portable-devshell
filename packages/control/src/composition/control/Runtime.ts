@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
     controlRemoteRpcPath,
     controlWebBasePath,
+    type ControlConfig,
 } from "@portable-devshell/shared";
 
 import {
@@ -20,7 +21,10 @@ import { WebApplicationCatalog } from "../../server/web/extension/application/Ca
 import type { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionInstallService } from "../../control/extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
-import { ToolCallCommentReview } from "../../control/extension/toolcall/Comment.js";
+import {
+    ToolCallCommentReview,
+    ToolCallSecretRewrite,
+} from "../../control/extension/toolcall/interface/index.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
@@ -44,6 +48,7 @@ export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     conversationPreferences: ConversationPreferencePort;
+    config?: () => ControlConfig;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
     instances: InstanceRegistry;
@@ -100,6 +105,7 @@ export class ControlRuntime {
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
             new ToolCallCommentReview(options.instances),
+            new ToolCallSecretRewrite(options.config),
         );
         this.#bindToolCallBoundaries();
         this.#toolCallInstanceUnsubscribe = this.#instances.onChange(() =>
@@ -292,8 +298,8 @@ export class ControlRuntime {
     #bindToolCallBoundaries(): void {
         for (const descriptor of this.#instances.list()) {
             if (this.#toolCallBoundWorkers.has(descriptor.worker)) continue;
-            descriptor.worker.bindToolCallBoundary(() =>
-                this.#toolCallBinding.acquire(),
+            descriptor.worker.bindToolCallBoundary((context) =>
+                this.#toolCallBinding.acquire(context),
             );
             this.#toolCallBoundWorkers.add(descriptor.worker);
         }

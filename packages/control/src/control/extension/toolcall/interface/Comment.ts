@@ -9,7 +9,7 @@ import type {
 } from "@portable-devshell/extension/toolcall";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../instance/registry/Registry.js";
+import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 
 export class ToolCallCommentReview {
     readonly #instances?: Pick<InstanceRegistry, "get">;

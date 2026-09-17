@@ -6,6 +6,16 @@ const workspacePackages = new Map([
         new URL("../../../packages/extension/src/index.ts", import.meta.url)
             .href,
     ],
+    [
+        "@portable-devshell/extension/secret",
+        new URL("../../../packages/extension/src/domain/secret.ts", import.meta.url)
+            .href,
+    ],
+    [
+        "@portable-devshell/extension/toolcall",
+        new URL("../../../packages/extension/src/domain/toolcall.ts", import.meta.url)
+            .href,
+    ],
 ]);
 
 registerHooks({

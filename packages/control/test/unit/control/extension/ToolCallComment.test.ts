@@ -4,7 +4,7 @@ import test from "node:test";
 import { commentReviewInterfaceOperation } from "@portable-devshell/extension/comment";
 import type { ToolCallReviewInvocation } from "@portable-devshell/extension/toolcall";
 
-import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/Comment.ts";
+import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/interface/Comment.ts";
 import type { InstanceDescriptor } from "../../../../src/control/instance/Descriptor.ts";
 import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
 

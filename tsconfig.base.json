@@ -41,6 +41,9 @@
             ],
             "@portable-devshell/extension/toolcall": [
                 "./packages/extension/dist/domain/toolcall.d.ts"
+            ],
+            "@portable-devshell/extension/secret": [
+                "./packages/extension/dist/domain/secret.d.ts"
             ]
         },
         "types": ["node"],

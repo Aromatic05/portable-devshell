@@ -3,13 +3,15 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 import { reviewCommentToolCall } from "@portable-devshell/extension/comment";
+import { readSecretEnvironment } from "@portable-devshell/extension/secret";
 import type {
     ToolCallReviewInvocation,
     ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 
 import { ToolCallExtensionBinding } from "../../../../src/control/extension/toolcall/Binding.ts";
-import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/Comment.ts";
+import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/interface/Comment.ts";
+import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
 import {
     createToolCallReviewSandboxBinding,
     createToolCallRewriteSandboxBinding,
@@ -58,7 +60,7 @@ test("ToolCall Extension binding acquires registrations once and releases them w
             } as never;
         },
     } as never);
-    const lease = await bindings.acquire();
+    const lease = await bindings.acquire(toolCallContext);
     const signal = new AbortController().signal;
 
     assert.deepEqual(
@@ -131,7 +133,7 @@ test("ToolCall Extension binding supplies the same scoped Comment interface to i
         } as never,
         comment,
     );
-    const lease = await bindings.acquire();
+    const lease = await bindings.acquire(toolCallContext);
     try {
         assert.deepEqual(
             await lease.sequence.review({
@@ -146,6 +148,101 @@ test("ToolCall Extension binding supplies the same scoped Comment interface to i
         );
     } finally {
         lease.release();
+    }
+});
+
+test("ToolCall Extension binding pins one Secret env snapshot for inbound and outbound", async () => {
+    let token = "real-token";
+    const secret = new ToolCallSecretRewrite(
+        () =>
+            ({
+                instances: [
+                    {
+                        env: { TOKEN: token },
+                        name: "demo",
+                    },
+                ],
+            }) as never,
+    );
+    const bindings = new ToolCallExtensionBinding(
+        {
+            listDeclarations(pointId: string) {
+                return pointId === "toolcall.rewrite"
+                    ? [{ extensionId: "secret", id: "secret" }]
+                    : [];
+            },
+            async acquireRegistration() {
+                return {
+                    extensionId: "secret",
+                    lease: { release() {} },
+                    registration: {
+                        binding: async (
+                            input: ToolCallRewriteInvocation,
+                            context: Parameters<typeof readSecretEnvironment>[0],
+                        ) => {
+                            const environment = await readSecretEnvironment(context);
+                            return input.direction === "inbound"
+                                ? input.text.replace(
+                                      "${SECRET:TOKEN}",
+                                      environment.TOKEN!,
+                                  )
+                                : input.text.replace(
+                                      environment.TOKEN!,
+                                      "${SECRET:TOKEN}",
+                                  );
+                        },
+                    },
+                } as never;
+            },
+        } as never,
+        new ToolCallCommentReview(),
+        secret,
+    );
+    const lease = await bindings.acquire(toolCallContext);
+    try {
+        const signal = new AbortController().signal;
+        assert.equal(
+            await lease.sequence.rewrite({
+                context: toolCallContext,
+                direction: "inbound",
+                kind: "call",
+                payload: "echo ${SECRET:TOKEN}",
+                signal,
+                toolName: "bash_run",
+            }),
+            "echo real-token",
+        );
+        token = "new-token";
+        assert.equal(
+            await lease.sequence.rewrite({
+                context: toolCallContext,
+                direction: "outbound",
+                kind: "result",
+                payload: "result real-token",
+                signal,
+                toolName: "bash_run",
+            }),
+            "result ${SECRET:TOKEN}",
+        );
+    } finally {
+        lease.release();
+    }
+
+    const nextLease = await bindings.acquire(toolCallContext);
+    try {
+        assert.equal(
+            await nextLease.sequence.rewrite({
+                context: toolCallContext,
+                direction: "inbound",
+                kind: "call",
+                payload: "echo ${SECRET:TOKEN}",
+                signal: new AbortController().signal,
+                toolName: "bash_run",
+            }),
+            "echo new-token",
+        );
+    } finally {
+        nextLease.release();
     }
 });
 
@@ -170,7 +267,7 @@ test("ToolCall Extension binding rolls back acquired generation leases when acqu
         },
     } as never);
 
-    await assert.rejects(bindings.acquire(), /acquire failed/u);
+    await assert.rejects(bindings.acquire(toolCallContext), /acquire failed/u);
     assert.deepEqual(events, ["release:one"]);
 });
 
@@ -339,15 +436,22 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
         },
     );
     assert.equal(
-        await rewriteBinding({
-            context: toolCallContext,
-            direction: "inbound",
-            kind: "call",
-            path: ["command"],
-            signal,
-            text: "${SECRET:github}",
-            toolName: "bash_run",
-        }),
+        await rewriteBinding(
+            {
+                context: toolCallContext,
+                direction: "inbound",
+                kind: "call",
+                path: ["command"],
+                signal,
+                text: "${SECRET:github}",
+                toolName: "bash_run",
+            },
+            {
+                async requestInterface() {
+                    throw new Error("not used");
+                },
+            },
+        ),
         "expanded",
     );
 });
@@ -376,7 +480,7 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
         },
     } as never);
 
-    const lease = await bindings.acquire();
+    const lease = await bindings.acquire(toolCallContext);
     generation = "g2";
     const signal = new AbortController().signal;
     assert.deepEqual(

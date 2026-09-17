@@ -131,6 +131,7 @@ export class ControlRuntimeFactory {
                 conversationPreferences: new ConversationPreferenceStore(
                     controlPaths.conversationPreferencesFile,
                 ),
+                config: () => options.state.requireConfig(),
                 extensionPaths,
                 extensions,
                 instances: options.state.instances,

@@ -27,7 +27,10 @@ import {
     createCliModelSandboxBinding,
     createCliNativeSandboxBinding,
 } from "../../../../../src/control/extension/cli/Sandbox.ts";
-import { createToolCallReviewSandboxBinding } from "../../../../../src/control/extension/toolcall/Sandbox.ts";
+import {
+    createToolCallReviewSandboxBinding,
+    createToolCallRewriteSandboxBinding,
+} from "../../../../../src/control/extension/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
@@ -184,6 +187,58 @@ export function activate(context) {
     );
     assert.deepEqual(calls, [
         { input: undefined, operation: "comment.reviewToolCall" },
+    ]);
+});
+
+test("Extension sandbox bridges a Secret interface scoped to one toolcall.rewrite invocation", async (t) => {
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-secret-rewrite",
+        `
+export function activate(context) {
+    context.register({ id: "toolcall.rewrite" }, "secret", async (input, invocation) => {
+        const environment = await invocation.requestInterface("secret.environment");
+        return input.text.replace("\${SECRET:TOKEN}", environment.TOKEN);
+    });
+}
+`,
+    );
+    const descriptor = await sandbox.start();
+    assert.deepEqual(descriptor.registrations, [
+        { descriptor: { kind: "rewrite" }, id: "secret", pointId: "toolcall.rewrite" },
+    ]);
+    const binding = createToolCallRewriteSandboxBinding(
+        { kind: "rewrite" },
+        { codeDirectory: "/extension", extensionId: "secret", id: "secret" },
+        sandbox,
+    );
+    const calls: unknown[] = [];
+    assert.equal(
+        await binding(
+            {
+                context: {
+                    ctxId: "ctx-secret",
+                    instance: "demo",
+                    source: "mcp",
+                },
+                direction: "inbound",
+                kind: "call",
+                path: ["command"],
+                signal: new AbortController().signal,
+                text: "echo ${SECRET:TOKEN}",
+                toolName: "bash_run",
+            },
+            {
+                async requestInterface(operation, input) {
+                    calls.push({ input, operation });
+                    return { TOKEN: "real-token" };
+                },
+            },
+        ),
+        "echo real-token",
+    );
+    assert.deepEqual(calls, [
+        { input: undefined, operation: "secret.environment" },
     ]);
 });
 

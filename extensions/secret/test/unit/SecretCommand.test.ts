@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { executeSecretCommand } from "../../src/builtin/SecretCommand.ts";
+import { executeSecretCommand } from "../../src/command/SecretCommand.ts";
 
 function invocation(workingDirectory?: string, localOwner = true) {
     return {

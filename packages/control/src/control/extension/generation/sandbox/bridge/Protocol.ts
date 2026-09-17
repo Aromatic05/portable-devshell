@@ -115,6 +115,7 @@ export type ExtensionSandboxCapabilityOperation =
 
 export type ExtensionSandboxInterfaceOperation =
     | "comment.reviewToolCall"
+    | "secret.environment"
     | "cli.context.instanceReference"
     | "cli.readInput"
     | "cli.requestInput"

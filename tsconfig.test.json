@@ -29,6 +29,9 @@
             "@portable-devshell/extension/toolcall": [
                 "./packages/extension/src/domain/toolcall.ts"
             ],
+            "@portable-devshell/extension/secret": [
+                "./packages/extension/src/domain/secret.ts"
+            ],
             "@portable-devshell/shared": ["./packages/shared/src/index.ts"],
             "@portable-devshell/shared/browser": [
                 "./packages/shared/src/browser.ts"
