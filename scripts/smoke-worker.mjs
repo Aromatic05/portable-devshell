@@ -1,6 +1,13 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import {
+    WorkerBinary,
+    WorkerRpcBridge,
+    WorkerRpcClient,
+    WorkerTransportConnection,
+    WorkerTransportDriverLocal,
+} from "../packages/core/dist/testing.js";
 import { WORKER_PROTOCOL_VERSION } from "../packages/core/dist/worker/protocol/Client.js";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
@@ -16,7 +23,6 @@ const workspace = resolve(root, "workspace");
 const instance = `windows-smoke-${process.pid}`;
 const env = {
     ...process.env,
-    DEVSHELL_WORKER_DIAGNOSTIC_RPC: "1",
     PORTABLE_DEVSHELL_HOME: resolve(root, "home"),
 };
 delete env.DEVSHELL_WORKER_INTERNAL_INSTANCE;
@@ -27,13 +33,23 @@ await mkdir(workspace, { recursive: true });
 try {
     stage("start worker");
     runWorker(["start", "--instance", instance]);
-    stage("open rpc bridge");
-    const bridge = spawn(worker, ["rpc", "--instance", instance], {
-        cwd: workspace,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
+    stage("open frame rpc service");
+    const transport = new WorkerTransportDriverLocal({
+        workerBinary: new WorkerBinary(worker),
     });
-    const rpc = createRpcClient(bridge, workspace);
+    const connection = WorkerTransportConnection.fromTransport(transport, {
+        env,
+        instanceName: instance,
+    });
+    const bridge = new WorkerRpcBridge({
+        connection,
+        rpcOptions: { env, instanceName: instance },
+    });
+    const client = new WorkerRpcClient(bridge);
+    const rpc = {
+        request: async (method, params) =>
+            await client.request(method, params, { workspace }),
+    };
     try {
         stage("worker.handshake");
         const handshake = await rpc.request("worker.handshake", {
@@ -183,13 +199,9 @@ try {
         });
         await waitForTerminalExit(rpc, terminal);
     } finally {
-        stage("close rpc bridge");
-        bridge.stdin.end();
-        await Promise.race([
-            new Promise((done) => bridge.once("exit", done)),
-            new Promise((done) => setTimeout(done, 2_000)),
-        ]);
-        if (bridge.exitCode === null) bridge.kill();
+        stage("close frame rpc service");
+        bridge.close();
+        connection.close();
     }
 
     stage("stop worker");
@@ -347,76 +359,4 @@ function escapeWorkflowCommand(value) {
 
 function stage(message) {
     process.stdout.write(`[smoke-worker] ${message}\n`);
-}
-
-function createRpcClient(child, workspace) {
-    let buffer = Buffer.alloc(0);
-    let nextId = 1;
-    const pending = new Map();
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-        stderr += chunk;
-    });
-    child.stdout.on("data", (chunk) => {
-        buffer = Buffer.concat([buffer, chunk]);
-        while (buffer.length >= 4) {
-            const length = buffer.readUInt32BE(0);
-            if (buffer.length < length + 4) return;
-            const payload = JSON.parse(
-                buffer.subarray(4, length + 4).toString("utf8"),
-            );
-            buffer = buffer.subarray(length + 4);
-            const request = pending.get(payload.id);
-            if (request === undefined) continue;
-            pending.delete(payload.id);
-            clearTimeout(request.timer);
-            if (payload.ok) request.resolve(payload.result);
-            else request.reject(new Error(JSON.stringify(payload.error)));
-        }
-    });
-    child.once("exit", (code) => {
-        for (const request of pending.values()) {
-            clearTimeout(request.timer);
-            request.reject(
-                new Error(`worker rpc bridge exited with ${code}: ${stderr}`),
-            );
-        }
-        pending.clear();
-    });
-
-    return {
-        request(method, params) {
-            const id = `smoke-${nextId++}`;
-            const payload = Buffer.from(
-                JSON.stringify({
-                    type: "request",
-                    id,
-                    method,
-                    params,
-                    context: { workspace },
-                }),
-                "utf8",
-            );
-            const frame = Buffer.allocUnsafe(payload.length + 4);
-            frame.writeUInt32BE(payload.length, 0);
-            payload.copy(frame, 4);
-            return new Promise((resolvePromise, rejectPromise) => {
-                const timer = setTimeout(() => {
-                    pending.delete(id);
-                    rejectPromise(
-                        new Error(
-                            `worker rpc timeout for ${method}: ${stderr}`,
-                        ),
-                    );
-                }, 15_000);
-                pending.set(id, {
-                    reject: rejectPromise,
-                    resolve: resolvePromise,
-                    timer,
-                });
-                child.stdin.write(frame);
-            });
-        },
-    };
 }
