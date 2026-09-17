@@ -190,66 +190,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         assert.equal(consumeCount, 0);
     });
 
-    test("model-facing tool calls run the conversation reply gate before execution", async () => {
-        const guarded: Array<{ instance: string; toolName: string }> = [];
-        const { dispatch } = createHarness({
-            async beforeModelToolCall(instance, toolName) {
-                guarded.push({ instance, toolName });
-            },
-        });
-        const ctxId = await createContext(dispatch, "guarded-context");
-
-        await dispatch.callTool(
-            "bash_run",
-            { command: "pwd", ctxId },
-            { principal: "tester", requestId: "guarded-call" },
-        );
-
-        assert.deepEqual(guarded, [
-            { instance: "alpha", toolName: "environ_info" },
-            { instance: "alpha", toolName: "bash_run" },
-        ]);
-    });
-
-    test("a rejected conversation-control gate runs before MCP tool audit side effects", async () => {
-        let appended = 0;
-        let now = Date.parse("2026-09-14T12:00:00.000Z");
-        const contextRegistry = new McpContextRegistry({ now: () => now });
-        const { dispatch, worker } = createHarness(
-            {
-                async beforeModelToolCall(_instance, toolName) {
-                    if (toolName === "bash_run")
-                        throw new Error("model stopped");
-                },
-            },
-            { contextRegistry },
-        );
-        worker.appendMcpToolCalled = async () => {
-            appended += 1;
-        };
-        const ctxId = await createContext(dispatch, "guarded-side-effects");
-        appended = 0;
-        const beforeGate = await contextRegistry.lookup(ctxId, {
-            principal: "tester",
-        });
-        now += 1_000;
-
-        await assert.rejects(
-            dispatch.callTool(
-                "bash_run",
-                { command: "pwd", ctxId },
-                { principal: "tester", requestId: "guarded-blocked" },
-            ),
-            /model stopped/u,
-        );
-        assert.equal(appended, 0);
-        const afterGate = await contextRegistry.lookup(ctxId, {
-            principal: "tester",
-        });
-        assert.equal(afterGate.lastAccessedAt, beforeGate.lastAccessedAt);
-        assert.equal(afterGate.expiresAt, beforeGate.expiresAt);
-    });
-
     test("a routed artifact result consumes Comments from the routed instance Context", async () => {
         const consumed: Array<{
             callId: string;
@@ -417,11 +357,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
     function createHarness(
         gatewayOverrides: {
-            beforeModelToolCall?(
-                instance: string,
-                toolName: string,
-                context: ToolCallContext,
-            ): Promise<void>;
             consumeContextMessages?(
                 instance: string,
                 ctxId: string,

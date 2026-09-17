@@ -835,7 +835,7 @@ test("environment and control-owned tools execute through the endpoint audit pat
         [
             {
                 ctxId,
-                input: {},
+                input: { workspace: "/workspace" },
                 requestId: "request-control-tools",
                 source: "mcp",
                 toolName: "environ_info",

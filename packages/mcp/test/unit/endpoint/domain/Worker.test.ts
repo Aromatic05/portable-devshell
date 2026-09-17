@@ -201,10 +201,10 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
     );
 });
 
-test("conversation control gate covers environ_info and environ_remote", async () => {
+test("environment tools cross the ToolCall operation boundary before side effects", async () => {
     let now = Date.parse("2026-09-14T12:00:00.000Z");
     const registry = new McpContextRegistry({
-        idFactory: () => "ctx-environ-gate",
+        idFactory: () => "ctx-environ-boundary",
         now: () => now,
     });
     const created = await registry.create({
@@ -212,13 +212,10 @@ test("conversation control gate covers environ_info and environ_remote", async (
         principal: "local",
         workspace: "/workspace",
     });
-    const guarded: string[] = [];
+    const boundaryCalls: string[] = [];
     let connectCalls = 0;
+    let prepareCalls = 0;
     const gateway = createGateway({
-        async beforeModelToolCall(instance, toolName, callContext) {
-            guarded.push(`${instance}:${toolName}:${callContext.ctxId}`);
-            throw new Error("reply required");
-        },
         async connectInstance(instance) {
             connectCalls += 1;
             return { instance };
@@ -226,10 +223,20 @@ test("conversation control gate covers environ_info and environ_remote", async (
     });
     const worker = {
         ...createWorker(),
+        async callToolOperation<T extends JsonValue>(
+            toolName: string,
+            _input: JsonValue,
+            _context: ToolCallContext,
+            _operation: (callId: string, input: JsonValue) => Promise<T>,
+        ): Promise<T> {
+            boundaryCalls.push(toolName);
+            throw new Error("boundary rejected");
+        },
         async prepareExtensionResource() {
             return { directory: "/workspace/.devshell/skills" };
         },
         async prepareWorkspace(workspace: string) {
+            prepareCalls += 1;
             return {
                 projectMemoryAgentFile: `${workspace}/AGENT.md`,
                 projectMemoryDirectory: workspace,
@@ -250,14 +257,14 @@ test("conversation control gate covers environ_info and environ_remote", async (
         created.ctxId,
         "remote-server",
     );
-    const beforeGate = await registry.lookup(created.ctxId, {
+    const beforeBoundary = await registry.lookup(created.ctxId, {
         principal: "local",
     });
     now += 1_000;
 
     await assert.rejects(
         endpoint.callTool("environ_info", { ctxId: created.ctxId }, context),
-        /reply required/u,
+        /boundary rejected/u,
     );
     await assert.rejects(
         endpoint.callTool(
@@ -270,20 +277,18 @@ test("conversation control gate covers environ_info and environ_remote", async (
             },
             context,
         ),
-        /reply required/u,
+        /boundary rejected/u,
     );
-    assert.deepEqual(guarded, [
-        `main-pc:environ_info:${created.ctxId}`,
-        `main-pc:environ_remote:${created.ctxId}`,
-    ]);
+    assert.deepEqual(boundaryCalls, ["environ_info", "environ_remote"]);
+    assert.equal(prepareCalls, 0);
     assert.equal(connectCalls, 0);
-    const afterGate = await registry.lookup(created.ctxId, {
+    const afterBoundary = await registry.lookup(created.ctxId, {
         principal: "local",
     });
-    assert.equal(afterGate.lastAccessedAt, beforeGate.lastAccessedAt);
-    assert.equal(afterGate.expiresAt, beforeGate.expiresAt);
+    assert.equal(afterBoundary.lastAccessedAt, beforeBoundary.lastAccessedAt);
+    assert.equal(afterBoundary.expiresAt, beforeBoundary.expiresAt);
     assert.equal(
-        afterGate.environments.find(
+        afterBoundary.environments.find(
             (environment) => environment.instance === "remote-server",
         )?.workspace,
         undefined,
@@ -985,8 +990,8 @@ function createGateway(
         assertReady(instance) {
             overrides.assertReady?.(instance);
         },
-        async beforeModelToolCall(instance, toolName, callContext) {
-            await overrides.beforeModelToolCall?.(
+        async beforeTodoToolCall(instance, toolName, callContext) {
+            await overrides.beforeTodoToolCall?.(
                 instance,
                 toolName,
                 callContext,

@@ -103,59 +103,17 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }
     }
 
-    async beforeModelToolCall(
+    async beforeTodoToolCall(
         instance: string,
         toolName: string,
         context: ToolCallContext,
     ): Promise<void> {
         const ctxId = context.ctxId;
-        if (ctxId === undefined) return;
-        const decision = (await this.#requireDescriptor(
-            instance,
-        ).contextMessages?.beforeModelToolCall(
-            ctxId,
-            toolName,
-            context.requestId,
-        )) ?? { kind: "allow" as const };
-        if (decision.kind === "allow") {
-            if (isTodoTool(toolName)) {
-                this.#assertTodoEnabled(instance, ctxId);
-            }
-            if (toolName === "todo_read" || toolName === "todo_write") {
-                await this.#consumeTodoAccessToken(instance, ctxId);
-            }
-            return;
+        if (ctxId === undefined || !isTodoTool(toolName)) return;
+        this.#assertTodoEnabled(instance, ctxId);
+        if (toolName === "todo_read" || toolName === "todo_write") {
+            await this.#consumeTodoAccessToken(instance, ctxId);
         }
-        if (decision.kind === "push") {
-            throw createError({
-                code: errorCodes.controlModelReplyRequired,
-                details: {
-                    commentId: decision.commentId,
-                    ctxId,
-                    toolCallBudget: decision.toolCallBudget,
-                },
-                message:
-                    "#push response deadline reached. Call todo_report before using more tools.",
-                retryable: false,
-            });
-        }
-        if (decision.kind === "resume") {
-            throw createError({
-                code: errorCodes.controlModelResumed,
-                details: { commentId: decision.commentId, ctxId },
-                message: `The user sent #resume. This tool was not executed. Read the Comment before deciding the next action: ${decision.comment}`,
-                retryable: false,
-            });
-        }
-        throw createError({
-            code: errorCodes.controlModelStopped,
-            details: { commentId: decision.commentId, ctxId },
-            message:
-                decision.comment === undefined
-                    ? "Stopped by user. Tool calls are disabled until the user sends #resume."
-                    : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
-            retryable: false,
-        });
     }
 
     async callToolOperation<T extends JsonValue>(
@@ -630,7 +588,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const key = todoPolicyKey(instance, ctxId);
         await this.#withTodoReportPolicy(key, async () => {
             const descriptor = this.#requireDescriptor(instance);
-            await this.beforeModelToolCall(instance, "todo_report", context);
+            await this.beforeTodoToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
             this.#refillTodoReportBucket(state, this.#now());
             const replyCommentId =

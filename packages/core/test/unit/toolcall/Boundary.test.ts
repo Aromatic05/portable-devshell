@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { asInstanceName } from "@portable-devshell/shared";
+
 import { ToolCallBoundarySequence } from "../../../src/toolcall/boundary/Sequence.ts";
 import type {
     ToolCallReview,
@@ -10,6 +12,7 @@ import type { ToolCallRewrite } from "../../../src/toolcall/boundary/Rewrite.ts"
 
 const context = Object.freeze({
     ctxId: "ctx-1",
+    instance: asInstanceName("demo"),
     source: "mcp" as const,
     workspace: "/repo",
 });

@@ -131,6 +131,8 @@ requestId
 
 具体字段继续沿用现有 ToolCall 数据模型，不在 Boundary 里建立第二套 ToolCall schema。
 
+Boundary invocation context 另外携带 owning `instance`，用于 host 侧把 review/rewrite 请求路由到正确的 per-instance state。`instance` 是 Boundary context identity，不写回普通 `ToolCallContext`，也不是可被 Rewrite 修改的 payload 字段。
+
 一旦进入 Boundary，同一次调用的 outer representation 不允许被 Review 改写。
 
 ## 5. Review
@@ -178,6 +180,26 @@ Outbound Review 发生在 outbound Rewrite 之后，因此它只能看到已经�
 它可以产生 Comment、hint 或其他外部反馈，但不得读取 Rewrite 之前的内部 secret-bearing payload。
 
 第一版不把 outbound Review 定义成任意结果 mutation middleware。
+
+### 5.3 Rejection feedback metadata
+
+Review 的安全决定和反馈语义需要分开。
+
+`reject` 的最终 authority 始终属于 Core，因此对外顶层错误固定为：
+
+```text
+core.toolCallRejected
+```
+
+Reviewer 可以附带一个只用于反馈的 `error.code/details`。Core 不允许它替换顶层错误，而是把它保存为 nested cause。这样 Comment 可以保留：
+
+```text
+control.modelStopped
+control.modelReplyRequired
+control.modelResumed
+```
+
+等机器可读反馈，现有 hint resolver 仍可沿 cause chain 生成指导，但 Extension 不能借此伪造 Core authority 或 Audit status。
 
 ## 6. Approval
 
@@ -525,25 +547,50 @@ raw Executor
 
 ## 16. Comment 的位置
 
-Comment 是 ToolCall Boundary 的消费者，不是 Boundary 本身。
+Comment 是 ToolCall Boundary 的第一个真实 consumer，不是 Boundary 本身。
 
-后续 `comment` Extension 可以使用：
+当前 `comment` Extension 注册：
 
 ```text
-inbound review
-    #stop
-    #resume
-    #push
-    tool-call deadline
-
-outbound review
-    hint
-    report/comment feedback
+toolcall.review / comment
 ```
 
-Conversation、Comment queue/list、preference、Context retired、instance deleted 等业务生命周期仍属于 Comment 自己的服务接口，不能强行塞进 `toolcall.review`。
+Inbound Review 负责：
 
-第一阶段先完成 Boundary 与 Extension ABI；Comment 迁移单独进行，不和 Boundary 基础设施混成一个提交。
+```text
+#stop
+#resume
+#push
+tool-call reply deadline
+```
+
+Sandboxed Comment Extension 不直接获得 Control、ConversationStore 或 Audit authority，也不新增 resource capability。Control 只在一次 `toolcall.review` invocation 内提供一个窄 interface：
+
+```text
+comment.reviewToolCall
+    -> allow | push | stop | resume
+```
+
+该 interface 不接受 Extension 提供的 instance / ctxId / toolName 参数，而是绑定到当前 Boundary invocation 的 authoritative context；调用结束后 interfacePort 随 invocation id 一起释放。只有 builtin `comment` registration 可以请求该 operation。Conversation、Comment queue/list、pending reply 与 Context lifecycle 仍由 Comment 自己的业务服务负责；Control 现有 RPC/route 只是这些服务的 facade。
+
+实现所有权已经迁到：
+
+```text
+extensions/comment/src/
+├── control/
+│   ├── Comment.ts
+│   ├── Conversation.ts
+│   └── Store.ts
+├── hint/
+├── runtime/
+└── index.ts
+```
+
+`hint` 规则也由 Comment package 持有，不再属于 `shared`。当前 hint delivery 仍位于现有 MCP/Control outer presentation path：它只消费已经经过 outbound Rewrite 的 outer result/error，因此不需要为了形式把现有 presentation adapter 强行改造成 outbound Review。等未来 Comment feedback 需要真正参与 Extension registration/composition 时，再把 delivery 收敛到 outbound review。
+
+Todo 的 enable/rate-limit/report token policy 与 Comment 是不同 authority，继续保留独立的 Todo-only gate；迁移 Comment 不得把 Todo policy 一起吸入 reviewer。
+
+`environ_info` 与 `environ_remote` 也必须和其他 external entry 一样在任何 touch/prepare/connect 等副作用之前进入统一 ToolCall Boundary。
 
 ## 17. 实现阶段
 
@@ -556,7 +603,7 @@ Conversation、Comment queue/list、preference、Context retired、instance dele
 4. 把正常 Worker tool call 接入 Boundary
 5. 统一 result / error / progress outbound path
 6. 消除 Control-owned MCP tool 的 Boundary bypass
-7. 迁移 Comment 为 Boundary 的第一个 review consumer
+7. 迁移 Comment 为 Boundary 的第一个 review consumer，并迁移 Conversation / Hint 所有权
 8. 使用 Secret 验证 rewrite 的 expand / mask 闭环
 ```
 

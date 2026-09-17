@@ -86,6 +86,7 @@ test("Extension manifest does not preserve the unreleased v2 or contribution-as-
         "worker",
         "child-process",
         "instance-lifecycle",
+        "comment",
     ]) {
         assert.throws(
             () =>

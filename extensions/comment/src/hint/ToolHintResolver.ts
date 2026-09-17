@@ -1,7 +1,7 @@
-import type { ControlErrorBody } from "../../protocol/Error.js";
-import type { JsonValue } from "../../protocol/JsonValue.js";
+import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 import { crossToolErrorHints } from "./common/CrossTool.js";
-import { errorHint, type ToolDiagnosticHint } from "./ToolDiagnosticHint.js";
+import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./management/Artifact.js";
 import { instanceErrorHints } from "./management/Instance.js";
 import { todoErrorHints } from "./management/Todo.js";

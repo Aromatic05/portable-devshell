@@ -807,7 +807,7 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
     descriptors.push({ name: "existing", worker: worker("existing") });
 
     const extensions = {
-        ...testExtensions(),
+        ...(testExtensions() as unknown as Record<string, unknown>),
         listDeclarations(pointId: string) {
             if (pointId === "toolcall.review") return [{ id: "guard" }];
             return [];

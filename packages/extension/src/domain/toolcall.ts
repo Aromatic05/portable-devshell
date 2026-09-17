@@ -15,6 +15,7 @@ export type ToolCallSource = "cli" | "extension" | "mcp" | "tui" | "web";
 
 export interface ToolCallContext {
     readonly ctxId?: string;
+    readonly instance: string;
     readonly extensionId?: string;
     readonly operationId?: string;
     readonly requestId?: string;
@@ -31,13 +32,28 @@ export interface ToolCallReviewInvocation {
     readonly toolName: string;
 }
 
+export interface ToolCallReviewError {
+    readonly code: string;
+    readonly details?: ExtensionJsonValue;
+}
+
 export interface ToolCallReviewResult {
     readonly decision: ToolCallReviewDecision;
+    readonly error?: ToolCallReviewError;
     readonly reason?: string;
+}
+
+/** Host interfaces scoped to exactly one toolcall.review invocation. */
+export interface ToolCallReviewContext {
+    requestInterface(
+        operation: string,
+        input?: ExtensionJsonValue,
+    ): Promise<ExtensionJsonValue | undefined>;
 }
 
 export type ToolCallReviewBinding = (
     input: ToolCallReviewInvocation,
+    context: ToolCallReviewContext,
 ) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
 
 export interface ToolCallRewriteInvocation {

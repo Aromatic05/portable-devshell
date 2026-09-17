@@ -20,6 +20,7 @@ import { WebApplicationCatalog } from "../../server/web/extension/application/Ca
 import type { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionInstallService } from "../../control/extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
+import { ToolCallCommentReview } from "../../control/extension/toolcall/Comment.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
@@ -96,7 +97,10 @@ export class ControlRuntime {
             }),
         });
         this.#instances = options.instances;
-        this.#toolCallBinding = new ToolCallExtensionBinding(this.#extensions);
+        this.#toolCallBinding = new ToolCallExtensionBinding(
+            this.#extensions,
+            new ToolCallCommentReview(options.instances),
+        );
         this.#bindToolCallBoundaries();
         this.#toolCallInstanceUnsubscribe = this.#instances.onChange(() =>
             this.#bindToolCallBoundaries(),

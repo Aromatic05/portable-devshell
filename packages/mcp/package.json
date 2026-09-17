@@ -24,6 +24,7 @@
         "@modelcontextprotocol/node": "2.0.0",
         "@modelcontextprotocol/sdk": "1.30.0",
         "@modelcontextprotocol/server": "2.0.0",
+        "@portable-devshell/comment-extension": "workspace:*",
         "@portable-devshell/shared": "workspace:*",
         "@types/oidc-provider": "9.12.1",
         "express": "^5.2.1",

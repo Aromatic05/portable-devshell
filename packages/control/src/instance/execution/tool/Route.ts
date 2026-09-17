@@ -1,11 +1,9 @@
+import { mergeComments, resolveErrorHints, resolveResultHints } from "@portable-devshell/comment-extension";
 import type { WorkerInstance } from "@portable-devshell/core";
 import {
     ControlError,
     createError,
     errorCodes,
-    mergeComments,
-    resolveErrorHints,
-    resolveResultHints,
     toControlErrorBody,
     type JsonValue,
     type PrefixRouteModuleDefinition,

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createError, errorCodes, asInstanceName } from "@portable-devshell/shared";
+import {
+    createError,
+    errorCodes,
+    asInstanceName,
+    toControlErrorBody,
+} from "@portable-devshell/shared";
 
 import { ToolCallExecution } from "../../../src/toolcall/Execution.ts";
 import { createToolCallScope } from "../../../src/toolcall/Context.ts";
@@ -13,7 +18,17 @@ const context = Object.freeze({
     workspace: "/repo",
 });
 
-function createHarness(decision: "accept" | "approve" | "reject") {
+function createHarness(
+    reviewResult:
+        | "accept"
+        | "approve"
+        | "reject"
+        | {
+              decision: "reject";
+              error: { code: string; details?: import("@portable-devshell/shared").JsonValue };
+              reason?: string;
+          },
+) {
     const events: string[] = [];
     const approvalInputs: unknown[] = [];
     const denied: string[] = [];
@@ -68,7 +83,9 @@ function createHarness(decision: "accept" | "approve" | "reject") {
             sequence: new ToolCallBoundarySequence({
                 reviews: [async () => {
                     events.push("review");
-                    return { decision };
+                    return typeof reviewResult === "string"
+                        ? { decision: reviewResult }
+                        : reviewResult;
                 }],
             }),
         }),
@@ -131,6 +148,76 @@ test("ToolCallExecution reviews the canonical outer call before scheduler admiss
     assert.deepEqual(harness.denied, [errorCodes.coreToolCallRejected]);
     assert.equal(harness.invokes(), 0);
     assert.equal(harness.releases(), 1);
+});
+
+test("ToolCallExecution keeps reviewer error metadata as a nested cause under Core rejection", async () => {
+    const harness = createHarness({
+        decision: "reject",
+        error: {
+            code: errorCodes.controlModelStopped,
+            details: { commentId: "stop-1" },
+        },
+        reason: "Stopped by user.",
+    });
+
+    await assert.rejects(
+        harness.execution.call("bash_run", { command: "echo ok" }, context),
+        (error: unknown) => {
+            const body = toControlErrorBody(error);
+            assert.equal(body?.code, errorCodes.coreToolCallRejected);
+            assert.equal(body?.message, "Stopped by user.");
+            assert.equal(body?.cause?.code, errorCodes.controlModelStopped);
+            assert.deepEqual(body?.cause?.details, { commentId: "stop-1" });
+            return true;
+        },
+    );
+    assert.deepEqual(harness.denied, [errorCodes.coreToolCallRejected]);
+    assert.equal(harness.invokes(), 0);
+});
+
+test("ToolCallExecution exposes its instance identity at the Boundary", async () => {
+    let boundaryContext: unknown;
+    const execution = new ToolCallExecution({
+        approval: { async prepare() { return {}; } },
+        assertReady() {},
+        audit: {
+            createScope(toolName: string, input: unknown, callContext: typeof context) {
+                return createToolCallScope(toolName, input as never, callContext);
+            },
+            async requested() {},
+            async queued() {},
+            async denied() {},
+            runningContext() { return {}; },
+            async running() {},
+            async completed() {},
+            async failed() {},
+            async failActive() {},
+            async nonRunning() {},
+        },
+        boundary: () => ({
+            release() {},
+            sequence: new ToolCallBoundarySequence({
+                reviews: [async (input) => {
+                    boundaryContext = input.context;
+                    return { decision: "reject" as const };
+                }],
+            }),
+        }),
+        instanceName: asInstanceName("boundary-instance"),
+        log: { async append() {} },
+        toolCallScheduler: { reserve() { throw new Error("must not reserve"); } },
+        toolInvoker: { async invoke() { throw new Error("must not invoke"); } },
+    } as never);
+
+    await assert.rejects(
+        execution.call("bash_run", { command: "pwd" }, context),
+        (error: unknown) =>
+            (error as { code?: string }).code === errorCodes.coreToolCallRejected,
+    );
+    assert.deepEqual(boundaryContext, {
+        ...context,
+        instance: "boundary-instance",
+    });
 });
 
 test("ToolCallExecution turns review approve into required Core Approval", async () => {

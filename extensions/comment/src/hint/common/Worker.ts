@@ -1,5 +1,5 @@
-import type { ControlErrorBody } from "../../../protocol/Error.js";
-import { errorHint, type ToolDiagnosticHint } from "../ToolDiagnosticHint.js";
+import type { ControlErrorBody } from "@portable-devshell/shared";
+import { errorHint, type ToolDiagnosticHint } from "../Hint.js";
 
 export function workerCommonErrorHints(
     body: ControlErrorBody,

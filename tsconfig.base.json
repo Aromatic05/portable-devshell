@@ -32,6 +32,15 @@
             ],
             "@portable-devshell/storage-extension": [
                 "./extensions/storage/dist/index.d.ts"
+            ],
+            "@portable-devshell/comment-extension": [
+                "./extensions/comment/dist/index.d.ts"
+            ],
+            "@portable-devshell/extension/comment": [
+                "./packages/extension/dist/domain/comment.d.ts"
+            ],
+            "@portable-devshell/extension/toolcall": [
+                "./packages/extension/dist/domain/toolcall.d.ts"
             ]
         },
         "types": ["node"],

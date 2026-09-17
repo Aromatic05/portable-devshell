@@ -21,6 +21,9 @@
         },
         {
             "path": "../../extensions/storage"
+        },
+        {
+            "path": "../../extensions/comment"
         }
     ]
 }

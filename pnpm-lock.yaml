@@ -86,6 +86,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/extension
 
+  extensions/comment:
+    dependencies:
+      '@portable-devshell/extension':
+        specifier: workspace:*
+        version: link:../../packages/extension
+      '@portable-devshell/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+
   extensions/instance:
     dependencies:
       '@portable-devshell/extension':
@@ -134,6 +143,9 @@ importers:
       '@portable-devshell/artifact-extension':
         specifier: workspace:*
         version: link:../../extensions/artifact
+      '@portable-devshell/comment-extension':
+        specifier: workspace:*
+        version: link:../../extensions/comment
       '@portable-devshell/control':
         specifier: workspace:*
         version: file:packages/control(react@18.3.1)
@@ -161,6 +173,9 @@ importers:
 
   packages/control:
     dependencies:
+      '@portable-devshell/comment-extension':
+        specifier: workspace:*
+        version: link:../../extensions/comment
       '@portable-devshell/core':
         specifier: workspace:*
         version: link:../core
@@ -234,6 +249,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
+      '@portable-devshell/comment-extension':
+        specifier: workspace:*
+        version: link:../../extensions/comment
       '@portable-devshell/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1069,6 +1087,9 @@ packages:
 
   '@oxc-project/types@0.149.0':
     resolution: {integrity: sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA==}
+
+  '@portable-devshell/comment-extension@file:extensions/comment':
+    resolution: {directory: extensions/comment, type: directory}
 
   '@portable-devshell/control@file:packages/control':
     resolution: {directory: packages/control, type: directory}
@@ -3879,8 +3900,14 @@ snapshots:
 
   '@oxc-project/types@0.149.0': {}
 
+  '@portable-devshell/comment-extension@file:extensions/comment':
+    dependencies:
+      '@portable-devshell/extension': file:packages/extension
+      '@portable-devshell/shared': file:packages/shared
+
   '@portable-devshell/control@file:packages/control(react@18.3.1)':
     dependencies:
+      '@portable-devshell/comment-extension': file:extensions/comment
       '@portable-devshell/core': file:packages/core
       '@portable-devshell/extension': file:packages/extension
       '@portable-devshell/mcp': file:packages/mcp(react@18.3.1)
@@ -3920,6 +3947,7 @@ snapshots:
       '@modelcontextprotocol/node': 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.7)
       '@modelcontextprotocol/sdk': 1.30.0(zod@3.25.76)
       '@modelcontextprotocol/server': 2.0.0
+      '@portable-devshell/comment-extension': file:extensions/comment
       '@portable-devshell/shared': file:packages/shared
       '@types/oidc-provider': 9.12.1
       express: 5.2.1

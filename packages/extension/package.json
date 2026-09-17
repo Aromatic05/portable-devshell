@@ -29,6 +29,10 @@
         "./web": {
             "types": "./dist/domain/web.d.ts",
             "default": "./dist/domain/web.js"
+        },
+        "./comment": {
+            "types": "./dist/domain/comment.d.ts",
+            "default": "./dist/domain/comment.js"
         }
     },
     "files": [

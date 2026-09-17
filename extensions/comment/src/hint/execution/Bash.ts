@@ -1,5 +1,5 @@
-import type { ControlErrorBody } from "../../../protocol/Error.js";
-import type { JsonValue } from "../../../protocol/JsonValue.js";
+import type { ControlErrorBody } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 import {
     asArray,
     asBoolean,
@@ -11,7 +11,7 @@ import {
     diagnosticHint,
     errorHint,
     type ToolDiagnosticHint,
-} from "../ToolDiagnosticHint.js";
+} from "../Hint.js";
 import { workerCommonErrorHints } from "../common/Worker.js";
 
 export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {

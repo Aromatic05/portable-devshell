@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { asInstanceName } from "@portable-devshell/shared";
+import { reviewCommentToolCall } from "@portable-devshell/extension/comment";
+import type {
+    ToolCallReviewInvocation,
+    ToolCallRewriteInvocation,
+} from "@portable-devshell/extension/toolcall";
+
 import { ToolCallExtensionBinding } from "../../../../src/control/extension/toolcall/Binding.ts";
+import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/Comment.ts";
 import {
     createToolCallReviewSandboxBinding,
     createToolCallRewriteSandboxBinding,
@@ -17,6 +25,7 @@ const validationContext = Object.freeze({
 
 const toolCallContext = Object.freeze({
     ctxId: "ctx-1",
+    instance: asInstanceName("demo"),
     source: "mcp" as const,
     workspace: "/repo",
 });
@@ -87,6 +96,59 @@ test("ToolCall Extension binding acquires registrations once and releases them w
     ]);
 });
 
+test("ToolCall Extension binding supplies the same scoped Comment interface to in-process review bindings", async () => {
+    const comment = new ToolCallCommentReview({
+        get(instance: string) {
+            assert.equal(instance, "demo");
+            return {
+                contextMessages: {
+                    async reviewToolCall() {
+                        return { commentId: "stop-1", kind: "stop" as const };
+                    },
+                },
+            } as never;
+        },
+    });
+    const bindings = new ToolCallExtensionBinding(
+        {
+            listDeclarations(pointId: string) {
+                return pointId === "toolcall.review"
+                    ? [{ extensionId: "comment", id: "comment" }]
+                    : [];
+            },
+            async acquireRegistration() {
+                return {
+                    extensionId: "comment",
+                    lease: { release() {} },
+                    registration: {
+                        binding: async (_input: unknown, context: Parameters<typeof reviewCommentToolCall>[0]) =>
+                            (await reviewCommentToolCall(context)).kind === "stop"
+                                ? { decision: "reject" as const, reason: "stop" }
+                                : { decision: "accept" as const },
+                    },
+                } as never;
+            },
+        } as never,
+        comment,
+    );
+    const lease = await bindings.acquire();
+    try {
+        assert.deepEqual(
+            await lease.sequence.review({
+                context: toolCallContext,
+                direction: "inbound",
+                kind: "call",
+                payload: { command: "pwd" },
+                signal: new AbortController().signal,
+                toolName: "bash_run",
+            }),
+            { decision: "reject", reason: "stop" },
+        );
+    } finally {
+        lease.release();
+    }
+});
+
 test("ToolCall Extension binding rolls back acquired generation leases when acquisition fails", async () => {
     const events: string[] = [];
     const bindings = new ToolCallExtensionBinding({
@@ -121,21 +183,42 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
         {
             async invokeBinding(pointId, id, input, options) {
                 calls.push({ id, input, pointId, signal: options?.signal });
-                return { decision: "reject", reason: "blocked" };
+                return {
+                    decision: "reject",
+                    error: {
+                        code: "control.modelStopped",
+                        details: { commentId: "stop-1" },
+                    },
+                    reason: "blocked",
+                };
             },
         },
     );
 
     assert.deepEqual(
-        await binding({
-            context: toolCallContext,
-            direction: "inbound",
-            kind: "call",
-            payload: { command: "echo ok" },
-            signal,
-            toolName: "bash_run",
-        }),
-        { decision: "reject", reason: "blocked" },
+        await binding(
+            {
+                context: toolCallContext,
+                direction: "inbound",
+                kind: "call",
+                payload: { command: "echo ok" },
+                signal,
+                toolName: "bash_run",
+            },
+            {
+                async requestInterface() {
+                    throw new Error("not used");
+                },
+            },
+        ),
+        {
+            decision: "reject",
+            error: {
+                code: "control.modelStopped",
+                details: { commentId: "stop-1" },
+            },
+            reason: "blocked",
+        },
     );
     assert.deepEqual(calls, [
         {
@@ -143,6 +226,7 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
             input: {
                 context: {
                     ctxId: "ctx-1",
+                    instance: "demo",
                     source: "mcp",
                     workspace: "/repo",
                 },
@@ -164,13 +248,20 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
 
     assert.deepEqual(
         await toolCallReviewSandboxCodec.invokeBinding(
-            async (input) => {
+            async (input: ToolCallReviewInvocation) => {
                 reviewSignal = input.signal;
                 assert.deepEqual(input.payload, { output: "safe" });
-                return { decision: "accept" };
+                return {
+                    decision: "reject",
+                    error: {
+                        code: "control.modelReplyRequired",
+                        details: { commentId: "push-1", toolCallBudget: 5 },
+                    },
+                    reason: "reply first",
+                };
             },
             {
-                context: { source: "mcp" },
+                context: { instance: "demo", source: "mcp" },
                 direction: "outbound",
                 kind: "result",
                 payload: { output: "safe" },
@@ -184,18 +275,25 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 },
             },
         ),
-        { decision: "accept" },
+        {
+            decision: "reject",
+            error: {
+                code: "control.modelReplyRequired",
+                details: { commentId: "push-1", toolCallBudget: 5 },
+            },
+            reason: "reply first",
+        },
     );
 
     assert.equal(
         await toolCallRewriteSandboxCodec.invokeBinding(
-            async (input) => {
+            async (input: ToolCallRewriteInvocation) => {
                 rewriteSignal = input.signal;
                 assert.deepEqual(input.path, ["stdout", 0]);
                 return `mask(${input.text})`;
             },
             {
-                context: { source: "mcp" },
+                context: { instance: "demo", source: "mcp" },
                 direction: "outbound",
                 kind: "progress",
                 path: ["stdout", 0],
@@ -226,6 +324,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 assert.deepEqual(input, {
                     context: {
                         ctxId: "ctx-1",
+                        instance: "demo",
                         source: "mcp",
                         workspace: "/repo",
                     },

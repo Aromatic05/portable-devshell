@@ -235,7 +235,7 @@ test("native control result uses the Boundary-returned structured content", asyn
         return {
             ...(result as Record<string, JsonValue>),
             name: "outer-masked.png",
-        } as T;
+        } as unknown as T;
     };
     const endpoint = new McpEndpointWorker({
         contextRegistry,

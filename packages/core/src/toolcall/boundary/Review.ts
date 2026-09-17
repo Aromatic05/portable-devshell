@@ -1,11 +1,12 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { InstanceName, JsonValue, ToolCallContext } from "@portable-devshell/shared";
 
 export type ToolCallBoundaryDirection = "inbound" | "outbound";
 export type ToolCallBoundaryPayloadKind = "call" | "error" | "progress" | "result";
+export type ToolCallBoundaryContext = ToolCallContext & { readonly instance: InstanceName };
 export type ToolCallReviewDecision = "accept" | "approve" | "reject";
 
 export interface ToolCallReviewInput {
-    readonly context: ToolCallContext;
+    readonly context: ToolCallBoundaryContext;
     readonly direction: ToolCallBoundaryDirection;
     readonly kind: ToolCallBoundaryPayloadKind;
     readonly payload: JsonValue;
@@ -13,8 +14,14 @@ export interface ToolCallReviewInput {
     readonly toolName: string;
 }
 
+export interface ToolCallReviewError {
+    readonly code: string;
+    readonly details?: JsonValue;
+}
+
 export interface ToolCallReviewResult {
     readonly decision: ToolCallReviewDecision;
+    readonly error?: ToolCallReviewError;
     readonly reason?: string;
 }
 
@@ -46,6 +53,20 @@ export async function reviewToolCall(
             continue;
         result = Object.freeze({
             decision: candidate.decision,
+            ...(candidate.error === undefined
+                ? {}
+                : {
+                      error: Object.freeze({
+                          code: candidate.error.code,
+                          ...(candidate.error.details === undefined
+                              ? {}
+                              : {
+                                    details: freezeJson(
+                                        cloneJson(candidate.error.details),
+                                    ),
+                                }),
+                      }),
+                  }),
             ...(candidate.reason === undefined ? {} : { reason: candidate.reason }),
         });
     }
@@ -58,6 +79,11 @@ function assertReviewResult(value: ToolCallReviewResult): void {
         throw new TypeError(`Unknown ToolCall review decision: ${String(value.decision)}.`);
     if (value.reason !== undefined && typeof value.reason !== "string")
         throw new TypeError("ToolCall review reason must be a string.");
+    if (value.error !== undefined) {
+        if (typeof value.error.code !== "string" || value.error.code.length === 0)
+            throw new TypeError("ToolCall review error code must be a non-empty string.");
+        if (value.error.details !== undefined) cloneJson(value.error.details);
+    }
 }
 
 function cloneJson(value: JsonValue): JsonValue {

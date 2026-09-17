@@ -1,6 +1,7 @@
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import type {
+    ToolCallBoundaryContext,
     ToolCallBoundaryDirection,
     ToolCallBoundaryPayloadKind,
 } from "./Review.js";
@@ -8,7 +9,7 @@ import type {
 export type ToolCallRewritePath = readonly (number | string)[];
 
 export interface ToolCallRewriteInput {
-    readonly context: ToolCallContext;
+    readonly context: ToolCallBoundaryContext;
     readonly direction: ToolCallBoundaryDirection;
     readonly kind: ToolCallBoundaryPayloadKind;
     readonly path: ToolCallRewritePath;
@@ -22,7 +23,7 @@ export type ToolCallRewrite = (
 ) => Promise<string> | string;
 
 export interface ToolCallRewritePayloadInput {
-    readonly context: ToolCallContext;
+    readonly context: ToolCallBoundaryContext;
     readonly direction: ToolCallBoundaryDirection;
     readonly kind: ToolCallBoundaryPayloadKind;
     readonly payload: JsonValue;

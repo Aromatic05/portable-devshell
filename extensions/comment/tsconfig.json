@@ -1,0 +1,35 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "declaration": true,
+        "declarationMap": true,
+        "outDir": "dist",
+        "rootDir": "src",
+        "paths": {
+            "@portable-devshell/extension": [
+                "../../packages/extension/dist/index.d.ts"
+            ],
+            "@portable-devshell/extension/comment": [
+                "../../packages/extension/dist/domain/comment.d.ts"
+            ],
+            "@portable-devshell/extension/toolcall": [
+                "../../packages/extension/dist/domain/toolcall.d.ts"
+            ],
+            "@portable-devshell/shared": [
+                "../../packages/shared/dist/index.d.ts"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*.ts"
+    ],
+    "references": [
+        {
+            "path": "../../packages/shared"
+        },
+        {
+            "path": "../../packages/extension"
+        }
+    ]
+}

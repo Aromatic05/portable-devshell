@@ -114,7 +114,7 @@ export interface McpInstanceGateway {
         context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
     assertReady(instance: string): void;
-    beforeModelToolCall?(
+    beforeTodoToolCall?(
         instance: string,
         toolName: string,
         context: ToolCallContext,

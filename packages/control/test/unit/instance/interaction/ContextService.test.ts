@@ -198,7 +198,7 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
     await service.consumePending("ctx-b", "call-b");
     await service.queue({ ctxId: "ctx-c", text: "Second" });
     assert.equal(
-        (await service.beforeModelToolCall("ctx-b", "file_read")).kind,
+        (await service.reviewToolCall("ctx-b", "file_read")).kind,
         "stop",
     );
 
@@ -216,7 +216,7 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
     );
     assert.equal((await service.list("ctx-b"))[0]?.id, delivered.id);
     assert.equal((await service.list("ctx-b"))[0]?.status, "delivered");
-    assert.deepEqual(await service.beforeModelToolCall("ctx-b", "file_read"), {
+    assert.deepEqual(await service.reviewToolCall("ctx-b", "file_read"), {
         kind: "allow",
     });
 });
@@ -270,7 +270,7 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
     });
 
     assert.deepEqual(
-        await service.beforeModelToolCall("ctx-a", "file_read", "request-stop"),
+        await service.reviewToolCall("ctx-a", "file_read", "request-stop"),
         {
             comment: "#stop Stop before the next tool",
             commentId: stop.id,
@@ -279,7 +279,7 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
     );
     const reloaded = new ContextMessageService(options);
     assert.equal(
-        (await reloaded.beforeModelToolCall("ctx-a", "file_read")).kind,
+        (await reloaded.reviewToolCall("ctx-a", "file_read")).kind,
         "stop",
     );
     const resume = await reloaded.queue({
@@ -287,7 +287,7 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
         text: "#resume Continue, but do not delete files",
     });
     assert.deepEqual(
-        await reloaded.beforeModelToolCall(
+        await reloaded.reviewToolCall(
             "ctx-a",
             "file_read",
             "request-resume",
@@ -298,7 +298,7 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
             kind: "resume",
         },
     );
-    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), {
+    assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
 });
@@ -320,7 +320,7 @@ test("ContextMessageService delivers queued Stop-era messages through Resume wit
     });
 
     assert.deepEqual(
-        await service.beforeModelToolCall(
+        await service.reviewToolCall(
             "ctx-a",
             "file_read",
             "request-resume-batch",
@@ -332,7 +332,7 @@ test("ContextMessageService delivers queued Stop-era messages through Resume wit
             kind: "resume",
         },
     );
-    assert.deepEqual(await service.beforeModelToolCall("ctx-a", "file_read"), {
+    assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
     assert.deepEqual(await service.consumePending("ctx-a", "next-call"), {
@@ -353,7 +353,7 @@ test("ContextMessageService persists the remaining #push budget without replenis
     await service.consumePending("ctx-a", "delivery-one");
     for (let index = 0; index < 4; index += 1) {
         assert.deepEqual(
-            await service.beforeModelToolCall("ctx-a", "file_read"),
+            await service.reviewToolCall("ctx-a", "file_read"),
             { kind: "allow" },
         );
     }
@@ -361,10 +361,10 @@ test("ContextMessageService persists the remaining #push budget without replenis
     await service.consumePending("ctx-a", "delivery-two");
 
     const reloaded = new ContextMessageService(options);
-    assert.deepEqual(await reloaded.beforeModelToolCall("ctx-a", "file_read"), {
+    assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
-    const blocked = await reloaded.beforeModelToolCall("ctx-a", "file_read");
+    const blocked = await reloaded.reviewToolCall("ctx-a", "file_read");
     assert.equal(blocked.kind, "push");
     if (blocked.kind === "push") assert.equal(blocked.toolCallBudget, 5);
 });

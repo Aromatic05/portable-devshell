@@ -1,3 +1,4 @@
+import { mergeComments, resolveErrorHints } from "@portable-devshell/comment-extension";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
@@ -17,8 +18,6 @@ import {
     type Tool,
 } from "@modelcontextprotocol/server";
 import {
-    mergeComments,
-    resolveErrorHints,
     toControlErrorBody,
     type ControlErrorBody,
     type JsonValue,

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { artifactExtensionDirectory } from "@portable-devshell/artifact-extension";
 import { instanceExtensionDirectory } from "@portable-devshell/instance-extension";
+import { commentExtensionDirectory } from "@portable-devshell/comment-extension";
 import { mcpExtensionDirectory } from "@portable-devshell/mcp-extension";
 import { secretExtensionDirectory } from "@portable-devshell/secret-extension";
 import { skillExtensionDirectory } from "@portable-devshell/skill-extension";
@@ -17,6 +18,7 @@ test("CLI lifecycle injects every builtin Extension source including MCP", () =>
     assert.deepEqual(sources, [
         { id: "artifact", path: artifactExtensionDirectory() },
         { id: "instance", path: instanceExtensionDirectory() },
+        { id: "comment", path: commentExtensionDirectory() },
         { id: "skill", path: skillExtensionDirectory() },
         { id: "secret", path: secretExtensionDirectory() },
         { id: "storage", path: storageExtensionDirectory() },

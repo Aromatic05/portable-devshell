@@ -1,8 +1,7 @@
+import { mergeComments, resolveResultHints } from "@portable-devshell/comment-extension";
 import {
     createError,
     errorCodes,
-    mergeComments,
-    resolveResultHints,
     toControlErrorBody,
     type GoalActivityKind,
     type JsonValue,
@@ -277,18 +276,20 @@ export class McpEndpointDispatch {
                 resolvedContext.record,
                 routed.instance,
             );
-            await this.#gateway?.beforeModelToolCall?.(
-                routed.instance,
-                toolName,
-                {
-                    ctxId: resolvedContext.record.ctxId,
-                    requestId: requestContext.requestId,
-                    source: "mcp",
-                    ...(environment?.workspace === undefined
-                        ? {}
-                        : { workspace: environment.workspace }),
-                },
-            );
+            if (selected.owner === "todo") {
+                await this.#gateway?.beforeTodoToolCall?.(
+                    routed.instance,
+                    toolName,
+                    {
+                        ctxId: resolvedContext.record.ctxId,
+                        requestId: requestContext.requestId,
+                        source: "mcp",
+                        ...(environment?.workspace === undefined
+                            ? {}
+                            : { workspace: environment.workspace }),
+                    },
+                );
+            }
             if (touchContext) {
                 resolvedContext = {
                     ...resolvedContext,

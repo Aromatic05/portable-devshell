@@ -123,92 +123,100 @@ export class McpEndpointHandlerEnvironment {
         let record = resolution.record;
         const workspace =
             contextWorkspace(record, this.#instanceName) ?? record.workspace;
-        await this.#gateway?.beforeModelToolCall?.(
-            this.#instanceName,
-            mcpRemoteEnvironmentToolName,
-            {
-                ctxId: record.ctxId,
-                requestId: requestContext.requestId,
-                source: "mcp",
-                ...(workspace === undefined ? {} : { workspace }),
+        const context: ToolCallContext = {
+            ctxId: record.ctxId,
+            requestId: requestContext.requestId,
+            source: "mcp",
+            ...(workspace === undefined ? {} : { workspace }),
+        };
+        let resultCtxId = record.ctxId;
+        const structuredContent = await callMcpEndpointToolOperation({
+            context,
+            input,
+            localInstance: this.#instanceName,
+            operation: async () => {
+                if (!resolution.created) {
+                    record = await this.#touchEnvironmentContext(
+                        record,
+                        requestContext,
+                    );
+                    resolution = { ...resolution, record };
+                }
+                resultCtxId = record.ctxId;
+                await this.#worker.appendMcpToolCalled(
+                    mcpRemoteEnvironmentToolName,
+                    {
+                        ctxId: record.ctxId,
+                        requestId: requestContext.requestId,
+                    },
+                );
+                const base = this.#contextSelector.expose(record);
+                switch (commandInput.command) {
+                    case "help":
+                        assertRemoteArguments(commandInput, {
+                            handle: false,
+                            workspace: false,
+                        });
+                        return {
+                            ...base,
+                            command: "help",
+                            details: {
+                                commands: remoteEnvironmentCommandCatalog(),
+                            },
+                            message: "Current environ_remote command catalog.",
+                        };
+                    case "attach": {
+                        assertRemoteArguments(commandInput, {
+                            handle: true,
+                            workspace: "optional",
+                        });
+                        const details = await remote.attach(
+                            record.ctxId,
+                            commandInput.handle!,
+                            commandInput.workspace,
+                            signal,
+                        );
+                        return {
+                            ...base,
+                            command: "attach",
+                            details: isJsonRecord(details)
+                                ? details
+                                : { result: details },
+                            message:
+                                "Remote environment attached to the current Context.",
+                        };
+                    }
+                    case "mask": {
+                        assertRemoteArguments(commandInput, {
+                            handle: true,
+                            workspace: false,
+                        });
+                        const details = await remote.mask(
+                            record.ctxId,
+                            commandInput.handle!,
+                        );
+                        return {
+                            ...base,
+                            command: "mask",
+                            details,
+                            message:
+                                "Remote instance is permanently masked for the lifetime of the current Context.",
+                        };
+                    }
+                    default:
+                        throw createError({
+                            code: errorCodes.targetInvalid,
+                            message: `Unknown environ_remote command ${JSON.stringify(commandInput.command)}. Use command='help' for the current command catalog.`,
+                            retryable: false,
+                        });
+                }
             },
-        );
-        if (!resolution.created) {
-            record = await this.#touchEnvironmentContext(
-                record,
-                requestContext,
-            );
-            resolution = { ...resolution, record };
-        }
-        const base = this.#contextSelector.expose(record);
-        switch (commandInput.command) {
-            case "help":
-                assertRemoteArguments(commandInput, {
-                    handle: false,
-                    workspace: false,
-                });
-                return {
-                    ctxId: record.ctxId,
-                    structuredContent: {
-                        ...base,
-                        command: "help",
-                        details: {
-                            commands: remoteEnvironmentCommandCatalog(),
-                        },
-                        message: "Current environ_remote command catalog.",
-                    },
-                };
-            case "attach": {
-                assertRemoteArguments(commandInput, {
-                    handle: true,
-                    workspace: "optional",
-                });
-                const details = await remote.attach(
-                    record.ctxId,
-                    commandInput.handle!,
-                    commandInput.workspace,
-                    signal,
-                );
-                return {
-                    ctxId: record.ctxId,
-                    structuredContent: {
-                        ...base,
-                        command: "attach",
-                        details: isJsonRecord(details)
-                            ? details
-                            : { result: details },
-                        message:
-                            "Remote environment attached to the current Context.",
-                    },
-                };
-            }
-            case "mask": {
-                assertRemoteArguments(commandInput, {
-                    handle: true,
-                    workspace: false,
-                });
-                const details = await remote.mask(
-                    record.ctxId,
-                    commandInput.handle!,
-                );
-                return {
-                    ctxId: record.ctxId,
-                    structuredContent: {
-                        ...base,
-                        command: "mask",
-                        details,
-                        message:
-                            "Remote instance is permanently masked for the lifetime of the current Context.",
-                    },
-                };
-            }
-            default:
-                throw createError({
-                    code: errorCodes.targetInvalid,
-                    message: `Unknown environ_remote command ${JSON.stringify(commandInput.command)}. Use command='help' for the current command catalog.`,
-                    retryable: false,
-                });
-        }
+            signal,
+            targetInstance: this.#instanceName,
+            toolName: mcpRemoteEnvironmentToolName,
+            worker: this.#worker,
+        });
+        return { ctxId: resultCtxId, structuredContent };
     }
 
     async #environmentInfo(
@@ -230,157 +238,156 @@ export class McpEndpointHandlerEnvironment {
         if (workspace === undefined) {
             throw contextWorkspaceRequired(record.ctxId, this.#instanceName);
         }
-
-        await this.#gateway?.beforeModelToolCall?.(
-            this.#instanceName,
-            mcpEnvironmentToolName,
-            {
-                ctxId: record.ctxId,
-                requestId: requestContext.requestId,
-                source: "mcp",
-                workspace,
-            },
-        );
-        if (!resolution.created) {
-            record = await this.#touchEnvironmentContext(
-                record,
-                requestContext,
-            );
-            resolution = { ...resolution, record };
-        }
-
-        const { alerts, environment, prepared, skillsDirectory } =
-            await this.#prepareEnvironment(workspace);
+        const context: ToolCallContext = {
+            ctxId: record.ctxId,
+            requestId: requestContext.requestId,
+            source: "mcp",
+            workspace,
+        };
+        let attachedCtxId = record.ctxId;
+        let preparedWorkspace: string | undefined;
         try {
-            if (
-                !resolution.created &&
-                previousWorkspace !== undefined &&
-                previousWorkspace !== prepared.workspace
-            ) {
-                await this.#assertWorkspaceSwitchAvailable(
-                    record.ctxId,
-                    previousWorkspace,
-                );
-            }
-            await this.#worker.appendMcpToolCalled(mcpEnvironmentToolName, {
-                ctxId: record.ctxId,
-                requestId: requestContext.requestId,
-            });
-            const context: ToolCallContext = {
-                ctxId: record.ctxId,
-                requestId: requestContext.requestId,
-                source: "mcp",
-                workspace: prepared.workspace,
-            };
-            const result = await callMcpEndpointToolOperation({
+            const structuredContent = await callMcpEndpointToolOperation({
                 context,
-                input: {},
+                input,
                 localInstance: this.#instanceName,
-                operation: async () => ({
-                    ...this.#contextSelector.expose(record),
-                    expiresAt: record.expiresAt,
-                    status: record.status,
-                    comment: [
+                operation: async () => {
+                    if (!resolution.created) {
+                        record = await this.#touchEnvironmentContext(
+                            record,
+                            requestContext,
+                        );
+                        resolution = { ...resolution, record };
+                    }
+
+                    const { alerts, environment, prepared, skillsDirectory } =
+                        await this.#prepareEnvironment(workspace);
+                    preparedWorkspace = prepared.workspace;
+                    if (
+                        !resolution.created &&
+                        previousWorkspace !== undefined &&
+                        previousWorkspace !== prepared.workspace
+                    ) {
+                        await this.#assertWorkspaceSwitchAvailable(
+                            record.ctxId,
+                            previousWorkspace,
+                        );
+                    }
+                    await this.#worker.appendMcpToolCalled(
+                        mcpEnvironmentToolName,
+                        {
+                            ctxId: record.ctxId,
+                            requestId: requestContext.requestId,
+                        },
+                    );
+                    const result = {
+                        ...this.#contextSelector.expose(record),
+                        expiresAt: record.expiresAt,
+                        status: record.status,
+                        comment: [
+                            ...(prepared.projectMemoryPresent !== false
+                                ? [
+                                      `Read ${prepared.projectMemoryAgentFile} before working.`,
+                                      `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                                  ]
+                                : []),
+                            `Use ${prepared.temporaryDirectory} for all temporary files.`,
+                            ...modelDevshellComments(
+                                this.#gateway?.modelCommands?.(
+                                    this.#instanceName,
+                                ) ?? [],
+                            ),
+                            ...alerts.map((advice) => advice.text),
+                        ],
+                        instance: this.#instanceName,
+                        platform: {
+                            arch: environment.platform.arch,
+                            ...(environment.platform.distribution === undefined
+                                ? {}
+                                : {
+                                      distribution:
+                                          environment.platform.distribution,
+                                  }),
+                            os: environment.platform.os,
+                            ...(environment.platform.packageManager === undefined
+                                ? {}
+                                : {
+                                      packageManager:
+                                          environment.platform.packageManager,
+                                  }),
+                            ...(environment.platform.shell === undefined
+                                ? {}
+                                : { shell: environment.platform.shell.kind }),
+                        },
                         ...(prepared.projectMemoryPresent !== false
-                            ? [
-                                  `Read ${prepared.projectMemoryAgentFile} before working.`,
-                                  `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
-                              ]
-                            : []),
-                        `Use ${prepared.temporaryDirectory} for all temporary files.`,
-                        ...modelDevshellComments(
-                            this.#gateway?.modelCommands?.(
-                                this.#instanceName,
-                            ) ?? [],
-                        ),
-                        ...alerts.map((advice) => advice.text),
-                    ],
-                    instance: this.#instanceName,
-                    platform: {
-                        arch: environment.platform.arch,
-                        ...(environment.platform.distribution === undefined
+                            ? {
+                                  projectMemoryAgentFile:
+                                      prepared.projectMemoryAgentFile,
+                                  projectMemoryDirectory:
+                                      prepared.projectMemoryDirectory,
+                              }
+                            : {}),
+                        ...(this.#remoteEnvironment === undefined
                             ? {}
                             : {
-                                  distribution:
-                                      environment.platform.distribution,
+                                  remoteEnvironment: {
+                                      commands: remoteEnvironmentCommandHints(),
+                                  },
                               }),
-                        os: environment.platform.os,
-                        ...(environment.platform.packageManager === undefined
-                            ? {}
-                            : {
-                                  packageManager:
-                                      environment.platform.packageManager,
-                              }),
-                        ...(environment.platform.shell === undefined
-                            ? {}
-                            : { shell: environment.platform.shell.kind }),
-                    },
-                    ...(prepared.projectMemoryPresent !== false
-                        ? {
-                              projectMemoryAgentFile:
-                                  prepared.projectMemoryAgentFile,
-                              projectMemoryDirectory:
-                                  prepared.projectMemoryDirectory,
-                          }
-                        : {}),
-                    ...(this.#remoteEnvironment === undefined
-                        ? {}
-                        : {
-                              remoteEnvironment: {
-                                  commands: remoteEnvironmentCommandHints(),
-                              },
-                          }),
-                    skillsDirectory,
-                    temporaryDirectory: prepared.temporaryDirectory,
-                    workspace: prepared.workspace,
-                }),
+                        skillsDirectory,
+                        temporaryDirectory: prepared.temporaryDirectory,
+                        workspace: prepared.workspace,
+                    };
+
+                    const attached = await this.#contextRegistry.attachEnvironment(
+                        record.ctxId,
+                        {
+                            instance: this.#instanceName,
+                            temporaryDirectory: prepared.temporaryDirectory,
+                            workspace: prepared.workspace,
+                        },
+                    );
+                    attachedCtxId = attached.ctxId;
+                    for (const binding of resolution.bindings) {
+                        await this.#contextRegistry.bindExternal(
+                            attached.ctxId,
+                            binding,
+                            {
+                                principal: requestContext.principal,
+                            },
+                        );
+                    }
+                    if (
+                        !resolution.created &&
+                        previousWorkspace !== undefined &&
+                        previousWorkspace !== prepared.workspace
+                    ) {
+                        await this.#releaseAlertsIfUnused(
+                            this.#instanceName,
+                            previousWorkspace,
+                        ).catch(() => undefined);
+                    }
+                    return result;
+                },
                 signal,
                 targetInstance: this.#instanceName,
                 toolName: mcpEnvironmentToolName,
                 worker: this.#worker,
             });
-
-            const attached = await this.#contextRegistry.attachEnvironment(
-                record.ctxId,
-                {
-                    instance: this.#instanceName,
-                    temporaryDirectory: prepared.temporaryDirectory,
-                    workspace: prepared.workspace,
-                },
-            );
-            for (const binding of resolution.bindings) {
-                await this.#contextRegistry.bindExternal(
-                    attached.ctxId,
-                    binding,
-                    {
-                        principal: requestContext.principal,
-                    },
-                );
-            }
-            if (
-                !resolution.created &&
-                previousWorkspace !== undefined &&
-                previousWorkspace !== prepared.workspace
-            ) {
-                await this.#releaseAlertsIfUnused(
-                    this.#instanceName,
-                    previousWorkspace,
-                ).catch(() => undefined);
-            }
             return {
-                ctxId: attached.ctxId,
-                structuredContent: result,
+                ctxId: attachedCtxId,
+                structuredContent,
             };
         } catch (error) {
             if (resolution.created) {
                 await this.#rollbackUndisclosedContext(
                     record.ctxId,
-                    prepared.workspace,
+                    preparedWorkspace ?? workspace,
                 ).catch(() => undefined);
-            } else {
+            } else if (preparedWorkspace !== undefined) {
                 await this.#releaseAlertsIfUnused(
                     this.#instanceName,
-                    prepared.workspace,
+                    preparedWorkspace,
                 ).catch(() => undefined);
             }
             throw error;

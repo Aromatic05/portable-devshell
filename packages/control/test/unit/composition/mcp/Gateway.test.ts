@@ -117,7 +117,7 @@ function createTodoReportHarness() {
                 },
             },
             contextMessages: {
-                async beforeModelToolCall(_ctxId: string, toolName: string) {
+                async beforeTodoToolCall(_ctxId: string, toolName: string) {
                     if (stoppedByCommentId !== undefined) {
                         if (pendingResumeCommentId !== undefined) {
                             const resume = entries.find(
@@ -384,7 +384,7 @@ test("four todo.invalid failures within two minutes disable Todo for five minute
     }
 
     await assertTodoUseOtherTools(
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_read",
             harness.context,
@@ -392,14 +392,14 @@ test("four todo.invalid failures within two minutes disable Todo for five minute
     );
     harness.advance(299_999);
     await assertTodoUseOtherTools(
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_report",
             harness.context,
         ),
     );
     harness.advance(1);
-    await harness.gateway.beforeModelToolCall(
+    await harness.gateway.beforeTodoToolCall(
         "local",
         "todo_report",
         harness.context,
@@ -449,18 +449,18 @@ test("todo_report serializes concurrent autonomous bursts through the same bucke
 test("todo_read and todo_write share a bucket that is independent from todo_report", async () => {
     const harness = createTodoReportHarness();
 
-    await harness.gateway.beforeModelToolCall(
+    await harness.gateway.beforeTodoToolCall(
         "local",
         "todo_read",
         harness.context,
     );
-    await harness.gateway.beforeModelToolCall(
+    await harness.gateway.beforeTodoToolCall(
         "local",
         "todo_write",
         harness.context,
     );
     await assertTodoUseOtherTools(
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_read",
             harness.context,
@@ -471,7 +471,7 @@ test("todo_read and todo_write share a bucket that is independent from todo_repo
     await harness.report("report two");
     await assertTodoUseOtherTools(harness.report("report three"));
     await assertTodoUseOtherTools(
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_read",
             harness.context,
@@ -479,7 +479,7 @@ test("todo_read and todo_write share a bucket that is independent from todo_repo
     );
 
     harness.advance(30_000);
-    await harness.gateway.beforeModelToolCall(
+    await harness.gateway.beforeTodoToolCall(
         "local",
         "todo_write",
         harness.context,
@@ -491,17 +491,17 @@ test("todo_read and todo_write serialize concurrent bursts through their shared 
     const harness = createTodoReportHarness();
 
     const results = await Promise.allSettled([
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_read",
             harness.context,
         ),
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_write",
             harness.context,
         ),
-        harness.gateway.beforeModelToolCall(
+        harness.gateway.beforeTodoToolCall(
             "local",
             "todo_read",
             harness.context,
@@ -515,197 +515,6 @@ test("todo_read and todo_write serialize concurrent bursts through their shared 
     assert.equal(
         results.filter((result) => result.status === "rejected").length,
         1,
-    );
-});
-
-test("a normal Comment never limits tools and its reply bypasses the autonomous bucket", async () => {
-    const harness = createTodoReportHarness();
-    await harness.report("autonomous one");
-    await harness.report("autonomous two");
-    harness.deliverComment("comment-1", "Please answer this normally");
-    for (let index = 0; index < 10; index += 1) {
-        await harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        );
-    }
-    await harness.report("reply to comment");
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
-    await assertTodoUseOtherTools(harness.report("autonomous exhausted"));
-    harness.advance(30_000);
-    await harness.report("autonomous after refill");
-});
-
-test("a #push Comment gets five ordinary calls then requires todo_report", async () => {
-    const harness = createTodoReportHarness();
-    harness.deliverComment("comment-push", "#push Please answer this first");
-    for (let index = 0; index < 5; index += 1) {
-        await harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        );
-    }
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                "control.modelReplyRequired",
-            );
-            assert.equal(
-                (error as { details?: { toolCallBudget?: number } }).details
-                    ?.toolCallBudget,
-                5,
-            );
-            return true;
-        },
-    );
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "todo_report",
-        harness.context,
-    );
-    await harness.report("reply to pushed comment");
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
-});
-
-test("a repeated #push never replenishes an already running tool budget", async () => {
-    const harness = createTodoReportHarness();
-    harness.deliverComment("comment-push-1", "#push First reminder");
-    for (let index = 0; index < 4; index += 1) {
-        await harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        );
-    }
-    harness.deliverComment("comment-push-2", "#push Still waiting");
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "control.modelReplyRequired",
-    );
-});
-
-test("a #stop Comment blocks every model tool until the user queues #resume", async () => {
-    const harness = createTodoReportHarness();
-    harness.deliverComment("comment-stop", "#stop Stop working now");
-    for (const toolName of ["file_read", "todo_report", "environ_remote"]) {
-        await assert.rejects(
-            harness.gateway.beforeModelToolCall(
-                "local",
-                toolName,
-                harness.context,
-            ),
-            (error: unknown) => {
-                assert.equal(
-                    (error as { code?: string }).code,
-                    "control.modelStopped",
-                );
-                return true;
-            },
-        );
-    }
-    harness.queueComment("comment-resume", "#resume");
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "control.modelResumed",
-    );
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
-});
-
-test("a queued #stop fences the next model tool before normal Comment delivery", async () => {
-    const harness = createTodoReportHarness();
-    harness.queueComment("comment-stop-queued", "#stop Stop before this tool");
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "control.modelStopped",
-    );
-});
-
-test("#resume is shown to the model before the first resumed tool is allowed", async () => {
-    const harness = createTodoReportHarness();
-    harness.deliverComment("comment-stop-resume", "#stop Stop first");
-    harness.queueComment(
-        "comment-resume-text",
-        "#resume Continue, but do not delete files",
-    );
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                "control.modelResumed",
-            );
-            assert.match(
-                String((error as Error).message),
-                /do not delete files/u,
-            );
-            return true;
-        },
-    );
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
-});
-
-test("#stop cannot disappear when older conversation history falls outside the read window", async () => {
-    const harness = createTodoReportHarness();
-    harness.deliverComment("comment-stop-long", "#stop Stay stopped");
-    for (let index = 0; index < 450; index += 1) {
-        harness.deliverComment(`comment-${index}`, `ordinary ${index}`);
-    }
-    await assert.rejects(
-        harness.gateway.beforeModelToolCall(
-            "local",
-            "file_read",
-            harness.context,
-        ),
-        (error: unknown) =>
-            (error as { code?: string }).code === "control.modelStopped",
     );
 });
 
@@ -724,11 +533,7 @@ test("failed reports neither spend a token nor satisfy a Comment obligation", as
     harness.failNextReport();
     await assert.rejects(harness.report("reply"), /report failed/u);
     await harness.report("reply");
-    await harness.gateway.beforeModelToolCall(
-        "local",
-        "file_read",
-        harness.context,
-    );
+    await assertTodoUseOtherTools(harness.report("autonomous after reply"));
 });
 
 test("closing an MCP tool session releases worker-owned session state", async () => {

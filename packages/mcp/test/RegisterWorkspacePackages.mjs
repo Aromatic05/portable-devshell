@@ -56,6 +56,10 @@ const workspacePackages = new Map([
             .href,
     ],
     [
+        "@portable-devshell/comment-extension",
+        new URL("../../../extensions/comment/src/index.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/control",
         new URL("../../control/src/index.ts", import.meta.url).href,
     ],

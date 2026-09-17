@@ -6,7 +6,7 @@ import {
     composeComments,
     errorHint,
     mergeComments,
-} from "@portable-devshell/shared";
+} from "../../src/index.ts";
 
 test("structured advice uses stable codes for deduplication without exposing metadata", () => {
     assert.deepEqual(

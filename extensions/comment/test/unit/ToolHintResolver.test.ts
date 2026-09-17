@@ -6,7 +6,7 @@ import {
     resolveErrorHints,
     resolveResultHints,
     type ToolDiagnosticHint,
-} from "@portable-devshell/shared";
+} from "../../src/index.ts";
 
 function codes(hints: readonly ToolDiagnosticHint[]): string[] {
     return hints.map((hint) => hint.code);

@@ -1,4 +1,4 @@
-import type { JsonValue } from "../../../protocol/JsonValue.js";
+import type { JsonValue } from "@portable-devshell/shared";
 
 export function asRecord(
     value: JsonValue | undefined,

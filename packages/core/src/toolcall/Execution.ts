@@ -33,6 +33,7 @@ import {
     ToolCallBoundarySequence,
     type ToolCallBoundaryProvider,
 } from "./boundary/Sequence.js";
+import type { ToolCallBoundaryContext } from "./boundary/Review.js";
 
 interface ToolCallExecutionOptions {
     approval: ToolCallApproval;
@@ -152,6 +153,10 @@ export class ToolCallExecution {
         const scope = this.#audit.createScope(toolName, input, context);
         const hostRecorded = recording === "host";
         const boundarySignal = signal ?? new AbortController().signal;
+        const boundaryContext: ToolCallBoundaryContext = Object.freeze({
+            ...context,
+            instance: this.#instanceName,
+        });
         if (hostRecorded) await this.#audit.requested(scope);
 
         let boundaryLease;
@@ -167,7 +172,7 @@ export class ToolCallExecution {
             let review;
             try {
                 review = await boundary.review({
-                    context,
+                    context: boundaryContext,
                     direction: "inbound",
                     kind: "call",
                     payload: input,
@@ -180,17 +185,32 @@ export class ToolCallExecution {
             }
 
             if (review.decision === "reject") {
+                const rejectionMessage =
+                    review.reason ??
+                    `Tool call ${toolName} was rejected by review.`;
+                const rejectionCause =
+                    review.error === undefined
+                        ? undefined
+                        : createError({
+                              code: review.error.code,
+                              ...(review.error.details === undefined
+                                  ? {}
+                                  : { details: review.error.details }),
+                              message: rejectionMessage,
+                              retryable: false,
+                          });
                 const error = createError({
                     code: errorCodes.coreToolCallRejected,
+                    ...(rejectionCause === undefined
+                        ? {}
+                        : { cause: rejectionCause }),
                     details: {
                         ...(review.reason === undefined
                             ? {}
                             : { reason: review.reason }),
                         toolName,
                     },
-                    message:
-                        review.reason ??
-                        `Tool call ${toolName} was rejected by review.`,
+                    message: rejectionMessage,
                     retryable: false,
                 });
                 if (hostRecorded)
@@ -255,7 +275,7 @@ export class ToolCallExecution {
                               if (progressFailure !== undefined) return;
                               try {
                                   const outerProgress = await boundary.rewrite({
-                                      context,
+                                      context: boundaryContext,
                                       direction: "outbound",
                                       kind: "progress",
                                       payload: progress,
@@ -263,7 +283,7 @@ export class ToolCallExecution {
                                       toolName,
                                   });
                                   await boundary.review({
-                                      context,
+                                      context: boundaryContext,
                                       direction: "outbound",
                                       kind: "progress",
                                       payload: outerProgress,
@@ -298,7 +318,7 @@ export class ToolCallExecution {
                             approvalState,
                         );
                     const innerInput = await boundary.rewrite({
-                        context,
+                        context: boundaryContext,
                         direction: "inbound",
                         kind: "call",
                         payload: invocationInput,
@@ -320,7 +340,7 @@ export class ToolCallExecution {
                 let result: JsonValue;
                 try {
                     result = await boundary.rewrite({
-                        context,
+                        context: boundaryContext,
                         direction: "outbound",
                         kind: "result",
                         payload: adaptedResult,
@@ -353,7 +373,7 @@ export class ToolCallExecution {
                     );
                 }
                 await boundary.review({
-                    context,
+                    context: boundaryContext,
                     direction: "outbound",
                     kind: "result",
                     payload: result,
@@ -371,7 +391,7 @@ export class ToolCallExecution {
                     outerFailure = await rewriteToolCallError(
                         boundary,
                         failure,
-                        context,
+                        boundaryContext,
                         boundarySignal,
                         toolName,
                     );
@@ -415,7 +435,7 @@ export class ToolCallExecution {
                         );
                     }
                     await boundary.review({
-                        context,
+                        context: boundaryContext,
                         direction: "outbound",
                         kind: "error",
                         payload: outerFailure.payload,
@@ -443,7 +463,7 @@ export class ToolCallExecution {
                     );
                 }
                 await boundary.review({
-                    context,
+                    context: boundaryContext,
                     direction: "outbound",
                     kind: "error",
                     payload: outerFailure.payload,
@@ -467,7 +487,7 @@ interface ToolCallOuterError {
 async function rewriteToolCallError(
     boundary: ToolCallBoundarySequence,
     error: unknown,
-    context: ToolCallContext,
+    context: ToolCallBoundaryContext,
     signal: AbortSignal,
     toolName: string,
 ): Promise<ToolCallOuterError> {

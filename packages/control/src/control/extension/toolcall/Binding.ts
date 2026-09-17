@@ -8,12 +8,15 @@ import {
     review,
     rewrite,
     type ToolCallReviewBinding,
+    type ToolCallReviewInvocation,
     type ToolCallRewriteBinding,
 } from "@portable-devshell/extension/toolcall";
 
 import type { ExtensionHost } from "../Host.js";
+import { ToolCallCommentReview } from "./Comment.js";
 
 export class ToolCallExtensionBinding {
+    readonly #comment: ToolCallCommentReview;
     readonly #extensions: Pick<
         ExtensionHost,
         "acquireRegistration" | "listDeclarations"
@@ -24,7 +27,9 @@ export class ToolCallExtensionBinding {
             ExtensionHost,
             "acquireRegistration" | "listDeclarations"
         >,
+        comment: ToolCallCommentReview = new ToolCallCommentReview(),
     ) {
+        this.#comment = comment;
         this.#extensions = extensions;
     }
 
@@ -53,10 +58,17 @@ export class ToolCallExtensionBinding {
     ): Promise<readonly ToolCallReview[]> {
         const bindings: ToolCallReview[] = [];
         for (const { id } of this.#extensions.listDeclarations(review.id)) {
-            const { lease, registration } =
+            const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(review.id, id);
             releases.push(() => lease.release());
-            bindings.push(registration.binding as ToolCallReviewBinding);
+            const binding = registration.binding as ToolCallReviewBinding;
+            bindings.push(async (input) => {
+                const invocation = input as ToolCallReviewInvocation;
+                return await binding(
+                    invocation,
+                    this.#comment.context(extensionId, invocation),
+                );
+            });
         }
         return bindings;
     }

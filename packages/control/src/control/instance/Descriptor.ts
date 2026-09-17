@@ -46,7 +46,7 @@ export type ContextMessageControlDecision =
     | { comment?: string; commentId: string; kind: "stop" };
 
 export interface InstanceContextMessagePort {
-    beforeModelToolCall(
+    reviewToolCall(
         ctxId: string,
         toolName: string,
         requestId?: string,
