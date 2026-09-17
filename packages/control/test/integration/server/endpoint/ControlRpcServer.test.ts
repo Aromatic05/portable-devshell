@@ -460,6 +460,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         JSON.stringify(initialPreferences.error),
     );
     assert.deepEqual(initialPreferences.payload, {
+        hiddenContexts: {},
         orderByWorkspace: {},
         titles: {},
         version: 1,
@@ -485,6 +486,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         )
     ).payload;
     assert.deepEqual(updated, {
+        hiddenContexts: {},
         orderByWorkspace: {
             "/work/portable-devshell": ["alpha\u0000ctx-b", "alpha\u0000ctx-a"],
         },
