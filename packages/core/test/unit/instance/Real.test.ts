@@ -48,6 +48,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { ToolCallBoundarySequence } from "../../../src/toolcall/boundary/Sequence.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -731,7 +732,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     }
 });
 
-test("WorkerInstance audits control-owned tool calls while the worker is stopped", async () => {
+test("WorkerInstance runs control-owned tool operations through ToolCall Boundary while the worker is stopped", async () => {
     const homeDirectory = await createTestTempDirectory("control-audit");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
@@ -746,7 +747,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
             requestId: "request-control-audit",
             source: "mcp",
         } as const;
-        const completed = await instance.auditToolCall(
+        const completed = await instance.callToolOperation(
             "todo_read",
             {},
             context,
@@ -755,7 +756,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         assert.deepEqual(completed, { revision: 7 });
 
         await assert.rejects(
-            instance.auditToolCall(
+            instance.callToolOperation(
                 "instance_status",
                 { instance: "missing" },
                 context,
@@ -778,7 +779,7 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         );
 
         await assert.rejects(
-            instance.auditToolCall(
+            instance.callToolOperation(
                 "artifact_transfer",
                 { operation: "status", transferId: "transfer-1" },
                 context,
@@ -853,14 +854,17 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
                 .filter((event) => jsonRecord(event.data)?.callId === callId)
                 .map((event) => event.type);
         assert.deepEqual(eventTypesForCall(records[0]?.callId), [
+            "toolCall.queued",
             "toolCall.running",
             "toolCall.completed",
         ]);
         assert.deepEqual(eventTypesForCall(records[1]?.callId), [
+            "toolCall.queued",
             "toolCall.running",
             "toolCall.failed",
         ]);
         assert.deepEqual(eventTypesForCall(records[2]?.callId), [
+            "toolCall.queued",
             "toolCall.running",
             "toolCall.cancelled",
         ]);
@@ -872,6 +876,64 @@ test("WorkerInstance audits control-owned tool calls while the worker is stopped
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
         assert.deepEqual(records[0]?.output, { revision: 7 });
     } finally {
+        await instance.close();
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall Boundary", async () => {
+    const homeDirectory = await createTestTempDirectory("internal-boundary");
+    const harness = createWorkerInstanceHarness();
+    const instance = new WorkerInstanceFactory().create({
+        homeDirectory,
+        name: asInstanceName("internal-boundary"),
+        transport: harness.transport,
+    });
+    let boundaryAcquires = 0;
+    let reviews = 0;
+    let rewrites = 0;
+
+    instance.bindToolCallBoundary(async () => {
+        boundaryAcquires += 1;
+        return {
+            release() {},
+            sequence: new ToolCallBoundarySequence({
+                reviews: [async () => {
+                    reviews += 1;
+                    return { decision: "accept" };
+                }],
+                rewrites: [async (input) => {
+                    rewrites += 1;
+                    return input.text;
+                }],
+            }),
+        };
+    });
+
+    try {
+        await instance.start();
+        const internal = instance.invokeToolInternal(
+            "bash_run",
+            { command: "pwd" },
+            cliToolCallContext,
+        );
+        await harness.waitForMethod("bash_run");
+        harness.respond("bash_run", {
+            exitCode: 0,
+            stderr: "",
+            stdout: "/tmp/workspace\n",
+        });
+
+        assert.equal(
+            jsonRecord(await internal)?.stdout,
+            "/tmp/workspace\n",
+        );
+        assert.equal(boundaryAcquires, 0);
+        assert.equal(reviews, 0);
+        assert.equal(rewrites, 0);
+        assert.deepEqual(await instance.readToolCalls(), []);
+    } finally {
+        await instance.stop();
         await instance.close();
         await rm(homeDirectory, { force: true, recursive: true });
     }

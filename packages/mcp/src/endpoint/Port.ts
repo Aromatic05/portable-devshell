@@ -24,11 +24,11 @@ import type {
 import type { McpEndpointCatalogWorker } from "./tool/Catalog.js";
 
 export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
-    auditToolCall<T extends JsonValue>(
+    callToolOperation<T extends JsonValue>(
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
@@ -119,12 +119,12 @@ export interface McpInstanceGateway {
         toolName: string,
         context: ToolCallContext,
     ): Promise<void>;
-    auditToolCall<T extends JsonValue>(
+    callToolOperation<T extends JsonValue>(
         instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T>;
     callTool(

@@ -630,13 +630,13 @@ function createWorkspaceHost(
                 } as never,
                 name: "demo",
                 worker: {
-                    async auditToolCall(
+                    async callToolOperation(
                         _toolName: string,
-                        _input: unknown,
+                        input: unknown,
                         _context: unknown,
-                        operation: () => Promise<unknown>,
+                        operation: (callId: string, input: unknown) => Promise<unknown>,
                     ) {
-                        return await operation();
+                        return await operation("call-test", input);
                     },
                     async appendMcpSessionClosed() {},
                     async appendMcpSessionOpened() {},

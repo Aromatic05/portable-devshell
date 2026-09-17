@@ -524,14 +524,14 @@ export class WorkerInstance {
         );
     }
 
-    async auditToolCall<T extends JsonValue>(
+    async callToolOperation<T extends JsonValue>(
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T> {
-        return await this.#tool.auditToolCall(
+        return await this.#tool.callOperation(
             toolName,
             input,
             context,

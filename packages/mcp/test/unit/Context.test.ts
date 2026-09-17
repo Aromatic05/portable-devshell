@@ -1554,13 +1554,13 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         contextRegistry: registry,
         instanceName: "demo-local",
         worker: {
-            async auditToolCall<T extends JsonValue>(
+            async callToolOperation<T extends JsonValue>(
                 _toolName: string,
-                _input: JsonValue,
+                input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string) => Promise<T>,
+                operation: (callId: string, input: JsonValue) => Promise<T>,
             ): Promise<T> {
-                return await operation("call-test");
+                return await operation("call-test", input);
             },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},

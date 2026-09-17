@@ -23,7 +23,6 @@ import {
     readByteLength,
     stripCommandStreams,
 } from "./Result.js";
-import { throwIfToolCallAborted } from "../Error.js";
 
 interface WorkerInstanceToolAuditOptions {
     appendEvent(
@@ -295,99 +294,6 @@ export class WorkerInstanceToolAudit {
                 new Date().toISOString(),
             )
             .catch(() => undefined);
-    }
-
-    async auditOperation<T extends JsonValue>(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T> {
-        throwIfToolCallAborted(signal);
-        const scope = this.createScope(toolName, input, context);
-
-        await this.#toolCallHistory.started(
-            scope.callId,
-            scope.toolName,
-            scope.inputSummary,
-            scope.context,
-            scope.startedAt,
-            "running",
-            scope.association,
-            scope.input,
-        );
-        await this.#appendEvent(
-            "toolCall.running",
-            toEventData({
-                ...scope.eventContext,
-                startedAt: scope.startedAt,
-                status: "running",
-            }),
-        );
-
-        try {
-            throwIfToolCallAborted(signal);
-            const result = await operation(scope.callId);
-            const completedAt = new Date().toISOString();
-            await this.#toolCallHistory.completed(scope.callId, completedAt, {
-                output: result,
-            });
-            await this.#appendEvent(
-                "toolCall.completed",
-                toEventData({
-                    ...scope.eventContext,
-                    completedAt,
-                    startedAt: scope.startedAt,
-                    status: "completed",
-                }),
-            );
-            return result;
-        } catch (error) {
-            const completedAt = new Date().toISOString();
-            const errorCode = getErrorCode(
-                error,
-                errorCodes.coreProviderFailed,
-            );
-            const cancelled =
-                errorCode === errorCodes.coreToolCallCancelled ||
-                errorCode === "tool.cancelled";
-
-            if (cancelled) {
-                await this.#toolCallHistory.cancelled(
-                    scope.callId,
-                    errorCodes.coreToolCallCancelled,
-                    completedAt,
-                );
-                await this.#appendEvent(
-                    "toolCall.cancelled",
-                    toEventData({
-                        ...scope.eventContext,
-                        completedAt,
-                        errorCode: errorCodes.coreToolCallCancelled,
-                        startedAt: scope.startedAt,
-                        status: "cancelled",
-                    }),
-                );
-            } else {
-                await this.#toolCallHistory.failed(
-                    scope.callId,
-                    errorCode,
-                    completedAt,
-                );
-                await this.#appendEvent(
-                    "toolCall.failed",
-                    toEventData({
-                        ...scope.eventContext,
-                        completedAt,
-                        errorCode,
-                        startedAt: scope.startedAt,
-                        status: "failed",
-                    }),
-                );
-            }
-            throw error;
-        }
     }
 
     async read(query: ToolCallQuery = {}): Promise<ToolCallRecord[]> {

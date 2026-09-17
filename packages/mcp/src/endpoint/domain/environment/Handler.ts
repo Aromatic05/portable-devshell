@@ -26,7 +26,7 @@ import type {
     McpEndpointWorkerPort,
 } from "../../Port.js";
 import {
-    auditMcpEndpointTool,
+    callMcpEndpointToolOperation,
     mcpEndpointToolNotExposed,
     requireMcpEndpointEnvironment,
 } from "../../dispatch/Support.js";
@@ -272,7 +272,7 @@ export class McpEndpointHandlerEnvironment {
                 source: "mcp",
                 workspace: prepared.workspace,
             };
-            const result = await auditMcpEndpointTool({
+            const result = await callMcpEndpointToolOperation({
                 context,
                 input: {},
                 localInstance: this.#instanceName,

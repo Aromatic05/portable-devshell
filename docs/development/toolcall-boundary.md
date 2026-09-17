@@ -447,19 +447,19 @@ Rewrite stack
 
 否则会产生双重审批、双重审计和 secret 重复 expand/mask。
 
-## 14. 当前需要统一的入口
+## 14. 统一入口
 
-第一阶段实现必须覆盖三类当前路径：
+第一阶段覆盖三类 external entry：
 
 ### 14.1 Worker tool call
 
-现有 `WorkerInstanceToolExecution` 是主要调用链，需要成为 Boundary 的正常入口。
+`ToolCallExecution.call()` 是 Worker-backed ToolCall 的正常入口。它在进入共享 Boundary 生命周期前检查 Worker readiness，真正的 Worker RPC invocation 只作为 inner executor。
 
 ### 14.2 Control-owned MCP tool
 
-当前 `auditMcpEndpointTool()` 通过 `worker.auditToolCall(operation)` 直接建立 Audit scope，并绕过正常 Approval / Scheduler / Boundary。
+Control-owned MCP tool 通过 `WorkerInstance.callToolOperation()` 进入同一个 `ToolCallExecution` 生命周期。它复用 Review、Scheduler、Approval、Audit 和 Rewrite，但以 Control operation callback 作为 inner executor，因此不依赖 Worker readiness。
 
-这条路径必须迁移到统一 Boundary，不能继续作为长期旁路。
+operation callback 接收 inbound Rewrite 后的 input；返回值必须经过 outbound Rewrite 后才能进入 Audit 和 MCP structured result。旧的 audit-only operation path 不再存在。
 
 ### 14.3 Extension-originated worker call
 

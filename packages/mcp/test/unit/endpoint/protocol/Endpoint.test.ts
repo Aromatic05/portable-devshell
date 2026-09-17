@@ -2045,14 +2045,14 @@ function createWorkerHarness(options?: {
         }>,
         events,
         worker: {
-            async auditToolCall<T extends JsonValue>(
+            async callToolOperation<T extends JsonValue>(
                 toolName: string,
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
-                operation: (callId: string) => Promise<T>,
+                operation: (callId: string, input: JsonValue) => Promise<T>,
             ): Promise<T> {
                 auditedCalls.push({ context, input, toolName });
-                return await operation("call-test");
+                return await operation("call-test", input);
             },
             async appendMcpSessionClosed(sessionId: string) {
                 events.push({ data: { sessionId }, type: "mcp.sessionClosed" });

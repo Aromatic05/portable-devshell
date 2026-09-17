@@ -61,7 +61,7 @@ import { McpEndpointHandlerInteraction } from "../domain/interaction/Handler.js"
 import { McpEndpointHandlerTodo } from "../domain/todo/Handler.js";
 import { McpEndpointHandlerWorker } from "../domain/worker/Handler.js";
 import {
-    auditMcpEndpointTool,
+    callMcpEndpointToolOperation,
     assertMcpEndpointReady,
     mcpEndpointToolNotExposed,
 } from "./Support.js";
@@ -1805,17 +1805,17 @@ export class McpEndpointDispatch {
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
-        const structuredResult = await auditMcpEndpointTool({
+        const structuredResult = await callMcpEndpointToolOperation({
             context,
             gateway: this.#gateway,
             input,
             localInstance: this.#instanceName,
-            operation: async (callId) => {
+            operation: async (callId, operationInput) => {
                 await recordProvenance(callId);
                 const result = await this.#callControlTool(
                     owner,
                     toolName,
-                    input,
+                    operationInput,
                     context,
                     callId,
                     signal,
@@ -1851,7 +1851,15 @@ export class McpEndpointDispatch {
             toolName,
             worker: this.#worker,
         });
-        return nativeResult ?? structuredResult;
+        if (nativeResult === undefined) return structuredResult;
+        return new McpNativeToolResult({
+            ...(nativeResult._meta === undefined
+                ? {}
+                : { _meta: nativeResult._meta }),
+            content: nativeResult.content,
+            isError: nativeResult.isError,
+            structuredContent: structuredResult,
+        });
     }
 
     async #callControlTool(

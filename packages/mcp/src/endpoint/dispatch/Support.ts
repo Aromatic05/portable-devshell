@@ -107,19 +107,19 @@ export function requireMcpEndpointGateway(
     });
 }
 
-export async function auditMcpEndpointTool<T extends JsonValue>(options: {
+export async function callMcpEndpointToolOperation<T extends JsonValue>(options: {
     context: ToolCallContext;
     gateway?: McpInstanceGateway;
     input: JsonValue;
     localInstance: string;
-    operation: (callId: string) => Promise<T>;
+    operation: (callId: string, input: JsonValue) => Promise<T>;
     signal?: AbortSignal;
     targetInstance: string;
     toolName: string;
-    worker: Pick<McpEndpointWorkerPort, "auditToolCall">;
+    worker: Pick<McpEndpointWorkerPort, "callToolOperation">;
 }): Promise<T> {
     if (options.targetInstance === options.localInstance) {
-        return await options.worker.auditToolCall(
+        return await options.worker.callToolOperation(
             options.toolName,
             options.input,
             options.context,
@@ -130,7 +130,7 @@ export async function auditMcpEndpointTool<T extends JsonValue>(options: {
     return await requireMcpEndpointGateway(
         options.gateway,
         options.localInstance,
-    ).auditToolCall(
+    ).callToolOperation(
         options.targetInstance,
         options.toolName,
         options.input,

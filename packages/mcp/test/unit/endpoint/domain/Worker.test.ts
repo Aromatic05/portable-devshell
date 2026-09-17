@@ -922,13 +922,13 @@ function createWorker(
     } = {},
 ) {
     return {
-        async auditToolCall<T extends JsonValue>(
+        async callToolOperation<T extends JsonValue>(
             _toolName: string,
-            _input: JsonValue,
+            input: JsonValue,
             _context: ToolCallContext,
-            operation: (callId: string) => Promise<T>,
+            operation: (callId: string, input: JsonValue) => Promise<T>,
         ): Promise<T> {
-            return await operation("call-test");
+            return await operation("call-test", input);
         },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
@@ -992,16 +992,16 @@ function createGateway(
                 callContext,
             );
         },
-        async auditToolCall<T extends JsonValue>(
+        async callToolOperation<T extends JsonValue>(
             instance: string,
             toolName: string,
             input: JsonValue,
             callContext: ToolCallContext,
-            operation: (callId: string) => Promise<T>,
+            operation: (callId: string, input: JsonValue) => Promise<T>,
             signal?: AbortSignal,
         ): Promise<T> {
-            if (overrides.auditToolCall !== undefined) {
-                return await overrides.auditToolCall(
+            if (overrides.callToolOperation !== undefined) {
+                return await overrides.callToolOperation(
                     instance,
                     toolName,
                     input,
@@ -1010,7 +1010,7 @@ function createGateway(
                     signal,
                 );
             }
-            return await operation("call-test");
+            return await operation("call-test", input);
         },
         async callTool(
             instance,

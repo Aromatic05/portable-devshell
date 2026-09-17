@@ -268,15 +268,15 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             async connectInstance() {
                 return { instance: "beta", status: "ready" };
             },
-            async auditToolCall<T extends JsonValue>(
+            async callToolOperation<T extends JsonValue>(
                 instance: string,
                 toolName: string,
-                _input: JsonValue,
+                input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string) => Promise<T>,
+                operation: (callId: string, input: JsonValue) => Promise<T>,
             ): Promise<T> {
                 audited.push({ instance, toolName });
-                return await operation(`audit-${toolName}`);
+                return await operation(`audit-${toolName}`, input);
             },
             async consumeContextMessages(
                 instance: string,
@@ -436,17 +436,17 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         const worker = {
             fail: false,
             async appendMcpToolCalled() {},
-            async auditToolCall<T extends JsonValue>(
+            async callToolOperation<T extends JsonValue>(
                 _toolName: string,
-                _input: JsonValue,
+                input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string) => Promise<T>,
+                operation: (callId: string, input: JsonValue) => Promise<T>,
             ): Promise<T> {
-                return await operation("call-test");
+                return await operation("call-test", input);
             },
             async callTool(
                 _toolName: string,
-                _input: JsonValue,
+                input: JsonValue,
                 _context: ToolCallContext,
                 _signal?: AbortSignal,
                 transformResult?: (

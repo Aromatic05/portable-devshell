@@ -104,14 +104,14 @@ function createWorker(
     const auditResults: Array<{ result: JsonValue; toolName: string }> = [];
     const releasedAlerts: string[] = [];
     const worker = {
-        async auditToolCall<T extends JsonValue>(
+        async callToolOperation<T extends JsonValue>(
             toolName: string,
-            _input: JsonValue,
+            input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string) => Promise<T>,
+            operation: (callId: string, input: JsonValue) => Promise<T>,
         ): Promise<T> {
             audited.push({ context, toolName });
-            const result = await operation("call-test");
+            const result = await operation("call-test", input);
             auditResults.push({ result, toolName });
             if (options.failAuditAfterOperation === true)
                 throw new Error("audit finalize failed");

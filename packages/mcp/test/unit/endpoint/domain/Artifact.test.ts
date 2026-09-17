@@ -93,13 +93,13 @@ test("remote artifact path operations request an instance workspace attachment",
 
 function createWorker(ready: boolean, hasSchema: boolean) {
     return {
-        async auditToolCall<T extends JsonValue>(
+        async callToolOperation<T extends JsonValue>(
             _toolName: string,
-            _input: JsonValue,
+            input: JsonValue,
             _context: ToolCallContext,
-            operation: (callId: string) => Promise<T>,
+            operation: (callId: string, input: JsonValue) => Promise<T>,
         ): Promise<T> {
-            return await operation("call-test");
+            return await operation("call-test", input);
         },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
@@ -129,16 +129,16 @@ function createGateway(
         ...overrides,
         async appendMcpToolCalled() {},
         assertReady() {},
-        async auditToolCall<T extends JsonValue>(
+        async callToolOperation<T extends JsonValue>(
             instance: string,
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string) => Promise<T>,
+            operation: (callId: string, input: JsonValue) => Promise<T>,
             signal?: AbortSignal,
         ): Promise<T> {
-            if (overrides.auditToolCall !== undefined) {
-                return await overrides.auditToolCall(
+            if (overrides.callToolOperation !== undefined) {
+                return await overrides.callToolOperation(
                     instance,
                     toolName,
                     input,
@@ -147,7 +147,7 @@ function createGateway(
                     signal,
                 );
             }
-            return await operation("call-test");
+            return await operation("call-test", input);
         },
         async callTool() {
             return {};
@@ -203,3 +203,56 @@ function createGateway(
         },
     };
 }
+
+test("native control result uses the Boundary-returned structured content", async () => {
+    const gateway = createGateway({
+        async viewArtifactImage() {
+            const blake3 = "b".repeat(64);
+            return {
+                blake3,
+                bytes: png.length,
+                content: png.toString("base64"),
+                encoding: "base64",
+                imageRef: `${blake3}.png`,
+                mediaType: "image/png",
+                name: "inner-secret.png",
+                source: {
+                    instance: "main-pc",
+                    path: "./inner-secret.png",
+                    type: "file",
+                },
+            };
+        },
+    });
+    const worker = createWorker(false, true);
+    worker.callToolOperation = async <T extends JsonValue>(
+        _toolName: string,
+        input: JsonValue,
+        _context: ToolCallContext,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
+    ): Promise<T> => {
+        const result = await operation("call-boundary", input);
+        return {
+            ...(result as Record<string, JsonValue>),
+            name: "outer-masked.png",
+        } as T;
+    };
+    const endpoint = new McpEndpointWorker({
+        contextRegistry,
+        gateway,
+        instanceName: "main-pc",
+        worker,
+    });
+
+    const result = await endpoint.callTool(
+        "artifact_viewImage",
+        withContext({ path: "./inner-secret.png" }),
+        context,
+    );
+
+    assert.deepEqual(
+        (result as { structuredContent?: Record<string, JsonValue> })
+            .structuredContent?.name,
+        "outer-masked.png",
+    );
+});

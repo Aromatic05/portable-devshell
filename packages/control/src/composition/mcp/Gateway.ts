@@ -158,15 +158,15 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         });
     }
 
-    async auditToolCall<T extends JsonValue>(
+    async callToolOperation<T extends JsonValue>(
         instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T> {
-        return await this.#requireDescriptor(instance).worker.auditToolCall(
+        return await this.#requireDescriptor(instance).worker.callToolOperation(
             toolName,
             input,
             context,

@@ -27,11 +27,11 @@ import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
 interface WorkerInstanceLike {
-    auditToolCall<T extends JsonValue>(
+    callToolOperation<T extends JsonValue>(
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string) => Promise<T>,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;

@@ -292,14 +292,14 @@ test("cross-instance audit is recorded by the target worker", async () => {
             modelExtensions: [],
             name: "remote-server",
             worker: {
-                async auditToolCall(
+                async callToolOperation(
                     toolName: string,
                     input: unknown,
                     context: unknown,
-                    operation: (callId: string) => Promise<unknown>,
+                    operation: (callId: string, input: unknown) => Promise<unknown>,
                 ) {
                     calls.push({ context, input, toolName });
-                    return await operation("remote-call");
+                    return await operation("remote-call", input);
                 },
             },
         } as never,
@@ -309,7 +309,7 @@ test("cross-instance audit is recorded by the target worker", async () => {
         instanceRegistry: registry,
     });
 
-    const result = await gateway.auditToolCall(
+    const result = await gateway.callToolOperation(
         "remote-server",
         "artifact_viewImage",
         { path: "./preview.png" },

@@ -117,14 +117,14 @@ test(
         const gateway = {
             async appendMcpToolCalled() {},
             assertReady() {},
-            async auditToolCall<T extends JsonValue>(
+            async callToolOperation<T extends JsonValue>(
                 _instance: string,
                 _toolName: string,
-                _input: JsonValue,
+                input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string) => Promise<T>,
+                operation: (callId: string, input: JsonValue) => Promise<T>,
             ): Promise<T> {
-                return await operation("call-test");
+                return await operation("call-test", input);
             },
             async callTool() {
                 throw new Error("routed calls are not used by this test");

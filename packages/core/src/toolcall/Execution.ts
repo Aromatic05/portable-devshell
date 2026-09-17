@@ -89,6 +89,64 @@ export class ToolCallExecution {
         recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {
         this.#assertReady();
+        return await this.#call(
+            toolName,
+            input,
+            context,
+            signal,
+            transformResult,
+            invocationInput,
+            onProgress,
+            recording,
+            async (innerInput, callId, boundaryProgress, executionSignal) =>
+                await this.#toolInvoker.invoke(
+                    toolName,
+                    innerInput,
+                    { ...context, operationId: callId },
+                    executionSignal,
+                    boundaryProgress,
+                ),
+        );
+    }
+
+    async callOperation<T extends JsonValue>(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        operation: (callId: string, input: JsonValue) => Promise<T>,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        return (await this.#call(
+            toolName,
+            input,
+            context,
+            signal,
+            undefined,
+            input,
+            undefined,
+            "host",
+            async (innerInput, callId) => await operation(callId, innerInput),
+        )) as T;
+    }
+
+    async #call(
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal: AbortSignal | undefined,
+        transformResult:
+            | ((result: JsonValue, callId: string) => Promise<JsonValue>)
+            | undefined,
+        invocationInput: JsonValue,
+        onProgress: ((progress: JsonValue) => void) | undefined,
+        recording: "caller" | "host",
+        execute: (
+            input: JsonValue,
+            callId: string,
+            onProgress: ((progress: JsonValue) => void) | undefined,
+            signal: AbortSignal | undefined,
+        ) => Promise<JsonValue>,
+    ): Promise<JsonValue> {
         throwIfToolCallAborted(signal);
 
         const scope = this.#audit.createScope(toolName, input, context);
@@ -247,12 +305,11 @@ export class ToolCallExecution {
                         signal: boundarySignal,
                         toolName,
                     });
-                    return await this.#toolInvoker.invoke(
-                        toolName,
+                    return await execute(
                         innerInput,
-                        { ...context, operationId: scope.callId },
-                        signal,
+                        scope.callId,
                         boundaryProgress,
+                        signal,
                     );
                 });
                 const adaptedResult =

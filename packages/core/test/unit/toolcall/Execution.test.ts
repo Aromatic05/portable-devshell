@@ -443,3 +443,94 @@ test("ToolCallExecution masks error message, details, and command streams before
     assert.equal(JSON.stringify(reviewed).includes("real-token"), false);
     assert.equal(JSON.stringify(reviewed).includes("${SECRET:github}"), true);
 });
+
+test("ToolCallExecution callOperation uses the same Boundary without requiring Worker readiness", async () => {
+    const events: string[] = [];
+    const reviews: string[] = [];
+    const operationInputs: unknown[] = [];
+    let readinessChecks = 0;
+    const execution = new ToolCallExecution({
+        approval: { async prepare() { return {}; } },
+        assertReady() {
+            readinessChecks += 1;
+            throw new Error("Worker readiness must not gate Control-owned operations.");
+        },
+        audit: {
+            createScope(toolName: string, input: unknown, callContext: typeof context) {
+                return createToolCallScope(toolName, input as never, callContext);
+            },
+            async requested() { events.push("audit.requested"); },
+            async queued() { events.push("audit.queued"); },
+            runningContext() { return {}; },
+            async running() { events.push("audit.running"); },
+            async completed(_scope: unknown, _running: unknown, _approval: unknown, result: unknown) {
+                events.push("audit.completed");
+                assert.deepEqual(result, { value: "outer-result" });
+            },
+            async denied() {},
+            async failed() {},
+            async failActive() {},
+            async nonRunning() {},
+        },
+        boundary: async () => ({
+            release() { events.push("boundary.release"); },
+            sequence: new ToolCallBoundarySequence({
+                reviews: [async (input) => {
+                    reviews.push(`${input.direction}:${input.kind}`);
+                    return { decision: "accept" };
+                }],
+                rewrites: [async (input) =>
+                    input.direction === "inbound"
+                        ? input.text.replaceAll("outer", "inner")
+                        : input.text.replaceAll("inner", "outer")],
+            }),
+        }),
+        instanceName: asInstanceName("control-operation"),
+        log: { async append() {} },
+        toolCallScheduler: {
+            reserve() {
+                events.push("reserve");
+                return {
+                    markPendingApproval() {},
+                    release() {},
+                    async run(operation: () => Promise<unknown>) {
+                        events.push("run");
+                        return await operation();
+                    },
+                };
+            },
+        },
+        toolInvoker: {
+            async invoke() {
+                throw new Error("Control-owned operation must not invoke Worker RPC.");
+            },
+        },
+    } as never);
+
+    const result = await execution.callOperation(
+        "todo_read",
+        { value: "outer-input" },
+        context,
+        async (callId, input) => {
+            events.push("operation");
+            assert.equal(callId.length > 0, true);
+            operationInputs.push(input);
+            return { value: "inner-result" };
+        },
+    );
+
+    assert.equal(readinessChecks, 0);
+    assert.deepEqual(operationInputs, [{ value: "inner-input" }]);
+    assert.deepEqual(result, { value: "outer-result" });
+    assert.deepEqual(reviews, ["inbound:call", "outbound:result"]);
+    assert.deepEqual(events, [
+        "audit.requested",
+        "reserve",
+        "audit.queued",
+        "run",
+        "audit.running",
+        "operation",
+        "audit.completed",
+        "boundary.release",
+    ]);
+});
