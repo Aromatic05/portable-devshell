@@ -1,24 +1,20 @@
 use std::net::TcpStream;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::time::Duration;
 
 use reqwest::header::AUTHORIZATION;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Error as WebSocketError, Message, WebSocket, connect};
+use tungstenite::{Error as WebSocketError, Message, WebSocket, client_tls, connect};
 
 use crate::daemon::log::append_log;
 
-use super::{MAX_RECONNECT_BACKOFF, ReverseConnector, reverse_endpoint};
+use super::{ReverseConnector, proxy, reverse_endpoint};
 
 impl ReverseConnector {
     pub(super) fn connect_wss(
         &self,
         generation: u64,
-        lane: &str,
     ) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, String> {
         let endpoint = reverse_endpoint(&self.config.controller_url, "/reverse/v1/connect", true)?;
         let mut request = endpoint
@@ -40,79 +36,33 @@ impl ReverseConnector {
             HeaderValue::from_str(&generation.to_string()).map_err(|error| error.to_string())?,
         );
         headers.insert(
-            "x-devshell-rpc-lane",
-            HeaderValue::from_str(lane).map_err(|error| error.to_string())?,
-        );
-        headers.insert(
             "sec-websocket-protocol",
-            HeaderValue::from_static("devshell-worker-rpc.v1"),
+            HeaderValue::from_static("devshell-worker-transport.v1"),
         );
 
-        let (mut socket, _) = connect(request)
-            .map_err(|error| format!("failed to connect reverse websocket: {error}"))?;
+        let (mut socket, _) = if let Some(proxy_url) = self.config.proxy_url.as_deref() {
+            let stream = proxy::connect_tcp(proxy_url, &endpoint)?;
+            client_tls(request, stream)
+                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
+        } else {
+            connect(request)
+                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
+        };
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
-        if lane == "control" {
-            self.payload.prepare_connection()?;
-        }
+        self.payload.prepare_connection()?;
         append_log(
             &self.paths,
-            &format!(
-                "reverse connection established transport=wss generation={generation} lane={lane}"
-            ),
+            &format!("reverse connection established transport=wss generation={generation}"),
         )?;
         Ok(socket)
-    }
-
-    pub(super) fn run_wss_generation(
-        &self,
-        generation: u64,
-        control_socket: WebSocket<MaybeTlsStream<TcpStream>>,
-    ) -> Result<(), String> {
-        let active = Arc::new(AtomicBool::new(true));
-        let bulk_connector = self.clone();
-        let bulk_active = Arc::clone(&active);
-        let bulk = thread::spawn(move || {
-            let mut backoff = Duration::from_secs(1);
-            while bulk_active.load(Ordering::SeqCst) && !bulk_connector.payload.is_stopping() {
-                let result = match bulk_connector.connect_wss(generation, "bulk") {
-                    Ok(socket) => {
-                        backoff = Duration::from_secs(1);
-                        bulk_connector.run_wss(socket, false, Arc::clone(&bulk_active))
-                    }
-                    Err(error) => Err(error),
-                };
-                if !bulk_active.load(Ordering::SeqCst) || bulk_connector.payload.is_stopping() {
-                    break;
-                }
-                if let Err(error) = result {
-                    let _ = append_log(
-                        &bulk_connector.paths,
-                        &format!(
-                            "reverse bulk lane unavailable; using control lane fallback and retrying: {error}"
-                        ),
-                    );
-                }
-                thread::park_timeout(backoff);
-                backoff = (backoff * 2).min(MAX_RECONNECT_BACKOFF);
-            }
-        });
-        let result = self.run_wss(control_socket, true, Arc::clone(&active));
-        active.store(false, Ordering::SeqCst);
-        bulk.thread().unpark();
-        let _ = bulk.join();
-        result
     }
 
     pub(super) fn run_wss(
         &self,
         mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
-        flush_shared: bool,
-        active: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        while active.load(Ordering::SeqCst) && !self.payload.is_stopping() {
-            if flush_shared {
-                self.flush_wss_responses(&mut socket)?;
-            }
+        while !self.payload.is_stopping() {
+            self.flush_wss_responses(&mut socket)?;
             match socket.read() {
                 Ok(Message::Binary(frame)) => {
                     if let Some(response) = self.payload.accept_inbound(&frame)?

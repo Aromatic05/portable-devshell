@@ -7,7 +7,6 @@ import {
     asChannelError,
     type Channel,
 } from "../protocol/Channel.js";
-import type { Frame } from "../protocol/Frame.js";
 
 export interface WebSocketClientLike {
     binaryType: string;
@@ -54,7 +53,7 @@ const OPEN = 1;
 
 export class WebSocketChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
-    readonly #frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     readonly #socket: WebSocketClientLike;
     #closed = false;
     #closeError?: Error;
@@ -136,8 +135,8 @@ export class WebSocketChannel implements Channel {
         return this.#closed;
     }
 
-    async send(frame: Uint8Array): Promise<void> {
-        const copy = Uint8Array.from(frame);
+    async write(data: Uint8Array): Promise<void> {
+        const copy = Uint8Array.from(data);
         const operation = this.#sendTail.then(() => {
             if (this.#closed || this.#socket.readyState !== OPEN) {
                 throw (
@@ -157,9 +156,9 @@ export class WebSocketChannel implements Channel {
         }
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -195,11 +194,11 @@ export class WebSocketChannel implements Channel {
     readonly #accept = (event: { data: unknown }): void => {
         this.#messageTail = this.#messageTail
             .then(async () => {
-                const frame = await toBytes(event.data);
+                const data = await toBytes(event.data);
                 if (this.#closed) return;
-                for (const listener of [...this.#frameListeners]) {
+                for (const listener of [...this.#dataListeners]) {
                     try {
-                        listener(frame);
+                        listener(data);
                     } catch (error) {
                         console.warn(asError(error));
                     }
@@ -234,7 +233,7 @@ export class WebSocketChannel implements Channel {
         this.#socket.removeEventListener("close", this.#close);
         const listeners = [...this.#closeListeners];
         this.#closeListeners.clear();
-        this.#frameListeners.clear();
+        this.#dataListeners.clear();
         for (const listener of listeners) {
             try {
                 listener(this.#closeError);
@@ -384,8 +383,8 @@ export class WebSocketServerChannel extends ChannelBase {
         this.#heartbeat.unref();
     }
 
-    async send(frame: Frame): Promise<void> {
-        const copy = Uint8Array.from(frame);
+    async write(data: Uint8Array): Promise<void> {
+        const copy = Uint8Array.from(data);
         const operation = this.#sendTail.then(async () => {
             if (this.closed || this.#socket.readyState !== OPEN)
                 throw this.closeError("WebSocket channel is closed.");
@@ -442,7 +441,7 @@ export class WebSocketServerChannel extends ChannelBase {
             return;
         }
         try {
-            this.emitFrame(toServerBytes(data));
+            this.emitData(toServerBytes(data));
         } catch (error) {
             this.#fail(error);
         }

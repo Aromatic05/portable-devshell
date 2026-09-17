@@ -18,7 +18,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 class MemoryRpcChannel implements Channel {
     readonly sent: Uint8Array[] = [];
     readonly closeListeners = new Set<(error?: Error) => void>();
-    readonly frameListeners = new Set<(frame: Uint8Array) => void>();
+    readonly dataListeners = new Set<(data: Uint8Array) => void>();
     closed = false;
 
     close(error?: Error): void {
@@ -33,13 +33,13 @@ class MemoryRpcChannel implements Channel {
         return () => this.closeListeners.delete(listener);
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.frameListeners.add(listener);
-        return () => this.frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.dataListeners.add(listener);
+        return () => this.dataListeners.delete(listener);
     }
 
-    async send(frame: Uint8Array): Promise<void> {
-        this.sent.push(Uint8Array.from(frame));
+    async write(data: Uint8Array): Promise<void> {
+        this.sent.push(Uint8Array.from(data));
     }
 }
 
@@ -50,7 +50,7 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel: async (): Promise<InstanceSnapshot> => ({
                 connectionState: "connected",
@@ -111,23 +111,21 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     const accepted: Array<{
         channel: Channel;
         generation: number;
-        lane?: "control" | "bulk";
         transport: string;
     }> = [];
     const descriptor = {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel: async (
                 channel: Channel,
                 options: {
                     generation: number;
-                    lane?: "control" | "bulk";
                     transport: "sse" | "wss";
                 },
             ): Promise<InstanceSnapshot> => {
-                if (options.lane !== "bulk") generation = options.generation;
+                generation = options.generation;
                 accepted.push({ channel, ...options });
                 return {
                     connectionState: "connected",
@@ -170,13 +168,6 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     await service.activate(identityOne, "wss", first);
     assert.equal(accepted.length, 1);
     assert.equal(accepted[0]?.generation, 1);
-    assert.equal(accepted[0]?.lane, "control");
-
-    const bulk = new MemoryRpcChannel();
-    await service.activate(identityOne, "wss", bulk, "bulk");
-    assert.equal(accepted.length, 2);
-    assert.equal(accepted[1]?.generation, 1);
-    assert.equal(accepted[1]?.lane, "bulk");
 
     const duplicate = new MemoryRpcChannel();
     await assert.rejects(
@@ -192,9 +183,8 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     );
     const second = new MemoryRpcChannel();
     await service.activate(identityTwo, "wss", second);
-    assert.equal(accepted.length, 3);
-    assert.equal(accepted[2]?.generation, 2);
-    assert.equal(bulk.closed, true);
+    assert.equal(accepted.length, 2);
+    assert.equal(accepted[1]?.generation, 2);
 
     service.disconnect(descriptor.name);
     assert.equal(second.closed, true);
@@ -410,7 +400,7 @@ function reverseDescriptor(
     return {
         name: asInstanceName("remote-test"),
         provider: "reverse" as const,
-        reverseConnector: {} as never,
+        reverseConnection: {} as never,
         worker: {
             acceptReverseChannel,
             setReverseEnrollmentState: async (): Promise<InstanceSnapshot> =>

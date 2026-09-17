@@ -5,6 +5,10 @@ import {
     type Channel,
     type WebSocketClientLike,
 } from "@portable-devshell/shared/browser";
+import {
+    encodePacket,
+    PacketBuffer,
+} from "@portable-devshell/shared/transport/frame";
 
 import {
     connectBrowserWebSocketChannel,
@@ -14,7 +18,7 @@ import { webRoutePath } from "../../src/app/transport/Route.js";
 import { createWebClients } from "../../src/app/transport/Client.js";
 
 describe("WebSocketChannel", () => {
-    it("sends one binary message per frame and notifies close once", async () => {
+    it("writes raw binary data and notifies close once", async () => {
         const socket = new FakeSocket();
         const channel = new WebSocketChannel(
             socket as unknown as WebSocketClientLike,
@@ -23,7 +27,7 @@ describe("WebSocketChannel", () => {
         channel.onClose(() => (closeCount += 1));
         socket.open();
 
-        await channel.send(
+        await channel.write(
             new TextEncoder().encode('{"name":"service.status"}'),
         );
 
@@ -33,23 +37,23 @@ describe("WebSocketChannel", () => {
         socket.serverClose();
         socket.serverClose();
         expect(closeCount).toBe(1);
-        await expect(channel.send(new Uint8Array())).rejects.toThrow("closed");
+        await expect(channel.write(new Uint8Array())).rejects.toThrow("closed");
     });
 
-    it("decodes ordered ArrayBuffer and Blob messages as frames", async () => {
+    it("delivers ordered ArrayBuffer and Blob messages as raw data chunks", async () => {
         const socket = new FakeSocket();
         const channel = new WebSocketChannel(
             socket as unknown as WebSocketClientLike,
         );
         socket.open();
-        const frames: string[] = [];
+        const chunks: string[] = [];
         let resolveFrames!: () => void;
         const received = new Promise<void>((resolve) => {
             resolveFrames = resolve;
         });
-        channel.onFrame((frame) => {
-            frames.push(new TextDecoder().decode(frame));
-            if (frames.length === 2) resolveFrames();
+        channel.onData((data) => {
+            chunks.push(new TextDecoder().decode(data));
+            if (chunks.length === 2) resolveFrames();
         });
 
         const first = new DeferredBlob("first");
@@ -61,7 +65,7 @@ describe("WebSocketChannel", () => {
         first.release();
         await received;
 
-        expect(frames).toEqual(["first", "second"]);
+        expect(chunks).toEqual(["first", "second"]);
     });
 
     it("closes when an open send throws", async () => {
@@ -76,7 +80,7 @@ describe("WebSocketChannel", () => {
             if (error !== undefined) errors.push(error);
         });
 
-        await expect(channel.send(new Uint8Array([1]))).rejects.toThrow(
+        await expect(channel.write(new Uint8Array([1]))).rejects.toThrow(
             "send failed",
         );
 
@@ -227,36 +231,41 @@ describe("web client transport", () => {
 
 class ReplyChannel implements Channel {
     closed = false;
-    private readonly frames = new Set<(frame: Uint8Array) => void>();
+    private readonly dataListeners = new Set<(data: Uint8Array) => void>();
+    private readonly packets = new PacketBuffer();
     private readonly closes = new Set<(error?: Error) => void>();
 
-    async send(frame: Uint8Array): Promise<void> {
-        const request = JSON.parse(new TextDecoder().decode(frame)) as {
-            destination: string;
-            id: string;
-            name: string;
-        };
-        const reply = {
-            destination: request.destination,
-            from: "server",
-            id: `reply-${request.id}`,
-            name: request.name,
-            payload: {
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
-            },
-            replyTo: request.id,
-            to: "web",
-        };
-        queueMicrotask(() => {
-            const encoded = new TextEncoder().encode(JSON.stringify(reply));
-            for (const listener of this.frames) listener(encoded);
-        });
+    async write(data: Uint8Array): Promise<void> {
+        for (const packet of this.packets.push(data)) {
+            const request = JSON.parse(new TextDecoder().decode(packet)) as {
+                destination: string;
+                id: string;
+                name: string;
+            };
+            const reply = {
+                destination: request.destination,
+                from: "server",
+                id: `reply-${request.id}`,
+                name: request.name,
+                payload: {
+                    capabilities: ["request", "stream", "streamResume"],
+                    protocolVersion: 1,
+                },
+                replyTo: request.id,
+                to: "web",
+            };
+            queueMicrotask(() => {
+                const encoded = encodePacket(
+                    new TextEncoder().encode(JSON.stringify(reply)),
+                );
+                for (const listener of this.dataListeners) listener(encoded);
+            });
+        }
     }
 
-    onFrame(listener: (frame: Uint8Array) => void): () => void {
-        this.frames.add(listener);
-        return () => this.frames.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.dataListeners.add(listener);
+        return () => this.dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {

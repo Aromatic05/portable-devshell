@@ -43,6 +43,7 @@
         "acceptance:web": "node ./acceptance/run-web-browser-smoke.mjs",
         "typecheck:source": "tsc --noEmit -p tsconfig.typecheck.json",
         "test:worker:tmux": "cargo test --locked -p devshell-worker --test tmux_tools_contract -- --ignored",
+        "stress:transport": "node ./scripts/stress-transport.mjs",
         "testspace": "node ./scripts/testspace-launcher.mjs"
     },
     "devDependencies": {

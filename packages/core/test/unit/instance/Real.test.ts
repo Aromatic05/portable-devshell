@@ -1,28 +1,46 @@
 import assert from "node:assert/strict";
-import { spawn as nodeSpawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import {
+    execFile,
+    spawn as nodeSpawn,
+    spawnSync,
+} from "node:child_process";
+import { once } from "node:events";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import {
+    connect as connectNet,
+    createServer as createNetServer,
+    type Socket,
+} from "node:net";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
     asInstanceName,
     errorCodes,
+    StreamChannel,
     toolCallOutput,
     type JsonValue,
 } from "@portable-devshell/shared";
 import {
-    encodeFrame,
-    FrameBuffer,
+    encodePacket,
+    FrameProtocol,
+    frameResetCodes,
+    PacketBuffer,
+    type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
+    type WorkerInstance,
     WORKER_PROTOCOL_VERSION,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
+    type WorkerTransport,
     type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 import {
@@ -32,8 +50,124 @@ import {
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
+const execFileAsync = promisify(execFile);
+const rsyncAvailable =
+    process.platform !== "win32" &&
+    spawnSync("rsync", ["--version"], { stdio: "ignore" }).status === 0;
 
 const cliToolCallContext = { source: "cli" } as const;
+
+async function readServiceStream(stream: FrameStream): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    while (true) {
+        const chunk = await stream.read();
+        if (chunk === undefined) return Buffer.concat(chunks);
+        chunks.push(Buffer.from(chunk));
+    }
+}
+
+function rsyncWorkerTestOptions(): { skip: false | string } {
+    const worker = realWorkerTestOptions(workerBinaryPath);
+    if (worker.skip !== false) return worker;
+    return {
+        skip: rsyncAvailable ? false : "requires rsync on a non-Windows host",
+    };
+}
+
+async function readSocketLine(
+    socket: Socket,
+): Promise<{ line: string; remainder: Buffer }> {
+    return await new Promise((resolve, reject) => {
+        let buffered = Buffer.alloc(0);
+        const cleanup = () => {
+            socket.off("data", onData);
+            socket.off("end", onEnd);
+            socket.off("error", onError);
+        };
+        const onData = (chunk: Buffer) => {
+            buffered = Buffer.concat([buffered, chunk]);
+            const newline = buffered.indexOf(0x0a);
+            if (newline < 0) return;
+            socket.pause();
+            cleanup();
+            resolve({
+                line: buffered.subarray(0, newline).toString("utf8"),
+                remainder: buffered.subarray(newline + 1),
+            });
+        };
+        const onEnd = () => {
+            cleanup();
+            reject(new Error("rsync remote shell closed before its handshake"));
+        };
+        const onError = (error: Error) => {
+            cleanup();
+            reject(error);
+        };
+        socket.on("data", onData);
+        socket.once("end", onEnd);
+        socket.once("error", onError);
+    });
+}
+
+async function bridgeRsyncRemoteShell(
+    instance: WorkerInstance,
+    socket: Socket,
+    cwd: string,
+): Promise<void> {
+    let stream: FrameStream | undefined;
+    try {
+        const handshake = await readSocketLine(socket);
+        const parsed = JSON.parse(handshake.line) as {
+            command?: unknown;
+            host?: unknown;
+        };
+        if (
+            parsed.host !== "dummy" ||
+            !Array.isArray(parsed.command) ||
+            parsed.command.length === 0 ||
+            !parsed.command.every((value) => typeof value === "string")
+        ) {
+            throw new Error("invalid rsync remote shell handshake");
+        }
+        const [executable, ...args] = parsed.command as string[];
+        stream = await instance.execProcess({ executable: executable!, args, cwd });
+        if (handshake.remainder.byteLength > 0) {
+            await stream.write(handshake.remainder);
+        }
+        socket.resume();
+
+        const upload = (async () => {
+            for await (const chunk of socket) {
+                await stream!.write(Buffer.from(chunk));
+            }
+            await stream!.finish();
+        })();
+        const download = (async () => {
+            while (true) {
+                const chunk = await stream!.read();
+                if (chunk === undefined) {
+                    socket.end();
+                    return;
+                }
+                if (!socket.write(Buffer.from(chunk))) {
+                    await once(socket, "drain");
+                }
+            }
+        })();
+        await Promise.all([upload, download]);
+    } catch (error) {
+        if (stream !== undefined && !stream.closed) {
+            await stream
+                .reset(
+                    frameResetCodes.cancelled,
+                    error instanceof Error ? error.message : String(error),
+                )
+                .catch(() => undefined);
+        }
+        socket.destroy(error instanceof Error ? error : new Error(String(error)));
+        throw error;
+    }
+}
 
 test(
     "WorkerInstance completes lifecycle against frozen devshell-worker",
@@ -134,6 +268,421 @@ test(
     },
 );
 
+test(
+    "WorkerInstance transfers artifact bytes over Frame services against frozen devshell-worker",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("artifact-frame");
+        const homeDirectory = await createTestTempDirectory("artifact-frame-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("artifact-frame-runtime");
+        const instanceName = asInstanceName(`artifact-frame-${process.pid}`);
+        const source = Buffer.alloc(700 * 1024);
+        for (let index = 0; index < source.length; index += 1) {
+            source[index] = index % 251;
+        }
+        await writeFile(`${workspacePath}/source.bin`, source);
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: instanceName,
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        t.after(async () => {
+            await instance.stop();
+            await instance.close();
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        const opened = await instance.openArtifactPayload({
+            expiresAtMs: Date.now() + 60_000,
+            path: "./source.bin",
+            workspace: workspacePath,
+        });
+        const chunk = await instance.readArtifactPayload({
+            maxBytes: source.byteLength,
+            offsetBytes: 0,
+            payloadId: opened.payloadId,
+        });
+        assert.equal(chunk.returnedBytes, source.byteLength);
+        assert.equal(chunk.totalBytes, source.byteLength);
+        assert.equal(chunk.eof, true);
+        assert.deepEqual(Buffer.from(chunk.content, "base64"), source);
+
+        const receive = await instance.beginArtifactReceive({
+            descriptor: opened.descriptor,
+            overwrite: false,
+            targetPath: "./copy.bin",
+            workspace: workspacePath,
+        });
+        const written = await instance.writeArtifactReceive({
+            content: chunk.content,
+            offsetBytes: receive.nextOffsetBytes,
+            receiveId: receive.receiveId,
+        });
+        assert.equal(written.receivedBytes, source.byteLength);
+        const finished = await instance.finishArtifactReceive(receive.receiveId);
+        assert.equal(finished.bytes, source.byteLength);
+        assert.deepEqual(await readFile(`${workspacePath}/copy.bin`), source);
+        await instance.closeArtifactPayload(opened.payloadId);
+    },
+);
+
+test(
+    "WorkerInstance exposes HTTP over tcp and process exec Frame services",
+    realWorkerTestOptions(workerBinaryPath),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("service-consumer");
+        const homeDirectory = await createTestTempDirectory("service-consumer-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("service-consumer-runtime");
+        const instanceName = asInstanceName(`service-consumer-${process.pid}`);
+        const httpBody = "http-over-devshell";
+        const server = createHttpServer((request, response) => {
+            assert.equal(request.url, "/probe");
+            response.writeHead(200, {
+                Connection: "close",
+                "Content-Length": Buffer.byteLength(httpBody),
+                "Content-Type": "text/plain",
+            });
+            response.end(httpBody);
+        });
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+        const address = server.address();
+        assert.ok(address !== null && typeof address !== "string");
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: instanceName,
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        t.after(async () => {
+            await instance.stop();
+            await instance.close();
+            server.close();
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        const tcp = await instance.connectTcp({
+            host: "127.0.0.1",
+            port: address.port,
+        });
+        await tcp.write(
+            Buffer.from(
+                "GET /probe HTTP/1.1\r\nHost: devshell\r\nConnection: close\r\n\r\n",
+            ),
+        );
+        await tcp.finish();
+        const httpResponse = (await readServiceStream(tcp)).toString("utf8");
+        assert.match(httpResponse, /^HTTP\/1\.1 200 OK\r\n/u);
+        assert.match(httpResponse, /\r\n\r\nhttp-over-devshell$/u);
+
+        const socksServer = createNetServer(
+            { allowHalfOpen: true },
+            (client) => {
+                let buffered = Buffer.alloc(0);
+                let connecting = false;
+                let stage: "greeting" | "request" | "tunnel" = "greeting";
+                let upstream: Socket | undefined;
+
+                const fail = (message: string) => {
+                    client.destroy(new Error(message));
+                };
+                const flush = () => {
+                    if (stage === "tunnel") {
+                        if (buffered.byteLength > 0) {
+                            upstream!.write(buffered);
+                            buffered = Buffer.alloc(0);
+                        }
+                        return;
+                    }
+                    if (connecting) return;
+                    if (stage === "greeting") {
+                        if (buffered.byteLength < 2) return;
+                        const methodCount = buffered[1]!;
+                        if (buffered.byteLength < 2 + methodCount) return;
+                        const methods = buffered.subarray(2, 2 + methodCount);
+                        if (
+                            buffered[0] !== 0x05 ||
+                            !methods.includes(0x00)
+                        ) {
+                            fail("unsupported SOCKS5 greeting");
+                            return;
+                        }
+                        buffered = buffered.subarray(2 + methodCount);
+                        client.write(Buffer.from([0x05, 0x00]));
+                        stage = "request";
+                    }
+                    if (stage !== "request" || buffered.byteLength < 4)
+                        return;
+                    if (
+                        buffered[0] !== 0x05 ||
+                        buffered[1] !== 0x01 ||
+                        buffered[2] !== 0x00 ||
+                        buffered[3] !== 0x01
+                    ) {
+                        fail("unsupported SOCKS5 CONNECT request");
+                        return;
+                    }
+                    if (buffered.byteLength < 10) return;
+                    const host = Array.from(buffered.subarray(4, 8)).join(".");
+                    const port = buffered.readUInt16BE(8);
+                    buffered = buffered.subarray(10);
+                    connecting = true;
+                    const remote = connectNet({ host, port }, () => {
+                        upstream = remote;
+                        connecting = false;
+                        stage = "tunnel";
+                        client.write(
+                            Buffer.from([
+                                0x05,
+                                0x00,
+                                0x00,
+                                0x01,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                                0x00,
+                            ]),
+                        );
+                        flush();
+                    });
+                    remote.on("data", (chunk) => client.write(chunk));
+                    remote.on("end", () => client.end());
+                    remote.on("error", (error) => client.destroy(error));
+                };
+
+                client.on("data", (chunk) => {
+                    if (stage === "tunnel") {
+                        upstream!.write(chunk);
+                        return;
+                    }
+                    buffered = Buffer.concat([buffered, chunk]);
+                    flush();
+                });
+                client.on("end", () => upstream?.end());
+                client.on("error", () => upstream?.destroy());
+            },
+        );
+        socksServer.listen(0, "127.0.0.1");
+        await once(socksServer, "listening");
+        t.after(() => socksServer.close());
+        const socksAddress = socksServer.address();
+        assert.ok(socksAddress !== null && typeof socksAddress !== "string");
+
+        const socks = await instance.connectTcp({
+            host: "127.0.0.1",
+            port: socksAddress.port,
+        });
+        let socksBuffered = Buffer.alloc(0);
+        const readSocksBytes = async (byteLength: number): Promise<Buffer> => {
+            while (socksBuffered.byteLength < byteLength) {
+                const chunk = await socks.read();
+                if (chunk === undefined)
+                    throw new Error("SOCKS5 stream ended during handshake");
+                socksBuffered = Buffer.concat([
+                    socksBuffered,
+                    Buffer.from(chunk),
+                ]);
+            }
+            const value = socksBuffered.subarray(0, byteLength);
+            socksBuffered = socksBuffered.subarray(byteLength);
+            return value;
+        };
+        await socks.write(Buffer.from([0x05, 0x01, 0x00]));
+        assert.deepEqual(await readSocksBytes(2), Buffer.from([0x05, 0x00]));
+        await socks.write(
+            Buffer.from([
+                0x05,
+                0x01,
+                0x00,
+                0x01,
+                127,
+                0,
+                0,
+                1,
+                (address.port >> 8) & 0xff,
+                address.port & 0xff,
+            ]),
+        );
+        const socksReply = await readSocksBytes(10);
+        assert.deepEqual(socksReply.subarray(0, 4), Buffer.from([5, 0, 0, 1]));
+        await socks.write(
+            Buffer.from(
+                "GET /probe HTTP/1.1\r\nHost: devshell\r\nConnection: close\r\n\r\n",
+            ),
+        );
+        await socks.finish();
+        const proxiedChunks = [socksBuffered];
+        while (true) {
+            const chunk = await socks.read();
+            if (chunk === undefined) break;
+            proxiedChunks.push(Buffer.from(chunk));
+        }
+        const proxiedResponse = Buffer.concat(proxiedChunks).toString("utf8");
+        assert.match(proxiedResponse, /^HTTP\/1\.1 200 OK\r\n/u);
+        assert.match(proxiedResponse, /\r\n\r\nhttp-over-devshell$/u);
+
+        const processStream = await instance.execProcess({
+            executable: process.execPath,
+            args: [
+                "-e",
+                "let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>process.stdout.write(process.cwd()+'\\n'+input));",
+            ],
+            cwd: workspacePath,
+        });
+        await processStream.write(Buffer.from("process-over-devshell"));
+        await processStream.finish();
+        assert.equal(
+            (await readServiceStream(processStream)).toString("utf8"),
+            `${workspacePath}\nprocess-over-devshell`,
+        );
+    },
+);
+
+test(
+    "WorkerInstance carries a real rsync session over process exec Frame service",
+    rsyncWorkerTestOptions(),
+    async (t) => {
+        const workspacePath = await createTestTempDirectory("rsync-worker");
+        const sourcePath = await createTestTempDirectory("rsync-source");
+        const homeDirectory = await createTestTempDirectory("rsync-worker-home");
+        const runtimeDirectory =
+            await createTestTempDirectory("rsync-worker-runtime");
+        const targetPath = join(workspacePath, "target");
+        const nestedSource = join(sourcePath, "nested");
+        await mkdir(targetPath, { recursive: true });
+        await mkdir(nestedSource, { recursive: true });
+        const payload = Buffer.alloc(700 * 1024);
+        for (let index = 0; index < payload.length; index += 1) {
+            payload[index] = index % 251;
+        }
+        await writeFile(join(sourcePath, "payload.bin"), payload);
+        await writeFile(join(nestedSource, "note.txt"), "rsync-over-devshell\n");
+
+        const remoteShellPath = join(workspacePath, "rsync-remote-shell.mjs");
+        await writeFile(
+            remoteShellPath,
+            `#!/usr/bin/env node
+import { createConnection } from "node:net";
+const [host, ...command] = process.argv.slice(2);
+const port = Number(process.env.DEVSHELL_RSYNC_BRIDGE_PORT);
+if (!Number.isInteger(port) || port <= 0) {
+    throw new Error("DEVSHELL_RSYNC_BRIDGE_PORT is invalid");
+}
+const socket = createConnection({ allowHalfOpen: true, host: "127.0.0.1", port });
+socket.once("connect", () => {
+    socket.write(JSON.stringify({ host, command }) + "\\n");
+    process.stdin.pipe(socket);
+    socket.pipe(process.stdout, { end: false });
+});
+socket.on("end", () => {
+    process.stdin.unpipe(socket);
+    process.stdin.pause();
+    socket.end();
+});
+socket.on("error", (error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+});
+`,
+            { mode: 0o700 },
+        );
+
+        const instance = new WorkerInstanceFactory().create({
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                XDG_RUNTIME_DIR: runtimeDirectory,
+            },
+            homeDirectory,
+            name: asInstanceName(`rsync-worker-${process.pid}`),
+            transport: new WorkerTransportDriverLocal({
+                workerBinary: new WorkerBinary(workerBinaryPath!),
+                spawnFunction: nodeSpawn,
+            }),
+        });
+        const bridgeServer = createNetServer({ allowHalfOpen: true });
+        const bridgeCompleted = new Promise<void>((resolve, reject) => {
+            bridgeServer.once("connection", (socket) => {
+                bridgeServer.close();
+                void bridgeRsyncRemoteShell(instance, socket, workspacePath).then(
+                    resolve,
+                    reject,
+                );
+            });
+            bridgeServer.once("error", reject);
+        });
+        bridgeServer.listen(0, "127.0.0.1");
+        await once(bridgeServer, "listening");
+        const bridgeAddress = bridgeServer.address();
+        assert.ok(bridgeAddress !== null && typeof bridgeAddress !== "string");
+
+        t.after(async () => {
+            bridgeServer.close();
+            await instance.stop();
+            await instance.close();
+            await rm(sourcePath, { force: true, recursive: true });
+            await rm(workspacePath, { force: true, recursive: true });
+            await rm(homeDirectory, { force: true, recursive: true });
+            await rm(runtimeDirectory, { force: true, recursive: true });
+        });
+
+        await instance.start();
+        await Promise.all([
+            execFileAsync(
+                "rsync",
+                [
+                    "-a",
+                    "-e",
+                    remoteShellPath,
+                    `${sourcePath}/`,
+                    `dummy:${targetPath}/`,
+                ],
+                {
+                    env: {
+                        ...process.env,
+                        DEVSHELL_RSYNC_BRIDGE_PORT: String(bridgeAddress.port),
+                    },
+                    timeout: 30_000,
+                },
+            ),
+            bridgeCompleted,
+        ]);
+
+        assert.deepEqual(await readFile(join(targetPath, "payload.bin")), payload);
+        assert.equal(
+            await readFile(join(targetPath, "nested", "note.txt"), "utf8"),
+            "rsync-over-devshell\n",
+        );
+    },
+);
+
 test("WorkerInstance serializes start and stop lifecycle operations", async () => {
     const homeDirectory = await createTestTempDirectory("instance-serialized");
     const harness = createWorkerInstanceHarness();
@@ -144,7 +693,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     const startGate = new Promise<void>((resolve) => {
         releaseStart = resolve;
     });
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             commands.push(command);
@@ -1010,7 +1559,10 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
     const homeDirectory = await createTestTempDirectory(
         "instance-start-failure",
     );
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            throw new Error("channel must not be connected after a failed start");
+        },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             assert.equal(command, "start");
             return {
@@ -1018,9 +1570,6 @@ test("WorkerInstance restores a stopped disconnected snapshot when start fails",
                 stderr: "start failed",
                 stdout: "",
             };
-        },
-        async spawnWorkerRpc() {
-            throw new Error("rpc must not be spawned after a failed start");
         },
         async installWorker(): Promise<void> {},
     };
@@ -1066,7 +1615,7 @@ test("WorkerInstance refreshes actual daemon state when stop fails", async () =>
         "instance-stop-failure",
     );
     const harness = createWorkerInstanceHarness();
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
         ...harness.transport,
         async runWorkerCommand(command, options) {
             if (command === "stop") {
@@ -1285,7 +1834,7 @@ test("WorkerInstance keeps retrying automatic rpc reconnect after a transient fa
 
     try {
         await instance.start();
-        harness.failNextRpcStarts();
+        harness.failNextRpcConnections();
         harness.disconnect();
 
         await harness.waitForMethodCount("tools.list", 2);
@@ -1311,9 +1860,9 @@ type HarnessTool = {
 function createWorkerInstanceHarness(): {
     disconnect: () => void;
     fail: (method: string, code: string) => void;
-    failNextRpcStarts: (count?: number) => void;
+    failNextRpcConnections: (count?: number) => void;
     setTools: (tools: HarnessTool[]) => void;
-    transport: WorkerCommandTransport;
+    transport: WorkerTransport;
     requestedMethods: () => number;
     respond: (method: string, result: Record<string, JsonValue>) => void;
     setStatus: (status: "running" | "stale" | "stopped") => void;
@@ -1324,7 +1873,7 @@ function createWorkerInstanceHarness(): {
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
-    let rpcSpawnFailures = 0;
+    let rpcConnectFailures = 0;
     let tools: HarnessTool[] = [
         {
             requiredCapabilities: ["execute"] as ["execute"],
@@ -1335,18 +1884,53 @@ function createWorkerInstanceHarness(): {
             outputSchema: { type: "object" },
         },
     ];
-    let activeProcess:
+    let activeConnection:
         | {
-              exitResolve?: (value: {
-                  code: number | null;
-                  signal: NodeJS.Signals | null;
-              }) => void;
-              stdout: PassThrough;
-              write(value: JsonValue): void;
+              protocol: FrameProtocol;
+              stream?: FrameStream;
           }
         | undefined;
 
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            if (rpcConnectFailures > 0) {
+                rpcConnectFailures -= 1;
+                throw new Error("transient rpc connection failure");
+            }
+            const clientToServer = new PassThrough();
+            const serverToClient = new PassThrough();
+            const pair: {
+                client?: StreamChannel;
+                server?: StreamChannel;
+                closed: boolean;
+            } = { closed: false };
+            const closePair = (error?: Error) => {
+                if (pair.closed) return;
+                pair.closed = true;
+                pair.client?.close(error);
+                pair.server?.close(error);
+            };
+            const client = new StreamChannel(serverToClient, clientToServer, {
+                closeTransport: closePair,
+            });
+            const server = new StreamChannel(clientToServer, serverToClient, {
+                closeTransport: closePair,
+            });
+            pair.client = client;
+            pair.server = server;
+            const protocol = new FrameProtocol(server, { role: "acceptor" });
+            const connection = { protocol } as {
+                protocol: FrameProtocol;
+                stream?: FrameStream;
+            };
+            activeConnection = connection;
+            void serveRpcHarness(connection).catch((error: unknown) => {
+                protocol.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
+            return client;
+        },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
             if (command === "status") {
                 return {
@@ -1378,84 +1962,74 @@ function createWorkerInstanceHarness(): {
                         : JSON.stringify({ running: false }),
             };
         },
-        async spawnWorkerRpc() {
-            if (rpcSpawnFailures > 0) {
-                rpcSpawnFailures -= 1;
-                throw new Error("transient rpc spawn failure");
-            }
-            const stdout = new PassThrough();
-            const stdin = new PassThrough();
-            const stderr = new PassThrough();
-            const reader = new FrameBuffer();
-            const write = (value: JsonValue) => {
-                stdout.write(encodeFrame(encodeWorkerRpcMessage(value)));
-            };
-            let exitResolve:
-                | ((value: {
-                      code: number | null;
-                      signal: NodeJS.Signals | null;
-                  }) => void)
-                | undefined;
-
-            stdin.on("data", (chunk: Uint8Array) => {
-                const frames = reader.push(chunk);
-
-                for (const payload of frames) {
-                    const frame = decodeWorkerRpcMessage(payload);
-                    if (!isRequestFrame(frame)) {
-                        continue;
-                    }
-
-                    const pendingIds = pending.get(frame.method) ?? [];
-                    pendingIds.push(frame.id);
-                    pending.set(frame.method, pendingIds);
-                    requestMethods.push(frame.method);
-                    methodWaiters
-                        .get(frame.method)
-                        ?.splice(0)
-                        .forEach((resolve) => resolve());
-
-                    if (
-                        frame.method === "worker.ping" ||
-                        frame.method === "worker.handshake" ||
-                        frame.method === "tools.list"
-                    ) {
-                        write(
-                            createLifecycleResponse(
-                                frame.method,
-                                frame.id,
-                                tools,
-                            ) as unknown as JsonValue,
-                        );
-                    }
-                }
-            });
-
-            activeProcess = { stdout, write };
-            return {
-                stdin,
-                stdout,
-                stderr,
-                kill() {
-                    stdout.end();
-                    exitResolve?.({ code: null, signal: "SIGTERM" });
-                    return true;
-                },
-                exit: new Promise((resolve) => {
-                    exitResolve = resolve;
-                    if (activeProcess !== undefined) {
-                        activeProcess.exitResolve = resolve;
-                    }
-                }),
-            };
-        },
         async installWorker(): Promise<void> {},
     };
 
+    async function serveRpcHarness(connection: {
+        protocol: FrameProtocol;
+        stream?: FrameStream;
+    }): Promise<void> {
+        const open = await connection.protocol.nextOpen();
+        assert.notEqual(open, undefined);
+        assert.equal(open!.service, "worker.rpc");
+        assert.equal(open!.metadata.byteLength, 0);
+        const stream = await open!.accept();
+        connection.stream = stream;
+        const reader = new PacketBuffer();
+
+        while (true) {
+            const chunk = await stream.read();
+            if (chunk === undefined) return;
+            for (const payload of reader.push(chunk)) {
+                const frame = decodeWorkerRpcMessage(payload);
+                if (!isRequestFrame(frame)) continue;
+
+                const pendingIds = pending.get(frame.method) ?? [];
+                pendingIds.push(frame.id);
+                pending.set(frame.method, pendingIds);
+                requestMethods.push(frame.method);
+                methodWaiters
+                    .get(frame.method)
+                    ?.splice(0)
+                    .forEach((resolve) => resolve());
+
+                if (
+                    frame.method === "worker.ping" ||
+                    frame.method === "worker.handshake" ||
+                    frame.method === "tools.list"
+                ) {
+                    await stream.write(
+                        encodePacket(
+                            encodeWorkerRpcMessage(
+                                createLifecycleResponse(
+                                    frame.method,
+                                    frame.id,
+                                    tools,
+                                ) as unknown as JsonValue,
+                            ),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    function writeToActiveStream(value: JsonValue): void {
+        const stream = activeConnection?.stream;
+        if (stream === undefined) {
+            throw new Error("worker.rpc lifecycle harness stream is not connected.");
+        }
+        void stream
+            .write(encodePacket(encodeWorkerRpcMessage(value)))
+            .catch(() => undefined);
+    }
+
     return {
         disconnect() {
-            activeProcess?.stdout.end();
-            activeProcess?.exitResolve?.({ code: 1, signal: null });
+            activeConnection?.protocol.close(
+                new Error("injected rpc transport disconnect"),
+            );
+            activeConnection = undefined;
         },
         fail(method, code) {
             const requestIds = pending.get(method);
@@ -1469,7 +2043,7 @@ function createWorkerInstanceHarness(): {
             if (requestIds.length === 0) {
                 pending.delete(method);
             }
-            activeProcess?.write({
+            writeToActiveStream({
                 error: {
                     code,
                     message: `worker rejected ${method}`,
@@ -1480,8 +2054,8 @@ function createWorkerInstanceHarness(): {
                 type: "response",
             } as unknown as JsonValue);
         },
-        failNextRpcStarts(count = 1) {
-            rpcSpawnFailures = count;
+        failNextRpcConnections(count = 1) {
+            rpcConnectFailures = count;
         },
         setTools(nextTools) {
             tools = nextTools;
@@ -1504,7 +2078,7 @@ function createWorkerInstanceHarness(): {
                 pending.delete(method);
             }
 
-            activeProcess?.write({
+            writeToActiveStream({
                 id: requestId,
                 ok: true,
                 result,

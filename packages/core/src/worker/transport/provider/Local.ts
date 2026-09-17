@@ -9,17 +9,13 @@ import {
     createCommandContext,
     type SpawnFunction,
     type ProviderCommandContext,
-    type WorkerCommandTransport,
 } from "../command/Transport.js";
+import type { WorkerTransport } from "../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
-    WorkerRpcOptions,
 } from "../command/Model.js";
-import {
-    createWorkerRpcProcess,
-    type WorkerRpcProcess,
-} from "../../protocol/rpc/Process.js";
 import {
     WorkerInstallerLocal,
     type WorkerInstallerLocalResult,
@@ -36,7 +32,7 @@ export interface WorkerTransportDriverLocalOptions {
     spawnFunction?: SpawnFunction;
 }
 
-export class WorkerTransportDriverLocal implements WorkerCommandTransport {
+export class WorkerTransportDriverLocal implements WorkerTransport {
     readonly #installer: WorkerInstallerLocal;
     readonly #resolver: WorkerAssetResolver;
     readonly #workerBinary: WorkerBinary;
@@ -161,26 +157,26 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         );
     }
 
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
+    async connectWorkerChannel(options: WorkerChannelOptions) {
         const workerCommand = new WorkerBinary(
             await this.#resolveActiveExecutable(options.env),
-        ).buildCommand("rpc", options.instanceName);
+        ).buildCommand("transport", options.instanceName);
         const context = this.#createCommandContext(
-            "spawnWorkerRpc",
+            "connectWorkerChannel",
             [workerCommand.command, ...workerCommand.args],
-            {
-                instance: options.instanceName,
-            },
+            { instance: options.instanceName },
         );
-        const child = this.#process.spawn(
+        return this.#process.createChannel(
+            this.#process.spawn(
+                context,
+                {
+                    env: this.#mergeEnv(options.env),
+                    stdio: ["pipe", "pipe", "pipe"],
+                },
+                errorCodes.coreProviderFailed,
+            ),
             context,
-            {
-                env: this.#mergeEnv(options.env),
-                stdio: ["pipe", "pipe", "pipe"],
-            },
-            errorCodes.coreWorkerRpcSpawnFailed,
         );
-        return createWorkerRpcProcess(child);
     }
 
     async #resolveExecutable(env?: NodeJS.ProcessEnv): Promise<string> {
@@ -260,7 +256,7 @@ export class WorkerTransportDriverLocal implements WorkerCommandTransport {
         command: WorkerCommandName,
         options: WorkerCommandOptions,
     ): Promise<
-        Awaited<ReturnType<WorkerCommandTransport["runWorkerCommand"]>>
+        Awaited<ReturnType<WorkerTransport["runWorkerCommand"]>>
     > {
         const workerCommand = new WorkerBinary(executable).buildCommand(
             command,

@@ -1,10 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use assert_cmd::Command;
 use serde_json::Value;
 
-use super::frame::decode_response_frame;
+use super::frame::exchange_rpc;
 
 pub struct TestEnv {
     _home_guard: tempfile::TempDir,
@@ -116,6 +117,24 @@ impl TestEnv {
         command
     }
 
+    pub fn std_command_without_runtime_dir(&self) -> std::process::Command {
+        let mut command =
+            std::process::Command::new(assert_cmd::cargo::cargo_bin("devshell-worker"));
+        command
+            .env("HOME", self._home_guard.path())
+            .env("PORTABLE_DEVSHELL_HOME", &self.home_root)
+            .env_remove("XDG_RUNTIME_DIR")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_INSTANCE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_WORKSPACE")
+            .env_remove("DEVSHELL_WORKER_INTERNAL_SECURITY_MODE");
+        #[cfg(windows)]
+        command
+            .env("USERPROFILE", self._home_guard.path())
+            .env_remove("HOMEDRIVE")
+            .env_remove("HOMEPATH");
+        command
+    }
+
     pub fn command(&self) -> Command {
         let mut command = Command::cargo_bin("devshell-worker").unwrap();
         self.configure_command(&mut command);
@@ -172,39 +191,35 @@ impl TestEnv {
 
     pub fn rpc_without_runtime_dir(&self, instance: &str, request: &Value) -> Value {
         let payload = serde_json::to_vec(request).unwrap();
-        let mut input = Vec::with_capacity(4 + payload.len());
-        input.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        input.extend_from_slice(&payload);
-        let output = self
-            .command_without_runtime_dir()
-            .args(["rpc", "--instance", instance])
-            .write_stdin(input)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
-        decode_response_frame(&output, request.get("id").and_then(Value::as_str))
+        self.raw_rpc_with_command(self.std_command_without_runtime_dir(), instance, &payload)
     }
 
     pub fn raw_rpc(&self, instance: &str, payload: &[u8]) -> Value {
-        let mut input = Vec::with_capacity(4 + payload.len());
-        input.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-        input.extend_from_slice(payload);
+        self.raw_rpc_with_command(self.std_command(), instance, payload)
+    }
 
-        let output = self
-            .command()
-            .args(["rpc", "--instance", instance])
-            .write_stdin(input)
-            .assert()
-            .success()
-            .get_output()
-            .stdout
-            .clone();
+    fn raw_rpc_with_command(
+        &self,
+        mut command: std::process::Command,
+        instance: &str,
+        payload: &[u8],
+    ) -> Value {
+        let mut child = command
+            .args(["transport", "--instance", instance])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let mut output = child.stdout.take().unwrap();
         let expected_id = serde_json::from_slice::<Value>(payload)
             .ok()
             .and_then(|request| request.get("id").and_then(Value::as_str).map(str::to_owned));
-        decode_response_frame(&output, expected_id.as_deref())
+        let response = exchange_rpc(&mut input, &mut output, payload, expected_id.as_deref())
+            .expect("transport RPC exchange");
+        drop(input);
+        assert!(child.wait().unwrap().success());
+        response
     }
 
     fn configure_command(&self, command: &mut Command) {

@@ -218,7 +218,7 @@ Control view/share
 cross-instance transfer
 ```
 
-stdout/stderr 等 worker-local artifact 通过 handle 延迟读取；图片可以由 Control 转成原生 MCP image content；公开 share 和跨实例 transfer 由 Control 管理配额、lease、hash 与 lifecycle。
+stdout/stderr 等 worker-local artifact 通过 handle 延迟读取；payload/receive 的 bulk bytes 使用 Worker Frame Service，open/begin/finish/close 等生命周期仍走 Worker RPC。图片可以由 Control 转成原生 MCP image content；公开 share 和跨实例 transfer 由 Control 管理配额、lease、hash 与 lifecycle。
 
 详见 [Artifact](../tools/artifacts.md)。
 
@@ -231,7 +231,7 @@ WSS
   └── fallback: SSE downstream + HTTPS POST upstream
 ```
 
-两种 transport 承载同一套 worker RPC。generation、request replay 与 completed-result cache 用于重连时避免同一个副作用请求被重复执行。
+两种 transport 都归一为一条 Channel，再由 Frame v1 multiplex `worker.rpc`、Artifact、TCP、process 等 Service。generation 属于 Reverse Channel 生命周期；只有 `worker.rpc` Protocol 使用 request replay 与 completed-result cache 在重连后避免同一个副作用请求被重复执行，其它 logical stream 不跨 generation 恢复。
 
 self-managed reverse worker 不由 Control 启动；Control 只接受其连接并管理引用/路由。
 

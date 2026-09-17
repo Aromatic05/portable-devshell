@@ -5,7 +5,6 @@ import type { HttpHost } from "@portable-devshell/mcp";
 import {
     createError,
     errorCodes,
-    LengthPrefixedChannel,
     WebSocketServerChannel,
     type JsonValue,
     type ReverseEnrollmentRequest,
@@ -19,7 +18,7 @@ import {
 } from "./Service.js";
 import { ReverseCredentialStore } from "../credential/Store.js";
 import type { ReverseInstanceLookupPort } from "../Port.js";
-import { ReverseRpcSseChannel } from "./SseChannel.js";
+import { ReverseSseChannel } from "./SseChannel.js";
 
 const ENROLL_SUFFIX = "/reverse/v1/enroll";
 const WSS_SUFFIX = "/reverse/v1/connect";
@@ -109,12 +108,11 @@ export class ReverseConnectionGateway {
     ): Promise<void> {
         try {
             const identity = await this.#authenticateRequest(request);
-            const lane = readReverseRpcLane(request);
-            if (!hasWebSocketProtocol(request, "devshell-worker-rpc.v1")) {
+            if (!hasWebSocketProtocol(request, "devshell-worker-transport.v1")) {
                 throw createError({
                     code: errorCodes.reverseTransportUnavailable,
                     message:
-                        "Sec-WebSocket-Protocol devshell-worker-rpc.v1 is required.",
+                        "Sec-WebSocket-Protocol devshell-worker-transport.v1 is required.",
                     retryable: false,
                 });
             }
@@ -124,11 +122,11 @@ export class ReverseConnectionGateway {
                 socket,
                 head,
                 (webSocket) => {
-                    const channel = new LengthPrefixedChannel(
-                        new WebSocketServerChannel(webSocket as never),
+                    const channel = new WebSocketServerChannel(
+                        webSocket as never,
                     );
                     void this.#connectionService
-                        .activate(identity, "wss", channel, lane)
+                        .activate(identity, "wss", channel)
                         .catch(() => channel.close());
                 },
             );
@@ -150,7 +148,7 @@ export class ReverseConnectionGateway {
                 "X-Accel-Buffering": "no",
             });
             response.flushHeaders();
-            const channel = new ReverseRpcSseChannel(
+            const channel = new ReverseSseChannel(
                 response,
                 readLastEventId(request),
             );
@@ -283,20 +281,6 @@ function parseGeneration(value: string): number {
         });
     }
     return generation;
-}
-
-function readReverseRpcLane(
-    request: IncomingMessage,
-): "control" | "bulk" | undefined {
-    const raw = request.headers["x-devshell-rpc-lane"];
-    const value = Array.isArray(raw) ? raw[0] : raw;
-    if (value === undefined || value.length === 0) return undefined;
-    if (value === "control" || value === "bulk") return value;
-    throw createError({
-        code: errorCodes.reverseTransportUnavailable,
-        message: "x-devshell-rpc-lane must be control or bulk.",
-        retryable: false,
-    });
 }
 
 function readLastEventId(request: IncomingMessage): number {

@@ -1,8 +1,11 @@
+pub(crate) mod proxy;
+mod service;
 mod sse;
 mod websocket;
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,12 +17,14 @@ use crate::daemon::log::append_log;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_file_mode;
 use crate::instance::{InstanceName, WorkerReverseConfig};
+use service::ReverseFramePayload;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
 const SSE_RETRY_AFTER: Duration = Duration::from_secs(5);
 const SSE_READ_TIMEOUT: Duration = Duration::from_secs(45);
-#[derive(Clone, Debug)]
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReversePayloadFrame {
     pub frame: Vec<u8>,
     pub opaque_id: Option<String>,
@@ -41,7 +46,7 @@ pub struct ReverseConnector {
     instance: InstanceName,
     paths: InstancePaths,
     config: WorkerReverseConfig,
-    payload: Arc<dyn ReversePayload>,
+    payload: Arc<ReverseFramePayload>,
 }
 
 impl ReverseConnector {
@@ -49,13 +54,14 @@ impl ReverseConnector {
         instance: InstanceName,
         paths: InstancePaths,
         config: WorkerReverseConfig,
+        transport_socket: PathBuf,
         payload: Arc<dyn ReversePayload>,
     ) -> Self {
         Self {
             instance,
             paths,
             config,
-            payload,
+            payload: Arc::new(ReverseFramePayload::new(transport_socket, payload)),
         }
     }
 
@@ -64,11 +70,15 @@ impl ReverseConnector {
     }
 
     fn run(mut self) {
-        let client = match Client::builder()
+        let client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            .timeout(SSE_READ_TIMEOUT)
-            .build()
-        {
+            .timeout(SSE_READ_TIMEOUT);
+        let client = match proxy::apply_http_client_proxy(client, self.config.proxy_url.as_deref())
+            .and_then(|builder| {
+                builder
+                    .build()
+                    .map_err(|error| format!("failed to build reverse HTTP client: {error}"))
+            }) {
             Ok(client) => client,
             Err(error) => {
                 let _ = append_log(
@@ -93,11 +103,11 @@ impl ReverseConnector {
                 }
             };
             let (transport, established, result) = if wss_failures < WSS_FAILURES_BEFORE_SSE {
-                match self.connect_wss(generation, "control") {
+                match self.connect_wss(generation) {
                     Ok(socket) => {
                         wss_failures = 0;
                         backoff = Duration::from_secs(1);
-                        ("wss", true, self.run_wss_generation(generation, socket))
+                        ("wss", true, self.run_wss(socket))
                     }
                     Err(error) => ("wss", false, Err(error)),
                 }

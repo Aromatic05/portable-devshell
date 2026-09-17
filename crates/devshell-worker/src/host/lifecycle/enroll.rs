@@ -11,11 +11,13 @@ use crate::instance::storage::ensure_dir;
 use crate::instance::{
     InstanceLock, InstanceName, WorkerReverseConfig, build_config, read_config, write_config,
 };
+use crate::transport::reverse::proxy::{apply_http_client_proxy, validate_proxy_url};
 
 #[derive(Clone, Debug)]
 pub struct EnrollOptions {
     pub controller: String,
     pub device_code: String,
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -46,10 +48,14 @@ struct EnrollResult {
 
 pub fn run(options: EnrollOptions) -> Result<String, String> {
     validate_controller_url(&options.controller)?;
+    if let Some(proxy_url) = options.proxy_url.as_deref() {
+        validate_proxy_url(proxy_url)?;
+    }
     let endpoint = enrollment_endpoint(&options.controller)?;
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(30));
+    let client = apply_http_client_proxy(client, options.proxy_url.as_deref())?
         .build()
         .map_err(|error| format!("failed to create enrollment client: {error}"))?;
     let response = client
@@ -98,6 +104,7 @@ pub fn run(options: EnrollOptions) -> Result<String, String> {
             controller_url: enrollment.controller_url,
             device_token: enrollment.device_token,
             generation: 0,
+            proxy_url: options.proxy_url,
         });
         write_config(&paths, &config)?;
     }
@@ -139,7 +146,7 @@ fn is_loopback(host: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{enrollment_endpoint, validate_controller_url};
+    use super::{enrollment_endpoint, validate_controller_url, validate_proxy_url};
 
     #[test]
     fn enrollment_endpoint_preserves_base_path() {
@@ -155,5 +162,15 @@ mod tests {
     fn rejects_public_plain_http() {
         assert!(validate_controller_url("http://example.test").is_err());
         assert!(validate_controller_url("http://127.0.0.1:17890").is_ok());
+    }
+
+    #[test]
+    fn reverse_proxy_url_accepts_only_supported_anonymous_proxy_schemes() {
+        assert!(validate_proxy_url("http://127.0.0.1:8080").is_ok());
+        assert!(validate_proxy_url("socks5://127.0.0.1:1080").is_ok());
+        assert!(validate_proxy_url("socks5h://proxy.example:1080").is_ok());
+        assert!(validate_proxy_url("https://proxy.example:8443").is_err());
+        assert!(validate_proxy_url("socks5://user:secret@127.0.0.1:1080").is_err());
+        assert!(validate_proxy_url("http://proxy.example").is_ok());
     }
 }

@@ -1,0 +1,1294 @@
+# Transport 通信协议
+
+> 状态：当前实现契约。Frame v1、Worker RPC、Artifact 数据面、controller-managed transport 与 Reverse multiplex 已在 TypeScript / Rust 两端落地并通过真实 HTTP、rsync、Artifact 与 Reverse 验收。
+>
+> Reverse 的认证、generation、WSS / SSE+POST 与 RPC replay 运行态规则见 [反向 Worker 连接协议](../operations/reverse-connections.md)；两份文档描述同一套 Frame transport，不存在旧 RPC lane 兼容层。
+
+当前边界：
+
+```text
+已冻结架构
+    Provider -> Carrier -> Channel -> Frame -> Service -> Protocol
+    Provider 与 Carrier 保持独立职责
+    Channel 只提供 byte service
+    Frame 是 length-prefixed PDU，并承担 multiplex / logical stream flow control
+    不建立独立 Framing / Session / Stream 架构层
+    新 transport 实现只进入各 package / crate 的 transport domain
+
+当前 Frame v1 实现
+    Frame header 与 OPEN / DATA / WINDOW / FIN / RESET
+    单侧 OPEN
+    per-stream credit / half-close / RESET
+    64 KiB DATA / 16 MiB Frame 上限
+    network.tcp / process.exec
+    worker.rpc
+    artifact.payload / artifact.receive
+    controller-managed 与 Reverse 共用同一 Service server
+
+仍然独立的边界
+    Client <-> Control 的 PrefixRoute / ClientConnection
+    Provider 的远端能力生命周期
+    Carrier 的 generation / reconnect / heartbeat
+    Worker RPC request replay / dedupe
+    public Extension Worker ABI
+```
+
+## 1. 目标
+
+portable-devshell 需要一套统一而足够小的通信基础设施，使不同 Provider / Carrier 组合可以承载相同的上层能力，同时避免 transport 理解具体业务协议。
+
+目标分层固定为：
+
+```text
+Provider
+   ↓
+Carrier
+   ↓
+Channel
+   ↓
+Frame
+   ↓
+Service
+   ↓
+Protocol / Consumer
+```
+
+六层分别回答六个问题：
+
+```text
+Provider   如何创建、启动和管理远端能力
+Carrier    如何跨进程或网络边界承载 Channel
+Channel    如何可靠、有序地搬运 bytes
+Frame      如何在一条 Channel 上表达多条逻辑流
+Service    一条逻辑流应该接到什么能力
+Protocol   这些 bytes 在业务上是什么意思
+```
+
+本设计的核心不是增加更多抽象，而是恢复严格的依赖方向：**下层只向上层提供服务，下层不得理解上层 PDU 的业务语义。**
+
+## 2. 非目标
+
+第一版明确不实现：
+
+- TCP 风格的重传、RTT 估计、slow start 或 congestion window；
+- Frame 层透明断线恢复、stream resume 或 exactly-once；
+- 多物理连接 striping / bonding；
+- traffic class、strict priority 或复杂 QoS；
+- public Extension transport ABI；
+- 为未来 Service 预建 `ServiceFactory`、`ServiceProvider`、`ServiceRegistry` 等层级；
+- 为解释模型额外建立 `Framing`、`Session`、`Stream` 架构层。
+
+这些能力只有出现真实需求后才进入设计。
+
+## 3. 分层与依赖规则
+
+### 3.1 Provider
+
+Provider 负责创建、启动、连接和管理远端能力，并选择或构造适合该能力的 Carrier。
+
+当前或预期的 Provider 包括：
+
+```text
+Local
+SSH
+Docker
+Podman
+```
+
+Control 配置中的 `provider = "reverse"` 是现有 instance 生命周期配置名称；在 Transport 分层里，Worker 主动回连 Control 的 WSS / SSE+POST 路径属于 Reverse Carrier，不改变 Provider 与 Carrier 的职责区分。
+
+Provider 可以负责：
+
+- worker install / start / attach；
+- 远端 executable / container / host 的生命周期；
+- Provider-specific provisioning 与环境准备；
+- 选择并建立对应 Carrier。
+
+Provider 不得理解：
+
+```text
+OPEN
+DATA
+WINDOW
+FIN
+RESET
+streamId
+service name
+Worker RPC method
+HTTP / TLS / rsync
+```
+
+### 3.2 Carrier
+
+Carrier 负责跨进程或网络边界实际承载 Channel，并把具体媒介的差异收敛在 Channel 之下。
+
+当前 Carrier 形态包括：
+
+```text
+local socket
+SSH stdio
+container exec stdio
+WebSocket
+Reverse WSS / SSE+POST
+```
+
+Carrier 可以拥有连接认证、heartbeat、generation、重连、proxy 和底层 message/chunk 适配，但不得解释 Frame、Service 或 Protocol。Provider 可以创建 Carrier；Carrier 向上只提供 Channel。
+
+### 3.3 Channel
+
+Channel 是 Carrier 向 Frame 提供的可靠、有序 byte service。
+
+概念接口：
+
+```ts
+interface Channel {
+    readonly closed: boolean;
+
+    write(data: Uint8Array): Promise<void>;
+    onData(listener: (data: Uint8Array) => void): () => void;
+    onClose(listener: (error?: Error) => void): () => void;
+
+    close(error?: Error): void;
+}
+```
+
+Channel 的契约是：
+
+1. 正常连接生命周期内，bytes 可靠且有序；
+2. `write()` 的数据顺序必须被保留；
+3. `write()` 的 Promise 必须传播底层发送 backpressure 和失败；
+4. `onData()` 返回的 chunk **没有任何协议边界含义**；
+5. 底层可以任意拆分或合并 chunk；
+6. Channel close 是整条连接关闭，不提供逻辑 half-close；
+7. Channel 不提供 replay / resume 语义。
+
+例如上层写入两个 Frame：
+
+```text
+Frame A = 100 bytes
+Frame B = 200 bytes
+```
+
+Channel 对端可以合法观察到：
+
+```text
+50 + 50 + 120 + 180
+```
+
+也可以观察到：
+
+```text
+300
+```
+
+Frame decoder 必须自行恢复 PDU 边界。
+
+即使 WebSocket 天生提供 message boundary，`WebSocketChannel` 也不得把该边界暴露成 Frame 语义：
+
+```text
+WebSocket message ─┐
+TCP byte stream ───┼─> Channel bytes
+SSH stdio ─────────┤
+SSE / POST ────────┘
+```
+
+### 3.4 Frame
+
+Frame 是建立在 Channel byte service 之上的 transport PDU。
+
+它负责：
+
+- length-prefix framing；
+- logical stream multiplex / demultiplex；
+- stream lifecycle；
+- per-stream receive credit；
+- bounded buffering；
+- 基本公平发送。
+
+它不负责：
+
+- 网络可靠性与网络拥塞控制；
+- Service metadata 的业务解释；
+- DATA payload 的协议解释；
+- Provider 重连；
+- RPC request replay。
+
+`stream` 不是独立 wire object，也不是新的架构层。
+
+一个 logical stream 只是：
+
+> 具有相同 `streamId` 的一组 Frame 按协议形成的双向逻辑字节流。
+
+### 3.5 Service
+
+Service 决定 logical stream 与目标能力之间的绑定关系。
+
+当前内建 Service：
+
+```text
+network.tcp
+process.exec
+worker.rpc
+artifact.payload
+artifact.receive
+```
+
+Service 可以解释 `OPEN` metadata，但不得解释 DATA 中承载的上层 Protocol。
+
+例如：
+
+```text
+HTTPS
+  ↓
+network.tcp(host, port)
+  ↓
+Frame logical stream
+```
+
+Transport 不解析 TLS 或 HTTP。
+
+又例如：
+
+```text
+rsync
+  ↓
+process.exec(executable, args, cwd)
+  ↓
+Frame logical stream
+```
+
+Transport 不认识 rsync 协议。
+
+### 3.6 Protocol / Consumer
+
+Protocol 是 transport 之外的消费者。
+
+包括但不限于：
+
+```text
+HTTP
+TLS
+rsync
+Worker RPC
+Control RPC
+database protocols
+```
+
+以下名称若进入通用 Frame 实现，说明分层已经泄漏：
+
+```text
+tool.call.*
+terminal.*
+HTTP
+rsync
+network.tcp
+process.exec
+worker.rpc
+artifact.payload
+artifact.receive
+```
+
+Service 名称只允许出现在 Service dispatcher / consumer；Frame codec、stream state、scheduler 与 Channel 都不得按 Service 名分支。
+
+### 3.7 Routing / Proxy
+
+`route` 不是新的公共 Transport 层，也不是 `network.tcp` metadata 的一部分。必须先区分两类路径：
+
+```text
+Provider path
+    Control / Worker 之间如何建立 Channel
+
+Service destination path
+    Worker 建立 network.tcp 时，bytes 最终如何到目标 endpoint
+```
+
+当前规则：
+
+- SSH Provider 直接使用 `ssh.command`；OpenSSH `ProxyJump`、`ProxyCommand`、ssh config 等 Provider 路由能力由该命令表达，DevShell 不复制一套 SSH route schema；
+- Docker / Podman 的路径由对应 container network 决定；
+- Tailscale / WireGuard 等已经进入 Worker OS routing table 的路径，对 `network.tcp` 完全透明；host 可以直接使用 tailnet IP / DNS name；
+- `network.tcp` metadata 始终只描述 `{ host, port }`，表示要连接的当前 byte endpoint；
+- 若最终目标需要通过 SOCKS，Consumer 先 `network.tcp(proxyHost, proxyPort)`，再在得到的 `FrameStream` 上执行 SOCKS CONNECT；隧道建立后继续承载 HTTP / TLS / database protocol；
+- SOCKS 因而是 Protocol / Consumer 组合，不新增 `network.socks` Service，也不向 Frame 增加 `route` 字段；
+- Reverse Carrier 自己如何经 proxy 连接 Control 属于 Carrier 实现，和 Worker 上的 `network.tcp` 无关；当前 worker `[reverse].proxyUrl` 已支持匿名 `http://`、`socks5://`、`socks5h://`，统一作用于 enrollment、WSS 与 SSE/POST。
+
+该分层已由真实 Worker e2e 验证：Consumer 通过 `network.tcp` 连接 SOCKS5 proxy，完成 no-auth CONNECT 后在同一个 `FrameStream` 上发送 HTTP/1.1 request/response；Reverse WebSocket 也已通过独立 HTTP CONNECT `proxyUrl` 建立完整 Frame Channel。`wss://` 在同一个预连接 tunnel 上由 `tungstenite::client_tls()` 继续完成 TLS/WebSocket handshake。两者使用的是不同层级的 proxy 能力。
+
+如果未来多个调用方重复需要 SOCKS consumer，可以增加 domain-level SOCKS helper，但它只能包装 `FrameStream`；不能改变 Frame wire contract 或固定 primitive Service 集。
+
+## 4. Channel 与 Frame 的依赖方向
+
+历史问题：
+
+```ts
+interface Channel {
+    send(frame: Frame): Promise<void>;
+    onFrame(listener: (frame: Frame) => void): () => void;
+}
+```
+
+它把 Channel API 绑定到了上层 PDU。
+
+当前实现已经改为：
+
+```text
+Provider
+   │ creates
+   ▼
+Channel
+   │ byte service
+   ▼
+Frame codec + state
+```
+
+依赖规则冻结为：
+
+> **Frame 可以依赖 Channel；Channel 不得依赖 Frame protocol semantic。**
+
+因此 Socket / WebSocket / SSE / SSH 等 Channel 实现中禁止出现 `streamId`、Frame type、Service 或 RPC method 判断。
+
+## 5. Frame v1 wire format
+
+### 5.1 基本格式
+
+所有整数采用 big-endian。
+
+每个 Frame 都是一个 length-prefixed byte packet：
+
+```text
+0               4       5       6              10
+┌───────────────┬───────┬───────┬───────────────┬───────────────┐
+│ length: u32   │ ver   │ type  │ streamId: u32 │ payload ...   │
+└───────────────┴───────┴───────┴───────────────┴───────────────┘
+```
+
+字段含义：
+
+```text
+length
+    后续 bytes 总数，不包含 length 自身
+
+ver
+    Frame protocol version；v1 固定为 1
+
+type
+    Frame type
+
+streamId
+    logical stream identifier
+
+payload
+    由 type 决定结构
+```
+
+v1 固定 header 为 6 bytes，不包含外层 4-byte `length`。
+
+`streamId = 0` 保留，不得用于普通 stream。
+
+Frame v1 不增加独立 preface，不依赖底层 message boundary，也不使用 transport-specific magic。
+
+### 5.2 Frame type
+
+v1 只定义：
+
+```text
+0x01 OPEN
+0x02 DATA
+0x03 WINDOW
+0x04 FIN
+0x05 RESET
+```
+
+未知 `type` 在 v1 中是 connection-level protocol error。
+
+第一版不定义：
+
+```text
+ACK
+PING
+PONG
+GOAWAY
+RESUME
+REPLAY
+PRIORITY
+```
+
+Provider 自己负责 heartbeat；Protocol 自己负责需要的 request retry / replay。
+
+## 6. Stream identifier
+
+Frame v1 采用单侧 OPEN 模型：
+
+```text
+opener   可以发送 OPEN
+acceptor 不发送 OPEN，只接受或 RESET
+```
+
+初始实现中：
+
+```text
+Control side = opener
+Worker side  = acceptor
+```
+
+这与底层物理连接建立方向无关。Reverse Worker 即使由 Worker 主动建立 WSS，也不改变 Frame opener / acceptor 角色。
+
+opener：
+
+- 从 `1` 开始单调分配 `streamId`；
+- 同一 Channel 生命周期内不得复用已经使用过的 ID；
+- ID 空间耗尽时关闭当前 Channel 并建立新 Channel，不回绕复用。
+
+单侧 OPEN 避免第一版引入 odd/even ID、冲突解决或双向 stream allocation。未来若出现 Worker 主动 open Service 的真实需求，再通过新 protocol version 扩展。
+
+## 7. OPEN
+
+`OPEN` 创建 logical stream 并选择 Service。
+
+payload：
+
+```text
+┌────────────────────┬─────────────────────┬──────────────────┬────────────────┐
+│ receiveWindow: u32 │ serviceLength: u16  │ service: bytes   │ metadata ...   │
+└────────────────────┴─────────────────────┴──────────────────┴────────────────┘
+```
+
+语义：
+
+```text
+receiveWindow
+    opener 授予 acceptor 的初始发送 credit
+
+service
+    UTF-8 Service name，例如 "network.tcp"
+
+metadata
+    Service-specific opaque bytes；Frame 层不得解析
+```
+
+约束：
+
+- `serviceLength > 0`；
+- service 必须是合法 UTF-8；
+- `receiveWindow > 0`；
+- 同一 `streamId` 只能 OPEN 一次；
+- Frame 层只解析 service name 和 receiveWindow，metadata 原样交给 Service。
+
+第一批内建 Service 可以各自在 Service 层使用 UTF-8 JSON metadata；这不是 Frame wire contract。
+
+OPEN 后 opener 的发送 credit 初始为 `0`。
+
+acceptor 成功建立 Service 后，通过第一个 `WINDOW` 授予 opener credit：
+
+```text
+OPEN -------------------->
+     <-------------------- WINDOW +N
+DATA -------------------->
+```
+
+因此 v1 不需要额外 `OPEN_ACK`。
+
+Service 建立失败时：
+
+```text
+OPEN -------------------->
+     <-------------------- RESET
+```
+
+acceptor 可以在发送第一个 WINDOW 前，使用 OPEN 中获得的 `receiveWindow` 向 opener 发送 Service 输出。
+
+## 8. DATA
+
+DATA payload 全部是上层 Protocol bytes：
+
+```text
+┌──────────────────────────────┐
+│ protocol bytes ...           │
+└──────────────────────────────┘
+```
+
+Frame 不增加 offset、sequence 或 checksum。
+
+理由：
+
+- Channel 已保证连接生命周期内可靠、有序；
+- Frame 不做重传；
+- logical stream byte offset 可以由本地状态直接累计。
+
+每个方向发送 DATA 前必须有足够 `sendCredit`：
+
+```text
+payload.length <= sendCredit
+```
+
+发送后：
+
+```text
+sendCredit -= payload.length
+```
+
+若对端发送超过已授予 credit 的 DATA，属于 connection-level protocol violation。
+
+DATA frame 的最大 payload 固定为 `64 KiB`，防止单个 logical stream 长时间占据 Channel。TypeScript 与 Rust 使用相同常量和 wire vectors。
+
+整个 Frame 的硬上限固定为 `16 MiB`。DATA 的更小上限用于 multiplex 公平性；Frame 上限用于资源防护，两者职责不同。
+
+## 9. WINDOW
+
+WINDOW 只解决 logical stream consumer backpressure，不实现网络 congestion control。
+
+payload：
+
+```text
+┌──────────────────┐
+│ creditDelta: u32 │
+└──────────────────┘
+```
+
+`creditDelta` 必须大于 `0`。
+
+发送 WINDOW 的时机是：
+
+> **上层 Service / Protocol 真正消费 DATA 之后。**
+
+不是 Frame 刚被解析时立即返还 credit。
+
+例如：
+
+```text
+sender                         receiver
+
+DATA 64K -------------------->
+DATA 64K -------------------->
+                               service consumes 128K
+          <------------------- WINDOW +128K
+DATA 64K -------------------->
+DATA 64K -------------------->
+```
+
+这保证慢 consumer 只能压住自己的 logical stream，不能通过无限 receiver buffering 消耗整个进程内存。
+
+### 9.1 为什么不能只依赖 TCP backpressure
+
+如果没有 per-stream WINDOW：
+
+```text
+stream 1  worker.rpc
+stream 2  artifact.payload
+stream 3  process.exec
+```
+
+当 stream 3 的 consumer 很慢时，只剩两种错误选择：
+
+```text
+A. 无限缓存 stream 3 DATA
+B. 停止读取整个 Channel
+```
+
+选择 B 会同时阻塞 stream 1 和 stream 2。
+
+因此 Frame WINDOW 解决的是：
+
+> multiplex 后不同 logical consumer 之间的 backpressure 隔离。
+
+TCP congestion control 解决的是网络承载能力，两者不是同一个问题。
+
+## 10. FIN
+
+FIN 表示当前发送方向正常结束。
+
+FIN 没有 payload。
+
+它是 half-close，不是整个 logical stream close：
+
+```text
+A                           B
+
+DATA --------------------->
+FIN ---------------------->
+
+     <--------------------- DATA
+     <--------------------- DATA
+     <--------------------- FIN
+```
+
+发送 FIN 后，本端不得再发送 DATA，但仍然可以接收对端 DATA。
+
+只有两个方向都 FIN 后，logical stream 才正常结束。
+
+half-close 对以下 Service 是必要语义：
+
+- `network.tcp`：映射 socket write-half shutdown；
+- `process.exec`：关闭 child stdin 后继续读取 stdout/stderr；
+- 依赖 EOF 表达请求结束的上层 Protocol。
+
+FIN 不消耗 stream credit。
+
+## 11. RESET
+
+RESET 表示整个 logical stream 异常终止。
+
+收到 RESET 后必须：
+
+- 丢弃该 stream 未发送 DATA；
+- 拒绝该 stream pending read/write；
+- 关闭对应 Service resource；
+- 删除 stream state；
+- 该 streamId 进入 retired 状态且永不复用；由于 RESET 与反方向在途 Frame 可以交叉，之后晚到的 DATA / WINDOW / FIN / RESET 直接丢弃，不得扩大为 Channel failure。
+
+RESET 不是 half-close，不区分方向。
+
+v1 RESET payload：
+
+```text
+┌───────────┬──────────────────┐
+│ code: u16 │ message: UTF-8   │
+└───────────┴──────────────────┘
+```
+
+`code` 属于 Frame/Service transport failure taxonomy；`message` 仅用于诊断，不作为程序分支依据。
+
+初始 code 至少覆盖：
+
+```text
+1 unsupportedService
+2 serviceRejected
+3 serviceFailed
+4 cancelled
+5 streamProtocolError
+```
+
+具体 Service 的业务错误应由上层 Protocol 表达，不应无限扩展 RESET code。
+
+## 12. Logical stream state
+
+每个 stream 至少维护：
+
+```text
+id
+service
+sendCredit
+receiveCredit
+localFin
+remoteFin
+sendQueue
+serviceState
+```
+
+状态机：
+
+```text
+             OPEN
+CLOSED ----------------> OPEN
+
+OPEN
+  │
+  ├─ DATA*
+  │
+  ├─ local FIN --------> HALF_CLOSED_LOCAL
+  │
+  ├─ remote FIN -------> HALF_CLOSED_REMOTE
+  │
+  └─ RESET -----------> CLOSED
+
+HALF_CLOSED_LOCAL
+  │
+  ├─ receive DATA
+  ├─ remote FIN -------> CLOSED
+  └─ RESET -----------> CLOSED
+
+HALF_CLOSED_REMOTE
+  │
+  ├─ send DATA
+  ├─ local FIN --------> CLOSED
+  └─ RESET -----------> CLOSED
+```
+
+Frame 层内部可以有 stream state 实现，但这不形成一个新的 `Stream` 架构层或 public transport taxonomy。
+
+## 13. Buffering 与发送公平性
+
+### 13.1 bounded queue
+
+本地 producer 不得通过一次大 `write()` 把整个 payload 复制进 Frame send queue。
+
+必须形成真实 backpressure：
+
+```text
+Protocol producer
+      │
+      ▼
+bounded per-stream queue
+      │
+      ▼
+Frame scheduler
+      │
+      ▼
+Channel.write()
+      │
+      ▼
+Provider / TCP / SSH / WSS
+```
+
+当 queue 达到 high-water mark 或 sendCredit 用尽时，上层 write 必须 await。
+
+### 13.2 v1 scheduling
+
+第一版不做 priority class。
+
+DATA 使用简单公平 ready queue：
+
+```text
+stream A -> one DATA chunk
+stream B -> one DATA chunk
+stream C -> one DATA chunk
+stream A -> one DATA chunk
+...
+```
+
+目标不是保证硬实时，而是避免一个 bulk producer 在应用层先把大量 DATA 排进 Channel，造成其他 stream 明显 head-of-line waiting。
+
+控制 Frame 的调度规则：
+
+- OPEN 必须先于同 stream 的其它 Frame；
+- DATA 与 FIN 保持同 stream 顺序；
+- WINDOW 不受 DATA credit 限制；
+- RESET 会取消该 stream 尚未发送的 DATA/FIN，并尽快发送；
+- 不同 stream 之间没有业务顺序保证。
+
+只有实际测试证明 terminal / RPC latency 需要更强 QoS 后，才考虑 weighted scheduling。
+
+## 14. Connection failure 与恢复边界
+
+Frame v1 明确规定：
+
+> **Channel lifetime = 当前 Frame logical-stream set 的 lifetime。**
+
+Channel 关闭时：
+
+```text
+Channel close
+    ↓
+all logical streams fail
+    ↓
+all Service resources close
+```
+
+Frame v1 不尝试透明恢复：
+
+```text
+stream resume
+frame sequence replay
+exactly-once
+connection migration
+```
+
+原因是多数 Service 无法通用恢复：
+
+```text
+network.tcp
+process.exec
+```
+
+其远端资源状态本身就可能已经失效。
+
+需要 request retry / replay 的 Protocol 自己拥有该语义。Worker RPC 已经在 RPC 层根据 request ID 处理 replay / dedupe；Frame 不 replay raw DATA。
+
+Reverse Carrier 的 generation / reconnect 和 Worker RPC completed-result cache 已位于对应层级：Carrier 恢复 Channel availability，RPC 恢复逻辑 request；`network.tcp`、`process.exec`、Artifact raw stream 等其它 logical stream 在 Channel 断开后直接失败，不跨 generation 恢复。
+
+## 15. Protocol error 边界
+
+### 15.1 connection-level error
+
+以下错误破坏整个 Frame 协议可信度，必须关闭 Channel：
+
+- length 非法或超过实现上限；
+- Frame version 不支持；
+- 未知 Frame type；
+- `streamId = 0` 用于普通 v1 Frame；
+- DATA 超过对端授予的 credit；
+- WINDOW delta 为 0 或 credit arithmetic overflow；
+- duplicate OPEN；
+- future / 从未退休的未知 streamId 上出现非 OPEN Frame；
+- active stream 上出现 DATA-after-FIN、duplicate FIN 等无法容忍的状态错误；
+- malformed fixed-size payload。
+
+### 15.2 stream-level error
+
+以下错误通常只 RESET 当前 stream：
+
+- Service 不存在；
+- Service metadata 非法；
+- TCP connect 失败；
+- process spawn 失败；
+- Service 本地资源异常；
+- consumer 主动取消。
+
+原则是：
+
+> 无法继续可信解析整个 Frame connection 才关闭 Channel；单个 Service 的失败不得扩大成整个连接失败。
+
+## 16. Service v1
+
+### 16.1 `network.tcp`
+
+职责：在 Worker 网络命名空间中建立 TCP connection，并把 socket 双向 bytes 与 logical stream 映射。
+
+概念 metadata：
+
+```json
+{
+    "host": "127.0.0.1",
+    "port": 8080
+}
+```
+
+映射：
+
+```text
+Frame DATA -> socket write
+socket read -> Frame DATA
+remote FIN -> socket write-half shutdown
+socket EOF -> local FIN
+RESET -> socket close
+```
+
+Transport 不解析 TCP 上承载的协议。
+
+该 Service 用于证明：
+
+- HTTP over DevShell；
+- HTTPS over DevShell；
+- 数据库等任意 TCP protocol；
+- Service 与 Protocol 正交。
+
+### 16.2 `process.exec`
+
+职责：在 Worker 上启动指定 executable，并把 process I/O 映射到 logical stream。
+
+概念 metadata：
+
+```json
+{
+    "executable": "rsync",
+    "args": ["--server", "..."],
+    "cwd": "/workspace"
+}
+```
+
+v1 映射固定为：
+
+```text
+Frame DATA        -> child stdin
+remote FIN        -> close child stdin
+child stdout      -> Frame DATA
+stdout EOF + exit 0 -> local FIN
+spawn failure     -> RESET serviceFailed
+non-zero exit     -> RESET serviceFailed
+RESET             -> terminate child
+```
+
+`stderr` 不进入 DATA，因为它不是上层 byte protocol 的一部分。v1 只允许把有界 stderr 摘要附到诊断 message；程序不得依赖该 message 做协议分支。
+
+该 Service 用于证明 rsync 等“程序自身拥有协议”的场景可以直接复用 Transport，而不需要为 rsync 增加专用 DevShell wire protocol。
+
+### 16.3 `worker.rpc`
+
+`worker.rpc` 已经迁移到 Frame Service：
+
+```text
+Worker RPC serializer
+        ↓ bytes
+worker.rpc Service
+        ↓
+Frame logical stream
+        ↓
+Channel
+```
+
+metadata 必须为空。controller-managed Worker 的 Service backend 连接 daemon RPC socket，并把该 socket 的双向 bytes 映射到 logical stream；`WorkerTransportConnection` 上的 RPC consumer 复用一个持久 `worker.rpc` stream。
+
+Frame 和 Provider 不检查 RPC method。RPC request ID、cancel、notification、request replay 和 completed-result dedupe 都属于 Worker RPC Protocol。
+
+Reverse 重连时可以重放未完成的 RPC request，但不是 replay 旧 Frame DATA。新的 generation 建立新的 Frame Channel 和新的 `worker.rpc` stream，再由 RPC 层以原 request ID 重新发送。
+
+### 16.4 `artifact.payload`
+
+Artifact 生命周期仍由控制 RPC 管理；payload bytes 已从 RPC 数据面移到专用 Service。
+
+metadata：
+
+```json
+{
+    "payloadId": "...",
+    "offsetBytes": 0,
+    "maxBytes": 1048576
+}
+```
+
+Service 输出：
+
+```text
+8-byte big-endian totalBytes
+raw payload bytes
+```
+
+输入方向不承载 payload。consumer 通常 OPEN 后立即 FIN 自己的发送方向，再读取 header 与 raw bytes，直到 Service FIN。
+
+### 16.5 `artifact.receive`
+
+metadata：
+
+```json
+{
+    "receiveId": "...",
+    "offsetBytes": 0
+}
+```
+
+DATA 全部是 raw payload bytes。远端 FIN 表示本次 chunk 输入结束，Service flush 当前 buffer；最终校验、hash 与原子提交仍由 `artifact.receive.finish` 控制 RPC 完成。
+
+因此 Artifact 的边界固定为：
+
+```text
+open / begin / finish / abort / close -> Worker RPC control plane
+payload bytes                         -> Frame Service data plane
+```
+
+不存在按 RPC method 把 Artifact 分到另一条物理 lane 的逻辑。
+
+## 17. Reverse Carrier
+
+Reverse 当前已经收敛为：
+
+```text
+WSS 或 SSE+POST
+      ↓
+one Channel / generation
+      ↓
+Frame multiplex
+```
+
+物理连接方向仍由 Worker 主动发起，但 Frame role 不变：Control 是 opener，Worker 是 acceptor。
+
+Worker Reverse connector 在 Service 边界做两类处理：
+
+```text
+worker.rpc
+    -> ReverseRpcPayload
+    -> 保留 request replay / dedupe / async response queue
+
+其它 Service
+    -> 原样桥接 daemon transport endpoint
+    -> 由同一个 daemon Service dispatcher 处理
+```
+
+因此 `network.tcp`、`process.exec`、`artifact.payload`、`artifact.receive` 在 controller-managed 与 Reverse 下共用同一 backend，不存在 Reverse 专用实现。
+
+Channel 断开时所有当前 logical stream 都失败。只有 Worker RPC 的逻辑 request 可以在新 generation 上由 RPC 层重放；其它 Service 不透明恢复。
+
+若未来确有多物理连接吞吐需求，应由 Carrier 内部实现，不允许 Frame 或 Protocol 依赖具体 lane。
+
+## 18. Security boundary
+
+Transport 统一不等于权限统一，也不等于 raw Service 是公共能力。
+
+当前 `network.tcp` / `process.exec` consumer 是 trusted host-side `WorkerInstance` API，经过 instance readiness / connection ownership，但**不等同于** model tool 的 approval / workspace policy。worker daemon 的 Service dispatcher 也不自行实现一套新的调用者权限系统。
+
+当前 public Extension Worker ABI 仍然只暴露：
+
+```text
+openSession
+callTool
+listTools
+```
+
+Extension 不获得 `Channel`、Frame scheduler、window 或 raw `FrameStream`。如果未来需要把远端通信能力开放给 Extension，应先定义对应 domain-level capability 和 authority，再由 Host 组合内部 Service；不能因为内部已有 `WorkerInstance.connectTcp()` 就直接冻结 transport ABI。
+
+Frame 自身永远只表达 Service open，不负责调用者授权。
+
+## 19. 目录与分类学约束
+
+实现没有为了分层图机械建立五层目录。当前主要结构：
+
+```text
+packages/shared/src/transport/
+  frame/
+    Codec.ts
+    Protocol.ts
+    Stream.ts
+  protocol/
+    Channel.ts
+    Codec.ts
+    PrefixRoute.ts
+  socket/
+  websocket/
+  ClientConnection.ts
+
+packages/core/src/worker/transport/
+  command/
+  container/
+  process/
+  provider/
+  service/
+    Client.ts
+    Codec.ts
+    Model.ts
+  Binary.ts
+  Factory.ts
+  Transport.ts
+
+crates/devshell-worker/src/transport/
+  frame/
+    mod.rs
+    codec.rs
+    stream.rs
+  service/
+    artifact/
+      mod.rs
+      payload.rs
+      receive.rs
+    exec.rs
+    mod.rs
+    tcp.rs
+  reverse/
+    service/
+      bridge.rs
+      frame.rs
+      mod.rs
+    mod.rs
+    sse.rs
+    websocket.rs
+  socket/
+  mod.rs
+```
+
+其中：
+
+- `frame/Stream.ts` / `frame/stream.rs` 只是 Frame 内部 logical stream state / API，不代表独立 Stream 架构层；
+- Core `transport/service/` 是 host-side typed consumer，只编码 Service metadata 并返回现有 `FrameStream`；
+- Worker `transport/service/` 是固定 primitive dispatcher，不建立动态 `ServiceRegistry`；
+- Reverse `transport/reverse/service/` 只解决 Reverse Channel 与 daemon Service endpoint 的桥接，以及 `worker.rpc` 特有的 replay ownership；
+- 不新增 `session/` 或 `carrier/`；
+- 不把 `service/` 提升为 package 顶层 domain；
+- 不大规模重排现有 transport 目录。
+
+## 20. 实现状态
+
+### Phase 1 — Channel boundary：完成
+
+公共 Channel 已使用：
+
+```text
+write(bytes) / onData(bytes)
+```
+
+Channel 不再依赖 Frame PDU。
+
+### Phase 2 — Frame v1：完成
+
+```text
+length-prefix codec
+OPEN / DATA / WINDOW / FIN / RESET
+logical stream state
+per-stream credit
+64 KiB DATA chunk
+fair DATA scheduling
+```
+
+TypeScript / Rust 使用相同 wire vectors，并覆盖 split / coalesce、credit、half-close、RESET，以及 retired stream 上 late DATA / WINDOW / FIN / RESET 的关闭竞态。
+
+### Phase 3 — primitive Service：完成
+
+```text
+network.tcp
+process.exec
+```
+
+Core 已提供 typed `WorkerTransportServiceClient`，`WorkerInstance.connectTcp()` / `execProcess()` 是 trusted host-side consumer。
+
+### Phase 4 — 既有 Protocol 迁移：完成 Worker 侧
+
+```text
+worker.rpc
+artifact.payload
+artifact.receive
+Reverse multiplex
+```
+
+Artifact chunk RPC 数据面已删除。Reverse 不再按 RPC method 做 control/bulk lane 分类。
+
+Client 与 Control 之间的 `ClientConnection` / `PrefixRoute` 是另一条已经稳定的 Control transport，不要求为了“统一图”机械迁到 Worker Frame v1。
+
+### Phase 5 — Protocol 验收：完成
+
+```text
+HTTP/1.1 over network.tcp
+SOCKS5 CONNECT + HTTP/1.1 over network.tcp(proxy)
+rsync wire protocol over process.exec
+700 KiB Artifact raw data plane
+real WSS Reverse Worker with sibling Services
+```
+
+## 21. 回归测试要求
+
+以下测试已经形成实现契约，后续修改必须继续覆盖。
+
+### 21.1 Channel contract
+
+- 任意拆分输入可以恢复完整 byte sequence；
+- 任意合并输入不改变 byte sequence；
+- concurrent write 不重排 bytes；
+- write failure 关闭 Channel 并传播错误；
+- WebSocket message boundary 不成为公共语义。
+
+### 21.2 Frame codec
+
+- TypeScript encode -> Rust decode；
+- Rust encode -> TypeScript decode；
+- partial header；
+- partial payload；
+- multiple frames in one chunk；
+- malformed length；
+- unsupported version；
+- unknown type；
+- frame size limit。
+
+### 21.3 Multiplex
+
+- 多 stream DATA 正确隔离；
+- 同 stream byte order 保持；
+- 一个 stream credit 耗尽不阻塞其它 stream；
+- bounded send queue 会产生 backpressure；
+- FIN half-close；
+- RESET 只关闭目标 stream；
+- Channel close 关闭全部 stream。
+
+### 21.4 Flow control
+
+- DATA 不得超过 sendCredit；
+- WINDOW 只在 consumer consumption 后返还；
+- WINDOW 不能 overflow；
+- slow consumer 不导致 unlimited buffering；
+- bulk stream 持续传输时 interactive stream 仍可前进。
+
+### 21.5 Service
+
+`network.tcp`：
+
+- TCP echo；
+- HTTP request/response；
+- SOCKS5 CONNECT 后继续承载 HTTP；
+- half-close；
+- connect failure -> RESET；
+- large bidirectional transfer。
+
+`process.exec`：
+
+- stdin/stdout echo；
+- stdin FIN 后 stdout 继续读取；
+- process spawn failure -> RESET；
+- 使用真实 rsync server mode 做协议 smoke；
+- 本地 rsync client 通过 `WorkerInstance.execProcess()` 完成真实 remote-shell end-to-end 文件同步。
+
+`worker.rpc`：
+
+- 一个物理 Frame connection 上复用持久 RPC stream；
+- notification 与 response 共存；
+- Reverse channel replacement 后按原 request ID replay；
+- replay / cancel / dedupe 不污染 Frame 层。
+
+Artifact：
+
+- `artifact.payload` 返回 8-byte total length + raw bytes；
+- `artifact.receive` 接收 raw bytes，并在控制 RPC `finish` 中校验提交；
+- controller-managed 与 Reverse 都覆盖 700 KiB round-trip；
+- 显式压力验收覆盖 32 MiB payload/receive，以正式 1 MiB chunk 上限连续完成 64 条 data stream；
+- 旧 `artifact.payload.read` / `artifact.receive.write` chunk RPC 不得重新出现。
+
+Reverse：
+
+- WSS 与 SSE+POST 都承载 Frame bytes；
+- generation replacement 不产生第二套 Frame 状态；
+- `worker.rpc` 与 sibling Service 共用一个 Channel；
+- HTTP over `network.tcp`、`process.exec`、Artifact 都必须在真实 Reverse worker 上可用。
+
+### 21.6 显式压力验收
+
+压力测试**不属于默认 `pnpm test` / package test**，只能显式运行：
+
+```bash
+pnpm stress:transport
+```
+
+专用 runner 会先进入受限 user cgroup；没有有效资源上限时拒绝执行。当前限制为：
+
+```text
+MemoryHigh   1 GiB
+MemoryMax    1.5 GiB
+MemorySwapMax 0
+CPUQuota     150%
+TasksMax     256
+IOWeight     50
+Nice         10
+RuntimeMax   300 s
+```
+
+显式压力矩阵当前覆盖：
+
+- 默认 256 active stream 饱和、释放后复用，以及超量 OPEN 资源保护；
+- 4000 次 fragmented OPEN / DATA / FIN churn；
+- 1000 次低 credit blocked writer 与 RESET race，并持续验证 sibling stream 存活；
+- 48 条并发双向 stream，在任意 Channel fragment 下保持 byte integrity；
+- 8 MiB slow consumer 与 32 条 sibling stream 的 starvation 隔离；
+- 真实 Rust Worker 上 24 条并发 `process.exec`、32 条并发 `network.tcp`、16 MiB 单 stream 与 256 次 process stream churn；
+- 32 MiB Artifact payload / receive round-trip；
+- 8 轮 WSS generation replacement + SSE/POST dedupe；
+- 真实 proxied WSS Reverse 与 direct re-enroll。
+
+active-stream 数量属于实现资源保护，不属于 Frame v1 wire compatibility；当前默认值为 256。常规测试只保留小规模边界语义测试，不运行上述压力负载。
+
+## 22. 架构验收规则
+
+代码审查时可以直接用以下规则判断设计是否走偏：
+
+1. **Provider 只负责远端能力生命周期并创建/选择 Carrier，不理解 Frame / Service / Protocol。**
+2. **Carrier 只负责承载 Channel，不理解 Frame / Service / Protocol。**
+3. **Channel 只搬运 bytes，不理解 Frame PDU。**
+4. **Frame 只理解 multiplex、logical stream lifecycle 和 credit，不理解 DATA 业务。**
+5. **Service 只负责 logical stream 与能力的绑定，不解析其上承载的 Protocol。**
+6. **Protocol retry/replay 不得下沉为 Frame raw-byte replay。**
+7. **一个 slow logical stream 不得阻塞整个 Channel。**
+8. **Channel 断开后 Frame stream 不透明恢复。**
+9. **新通信实现只进入 `transport` domain，不为分层图大规模重排现有目录。**
+
+当前结构保持简单：
+
+```text
+Local / SSH / Docker / Podman
+             │
+             ▼
+          Provider
+             │ creates / selects
+             ▼
+ socket / SSH stdio / container exec / Reverse WSS+SSE
+             │
+             ▼
+           Carrier
+             │ provides
+             ▼
+           Channel
+                    │
+                    ▼
+       length-prefixed Frame protocol
+          │         │         │
+       stream 1    stream 2    stream 3    stream 4
+          │           │           │           │
+          ▼           ▼           ▼           ▼
+      network.tcp process.exec worker.rpc artifact.*
+          │           │           │           │
+          ▼           ▼           ▼           ▼
+       HTTP/TLS      rsync        RPC      raw payload
+```
+
+远端能力生命周期归 Provider；跨边界承载归 Carrier；可靠有序 bytes 归 Channel；多路逻辑流归 Frame；目标能力归 Service；业务含义归 Protocol。

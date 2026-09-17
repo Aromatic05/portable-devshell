@@ -4,10 +4,16 @@ import { rm } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { errorCodes, type JsonValue } from "@portable-devshell/shared";
 import {
-    encodeFrame,
-    FrameBuffer,
+    errorCodes,
+    StreamChannel,
+    type JsonValue,
+} from "@portable-devshell/shared";
+import {
+    encodePacket,
+    FrameProtocol,
+    PacketBuffer,
+    type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
@@ -17,11 +23,12 @@ import {
     WorkerRpcBridge,
     WorkerRpcClient,
     WorkerRpcError,
+    WorkerTransportConnection,
     decodeWorkerRpcMessage,
     encodeWorkerRpcMessage,
     workerRpcDisconnectedErrorCode,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
+    type WorkerTransport,
     type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 import {
@@ -33,11 +40,20 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
 const workerBinaryPath = resolveTestWorkerBinary();
 
-test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", async () => {
+function createTransportRpcBridge(
+    transport: WorkerTransport,
+    rpcOptions: Parameters<typeof WorkerTransportConnection.fromTransport>[1],
+): WorkerRpcBridge {
+    return new WorkerRpcBridge({
+        connection: WorkerTransportConnection.fromTransport(transport, rpcOptions),
+        rpcOptions,
+    });
+}
+
+test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple calls", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "task-4-bridge" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "task-4-bridge",
     });
     const rpcClient = new WorkerRpcClient(bridge);
     const protocolClient = new WorkerProtocolClient(rpcClient);
@@ -55,7 +71,7 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
     assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
     assert.equal("tools" in handshake, false);
     assert.equal(tools.tools[0]?.name, "bash_run");
-    assert.equal(harness.spawnCount, 1);
+    assert.equal(harness.connectionCount, 1);
     assert.deepEqual(harness.requestMethods, [
         "worker.ping",
         "worker.handshake",
@@ -64,11 +80,10 @@ test("WorkerRpcBridge reuses one spawned rpc process across multiple calls", asy
     bridge.close();
 });
 
-test("WorkerProtocolClient routes artifact payload and receive lifecycle through internal RPC methods", async () => {
+test("WorkerProtocolClient routes artifact control lifecycle through internal RPC methods", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "artifact-rpc" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "artifact-rpc",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 
@@ -77,21 +92,11 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
         path: "./result.bin",
         workspace: "/workspace",
     });
-    const chunk = await client.readArtifactPayload({
-        maxBytes: 1024,
-        offsetBytes: 0,
-        payloadId: opened.payloadId,
-    });
     const receive = await client.beginArtifactReceive({
         descriptor: opened.descriptor,
         overwrite: false,
         targetPath: "./copy.bin",
         workspace: "/workspace",
-    });
-    await client.writeArtifactReceive({
-        content: chunk.content,
-        offsetBytes: 0,
-        receiveId: receive.receiveId,
     });
     const direct = await client.openArtifactDirectReceive({
         expiresAtMs: Date.now() + 60_000,
@@ -110,9 +115,7 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
 
     assert.deepEqual(harness.requestMethods, [
         "artifact.payload.open",
-        "artifact.payload.read",
         "artifact.receive.begin",
-        "artifact.receive.write",
         "artifact.receive.direct.open",
         "artifact.payload.direct.push",
         "artifact.receive.direct.close",
@@ -125,9 +128,8 @@ test("WorkerProtocolClient routes artifact payload and receive lifecycle through
 
 test("WorkerProtocolClient prepares private Extension resource collections through internal RPC", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "resource-rpc" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "resource-rpc",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
 
@@ -147,9 +149,8 @@ test("WorkerProtocolClient prepares private Extension resource collections throu
 
 test("WorkerRpcClient keeps context identity while assigning each call a distinct operation id", async () => {
     const harness = createRpcHarness();
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "session-context" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "session-context",
     });
     const client = new WorkerRpcClient(bridge);
 
@@ -204,9 +205,8 @@ test("WorkerRpcClient keeps context identity while assigning each call a distinc
 
 test("WorkerRpcClient routes only increasing progress for the matching operation id", async () => {
     const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "rpc-progress" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "rpc-progress",
     });
     const client = new WorkerRpcClient(bridge);
     const progress: JsonValue[] = [];
@@ -253,9 +253,8 @@ test("WorkerRpcClient routes only increasing progress for the matching operation
 
 test("WorkerRpcClient propagates abort as tool.call.cancel", async () => {
     const harness = createRpcHarness({ slowMethods: new Set(["bash_run"]) });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "rpc-cancel" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "rpc-cancel",
     });
     const client = new WorkerRpcClient(bridge);
     const controller = new AbortController();
@@ -295,9 +294,8 @@ test("WorkerProtocolClient propagates artifact abort as tool.call.cancel", async
     const harness = createRpcHarness({
         slowMethods: new Set(["artifact.payload.open"]),
     });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "artifact-rpc-cancel" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "artifact-rpc-cancel",
     });
     const client = new WorkerProtocolClient(new WorkerRpcClient(bridge));
     const controller = new AbortController();
@@ -342,9 +340,8 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
     const harness = createRpcHarness({
         slowMethods: new Set(["tools.list"]),
     });
-    const bridge = new WorkerRpcBridge({
-        transport: harness.transport,
-        rpcOptions: { instanceName: "task-4-disconnect" },
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "task-4-disconnect",
     });
     const disconnects: string[] = [];
     bridge.onDisconnect((error) => {
@@ -362,23 +359,23 @@ test("WorkerRpcBridge rejects pending calls when the rpc bridge disconnects", as
         assert.equal(error.code, workerRpcDisconnectedErrorCode);
         return true;
     });
-    assert.equal(harness.spawnCount, 1);
+    assert.equal(harness.connectionCount, 1);
     assert.deepEqual(disconnects, [workerRpcDisconnectedErrorCode]);
 });
 
-test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", async () => {
-    const bridge = new WorkerRpcBridge({
-        transport: {
+test("WorkerRpcBridge surfaces transport connection failures with the compatible rpc error code", async () => {
+    const bridge = createTransportRpcBridge(
+        {
+            async connectWorkerChannel() {
+                throw new Error("connect denied");
+            },
             async installWorker() {},
             async runWorkerCommand(): Promise<WorkerCommandResult> {
                 throw new Error("unused");
             },
-            async spawnWorkerRpc() {
-                throw new Error("spawn denied");
-            },
         },
-        rpcOptions: { instanceName: "task-4-spawn" },
-    });
+        { instanceName: "task-4-connect" },
+    );
 
     await assert.rejects(bridge.connect(), (error: unknown) => {
         assert.ok(typeof error === "object" && error !== null);
@@ -388,7 +385,7 @@ test("WorkerRpcBridge surfaces spawn failures as structured rpc spawn errors", a
         );
         assert.equal(
             (error as { details?: Record<string, unknown> }).details?.instance,
-            "task-4-spawn",
+            "task-4-connect",
         );
         return true;
     });
@@ -418,13 +415,18 @@ test(
 
         assert.equal(commandResult.exitCode, 0);
 
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
 
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
@@ -478,12 +480,17 @@ test(
                 .exitCode,
             0,
         );
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
@@ -567,12 +574,17 @@ test(
                 .exitCode,
             0,
         );
+        const connection = WorkerTransportConnection.fromTransport(transport, {
+            env,
+            instanceName,
+        });
         const bridge = new WorkerRpcBridge({
-            transport,
+            connection,
             rpcOptions: { env, instanceName },
         });
         t.after(async () => {
             bridge.close();
+            connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
@@ -632,8 +644,8 @@ test(
 );
 
 function createRpcHarness(options?: { slowMethods?: Set<string> }): {
-    transport: WorkerCommandTransport;
-    spawnCount: number;
+    transport: WorkerTransport;
+    connectionCount: number;
     requestMethods: string[];
     requestContexts: Array<
         | {
@@ -682,88 +694,113 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
         };
     }> = [];
     const slowMethods = options?.slowMethods ?? new Set<string>();
-    const stdout = new PassThrough();
-    const stdin = new PassThrough();
-    const stderr = new PassThrough();
-    const reader = new FrameBuffer();
-    let spawnCount = 0;
-    let exitResolve:
-        | ((value: {
-              code: number | null;
-              signal: NodeJS.Signals | null;
-          }) => void)
-        | undefined;
+    let connectionCount = 0;
+    let activeProtocol: FrameProtocol | undefined;
+    let activeStream: FrameStream | undefined;
     const methodWaiters = new Map<string, Array<() => void>>();
-    const transport: WorkerCommandTransport = {
+    const transport: WorkerTransport = {
+        async connectWorkerChannel() {
+            connectionCount += 1;
+            const clientToServer = new PassThrough();
+            const serverToClient = new PassThrough();
+            const pair: {
+                client?: StreamChannel;
+                server?: StreamChannel;
+                closed: boolean;
+            } = { closed: false };
+            const closePair = (error?: Error) => {
+                if (pair.closed) return;
+                pair.closed = true;
+                pair.client?.close(error);
+                pair.server?.close(error);
+            };
+            const client = new StreamChannel(serverToClient, clientToServer, {
+                closeTransport: closePair,
+            });
+            const server = new StreamChannel(clientToServer, serverToClient, {
+                closeTransport: closePair,
+            });
+            pair.client = client;
+            pair.server = server;
+            const protocol = new FrameProtocol(server, { role: "acceptor" });
+            activeProtocol = protocol;
+            void serveRpcHarness(protocol).catch((error: unknown) => {
+                protocol.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            });
+            return client;
+        },
         async runWorkerCommand(): Promise<WorkerCommandResult> {
             throw new Error(
                 "runWorkerCommand should not be called in RPC harness tests.",
             );
         },
-        async spawnWorkerRpc() {
-            spawnCount += 1;
-            return {
-                stdin,
-                stdout,
-                stderr,
-                kill() {
-                    stdout.end();
-                    exitResolve?.({ code: null, signal: "SIGTERM" });
-                    return true;
-                },
-                exit: new Promise((resolve) => {
-                    exitResolve = resolve;
-                }),
-            };
-        },
         async installWorker(): Promise<void> {},
     };
 
-    stdin.on("data", (chunk: Uint8Array) => {
-        const frames = reader.push(chunk);
+    async function serveRpcHarness(protocol: FrameProtocol): Promise<void> {
+        const open = await protocol.nextOpen();
+        assert.notEqual(open, undefined);
+        assert.equal(open!.service, "worker.rpc");
+        assert.equal(open!.metadata.byteLength, 0);
+        const stream = await open!.accept();
+        activeStream = stream;
+        const reader = new PacketBuffer();
 
-        for (const payload of frames) {
-            const frame = decodeWorkerRpcMessage(payload);
-            if (!isRequestFrame(frame)) {
-                continue;
-            }
+        while (true) {
+            const chunk = await stream.read();
+            if (chunk === undefined) return;
 
-            requestMethods.push(frame.method);
-            requestContexts.push(frame.context);
-            requests.push(frame);
-            methodWaiters
-                .get(frame.method)
-                ?.splice(0)
-                .forEach((resolve) => resolve());
+            for (const payload of reader.push(chunk)) {
+                const frame = decodeWorkerRpcMessage(payload);
+                if (!isRequestFrame(frame)) continue;
 
-            if (slowMethods.has(frame.method)) {
-                continue;
-            }
+                requestMethods.push(frame.method);
+                requestContexts.push(frame.context);
+                requests.push(frame);
+                methodWaiters
+                    .get(frame.method)
+                    ?.splice(0)
+                    .forEach((resolve) => resolve());
 
-            stdout.write(
-                encodeFrame(
-                    encodeWorkerRpcMessage(
-                        createResponse(
-                            frame.method,
-                            frame.id,
-                        ) as unknown as JsonValue,
+                if (slowMethods.has(frame.method)) continue;
+                await stream.write(
+                    encodePacket(
+                        encodeWorkerRpcMessage(
+                            createResponse(
+                                frame.method,
+                                frame.id,
+                            ) as unknown as JsonValue,
+                        ),
                     ),
-                ),
-            );
+                );
+            }
         }
-    });
+    }
+
+    function writeToActiveStream(value: JsonValue): void {
+        const stream = activeStream;
+        if (stream === undefined) {
+            throw new Error("worker.rpc harness stream is not connected.");
+        }
+        void stream
+            .write(encodePacket(encodeWorkerRpcMessage(value)))
+            .catch(() => undefined);
+    }
 
     return {
         transport,
-        get spawnCount() {
-            return spawnCount;
+        get connectionCount() {
+            return connectionCount;
         },
         requestMethods,
         requestContexts,
         requests,
         disconnect() {
-            stdout.end();
-            exitResolve?.({ code: 1, signal: null });
+            activeProtocol?.close(new Error("injected rpc transport disconnect"));
+            activeProtocol = undefined;
+            activeStream = undefined;
         },
         respondMethod(method: string) {
             const request = [...requests]
@@ -771,27 +808,16 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
                 .find((candidate) => candidate.method === method);
             if (request === undefined)
                 throw new Error(`No request available for ${method}.`);
-            stdout.write(
-                encodeFrame(
-                    encodeWorkerRpcMessage(
-                        createResponse(
-                            method,
-                            request.id,
-                        ) as unknown as JsonValue,
-                    ),
-                ),
+            writeToActiveStream(
+                createResponse(method, request.id) as unknown as JsonValue,
             );
         },
         sendNotification(method: string, params: JsonValue) {
-            stdout.write(
-                encodeFrame(
-                    encodeWorkerRpcMessage({
-                        method,
-                        params,
-                        type: "notification",
-                    } as unknown as JsonValue),
-                ),
-            );
+            writeToActiveStream({
+                method,
+                params,
+                type: "notification",
+            } as unknown as JsonValue);
         },
         waitForMethod(method: string) {
             if (requestMethods.includes(method)) {
@@ -882,42 +908,12 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
         };
     }
 
-    if (method === "artifact.payload.read") {
-        return {
-            type: "response",
-            id,
-            ok: true,
-            result: {
-                payloadId: "payload-1",
-                offsetBytes: 0,
-                returnedBytes: 3,
-                totalBytes: 3,
-                content: "YWJj",
-                encoding: "base64",
-                eof: true,
-            },
-        };
-    }
-
     if (method === "artifact.receive.begin") {
         return {
             type: "response",
             id,
             ok: true,
             result: { receiveId: "receive-1", nextOffsetBytes: 0 },
-        };
-    }
-
-    if (method === "artifact.receive.write") {
-        return {
-            type: "response",
-            id,
-            ok: true,
-            result: {
-                receiveId: "receive-1",
-                receivedBytes: 3,
-                nextOffsetBytes: 3,
-            },
         };
     }
 

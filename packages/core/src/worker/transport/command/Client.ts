@@ -1,16 +1,16 @@
 import type {
     WorkerCommandInteractiveSession,
-    WorkerCommandTransport,
     WorkerCommandResult,
 } from "./Transport.js";
+import type { WorkerTransport } from "../Transport.js";
 
 export class WorkerCommandClient {
-    readonly #transport: WorkerCommandTransport;
+    readonly #transport: WorkerTransport;
     readonly #instanceName: string;
     readonly #env?: NodeJS.ProcessEnv;
 
     constructor(
-        transport: WorkerCommandTransport,
+        transport: WorkerTransport,
         instanceName: string,
         env?: NodeJS.ProcessEnv,
     ) {

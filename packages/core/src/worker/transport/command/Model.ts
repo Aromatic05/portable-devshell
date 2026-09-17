@@ -6,7 +6,9 @@ export interface WorkerCommandOptions {
     env?: NodeJS.ProcessEnv;
 }
 
-export interface WorkerRpcOptions {
+export interface WorkerChannelOptions {
     instanceName: string;
     env?: NodeJS.ProcessEnv;
 }
+
+export type WorkerRpcOptions = WorkerChannelOptions;

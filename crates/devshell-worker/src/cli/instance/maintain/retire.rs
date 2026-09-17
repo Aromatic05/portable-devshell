@@ -54,7 +54,7 @@ pub fn retire_instance(instance: &InstanceName) -> Result<bool, String> {
 
     #[cfg(unix)]
     tmux::retire_instance_runtime(&instance_paths, &socket_paths, instance.as_str())?;
-    process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
+    process::clear_runtime_files(&instance_paths, &socket_paths)?;
     remove_file(&instance_paths.config_file)?;
     remove_tree(&instance_paths.artifacts_dir)?;
     remove_tree(&instance_paths.logs_dir)?;

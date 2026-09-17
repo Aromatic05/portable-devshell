@@ -13,7 +13,7 @@ export class WorkerBinary {
     }
 
     buildCommand(
-        subcommand: WorkerCommandName | "rpc",
+        subcommand: WorkerCommandName | "transport",
         instanceName: string,
         extraArgs: readonly string[] = [],
     ): WorkerBinaryCommand {

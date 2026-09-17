@@ -254,6 +254,9 @@ function createInstance(
         } as never,
         stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
         terminalClient: {} as never,
+        transportConnection: {
+            close: () => undefined,
+        } as never,
         toolCallScheduler: {} as never,
         toolCallHistory: {
             read: async () => [],

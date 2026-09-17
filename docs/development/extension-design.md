@@ -353,8 +353,12 @@ WorkerInstance
 provider transport
 Worker protocol client
 SSH / Docker / Reverse connection
+Channel / Frame
+raw Worker Service / FrameStream
 raw worker RPC
 ```
+
+当前内部 `WorkerInstance.connectTcp()` / `execProcess()` 是 trusted Host transport consumer，不属于 public Extension Worker session ABI。若未来需要向 Extension 开放远端 byte capability，应先定义独立 domain capability 与 authority，不能直接泄漏 Frame stream/window 生命周期。
 
 ### 5.4 `processes`
 

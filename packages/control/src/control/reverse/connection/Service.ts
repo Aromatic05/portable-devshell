@@ -4,7 +4,6 @@ import {
     errorCodes,
     type JsonValue,
     type ReverseEnrollmentRequest,
-    type ReverseRpcLane,
     type ReverseUpstreamBatch,
 } from "@portable-devshell/shared";
 
@@ -13,10 +12,9 @@ import type {
     ReverseInstanceLookupPort,
     ReverseInstancePort,
 } from "../Port.js";
-import { ReverseRpcSseChannel } from "./SseChannel.js";
+import { ReverseSseChannel } from "./SseChannel.js";
 
 interface ActiveReverseConnection {
-    bulkChannel?: Channel;
     channel: Channel;
     generation: number;
     transport: "sse" | "wss";
@@ -87,15 +85,10 @@ export class ReverseConnectionService {
         identity: ReverseConnectionIdentity,
         transport: "sse" | "wss",
         channel: Channel,
-        lane?: ReverseRpcLane,
     ): Promise<void> {
         try {
             await this.#exclusive(identity.descriptor.name, async () => {
                 this.#assertRunning(channel);
-                if (lane === "bulk") {
-                    await this.#activateBulk(identity, transport, channel);
-                    return;
-                }
                 let active: ActiveReverseConnection | undefined;
                 const authenticated =
                     await this.#credentialStore.withAuthenticatedToken(
@@ -119,7 +112,6 @@ export class ReverseConnectionService {
                         channel,
                         {
                             generation: identity.generation,
-                            lane: "control",
                             transport,
                         },
                     );
@@ -142,57 +134,6 @@ export class ReverseConnectionService {
             channel.close();
             throw error;
         }
-    }
-
-    async #activateBulk(
-        identity: ReverseConnectionIdentity,
-        transport: "sse" | "wss",
-        channel: Channel,
-    ): Promise<void> {
-        if (transport !== "wss") {
-            throw createError({
-                code: errorCodes.reverseTransportUnavailable,
-                message: "Reverse bulk lane requires WSS.",
-                retryable: false,
-            });
-        }
-        const active = this.#active.get(identity.descriptor.name);
-        if (
-            active === undefined ||
-            active.transport !== "wss" ||
-            active.generation !== identity.generation
-        ) {
-            throw createError({
-                code: errorCodes.reverseGenerationInvalid,
-                details: {
-                    generation: identity.generation,
-                    instance: identity.descriptor.name,
-                    previousGeneration: active?.generation ?? 0,
-                },
-                message:
-                    "Reverse bulk lane must join the active WSS generation.",
-                retryable: true,
-            });
-        }
-        const authenticated =
-            await this.#credentialStore.withAuthenticatedToken(
-                identity.descriptor.name,
-                identity.credentialToken,
-                async () => this.#assertRunning(channel),
-            );
-        if (!authenticated) throw invalidDeviceToken(identity.descriptor.name);
-
-        await identity.descriptor.worker.acceptReverseChannel(channel, {
-            generation: identity.generation,
-            lane: "bulk",
-            transport,
-        });
-        const previous = active.bulkChannel;
-        active.bulkChannel = channel;
-        if (previous !== undefined && previous !== channel) previous.close();
-        channel.onClose(() => {
-            if (active.bulkChannel === channel) active.bulkChannel = undefined;
-        });
     }
 
     #prepareActivation(
@@ -228,7 +169,6 @@ export class ReverseConnectionService {
             generation: identity.generation,
             transport,
         };
-        previous?.bulkChannel?.close();
         this.#active.set(identity.descriptor.name, active);
         channel.onClose(() => {
             if (this.#active.get(identity.descriptor.name) === active) {
@@ -256,7 +196,7 @@ export class ReverseConnectionService {
             active === undefined ||
             active.transport !== "sse" ||
             active.generation !== identity.generation ||
-            !(active.channel instanceof ReverseRpcSseChannel)
+            !(active.channel instanceof ReverseSseChannel)
         ) {
             throw createError({
                 code: errorCodes.reverseConnectionSuperseded,
@@ -285,14 +225,12 @@ export class ReverseConnectionService {
             return;
         }
         this.#active.delete(instance);
-        active.bulkChannel?.close();
         active.channel.close();
     }
 
     stop(): void {
         this.#stopped = true;
         for (const active of this.#active.values()) {
-            active.bulkChannel?.close();
             active.channel.close();
         }
         this.#active.clear();
@@ -322,7 +260,7 @@ export class ReverseConnectionService {
         }
         if (
             descriptor.provider !== "reverse" ||
-            descriptor.reverseConnector === undefined
+            descriptor.reverseConnection === undefined
         ) {
             throw createError({
                 code: errorCodes.reverseInstanceNotReverse,

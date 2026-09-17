@@ -8,6 +8,10 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
         alias: {
+            "@portable-devshell/shared/transport/frame": resolve(
+                import.meta.dirname,
+                "../shared/src/transport/frame/Protocol.ts",
+            ),
             "@portable-devshell/shared/browser": resolve(
                 import.meta.dirname,
                 "../shared/src/browser.ts",

@@ -1,6 +1,6 @@
 import type {
     WorkerInstance,
-    WorkerRpcInboundConnector,
+    WorkerTransportConnection,
 } from "@portable-devshell/core";
 import type { TerminalBackend } from "../../instance/execution/terminal/Backend.js";
 import type {
@@ -134,7 +134,7 @@ export interface InstanceDescriptor {
     modelExtensions: readonly string[];
     name: string;
     provider: "docker" | "local" | "podman" | "reverse" | "ssh";
-    reverseConnector?: WorkerRpcInboundConnector;
+    reverseConnection?: WorkerTransportConnection;
     terminal?: TerminalBackend;
     todo: InstanceTodoPort;
     wait?: InstanceWaitPort;

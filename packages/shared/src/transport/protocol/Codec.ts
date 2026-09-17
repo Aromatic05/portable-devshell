@@ -6,6 +6,7 @@ import type { ErrorCode } from "../../protocol/Error.js";
 import { createError } from "../../protocol/Error.js";
 import type { JsonValue } from "../../protocol/JsonValue.js";
 import type { InstanceName } from "../../protocol/instance/Identity.js";
+import { encodePacket, PacketBuffer } from "../frame/Codec.js";
 import type { Channel } from "./Channel.js";
 
 interface TransportIdCrypto {
@@ -72,6 +73,7 @@ const encoder = new TextEncoder();
 
 export class Codec {
     readonly #channel: Channel;
+    readonly #packets = new PacketBuffer();
     readonly #local: Peer;
     readonly #eventListeners = new Set<(event: Event) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -83,7 +85,16 @@ export class Codec {
         this.#channel = channel;
         this.#local = options.local;
         this.#remote = options.remote;
-        channel.onFrame((frame) => this.#accept(frame));
+        channel.onData((data) => {
+            try {
+                for (const packet of this.#packets.push(data))
+                    this.#accept(packet);
+            } catch (error) {
+                this.close(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
+            }
+        });
         channel.onClose((error) => this.#finishClose(error));
     }
 
@@ -115,7 +126,9 @@ export class Codec {
             to: this.#remote,
         });
         try {
-            await this.#channel.send(encoder.encode(JSON.stringify(event)));
+            await this.#channel.write(
+                encodePacket(encoder.encode(JSON.stringify(event))),
+            );
         } catch (error) {
             const normalized =
                 error instanceof Error ? error : new Error(String(error));

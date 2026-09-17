@@ -32,17 +32,17 @@ pub fn stop_stale_daemon(
     timeout: Duration,
 ) -> Result<bool, String> {
     let Some(pid) = process::read_pid(instance_paths) else {
-        process::clear_runtime_files(instance_paths, &socket_paths.socket_file)?;
+        process::clear_runtime_files(instance_paths, socket_paths)?;
         return Ok(false);
     };
 
     if !process_is_running(pid) {
-        process::clear_runtime_files(instance_paths, &socket_paths.socket_file)?;
+        process::clear_runtime_files(instance_paths, socket_paths)?;
         return Ok(false);
     }
 
     if InstanceLock::try_acquire_daemon(instance_paths)?.is_some() {
-        process::clear_runtime_files(instance_paths, &socket_paths.socket_file)?;
+        process::clear_runtime_files(instance_paths, socket_paths)?;
         return Ok(false);
     }
 
@@ -65,7 +65,7 @@ pub fn terminate_daemon_process(
             }
         }
     }
-    process::clear_runtime_files(instance_paths, &socket_paths.socket_file)
+    process::clear_runtime_files(instance_paths, socket_paths)
 }
 
 pub fn terminate_spawned_daemon(
@@ -84,7 +84,7 @@ pub fn terminate_spawned_daemon(
             }
         }
     }
-    process::clear_runtime_files(instance_paths, &socket_paths.socket_file)
+    process::clear_runtime_files(instance_paths, socket_paths)
 }
 
 pub fn wait_until_stopped(

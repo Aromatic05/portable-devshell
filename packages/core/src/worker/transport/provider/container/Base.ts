@@ -12,17 +12,13 @@ import {
     type ProviderCommandContext,
     type SpawnFunction,
     type WorkerCommandResult,
-    type WorkerCommandTransport,
 } from "../../command/Transport.js";
+import type { WorkerTransport } from "../../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
-    WorkerRpcOptions,
 } from "../../command/Model.js";
-import {
-    createWorkerRpcProcess,
-    type WorkerRpcProcess,
-} from "../../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -44,7 +40,7 @@ export interface WorkerTransportDriverContainerBaseOptions {
     workerBinary?: WorkerBinary;
 }
 
-export class WorkerTransportDriverContainerBase implements WorkerCommandTransport {
+export class WorkerTransportDriverContainerBase implements WorkerTransport {
     readonly #binary: string;
     readonly #installer: WorkerInstallerRemote;
     readonly #process: WorkerTransportProcessRunner;
@@ -167,29 +163,30 @@ export class WorkerTransportDriverContainerBase implements WorkerCommandTranspor
         }
     }
 
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
+    async connectWorkerChannel(options: WorkerChannelOptions) {
         const environment = this.#workerCommandEnvironment(options.env);
-        await this.#provision.ensureReady("spawnWorkerRpc");
+        await this.#provision.ensureReady("connectWorkerChannel");
         const executable = await this.#resolveExecutable();
         const workerCommand = new WorkerBinary(executable).buildCommand(
-            "rpc",
+            "transport",
             options.instanceName,
         );
         const invocation = this.#createExecInvocation(
-            "spawnWorkerRpc",
+            "connectWorkerChannel",
             [workerCommand.command, ...workerCommand.args],
             options.instanceName,
             environment.keys,
         );
-        return createWorkerRpcProcess(
+        return this.#process.createChannel(
             this.#process.spawn(
                 invocation.context,
                 {
                     env: environment.processEnv,
                     stdio: ["pipe", "pipe", "pipe"],
                 },
-                errorCodes.coreWorkerRpcSpawnFailed,
+                errorCodes.coreProviderFailed,
             ),
+            invocation.context,
         );
     }
 

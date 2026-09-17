@@ -4,7 +4,7 @@ import test from "node:test";
 import { WorkerInstanceArtifact } from "../../../src/worker/instance/capability/Artifact.ts";
 import { WorkerInstanceAudit } from "../../../src/worker/instance/capability/Audit.ts";
 
-test("worker artifact facade checks readiness and delegates every payload lifecycle operation", async () => {
+test("worker artifact facade checks readiness and delegates control lifecycle operations", async () => {
     const calls: Array<[string, unknown]> = [];
     let readyChecks = 0;
     const protocolClient = {
@@ -41,31 +41,13 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
                 payloadId: "payload-1",
             };
         },
-        async readArtifactPayload(input: unknown) {
-            calls.push(["read", input]);
-            return {
-                content: "dGVzdA==",
-                encoding: "base64",
-                eof: true,
-                offsetBytes: 0,
-                payloadId: "payload-1",
-                totalBytes: 4,
-            };
-        },
-        async writeArtifactReceive(input: unknown) {
-            calls.push(["write", input]);
-            return {
-                nextOffsetBytes: 4,
-                receivedBytes: 4,
-                receiveId: "receive-1",
-            };
-        },
     };
     const artifact = new WorkerInstanceArtifact({
         assertReady() {
             readyChecks += 1;
         },
         protocolClient: protocolClient as never,
+        transportConnection: {} as never,
     });
 
     const openInput = {
@@ -73,7 +55,6 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
         path: "./result.bin",
         workspace: "/workspace",
     } as const;
-    const readInput = { maxBytes: 10, offsetBytes: 0, payloadId: "payload-1" };
     const beginInput = {
         descriptor: {
             mediaType: "application/octet-stream",
@@ -86,36 +67,107 @@ test("worker artifact facade checks readiness and delegates every payload lifecy
         targetPath: "/tmp/result.bin",
         workspace: "/tmp",
     };
-    const writeInput = {
-        content: "dGVzdA==",
-        offsetBytes: 0,
-        receiveId: "receive-1",
-    };
-
     assert.equal(
         (await artifact.openPayload(openInput)).payloadId,
         "payload-1",
     );
-    assert.equal((await artifact.readPayload(readInput)).eof, true);
     await artifact.closePayload("payload-1");
     assert.equal(
         (await artifact.beginReceive(beginInput)).receiveId,
         "receive-1",
     );
-    assert.equal((await artifact.writeReceive(writeInput)).receivedBytes, 4);
     assert.equal((await artifact.finishReceive("receive-1")).bytes, 4);
     await artifact.abortReceive("receive-2");
 
-    assert.equal(readyChecks, 7);
+    assert.equal(readyChecks, 5);
     assert.deepEqual(calls, [
         ["open", openInput],
-        ["read", readInput],
         ["close", "payload-1"],
         ["begin", beginInput],
-        ["write", writeInput],
         ["finish", "receive-1"],
         ["abort", "receive-2"],
     ]);
+});
+
+test("worker artifact facade carries chunk bytes over Frame services when a transport connection is available", async () => {
+    const opens: Array<[string, unknown]> = [];
+    const writes: Array<[string, Buffer]> = [];
+    const finishes: string[] = [];
+    const totalHeader = Buffer.alloc(8);
+    totalHeader.writeBigUInt64BE(4n);
+
+    const transportConnection = {
+        async openStream(service: string, metadata: Uint8Array) {
+            opens.push([
+                service,
+                JSON.parse(Buffer.from(metadata).toString("utf8")) as unknown,
+            ]);
+            const reads =
+                service === "artifact.payload"
+                    ? [Buffer.concat([totalHeader, Buffer.from("est")])]
+                    : [];
+            return {
+                closed: false,
+                id: 1,
+                metadata,
+                service,
+                async finish() {
+                    finishes.push(service);
+                },
+                async read() {
+                    return reads.shift();
+                },
+                async reset() {},
+                async write(data: Uint8Array) {
+                    writes.push([service, Buffer.from(data)]);
+                },
+            };
+        },
+    };
+    const artifact = new WorkerInstanceArtifact({
+        assertReady() {},
+        protocolClient: {} as never,
+        transportConnection: transportConnection as never,
+    });
+
+    assert.deepEqual(
+        await artifact.readPayload({
+            maxBytes: 3,
+            offsetBytes: 1,
+            payloadId: "payload-1",
+        }),
+        {
+            content: "ZXN0",
+            encoding: "base64",
+            eof: true,
+            offsetBytes: 1,
+            payloadId: "payload-1",
+            returnedBytes: 3,
+            totalBytes: 4,
+        },
+    );
+    assert.deepEqual(
+        await artifact.writeReceive({
+            content: "dGVzdA==",
+            offsetBytes: 4,
+            receiveId: "receive-1",
+        }),
+        {
+            nextOffsetBytes: 8,
+            receivedBytes: 8,
+            receiveId: "receive-1",
+        },
+    );
+
+    assert.deepEqual(opens, [
+        [
+            "artifact.payload",
+            { maxBytes: 3, offsetBytes: 1, payloadId: "payload-1" },
+        ],
+        ["artifact.receive", { offsetBytes: 4, receiveId: "receive-1" }],
+    ]);
+    assert.deepEqual(writes, [["artifact.receive", Buffer.from("test")]]);
+    assert.deepEqual(finishes, ["artifact.payload", "artifact.receive"]);
 });
 
 test("worker artifact facade never calls the protocol client when readiness fails", async () => {
@@ -131,6 +183,7 @@ test("worker artifact facade never calls the protocol client when readiness fail
                 return {};
             },
         } as never,
+        transportConnection: {} as never,
     });
 
     await assert.rejects(

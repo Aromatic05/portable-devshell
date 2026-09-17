@@ -40,26 +40,38 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     let runtime_guard = RuntimeFilesGuard::new(instance_paths.clone(), socket_paths.clone());
 
     process::remove_ipc_endpoint_if_exists(&socket_paths.socket_file)?;
+    process::remove_ipc_endpoint_if_exists(&socket_paths.transport_socket_file)?;
     process::write_pid(&instance_paths, std::process::id())?;
     append_log(&instance_paths, "daemon starting")?;
 
-    let listener = match LocalIpcListener::bind(&socket_paths.socket_file) {
+    let rpc_listener = match LocalIpcListener::bind(&socket_paths.socket_file) {
         Ok(listener) => listener,
         Err(error) => {
-            let _ = process::clear_runtime_files(&instance_paths, &socket_paths.socket_file);
+            let _ = process::clear_runtime_files(&instance_paths, &socket_paths);
             return Err(format!(
                 "failed to bind {}: {error}",
                 socket_paths.socket_file.display()
             ));
         }
     };
+    let transport_listener =
+        LocalIpcListener::bind(&socket_paths.transport_socket_file).map_err(|error| {
+            format!(
+                "failed to bind {}: {error}",
+                socket_paths.transport_socket_file.display()
+            )
+        })?;
     if test_flag_enabled(FAIL_AFTER_BIND_ENV) {
         return Err("forced failure after bind for testing".to_string());
     }
     ensure_file_mode(&socket_paths.socket_file, 0o600)?;
-    listener
+    ensure_file_mode(&socket_paths.transport_socket_file, 0o600)?;
+    rpc_listener
         .set_nonblocking(true)
-        .map_err(|error| format!("failed to set listener nonblocking: {error}"))?;
+        .map_err(|error| format!("failed to set RPC listener nonblocking: {error}"))?;
+    transport_listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("failed to set transport listener nonblocking: {error}"))?;
     if let Some(delay_ms) = std::env::var(DELAY_READY_MS_ENV)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -88,6 +100,11 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let tools = Arc::new(builtin_tools);
     let payload_maintenance = Arc::clone(&payloads);
+    let service_context = crate::transport::service::ServiceContext::daemon(
+        socket_paths.socket_file.clone(),
+        Arc::clone(&payloads),
+        Arc::clone(&receives),
+    );
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
@@ -99,15 +116,24 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
         let payload = Arc::new(ReverseRpcPayload::new(Arc::clone(&router)));
-        ReverseConnector::new(instance.clone(), instance_paths.clone(), reverse, payload).spawn()
+        ReverseConnector::new(
+            instance.clone(),
+            instance_paths.clone(),
+            reverse,
+            socket_paths.transport_socket_file.clone(),
+            payload,
+        )
+        .spawn()
     });
 
     while !router.shutdown_requested() {
         if test_flag_enabled(FAIL_ACCEPT_LOOP_ENV) {
             return Err("forced accept loop failure for testing".to_string());
         }
-        match listener.accept() {
+        let mut accepted = false;
+        match rpc_listener.accept() {
             Ok(stream) => {
+                accepted = true;
                 stream
                     .set_nonblocking(false)
                     .map_err(|error| format!("failed to set accepted stream blocking: {error}"))?;
@@ -119,18 +145,43 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
                     }
                 });
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(50));
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(error) => {
-                return Err(format!("failed to accept connection: {error}"));
+                return Err(format!("failed to accept RPC connection: {error}"));
             }
+        }
+        match transport_listener.accept() {
+            Ok(stream) => {
+                accepted = true;
+                stream.set_nonblocking(false).map_err(|error| {
+                    format!("failed to set accepted transport stream blocking: {error}")
+                })?;
+                let service_context = service_context.clone();
+                let instance_paths = instance_paths.clone();
+                thread::spawn(move || {
+                    if let Err(error) =
+                        crate::transport::service::serve_ipc(stream, service_context)
+                    {
+                        let _ = append_log(
+                            &instance_paths,
+                            &format!("transport connection error: {error}"),
+                        );
+                    }
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => {
+                return Err(format!("failed to accept transport connection: {error}"));
+            }
+        }
+        if !accepted {
+            thread::sleep(Duration::from_millis(50));
         }
     }
 
     append_log(&instance_paths, "daemon stopping")?;
     runtime_guard.disarm();
-    process::clear_runtime_files(&instance_paths, &socket_paths.socket_file)?;
+    process::clear_runtime_files(&instance_paths, &socket_paths)?;
     remove_empty_runtime_dir(&socket_paths.instance_runtime_dir);
     Ok(())
 }
@@ -328,8 +379,7 @@ impl RuntimeFilesGuard {
 impl Drop for RuntimeFilesGuard {
     fn drop(&mut self) {
         if self.armed {
-            let _ =
-                process::clear_runtime_files(&self.instance_paths, &self.socket_paths.socket_file);
+            let _ = process::clear_runtime_files(&self.instance_paths, &self.socket_paths);
             remove_empty_runtime_dir(&self.socket_paths.instance_runtime_dir);
         }
     }

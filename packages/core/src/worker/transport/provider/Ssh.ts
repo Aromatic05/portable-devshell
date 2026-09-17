@@ -17,17 +17,13 @@ import {
     type WorkerCommandInteractiveSession,
     type SpawnFunction,
     type ProviderCommandContext,
-    type WorkerCommandTransport,
 } from "../command/Transport.js";
+import type { WorkerTransport } from "../Transport.js";
 import type {
+    WorkerChannelOptions,
     WorkerCommandName,
     WorkerCommandOptions,
-    WorkerRpcOptions,
 } from "../command/Model.js";
-import {
-    createWorkerRpcProcess,
-    type WorkerRpcProcess,
-} from "../../protocol/rpc/Process.js";
 import {
     createWorkerTargetProbeFailedError,
     parseWorkerTargetProbeOutput,
@@ -50,7 +46,7 @@ export interface WorkerTransportDriverSshOptions {
     spawnFunction?: SpawnFunction;
 }
 
-export class WorkerTransportDriverSsh implements WorkerCommandTransport {
+export class WorkerTransportDriverSsh implements WorkerTransport {
     readonly #sshCommand: readonly [string, ...string[]];
     readonly #workerBinary: WorkerBinary;
     readonly #installer: WorkerInstallerRemote;
@@ -182,24 +178,22 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         }
     }
 
-    async spawnWorkerRpc(options: WorkerRpcOptions): Promise<WorkerRpcProcess> {
+    async connectWorkerChannel(options: WorkerChannelOptions) {
         const executable = await this.#resolveExecutable();
         const workerCommand = new WorkerBinary(executable).buildCommand(
-            "rpc",
+            "transport",
             options.instanceName,
         );
         const commandLine = [workerCommand.command, ...workerCommand.args]
             .map(shellEscape)
             .join(" ");
-        const environmentFile = await this.#prepareRemoteEnvironment(
-            options.env,
-        );
+        const environmentFile = await this.#prepareRemoteEnvironment(options.env);
         const remoteCommandLine = this.#withRemoteEnvironment(
             commandLine,
             environmentFile,
         );
         const context = this.#createRemoteShellContext(
-            "spawnWorkerRpc",
+            "connectWorkerChannel",
             remoteCommandLine,
             { instance: options.instanceName },
         );
@@ -216,13 +210,12 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
             );
             throw error;
         }
-        const rpcProcess = createWorkerRpcProcess(child);
-        return {
-            ...rpcProcess,
-            exit: rpcProcess.exit.finally(async () => {
-                await this.#removeRemoteEnvironmentFile(environmentFile);
-            }),
-        };
+        child.once("exit", () => {
+            void this.#removeRemoteEnvironmentFile(environmentFile).catch(
+                () => undefined,
+            );
+        });
+        return this.#process.createChannel(child, context);
     }
 
     async #resolveExecutable(
@@ -277,9 +270,7 @@ export class WorkerTransportDriverSsh implements WorkerCommandTransport {
         return this.#process.spawn(
             context,
             { stdio },
-            context.operation === "spawnWorkerRpc"
-                ? errorCodes.coreWorkerRpcSpawnFailed
-                : errorCodes.coreProviderFailed,
+            errorCodes.coreProviderFailed,
         );
     }
 

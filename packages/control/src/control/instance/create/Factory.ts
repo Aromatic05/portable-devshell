@@ -1,7 +1,7 @@
 import {
     InstancePaths,
     WorkerInstanceFactory,
-    WorkerRpcInboundConnector,
+    WorkerTransportConnection,
     WorkerTransportFactory,
     resolveWorkerHomeDirectory,
     type WorkerInstance,
@@ -34,9 +34,9 @@ export class InstanceFactory {
         const name = asInstanceName(instance.name);
         const homeDirectory = resolveWorkerHomeDirectory();
         const paths = new InstancePaths(name, homeDirectory);
-        const reverseConnector =
+        const reverseConnection =
             instance.provider === "reverse"
-                ? new WorkerRpcInboundConnector()
+                ? new WorkerTransportConnection()
                 : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
         const conversationStore = new ConversationStore({
@@ -82,7 +82,7 @@ export class InstanceFactory {
             instanceName: instance.name,
         });
         const worker = this.#workerInstanceFactory.create(
-            this.#toWorkerConfig(instance, reverseConnector, homeDirectory),
+            this.#toWorkerConfig(instance, reverseConnection, homeDirectory),
             {
                 toolCallAssociationProvider: (context) =>
                     todo.currentAssociation(context.ctxId),
@@ -102,7 +102,7 @@ export class InstanceFactory {
             modelExtensions: [...instance.extensions.model],
             name: instance.name,
             provider: instance.provider,
-            ...(reverseConnector === undefined ? {} : { reverseConnector }),
+            ...(reverseConnection === undefined ? {} : { reverseConnection }),
             terminal,
             todo,
             wait,
@@ -112,7 +112,7 @@ export class InstanceFactory {
 
     #toWorkerConfig(
         instance: ControlInstanceConfig,
-        reverseConnector: WorkerRpcInboundConnector | undefined,
+        reverseConnection: WorkerTransportConnection | undefined,
         homeDirectory: string,
     ): WorkerInstanceConfig {
         const effectiveSecurityMode: "disabled" | "workspace" =
@@ -140,10 +140,10 @@ export class InstanceFactory {
             return {
                 ...common,
                 managementMode: "selfManaged",
-                rpcConnector:
-                    reverseConnector ??
+                transportConnection:
+                    reverseConnection ??
                     fail(
-                        `reverse instance ${instance.name} requires connector`,
+                        `reverse instance ${instance.name} requires transport connection`,
                     ),
             };
         }

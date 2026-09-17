@@ -6,6 +6,8 @@ import {
 
 import {
     errorCodes,
+    StreamChannel,
+    type Channel,
     type CommandResult,
     type ControlError,
 } from "@portable-devshell/shared";
@@ -37,6 +39,52 @@ export class WorkerTransportProcessRunner {
         } catch (error) {
             throw this.createError(context, error, { errorCode });
         }
+    }
+
+    createChannel(
+        child: ChildProcess,
+        context: ProviderCommandContext,
+    ): Channel {
+        const { stdin, stdout, stderr } = child;
+        if (stdin === null || stdout === null || stderr === null) {
+            try {
+                child.kill("SIGTERM");
+            } catch {
+                // The provider error below is authoritative.
+            }
+            throw this.createError(
+                context,
+                new Error("Worker transport process must expose stdin, stdout, and stderr."),
+            );
+        }
+
+        stderr.resume();
+        const channel = new StreamChannel(stdout, stdin, {
+            closeTransport: () => {
+                if (child.exitCode === null && child.signalCode === null) {
+                    child.kill("SIGTERM");
+                }
+            },
+        });
+        child.once("error", (error) => {
+            channel.close(this.createError(context, error));
+        });
+        child.once("exit", (code, signal) => {
+            if (channel.closed) return;
+            if (code === 0) {
+                channel.close();
+                return;
+            }
+            channel.close(
+                this.createError(
+                    context,
+                    new Error(
+                        `Worker transport process exited with code ${String(code)} signal ${String(signal)}.`,
+                    ),
+                ),
+            );
+        });
+        return channel;
     }
 
     async run(

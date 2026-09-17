@@ -1,28 +1,14 @@
 import { createConnection, type Socket } from "node:net";
-
-import type { ErrorCode } from "../../protocol/Error.js";
-import { createError } from "../../protocol/Error.js";
-import {
-    encodeFrame,
-    FrameBuffer,
-    TRANSPORT_MAX_FRAME_SIZE,
-    type Frame,
-} from "../protocol/Frame.js";
 import type { Channel } from "../protocol/Channel.js";
 
-export const SOCKET_CHANNEL_MAX_FRAME_SIZE = TRANSPORT_MAX_FRAME_SIZE;
-
 export interface SocketChannelOptions {
-    maxFrameSize?: number;
     signal?: AbortSignal;
     socketFactory?: (path: string) => Socket;
 }
 
 export class SocketChannel implements Channel {
     readonly #socket: Socket;
-    readonly #maxFrameSize: number;
-    readonly #frames: FrameBuffer;
-    readonly #frameListeners = new Set<(frame: Frame) => void>();
+    readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
     #closed = false;
     #closeError?: Error;
@@ -60,11 +46,7 @@ export class SocketChannel implements Channel {
                 if (settled) return;
                 settled = true;
                 cleanup();
-                resolve(
-                    new SocketChannel(socket, {
-                        maxFrameSize: options.maxFrameSize,
-                    }),
-                );
+                resolve(new SocketChannel(socket));
             };
             const onError = (error: Error) => {
                 if (settled) return;
@@ -86,32 +68,15 @@ export class SocketChannel implements Channel {
 
     static accept(
         socket: Socket,
-        options: Omit<SocketChannelOptions, "socketFactory"> = {},
+        _options: Omit<SocketChannelOptions, "socketFactory"> = {},
     ): SocketChannel {
-        return new SocketChannel(socket, options);
+        return new SocketChannel(socket);
     }
 
-    private constructor(
-        socket: Socket,
-        options: Omit<SocketChannelOptions, "socketFactory">,
-    ) {
+    private constructor(socket: Socket) {
         this.#socket = socket;
-        this.#maxFrameSize =
-            options.maxFrameSize ?? SOCKET_CHANNEL_MAX_FRAME_SIZE;
-        this.#frames = new FrameBuffer(this.#maxFrameSize);
         socket.on("data", (chunk: Buffer) => this.#acceptChunk(chunk));
-        socket.once("end", () => {
-            if (!this.#frames.empty) {
-                this.close(
-                    protocolError(
-                        "protocol.invalidFrame",
-                        "Socket ended with an incomplete frame.",
-                    ),
-                );
-                return;
-            }
-            this.close();
-        });
+        socket.once("end", () => this.close());
         socket.once("error", (error) => this.close(error));
         socket.once("close", () => this.#finishClose());
     }
@@ -120,11 +85,11 @@ export class SocketChannel implements Channel {
         return this.#closed;
     }
 
-    async send(frame: Frame): Promise<void> {
+    async write(data: Uint8Array): Promise<void> {
         if (this.#closed) {
             throw this.#closeError ?? new Error("Socket channel is closed.");
         }
-        const encoded = encodeFrame(frame, this.#maxFrameSize);
+        const copy = Uint8Array.from(data);
         const write = this.#writeQueue.then(async () => {
             if (this.#closed) {
                 throw (
@@ -133,7 +98,7 @@ export class SocketChannel implements Channel {
             }
             await new Promise<void>((resolve, reject) => {
                 try {
-                    this.#socket.write(encoded, (error) =>
+                    this.#socket.write(copy, (error) =>
                         error == null ? resolve() : reject(error),
                     );
                 } catch (error) {
@@ -152,9 +117,9 @@ export class SocketChannel implements Channel {
         }
     }
 
-    onFrame(listener: (frame: Frame) => void): () => void {
-        this.#frameListeners.add(listener);
-        return () => this.#frameListeners.delete(listener);
+    onData(listener: (data: Uint8Array) => void): () => void {
+        this.#dataListeners.add(listener);
+        return () => this.#dataListeners.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
@@ -174,7 +139,6 @@ export class SocketChannel implements Channel {
             return;
         }
         this.#closed = true;
-        this.#frames.reset();
         this.#socket.destroy();
         this.#finishClose();
     }
@@ -183,24 +147,14 @@ export class SocketChannel implements Channel {
         if (this.#closed) {
             return;
         }
-        try {
-            for (const frame of this.#frames.push(chunk)) {
-                for (const listener of [...this.#frameListeners]) {
-                    try {
-                        listener(frame);
-                    } catch (error) {
-                        process.emitWarning(
-                            error instanceof Error
-                                ? error
-                                : new Error(String(error)),
-                        );
-                    }
-                }
+        for (const listener of [...this.#dataListeners]) {
+            try {
+                listener(Uint8Array.from(chunk));
+            } catch (error) {
+                process.emitWarning(
+                    error instanceof Error ? error : new Error(String(error)),
+                );
             }
-        } catch (error) {
-            this.close(
-                error instanceof Error ? error : new Error(String(error)),
-            );
         }
     }
 
@@ -226,10 +180,6 @@ export class SocketChannel implements Channel {
             );
         }
     }
-}
-
-function protocolError(code: string, message: string): Error {
-    return createError({ code: code as ErrorCode, message, retryable: false });
 }
 
 function abortError(signal: AbortSignal): Error {

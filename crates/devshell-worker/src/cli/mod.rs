@@ -1,6 +1,5 @@
 pub mod enroll;
 pub mod instance;
-pub mod rpc;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -18,7 +17,7 @@ enum Command {
     Stop(InstanceArgs),
     Status(InstanceArgs),
     Logs(InstanceArgs),
-    Rpc(InstanceArgs),
+    Transport(InstanceArgs),
     Retire(InstanceArgs),
     Gc(GcArgs),
 }
@@ -35,6 +34,8 @@ pub struct EnrollArgs {
     pub controller: String,
     #[arg(long)]
     pub device_code: String,
+    #[arg(long)]
+    pub proxy: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -51,8 +52,34 @@ pub fn run() -> Result<String, String> {
         Command::Stop(args) => instance::lifecycle::stop::run(args),
         Command::Status(args) => instance::observe::status::run(args),
         Command::Logs(args) => instance::observe::logs::run(args),
-        Command::Rpc(args) => rpc::run(args),
+        Command::Transport(args) => crate::transport::run(&args.instance),
         Command::Retire(args) => instance::maintain::retire::run(args),
         Command::Gc(args) => instance::maintain::gc::run(args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+
+    #[test]
+    fn enroll_accepts_an_explicit_reverse_proxy() {
+        let cli = Cli::try_parse_from([
+            "devshell-worker",
+            "enroll",
+            "--controller",
+            "https://controller.example",
+            "--device-code",
+            "device-code",
+            "--proxy",
+            "socks5h://127.0.0.1:1080",
+        ])
+        .unwrap();
+        let Command::Enroll(args) = cli.command else {
+            panic!("expected enroll command");
+        };
+        assert_eq!(args.proxy.as_deref(), Some("socks5h://127.0.0.1:1080"));
     }
 }
