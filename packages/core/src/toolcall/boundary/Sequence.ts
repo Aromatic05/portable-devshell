@@ -1,3 +1,5 @@
+import type { JsonValue } from "@portable-devshell/shared";
+
 import {
     reviewToolCall,
     type ToolCallReview,
@@ -9,12 +11,20 @@ import {
     type ToolCallRewrite,
     type ToolCallRewritePayloadInput,
 } from "./Rewrite.js";
-import type { JsonValue } from "@portable-devshell/shared";
 
 export interface ToolCallBoundarySequenceOptions {
     readonly reviews?: readonly ToolCallReview[];
     readonly rewrites?: readonly ToolCallRewrite[];
 }
+
+export interface ToolCallBoundaryLease {
+    readonly sequence: ToolCallBoundarySequence;
+    release(): void;
+}
+
+export type ToolCallBoundaryProvider = () =>
+    | Promise<ToolCallBoundaryLease>
+    | ToolCallBoundaryLease;
 
 export class ToolCallBoundarySequence {
     readonly #reviews: readonly ToolCallReview[];

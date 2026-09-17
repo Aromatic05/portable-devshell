@@ -289,7 +289,7 @@ export class ControlRuntime {
         for (const descriptor of this.#instances.list()) {
             if (this.#toolCallBoundWorkers.has(descriptor.worker)) continue;
             descriptor.worker.bindToolCallBoundary(() =>
-                this.#toolCallBinding.sequence(),
+                this.#toolCallBinding.acquire(),
             );
             this.#toolCallBoundWorkers.add(descriptor.worker);
         }

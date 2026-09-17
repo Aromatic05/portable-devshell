@@ -864,11 +864,13 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
 
     assert.equal(providers.has("existing"), true);
     const existingProvider = providers.get("existing")!;
+    const firstLease = await existingProvider() as {
+        release(): void;
+        sequence: { review(input: unknown): Promise<{ decision: string }> };
+    };
     assert.equal(
         (
-            await (existingProvider() as {
-                review(input: unknown): Promise<{ decision: string }>;
-            }).review({
+            await firstLease.sequence.review({
                 context: { source: "mcp" },
                 direction: "inbound",
                 kind: "call",
@@ -879,13 +881,16 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
         ).decision,
         "accept",
     );
+    firstLease.release();
 
     reviewDecision = "reject";
+    const secondLease = await existingProvider() as {
+        release(): void;
+        sequence: { review(input: unknown): Promise<{ decision: string }> };
+    };
     assert.equal(
         (
-            await (existingProvider() as {
-                review(input: unknown): Promise<{ decision: string }>;
-            }).review({
+            await secondLease.sequence.review({
                 context: { source: "mcp" },
                 direction: "inbound",
                 kind: "call",
@@ -896,6 +901,7 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
         ).decision,
         "reject",
     );
+    secondLease.release();
 
     descriptors.push({ name: "added", worker: worker("added") });
     for (const listener of [...listeners]) listener();

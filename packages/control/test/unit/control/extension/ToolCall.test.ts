@@ -21,9 +21,9 @@ const toolCallContext = Object.freeze({
     workspace: "/repo",
 });
 
-test("ToolCall Extension bindings acquire and release one generation lease per invocation", async () => {
+test("ToolCall Extension binding acquires registrations once and releases them with the Boundary lease", async () => {
     const events: string[] = [];
-    const host = {
+    const bindings = new ToolCallExtensionBinding({
         listDeclarations(pointId: string) {
             return pointId === "toolcall.review"
                 ? [{ id: "comment" }]
@@ -46,14 +46,14 @@ test("ToolCall Extension bindings acquire and release one generation lease per i
                             : async (input: { text: string }) =>
                                   `masked(${input.text})`,
                 },
-            };
+            } as never;
         },
-    };
-    const bindings = new ToolCallExtensionBinding(host as never);
+    } as never);
+    const lease = await bindings.acquire();
     const signal = new AbortController().signal;
 
     assert.deepEqual(
-        await bindings.reviews()[0]!({
+        await lease.sequence.review({
             context: toolCallContext,
             direction: "inbound",
             kind: "call",
@@ -64,59 +64,52 @@ test("ToolCall Extension bindings acquire and release one generation lease per i
         { decision: "approve" },
     );
     assert.equal(
-        await bindings.rewrites()[0]!({
+        await lease.sequence.rewrite({
             context: toolCallContext,
             direction: "outbound",
             kind: "result",
-            path: ["stdout"],
+            payload: "secret",
             signal,
-            text: "secret",
             toolName: "bash_run",
         }),
         "masked(secret)",
     );
     assert.deepEqual(events, [
         "acquire:toolcall.review:comment",
-        "release:toolcall.review:comment",
+        "acquire:toolcall.rewrite:secret",
+    ]);
+    lease.release();
+    assert.deepEqual(events, [
+        "acquire:toolcall.review:comment",
         "acquire:toolcall.rewrite:secret",
         "release:toolcall.rewrite:secret",
+        "release:toolcall.review:comment",
     ]);
 });
 
-test("ToolCall Extension binding releases the generation lease when a binding fails", async () => {
-    let releases = 0;
+test("ToolCall Extension binding rolls back acquired generation leases when acquisition fails", async () => {
+    const events: string[] = [];
     const bindings = new ToolCallExtensionBinding({
-        listDeclarations() {
-            return [{ id: "guard" }] as never;
+        listDeclarations(pointId: string) {
+            return pointId === "toolcall.review"
+                ? [{ id: "one" }, { id: "two" }]
+                : [];
         },
-        async acquireRegistration() {
+        async acquireRegistration(_pointId: string, id: string) {
+            if (id === "two") throw new Error("acquire failed");
             return {
                 lease: {
                     release() {
-                        releases += 1;
+                        events.push("release:one");
                     },
                 },
-                registration: {
-                    binding: async () => {
-                        throw new Error("review failed");
-                    },
-                },
+                registration: { binding: async () => ({ decision: "accept" }) },
             } as never;
         },
-    });
+    } as never);
 
-    await assert.rejects(
-        bindings.reviews()[0]!({
-            context: toolCallContext,
-            direction: "inbound",
-            kind: "call",
-            payload: {},
-            signal: new AbortController().signal,
-            toolName: "bash_run",
-        }),
-        /review failed/u,
-    );
-    assert.equal(releases, 1);
+    await assert.rejects(bindings.acquire(), /acquire failed/u);
+    assert.deepEqual(events, ["release:one"]);
 });
 
 test("ToolCall sandbox review binding preserves outer invocation fields and AbortSignal", async () => {
@@ -258,4 +251,61 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
         }),
         "expanded",
     );
+});
+
+test("ToolCall Boundary holds exact Extension generation leases for the whole call", async () => {
+    const events: string[] = [];
+    let generation = "g1";
+    const bindings = new ToolCallExtensionBinding({
+        listDeclarations(pointId: string) {
+            return pointId === "toolcall.rewrite" ? [{ id: "secret" }] : [];
+        },
+        async acquireRegistration(pointId: string, id: string) {
+            const acquired = generation;
+            events.push(`acquire:${pointId}:${id}:${acquired}`);
+            return {
+                lease: {
+                    release() {
+                        events.push(`release:${pointId}:${id}:${acquired}`);
+                    },
+                },
+                registration: {
+                    binding: async (input: { text: string }) =>
+                        `${acquired}(${input.text})`,
+                },
+            } as never;
+        },
+    } as never);
+
+    const lease = await bindings.acquire();
+    generation = "g2";
+    const signal = new AbortController().signal;
+    assert.deepEqual(
+        await lease.sequence.rewrite({
+            context: toolCallContext,
+            direction: "inbound",
+            kind: "call",
+            payload: "secret",
+            signal,
+            toolName: "bash_run",
+        }),
+        "g1(secret)",
+    );
+    assert.deepEqual(
+        await lease.sequence.rewrite({
+            context: toolCallContext,
+            direction: "outbound",
+            kind: "result",
+            payload: "secret",
+            signal,
+            toolName: "bash_run",
+        }),
+        "g1(secret)",
+    );
+    assert.deepEqual(events, ["acquire:toolcall.rewrite:secret:g1"]);
+    lease.release();
+    assert.deepEqual(events, [
+        "acquire:toolcall.rewrite:secret:g1",
+        "release:toolcall.rewrite:secret:g1",
+    ]);
 });

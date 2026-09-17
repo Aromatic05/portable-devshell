@@ -22,7 +22,7 @@ import type { WorkerToolCallScheduler } from "../../tool/Scheduler.js";
 import { ToolCallApproval } from "../../../toolcall/Approval.js";
 import { WorkerInstanceToolAudit } from "./record/Audit.js";
 import { ToolCallExecution } from "../../../toolcall/Execution.js";
-import type { ToolCallBoundarySequence } from "../../../toolcall/boundary/Sequence.js";
+import type { ToolCallBoundaryProvider } from "../../../toolcall/boundary/Sequence.js";
 import { WorkerInstanceToolLog } from "./record/Log.js";
 
 interface WorkerToolOptions {
@@ -74,7 +74,7 @@ export class WorkerInstanceTool {
         });
     }
 
-    bindBoundary(boundary: () => ToolCallBoundarySequence): void {
+    bindBoundary(boundary: ToolCallBoundaryProvider): void {
         this.#execution.bindBoundary(boundary);
     }
 

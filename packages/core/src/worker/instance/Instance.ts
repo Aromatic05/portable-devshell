@@ -78,7 +78,7 @@ import type { InstanceEventBuffer } from "../../instance/EventBuffer.js";
 import type { LogStoreInstance } from "../../storage/log/Store.js";
 import type { ResolvedWorkerInstanceConfig } from "./Config.js";
 import { WorkerInstanceTool } from "./tool/Tool.js";
-import type { ToolCallBoundarySequence } from "../../toolcall/boundary/Sequence.js";
+import type { ToolCallBoundaryProvider } from "../../toolcall/boundary/Sequence.js";
 import { WorkerInstanceConnection } from "./lifecycle/Connection.js";
 import { WorkerInstanceLifecycle } from "./lifecycle/Lifecycle.js";
 import { WorkerInstanceArtifact } from "./capability/Artifact.js";
@@ -463,7 +463,7 @@ export class WorkerInstance {
         return await this.#lifecycle.refreshStatus();
     }
 
-    bindToolCallBoundary(boundary: () => ToolCallBoundarySequence): void {
+    bindToolCallBoundary(boundary: ToolCallBoundaryProvider): void {
         this.#tool.bindBoundary(boundary);
     }
 

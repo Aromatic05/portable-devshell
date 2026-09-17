@@ -1,10 +1,8 @@
 import {
     ToolCallBoundarySequence,
+    type ToolCallBoundaryLease,
     type ToolCallReview,
-    ToolCallReviewInput,
-    ToolCallReviewResult,
-    ToolCallRewrite,
-    ToolCallRewriteInput,
+    type ToolCallRewrite,
 } from "@portable-devshell/core";
 import {
     review,
@@ -30,51 +28,49 @@ export class ToolCallExtensionBinding {
         this.#extensions = extensions;
     }
 
-    sequence(): ToolCallBoundarySequence {
-        return new ToolCallBoundarySequence({
-            reviews: this.reviews(),
-            rewrites: this.rewrites(),
-        });
-    }
-
-    reviews(): readonly ToolCallReview[] {
-        return this.#extensions
-            .listDeclarations(review.id)
-            .map(({ id }) => async (input) => await this.#review(id, input));
-    }
-
-    rewrites(): readonly ToolCallRewrite[] {
-        return this.#extensions
-            .listDeclarations(rewrite.id)
-            .map(({ id }) => async (input) => await this.#rewrite(id, input));
-    }
-
-    async #review(
-        id: string,
-        input: ToolCallReviewInput,
-    ): Promise<ToolCallReviewResult> {
-        const { lease, registration } = await this.#extensions.acquireRegistration(
-            review.id,
-            id,
-        );
+    async acquire(): Promise<ToolCallBoundaryLease> {
+        const releases: Array<() => void> = [];
         try {
-            const binding = registration.binding as ToolCallReviewBinding;
-            return await binding(input);
-        } finally {
-            lease.release();
+            const reviews = await this.#acquireReviews(releases);
+            const rewrites = await this.#acquireRewrites(releases);
+            let released = false;
+            return {
+                sequence: new ToolCallBoundarySequence({ reviews, rewrites }),
+                release() {
+                    if (released) return;
+                    released = true;
+                    for (const release of [...releases].reverse()) release();
+                },
+            };
+        } catch (error) {
+            for (const release of [...releases].reverse()) release();
+            throw error;
         }
     }
 
-    async #rewrite(id: string, input: ToolCallRewriteInput): Promise<string> {
-        const { lease, registration } = await this.#extensions.acquireRegistration(
-            rewrite.id,
-            id,
-        );
-        try {
-            const binding = registration.binding as ToolCallRewriteBinding;
-            return await binding(input);
-        } finally {
-            lease.release();
+    async #acquireReviews(
+        releases: Array<() => void>,
+    ): Promise<readonly ToolCallReview[]> {
+        const bindings: ToolCallReview[] = [];
+        for (const { id } of this.#extensions.listDeclarations(review.id)) {
+            const { lease, registration } =
+                await this.#extensions.acquireRegistration(review.id, id);
+            releases.push(() => lease.release());
+            bindings.push(registration.binding as ToolCallReviewBinding);
         }
+        return bindings;
+    }
+
+    async #acquireRewrites(
+        releases: Array<() => void>,
+    ): Promise<readonly ToolCallRewrite[]> {
+        const bindings: ToolCallRewrite[] = [];
+        for (const { id } of this.#extensions.listDeclarations(rewrite.id)) {
+            const { lease, registration } =
+                await this.#extensions.acquireRegistration(rewrite.id, id);
+            releases.push(() => lease.release());
+            bindings.push(registration.binding as ToolCallRewriteBinding);
+        }
+        return bindings;
     }
 }

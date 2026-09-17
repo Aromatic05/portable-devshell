@@ -299,6 +299,8 @@ outbound    B -> A
 
 具体 registration 如何声明这个层次，第一版实现前继续沿用 Extension catalog 的稳定标识，不在本文先冻结 `priority`、`direction` 等尚未确认的 public ABI 字段。
 
+同一次 ToolCall 必须固定它取得的 rewrite registrations 及其 Extension generation lease，直到 outbound 完成后再释放。热重载只影响后续 ToolCall，不能让一次调用的 inbound 使用旧 generation、outbound 使用新 generation，否则即使顺序仍是 `A -> B -> B -> A`，也不再是同一个可逆栈。
+
 ## 9. Secret 示例
 
 Outer ToolCall：
