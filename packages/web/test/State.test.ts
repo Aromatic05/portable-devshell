@@ -217,6 +217,25 @@ describe("WebStore", () => {
         expect(clients.overview.get).toHaveBeenCalledOnce();
     });
 
+    it("refreshes Messages without materializing Audit logs or Tool Calls", async () => {
+        const clients = fakeClients();
+        clients.conversation.list = vi.fn(async () => []);
+        clients.runtime.readLogs = vi.fn(async () => []);
+        clients.tool.listCalls = vi.fn(async () => []);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+
+        await store.load();
+        await store.refreshMessages();
+
+        expect(clients.conversation.list).toHaveBeenCalledWith("demo", {
+            limit: 400,
+            maxBytes: 1024 * 1024,
+        });
+        expect(clients.runtime.readLogs).not.toHaveBeenCalled();
+        expect(clients.tool.listCalls).not.toHaveBeenCalled();
+        store.close();
+    });
+
     it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
         const clients = fakeClients();
         clients.tool.listApprovals = vi.fn(async () => []);
@@ -410,6 +429,7 @@ describe("WebStore", () => {
         stream.push({
             event: {
                 at: "2026-07-31T00:00:13Z",
+                data: { toolName: "bash_run" },
                 instanceName: asInstanceName("demo"),
                 seq: 13,
                 type: "toolCall.completed",
@@ -419,8 +439,22 @@ describe("WebStore", () => {
         await vi.waitFor(() => {
             expect(clients.runtime.readLogs).toHaveBeenCalled();
             expect(clients.tool.listCalls).toHaveBeenCalled();
-            expect(clients.conversation.list).toHaveBeenCalled();
         });
+        expect(clients.conversation.list).not.toHaveBeenCalled();
+
+        stream.push({
+            event: {
+                at: "2026-07-31T00:00:14Z",
+                data: { toolName: "todo_report" },
+                instanceName: asInstanceName("demo"),
+                seq: 14,
+                type: "toolCall.completed",
+            },
+            kind: "event",
+        });
+        await vi.waitFor(() =>
+            expect(clients.conversation.list).toHaveBeenCalledOnce(),
+        );
         store.close();
     });
 
@@ -756,7 +790,7 @@ describe("WebStore", () => {
         store.close();
     });
 
-    it("polls overview only while online, visible, and observed", async () => {
+    it("polls overview only while online, visible, observed, and on Overview", async () => {
         vi.useFakeTimers();
         let visible = true;
         const clients = fakeClients();
@@ -770,16 +804,22 @@ describe("WebStore", () => {
 
         expect(clients.overview.get).toHaveBeenCalledOnce();
         await vi.advanceTimersByTimeAsync(1_000);
+        expect(clients.overview.get).toHaveBeenCalledOnce();
+
+        store.setOverviewActive(true);
+        await vi.advanceTimersByTimeAsync(0);
         expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(clients.overview.get).toHaveBeenCalledTimes(3);
 
         visible = false;
         await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        expect(clients.overview.get).toHaveBeenCalledTimes(3);
 
         visible = true;
         unsubscribe();
         await vi.advanceTimersByTimeAsync(1_000);
-        expect(clients.overview.get).toHaveBeenCalledTimes(2);
+        expect(clients.overview.get).toHaveBeenCalledTimes(3);
         store.close();
         vi.useRealTimers();
     });

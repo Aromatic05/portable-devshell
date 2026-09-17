@@ -4,6 +4,7 @@ import {
     parseContextMessageDirective,
     workspaceFolderName,
     type ContextMessageStatus,
+    type ConversationEntry,
     type ConversationPreferencesPatch,
     type ConversationPreferencesSnapshot,
 } from "@portable-devshell/shared/browser";
@@ -29,6 +30,20 @@ export interface WebMessageSession {
 }
 
 const activeSessionWindowMs = 30 * 60 * 1_000;
+const emptyConversationEntries = Object.freeze(
+    [],
+) as readonly ConversationEntry[];
+const messageEntryCache = new WeakMap<
+    readonly ConversationEntry[],
+    Map<string, WebMessageEntry[]>
+>();
+let messageSessionCache:
+    | {
+          contexts: WebState["readModel"]["contexts"];
+          instanceState: WebState["readModel"]["instanceState"];
+          sessions: WebMessageSession[];
+      }
+    | undefined;
 
 export function selectWebMessageSessions(
     state: WebState,
@@ -59,6 +74,11 @@ export function selectWebMessageSession(
 }
 
 function projectWebMessageSessions(state: WebState): WebMessageSession[] {
+    if (
+        messageSessionCache?.contexts === state.readModel.contexts &&
+        messageSessionCache.instanceState === state.readModel.instanceState
+    )
+        return messageSessionCache.sessions;
     const sessions = new Map<string, Omit<WebMessageSession, "title">>();
     const summaries = new Map<string, { at: string; text: string }>();
     const touch = (
@@ -126,7 +146,7 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     const titleCounts = new Map<string, number>();
     for (const title of baseTitles)
         titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-    return values
+    const projected = values
         .map((session, index): WebMessageSession => {
             const baseTitle =
                 baseTitles[index] ?? humanConversationTitle(session);
@@ -143,6 +163,12 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
                 right.startedAt.localeCompare(left.startedAt) ||
                 left.ctxId.localeCompare(right.ctxId),
         );
+    messageSessionCache = {
+        contexts: state.readModel.contexts,
+        instanceState: state.readModel.instanceState,
+        sessions: projected,
+    };
+    return projected;
 }
 
 export function selectWebMessageEntries(
@@ -150,9 +176,17 @@ export function selectWebMessageEntries(
     instance: string,
     ctxId: string,
 ): WebMessageEntry[] {
-    const instanceState = state.readModel.instanceState[instance];
-    if (instanceState === undefined) return [];
-    return instanceState.conversationEntries
+    const source =
+        state.readModel.instanceState[instance]?.conversationEntries ??
+        emptyConversationEntries;
+    let byContext = messageEntryCache.get(source);
+    if (byContext === undefined) {
+        byContext = new Map();
+        messageEntryCache.set(source, byContext);
+    }
+    const cached = byContext.get(ctxId);
+    if (cached !== undefined) return cached;
+    const projected = source
         .filter((entry) => entry.ctxId === ctxId)
         .map((entry): WebMessageEntry => ({
             at: entry.createdAt,
@@ -166,6 +200,8 @@ export function selectWebMessageEntries(
                 left.at.localeCompare(right.at) ||
                 left.id.localeCompare(right.id),
         );
+    byContext.set(ctxId, projected);
+    return projected;
 }
 
 export function filterWebMessageSessions(
@@ -370,6 +406,12 @@ export function applyConversationPreferences(
     const workspaceRank = new Map(
         preferences.workspaceOrder.map((key, index) => [key, index]),
     );
+    const conversationRanks = new Map(
+        Object.entries(preferences.orderByWorkspace).map(([workspace, order]) => [
+            workspace,
+            new Map(order.map((key, index) => [key, index])),
+        ]),
+    );
     return sessions
         .map((session) => ({
             ...session,
@@ -392,13 +434,9 @@ export function applyConversationPreferences(
                 }
                 return leftWorkspace.localeCompare(rightWorkspace);
             }
-            const rank = new Map(
-                (preferences.orderByWorkspace[leftWorkspace] ?? []).map(
-                    (key, index) => [key, index],
-                ),
-            );
-            const leftRank = rank.get(conversationKey(left));
-            const rightRank = rank.get(conversationKey(right));
+            const rank = conversationRanks.get(leftWorkspace);
+            const leftRank = rank?.get(conversationKey(left));
+            const rightRank = rank?.get(conversationKey(right));
             if (leftRank === undefined && rightRank === undefined)
                 return (
                     right.startedAt.localeCompare(left.startedAt) ||
@@ -438,10 +476,12 @@ export function ensureConversationPreferenceOrder(
         );
     for (const [workspace, values] of workspaceSessions) {
         const loadedKeys = values.map(conversationKey);
+        const loaded = new Set(loadedKeys);
         const previous =
             orderByWorkspace[workspace] ??
-            legacyOrder.filter((key) => loadedKeys.includes(key));
-        const missing = loadedKeys.filter((key) => !previous.includes(key));
+            legacyOrder.filter((key) => loaded.has(key));
+        const previousKeys = new Set(previous);
+        const missing = loadedKeys.filter((key) => !previousKeys.has(key));
         const next = [...missing, ...previous];
         if (
             orderByWorkspace[workspace] === undefined ||

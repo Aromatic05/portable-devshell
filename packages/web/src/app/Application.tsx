@@ -37,13 +37,14 @@ export function Application({
     const [route, navigate] = useHashRoute();
     const interactionDisabled = busy !== undefined;
     useEffect(() => {
-        if (
-            (route.page === "audit" || route.page === "messages") &&
-            state.connection === "online"
-        ) {
-            void store.refreshAudit();
-        }
-    }, [route, state.connection, store]);
+        store.setOverviewActive(route.page === "overview");
+        return () => store.setOverviewActive(false);
+    }, [route.page, store]);
+    useEffect(() => {
+        if (state.connection !== "online") return;
+        if (route.page === "audit") void store.refreshAudit();
+        else if (route.page === "messages") void store.refreshMessages();
+    }, [route.page, state.connection, store]);
     const counts = {
         approvals: pendingApprovals(state),
         instances: state.readModel.instances.length,

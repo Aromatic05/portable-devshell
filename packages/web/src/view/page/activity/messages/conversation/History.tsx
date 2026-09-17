@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 import { parseContextMessageDirective } from "@portable-devshell/shared/browser";
 
 import type { WebMessageEntry } from "../Model.js";
 
-export function ConversationHistory({
+export const ConversationHistory = memo(function ConversationHistory({
     entries,
     threadKey,
 }: {
@@ -95,7 +95,7 @@ export function ConversationHistory({
             />
         </div>
     );
-}
+});
 
 function formatMessageDate(value: string): string {
     const date = new Date(value);

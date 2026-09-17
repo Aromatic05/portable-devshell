@@ -46,6 +46,7 @@ export class WebStore {
     #conversationPreferenceQueue = Promise.resolve();
     #generation = 0;
     #ignoreTransportClose = false;
+    #overviewActive = false;
 
     constructor(
         readonly clients: WebClients,
@@ -97,7 +98,8 @@ export class WebStore {
             shouldRefreshOverview: () =>
                 this.#listeners.size > 0 &&
                 this.#state.connection === "online" &&
-                isPageVisible(),
+                isPageVisible() &&
+                this.#overviewActive,
         });
         this.#refreshScheduler.start();
         this.#model.subscribe(() => this.#syncModel());
@@ -114,6 +116,12 @@ export class WebStore {
         this.#listeners.add(listener);
         return () => this.#listeners.delete(listener);
     };
+
+    setOverviewActive(active: boolean): void {
+        if (this.#overviewActive === active) return;
+        this.#overviewActive = active;
+        if (active) this.#refreshScheduler.scheduleOverview(0);
+    }
 
     async load(): Promise<void> {
         if (this.#stopped) return;
@@ -228,7 +236,10 @@ export class WebStore {
     }
 
     async refreshAudit(): Promise<void> {
-        await this.#model.refreshControl();
+        await Promise.all([
+            this.#model.refreshInstances(),
+            this.#model.refreshContexts(),
+        ]);
         await Promise.all(
             this.#model.state.instances.map(async ({ name }) => {
                 await this.#model.refreshInstance(name, [
@@ -238,6 +249,17 @@ export class WebStore {
                 ]);
             }),
         );
+    }
+
+    async refreshMessages(): Promise<void> {
+        const generation = this.#generation;
+        await Promise.all([
+            this.#model.refreshContexts(),
+            ...this.#model.state.instances.map(async ({ name }) => {
+                await this.#model.refreshInstance(name, ["comments"]);
+            }),
+            this.#loadConversationPreferences(generation),
+        ]);
     }
 
     readonly readArtifactImage = async (imageRef: string) =>
