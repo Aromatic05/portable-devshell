@@ -1,3 +1,4 @@
+pub(crate) mod proxy;
 mod service;
 mod sse;
 mod websocket;
@@ -69,11 +70,15 @@ impl ReverseConnector {
     }
 
     fn run(mut self) {
-        let client = match Client::builder()
+        let client = Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            .timeout(SSE_READ_TIMEOUT)
-            .build()
-        {
+            .timeout(SSE_READ_TIMEOUT);
+        let client = match proxy::apply_http_client_proxy(client, self.config.proxy_url.as_deref())
+            .and_then(|builder| {
+                builder
+                    .build()
+                    .map_err(|error| format!("failed to build reverse HTTP client: {error}"))
+            }) {
             Ok(client) => client,
             Err(error) => {
                 let _ = append_log(

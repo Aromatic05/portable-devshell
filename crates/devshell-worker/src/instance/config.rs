@@ -29,6 +29,8 @@ pub struct WorkerReverseConfig {
     pub device_token: String,
     #[serde(default)]
     pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_url: Option<String>,
 }
 
 pub fn build_config(instance: &InstanceName) -> Result<WorkerConfig, String> {
@@ -146,4 +148,46 @@ fn sync_directory(path: &Path) -> Result<(), String> {
 #[cfg(not(unix))]
 fn sync_directory(_path: &Path) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorkerConfig, WorkerReverseConfig};
+
+    #[test]
+    fn reverse_proxy_url_round_trips_and_old_config_defaults_to_none() {
+        let config = WorkerConfig {
+            version: 1,
+            instance: "proxy-test".to_string(),
+            created_at: 1,
+            reverse: Some(WorkerReverseConfig {
+                controller_url: "https://controller.example".to_string(),
+                device_token: "token".to_string(),
+                generation: 7,
+                proxy_url: Some("socks5h://127.0.0.1:1080".to_string()),
+            }),
+        };
+        let encoded = toml::to_string(&config).unwrap();
+        assert!(encoded.contains("proxyUrl = \"socks5h://127.0.0.1:1080\""));
+        let decoded: WorkerConfig = toml::from_str(&encoded).unwrap();
+        assert_eq!(
+            decoded.reverse.unwrap().proxy_url.as_deref(),
+            Some("socks5h://127.0.0.1:1080")
+        );
+
+        let old: WorkerConfig = toml::from_str(
+            r#"
+version = 1
+instance = "old"
+createdAt = 1
+
+[reverse]
+controllerUrl = "https://controller.example"
+deviceToken = "token"
+generation = 2
+"#,
+        )
+        .unwrap();
+        assert_eq!(old.reverse.unwrap().proxy_url, None);
+    }
 }

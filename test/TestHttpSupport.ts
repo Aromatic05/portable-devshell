@@ -88,6 +88,42 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
         upstream.once("error", () => socket.destroy());
         socket.once("error", () => upstream.destroy());
     });
+    server.on("connect", (incoming, socket, head) => {
+        let target: URL;
+        try {
+            target = new URL(`http://${incoming.url ?? ""}`);
+        } catch {
+            socket.destroy();
+            return;
+        }
+        if (!isLoopbackHost(target.hostname) || target.port.length === 0) {
+            socket.destroy();
+            return;
+        }
+        const targetPort = Number.parseInt(target.port, 10);
+        if (
+            !Number.isInteger(targetPort) ||
+            targetPort <= 0 ||
+            targetPort > 65535
+        ) {
+            socket.destroy();
+            return;
+        }
+        const upstream = connect(targetPort, target.hostname);
+        upgradedSockets.add(socket);
+        upgradedSockets.add(upstream);
+        const forget = (candidate: Duplex) => () =>
+            upgradedSockets.delete(candidate);
+        socket.once("close", forget(socket));
+        upstream.once("close", forget(upstream));
+        upstream.once("connect", () => {
+            socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+            if (head.length > 0) upstream.write(head);
+            socket.pipe(upstream).pipe(socket);
+        });
+        upstream.once("error", () => socket.destroy());
+        socket.once("error", () => upstream.destroy());
+    });
 
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
@@ -110,4 +146,13 @@ export async function startLoopbackHttpProxy(): Promise<LoopbackHttpProxy> {
             targetOrigin = new URL(nextOrigin);
         },
     };
+}
+
+function isLoopbackHost(host: string): boolean {
+    return (
+        host === "127.0.0.1" ||
+        host === "localhost" ||
+        host === "[::1]" ||
+        host === "::1"
+    );
 }

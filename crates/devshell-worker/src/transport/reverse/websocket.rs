@@ -5,11 +5,11 @@ use reqwest::header::AUTHORIZATION;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Error as WebSocketError, Message, WebSocket, connect};
+use tungstenite::{Error as WebSocketError, Message, WebSocket, client_tls, connect};
 
 use crate::daemon::log::append_log;
 
-use super::{ReverseConnector, reverse_endpoint};
+use super::{ReverseConnector, proxy, reverse_endpoint};
 
 impl ReverseConnector {
     pub(super) fn connect_wss(
@@ -40,8 +40,14 @@ impl ReverseConnector {
             HeaderValue::from_static("devshell-worker-transport.v1"),
         );
 
-        let (mut socket, _) = connect(request)
-            .map_err(|error| format!("failed to connect reverse websocket: {error}"))?;
+        let (mut socket, _) = if let Some(proxy_url) = self.config.proxy_url.as_deref() {
+            let stream = proxy::connect_tcp(proxy_url, &endpoint)?;
+            client_tls(request, stream)
+                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
+        } else {
+            connect(request)
+                .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
+        };
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
         self.payload.prepare_connection()?;
         append_log(

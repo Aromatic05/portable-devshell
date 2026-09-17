@@ -99,6 +99,7 @@ test(
         );
         await writeFile(join(workspace, artifactSourceName), artifactSource);
         const proxy = await startLoopbackHttpProxy();
+        const routeProxy = await startLoopbackHttpProxy();
         const publicBaseUrl = proxy.origin;
         const restoreWindowsIdentity = installUniqueWindowsTestIdentity(
             "reverse-real-worker",
@@ -125,6 +126,7 @@ test(
                 await waitForExit(worker);
             }
             await server.stop();
+            await routeProxy.close();
             await proxy.close();
             restoreWindowsIdentity();
             await rm(homeDirectory, { force: true, recursive: true });
@@ -181,6 +183,7 @@ test(
                 `controllerUrl = ${JSON.stringify(publicBaseUrl)}`,
                 `deviceToken = ${JSON.stringify(credential.deviceToken)}`,
                 "generation = 0",
+                `proxyUrl = ${JSON.stringify(routeProxy.origin)}`,
                 "",
             ].join("\n"),
             { encoding: "utf8", mode: 0o600 },
