@@ -8,8 +8,8 @@
 
 ```text
 已冻结架构
-    Provider -> Channel -> Frame -> Service -> Protocol
-    Provider 与 Carrier 不拆分
+    Provider -> Carrier -> Channel -> Frame -> Service -> Protocol
+    Provider 与 Carrier 保持独立职责
     Channel 只提供 byte service
     Frame 是 length-prefixed PDU，并承担 multiplex / logical stream flow control
     不建立独立 Framing / Session / Stream 架构层
@@ -27,19 +27,22 @@
 
 仍然独立的边界
     Client <-> Control 的 PrefixRoute / ClientConnection
-    Provider 自身的 generation / reconnect / heartbeat
+    Provider 的远端能力生命周期
+    Carrier 的 generation / reconnect / heartbeat
     Worker RPC request replay / dedupe
     public Extension Worker ABI
 ```
 
 ## 1. 目标
 
-portable-devshell 需要一套统一而足够小的通信基础设施，使不同 Provider 可以承载相同的上层能力，同时避免 transport 理解具体业务协议。
+portable-devshell 需要一套统一而足够小的通信基础设施，使不同 Provider / Carrier 组合可以承载相同的上层能力，同时避免 transport 理解具体业务协议。
 
 目标分层固定为：
 
 ```text
 Provider
+   ↓
+Carrier
    ↓
 Channel
    ↓
@@ -50,10 +53,11 @@ Service
 Protocol / Consumer
 ```
 
-五层分别回答五个问题：
+六层分别回答六个问题：
 
 ```text
-Provider   如何获得到另一端的通信能力
+Provider   如何创建、启动和管理远端能力
+Carrier    如何跨进程或网络边界承载 Channel
 Channel    如何可靠、有序地搬运 bytes
 Frame      如何在一条 Channel 上表达多条逻辑流
 Service    一条逻辑流应该接到什么能力
@@ -72,7 +76,7 @@ Protocol   这些 bytes 在业务上是什么意思
 - traffic class、strict priority 或复杂 QoS；
 - public Extension transport ABI；
 - 为未来 Service 预建 `ServiceFactory`、`ServiceProvider`、`ServiceRegistry` 等层级；
-- 为解释模型额外建立 `Carrier`、`Framing`、`Session`、`Stream` 架构层。
+- 为解释模型额外建立 `Framing`、`Session`、`Stream` 架构层。
 
 这些能力只有出现真实需求后才进入设计。
 
@@ -80,7 +84,7 @@ Protocol   这些 bytes 在业务上是什么意思
 
 ### 3.1 Provider
 
-Provider 负责建立、维持和关闭底层通信能力，并向上层提供 `Channel`。
+Provider 负责创建、启动、连接和管理远端能力，并选择或构造适合该能力的 Carrier。
 
 当前或预期的 Provider 包括：
 
@@ -89,18 +93,16 @@ Local
 SSH
 Docker
 Podman
-Reverse
 ```
 
-本设计不再区分 Provider 与 Carrier。Socket、WebSocket、SSE、SSH stdio、container exec 等都是 Provider 实现 Channel 时使用的媒介，不形成新的公共架构层。
+Control 配置中的 `provider = "reverse"` 是现有 instance 生命周期配置名称；在 Transport 分层里，Worker 主动回连 Control 的 WSS / SSE+POST 路径属于 Reverse Carrier，不改变 Provider 与 Carrier 的职责区分。
 
 Provider 可以负责：
 
-- worker install / start / attach 所需的连接建立；
-- socket / stdio / WSS / SSE 等具体 I/O；
-- transport heartbeat；
-- Provider 自身的认证、重连和连接 generation；
-- 把消息型或分片型底层媒介归一成 Channel byte service。
+- worker install / start / attach；
+- 远端 executable / container / host 的生命周期；
+- Provider-specific provisioning 与环境准备；
+- 选择并建立对应 Carrier。
 
 Provider 不得理解：
 
@@ -116,9 +118,25 @@ Worker RPC method
 HTTP / TLS / rsync
 ```
 
-### 3.2 Channel
+### 3.2 Carrier
 
-Channel 是 Provider 向 Frame 提供的服务。
+Carrier 负责跨进程或网络边界实际承载 Channel，并把具体媒介的差异收敛在 Channel 之下。
+
+当前 Carrier 形态包括：
+
+```text
+local socket
+SSH stdio
+container exec stdio
+WebSocket
+Reverse WSS / SSE+POST
+```
+
+Carrier 可以拥有连接认证、heartbeat、generation、重连、proxy 和底层 message/chunk 适配，但不得解释 Frame、Service 或 Protocol。Provider 可以创建 Carrier；Carrier 向上只提供 Channel。
+
+### 3.3 Channel
+
+Channel 是 Carrier 向 Frame 提供的可靠、有序 byte service。
 
 概念接口：
 
@@ -174,7 +192,7 @@ SSH stdio ─────────┤
 SSE / POST ────────┘
 ```
 
-### 3.3 Frame
+### 3.4 Frame
 
 Frame 是建立在 Channel byte service 之上的 transport PDU。
 
@@ -201,7 +219,7 @@ Frame 是建立在 Channel byte service 之上的 transport PDU。
 
 > 具有相同 `streamId` 的一组 Frame 按协议形成的双向逻辑字节流。
 
-### 3.4 Service
+### 3.5 Service
 
 Service 决定 logical stream 与目标能力之间的绑定关系。
 
@@ -241,7 +259,7 @@ Frame logical stream
 
 Transport 不认识 rsync 协议。
 
-### 3.5 Protocol / Consumer
+### 3.6 Protocol / Consumer
 
 Protocol 是 transport 之外的消费者。
 
@@ -272,7 +290,7 @@ artifact.receive
 
 Service 名称只允许出现在 Service dispatcher / consumer；Frame codec、stream state、scheduler 与 Channel 都不得按 Service 名分支。
 
-### 3.6 Routing / Proxy
+### 3.7 Routing / Proxy
 
 `route` 不是新的公共 Transport 层，也不是 `network.tcp` metadata 的一部分。必须先区分两类路径：
 
@@ -292,9 +310,9 @@ Service destination path
 - `network.tcp` metadata 始终只描述 `{ host, port }`，表示要连接的当前 byte endpoint；
 - 若最终目标需要通过 SOCKS，Consumer 先 `network.tcp(proxyHost, proxyPort)`，再在得到的 `FrameStream` 上执行 SOCKS CONNECT；隧道建立后继续承载 HTTP / TLS / database protocol；
 - SOCKS 因而是 Protocol / Consumer 组合，不新增 `network.socks` Service，也不向 Frame 增加 `route` 字段；
-- Reverse Provider 自己如何经 proxy 连接 Control 属于 Provider 实现，和 Worker 上的 `network.tcp` 无关。
+- Reverse Carrier 自己如何经 proxy 连接 Control 属于 Carrier 实现，和 Worker 上的 `network.tcp` 无关；当前 worker `[reverse].proxyUrl` 已支持匿名 `http://`、`socks5://`、`socks5h://`，统一作用于 enrollment、WSS 与 SSE/POST。
 
-该分层已由真实 Worker e2e 验证：Consumer 通过 `network.tcp` 连接 SOCKS5 proxy，完成 no-auth CONNECT 后在同一个 `FrameStream` 上发送 HTTP/1.1 request/response。
+该分层已由真实 Worker e2e 验证：Consumer 通过 `network.tcp` 连接 SOCKS5 proxy，完成 no-auth CONNECT 后在同一个 `FrameStream` 上发送 HTTP/1.1 request/response；Reverse WebSocket 也已通过独立 HTTP CONNECT `proxyUrl` 建立完整 Frame Channel。`wss://` 在同一个预连接 tunnel 上由 `tungstenite::client_tls()` 继续完成 TLS/WebSocket handshake。两者使用的是不同层级的 proxy 能力。
 
 如果未来多个调用方重复需要 SOCKS consumer，可以增加 domain-level SOCKS helper，但它只能包装 `FrameStream`；不能改变 Frame wire contract 或固定 primitive Service 集。
 
@@ -776,7 +794,7 @@ process.exec
 
 需要 request retry / replay 的 Protocol 自己拥有该语义。Worker RPC 已经在 RPC 层根据 request ID 处理 replay / dedupe；Frame 不 replay raw DATA。
 
-Reverse Provider 的 generation / reconnect 和 Worker RPC completed-result cache 已位于对应层级：Provider 恢复 Channel availability，RPC 恢复逻辑 request；`network.tcp`、`process.exec`、Artifact raw stream 等其它 logical stream 在 Channel 断开后直接失败，不跨 generation 恢复。
+Reverse Carrier 的 generation / reconnect 和 Worker RPC completed-result cache 已位于对应层级：Carrier 恢复 Channel availability，RPC 恢复逻辑 request；`network.tcp`、`process.exec`、Artifact raw stream 等其它 logical stream 在 Channel 断开后直接失败，不跨 generation 恢复。
 
 ## 15. Protocol error 边界
 
@@ -938,7 +956,7 @@ payload bytes                         -> Frame Service data plane
 
 不存在按 RPC method 把 Artifact 分到另一条物理 lane 的逻辑。
 
-## 17. Reverse Provider
+## 17. Reverse Carrier
 
 Reverse 当前已经收敛为：
 
@@ -968,7 +986,7 @@ worker.rpc
 
 Channel 断开时所有当前 logical stream 都失败。只有 Worker RPC 的逻辑 request 可以在新 generation 上由 RPC 层重放；其它 Service 不透明恢复。
 
-若未来确有多物理连接吞吐需求，应由 Provider 内部实现，不允许 Frame 或 Protocol 依赖具体 lane。
+若未来确有多物理连接吞吐需求，应由 Carrier 内部实现，不允许 Frame 或 Protocol 依赖具体 lane。
 
 ## 18. Security boundary
 
@@ -1197,25 +1215,32 @@ Reverse：
 
 代码审查时可以直接用以下规则判断设计是否走偏：
 
-1. **Provider 只产生 Channel，不理解 Frame / Service / Protocol。**
-2. **Channel 只搬运 bytes，不理解 Frame PDU。**
-3. **Frame 只理解 multiplex、logical stream lifecycle 和 credit，不理解 DATA 业务。**
-4. **Service 只负责 logical stream 与能力的绑定，不解析其上承载的 Protocol。**
-5. **Protocol retry/replay 不得下沉为 Frame raw-byte replay。**
-6. **一个 slow logical stream 不得阻塞整个 Channel。**
-7. **Channel 断开后 Frame stream 不透明恢复。**
-8. **新通信实现只进入 `transport` domain，不为分层图大规模重排现有目录。**
+1. **Provider 只负责远端能力生命周期并创建/选择 Carrier，不理解 Frame / Service / Protocol。**
+2. **Carrier 只负责承载 Channel，不理解 Frame / Service / Protocol。**
+3. **Channel 只搬运 bytes，不理解 Frame PDU。**
+4. **Frame 只理解 multiplex、logical stream lifecycle 和 credit，不理解 DATA 业务。**
+5. **Service 只负责 logical stream 与能力的绑定，不解析其上承载的 Protocol。**
+6. **Protocol retry/replay 不得下沉为 Frame raw-byte replay。**
+7. **一个 slow logical stream 不得阻塞整个 Channel。**
+8. **Channel 断开后 Frame stream 不透明恢复。**
+9. **新通信实现只进入 `transport` domain，不为分层图大规模重排现有目录。**
 
 当前结构保持简单：
 
 ```text
-Local / SSH / Docker / Podman / Reverse
-                    │
-                    ▼
-                 Provider
-                    │
-                    ▼
-                  Channel
+Local / SSH / Docker / Podman
+             │
+             ▼
+          Provider
+             │ creates / selects
+             ▼
+ socket / SSH stdio / container exec / Reverse WSS+SSE
+             │
+             ▼
+           Carrier
+             │ provides
+             ▼
+           Channel
                     │
                     ▼
        length-prefixed Frame protocol
@@ -1229,4 +1254,4 @@ Local / SSH / Docker / Podman / Reverse
        HTTP/TLS      rsync        RPC      raw payload
 ```
 
-网络可靠性归 Provider / Channel；多路逻辑流归 Frame；目标能力归 Service；业务含义归 Protocol。
+远端能力生命周期归 Provider；跨边界承载归 Carrier；可靠有序 bytes 归 Channel；多路逻辑流归 Frame；目标能力归 Service；业务含义归 Protocol。

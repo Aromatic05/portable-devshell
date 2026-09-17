@@ -2,7 +2,7 @@
 
 版本：1
 
-Reverse 定义的是 Worker 主动连接 Control 的 **Provider / Channel** 行为。连接建立后，应用层统一使用 [Transport Frame v1](../development/transport-protocol.md)：一条 Reverse Channel 上 multiplex `worker.rpc`、Artifact、TCP、process 等 Service，不存在第二套 Reverse RPC wire protocol。
+Reverse 定义的是 Worker 主动连接 Control 的 **Carrier / Channel** 行为。连接建立后，应用层统一使用 [Transport Frame v1](../development/transport-protocol.md)：一条 Reverse Channel 上 multiplex `worker.rpc`、Artifact、TCP、process 等 Service，不存在第二套 Reverse RPC wire protocol。
 
 ## 拓扑
 
@@ -74,9 +74,13 @@ devshell instance rotate-token <instance>
 devshell instance revoke-token <instance>
 
 devshell-worker enroll --controller <publicBaseUrl> --device-code <code>
+
+optional: 让 enrollment 和后续 Reverse transport 都走显式 proxy
+devshell-worker enroll --controller <publicBaseUrl> --device-code <code> \
+  --proxy socks5h://127.0.0.1:1080
 ```
 
-注册的最后一步仍调用已有 `start --instance`，由 worker 负责 runtime socket、pid、日志、状态和停止流程。
+`--proxy` 会持久化为 worker `config.toml` 的 `[reverse].proxyUrl`。注册的最后一步仍调用已有 `start --instance`，由 worker 负责 runtime socket、pid、日志、状态和停止流程。
 
 ## Generation
 
@@ -220,37 +224,66 @@ Worker RPC completed-result cache     1024 条
 
 这些是当前实现默认值，不属于 Frame wire-level 兼容性要求。
 
-## Provider 路由与 Proxy
+## Carrier 路由与 Proxy
 
-Reverse 自己的出站路径属于 Provider 层，不复用 `network.tcp` Service。
+Reverse 自己的出站路径属于 Carrier 层，不复用 `network.tcp` Service。
 
-当前实现能力：
+显式 `proxyUrl` 当前支持匿名：
+
+```text
+http://proxy:port
+socks5://proxy:port
+socks5h://proxy:port
+```
+
+不支持：
+
+```text
+https:// proxy
+proxy URL userinfo / proxy authentication
+```
+
+同一个 `proxyUrl` 同时作用于 enrollment、WSS 与 SSE/POST：
+
+```text
+enrollment / SSE / HTTPS POST
+    reqwest Proxy::all(proxyUrl)
+
+WSS
+    proxy TCP connect
+      -> HTTP CONNECT 或 SOCKS5 CONNECT
+      -> raw tunnel
+      -> tungstenite client_tls(original wss URL)
+      -> WebSocket / Frame
+```
+
+`socks5://` 在 Worker 本地解析目标 DNS，再把 IP 交给 proxy；`socks5h://` 把域名交给 proxy 解析。HTTP proxy 的 WSS 路径使用 CONNECT tunnel，因此原 controller hostname 仍由后续 TLS/WebSocket handshake 使用。
+
+未配置 `proxyUrl` 时：
 
 ```text
 WSS
-    tungstenite 直接建立 TCP/TLS/WebSocket
-    不读取 DevShell-specific proxy config
+    继续直接建立 TCP/TLS/WebSocket
 
-SSE / HTTPS POST
+enrollment / SSE / HTTPS POST
     reqwest 默认读取 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY
-    当前构建未启用 reqwest socks feature
 ```
 
-因此：
+reqwest 已启用 `socks` feature，所以这些环境变量也可以使用 SOCKS URL；但显式 `proxyUrl` 是 Reverse Carrier 自己的稳定配置入口，并会覆盖 reqwest 的 system proxy 自动发现。
+
+其它路由规则保持不变：
 
 - OS routing、Tailscale、WireGuard、透明代理等对两种 carrier 都透明；
-- HTTP(S) proxy 环境变量可以作用于 SSE/POST fallback；
-- 当前 WSS 不通过这些 proxy 环境变量建立 CONNECT tunnel；
-- `socks5://` proxy URL 不是当前 Reverse Provider 的受支持能力；
-- 当前没有持久化 `reverse.proxy` 配置字段。
-
-如果未来需要显式 Reverse SOCKS / HTTP proxy，应在 Reverse Provider 的 Channel 建立逻辑中统一实现 WSS 与 SSE/POST routing；不能把 proxy 信息塞进 Frame OPEN 或 `network.tcp` metadata。
+- `proxyUrl` 只控制 Reverse Carrier 如何建立 Channel；
+- proxy 信息不进入 Frame OPEN，也不进入 `network.tcp` metadata；
+- 若未来增加 proxy authentication 或 HTTPS proxy，应继续扩展 Reverse Carrier，而不是引入新的 Frame / Service route 语义。
 
 ## 验收要求
 
 Reverse integration 必须至少覆盖：
 
 - WSS 鉴权与更高 generation 原子替换；
+- real Reverse WebSocket 经显式 HTTP CONNECT `proxyUrl` 建立后继续完成完整 Frame/Service 流程；WSS 使用同一预连接 tunnel + `client_tls()` 路径；
 - SSE+POST fallback 和 upstream sequence dedupe；
 - real Rust reverse worker tool call；
 - Control restart 后 RPC/terminal 恢复；
