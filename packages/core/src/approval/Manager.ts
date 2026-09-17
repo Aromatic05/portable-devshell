@@ -75,10 +75,6 @@ export class ApprovalManager {
             input.toolName,
         );
 
-        if (policyDecision === "allow") {
-            return { decision: "allow" };
-        }
-
         if (policyDecision === "deny") {
             return {
                 decision: "deny",
@@ -87,6 +83,10 @@ export class ApprovalManager {
                     input.toolName,
                 ),
             };
+        }
+
+        if (policyDecision === "allow" && input.required !== true) {
+            return { decision: "allow" };
         }
 
         const createdAt = new Date().toISOString();

@@ -138,13 +138,14 @@ export class AuditToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
+        decision: ToolCallApprovalDecision | undefined,
     ): Promise<ToolCallRecord> {
         return await this.#finishNonRunning(
             callId,
             error,
             completedAt,
             "denied",
-            "denied",
+            decision,
         );
     }
 

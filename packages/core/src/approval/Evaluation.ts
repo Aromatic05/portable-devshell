@@ -23,6 +23,7 @@ export interface ApprovalEvaluationInput {
     context: ToolCallContext;
     inputSummary: string;
     recording?: "caller" | "host";
+    required?: boolean;
     toolName: string;
 }
 

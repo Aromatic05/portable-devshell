@@ -19,6 +19,7 @@ import { ExtensionControlService } from "../../control/extension/Service.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
 import type { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionInstallService } from "../../control/extension/install/Service.js";
+import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
@@ -73,6 +74,9 @@ export class ControlRuntime {
     readonly #reverse: ControlRuntimeReverse;
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
+    readonly #toolCallBinding: ToolCallExtensionBinding;
+    readonly #toolCallBoundWorkers = new WeakSet<object>();
+    readonly #toolCallInstanceUnsubscribe: () => void;
     #webListener?: ControlWebSocketListener;
     #webFlow?: ControlWebOAuthFlow;
     #webFlowUninstall?: () => void;
@@ -92,6 +96,11 @@ export class ControlRuntime {
             }),
         });
         this.#instances = options.instances;
+        this.#toolCallBinding = new ToolCallExtensionBinding(this.#extensions);
+        this.#bindToolCallBoundaries();
+        this.#toolCallInstanceUnsubscribe = this.#instances.onChange(() =>
+            this.#bindToolCallBoundaries(),
+        );
         this.#mcp = options.mcp;
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
@@ -243,6 +252,7 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         this.#modelDevshell.dispose();
+        this.#toolCallInstanceUnsubscribe();
         await this.#channels.close().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));
@@ -272,6 +282,16 @@ export class ControlRuntime {
                 failures,
                 "Control runtime failed to stop cleanly.",
             );
+        }
+    }
+
+    #bindToolCallBoundaries(): void {
+        for (const descriptor of this.#instances.list()) {
+            if (this.#toolCallBoundWorkers.has(descriptor.worker)) continue;
+            descriptor.worker.bindToolCallBoundary(() =>
+                this.#toolCallBinding.sequence(),
+            );
+            this.#toolCallBoundWorkers.add(descriptor.worker);
         }
     }
 

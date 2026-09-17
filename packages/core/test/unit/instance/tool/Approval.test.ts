@@ -64,8 +64,15 @@ test("ToolCallApproval cancels a durable pending approval when setup fails", asy
     let markedPending = false;
 
     await assert.rejects(
-        approval.prepare(callId, "bash_run", "{}", context, startedAt, () => {
-            markedPending = true;
+        approval.prepare({
+            callId,
+            context,
+            inputSummary: "{}",
+            onPendingApproval() {
+                markedPending = true;
+            },
+            startedAt,
+            toolName: "bash_run",
         }),
         /event store unavailable/u,
     );

@@ -66,16 +66,27 @@ export class ToolCallApproval {
         return await this.#approvalManager.cancel(approvalId, reason);
     }
 
-    async prepare(
-        callId: string,
-        toolName: string,
-        inputSummary: string,
-        context: ToolCallContext,
-        startedAt: string,
-        onPendingApproval: () => void,
-        signal?: AbortSignal,
-        recording: "caller" | "host" = "host",
-    ): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
+    async prepare(input: {
+        callId: string;
+        context: ToolCallContext;
+        inputSummary: string;
+        onPendingApproval(): void;
+        recording?: "caller" | "host";
+        required?: boolean;
+        signal?: AbortSignal;
+        startedAt: string;
+        toolName: string;
+    }): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
+        const {
+            callId,
+            context,
+            inputSummary,
+            onPendingApproval,
+            signal,
+            startedAt,
+            toolName,
+        } = input;
+        const recording = input.recording ?? "host";
         let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
 
         try {
@@ -84,6 +95,7 @@ export class ToolCallApproval {
                 context,
                 inputSummary,
                 recording,
+                required: input.required === true,
                 toolName,
             });
         } catch (error) {
@@ -301,7 +313,12 @@ export class ToolCallApproval {
         const errorCode = getErrorCode(error, errorCodes.coreApprovalDenied);
 
         if (recording === "host") {
-            await this.#toolCallHistory.denied(callId, errorCode, completedAt);
+            await this.#toolCallHistory.denied(
+                callId,
+                errorCode,
+                completedAt,
+                "denied",
+            );
             await this.#appendEvent(
                 "toolCall.denied",
                 toEventData({

@@ -1,5 +1,6 @@
-import type {
-    ToolCallReview,
+import {
+    ToolCallBoundarySequence,
+    type ToolCallReview,
     ToolCallReviewInput,
     ToolCallReviewResult,
     ToolCallRewrite,
@@ -27,6 +28,13 @@ export class ToolCallExtensionBinding {
         >,
     ) {
         this.#extensions = extensions;
+    }
+
+    sequence(): ToolCallBoundarySequence {
+        return new ToolCallBoundarySequence({
+            reviews: this.reviews(),
+            rewrites: this.rewrites(),
+        });
     }
 
     reviews(): readonly ToolCallReview[] {

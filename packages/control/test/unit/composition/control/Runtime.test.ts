@@ -783,3 +783,121 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     await assert.rejects(runtime.start(), /missing devshell-extension\.json/iu);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
+
+test("runtime binds dynamic ToolCall Extension Boundary to existing and newly added Workers", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-toolcall-boundary");
+    const socketPath = createTestIpcPath("control-runtime", runtimeDir);
+    const listeners = new Set<() => void>();
+    const descriptors: Array<{ name: string; worker: unknown }> = [];
+    const providers = new Map<string, () => unknown>();
+    let reviewDecision: "accept" | "reject" = "accept";
+
+    const worker = (name: string) => ({
+        bindToolCallBoundary(provider: () => unknown) {
+            assert.equal(providers.has(name), false);
+            providers.set(name, provider);
+        },
+        onCommandSessionClose() {
+            return () => undefined;
+        },
+        onCommandSessionOpen() {
+            return () => undefined;
+        },
+    });
+    descriptors.push({ name: "existing", worker: worker("existing") });
+
+    const extensions = {
+        ...testExtensions(),
+        listDeclarations(pointId: string) {
+            if (pointId === "toolcall.review") return [{ id: "guard" }];
+            return [];
+        },
+        async acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "toolcall.review");
+            assert.equal(id, "guard");
+            return {
+                lease: { release() {} },
+                registration: {
+                    binding: async () => ({ decision: reviewDecision }),
+                },
+            };
+        },
+    };
+    const instances = {
+        get() {
+            return undefined;
+        },
+        list() {
+            return descriptors;
+        },
+        onChange(listener: () => void) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        async stopOwned() {},
+    };
+    const runtime = new ControlRuntime({
+        conversationPreferences: testConversationPreferences(),
+        extensionPaths: testExtensionPaths(),
+        extensions: extensions as never,
+        artifact: { service: undefined, async stop() {} } as never,
+        instances: instances as never,
+        mcp: {
+            configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
+            instanceCreate: undefined,
+            oauthApprovals: undefined,
+            webEnabled: false,
+            async start() {},
+            status: () => ({ running: false }),
+            async stop() {},
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath,
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    assert.equal(providers.has("existing"), true);
+    const existingProvider = providers.get("existing")!;
+    assert.equal(
+        (
+            await (existingProvider() as {
+                review(input: unknown): Promise<{ decision: string }>;
+            }).review({
+                context: { source: "mcp" },
+                direction: "inbound",
+                kind: "call",
+                payload: {},
+                signal: new AbortController().signal,
+                toolName: "bash_run",
+            })
+        ).decision,
+        "accept",
+    );
+
+    reviewDecision = "reject";
+    assert.equal(
+        (
+            await (existingProvider() as {
+                review(input: unknown): Promise<{ decision: string }>;
+            }).review({
+                context: { source: "mcp" },
+                direction: "inbound",
+                kind: "call",
+                payload: {},
+                signal: new AbortController().signal,
+                toolName: "bash_run",
+            })
+        ).decision,
+        "reject",
+    );
+
+    descriptors.push({ name: "added", worker: worker("added") });
+    for (const listener of [...listeners]) listener();
+    assert.equal(providers.has("added"), true);
+});

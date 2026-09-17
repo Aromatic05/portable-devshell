@@ -84,7 +84,7 @@ export class WorkerInstanceToolAudit {
         };
     }
 
-    async queued(scope: ToolCallScope): Promise<void> {
+    async requested(scope: ToolCallScope): Promise<void> {
         await this.#toolCallHistory.started(
             scope.callId,
             scope.toolName,
@@ -95,6 +95,11 @@ export class WorkerInstanceToolAudit {
             scope.association,
             scope.input,
         );
+    }
+
+    async queued(scope: ToolCallScope): Promise<void> {
+        if (!this.#toolCallHistory.hasActive(scope.callId))
+            await this.requested(scope);
         await this.#appendEvent(
             "toolCall.queued",
             toEventData({
@@ -102,6 +107,26 @@ export class WorkerInstanceToolAudit {
                 queuedAt: scope.startedAt,
                 startedAt: scope.startedAt,
                 status: "queued",
+            }),
+        );
+    }
+
+    async denied(scope: ToolCallScope, errorCode: string): Promise<void> {
+        const completedAt = new Date().toISOString();
+        await this.#toolCallHistory.denied(
+            scope.callId,
+            errorCode,
+            completedAt,
+            undefined,
+        );
+        await this.#appendEvent(
+            "toolCall.denied",
+            toEventData({
+                ...scope.eventContext,
+                completedAt,
+                errorCode,
+                startedAt: scope.startedAt,
+                status: "denied",
             }),
         );
     }

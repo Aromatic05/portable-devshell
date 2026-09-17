@@ -47,6 +47,7 @@ export const errorCodes = {
     coreInstanceNotReady: "core.instanceNotReady",
     coreProviderFailed: "core.providerFailed",
     coreToolCallCancelled: "core.toolCallCancelled",
+    coreToolCallRejected: "core.toolCallRejected",
     coreToolQueueTimeout: "core.toolQueueTimeout",
     coreToolSchedulerFull: "core.toolSchedulerFull",
     coreToolSchemaUnavailable: "core.toolSchemaUnavailable",

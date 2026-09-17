@@ -285,3 +285,56 @@ test("ApprovalManager serializes a decision racing its expiry timer", async () =
         0,
     );
 });
+
+test("ApprovalManager requires an approval request when Boundary review asks even under allow policy", async () => {
+    const records: ApprovalRequest[] = [];
+    const manager = new ApprovalManager({
+        instanceName: asInstanceName("approval-boundary-required"),
+        policy: { mode: "allow" },
+        store: new ApprovalStore({
+            async append(request: ApprovalRequest) {
+                records.push(structuredClone(request));
+            },
+            async readAll() {
+                return records.map((request) => structuredClone(request));
+            },
+        } as never),
+        timeout: { ms: 60_000 },
+    });
+
+    const evaluation = await manager.evaluate({
+        callId: "call-boundary-required",
+        context: { source: "mcp", workspace: "/repo" },
+        inputSummary: "{}",
+        required: true,
+        toolName: "bash_run",
+    });
+    assert.equal(evaluation.decision, "ask");
+    if (evaluation.decision !== "ask") throw new Error("approval was not requested");
+    await manager.cancel(evaluation.request.approvalId, "test cleanup");
+});
+
+test("ApprovalManager deny policy remains stronger than Boundary approval request", async () => {
+    const records: ApprovalRequest[] = [];
+    const manager = new ApprovalManager({
+        instanceName: asInstanceName("approval-boundary-deny"),
+        policy: { mode: "deny" },
+        store: new ApprovalStore({
+            async append(request: ApprovalRequest) {
+                records.push(structuredClone(request));
+            },
+            async readAll() {
+                return records.map((request) => structuredClone(request));
+            },
+        } as never),
+    });
+
+    const evaluation = await manager.evaluate({
+        callId: "call-boundary-deny",
+        context: { source: "mcp", workspace: "/repo" },
+        inputSummary: "{}",
+        required: true,
+        toolName: "bash_run",
+    });
+    assert.equal(evaluation.decision, "deny");
+});

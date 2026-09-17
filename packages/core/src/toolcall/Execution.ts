@@ -1,4 +1,5 @@
 import {
+    createError,
     errorCodes,
     type InstanceName,
     type JsonValue,
@@ -20,9 +21,11 @@ import {
     throwIfToolCallAborted,
 } from "../worker/instance/tool/Error.js";
 import { asBashToolResult, asCommandResult } from "../worker/instance/tool/record/Result.js";
+import { ToolCallBoundarySequence } from "./boundary/Sequence.js";
 
 interface ToolCallExecutionOptions {
     approval: ToolCallApproval;
+    boundary?: () => ToolCallBoundarySequence;
     assertReady(): void;
     audit: WorkerInstanceToolAudit;
     instanceName: InstanceName;
@@ -33,6 +36,8 @@ interface ToolCallExecutionOptions {
 
 export class ToolCallExecution {
     readonly #approval: ToolCallApproval;
+    #boundary: () => ToolCallBoundarySequence;
+    #boundaryBound: boolean;
     readonly #assertReady: ToolCallExecutionOptions["assertReady"];
     readonly #audit: WorkerInstanceToolAudit;
     readonly #instanceName: InstanceName;
@@ -42,12 +47,21 @@ export class ToolCallExecution {
 
     constructor(options: ToolCallExecutionOptions) {
         this.#approval = options.approval;
+        this.#boundary = options.boundary ?? (() => emptyToolCallBoundary);
+        this.#boundaryBound = options.boundary !== undefined;
         this.#assertReady = options.assertReady;
         this.#audit = options.audit;
         this.#instanceName = options.instanceName;
         this.#log = options.log;
         this.#toolCallScheduler = options.toolCallScheduler;
         this.#toolInvoker = options.toolInvoker;
+    }
+
+    bindBoundary(boundary: () => ToolCallBoundarySequence): void {
+        if (this.#boundaryBound)
+            throw new Error("ToolCall Boundary is already bound.");
+        this.#boundary = boundary;
+        this.#boundaryBound = true;
     }
 
     async call(
@@ -68,8 +82,42 @@ export class ToolCallExecution {
 
         const scope = this.#audit.createScope(toolName, input, context);
         const hostRecorded = recording === "host";
-        let reservation: WorkerToolSchedulerReservation;
+        if (hostRecorded) await this.#audit.requested(scope);
 
+        let review;
+        try {
+            review = await this.#boundary().review({
+                context,
+                direction: "inbound",
+                kind: "call",
+                payload: input,
+                signal: signal ?? new AbortController().signal,
+                toolName,
+            });
+        } catch (error) {
+            if (hostRecorded) await this.#audit.failActive(scope, error);
+            throw error;
+        }
+
+        if (review.decision === "reject") {
+            const error = createError({
+                code: errorCodes.coreToolCallRejected,
+                details: {
+                    ...(review.reason === undefined
+                        ? {}
+                        : { reason: review.reason }),
+                    toolName,
+                },
+                message:
+                    review.reason ?? `Tool call ${toolName} was rejected by review.`,
+                retryable: false,
+            });
+            if (hostRecorded)
+                await this.#audit.denied(scope, errorCodes.coreToolCallRejected);
+            throw error;
+        }
+
+        let reservation: WorkerToolSchedulerReservation;
         try {
             reservation = this.#toolCallScheduler.reserve(
                 {
@@ -81,7 +129,9 @@ export class ToolCallExecution {
                 },
                 signal,
             );
+            if (hostRecorded) await this.#audit.queued(scope);
         } catch (error) {
+            if (hostRecorded) await this.#audit.failActive(scope, error);
             throw normalizeToolSchedulerError(error);
         }
 
@@ -89,17 +139,17 @@ export class ToolCallExecution {
             ReturnType<ToolCallApproval["prepare"]>
         >;
         try {
-            if (hostRecorded) await this.#audit.queued(scope);
-            approvalState = await this.#approval.prepare(
-                scope.callId,
-                scope.toolName,
-                scope.inputSummary,
-                scope.context,
-                scope.startedAt,
-                () => reservation.markPendingApproval(),
-                signal,
+            approvalState = await this.#approval.prepare({
+                callId: scope.callId,
+                context: scope.context,
+                inputSummary: scope.inputSummary,
+                onPendingApproval: () => reservation.markPendingApproval(),
                 recording,
-            );
+                required: review.decision === "approve",
+                signal,
+                startedAt: scope.startedAt,
+                toolName: scope.toolName,
+            });
         } catch (error) {
             reservation.release();
             if (hostRecorded) await this.#audit.failActive(scope, error);
@@ -196,3 +246,5 @@ export class ToolCallExecution {
         }
     }
 }
+
+const emptyToolCallBoundary = new ToolCallBoundarySequence();
