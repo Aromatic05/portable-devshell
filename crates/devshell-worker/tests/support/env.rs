@@ -76,7 +76,7 @@ impl TestEnv {
         let workspace_key = &hash[..16];
         let default_runtime_dir = self.runtime_root.join("devshell-worker").join(instance);
         let instance_runtime_dir = if default_runtime_dir
-            .join("worker.sock")
+            .join("transport.sock")
             .as_os_str()
             .as_encoded_bytes()
             .len()
