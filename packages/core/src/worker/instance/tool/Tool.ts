@@ -19,9 +19,9 @@ import type {
 import type { AuditToolCallHistory } from "../../../storage/audit/ToolCallHistory.js";
 import type { WorkerToolInvoker } from "../../tool/Invoker.js";
 import type { WorkerToolCallScheduler } from "../../tool/Scheduler.js";
-import { WorkerInstanceToolApproval } from "./call/Approval.js";
+import { ToolCallApproval } from "../../../toolcall/Approval.js";
 import { WorkerInstanceToolAudit } from "./record/Audit.js";
-import { WorkerInstanceToolExecution } from "./call/Execution.js";
+import { ToolCallExecution } from "../../../toolcall/Execution.js";
 import { WorkerInstanceToolLog } from "./record/Log.js";
 
 interface WorkerToolOptions {
@@ -42,13 +42,13 @@ interface WorkerToolOptions {
 }
 
 export class WorkerInstanceTool {
-    readonly #approval: WorkerInstanceToolApproval;
+    readonly #approval: ToolCallApproval;
     readonly #audit: WorkerInstanceToolAudit;
-    readonly #execution: WorkerInstanceToolExecution;
+    readonly #execution: ToolCallExecution;
     readonly #log: WorkerInstanceToolLog;
 
     constructor(options: WorkerToolOptions) {
-        this.#approval = new WorkerInstanceToolApproval({
+        this.#approval = new ToolCallApproval({
             approvalManager: options.approvalManager,
             appendEvent: options.appendEvent,
             toolCallHistory: options.toolCallHistory,
@@ -62,7 +62,7 @@ export class WorkerInstanceTool {
             appendEvent: options.appendEvent,
             logStore: options.logStore,
         });
-        this.#execution = new WorkerInstanceToolExecution({
+        this.#execution = new ToolCallExecution({
             approval: this.#approval,
             assertReady: options.assertReady,
             audit: this.#audit,

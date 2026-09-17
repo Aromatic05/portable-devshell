@@ -14,9 +14,9 @@ import type { InstanceEventInput } from "../../../../instance/EventBuffer.js";
 import { getErrorCode } from "../../state/Error.js";
 import { toEventData } from "../../state/Event.js";
 import {
-    createWorkerInstanceToolCallScope,
-    type WorkerInstanceToolCallScope,
-} from "../call/Context.js";
+    createToolCallScope,
+    type ToolCallScope,
+} from "../../../../toolcall/Context.js";
 import type { WorkerInstanceBashToolResult } from "./Result.js";
 import {
     commandResultOutput,
@@ -36,13 +36,13 @@ interface WorkerInstanceToolAuditOptions {
     toolCallHistory: AuditToolCallHistory;
 }
 
-export type WorkerInstanceToolApprovalState = {
+export type ToolCallApprovalState = {
     approvalId?: string;
     decision?: ToolCallApprovalDecision;
 };
 
-export type WorkerInstanceToolRunningContext =
-    WorkerInstanceToolCallScope["eventContext"] & {
+export type ToolCallRunningContext =
+    ToolCallScope["eventContext"] & {
         approvalId?: string;
     };
 
@@ -63,8 +63,8 @@ export class WorkerInstanceToolAudit {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-    ): WorkerInstanceToolCallScope {
-        return createWorkerInstanceToolCallScope(
+    ): ToolCallScope {
+        return createToolCallScope(
             toolName,
             input,
             context,
@@ -73,9 +73,9 @@ export class WorkerInstanceToolAudit {
     }
 
     runningContext(
-        scope: WorkerInstanceToolCallScope,
-        approvalState: WorkerInstanceToolApprovalState,
-    ): WorkerInstanceToolRunningContext {
+        scope: ToolCallScope,
+        approvalState: ToolCallApprovalState,
+    ): ToolCallRunningContext {
         return {
             ...scope.eventContext,
             ...(approvalState.approvalId === undefined
@@ -84,7 +84,7 @@ export class WorkerInstanceToolAudit {
         };
     }
 
-    async queued(scope: WorkerInstanceToolCallScope): Promise<void> {
+    async queued(scope: ToolCallScope): Promise<void> {
         await this.#toolCallHistory.started(
             scope.callId,
             scope.toolName,
@@ -107,9 +107,9 @@ export class WorkerInstanceToolAudit {
     }
 
     async running(
-        scope: WorkerInstanceToolCallScope,
-        runningContext: WorkerInstanceToolRunningContext,
-        approvalState: WorkerInstanceToolApprovalState,
+        scope: ToolCallScope,
+        runningContext: ToolCallRunningContext,
+        approvalState: ToolCallApprovalState,
     ): Promise<void> {
         await this.#toolCallHistory.running(
             scope.callId,
@@ -129,9 +129,9 @@ export class WorkerInstanceToolAudit {
     }
 
     async completed(
-        scope: WorkerInstanceToolCallScope,
-        runningContext: WorkerInstanceToolRunningContext,
-        approvalState: WorkerInstanceToolApprovalState,
+        scope: ToolCallScope,
+        runningContext: ToolCallRunningContext,
+        approvalState: ToolCallApprovalState,
         result: JsonValue,
         bashResult: WorkerInstanceBashToolResult | undefined,
         appendLogs: () => Promise<void>,
@@ -171,9 +171,9 @@ export class WorkerInstanceToolAudit {
     }
 
     async nonRunning(
-        scope: WorkerInstanceToolCallScope,
-        runningContext: WorkerInstanceToolRunningContext,
-        approvalState: WorkerInstanceToolApprovalState,
+        scope: ToolCallScope,
+        runningContext: ToolCallRunningContext,
+        approvalState: ToolCallApprovalState,
         status: "queueTimeout" | "cancelled",
         errorCode: string,
     ): Promise<void> {
@@ -209,9 +209,9 @@ export class WorkerInstanceToolAudit {
     }
 
     async failed(
-        scope: WorkerInstanceToolCallScope,
-        runningContext: WorkerInstanceToolRunningContext,
-        approvalState: WorkerInstanceToolApprovalState,
+        scope: ToolCallScope,
+        runningContext: ToolCallRunningContext,
+        approvalState: ToolCallApprovalState,
         errorCode: string,
         result: CommandResult | undefined,
         appendLogs: () => Promise<void>,
@@ -256,7 +256,7 @@ export class WorkerInstanceToolAudit {
     }
 
     async failActive(
-        scope: WorkerInstanceToolCallScope,
+        scope: ToolCallScope,
         error: unknown,
     ): Promise<void> {
         if (!this.#toolCallHistory.hasActive(scope.callId)) {

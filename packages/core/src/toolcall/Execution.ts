@@ -5,24 +5,24 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import type { WorkerToolInvoker } from "../../../tool/Invoker.js";
+import type { WorkerToolInvoker } from "../worker/tool/Invoker.js";
 import type {
     WorkerToolCallScheduler,
     WorkerToolSchedulerReservation,
-} from "../../../tool/Scheduler.js";
-import { getErrorCode } from "../../state/Error.js";
-import type { WorkerInstanceToolApproval } from "./Approval.js";
-import type { WorkerInstanceToolAudit } from "../record/Audit.js";
-import type { WorkerInstanceToolLog } from "../record/Log.js";
+} from "../worker/tool/Scheduler.js";
+import { getErrorCode } from "../worker/instance/state/Error.js";
+import type { ToolCallApproval } from "./Approval.js";
+import type { WorkerInstanceToolAudit } from "../worker/instance/tool/record/Audit.js";
+import type { WorkerInstanceToolLog } from "../worker/instance/tool/record/Log.js";
 import {
     normalizeToolSchedulerError,
     readNonRunningSchedulerStatus,
     throwIfToolCallAborted,
-} from "../Error.js";
-import { asBashToolResult, asCommandResult } from "../record/Result.js";
+} from "../worker/instance/tool/Error.js";
+import { asBashToolResult, asCommandResult } from "../worker/instance/tool/record/Result.js";
 
-interface WorkerInstanceToolExecutionOptions {
-    approval: WorkerInstanceToolApproval;
+interface ToolCallExecutionOptions {
+    approval: ToolCallApproval;
     assertReady(): void;
     audit: WorkerInstanceToolAudit;
     instanceName: InstanceName;
@@ -31,16 +31,16 @@ interface WorkerInstanceToolExecutionOptions {
     toolInvoker: WorkerToolInvoker;
 }
 
-export class WorkerInstanceToolExecution {
-    readonly #approval: WorkerInstanceToolApproval;
-    readonly #assertReady: WorkerInstanceToolExecutionOptions["assertReady"];
+export class ToolCallExecution {
+    readonly #approval: ToolCallApproval;
+    readonly #assertReady: ToolCallExecutionOptions["assertReady"];
     readonly #audit: WorkerInstanceToolAudit;
     readonly #instanceName: InstanceName;
     readonly #log: WorkerInstanceToolLog;
     readonly #toolCallScheduler: WorkerToolCallScheduler;
     readonly #toolInvoker: WorkerToolInvoker;
 
-    constructor(options: WorkerInstanceToolExecutionOptions) {
+    constructor(options: ToolCallExecutionOptions) {
         this.#approval = options.approval;
         this.#assertReady = options.assertReady;
         this.#audit = options.audit;
@@ -86,7 +86,7 @@ export class WorkerInstanceToolExecution {
         }
 
         let approvalState: Awaited<
-            ReturnType<WorkerInstanceToolApproval["prepare"]>
+            ReturnType<ToolCallApproval["prepare"]>
         >;
         try {
             if (hostRecorded) await this.#audit.queued(scope);

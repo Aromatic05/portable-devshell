@@ -1,3 +1,13 @@
+export { ToolCallBoundarySequence } from "./toolcall/boundary/Sequence.js";
+export type {
+    ToolCallReview,
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+} from "./toolcall/boundary/Review.js";
+export type {
+    ToolCallRewrite,
+    ToolCallRewriteInput,
+} from "./toolcall/boundary/Rewrite.js";
 export { InstancePaths } from "./instance/Paths.js";
 export {
     assertSqliteSchemaVersionSupported,

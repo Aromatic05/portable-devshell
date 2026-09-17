@@ -4,6 +4,8 @@ import test from "node:test";
 import { defineExtensionPoint } from "../../src/index.ts";
 import * as cliApi from "../../src/domain/cli.ts";
 import { modelCommands, nativeCommands } from "../../src/domain/cli.ts";
+import * as toolcallApi from "../../src/domain/toolcall.ts";
+import { review, rewrite } from "../../src/domain/toolcall.ts";
 import * as webApi from "../../src/domain/web.ts";
 import { applications } from "../../src/domain/web.ts";
 
@@ -11,6 +13,8 @@ test("domain Extension Point descriptors use stable string identity", () => {
     assert.equal(nativeCommands.id, "cli.native-commands");
     assert.equal(modelCommands.id, "cli.model-commands");
     assert.equal(applications.id, "web.applications");
+    assert.equal(review.id, "toolcall.review");
+    assert.equal(rewrite.id, "toolcall.rewrite");
     assert.notEqual(
         nativeCommands,
         defineExtensionPoint("cli.native-commands"),
@@ -24,5 +28,6 @@ test("domain Extension Point descriptors use stable string identity", () => {
 
 test("domain leaf runtime exports contain only author-facing point descriptors", () => {
     assert.deepEqual(Object.keys(cliApi), ["modelCommands", "nativeCommands"]);
+    assert.deepEqual(Object.keys(toolcallApi), ["review", "rewrite"]);
     assert.deepEqual(Object.keys(webApi), ["applications"]);
 });

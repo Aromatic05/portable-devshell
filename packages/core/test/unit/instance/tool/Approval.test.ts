@@ -12,9 +12,9 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { WorkerInstanceToolApproval } from "../../../../src/worker/instance/tool/call/Approval.ts";
+import { ToolCallApproval } from "../../../../src/toolcall/Approval.ts";
 
-test("WorkerInstanceToolApproval cancels a durable pending approval when setup fails", async () => {
+test("ToolCallApproval cancels a durable pending approval when setup fails", async () => {
     const approvalRecords: ApprovalRequest[] = [];
     const toolCallRecords: ToolCallRecord[] = [];
     const instanceName = asInstanceName("approval-setup-failure");
@@ -53,7 +53,7 @@ test("WorkerInstanceToolApproval cancels a durable pending approval when setup f
         "queued",
     );
 
-    const approval = new WorkerInstanceToolApproval({
+    const approval = new ToolCallApproval({
         approvalManager: manager,
         async appendEvent(type) {
             if (type === "approval.requested")

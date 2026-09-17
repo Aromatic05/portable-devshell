@@ -2,6 +2,10 @@ import {
     cliModelCommandsExtensionPointDefinition,
     cliNativeCommandsExtensionPointDefinition,
 } from "../control/extension/cli/Point.js";
+import {
+    toolCallReviewExtensionPointDefinition,
+    toolCallRewriteExtensionPointDefinition,
+} from "../control/extension/toolcall/Point.js";
 import { ExtensionPointRegistry } from "../control/extension/generation/registration/PointRegistry.js";
 import type { ExtensionSandboxPointCodecRegistry } from "../control/extension/generation/sandbox/bridge/PointCodec.js";
 import { webApplicationsExtensionPointDefinition } from "../server/web/extension/Point.js";
@@ -11,6 +15,8 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
     const points = new ExtensionPointRegistry([
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
+        toolCallReviewExtensionPointDefinition,
+        toolCallRewriteExtensionPointDefinition,
         webApplicationsExtensionPointDefinition,
     ]);
     assertControlExtensionPointRegistryParity(

@@ -22,6 +22,10 @@
             "types": "./dist/domain/instance.d.ts",
             "default": "./dist/domain/instance.js"
         },
+        "./toolcall": {
+            "types": "./dist/domain/toolcall.d.ts",
+            "default": "./dist/domain/toolcall.js"
+        },
         "./web": {
             "types": "./dist/domain/web.d.ts",
             "default": "./dist/domain/web.js"

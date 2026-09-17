@@ -69,6 +69,31 @@ test("Control domain point definitions own declaration schema validation", () =>
             title: "Agent",
         },
     );
+    assert.deepEqual(
+        points.parseDeclaration(
+            "toolcall.review",
+            { id: "comment" },
+            "example",
+        ),
+        { id: "comment" },
+    );
+    assert.deepEqual(
+        points.parseDeclaration(
+            "toolcall.rewrite",
+            { id: "secret" },
+            "example",
+        ),
+        { id: "secret" },
+    );
+    assert.throws(
+        () =>
+            points.parseDeclaration(
+                "toolcall.rewrite",
+                { id: "secret", priority: 10 },
+                "example",
+            ),
+        /unknown field/u,
+    );
     assert.throws(
         () =>
             points.parseDeclaration(

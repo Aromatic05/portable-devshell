@@ -8,7 +8,7 @@ import type {
 
 const LIVE_INPUT_SUMMARY_MAX_LENGTH = 512;
 
-export interface WorkerInstanceToolCallScope {
+export interface ToolCallScope {
     association?: ToolCallAssociation;
     callId: string;
     context: ToolCallContext;
@@ -30,12 +30,12 @@ export interface WorkerInstanceToolCallScope {
     toolName: string;
 }
 
-export function createWorkerInstanceToolCallScope(
+export function createToolCallScope(
     toolName: string,
     input: JsonValue,
     context: ToolCallContext,
     association?: ToolCallAssociation,
-): WorkerInstanceToolCallScope {
+): ToolCallScope {
     const callId = randomUUID();
     const inputSummary = toInputSummary(input);
     const startedAt = new Date().toISOString();
