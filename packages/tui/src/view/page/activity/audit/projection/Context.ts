@@ -31,10 +31,33 @@ interface MutableAuditContext {
     label: string;
 }
 
+let auditProjectionCache:
+    | {
+          approvals: readonly ApprovalRequest[];
+          commentCalls: readonly ToolCallRecord[];
+          contexts: TuiAppState["readModel"]["contexts"];
+          instance: string;
+          result: TuiAuditContextSummary[];
+          toolCalls: readonly ToolCallRecord[];
+      }
+    | undefined;
+
 export function projectAuditContexts(
     state: TuiAppState,
     instance: string,
 ): TuiAuditContextSummary[] {
+    const instanceState = state.readModel.instanceState[instance];
+    const toolCalls = instanceState?.toolCalls ?? [];
+    const commentCalls = instanceState?.commentCalls ?? [];
+    const approvals = instanceState?.approvals ?? [];
+    if (
+        auditProjectionCache?.instance === instance &&
+        auditProjectionCache.contexts === state.readModel.contexts &&
+        auditProjectionCache.toolCalls === toolCalls &&
+        auditProjectionCache.commentCalls === commentCalls &&
+        auditProjectionCache.approvals === approvals
+    )
+        return auditProjectionCache.result;
     const contexts = new Map<string, MutableAuditContext>();
     const resolve = (ctxId: string | undefined): MutableAuditContext => {
         const key: TuiAuditContextKey =
@@ -56,27 +79,32 @@ export function projectAuditContexts(
     };
 
     const callsById = new Map(
-        (state.readModel.instanceState[instance]?.toolCalls ?? []).map(
-            (call) => [call.callId, call] as const,
-        ),
+        toolCalls.map((call) => [call.callId, call] as const),
     );
-    for (const call of state.readModel.instanceState[instance]?.commentCalls ??
-        []) {
+    for (const call of commentCalls) {
         callsById.set(call.callId, call);
     }
     for (const call of callsById.values()) {
         resolve(call.ctxId).calls.push(call);
     }
-    for (const approval of state.readModel.instanceState[instance]?.approvals ??
-        []) {
+    for (const approval of approvals) {
         if (approval.recording === "caller") continue;
         resolve(approval.ctxId).approvals.push(approval);
     }
-    return [...contexts.values()]
+    const result = [...contexts.values()]
         .map((context) => toSummary(context, state, instance))
         .sort((left, right) =>
             right.latestActivityAt.localeCompare(left.latestActivityAt),
         );
+    auditProjectionCache = {
+        approvals,
+        commentCalls,
+        contexts: state.readModel.contexts,
+        instance,
+        result,
+        toolCalls,
+    };
+    return result;
 }
 
 export function findAuditContext(

@@ -46,6 +46,14 @@ const messageHistoryCache = new WeakMap<
     readonly ConversationEntry[],
     Map<string, Array<{ kind: "meta" | "text"; text: string }>>
 >();
+let messageSessionCache:
+    | {
+          contexts: TuiAppState["readModel"]["contexts"];
+          instanceState: TuiAppState["readModel"]["instanceState"];
+          preferences: TuiAppState["conversationPreferences"];
+          sessions: TuiMessageSession[];
+      }
+    | undefined;
 
 export function selectTuiMessageSessions(
     state: TuiAppState,
@@ -80,6 +88,12 @@ export function selectTuiMessageHiddenSessions(
 }
 
 function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
+    if (
+        messageSessionCache?.contexts === state.readModel.contexts &&
+        messageSessionCache.instanceState === state.readModel.instanceState &&
+        messageSessionCache.preferences === state.conversationPreferences
+    )
+        return messageSessionCache.sessions;
     const sessions = new Map<string, Omit<TuiMessageSession, "title">>();
     const summaries = new Map<string, { at: string; text: string }>();
     const touch = (
@@ -148,7 +162,7 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
     for (const title of baseTitles) {
         titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
     }
-    return values
+    const projected = values
         .map((session, index): TuiMessageSession => {
             const baseTitle =
                 baseTitles[index] ?? compactContextId(session.ctxId, 12);
@@ -161,6 +175,13 @@ function projectTuiMessageSessions(state: TuiAppState): TuiMessageSession[] {
             };
         })
         .sort((left, right) => compareMessageSessions(state, left, right));
+    messageSessionCache = {
+        contexts: state.readModel.contexts,
+        instanceState: state.readModel.instanceState,
+        preferences: state.conversationPreferences,
+        sessions: projected,
+    };
+    return projected;
 }
 
 export function selectTuiMessagesSidebarEntries(
@@ -174,10 +195,25 @@ export function selectTuiMessagesSidebarEntries(
     const allSessions = projectTuiMessageSessions(state);
     const scopedSessions =
         scope === "active"
-            ? selectTuiMessageSessions(state, now)
+            ? allSessions.filter(
+                  (session) =>
+                      state.conversationPreferences.hiddenContexts[
+                          session.ctxId
+                      ] !== true && isActiveMessageSession(session, now),
+              )
             : scope === "history"
-              ? selectTuiMessageHistorySessions(state, now)
-              : selectTuiMessageHiddenSessions(state);
+              ? allSessions.filter(
+                    (session) =>
+                        state.conversationPreferences.hiddenContexts[
+                            session.ctxId
+                        ] !== true && !isActiveMessageSession(session, now),
+                )
+              : allSessions.filter(
+                    (session) =>
+                        state.conversationPreferences.hiddenContexts[
+                            session.ctxId
+                        ] === true,
+                );
     const sessions = filterMessageSessions(
         scopedSessions,
         state.ui.searchQueries.messages ?? "",

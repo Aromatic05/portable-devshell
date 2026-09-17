@@ -34,6 +34,8 @@ import {
     selectTuiMessagesSidebarEntries,
 } from "../page/activity/messages/Projection.js";
 
+const mainScreenModelCache = new WeakMap<TuiAppState, TuiMainScreenModel>();
+
 export function selectActivePage(state: TuiAppState): TuiActivePage {
     return {
         instance:
@@ -120,6 +122,14 @@ function selectSidebarContext(
 }
 
 export function selectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
+    const cached = mainScreenModelCache.get(state);
+    if (cached !== undefined) return cached;
+    const model = projectMainScreenModel(state);
+    mainScreenModelCache.set(state, model);
+    return model;
+}
+
+function projectMainScreenModel(state: TuiAppState): TuiMainScreenModel {
     const activePage = selectActivePage(state);
     const statusLine = state.interaction.screenStatusByPage[activePage.page];
     const panelKey = `${activePage.page}:${activePage.instance ?? "-"}`;

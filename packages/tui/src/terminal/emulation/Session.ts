@@ -17,12 +17,14 @@ import type {
 
 export class TuiTerminalSession {
     readonly #listeners = new Set<() => void>();
+    readonly #outputFlushDelayMs: number;
     readonly #ptyFactory: TuiTerminalPtyFactory;
     #buffer?: TuiTerminalBuffer;
     #bufferDataSubscription?: TuiTerminalDisposable;
     #command?: TuiTerminalCommand;
     #focused = false;
     #graphicsParser = new TuiTerminalGraphicsParser();
+    #outputFlushTimer?: ReturnType<typeof setTimeout>;
     #outputQueue: Promise<void> = Promise.resolve();
     #processGeneration = 0;
     #pty?: TuiTerminalPty;
@@ -30,8 +32,15 @@ export class TuiTerminalSession {
     #ptyExitSubscription?: TuiTerminalDisposable;
     #snapshot: TuiTerminalSnapshot = emptySnapshot();
 
-    constructor(options: { ptyFactory: TuiTerminalPtyFactory }) {
+    constructor(options: {
+        outputFlushDelayMs?: number;
+        ptyFactory: TuiTerminalPtyFactory;
+    }) {
         this.#ptyFactory = options.ptyFactory;
+        this.#outputFlushDelayMs = Math.max(
+            0,
+            Math.floor(options.outputFlushDelayMs ?? 16),
+        );
     }
 
     dispose(): void {
@@ -41,6 +50,7 @@ export class TuiTerminalSession {
         this.#bufferDataSubscription = undefined;
         this.#buffer?.dispose();
         this.#buffer = undefined;
+        this.#clearOutputFlush();
         this.#graphicsParser.reset();
         this.#listeners.clear();
     }
@@ -60,6 +70,11 @@ export class TuiTerminalSession {
     resize(columns: number, rows: number): void {
         const safeColumns = clampDimension(columns);
         const safeRows = clampDimension(rows);
+        if (
+            safeColumns === this.#snapshot.columns &&
+            safeRows === this.#snapshot.rows
+        )
+            return;
         this.#buffer?.resize(safeColumns, safeRows);
         this.#pty?.resize(safeColumns, safeRows);
         this.#syncBuffer();
@@ -94,6 +109,7 @@ export class TuiTerminalSession {
         this.#disposeProcess();
         const generation = ++this.#processGeneration;
         this.#outputQueue = Promise.resolve();
+        this.#clearOutputFlush();
         this.#graphicsParser.reset();
         this.#bufferDataSubscription?.dispose();
         this.#buffer?.dispose();
@@ -244,6 +260,7 @@ export class TuiTerminalSession {
                     return;
                 }
                 await this.#writeOutputTokens(finalTokens, generation);
+                this.#flushBufferSync();
                 this.#replaceSnapshot({
                     ...this.#snapshot,
                     exitCode: event.exitCode,
@@ -277,7 +294,7 @@ export class TuiTerminalSession {
             await buffer.write(token.data);
         }
         if (generation === this.#processGeneration) {
-            this.#syncBuffer();
+            this.#scheduleBufferSync();
         }
     }
 
@@ -312,6 +329,39 @@ export class TuiTerminalSession {
             ...this.#snapshot,
             ...this.#buffer.getSnapshot(),
         });
+    }
+
+    #scheduleBufferSync(): void {
+        if (this.#outputFlushTimer !== undefined) return;
+        if (this.#outputFlushDelayMs === 0) {
+            this.#syncBuffer();
+            return;
+        }
+        const generation = this.#processGeneration;
+        const timer = setTimeout(() => {
+            const barrier = this.#outputQueue;
+            void barrier.then(() => {
+                if (
+                    this.#outputFlushTimer !== timer ||
+                    generation !== this.#processGeneration
+                )
+                    return;
+                this.#outputFlushTimer = undefined;
+                this.#syncBuffer();
+            });
+        }, this.#outputFlushDelayMs);
+        this.#outputFlushTimer = timer;
+    }
+
+    #flushBufferSync(): void {
+        this.#clearOutputFlush();
+        this.#syncBuffer();
+    }
+
+    #clearOutputFlush(): void {
+        if (this.#outputFlushTimer !== undefined)
+            clearTimeout(this.#outputFlushTimer);
+        this.#outputFlushTimer = undefined;
     }
 }
 

@@ -500,6 +500,8 @@ import {
         );
 
         session.writeInput("pwd\r");
+        session.resize(12, 4);
+        assert.deepEqual(resizes, []);
         session.resize(20, 6);
         assert.deepEqual(writes, ["pwd\r"]);
         assert.deepEqual(resizes, [[20, 6]]);
@@ -516,6 +518,50 @@ import {
         );
         session.dispose();
         assert.equal(killed, true);
+    });
+
+    test("terminal session coalesces burst output into one published snapshot", async () => {
+        let dataListener: ((data: string) => void) | undefined;
+        const pty: TuiTerminalPty = {
+            kill() {},
+            onData(listener) {
+                dataListener = listener;
+                return { dispose() {} };
+            },
+            onExit() {
+                return { dispose() {} };
+            },
+            resize() {},
+            write() {},
+        };
+        const session = new TuiTerminalSession({
+            outputFlushDelayMs: 20,
+            ptyFactory: () => pty,
+        });
+        await session.start({
+            columns: 20,
+            command: { args: [], command: "/bin/sh" },
+            instance: "alpha",
+            rows: 4,
+        });
+        let notifications = 0;
+        const unsubscribe = session.subscribe(() => {
+            notifications += 1;
+        });
+
+        dataListener?.("one");
+        dataListener?.(" two");
+        dataListener?.(" three");
+
+        await waitUntil(() => notifications > 0);
+        assert.equal(notifications, 1);
+        assert.equal(
+            lineText(session.getSnapshot().lines[0]!).trimEnd(),
+            "one two three",
+        );
+
+        unsubscribe();
+        session.dispose();
     });
 
     test("terminal session does not publish when scrolling beyond a boundary", async () => {
