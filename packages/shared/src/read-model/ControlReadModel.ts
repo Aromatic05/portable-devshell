@@ -93,10 +93,13 @@ export class ControlReadModel {
         ReturnType<typeof setTimeout>
     >();
     readonly #streamAttempts = new Map<string, number>();
+    readonly #writableInstances = new Set<string>();
     readonly #gapStreaks = new Map<string, number>();
     #epoch = 0;
+    #instanceStateWritable = false;
     #loadOptions: ControlReadModelLoadOptions = {};
-    #state = createInitialControlReadModelState();
+    #publishedState = createInitialControlReadModelState();
+    #state: ControlReadModelState = { ...this.#publishedState };
 
     constructor(options: ControlReadModelOptions) {
         this.#clients = options.clients;
@@ -109,7 +112,7 @@ export class ControlReadModel {
     }
 
     get state(): Readonly<ControlReadModelState> {
-        return this.#state;
+        return this.#publishedState;
     }
 
     subscribe(listener: () => void): () => void {
@@ -455,7 +458,7 @@ export class ControlReadModel {
     applyAuthoritativeSnapshot(snapshot: InstanceSnapshot): void {
         this.#nextVersion(this.#instanceVersionKey(snapshot.name, "snapshot"));
         this.#authoritativeSnapshots.set(snapshot.name, snapshot);
-        const state = this.#instance(snapshot.name);
+        const state = this.#mutableInstance(snapshot.name);
         state.snapshot = snapshot;
         state.sequence = Math.max(state.sequence, snapshot.lastSeq, 1);
         this.#state.instances = this.#state.instances.map((entry) =>
@@ -470,7 +473,7 @@ export class ControlReadModel {
             this.#decidedToolApprovals.get(instance) ?? new Set<string>();
         ids.add(approvalId);
         this.#decidedToolApprovals.set(instance, ids);
-        const state = this.#instance(instance);
+        const state = this.#mutableInstance(instance);
         state.approvals = state.approvals.filter(
             (approval) => approval.approvalId !== approvalId,
         );
@@ -489,7 +492,7 @@ export class ControlReadModel {
         instance: string,
         message: ContextMessageRecord,
     ): void {
-        const state = this.#instance(instance);
+        const state = this.#mutableInstance(instance);
         state.contextMessages = mergeContextMessage(
             state.contextMessages,
             message,
@@ -521,6 +524,8 @@ export class ControlReadModel {
         this.#decidedOAuthApprovals.clear();
         this.#closeSubscriptions();
         this.#state = createInitialControlReadModelState();
+        this.#instanceStateWritable = true;
+        this.#writableInstances.clear();
         this.#emit();
     }
 
@@ -538,7 +543,7 @@ export class ControlReadModel {
 
     #handleEvent(event: InstanceEvent, epoch: number): void {
         if (!this.#current(epoch)) return;
-        const state = this.#instance(event.instanceName);
+        const state = this.#mutableInstance(event.instanceName);
         state.sequence = Math.max(state.sequence, event.seq, 1);
         if (state.snapshot !== undefined) {
             state.snapshot = { ...state.snapshot, lastSeq: state.sequence };
@@ -757,7 +762,7 @@ export class ControlReadModel {
         key: ControlInstanceReadKey,
         value: InstanceReadValue,
     ): void {
-        const state = this.#instance(instance);
+        const state = this.#mutableInstance(instance);
         switch (key) {
             case "snapshot": {
                 const read = value as {
@@ -835,9 +840,10 @@ export class ControlReadModel {
     }
 
     #applyInstances(instances: InstanceListEntry[]): void {
+        this.#ensureWritableInstanceState();
         const names = new Set(instances.map(({ name }) => name));
         this.#state.instances = instances.map((entry) => {
-            const state = this.#instance(entry.name);
+            const state = this.#mutableInstance(entry.name);
             const incoming = this.#resolveSnapshot(entry.name, entry.snapshot);
             const snapshot =
                 state.snapshot === undefined ||
@@ -893,7 +899,10 @@ export class ControlReadModel {
             if (!names.has(name)) this.#closeSubscription(name);
         }
         for (const name of instances) {
-            const fromSeq = Math.max(1, this.#instance(name).sequence);
+            const fromSeq = Math.max(
+                1,
+                this.#state.instanceState[name]?.sequence ?? 1,
+            );
             if (!this.#streams.has(name) && !this.#streamRetries.has(name)) {
                 void this.#startSubscription(name, fromSeq, epoch);
             }
@@ -1056,7 +1065,7 @@ export class ControlReadModel {
             ) {
                 void this.#startSubscription(
                     instance,
-                    this.#instance(instance).sequence,
+                    this.#state.instanceState[instance]?.sequence ?? 1,
                     epoch,
                 );
             }
@@ -1163,18 +1172,22 @@ export class ControlReadModel {
         );
     }
 
-    #instance(name: string): ControlInstanceReadState {
-        return (this.#state.instanceState[name] ??= {
-            approvals: [],
-            commentCalls: [],
-            conversationEntries: [],
-            contextMessages: [],
-            goals: [],
-            logs: [],
-            reportCalls: [],
-            sequence: 1,
-            toolCalls: [],
-        });
+    #ensureWritableInstanceState(): void {
+        if (this.#instanceStateWritable) return;
+        this.#state.instanceState = { ...this.#state.instanceState };
+        this.#instanceStateWritable = true;
+    }
+
+    #mutableInstance(name: string): ControlInstanceReadState {
+        this.#ensureWritableInstanceState();
+        if (this.#writableInstances.has(name))
+            return this.#state.instanceState[name]!;
+        const current = this.#state.instanceState[name];
+        const writable =
+            current === undefined ? emptyInstanceReadState() : { ...current };
+        this.#state.instanceState[name] = writable;
+        this.#writableInstances.add(name);
+        return writable;
     }
 
     #setFailure(id: string, error: unknown): void {
@@ -1182,17 +1195,25 @@ export class ControlReadModel {
         const key = (
             separator < 0 ? id : id.slice(0, separator)
         ) as ControlReadFailure["key"];
-        this.#state.failures[id] = {
-            error: error instanceof Error ? error : new Error(String(error)),
-            id,
-            ...(separator < 0 ? {} : { instance: id.slice(separator + 1) }),
-            key,
+        this.#state.failures = {
+            ...this.#state.failures,
+            [id]: {
+                error: error instanceof Error ? error : new Error(String(error)),
+                id,
+                ...(separator < 0
+                    ? {}
+                    : { instance: id.slice(separator + 1) }),
+                key,
+            },
         };
         this.#emit();
     }
 
     #clearFailure(key: string): void {
-        delete this.#state.failures[key];
+        if (this.#state.failures[key] === undefined) return;
+        const failures = { ...this.#state.failures };
+        delete failures[key];
+        this.#state.failures = failures;
     }
 
     #instanceVersionKey(instance: string, key: ControlInstanceReadKey): string {
@@ -1218,37 +1239,25 @@ export class ControlReadModel {
     }
 
     #emit(): void {
-        this.#state = snapshotState(this.#state);
+        this.#publishedState = this.#state;
+        this.#state = { ...this.#publishedState };
+        this.#instanceStateWritable = false;
+        this.#writableInstances.clear();
         for (const listener of this.#listeners) listener();
     }
 }
 
-function snapshotState(state: ControlReadModelState): ControlReadModelState {
+function emptyInstanceReadState(): ControlInstanceReadState {
     return {
-        ...state,
-        artifactShares: [...state.artifactShares],
-        artifactTransfers: [...state.artifactTransfers],
-        contexts: [...state.contexts],
-        failures: { ...state.failures },
-        instances: [...state.instances],
-        instanceState: Object.fromEntries(
-            Object.entries(state.instanceState).map(([name, value]) => [
-                name,
-                {
-                    ...value,
-                    approvals: [...value.approvals],
-                    commentCalls: [...value.commentCalls],
-                    conversationEntries: [...value.conversationEntries],
-                    contextMessages: [...value.contextMessages],
-                    goals: [...value.goals],
-                    logs: [...value.logs],
-                    reportCalls: [...value.reportCalls],
-                    toolCalls: [...value.toolCalls],
-                },
-            ]),
-        ),
-        oauthApprovals: [...state.oauthApprovals],
-        webApplications: [...state.webApplications],
+        approvals: [],
+        commentCalls: [],
+        conversationEntries: [],
+        contextMessages: [],
+        goals: [],
+        logs: [],
+        reportCalls: [],
+        sequence: 1,
+        toolCalls: [],
     };
 }
 
@@ -1259,9 +1268,26 @@ function keysForEvent(event: InstanceEvent): ControlInstanceReadKey[] {
     if (event.type.startsWith("approval.")) keys.push("approvals");
     if (event.type.startsWith("goal.")) keys.push("goals");
     if (event.type.startsWith("todo.")) keys.push("todo");
-    if (event.type.startsWith("toolCall.")) keys.push("toolCalls", "comments");
+    if (event.type.startsWith("toolCall.")) keys.push("toolCalls");
+    if (
+        event.type === "toolCall.completed" &&
+        eventToolName(event) === "todo_report"
+    )
+        keys.push("comments");
     if (event.type.startsWith("context.message.")) keys.push("comments");
     return keys;
+}
+
+function eventToolName(event: InstanceEvent): string | undefined {
+    if (
+        typeof event.data !== "object" ||
+        event.data === null ||
+        Array.isArray(event.data)
+    )
+        return undefined;
+    return typeof event.data.toolName === "string"
+        ? event.data.toolName
+        : undefined;
 }
 
 function mergeContextMessage(
