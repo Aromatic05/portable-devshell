@@ -814,8 +814,9 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::net::{Shutdown, TcpListener};
-    use std::sync::Arc;
+    use std::sync::{Arc, mpsc};
     use std::thread;
+    use std::time::Duration;
 
     use serde_json::json;
 
@@ -1030,21 +1031,49 @@ mod tests {
             ServiceConnection::open(&service, &metadata, &ServiceContext::default())
                 .expect("spawn rsync")
                 .expect("process.exec is supported");
+        let mut service_input = connection.take_input().expect("attach rsync input");
         let mut service_output = connection.take_output().expect("attach rsync output");
         let window = worker
             .accept_open(opened_id, 64 * 1024)
             .expect("accept process.exec");
         client.accept_frame(window).expect("grant client credit");
 
-        let mut greeting = [0u8; 4];
-        let mut offset = 0;
-        while offset < greeting.len() {
-            let read = service_output
-                .read(&mut greeting[offset..])
-                .expect("read rsync greeting");
-            assert!(read > 0, "rsync closed before protocol greeting");
-            offset += read;
-        }
+        // Older rsync versions, including the macOS system rsync, may wait for
+        // the peer protocol version before flushing their own greeting. Send a
+        // compatible peer greeting first instead of assuming output-first
+        // handshake ordering.
+        service_input
+            .write(&29u32.to_le_bytes())
+            .expect("write rsync peer greeting");
+
+        // Keep a real external process smoke from hanging the whole platform
+        // contract if an rsync implementation changes its handshake again.
+        let (greeting_tx, greeting_rx) = mpsc::channel();
+        let greeting_reader = thread::spawn(move || {
+            let mut greeting = [0u8; 4];
+            let result = (|| -> Result<[u8; 4], String> {
+                let mut offset = 0;
+                while offset < greeting.len() {
+                    let read = service_output.read(&mut greeting[offset..])?;
+                    if read == 0 {
+                        return Err("rsync closed before protocol greeting".to_string());
+                    }
+                    offset += read;
+                }
+                Ok(greeting)
+            })();
+            let _ = greeting_tx.send(result);
+        });
+        let greeting = match greeting_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(greeting)) => greeting,
+            Ok(Err(error)) => panic!("{error}"),
+            Err(error) => {
+                connection.reset();
+                let _ = greeting_reader.join();
+                panic!("timed out waiting for rsync protocol greeting: {error}");
+            }
+        };
+        greeting_reader.join().expect("rsync greeting reader");
         let (_, frame) = worker
             .next_data_frame(stream_id, &greeting)
             .expect("frame rsync greeting")
