@@ -331,7 +331,7 @@ Secret 是 `toolcall.rewrite` 的第一个真实 consumer。第一版不新增�
 ${SECRET:NAME} = current instance env.NAME
 ```
 
-Control 对 `instance.env` 已经采用统一 secret redaction，因此这条映射沿用现有安全语义，而不是再定义第二套 Secret storage。
+`instance.env` 仍然是通用 environment map，不因为配置视图会 redaction 就把其中所有 value 都解释成 Secret。只有 ToolCall inbound 中显式写成 `${SECRET:NAME}` 并成功展开的名字，才进入当前 ToolCall 的 Secret mask set。
 
 Outer ToolCall：
 
@@ -349,10 +349,17 @@ toolcall.rewrite / secret
 
 ```text
 secret.environment
-    -> current instance env snapshot
+
+inbound  + { names: [...] }
+    -> current leaf 中实际引用且存在于当前 instance env snapshot 的条目
+
+outbound + no input
+    -> 本次 Boundary lease 中此前成功 resolve 过的条目
 ```
 
-这个 interface 不接受 Extension 提供的 instance/name/input；目标 instance 来自当前 Boundary invocation 的 authoritative context。Control 在每个 ToolCall Boundary lease 获取时从 live config 固定一份当前 instance env snapshot，同一调用的 inbound / outbound 始终使用这同一份 snapshot；后续 ToolCall 才会看到更新后的 env。因此配置更新不要求重启 Secret Extension，同时也不会因为调用执行期间配置变化而漏掉旧 secret 的 outbound masking。只有 builtin `secret` registration 可以请求该 operation。
+目标 instance 来自当前 Boundary invocation 的 authoritative context，Extension 不能自行指定。Inbound 允许 Extension 提交 `names`，但 Control 会验证每个 name 的 `${SECRET:NAME}` 确实存在于当前字符串叶；因此 Secret Extension 不能借 rewrite interface 枚举任意 env。
+
+Control 在每个 ToolCall Boundary lease 获取时从 live config 固定一份当前 instance env snapshot。同一调用的 inbound / outbound 始终使用同一份 snapshot；后续 ToolCall 才会看到更新后的 env。因此配置更新不要求重启 Secret Extension，也不会因为调用执行期间配置变化而漏掉已经展开 secret 的 outbound masking。只有 builtin `secret` registration 可以请求该 operation。
 
 Inbound 行为：
 
@@ -361,15 +368,16 @@ ${SECRET:NAME}
     -> env.NAME
 ```
 
-不存在的 `NAME` 直接拒绝本次 ToolCall，不能把 unresolved placeholder 交给 Executor。
+不存在的 `NAME` 直接拒绝本次 ToolCall，不能把 unresolved placeholder 交给 Executor。未被当前字符串引用的普通 env 不会暴露给 Secret Extension，也不会进入 mask set。
 
 Outbound 行为：
 
 - result / error / progress 的所有字符串叶子都经过同一个 Secret Rewrite；
-- 当前 instance `env` 中所有非空 value 都恢复成对应 `${SECRET:NAME}`；
-- 已经存在的 `${SECRET:NAME}` 保持不变；
+- 只把本次 ToolCall inbound 已经成功展开的 Secret value 恢复成对应 `${SECRET:NAME}`；
+- `NO_COLOR=1`、`LANG=C` 等未通过 placeholder 引用的普通 env 不会改写正常输出；
+- mask set 中已经存在的 `${SECRET:NAME}` 保持不变，未知 placeholder 不能用来包住并逃逸 raw secret；
 - value 按长度从长到短匹配，避免较短 secret 截断较长 secret；
-- 多个 env key 具有相同 value 时，用稳定 key 顺序选择一个 canonical placeholder。
+- 多个已引用 env key 具有相同 value 时，用稳定 key 顺序选择一个 canonical placeholder。
 
 完整边界：
 

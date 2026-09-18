@@ -180,7 +180,10 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
                             input: ToolCallRewriteInvocation,
                             context: Parameters<typeof readSecretEnvironment>[0],
                         ) => {
-                            const environment = await readSecretEnvironment(context);
+                            const environment = await readSecretEnvironment(
+                                context,
+                                input.direction === "inbound" ? ["TOKEN"] : undefined,
+                            );
                             return input.direction === "inbound"
                                 ? input.text.replace(
                                       "${SECRET:TOKEN}",

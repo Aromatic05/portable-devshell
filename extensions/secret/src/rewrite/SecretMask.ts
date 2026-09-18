@@ -14,12 +14,16 @@ export function maskSecretValues(
         if (!byValue.has(value)) byValue.set(value, name);
     }
     if (byValue.size === 0) return text;
+
+    const knownReferences = new Set(
+        Object.keys(environment).map((name) => `\${SECRET:${name}}`),
+    );
     const values = [...byValue.keys()].sort((left, right) => right.length - left.length);
     const pattern = new RegExp(values.map(escapeRegExp).join("|"), "gu");
     return text
         .split(SECRET_REFERENCE_SEGMENT)
         .map((segment) =>
-            /^\$\{SECRET:[^{}]+\}$/u.test(segment)
+            knownReferences.has(segment)
                 ? segment
                 : segment.replace(
                       pattern,

@@ -5,8 +5,14 @@ export const secretRewriteInterfaceOperation = "secret.environment";
 
 export async function readSecretEnvironment(
     context: Pick<ToolCallRewriteContext, "requestInterface">,
+    names?: readonly string[],
 ): Promise<Readonly<Record<string, string>>> {
-    const value = await context.requestInterface(secretRewriteInterfaceOperation);
+    const request: ExtensionJsonValue | undefined =
+        names === undefined ? undefined : { names: [...new Set(names)] };
+    const value = await context.requestInterface(
+        secretRewriteInterfaceOperation,
+        request,
+    );
     if (!isRecord(value))
         throw new TypeError("Secret rewrite interface returned an invalid environment.");
     const environment: Record<string, string> = {};
