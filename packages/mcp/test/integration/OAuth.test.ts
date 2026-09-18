@@ -29,11 +29,12 @@ import type {
     OAuthDiscoveryState,
     OAuthTokens,
 } from "@modelcontextprotocol/client";
+import { CommentExtension } from "@portable-devshell/comment-extension";
 import {
     asInstanceName,
-    type ContextMessageReadResult,
     type ContextMessageRecord,
     type JsonValue,
+    type PrefixRouteContext,
     type ToolCallContext,
 } from "@portable-devshell/shared";
 import {
@@ -47,57 +48,60 @@ import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
 
-class TestContextMessages {
-    readonly #instance: string;
-    readonly #records: ContextMessageRecord[] = [];
-    #nextId = 1;
+const commentRouteContext: PrefixRouteContext = {
+    afterReply() {},
+    connectionId: "mcp-comment-test",
+    destination: asInstanceName("real-comment"),
+    module: "contextMessage",
+    async openStream() {
+        throw new Error("unused");
+    },
+    peer: "cli",
+    requestId: "mcp-comment-test",
+    signal: new AbortController().signal,
+};
 
-    constructor(instance: string) {
-        this.#instance = instance;
-    }
+async function queueComment(
+    comment: CommentExtension,
+    ctxId: string,
+    text: string,
+): Promise<ContextMessageRecord> {
+    const route = comment.routes
+        .instance("real-comment")
+        .find((candidate) => candidate.name === "contextMessage");
+    const operation = route?.operations.find(
+        (candidate) => candidate.name === "queue",
+    );
+    if (operation === undefined) throw new Error("contextMessage.queue is missing");
+    return (await operation.handle(
+        {
+            id: `queue-${ctxId}-${text}`,
+            name: "queue",
+            payload: { ctxId, text },
+        },
+        commentRouteContext,
+    )) as unknown as ContextMessageRecord;
+}
 
-    async queue(input: { ctxId: string; text: string }): Promise<ContextMessageRecord> {
-        const record: ContextMessageRecord = {
-            createdAt: new Date(1_700_000_000_000 + this.#nextId).toISOString(),
-            ctxId: input.ctxId,
-            id: `comment-${this.#nextId++}`,
-            instance: this.#instance,
-            status: "sent",
-            text: input.text,
-        };
-        this.#records.push(record);
-        return { ...record };
-    }
-
-    async list(ctxId: string): Promise<ContextMessageRecord[]> {
-        return this.#records
-            .filter((record) => record.ctxId === ctxId)
-            .map((record) => ({ ...record }));
-    }
-
-    async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
-        const deliveredAt = new Date().toISOString();
-        const delivered = this.#records.filter(
-            (record) =>
-                record.ctxId === ctxId &&
-                (record.status === "pending" || record.status === "sent"),
-        );
-        for (const record of delivered) {
-            record.callId = callId;
-            record.deliveredAt = deliveredAt;
-            record.status = "delivered";
-        }
-        const comment = delivered.map((record) => record.text).join("\n\n");
-        return {
-            callId,
-            ...(comment.length === 0 ? {} : { comment }),
-            messages: delivered.map(({ createdAt, id, text }) => ({
-                createdAt,
-                id,
-                text,
-            })),
-        };
-    }
+async function listComments(
+    comment: CommentExtension,
+    ctxId: string,
+): Promise<ContextMessageRecord[]> {
+    const route = comment.routes
+        .instance("real-comment")
+        .find((candidate) => candidate.name === "contextMessage");
+    const operation = route?.operations.find(
+        (candidate) => candidate.name === "list",
+    );
+    if (operation === undefined) throw new Error("contextMessage.list is missing");
+    return (await operation.handle(
+        {
+            id: `list-${ctxId}`,
+            name: "list",
+            payload: { ctxId },
+        },
+        commentRouteContext,
+    )) as unknown as ContextMessageRecord[];
 }
 
 test(
@@ -163,7 +167,33 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async () => {
         const contextRoot = await createTestTempDirectory("real-comment-state");
-        const messages = new TestContextMessages("real-comment");
+        const commentKey = {};
+        const comment = new CommentExtension({
+            instances: {
+                list: () => [
+                    {
+                        appendEvent: async () => undefined,
+                        conversationDatabaseFile: join(
+                            contextRoot,
+                            "conversation.sqlite3",
+                        ),
+                        enabled: true,
+                        key: commentKey,
+                        legacyContextMessagesFile: join(
+                            contextRoot,
+                            "context-messages.json",
+                        ),
+                        legacyReports: async () => [],
+                        name: "real-comment",
+                    },
+                ],
+                onChange: () => () => undefined,
+            },
+            preferencesFile: join(
+                contextRoot,
+                "conversation-preferences.json",
+            ),
+        });
         const gateway = {
             async appendMcpToolCalled() {},
             assertReady() {},
@@ -185,7 +215,7 @@ test(
                 callId: string,
             ) {
                 assert.equal(instance, "real-comment");
-                return await messages.consumePending(ctxId, callId);
+                return await comment.comment.consumePending(instance, ctxId, callId);
             },
             environment() {
                 return undefined;
@@ -255,18 +285,21 @@ test(
             );
 
             const ctxId = await readContextId(client, workspacePath);
-            const queued = await messages.queue({
+            const queued = await queueComment(
+                comment,
                 ctxId,
-                text: "Inspect this result before continuing",
-            });
-            const followUp = await messages.queue({
+                "Inspect this result before continuing",
+            );
+            const followUp = await queueComment(
+                comment,
                 ctxId,
-                text: "Compare it with the next call",
-            });
-            const other = await messages.queue({
-                ctxId: "ctx-other",
-                text: "This belongs to another context",
-            });
+                "Compare it with the next call",
+            );
+            const other = await queueComment(
+                comment,
+                "ctx-other",
+                "This belongs to another context",
+            );
             assert.equal(queued.status, "sent");
             const first = await client.callTool({
                 arguments: {
@@ -299,7 +332,7 @@ test(
             );
             assert.ok(audited?.callId);
             assert.deepEqual(
-                (await messages.list(ctxId)).map((message) => [
+                (await listComments(comment, ctxId)).map((message) => [
                     message.id,
                     message.status,
                     message.callId,
@@ -310,7 +343,7 @@ test(
                 ],
             );
             assert.equal(
-                (await messages.list("ctx-other")).find(
+                (await listComments(comment, "ctx-other")).find(
                     (message) => message.id === other.id,
                 )?.status,
                 "sent",
@@ -361,10 +394,11 @@ test(
                 ).length,
                 0,
             );
-            await messages.queue({
+            await queueComment(
+                comment,
                 ctxId,
-                text: "Use the runtime comment before the next action",
-            });
+                "Use the runtime comment before the next action",
+            );
             const report = await client.callTool({
                 arguments: {
                     ctxId,
@@ -385,6 +419,7 @@ test(
             });
             await client.close();
         } finally {
+            comment.close();
             await teardownFrozenWorker(host, instance, cleanupDirs);
         }
     },
