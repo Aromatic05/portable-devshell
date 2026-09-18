@@ -1,4 +1,3 @@
-import { errorCodes } from "@portable-devshell/shared";
 import {
     reviewCommentToolCall,
     type ExtensionCommentControlDecision,
@@ -37,7 +36,7 @@ function reviewDecision(
             return {
                 decision: "reject",
                 error: {
-                    code: errorCodes.controlModelReplyRequired,
+                    code: "control.modelReplyRequired",
                     details: {
                         commentId: decision.commentId,
                         toolCallBudget: decision.toolCallBudget,
@@ -50,7 +49,7 @@ function reviewDecision(
             return {
                 decision: "reject",
                 error: {
-                    code: errorCodes.controlModelResumed,
+                    code: "control.modelResumed",
                     details: { commentId: decision.commentId },
                 },
                 reason: `The user sent #resume. This tool was not executed. Read the Comment before deciding the next action: ${decision.comment}`,
@@ -59,7 +58,7 @@ function reviewDecision(
             return {
                 decision: "reject",
                 error: {
-                    code: errorCodes.controlModelStopped,
+                    code: "control.modelStopped",
                     details: { commentId: decision.commentId },
                 },
                 reason:

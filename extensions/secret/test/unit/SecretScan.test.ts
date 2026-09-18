@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { scanSecrets } from "../../src/scan/SecretScan.ts";
+import { scanSecrets } from "../../src/builtin/scan/SecretScan.ts";
 
 test("secret scan reports locations without returning secret values", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-secret-scan-"));

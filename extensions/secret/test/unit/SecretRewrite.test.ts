@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createSecretRewrite } from "../../src/rewrite/SecretRewrite.ts";
+import { createSecretRewrite } from "../../src/builtin/rewrite/SecretRewrite.ts";
 
 const signal = new AbortController().signal;
 

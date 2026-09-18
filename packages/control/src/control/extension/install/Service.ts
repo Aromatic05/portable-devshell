@@ -34,6 +34,7 @@ import type { ExtensionPathLayout } from "../state/Layout.js";
 
 export const BUILTIN_EXTENSION_IDS = new Set([
     "artifact",
+    "comment",
     "instance",
     "mcp",
     "secret",

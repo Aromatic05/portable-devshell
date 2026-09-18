@@ -7,7 +7,7 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 
-import { executeSecretModelCommand } from "../../src/command/SecretModelCommand.ts";
+import { executeSecretModelCommand } from "../../src/builtin/command/SecretModelCommand.ts";
 
 function context(events: string[]): ExtensionContext {
     return {

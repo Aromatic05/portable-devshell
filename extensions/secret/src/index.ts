@@ -1,8 +1,4 @@
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-export * from "./builtin/index.js";
-
-export function secretExtensionDirectory(): string {
-    return resolve(dirname(fileURLToPath(import.meta.url)), "builtin");
-}
+export { secretExtensionDirectory } from "./Directory.js";
+export * from "./builtin/command/index.js";
+export * from "./builtin/rewrite/SecretRewrite.js";
+export * from "./builtin/scan/index.js";
