@@ -179,7 +179,7 @@ export class ControlRuntime {
             toolProvenance: options.mcp.toolProvenance,
             webApplications: new WebApplicationCatalog(this.#extensions),
         });
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+        this.#mcp.configEditor.registerInstanceDeleted(
             async (instance) => {
                 await this.#comment.retireInstance(
                     instance.name,
@@ -187,7 +187,7 @@ export class ControlRuntime {
                 );
             },
         );
-        this.#mcp.configEditor.registerInstanceDisableRetirement(
+        this.#mcp.configEditor.registerInstanceDisabled(
             async (instance) => {
                 await this.#comment.retireInstance(
                     instance.name,

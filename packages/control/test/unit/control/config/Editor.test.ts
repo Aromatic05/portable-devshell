@@ -817,6 +817,95 @@ test("disable restarts a managed worker when persistence fails after stop", asyn
     assert.equal(registry.get("demo-local")?.enabled, true);
 });
 
+test("disable committed listeners do not run when persistence fails", async () => {
+    let config = createConfig();
+    let committed = 0;
+    const registry = new InstanceRegistry([
+        descriptor({
+            snapshot: runningSnapshot,
+            async stop() {
+                return {
+                    ...runningSnapshot(),
+                    daemonState: "stopped",
+                    ready: false,
+                    status: "stopped",
+                };
+            },
+            async start() {
+                return runningSnapshot();
+            },
+        }),
+    ]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write() {
+                throw new Error("config persistence failed");
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    service.registerInstanceDisabled(async () => {
+        committed += 1;
+    });
+
+    await assert.rejects(
+        service.disableInstance({ instanceName: "demo-local" }),
+        /config persistence failed/u,
+    );
+    assert.equal(committed, 0);
+    assert.equal(config.instances[0]?.enabled, true);
+    assert.equal(registry.get("demo-local")?.enabled, true);
+});
+
+test("disable committed listeners run after persisted descriptor state is visible", async () => {
+    let config = createConfig();
+    const observed: string[] = [];
+    const registry = new InstanceRegistry([
+        descriptor({
+            snapshot: runningSnapshot,
+            async stop() {
+                return {
+                    ...runningSnapshot(),
+                    daemonState: "stopped",
+                    ready: false,
+                    status: "stopped",
+                };
+            },
+        }),
+    ]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    registry.onChange(() => {
+        observed.push(`registry:${registry.get("demo-local")?.enabled}`);
+    });
+    service.registerInstanceDisabled(async () => {
+        observed.push(
+            `committed:${config.instances[0]?.enabled}:${registry.get("demo-local")?.enabled}`,
+        );
+    });
+
+    await service.disableInstance({ instanceName: "demo-local" });
+
+    assert.deepEqual(observed, [
+        "registry:false",
+        "committed:false:false",
+    ]);
+});
+
 test("Control disable does not stop self-managed reverse workers but retires local pending interactions", async () => {
     let config = createConfig();
     let stopCalls = 0;
@@ -1295,6 +1384,9 @@ test("instance delete keeps retired live state when final config persistence fai
         setConfig: (nextConfig) => {
             config = nextConfig;
         },
+    });
+    service.registerInstanceDeleted(async () => {
+        actions.push("committed.delete");
     });
 
     await assert.rejects(

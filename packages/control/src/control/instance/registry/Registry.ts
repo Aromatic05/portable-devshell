@@ -22,6 +22,16 @@ export class InstanceRegistry {
         this.#emitChange();
     }
 
+    update(descriptor: InstanceDescriptor): void {
+        if (!this.#descriptors.has(descriptor.name)) {
+            throw new Error(
+                `Cannot update unregistered instance ${descriptor.name}.`,
+            );
+        }
+        this.#descriptors.set(descriptor.name, descriptor);
+        this.#emitChange();
+    }
+
     delete(name: string): void {
         if (this.#descriptors.delete(name)) {
             this.clearOwned(name);

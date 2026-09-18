@@ -89,6 +89,12 @@ export class ConfigEditorCoordinator {
     readonly #instanceDisableRetirements = new Set<
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
+    readonly #instanceDisabled = new Set<
+        (instance: ControlConfig["instances"][number]) => Promise<void>
+    >();
+    readonly #instanceDeleted = new Set<
+        (instance: ControlConfig["instances"][number]) => Promise<void>
+    >();
     readonly #instanceDeleteRetirements = new Set<
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
@@ -148,6 +154,20 @@ export class ConfigEditorCoordinator {
     ): () => void {
         this.#instanceDisableRetirements.add(retire);
         return () => this.#instanceDisableRetirements.delete(retire);
+    }
+
+    registerInstanceDisabled(
+        listener: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void {
+        this.#instanceDisabled.add(listener);
+        return () => this.#instanceDisabled.delete(listener);
+    }
+
+    registerInstanceDeleted(
+        listener: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void {
+        this.#instanceDeleted.add(listener);
+        return () => this.#instanceDeleted.delete(listener);
     }
 
     getConfigView(): JsonValue {
@@ -522,7 +542,15 @@ export class ConfigEditorCoordinator {
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
-        this.#instanceRegistry.delete(instanceName);
+        let committedCleanupError: unknown;
+        try {
+            await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing);
+        } catch (error) {
+            committedCleanupError = error;
+        } finally {
+            this.#instanceRegistry.delete(instanceName);
+        }
+        if (committedCleanupError !== undefined) throw committedCleanupError;
         return this.#finalizeApplyResult(currentConfig, nextConfig, [
             { kind: "instance.deleted", target: instanceName },
         ]);
@@ -599,6 +627,9 @@ export class ConfigEditorCoordinator {
                 stoppedForDisable,
                 error,
             );
+        }
+        if (existing.enabled && !instance.enabled) {
+            await this.#notifyInstanceLifecycle(this.#instanceDisabled, existing);
         }
         return this.#finalizeApplyResult(currentConfig, nextConfig, [
             {
@@ -842,7 +873,6 @@ export class ConfigEditorCoordinator {
         if (descriptor === undefined) {
             this.#instanceRegistry.delete(existing.name);
         } else {
-            this.#instanceRegistry.add(descriptor);
             try {
                 await descriptor.worker.reconfigure(
                     toWorkerReconfigureInput(existing),
@@ -852,7 +882,7 @@ export class ConfigEditorCoordinator {
                 descriptor.mcpEnabled = existing.mcp.enabled;
                 descriptor.mcpPath = existing.mcp.path;
                 descriptor.modelExtensions = [...existing.extensions.model];
-                this.#instanceRegistry.add(descriptor);
+                this.#instanceRegistry.update(descriptor);
             } catch (error) {
                 failures.push(error);
             }
@@ -912,7 +942,30 @@ export class ConfigEditorCoordinator {
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
         descriptor.modelExtensions = [...instance.extensions.model];
-        this.#instanceRegistry.add(descriptor);
+        this.#instanceRegistry.update(descriptor);
+    }
+
+    async #notifyInstanceLifecycle(
+        listeners: ReadonlySet<
+            (instance: ControlConfig["instances"][number]) => Promise<void>
+        >,
+        instance: ControlConfig["instances"][number],
+    ): Promise<void> {
+        const failures: unknown[] = [];
+        for (const listener of [...listeners]) {
+            try {
+                await listener(instance);
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) {
+            throw new AggregateError(
+                failures,
+                `Instance ${instance.name} lifecycle cleanup failed.`,
+            );
+        }
     }
 
     async #syncMcpEndpoint(instanceName: string): Promise<void> {

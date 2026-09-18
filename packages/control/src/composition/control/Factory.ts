@@ -69,7 +69,6 @@ export class ControlRuntimeFactory {
                     list: () =>
                         options.state.instances
                             .list()
-                            .filter((descriptor) => descriptor.enabled)
                             .map((descriptor) => {
                             const paths = new InstancePaths(
                                 asInstanceName(descriptor.name),
@@ -84,6 +83,7 @@ export class ControlRuntimeFactory {
                                 },
                                 conversationDatabaseFile:
                                     paths.conversationDatabaseFile,
+                                enabled: descriptor.enabled,
                                 key: descriptor.worker,
                                 legacyContextMessagesFile:
                                     paths.contextMessagesFile,

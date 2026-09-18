@@ -35,6 +35,7 @@ export interface CommentExtensionInstance {
         data: JsonValue,
     ): Promise<void>;
     conversationDatabaseFile: string;
+    enabled: boolean;
     key: object;
     legacyContextMessagesFile?: string;
     legacyReports?: () => Promise<ToolCallRecord[]>;
@@ -95,6 +96,7 @@ export interface CommentRoutePort {
 interface CommentExtensionInstanceState {
     readonly comment: CommentService;
     readonly conversation: ConversationService;
+    enabled: boolean;
     readonly key: object;
 }
 
@@ -146,7 +148,7 @@ export class CommentExtension {
             ],
             instance: (instance) => {
                 const state = this.#instances.get(instance);
-                return state === undefined
+                return state === undefined || !state.enabled
                     ? []
                     : [
                           createCommentRouteModule(state.comment),
@@ -162,11 +164,14 @@ export class CommentExtension {
     async retireInstance(instance: string, reason: string): Promise<void> {
         const state = this.#instances.get(instance);
         if (state === undefined) return;
-        this.#instances.delete(instance);
+        state.enabled = false;
         try {
             await state.comment.failAllPending(reason);
         } finally {
-            state.conversation.close();
+            if (this.#instances.get(instance) === state) {
+                this.#instances.delete(instance);
+                state.conversation.close();
+            }
         }
     }
 
@@ -181,8 +186,14 @@ export class CommentExtension {
         const names = new Set(instances.map((instance) => instance.name));
         for (const instance of instances) {
             const current = this.#instances.get(instance.name);
-            if (current?.key === instance.key) continue;
-            current?.conversation.close();
+            if (current?.key === instance.key) {
+                current.enabled = instance.enabled;
+                continue;
+            }
+            if (!instance.enabled) {
+                if (current !== undefined) current.enabled = false;
+                continue;
+            }
             const store = new ConversationStore({
                 filePath: instance.conversationDatabaseFile,
                 instanceName: instance.name,
@@ -193,7 +204,7 @@ export class CommentExtension {
                               instance.legacyContextMessagesFile,
                       }),
             });
-            this.#instances.set(instance.name, {
+            const next: CommentExtensionInstanceState = {
                 comment: new CommentService({
                     appendEvent: instance.appendEvent,
                     instanceName: instance.name,
@@ -203,11 +214,16 @@ export class CommentExtension {
                     legacyReports: instance.legacyReports,
                     store,
                 }),
+                enabled: true,
                 key: instance.key,
-            });
+            };
+            this.#instances.set(instance.name, next);
+            current?.conversation.close();
         }
         for (const name of [...this.#instances.keys()]) {
             if (names.has(name)) continue;
+            const state = this.#instances.get(name);
+            if (state !== undefined) state.enabled = false;
             void this.retireInstance(
                 name,
                 `Instance ${name} was removed before Comment delivery.`,
@@ -217,7 +233,7 @@ export class CommentExtension {
 
     #require(instance: string): CommentExtensionInstanceState {
         const state = this.#instances.get(instance);
-        if (state !== undefined) return state;
+        if (state !== undefined && state.enabled) return state;
         throw createError({
             code: errorCodes.instanceMissing,
             details: { instance },

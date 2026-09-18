@@ -54,6 +54,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
                 events.push({ data, type });
             },
             conversationDatabaseFile,
+            enabled: true,
             key: firstKey,
             legacyContextMessagesFile,
             legacyReports: async () => [],
@@ -93,6 +94,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
                 events.push({ data, type });
             },
             conversationDatabaseFile,
+            enabled: true,
             key: {},
             legacyContextMessagesFile,
             legacyReports: async () => [],
@@ -145,4 +147,56 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
     assert.deepEqual(extension.routes.instance("alpha"), []);
     extension.close();
     assert.equal(events.some((event) => event.type === "context.message.queued"), true);
+});
+
+test("CommentExtension preserves state across a transient disable until committed retirement", async () => {
+    const root = await createTestTempDirectory("comment-extension-disable-rollback");
+    const key = {};
+    const conversationDatabaseFile = join(root, "conversation.sqlite3");
+    const source = (enabled: boolean): CommentExtensionInstance => ({
+        appendEvent: async () => undefined,
+        conversationDatabaseFile,
+        enabled,
+        key,
+        legacyReports: async () => [],
+        name: "alpha",
+    });
+    const instances = new TestCommentInstances([source(true)]);
+    const extension = new CommentExtension({
+        instances,
+        preferencesFile: join(root, "conversation-preferences.json"),
+    });
+
+    const contextMessage = extension
+        .routes.instance("alpha")
+        .find((route) => route.name === "contextMessage");
+    const queue = contextMessage?.operations.find(
+        (operation) => operation.name === "queue",
+    );
+    if (queue === undefined) throw new Error("contextMessage.queue is missing");
+    await queue.handle(
+        {
+            id: "queue-before-disable",
+            name: "queue",
+            payload: { ctxId: "ctx-alpha", text: "Keep this Comment" },
+        },
+        routeContext,
+    );
+
+    instances.replace([source(false)]);
+    assert.deepEqual(extension.routes.instance("alpha"), []);
+    await assert.rejects(
+        extension.conversation.list("alpha", { ctxId: "ctx-alpha" }),
+        /not found or is disabled/u,
+    );
+
+    instances.replace([source(true)]);
+    const history = await extension.conversation.list("alpha", {
+        ctxId: "ctx-alpha",
+    });
+    assert.deepEqual(
+        history.map((entry) => ({ kind: entry.kind, text: entry.text })),
+        [{ kind: "comment", text: "Keep this Comment" }],
+    );
+    extension.close();
 });

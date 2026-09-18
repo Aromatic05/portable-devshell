@@ -93,6 +93,84 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
+test("runtime wires Comment retirement only to committed instance lifecycle events", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-comment-lifecycle");
+    const socketPath = createTestIpcPath("control-runtime-comment", runtimeDir);
+    const retired: string[] = [];
+    let disabled:
+        | ((instance: { name: string }) => Promise<void>)
+        | undefined;
+    let deleted:
+        | ((instance: { name: string }) => Promise<void>)
+        | undefined;
+    let disableRetirements = 0;
+    let deleteRetirements = 0;
+    const baseComment = testComment();
+    const runtime = new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        comment: {
+            ...baseComment,
+            async retireInstance(instance: string, reason: string) {
+                retired.push(`${instance}:${reason}`);
+            },
+        },
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {},
+        } as never,
+        mcp: {
+            configEditor: {
+                registerInstanceDisabled(listener: typeof disabled) {
+                    disabled = listener;
+                    return () => undefined;
+                },
+                registerInstanceDisableRetirement() {
+                    disableRetirements += 1;
+                    return () => undefined;
+                },
+                registerInstanceDeleted(listener: typeof deleted) {
+                    deleted = listener;
+                    return () => undefined;
+                },
+                registerInstanceDeleteRetirement() {
+                    deleteRetirements += 1;
+                    return () => undefined;
+                },
+            },
+            instanceGateway: testInstanceGateway(),
+            instanceCreate: undefined,
+            oauthApprovals: undefined,
+            webEnabled: false,
+            async start() {},
+            status: () => ({ running: false }),
+            async stop() {},
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath,
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    assert.equal(disableRetirements, 1);
+    assert.equal(deleteRetirements, 3);
+    assert.notEqual(disabled, undefined);
+    assert.notEqual(deleted, undefined);
+
+    await disabled!({ name: "alpha" });
+    await deleted!({ name: "beta" });
+    assert.deepEqual(retired, [
+        "alpha:Instance alpha was disabled before Comment delivery.",
+        "beta:Instance beta was deleted before Comment delivery.",
+    ]);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {
@@ -148,7 +226,13 @@ function testConversation() {
 
 function testConfigEditor() {
     return {
+        registerInstanceDisabled() {
+            return () => undefined;
+        },
         registerInstanceDisableRetirement() {
+            return () => undefined;
+        },
+        registerInstanceDeleted() {
             return () => undefined;
         },
         registerInstanceDeleteRetirement() {
