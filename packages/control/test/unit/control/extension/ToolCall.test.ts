@@ -100,15 +100,12 @@ test("ToolCall Extension binding acquires registrations once and releases them w
 
 test("ToolCall Extension binding supplies the same scoped Comment interface to in-process review bindings", async () => {
     const comment = new ToolCallCommentReview({
-        get(instance: string) {
+        feedback() {
+            return [];
+        },
+        async reviewToolCall(instance: string) {
             assert.equal(instance, "demo");
-            return {
-                contextMessages: {
-                    async reviewToolCall() {
-                        return { commentId: "stop-1", kind: "stop" as const };
-                    },
-                },
-            } as never;
+            return { commentId: "stop-1", kind: "stop" as const };
         },
     });
     const bindings = new ToolCallExtensionBinding(

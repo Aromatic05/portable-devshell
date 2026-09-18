@@ -10,13 +10,13 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
 import {
     CONVERSATION_DATABASE_SCHEMA_VERSION,
-    ConversationStore,
     defaultConversationStorageLimits,
-} from "../../../../src/instance/conversation/Store.ts";
-import { ConversationService } from "../../../../src/instance/conversation/Service.ts";
+} from "../../src/conversation/store/Schema.ts";
+import { ConversationService } from "../../src/conversation/ConversationService.ts";
 
 test("ConversationStore migrates legacy Comments to v1 SQLite and preserves the source as a backup", async () => {
     const root = await createTestTempDirectory(

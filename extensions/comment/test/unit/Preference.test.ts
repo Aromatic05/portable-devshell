@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ConversationPreferenceStore } from "../../../../../src/control/config/preference/Store.ts";
-import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
+import { ConversationPreferenceStore } from "../../src/conversation/preference/Store.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("ConversationPreferenceStore persists titles and ordering across reopen", async () => {
     const root = await createTestTempDirectory("conversation-preferences");

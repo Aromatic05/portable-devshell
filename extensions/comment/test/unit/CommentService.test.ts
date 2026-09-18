@@ -5,9 +5,9 @@ import test from "node:test";
 
 import type { InstanceEventType, JsonValue } from "@portable-devshell/shared";
 
-import { CommentService } from "../../../../src/instance/context/Service.ts";
-import { CommentState } from "../../../../src/instance/context/Store.ts";
-import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { CommentService } from "../../src/comment/CommentService.ts";
+import { CommentState } from "../../src/comment/CommentState.ts";
+import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("CommentService merges pending Comments into one call-bound delivery", async () => {
     const root = await createTestTempDirectory("context-message");

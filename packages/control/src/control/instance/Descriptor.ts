@@ -4,11 +4,6 @@ import type {
 } from "@portable-devshell/core";
 import type { TerminalBackend } from "../../instance/execution/terminal/Backend.js";
 import type {
-    ContextMessageQueueInput,
-    ContextMessageReadResult,
-    ContextMessageRecord,
-} from "@portable-devshell/shared";
-import type {
     ActiveTodoSummary,
     ControlMcpContextMode,
     GoalActivityKind,
@@ -21,46 +16,9 @@ import type {
     TodoTaskControlAction,
     TodoWriteInput,
     ToolCallAssociation,
-    ConversationEntry,
-    ConversationListInput,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
-
-export interface InstanceConversationPort {
-    close(): void;
-    list(input?: ConversationListInput): Promise<ConversationEntry[]>;
-    recordReport(input: {
-        callId: string;
-        createdAt?: string;
-        ctxId: string;
-        replyCommentId?: string;
-        text: string;
-    }): Promise<void>;
-}
-
-export type ContextMessageControlDecision =
-    | { kind: "allow" }
-    | { commentId: string; kind: "push"; toolCallBudget: number }
-    | { comment: string; commentId: string; kind: "resume" }
-    | { comment?: string; commentId: string; kind: "stop" };
-
-export interface InstanceContextMessagePort {
-    reviewToolCall(
-        ctxId: string,
-        toolName: string,
-        requestId?: string,
-    ): Promise<ContextMessageControlDecision>;
-    failAllPending(reason: string): Promise<ContextMessageRecord[]>;
-    failPending(ctxId: string, reason: string): Promise<ContextMessageRecord[]>;
-    pendingReplyCommentId(ctxId: string): Promise<string | undefined>;
-    list(ctxId?: string): Promise<ContextMessageRecord[]>;
-    queue(input: ContextMessageQueueInput): Promise<ContextMessageRecord>;
-    consumePending(
-        ctxId: string,
-        callId: string,
-    ): Promise<ContextMessageReadResult>;
-}
 
 export interface InstanceTodoPort {
     cancelAll(): Promise<void>;
@@ -124,8 +82,6 @@ export interface InstanceWaitPort {
 }
 
 export interface InstanceDescriptor {
-    conversation: InstanceConversationPort;
-    contextMessages?: InstanceContextMessagePort;
     enabled: boolean;
     goal: InstanceGoalPort;
     mcpContextMode?: ControlMcpContextMode;

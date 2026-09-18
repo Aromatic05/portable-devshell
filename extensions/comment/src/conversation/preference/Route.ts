@@ -7,7 +7,6 @@ import {
     type PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
-import { routeModule } from "../../../server/Route.js";
 import { parseConversationPreferencesPatch } from "./Model.js";
 
 export interface ConversationPreferencePort {
@@ -20,13 +19,24 @@ export interface ConversationPreferencePort {
 export function createConversationPreferenceRouteModule(
     port: ConversationPreferencePort,
 ): PrefixRouteModuleDefinition {
-    return routeModule("conversation", {
-        preferences: async () => (await port.read()) as unknown as JsonValue,
-        updatePreferences: async (request) =>
-            (await port.update(
-                readConversationPreferencesPatch(request.payload ?? {}),
-            )) as unknown as JsonValue,
-    });
+    return {
+        name: "conversation",
+        operations: [
+            {
+                name: "preferences",
+                handle: async () => (await port.read()) as unknown as JsonValue,
+            },
+            {
+                name: "updatePreferences",
+                handle: async (request) =>
+                    (await port.update(
+                        readConversationPreferencesPatch(
+                            request.payload ?? {},
+                        ),
+                    )) as unknown as JsonValue,
+            },
+        ],
+    };
 }
 
 function readConversationPreferencesPatch(

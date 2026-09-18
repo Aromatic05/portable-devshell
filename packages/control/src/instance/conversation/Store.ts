@@ -1,1 +1,0 @@
-export { ConversationStore, CONVERSATION_DATABASE_SCHEMA_VERSION, defaultConversationStorageLimits, type ConversationControlState, type ConversationStoreStats } from "@portable-devshell/comment-extension";

@@ -39,7 +39,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     });
     let artifactStopping = false;
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -102,14 +102,47 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     throw new Error("Timed out waiting for condition.");
 }
 
-function testConversationPreferences() {
+function testComment() {
     return {
-        async read() {
-            return createEmptyConversationPreferences();
+        close() {},
+        comment: {
+            async consumePending(_instance: string, _ctxId: string, callId: string) {
+                return { callId, messages: [] };
+            },
+            async failAllPending() {
+                return [];
+            },
+            async failPending() {
+                return [];
+            },
+            feedback() {
+                return [];
+            },
+            async pendingReplyCommentId() {
+                return undefined;
+            },
+            async reviewToolCall() {
+                return { kind: "allow" as const };
+            },
         },
-        async update() {
-            return createEmptyConversationPreferences();
+        async retireInstance() {},
+        routes: {
+            control() {
+                return [];
+            },
+            instance() {
+                return [];
+            },
         },
+    };
+}
+
+function testConversation() {
+    return {
+        async list() {
+            return [];
+        },
+        async recordReport() {},
     };
 }
 
@@ -155,7 +188,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -247,7 +280,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         async stop() {},
     };
     new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -316,7 +349,7 @@ test("Web hot replacement preserves the original failure when host rollback also
         async stop() {},
     };
     new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -385,7 +418,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         },
     };
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -448,7 +481,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -529,13 +562,16 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         service: undefined,
         async stop() {},
     } as never;
+    const mcpComment = testComment();
     const mcp = new ControlRuntimeMcp({
         artifact,
+        comment: mcpComment.comment,
+        conversation: testConversation(),
         controlPaths,
         state,
     });
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
@@ -688,7 +724,7 @@ test("runtime installs builtin Extensions through the normal installer before op
         async waitForDrain() {},
     } as never;
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         artifact: {
             service: undefined,
             async stop() {},
@@ -738,7 +774,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     const source = join(root, "invalid-builtin");
     await mkdir(source, { recursive: true });
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         artifact: { service: undefined, async stop() {} } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths: new ExtensionPathLayout({
@@ -837,7 +873,7 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
         async stopOwned() {},
     };
     const runtime = new ControlRuntime({
-        conversationPreferences: testConversationPreferences(),
+        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,

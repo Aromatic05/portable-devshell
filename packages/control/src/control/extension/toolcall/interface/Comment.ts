@@ -8,16 +8,24 @@ import type {
     ToolCallReviewContext,
     ToolCallReviewInvocation,
 } from "@portable-devshell/extension/toolcall";
-import { resolveToolCallFeedback } from "@portable-devshell/comment-extension";
-import { createError, errorCodes } from "@portable-devshell/shared";
 
-import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
+export interface ToolCallCommentPort {
+    feedback(input: ToolCallReviewInvocation): readonly string[];
+    reviewToolCall(
+        instance: string,
+        ctxId: string,
+        toolName: string,
+        requestId?: string,
+    ): Promise<ExtensionCommentControlDecision>;
+}
 
 export class ToolCallCommentReview {
-    readonly #instances?: Pick<InstanceRegistry, "get">;
+    readonly #comment?: ToolCallCommentPort;
 
-    constructor(instances?: Pick<InstanceRegistry, "get">) {
-        this.#instances = instances;
+    constructor(
+        comment?: ToolCallCommentPort,
+    ) {
+        this.#comment = comment;
     }
 
     context(
@@ -42,7 +50,7 @@ export class ToolCallCommentReview {
                 if (operation === commentReviewInterfaceOperation)
                     return (await this.#review(input)) as ExtensionJsonValue;
                 if (operation === commentFeedbackInterfaceOperation)
-                    return [...resolveToolCallFeedback(input)] as ExtensionJsonValue;
+                    return [...this.#requireComment().feedback(input)] as ExtensionJsonValue;
                 throw new TypeError(
                     `Unsupported ToolCall review interface operation for Extension ${extensionId}: ${operation}.`,
                 );
@@ -61,25 +69,16 @@ export class ToolCallCommentReview {
         ) {
             return { kind: "allow" };
         }
-        const instances = this.#instances;
-        if (instances === undefined) {
-            throw new Error("ToolCall Comment review interface is unavailable.");
-        }
-        const descriptor = instances.get(input.context.instance);
-        if (descriptor === undefined) {
-            throw createError({
-                code: errorCodes.instanceMissing,
-                details: { instance: input.context.instance },
-                message: `Instance ${input.context.instance} was not found or is disabled.`,
-                retryable: false,
-            });
-        }
-        const service = descriptor.contextMessages;
-        if (service === undefined) return { kind: "allow" };
-        return await service.reviewToolCall(
+        return await this.#requireComment().reviewToolCall(
+            input.context.instance,
             input.context.ctxId,
             input.toolName,
             input.context.requestId,
         );
+    }
+
+    #requireComment(): ToolCallCommentPort {
+        if (this.#comment !== undefined) return this.#comment;
+        throw new Error("ToolCall Comment review interface is unavailable.");
     }
 }

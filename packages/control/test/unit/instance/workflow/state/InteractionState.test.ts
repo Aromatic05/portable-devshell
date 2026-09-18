@@ -4,8 +4,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
-import { CommentState } from "../../../../../src/instance/context/Store.ts";
-import { CommentStore } from "../../../../../src/instance/context/Store.ts";
 import { GoalState } from "../../../../../src/instance/workflow/goal/storage/State.ts";
 import { GoalStore } from "../../../../../src/instance/workflow/goal/storage/Store.ts";
 import { TodoState } from "../../../../../src/instance/workflow/todo/Store.ts";
@@ -16,7 +14,6 @@ import { WaitStore } from "../../../../../src/instance/workflow/wait/Store.ts";
 test("interaction state stores defer persisted state loading until first access", async () => {
     const root = await createTestTempDirectory("lazy-interaction-state-");
     const files = {
-        context: join(root, "context-messages.json"),
         goal: join(root, "goals.json"),
         todo: join(root, "todo.json"),
         wait: join(root, "waits.json"),
@@ -27,11 +24,6 @@ test("interaction state stores defer persisted state loading until first access"
         ),
     );
 
-    const context = new CommentStore({
-        filePath: files.context,
-        instanceName: "alpha",
-        state: new CommentState(),
-    });
     const goal = new GoalStore({
         filePath: files.goal,
         instanceName: "alpha",
@@ -48,10 +40,6 @@ test("interaction state stores defer persisted state loading until first access"
         state: new WaitState(),
     });
 
-    assert.throws(
-        () => context.read(),
-        /Context message state for alpha is invalid/u,
-    );
     assert.throws(() => goal.read(), /Goal state for alpha is invalid/u);
     assert.throws(() => todo.read(), /Todo state for alpha is invalid/u);
     assert.throws(() => wait.read(), /Wait state for alpha is invalid/u);

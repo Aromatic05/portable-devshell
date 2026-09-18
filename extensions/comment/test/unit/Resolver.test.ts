@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    mergeComments,
-    resolveErrorHints,
-    resolveResultHints,
-    type ToolDiagnosticHint,
-} from "../../src/index.ts";
+import { mergeComments } from "../../src/comment/Merge.ts";
+import type { ToolDiagnosticHint } from "../../src/hint/Hint.ts";
+import { resolveErrorHints, resolveResultHints } from "../../src/hint/Resolver.ts";
 
 function codes(hints: readonly ToolDiagnosticHint[]): string[] {
     return hints.map((hint) => hint.code);

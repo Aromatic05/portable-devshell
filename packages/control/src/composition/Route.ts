@@ -4,6 +4,7 @@ import {
     PrefixRoute,
     type JsonValue,
     type PrefixRouteDestinationDefinition,
+    type PrefixRouteModuleDefinition,
     type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
@@ -15,10 +16,6 @@ import {
 } from "../control/extension/cli/Route.js";
 import type { ConfigEditorPort } from "../control/config/Route.js";
 import { createConfigRouteModule } from "../control/config/Route.js";
-import {
-    createConversationPreferenceRouteModule,
-    type ConversationPreferencePort,
-} from "../control/config/preference/Route.js";
 import {
     createDebugRouteModule,
     type DebugPatchPort,
@@ -41,8 +38,6 @@ import { OperationalOverviewService } from "../control/overview/Service.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/Service.js";
 import { createReverseRouteModule } from "../control/reverse/Route.js";
 import type { ToolCallProvenanceStore } from "../instance/execution/tool/Provenance.js";
-import { createContextMessageRouteModule } from "../instance/context/Route.js";
-import { createConversationRouteModule } from "../instance/conversation/Route.js";
 import { createGoalRouteModule } from "../instance/workflow/goal/Route.js";
 import { createRuntimeRouteModule } from "../instance/execution/runtime/Route.js";
 import { RuntimeSubscriptionManager } from "../instance/execution/runtime/Subscription.js";
@@ -57,12 +52,17 @@ import {
     type WebApplicationCatalogPort,
 } from "../server/web/extension/application/Route.js";
 
+export interface ControlRouteCommentPort {
+    control(): readonly PrefixRouteModuleDefinition[];
+    instance(instance: string): readonly PrefixRouteModuleDefinition[];
+}
+
 export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
     cliCommands?: CliCommandPort;
+    comment?: ControlRouteCommentPort;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
-    conversationPreferences?: ConversationPreferencePort;
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
     instanceCreate?: InstanceCreatePort;
@@ -165,13 +165,7 @@ export class ControlRouteComposition {
                             })),
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
-                    ...(this.#options.conversationPreferences === undefined
-                        ? []
-                        : [
-                              createConversationPreferenceRouteModule(
-                                  this.#options.conversationPreferences,
-                              ),
-                          ]),
+                    ...(this.#options.comment?.control() ?? []),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         create: this.#options.instanceCreate,
@@ -202,14 +196,7 @@ export class ControlRouteComposition {
                         this.#options.instances,
                         this.#subscriptions,
                     ),
-                    ...(descriptor.contextMessages === undefined
-                        ? []
-                        : [
-                              createContextMessageRouteModule(
-                                  descriptor.contextMessages,
-                              ),
-                          ]),
-                    createConversationRouteModule(descriptor.conversation),
+                    ...(this.#options.comment?.instance(descriptor.name) ?? []),
                     createGoalRouteModule(descriptor),
                     createTodoRouteModule(descriptor, this.#subscriptions),
                     createToolRouteModule(

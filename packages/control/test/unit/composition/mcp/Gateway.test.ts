@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
-    parseContextMessageDirective,
     toControlErrorBody,
 } from "@portable-devshell/shared";
 
@@ -11,6 +9,33 @@ import {
     McpInstanceGatewayControl,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
+
+function emptyComment() {
+    return {
+        async consumePending(_instance: string, _ctxId: string, callId: string) {
+            return { callId, messages: [] };
+        },
+        async failPending() {
+            return [];
+        },
+        async listConversation() {
+            return [];
+        },
+        async pendingReplyCommentId() {
+            return undefined;
+        },
+        async recordReport() {},
+    };
+}
+
+function emptyConversation() {
+    return {
+        async list() {
+            return [];
+        },
+        async recordReport() {},
+    };
+}
 
 function createGateway(ready: boolean): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([
@@ -29,6 +54,8 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
     ]);
 
     return new McpInstanceGatewayControl({
+        comment: emptyComment(),
+        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -38,136 +65,69 @@ function createTodoReportHarness() {
     let now = Date.parse("2026-09-14T00:00:00.000Z");
     let callSequence = 0;
     let failNext = false;
-    let pendingPushCommentId: string | undefined;
     let pendingReplyCommentId: string | undefined;
-    let pendingResumeCommentId: string | undefined;
-    let pushToolCallsRemaining: number | undefined;
-    let stoppedByCommentId: string | undefined;
     const entries: Array<Record<string, unknown>> = [];
     const reports: string[] = [];
-    const applyQueuedControl = (id: string, text: string) => {
-        const directive = parseContextMessageDirective(text).directive;
-        if (directive === "stop") {
-            stoppedByCommentId ??= id;
-            pendingResumeCommentId = undefined;
-        } else if (directive === "resume" && stoppedByCommentId !== undefined) {
-            pendingResumeCommentId = id;
-        }
+    const comment = {
+        async consumePending(_instance: string, _ctxId: string, callId: string) {
+            return { callId, messages: [] };
+        },
+        async failPending() {
+            return [];
+        },
+        async listConversation(
+            _instance: string,
+            input: { ctxId?: string; limit?: number } = {},
+        ) {
+            const filtered = entries.filter(
+                (entry) =>
+                    input.ctxId === undefined || entry.ctxId === input.ctxId,
+            );
+            return (
+                input.limit === undefined
+                    ? filtered
+                    : filtered.slice(-input.limit)
+            ) as never;
+        },
+        async pendingReplyCommentId() {
+            return pendingReplyCommentId;
+        },
+        async recordReport(
+            _instance: string,
+            input: {
+                callId: string;
+                ctxId: string;
+                replyCommentId?: string;
+                text: string;
+            },
+        ) {
+            if (failNext) {
+                failNext = false;
+                throw new Error("report failed");
+            }
+            reports.push(input.text);
+            entries.push({
+                callId: input.callId,
+                createdAt: new Date(now).toISOString(),
+                ctxId: input.ctxId,
+                id: input.callId,
+                kind: "report",
+                text: input.text,
+            });
+            if (
+                input.replyCommentId !== undefined &&
+                input.replyCommentId === pendingReplyCommentId
+            ) {
+                pendingReplyCommentId = undefined;
+            }
+        },
     };
-    const applyDeliveredControl = (id: string, text: string) => {
-        const directive = parseContextMessageDirective(text).directive;
-        if (directive === "stop") {
-            stoppedByCommentId ??= id;
-            pendingResumeCommentId = undefined;
-        } else if (directive === "resume") {
-            stoppedByCommentId = undefined;
-            pendingResumeCommentId = undefined;
-            pendingReplyCommentId = id;
-        } else if (directive === "push") {
-            pendingReplyCommentId = id;
-            pendingPushCommentId = id;
-            pushToolCallsRemaining ??= CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
-        } else {
-            pendingReplyCommentId = id;
-        }
+    const conversation = {
+        list: comment.listConversation,
+        recordReport: comment.recordReport,
     };
     const registry = new InstanceRegistry([
         {
-            conversation: {
-                close() {},
-                async list(input: { ctxId?: string; limit?: number } = {}) {
-                    const filtered = entries.filter(
-                        (entry) =>
-                            input.ctxId === undefined ||
-                            entry.ctxId === input.ctxId,
-                    );
-                    return (
-                        input.limit === undefined
-                            ? filtered
-                            : filtered.slice(-input.limit)
-                    ) as never;
-                },
-                async recordReport(input: {
-                    callId: string;
-                    ctxId: string;
-                    replyCommentId?: string;
-                    text: string;
-                }) {
-                    if (failNext) {
-                        failNext = false;
-                        throw new Error("report failed");
-                    }
-                    reports.push(input.text);
-                    entries.push({
-                        callId: input.callId,
-                        createdAt: new Date(now).toISOString(),
-                        ctxId: input.ctxId,
-                        id: input.callId,
-                        kind: "report",
-                        text: input.text,
-                    });
-                    if (
-                        input.replyCommentId !== undefined &&
-                        input.replyCommentId === pendingReplyCommentId
-                    ) {
-                        pendingReplyCommentId = undefined;
-                        pendingPushCommentId = undefined;
-                        pushToolCallsRemaining = undefined;
-                    }
-                },
-            },
-            contextMessages: {
-                async beforeTodoToolCall(_ctxId: string, toolName: string) {
-                    if (stoppedByCommentId !== undefined) {
-                        if (pendingResumeCommentId !== undefined) {
-                            const resume = entries.find(
-                                (entry) => entry.id === pendingResumeCommentId,
-                            );
-                            const resumeId = pendingResumeCommentId;
-                            const text = String(resume?.text ?? "#resume");
-                            if (resume !== undefined) {
-                                resume.status = "delivered";
-                                applyDeliveredControl(resumeId, text);
-                            }
-                            return {
-                                comment: text,
-                                commentId: resumeId,
-                                kind: "resume" as const,
-                            };
-                        }
-                        const stop = entries.find(
-                            (entry) => entry.id === stoppedByCommentId,
-                        );
-                        return {
-                            ...(typeof stop?.text === "string"
-                                ? { comment: stop.text }
-                                : {}),
-                            commentId: stoppedByCommentId,
-                            kind: "stop" as const,
-                        };
-                    }
-                    if (
-                        toolName === "todo_report" ||
-                        pendingPushCommentId === undefined
-                    )
-                        return { kind: "allow" as const };
-                    const remaining =
-                        pushToolCallsRemaining ??
-                        CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
-                    if (remaining <= 0) {
-                        return {
-                            commentId: pendingPushCommentId,
-                            kind: "push" as const,
-                            toolCallBudget: CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
-                        };
-                    }
-                    pushToolCallsRemaining = remaining - 1;
-                    return { kind: "allow" as const };
-                },
-                async pendingReplyCommentId() {
-                    return pendingReplyCommentId;
-                },
-            },
             enabled: true,
             mcpEnabled: true,
             mcpPath: "/local/mcp",
@@ -176,6 +136,8 @@ function createTodoReportHarness() {
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
+        comment,
+        conversation,
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
         now: () => now,
@@ -191,18 +153,6 @@ function createTodoReportHarness() {
             now += milliseconds;
         },
         context,
-        queueComment(id: string, text: string) {
-            const timestamp = new Date(now).toISOString();
-            entries.push({
-                createdAt: timestamp,
-                ctxId: context.ctxId,
-                id,
-                kind: "comment",
-                status: "sent",
-                text,
-            });
-            applyQueuedControl(id, text);
-        },
         deliverComment(id: string, text: string) {
             const timestamp = new Date(now).toISOString();
             entries.push({
@@ -215,7 +165,7 @@ function createTodoReportHarness() {
                 status: "delivered",
                 text,
             });
-            applyDeliveredControl(id, text);
+            pendingReplyCommentId = id;
         },
         failNextReport() {
             failNext = true;
@@ -305,6 +255,8 @@ test("cross-instance audit is recorded by the target worker", async () => {
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
+        comment: emptyComment(),
+        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -553,6 +505,8 @@ test("closing an MCP tool session releases worker-owned session state", async ()
         })) as never,
     );
     const gateway = new McpInstanceGatewayControl({
+        comment: emptyComment(),
+        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -618,6 +572,8 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
+        comment: emptyComment(),
+        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -687,6 +643,8 @@ test("MCP instance connect lifecycle uses Context references without adopting an
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
+        comment: emptyComment(),
+        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });

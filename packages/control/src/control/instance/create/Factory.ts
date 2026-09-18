@@ -14,9 +14,6 @@ import {
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../Descriptor.js";
-import { CommentService } from "../../../instance/context/Service.js";
-import { ConversationService } from "../../../instance/conversation/Service.js";
-import { ConversationStore } from "../../../instance/conversation/Store.js";
 import { GoalService } from "../../../instance/workflow/goal/Service.js";
 import { TodoService } from "../../../instance/workflow/todo/Service.js";
 import { WaitService } from "../../../instance/workflow/wait/Service.js";
@@ -39,33 +36,12 @@ export class InstanceFactory {
                 ? new WorkerTransportConnection()
                 : undefined;
         const workerHolder: { value?: WorkerInstance } = {};
-        const conversationStore = new ConversationStore({
-            filePath: paths.conversationDatabaseFile,
-            instanceName: instance.name,
-            legacyContextMessagesFile: paths.contextMessagesFile,
-        });
-        const conversation = new ConversationService({
-            legacyReports: async () =>
-                (await workerHolder.value?.readToolCalls({
-                    includeInput: true,
-                    includeOutput: false,
-                    toolName: "todo_report",
-                })) ?? [],
-            store: conversationStore,
-        });
         const todo = new TodoService({
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
             },
             filePath: paths.todoFile,
             instanceName: instance.name,
-        });
-        const contextMessages = new CommentService({
-            appendEvent: async (type, data) => {
-                await workerHolder.value?.appendControlEvent(type, data);
-            },
-            instanceName: instance.name,
-            store: conversationStore,
         });
         const goal = new GoalService({
             appendEvent: async (type, data) => {
@@ -92,8 +68,6 @@ export class InstanceFactory {
         const terminal = new WorkerTerminalBackend({ worker });
 
         return {
-            conversation,
-            contextMessages,
             goal,
             mcpContextMode: instance.mcp.contextMode,
             enabled: instance.enabled,

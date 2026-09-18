@@ -31,7 +31,7 @@ import {
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
 import { ConfigEditorCoordinator } from "../../../../src/control/config/editor/Coordinator.ts";
-import { ConversationPreferenceStore } from "../../../../src/control/config/preference/Store.ts";
+import { CommentExtension } from "@portable-devshell/comment-extension";
 import { ControlConfigStore } from "../../../../src/control/config/storage/Store.ts";
 import { DebugPatchService } from "../../../../src/control/debug/Service.ts";
 import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
@@ -429,11 +429,15 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         "conversation-preference-rpc",
         directory,
     );
-    const preferences = new ConversationPreferenceStore(
-        join(directory, "conversation-preferences.json"),
-    );
+    const comment = new CommentExtension({
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+        },
+        preferencesFile: join(directory, "conversation-preferences.json"),
+    });
     const routes = new ControlRouteComposition({
-        conversationPreferences: preferences,
+        comment: comment.routes,
         instances: new InstanceRegistry([]),
         shutdown() {},
     });
@@ -443,6 +447,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         await cleanupInOrder(
             () => server.stop(),
             () => routes.dispose(),
+            () => comment.close(),
             () => rm(directory, { force: true, recursive: true }),
         );
     });

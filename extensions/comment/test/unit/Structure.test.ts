@@ -31,6 +31,7 @@ test("Comment source tree follows domain entities and the builtin source is self
         "ConversationControl.ts",
         "ConversationService.ts",
         "migration",
+        "preference",
         "store",
     ]);
     assert.deepEqual(await entries(new URL("../../src/conversation/migration/", import.meta.url)), [
@@ -42,6 +43,11 @@ test("Comment source tree follows domain entities and the builtin source is self
         "ConversationStore.ts",
         "Query.ts",
         "Schema.ts",
+    ]);
+    assert.deepEqual(await entries(new URL("../../src/conversation/preference/", import.meta.url)), [
+        "Model.ts",
+        "Route.ts",
+        "Store.ts",
     ]);
     assert.deepEqual(await entries(new URL("../../src/hint/", import.meta.url)), [
         "Feedback.ts",

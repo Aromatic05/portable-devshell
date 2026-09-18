@@ -2,21 +2,10 @@ import type { WorkerInstance } from "@portable-devshell/core";
 import type { TodoReadResult } from "@portable-devshell/shared";
 
 import type {
-    InstanceConversationPort,
     InstanceDescriptor,
     InstanceGoalPort,
     InstanceTodoPort,
 } from "../../src/control/instance/Descriptor.ts";
-
-export function createTestConversationPort(): InstanceConversationPort {
-    return {
-        close() {},
-        async list() {
-            return [];
-        },
-        async recordReport() {},
-    };
-}
 
 export function createTestGoalPort(): InstanceGoalPort {
     return {
@@ -92,7 +81,6 @@ export function createTestInstanceDescriptor(
         count: 0,
     });
     return {
-        conversation: createTestConversationPort(),
         enabled: true,
         goal: createTestGoalPort(),
         mcpEnabled: false,

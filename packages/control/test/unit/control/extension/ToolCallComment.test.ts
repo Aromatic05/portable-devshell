@@ -5,8 +5,6 @@ import { commentFeedbackInterfaceOperation, commentReviewInterfaceOperation } fr
 import type { ToolCallReviewInvocation } from "@portable-devshell/extension/toolcall";
 
 import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/interface/Comment.ts";
-import type { InstanceDescriptor } from "../../../../src/control/instance/Descriptor.ts";
-import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
 
 const input: ToolCallReviewInvocation = {
     context: {
@@ -24,18 +22,20 @@ const input: ToolCallReviewInvocation = {
 
 test("ToolCall Comment interface exposes only the current review decision to the builtin Comment Extension", async () => {
     const calls: unknown[] = [];
-    const instances = new InstanceRegistry([
-        {
-            contextMessages: {
-                async reviewToolCall(ctxId: string, toolName: string, requestId?: string) {
-                    calls.push({ ctxId, requestId, toolName });
-                    return { commentId: "comment-stop", kind: "stop" as const };
-                },
-            },
-            name: "demo",
-        } as unknown as InstanceDescriptor,
-    ]);
-    const review = new ToolCallCommentReview(instances);
+    const review = new ToolCallCommentReview({
+        feedback() {
+            return [];
+        },
+        async reviewToolCall(
+            instance: string,
+            ctxId: string,
+            toolName: string,
+            requestId?: string,
+        ) {
+            calls.push({ ctxId, instance, requestId, toolName });
+            return { commentId: "comment-stop", kind: "stop" as const };
+        },
+    });
 
     assert.deepEqual(
         await review
@@ -44,12 +44,24 @@ test("ToolCall Comment interface exposes only the current review decision to the
         { commentId: "comment-stop", kind: "stop" },
     );
     assert.deepEqual(calls, [
-        { ctxId: "ctx-1", requestId: "request-1", toolName: "bash_run" },
+        {
+            ctxId: "ctx-1",
+            instance: "demo",
+            requestId: "request-1",
+            toolName: "bash_run",
+        },
     ]);
 });
 
 test("ToolCall Comment interface resolves outbound feedback through Comment-owned Hint logic", async () => {
-    const review = new ToolCallCommentReview(new InstanceRegistry([]));
+    const review = new ToolCallCommentReview({
+        feedback() {
+            return ["[bash.nonZeroExit] Exited with code 7; inspect output."];
+        },
+        async reviewToolCall() {
+            return { kind: "allow" as const };
+        },
+    });
     assert.deepEqual(
         await review
             .context("comment", {
@@ -73,7 +85,14 @@ test("ToolCall Comment interface resolves outbound feedback through Comment-owne
 });
 
 test("ToolCall Comment interface is invocation-scoped and unavailable to other Extensions", async () => {
-    const review = new ToolCallCommentReview(new InstanceRegistry([]));
+    const review = new ToolCallCommentReview({
+        feedback() {
+            return [];
+        },
+        async reviewToolCall() {
+            return { kind: "allow" as const };
+        },
+    });
 
     await assert.rejects(
         review

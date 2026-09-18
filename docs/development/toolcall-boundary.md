@@ -652,7 +652,7 @@ extensions/comment/src/
 
 `hint` 规则也由 Comment package 持有，不再属于 `shared`。Result/error Hint 现在由 Comment outbound Review 通过 `feedback[]` 返回；MCP 与 Control Tool Route 只消费 generic ToolCall feedback，不再直接 import Comment 的 resolver。
 
-Conversation、Comment queue/list、pending reply、preferences 与 Context lifecycle 的 runtime ownership 仍需要继续从 Control composition 中收口；这属于 Comment extraction 的后续阶段，不由 ToolCall Boundary 代替。
+Conversation、Comment queue/list、pending reply、preferences、routes 与 instance lifecycle 的 runtime ownership 现在由 `CommentExtension` 持有。Control 只有 composition root `ControlRuntimeFactory` 知道 concrete Comment package；Runtime、Route、ToolCall interface 与 MCP Gateway 只依赖各自的窄 Port。`packages/mcp` 不依赖 Comment package，只消费 ToolCall Boundary feedback 与通用 Context Message gateway contract。
 
 Todo 的 enable/rate-limit/report token policy 与 Comment 是不同 authority，继续保留独立的 Todo-only gate；迁移 Comment 不得把 Todo policy 一起吸入 reviewer。
 

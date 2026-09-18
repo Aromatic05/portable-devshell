@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+
 import {
     controlRemoteRpcPath,
     controlWebBasePath,
@@ -12,7 +13,6 @@ import {
 } from "@portable-devshell/mcp";
 import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { DebugPatchService } from "../../control/debug/Service.js";
-import type { ConversationPreferencePort } from "../../control/config/preference/Route.js";
 import { CliExtensionCommandService } from "../../control/extension/cli/command/Service.js";
 import { ModelDevshellBroker } from "../../control/extension/cli/command/ModelBroker.js";
 import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
@@ -25,6 +25,7 @@ import {
     ToolCallCommentReview,
     ToolCallSecretRewrite,
 } from "../../control/extension/toolcall/interface/index.js";
+import type { ToolCallCommentPort } from "../../control/extension/toolcall/interface/Comment.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
@@ -39,15 +40,25 @@ import { ControlWebSessionService } from "../../server/web/auth/Session.js";
 import { ControlWebSocketAccessService } from "../../server/web/auth/Access.js";
 import { ControlWebSocketListener } from "../../server/web/Socket.js";
 import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
-import { ControlRouteComposition } from "../Route.js";
+import {
+    ControlRouteComposition,
+    type ControlRouteCommentPort,
+} from "../Route.js";
 import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
 import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 
+interface ControlRuntimeComment {
+    readonly comment: ToolCallCommentPort;
+    readonly routes: ControlRouteCommentPort;
+    close(): void;
+    retireInstance(instance: string, reason: string): Promise<void>;
+}
+
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
-    conversationPreferences: ConversationPreferencePort;
+    comment: ControlRuntimeComment;
     config?: () => ControlConfig;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
@@ -70,6 +81,7 @@ export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #channels: ControlChannelServer;
+    readonly #comment: ControlRuntimeComment;
     readonly #debug: DebugPatchService;
     readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
@@ -102,9 +114,10 @@ export class ControlRuntime {
             }),
         });
         this.#instances = options.instances;
+        this.#comment = options.comment;
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
-            new ToolCallCommentReview(options.instances),
+            new ToolCallCommentReview(this.#comment.comment),
             new ToolCallSecretRewrite(options.config),
         );
         this.#bindToolCallBoundaries();
@@ -146,9 +159,9 @@ export class ControlRuntime {
             cliCommands: new CliExtensionCommandService(this.#extensions, {
                 surface: "native",
             }),
+            comment: this.#comment.routes,
             config: options.mcp.configEditor,
             contextAdmin: () => options.mcp.host?.contextAdmin,
-            conversationPreferences: options.conversationPreferences,
             debug: this.#debug,
             extension: this.#extensionControl,
             instanceCreate: options.mcp.instanceCreate,
@@ -166,6 +179,22 @@ export class ControlRuntime {
             toolProvenance: options.mcp.toolProvenance,
             webApplications: new WebApplicationCatalog(this.#extensions),
         });
+        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+            async (instance) => {
+                await this.#comment.retireInstance(
+                    instance.name,
+                    `Instance ${instance.name} was deleted before Comment delivery.`,
+                );
+            },
+        );
+        this.#mcp.configEditor.registerInstanceDisableRetirement(
+            async (instance) => {
+                await this.#comment.retireInstance(
+                    instance.name,
+                    `Instance ${instance.name} was disabled before Comment delivery.`,
+                );
+            },
+        );
         this.#mcp.configEditor.registerInstanceDeleteRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceResources(instance.name);
@@ -275,6 +304,11 @@ export class ControlRuntime {
             failures.push(error);
         }
         await this.#mcp.stop().catch((error) => failures.push(error));
+        try {
+            this.#comment.close();
+        } catch (error) {
+            failures.push(error);
+        }
         await this.#artifact.stop().catch((error) => failures.push(error));
         await this.#instances
             .stopOwned()

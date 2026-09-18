@@ -7,6 +7,10 @@ import {
 import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
+    ContextMessageReadResult,
+    ContextMessageRecord,
+    ConversationEntry,
+    ConversationListInput,
     ControlConfig,
     JsonValue,
     ToolCallContext,
@@ -17,7 +21,43 @@ import { InstanceConnectionService } from "../../control/instance/registry/Conne
 import type { ToolCallProvenanceStore } from "../../instance/execution/tool/Provenance.js";
 import type { ArtifactService } from "../../control/artifact/Service.js";
 
+export interface McpCommentPort {
+    consumePending(
+        instance: string,
+        ctxId: string,
+        callId: string,
+    ): Promise<ContextMessageReadResult>;
+    failPending(
+        instance: string,
+        ctxId: string,
+        reason: string,
+    ): Promise<ContextMessageRecord[]>;
+    pendingReplyCommentId(
+        instance: string,
+        ctxId: string,
+    ): Promise<string | undefined>;
+}
+
+export interface McpConversationPort {
+    list(
+        instance: string,
+        input?: ConversationListInput,
+    ): Promise<ConversationEntry[]>;
+    recordReport(
+        instance: string,
+        input: {
+            callId: string;
+            createdAt?: string;
+            ctxId: string;
+            replyCommentId?: string;
+            text: string;
+        },
+    ): Promise<void>;
+}
+
 export interface McpInstanceGatewayControlOptions {
+    comment: McpCommentPort;
+    conversation: McpConversationPort;
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
@@ -58,6 +98,8 @@ interface TodoInvalidPolicyState {
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
+    readonly #comment: McpInstanceGatewayControlOptions["comment"];
+    readonly #conversation: McpInstanceGatewayControlOptions["conversation"];
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
@@ -71,6 +113,8 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
+        this.#comment = options.comment;
+        this.#conversation = options.conversation;
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConnections =
@@ -451,9 +495,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     }
 
     async failContextMessages(instance: string, ctxId: string, reason: string) {
-        const service = this.#requireDescriptor(instance).contextMessages;
-        if (service === undefined) return [];
-        return await service.failPending(ctxId, reason);
+        return await this.#comment.failPending(instance, ctxId, reason);
     }
 
     async consumeContextMessages(
@@ -461,16 +503,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         ctxId: string,
         callId: string,
     ) {
-        const service = this.#requireDescriptor(instance).contextMessages;
-        if (service === undefined) {
-            throw createError({
-                code: errorCodes.envelopeInvalid,
-                message:
-                    "Context message service is unavailable for this instance.",
-                retryable: false,
-            });
-        }
-        return await service.consumePending(ctxId, callId);
+        return await this.#comment.consumePending(instance, ctxId, callId);
     }
 
     async readTodo(
@@ -593,12 +626,11 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         const ctxId = requireCtxId(context);
         const key = todoPolicyKey(instance, ctxId);
         await this.#withTodoReportPolicy(key, async () => {
-            const descriptor = this.#requireDescriptor(instance);
             await this.beforeTodoToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
             this.#refillTodoReportBucket(state, this.#now());
             const replyCommentId =
-                await descriptor.contextMessages?.pendingReplyCommentId(ctxId);
+                await this.#comment.pendingReplyCommentId(instance, ctxId);
 
             if (replyCommentId === undefined) {
                 if (state.lastReportMessage === message) {
@@ -617,7 +649,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 }
             }
 
-            await descriptor.conversation.recordReport({
+            await this.#conversation.recordReport(instance, {
                 callId,
                 ctxId,
                 ...(replyCommentId === undefined ? {} : { replyCommentId }),
@@ -642,9 +674,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             this.#todoReportPolicy.set(key, state);
         }
 
-        const entries = await this.#requireDescriptor(
-            instance,
-        ).conversation.list({
+        const entries = await this.#conversation.list(instance, {
             ctxId,
             limit: TODO_REPORT_CONVERSATION_WINDOW,
         });

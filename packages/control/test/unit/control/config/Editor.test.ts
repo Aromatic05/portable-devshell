@@ -496,6 +496,10 @@ test("config editor reconfigures and disables a running instance without replaci
             approvalPolicy: { mode: "ask" },
         },
     });
+    const enabledChanges: boolean[] = [];
+    registry.onChange(() => {
+        enabledChanges.push(registry.get("demo-local")?.enabled === true);
+    });
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.equal(config.instances[0]?.enabled, false);
@@ -518,6 +522,11 @@ test("config editor reconfigures and disables a running instance without replaci
     );
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "disabled");
     assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.deepEqual(enabledChanges, [false]);
+
+    await service.enableInstance({ instanceName: "demo-local" });
+    assert.equal(registry.get("demo-local")?.enabled, true);
+    assert.deepEqual(enabledChanges, [false, true]);
 });
 
 test("generic enabled=false config patch stops the worker and cancels unresolved Workspace waits", async () => {
@@ -948,24 +957,6 @@ test("instance delete terminalizes live state and detaches Context environments 
                 },
             },
             {
-                contextMessages: {
-                    async failAllPending() {
-                        actions.push("comments.failAll");
-                        return [];
-                    },
-                    async failPending() {
-                        return [];
-                    },
-                    async list() {
-                        return [];
-                    },
-                    async queue() {
-                        throw new Error("unused");
-                    },
-                    async consumePending() {
-                        return { callId: "unused", messages: [] };
-                    },
-                },
                 goal: {
                     async continuation() {
                         return {};
@@ -1065,7 +1056,6 @@ test("instance delete terminalizes live state and detaches Context environments 
         "approval.cancel:approval-live",
         "wait.cancel:wait-live",
         "wait.consume:wait-result",
-        "comments.failAll",
         "goals.stopAll",
         "todos.cancelAll",
         "runtime.retire",
@@ -1731,13 +1721,6 @@ function descriptor(
     extra: Record<string, unknown> = {},
 ) {
     return {
-        conversation: {
-            close() {},
-            async list() {
-                return [];
-            },
-            async recordReport() {},
-        },
         enabled: true,
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",

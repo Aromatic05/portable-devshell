@@ -16,8 +16,12 @@ import {
     type ConfigRuntimeChangeSet,
 } from "../../../control/config/editor/Coordinator.js";
 import { ToolCallProvenanceStore } from "../../../instance/execution/tool/Provenance.js";
-import { McpInstanceGatewayControl } from "../../mcp/Gateway.js";
-import { decorateMcpInstanceGatewayArtifact } from "../../mcp/Gateway.js";
+import {
+    decorateMcpInstanceGatewayArtifact,
+    McpInstanceGatewayControl,
+    type McpCommentPort,
+    type McpConversationPort,
+} from "../../mcp/Gateway.js";
 import { InstanceCreateCoordinator } from "../../../control/instance/create/Coordinator.js";
 import { McpRuntimeFactory } from "../../mcp/Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
@@ -26,6 +30,8 @@ import type { ControlRuntimeState } from "../State.js";
 
 export interface ControlRuntimeMcpOptions {
     artifact: ControlRuntimeArtifact;
+    comment: McpCommentPort;
+    conversation: McpConversationPort;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     state: ControlRuntimeState;
@@ -82,6 +88,8 @@ export class ControlRuntimeMcp {
             setConfig: (config) => options.state.setConfig(config),
         });
         this.instanceGateway = new McpInstanceGatewayControl({
+            comment: options.comment,
+            conversation: options.conversation,
             getConfig: () => options.state.requireConfig(),
             instanceRegistry: options.state.instances,
             toolProvenance: this.toolProvenance,

@@ -253,13 +253,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         const todoReadTaskIds: Array<string | undefined> = [];
         const instances = new InstanceRegistry([
             {
-                conversation: {
-                    close() {},
-                    async list() {
-                        return [];
-                    },
-                    async recordReport() {},
-                },
                 enabled: true,
                 goal: {
                     async continuation() {

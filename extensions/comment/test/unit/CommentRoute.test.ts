@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { PrefixRouteContext } from "@portable-devshell/shared";
 
-import { createContextMessageRouteModule } from "../../../../src/instance/context/Route.ts";
+import { createCommentRouteModule } from "../../src/comment/CommentService.ts";
 
 test("contextMessage.queue persists independently of Context lifecycle authority", async () => {
     const calls: string[] = [];
@@ -23,7 +23,7 @@ test("contextMessage.queue persists independently of Context lifecycle authority
             };
         },
     };
-    const module = createContextMessageRouteModule(service);
+    const module = createCommentRouteModule(service);
     const queue = module.operations.find(
         (operation) => operation.name === "queue",
     );

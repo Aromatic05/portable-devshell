@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-    diagnosticHint,
-    composeComments,
-    errorHint,
-    mergeComments,
-} from "../../src/index.ts";
+import { composeComments, mergeComments } from "../../src/comment/Merge.ts";
+import { diagnosticHint, errorHint } from "../../src/hint/Hint.ts";
 
 test("structured advice uses stable codes for deduplication without exposing metadata", () => {
     assert.deepEqual(

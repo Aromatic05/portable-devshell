@@ -520,7 +520,6 @@ export class ConfigEditorCoordinator {
             skipRuntimeRetirement,
         );
         await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
-        this.#instanceRegistry.get(instanceName)?.conversation.close();
         await this.#persistConfig(nextConfig);
         this.#getMcpHost()?.unregisterInstance(instanceName);
         this.#instanceRegistry.delete(instanceName);
@@ -658,9 +657,6 @@ export class ConfigEditorCoordinator {
             }
         }
 
-        await descriptor.contextMessages?.failAllPending(
-            `Instance ${descriptor.name} was deleted before Comment delivery.`,
-        );
         await descriptor.goal.stopAll();
         await descriptor.todo.cancelAll();
         if (!skipRuntimeRetirement) {
@@ -856,6 +852,7 @@ export class ConfigEditorCoordinator {
                 descriptor.mcpEnabled = existing.mcp.enabled;
                 descriptor.mcpPath = existing.mcp.path;
                 descriptor.modelExtensions = [...existing.extensions.model];
+                this.#instanceRegistry.add(descriptor);
             } catch (error) {
                 failures.push(error);
             }
@@ -902,7 +899,6 @@ export class ConfigEditorCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            descriptor.conversation.close();
             this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
@@ -916,6 +912,7 @@ export class ConfigEditorCoordinator {
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
         descriptor.modelExtensions = [...instance.extensions.model];
+        this.#instanceRegistry.add(descriptor);
     }
 
     async #syncMcpEndpoint(instanceName: string): Promise<void> {
@@ -1067,11 +1064,6 @@ async function closeDescriptorResourcesBestEffort(
     descriptor: ReturnType<InstanceFactory["map"]>,
 ): Promise<void> {
     const failures: unknown[] = [];
-    try {
-        descriptor.conversation.close();
-    } catch (error) {
-        failures.push(error);
-    }
     const close = (descriptor.worker as { close?: () => Promise<void> }).close;
     if (close !== undefined) {
         await close

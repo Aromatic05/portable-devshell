@@ -13,8 +13,8 @@ import {
     type PrefixRouteSnapshot,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
-import { CommentService } from "../../../../control/src/instance/context/Service.ts";
-import { ConversationPreferenceStore } from "../../../../control/src/control/config/preference/Store.ts";
+import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
+import { ConversationPreferenceStore } from "../../../../../extensions/comment/src/conversation/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
 import { createTuiClients } from "../../../src/app/control/Client.ts";
 import { TuiRuntime } from "../../../src/app/Runtime.js";

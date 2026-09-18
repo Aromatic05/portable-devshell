@@ -31,6 +31,8 @@ import type {
 } from "@modelcontextprotocol/client";
 import {
     asInstanceName,
+    type ContextMessageReadResult,
+    type ContextMessageRecord,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
@@ -41,10 +43,62 @@ import {
 } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
-import { CommentService } from "../../../control/src/instance/context/Service.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
+
+class TestContextMessages {
+    readonly #instance: string;
+    readonly #records: ContextMessageRecord[] = [];
+    #nextId = 1;
+
+    constructor(instance: string) {
+        this.#instance = instance;
+    }
+
+    async queue(input: { ctxId: string; text: string }): Promise<ContextMessageRecord> {
+        const record: ContextMessageRecord = {
+            createdAt: new Date(1_700_000_000_000 + this.#nextId).toISOString(),
+            ctxId: input.ctxId,
+            id: `comment-${this.#nextId++}`,
+            instance: this.#instance,
+            status: "sent",
+            text: input.text,
+        };
+        this.#records.push(record);
+        return { ...record };
+    }
+
+    async list(ctxId: string): Promise<ContextMessageRecord[]> {
+        return this.#records
+            .filter((record) => record.ctxId === ctxId)
+            .map((record) => ({ ...record }));
+    }
+
+    async consumePending(ctxId: string, callId: string): Promise<ContextMessageReadResult> {
+        const deliveredAt = new Date().toISOString();
+        const delivered = this.#records.filter(
+            (record) =>
+                record.ctxId === ctxId &&
+                (record.status === "pending" || record.status === "sent"),
+        );
+        for (const record of delivered) {
+            record.callId = callId;
+            record.deliveredAt = deliveredAt;
+            record.status = "delivered";
+        }
+        const comment = delivered.map((record) => record.text).join("\n\n");
+        return {
+            callId,
+            ...(comment.length === 0 ? {} : { comment }),
+            messages: delivered.map(({ createdAt, id, text }) => ({
+                createdAt,
+                id,
+                text,
+            })),
+        };
+    }
+}
 
 test(
     "a real MCP SDK client drives a none-auth frozen worker through initialize, tools/list and tools/call",
@@ -109,11 +163,7 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async () => {
         const contextRoot = await createTestTempDirectory("real-comment-state");
-        const messages = new CommentService({
-            appendEvent: async () => undefined,
-            filePath: join(contextRoot, "context-messages.json"),
-            instanceName: "real-comment",
-        });
+        const messages = new TestContextMessages("real-comment");
         const gateway = {
             async appendMcpToolCalled() {},
             assertReady() {},

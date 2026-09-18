@@ -5,9 +5,12 @@ import type {
     ContextMessageRecord,
     InstanceEventType,
     JsonValue,
+    PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 import {
     CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+    createError,
+    errorCodes,
     parseContextMessageDirective,
 } from "@portable-devshell/shared";
 import { randomUUID } from "node:crypto";
@@ -291,4 +294,92 @@ function eventData(record: ContextMessageRecord): Record<string, JsonValue> {
         status: record.status,
         text: record.text,
     };
+}
+
+export function createCommentRouteModule(
+    service: Pick<CommentService, "list" | "queue">,
+): PrefixRouteModuleDefinition {
+    return {
+        name: "contextMessage",
+        operations: [
+            {
+                name: "list",
+                handle: async (request) =>
+                    (await service.list(
+                        readCommentListInput(request.payload ?? {}),
+                    )) as unknown as JsonValue,
+            },
+            {
+                name: "queue",
+                handle: async (request) =>
+                    (await service.queue(
+                        readCommentQueueInput(request.payload ?? {}),
+                    )) as unknown as JsonValue,
+            },
+        ],
+    };
+}
+
+function readCommentQueueInput(value: JsonValue): ContextMessageQueueInput {
+    if (
+        !isRecord(value) ||
+        typeof value.ctxId !== "string" ||
+        typeof value.text !== "string" ||
+        Object.keys(value).some((key) => key !== "ctxId" && key !== "text")
+    ) {
+        throw invalidRouteInput(
+            "contextMessage.queue requires only ctxId and text strings.",
+        );
+    }
+    return { ctxId: value.ctxId, text: value.text };
+}
+
+function readCommentListInput(value: JsonValue): ContextMessageListInput {
+    if (
+        !isRecord(value) ||
+        Object.keys(value).some(
+            (key) => !["before", "ctxId", "limit", "maxBytes"].includes(key),
+        )
+    ) {
+        throw invalidRouteInput(
+            "contextMessage.list accepts only before, ctxId, limit, and maxBytes.",
+        );
+    }
+    if (value.before !== undefined && typeof value.before !== "string")
+        throw invalidRouteInput("contextMessage.list before must be a string.");
+    if (value.ctxId !== undefined && typeof value.ctxId !== "string")
+        throw invalidRouteInput("contextMessage.list ctxId must be a string.");
+    if (
+        value.limit !== undefined &&
+        (typeof value.limit !== "number" || !Number.isSafeInteger(value.limit))
+    )
+        throw invalidRouteInput("contextMessage.list limit must be an integer.");
+    if (
+        value.maxBytes !== undefined &&
+        (typeof value.maxBytes !== "number" ||
+            !Number.isSafeInteger(value.maxBytes))
+    )
+        throw invalidRouteInput("contextMessage.list maxBytes must be an integer.");
+    return {
+        ...(value.before === undefined ? {} : { before: value.before }),
+        ...(value.ctxId === undefined ? {} : { ctxId: value.ctxId }),
+        ...(value.limit === undefined
+            ? {}
+            : { limit: Math.min(Math.max(value.limit, 1), 1_000) }),
+        ...(value.maxBytes === undefined
+            ? {}
+            : { maxBytes: Math.min(Math.max(value.maxBytes, 1), 1024 * 1024) }),
+    };
+}
+
+function invalidRouteInput(message: string): Error {
+    return createError({
+        code: errorCodes.targetInvalid,
+        message,
+        retryable: false,
+    });
+}
+
+function isRecord(value: JsonValue): value is Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -764,13 +764,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
     } {
         const instances = new InstanceRegistry([
             {
-                conversation: {
-                    close() {},
-                    async list() {
-                        return options.conversationEntries?.() ?? [];
-                    },
-                    async recordReport() {},
-                },
                 enabled: true,
                 goal: {
                     async continuation() {
@@ -837,6 +830,30 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         let oauthApprovalReads = 0;
         let restartCount = 0;
         const routes = new ControlRouteComposition({
+            comment:
+                options.conversationEntries === undefined
+                    ? undefined
+                    : {
+                          control() {
+                              return [];
+                          },
+                          instance(instance: string) {
+                              return instance !== "alpha"
+                                  ? []
+                                  : [
+                                        {
+                                            name: "conversation",
+                                            operations: [
+                                                {
+                                                    name: "list",
+                                                    handle: async () =>
+                                                        options.conversationEntries!() as unknown as JsonValue,
+                                                },
+                                            ],
+                                        },
+                                    ];
+                          },
+                      },
             artifact: {
                 listShares() {
                     return [];
