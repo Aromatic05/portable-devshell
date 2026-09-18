@@ -300,53 +300,10 @@ export class McpEndpointDispatch {
                       this.#instanceName,
                   )
                 : { input, instance: this.#instanceName };
-        if (!appOnlyInteraction) {
-            const environment = contextEnvironment(
-                resolvedContext.record,
-                routed.instance,
-            );
-            if (selected.owner === "todo") {
-                await this.#gateway?.beforeTodoToolCall?.(
-                    routed.instance,
-                    toolName,
-                    {
-                        ctxId: resolvedContext.record.ctxId,
-                        requestId: requestContext.requestId,
-                        source: "mcp",
-                        ...(environment?.workspace === undefined
-                            ? {}
-                            : { workspace: environment.workspace }),
-                    },
-                );
-            }
-            if (touchContext) {
-                resolvedContext = {
-                    ...resolvedContext,
-                    record:
-                        resolvedContext.record.status === "expired"
-                            ? await this.#contextRegistry.renewForPrincipal(
-                                  resolvedContext.record.ctxId,
-                                  {
-                                      principal: requestContext.principal,
-                                  },
-                              )
-                            : await this.#contextRegistry.validateAndTouch(
-                                  resolvedContext.record.ctxId,
-                                  {
-                                      principal: requestContext.principal,
-                                  },
-                              ),
-                };
-            }
-        }
-        await this.restoreTmuxWaits(this.#instanceName);
         const context = await this.#createToolContext(
-            toolName,
             resolvedContext.record,
             requestContext,
             routed.instance,
-            selected.owner === "worker",
-            !appOnlyInteraction,
             signal,
         );
         const goalActivity =
@@ -360,25 +317,86 @@ export class McpEndpointDispatch {
                   )
                 : undefined;
         let executionEpoch: number | undefined;
-        if (!appOnlyInteraction && context.ctxId !== undefined) {
-            executionEpoch = await this.#reentry.observeExecutionStart(
-                context.ctxId,
-            );
-            if (goalActivity !== undefined) {
-                await this.#contextRegistry
-                    .observeAutomaticReentryActivity(
-                        context.ctxId,
-                        this.#instanceName,
-                        goalActivity,
-                    )
-                    .catch(() => undefined);
-                await this.#gateway?.touchGoal?.(
-                    this.#instanceName,
-                    context.ctxId,
-                    goalActivity,
-                );
-            }
-        }
+        let executionObserved = false;
+        const afterReview = appOnlyInteraction
+            ? undefined
+            : async (): Promise<void> => {
+                  if (selected.owner === "worker") {
+                      this.#assertToolTargetReady(routed.instance);
+                  }
+                  if (touchContext) {
+                      resolvedContext = {
+                          ...resolvedContext,
+                          record:
+                              resolvedContext.record.status === "expired"
+                                  ? await this.#contextRegistry.renewForPrincipal(
+                                        resolvedContext.record.ctxId,
+                                        {
+                                            principal: requestContext.principal,
+                                        },
+                                    )
+                                  : await this.#contextRegistry.validateAndTouch(
+                                        resolvedContext.record.ctxId,
+                                        {
+                                            principal: requestContext.principal,
+                                        },
+                                    ),
+                      };
+                  }
+                  const environment = contextEnvironment(
+                      resolvedContext.record,
+                      routed.instance,
+                  );
+                  if (selected.owner === "todo") {
+                      await this.#gateway?.beforeTodoToolCall?.(
+                          routed.instance,
+                          toolName,
+                          {
+                              ctxId: resolvedContext.record.ctxId,
+                              requestId: requestContext.requestId,
+                              source: "mcp",
+                              ...(environment?.workspace === undefined
+                                  ? {}
+                                  : { workspace: environment.workspace }),
+                          },
+                      );
+                  }
+                  await this.restoreTmuxWaits(this.#instanceName);
+                  if (selected.owner === "worker") {
+                      const prepared = await this.#ensureContextWorkerState(
+                          resolvedContext.record,
+                          routed.instance,
+                      );
+                      await this.#touchAlerts(
+                          routed.instance,
+                          prepared.workspace!,
+                      );
+                  }
+                  await this.#appendMcpToolCalled(routed.instance, toolName, {
+                      ctxId: context.ctxId,
+                      requestId: context.requestId,
+                  });
+                  if (context.ctxId !== undefined) {
+                      executionEpoch = await this.#reentry.observeExecutionStart(
+                          context.ctxId,
+                      );
+                      executionObserved = true;
+                      if (goalActivity !== undefined) {
+                          await this.#contextRegistry
+                              .observeAutomaticReentryActivity(
+                                  context.ctxId,
+                                  this.#instanceName,
+                                  goalActivity,
+                              )
+                              .catch(() => undefined);
+                          await this.#gateway?.touchGoal?.(
+                              this.#instanceName,
+                              context.ctxId,
+                              goalActivity,
+                          );
+                      }
+                  }
+              };
 
         const touchGoalAfter =
             goalActivity !== undefined && context.ctxId !== undefined;
@@ -446,6 +464,7 @@ export class McpEndpointDispatch {
                     recordProvenance,
                     signal,
                     onFeedback,
+                    afterReview,
                 );
             }
 
@@ -466,8 +485,9 @@ export class McpEndpointDispatch {
                     ownerWorkspace,
                     recordProvenance,
                     signal,
-                    executionEpoch,
+                    () => executionEpoch,
                     onFeedback,
+                    afterReview,
                 );
             }
 
@@ -488,8 +508,9 @@ export class McpEndpointDispatch {
                     ownerWorkspace,
                     recordProvenance,
                     signal,
-                    executionEpoch,
+                    () => executionEpoch,
                     onFeedback,
+                    afterReview,
                 );
             }
 
@@ -529,6 +550,7 @@ export class McpEndpointDispatch {
                         : withComments;
                 },
                 onFeedback,
+                afterReview,
             );
         } catch (error) {
             if (
@@ -546,13 +568,13 @@ export class McpEndpointDispatch {
             throw error;
         } finally {
             if (
-                !appOnlyInteraction &&
+                executionObserved &&
                 context.ctxId !== undefined &&
                 signal?.aborted !== true
             ) {
                 await this.#reentry.observeExecutionActivity(context.ctxId);
             }
-            if (touchGoalAfter) {
+            if (executionObserved && touchGoalAfter) {
                 await this.#gateway
                     ?.touchGoal?.(
                         this.#instanceName,
@@ -571,8 +593,9 @@ export class McpEndpointDispatch {
         ownerWorkspace: string | undefined,
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
-        executionEpoch?: number,
+        executionEpoch?: () => number | undefined,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
@@ -596,7 +619,7 @@ export class McpEndpointDispatch {
                 observed,
                 startedAt,
                 signal,
-                executionEpoch,
+                executionEpoch?.(),
             );
         };
         return instance === this.#instanceName
@@ -610,6 +633,7 @@ export class McpEndpointDispatch {
                   undefined,
                   "host",
                   onFeedback,
+                  afterReview,
               )
             : await gateway.callTool(
                   instance,
@@ -620,6 +644,7 @@ export class McpEndpointDispatch {
                   transformResult,
                   invocationInput,
                   onFeedback,
+                  afterReview,
               );
     }
 
@@ -830,8 +855,9 @@ export class McpEndpointDispatch {
         ownerWorkspace: string | undefined,
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
-        executionEpoch?: number,
+        executionEpoch?: () => number | undefined,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
@@ -854,7 +880,7 @@ export class McpEndpointDispatch {
                 started,
                 startedAt,
                 signal,
-                executionEpoch,
+                executionEpoch?.(),
             );
         };
         return instance === this.#instanceName
@@ -868,6 +894,7 @@ export class McpEndpointDispatch {
                   undefined,
                   "host",
                   onFeedback,
+                  afterReview,
               )
             : await gateway.callTool(
                   instance,
@@ -878,6 +905,7 @@ export class McpEndpointDispatch {
                   transformResult,
                   invocationInput,
                   onFeedback,
+                  afterReview,
               );
     }
 
@@ -1660,12 +1688,9 @@ export class McpEndpointDispatch {
     }
 
     async #createToolContext(
-        toolName: string,
         record: McpContextRecord,
         requestContext: McpEndpointCallContext,
         instance: string,
-        prepareWorkerState: boolean,
-        recordMcpCall: boolean,
         signal?: AbortSignal,
     ): Promise<ToolCallContext> {
         if (instance !== this.#instanceName) {
@@ -1674,9 +1699,7 @@ export class McpEndpointDispatch {
                 instance,
             );
         }
-        const environment = prepareWorkerState
-            ? await this.#ensureContextWorkerState(record, instance)
-            : contextEnvironment(record, instance);
+        const environment = contextEnvironment(record, instance);
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
@@ -1685,17 +1708,20 @@ export class McpEndpointDispatch {
                 ? {}
                 : { workspace: environment.workspace }),
         };
-        if (prepareWorkerState) {
-            await this.#touchAlerts(instance, environment!.workspace!);
-        }
-        if (recordMcpCall) {
-            await this.#appendMcpToolCalled(instance, toolName, {
-                ctxId: context.ctxId,
-                requestId: context.requestId,
-            });
-        }
         throwIfMcpEndpointAborted(signal);
         return context;
+    }
+
+    #assertToolTargetReady(instance: string): void {
+        if (instance === this.#instanceName) {
+            assertMcpEndpointReady(this.#worker, this.#instanceName);
+            return;
+        }
+        const gateway = this.#gateway;
+        if (gateway === undefined) {
+            throw new Error(`Instance gateway is unavailable for ${instance}.`);
+        }
+        gateway.assertReady(instance);
     }
 
     async #resolveAppOnlyContext(
@@ -1836,9 +1862,11 @@ export class McpEndpointDispatch {
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
         const structuredResult = await callMcpEndpointToolOperation({
+            afterReview,
             context,
             gateway: this.#gateway,
             input,

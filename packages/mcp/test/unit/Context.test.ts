@@ -1559,13 +1559,29 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 input: JsonValue,
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
+                _signal?: AbortSignal,
+                _onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
+                await afterReview?.("call-test");
                 return await operation("call-test", input);
             },
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},
-            async callTool(toolName, input, context) {
+            async callTool(
+                toolName,
+                input,
+                context,
+                _signal,
+                _transformResult,
+                _invocationInput,
+                _onProgress,
+                _recording,
+                _onFeedback,
+                afterReview,
+            ) {
+                await afterReview?.("call-test");
                 calls.push({ context, input, toolName });
                 return { ok: true };
             },

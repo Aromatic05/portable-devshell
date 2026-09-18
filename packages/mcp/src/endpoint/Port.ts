@@ -31,6 +31,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
@@ -51,6 +52,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         onProgress?: (progress: JsonValue) => void,
         recording?: "caller" | "host",
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue>;
     invokeToolInternal?(
         toolName: string,
@@ -131,6 +133,7 @@ export interface McpInstanceGateway {
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<T>;
     callTool(
         instance: string,
@@ -144,6 +147,7 @@ export interface McpInstanceGateway {
         ) => Promise<JsonValue>,
         invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue>;
     invokeToolInternal?(
         instance: string,

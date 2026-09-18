@@ -38,6 +38,7 @@ export class McpEndpointHandlerWorker {
             callId: string,
         ) => Promise<JsonValue>,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(
             input,
@@ -45,12 +46,6 @@ export class McpEndpointHandlerWorker {
             this.options.instanceName,
         );
         if (routed.instance === this.options.instanceName) {
-            await waitForMcpEndpointReady(
-                this.options.worker,
-                this.options.instanceName,
-                signal,
-                { timeoutMs: this.options.readyWaitMs },
-            );
             if (selected === undefined) {
                 throw mcpEndpointToolNotExposed(
                     toolName,
@@ -68,6 +63,15 @@ export class McpEndpointHandlerWorker {
                 undefined,
                 "host",
                 onFeedback,
+                async (callId) => {
+                    await waitForMcpEndpointReady(
+                        this.options.worker,
+                        this.options.instanceName,
+                        signal,
+                        { timeoutMs: this.options.readyWaitMs },
+                    );
+                    await afterReview?.(callId);
+                },
             );
         }
 
@@ -75,9 +79,6 @@ export class McpEndpointHandlerWorker {
             this.options.gateway,
             this.options.instanceName,
         );
-        await waitForMcpGatewayReady(gateway, routed.instance, signal, {
-            timeoutMs: this.options.readyWaitMs,
-        });
         const targetTool = gateway
             .listTools(routed.instance)
             .find((tool) => tool.name === toolName);
@@ -94,6 +95,12 @@ export class McpEndpointHandlerWorker {
             transformResult,
             undefined,
             onFeedback,
+            async (callId) => {
+                await waitForMcpGatewayReady(gateway, routed.instance, signal, {
+                    timeoutMs: this.options.readyWaitMs,
+                });
+                await afterReview?.(callId);
+            },
         );
     }
 }

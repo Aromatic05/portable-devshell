@@ -140,7 +140,6 @@ test("ToolCallExecution reviews the canonical outer call before scheduler admiss
         },
     );
     assert.deepEqual(harness.events, [
-        "ready",
         "audit.requested",
         "review",
         "audit.denied",
@@ -232,10 +231,10 @@ test("ToolCallExecution turns review approve into required Core Approval", async
         true,
     );
     assert.deepEqual(harness.events.slice(0, 6), [
-        "ready",
         "audit.requested",
         "review",
         "reserve",
+        "ready",
         "audit.queued",
         "approval",
     ]);

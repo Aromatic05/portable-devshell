@@ -109,8 +109,12 @@ function createWorker(
             input: JsonValue,
             context: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
+            _signal?: AbortSignal,
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             audited.push({ context, toolName });
+            await afterReview?.("call-test");
             const result = await operation("call-test", input);
             auditResults.push({ result, toolName });
             if (options.failAuditAfterOperation === true)
@@ -138,7 +142,18 @@ function createWorker(
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
+            _signal?: AbortSignal,
+            _transformResult?: (
+                result: JsonValue,
+                callId: string,
+            ) => Promise<JsonValue>,
+            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
+            await afterReview?.("call-test");
             calls.push({ context, input, toolName });
             return { ok: true, toolName };
         },
@@ -758,8 +773,14 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 callId: string,
             ) => Promise<JsonValue>,
             invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
+            const callId = `call-tmux-run-${runCalls + 1}`;
+            await afterReview?.(callId);
             assert.deepEqual(input, {
                 command: "sleep 10",
                 timeout: 660_000,
@@ -782,7 +803,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             } as JsonValue;
             return transformResult === undefined
                 ? result
-                : await transformResult(result, `call-tmux-run-${runCalls}`);
+                : await transformResult(result, callId);
         },
     };
     type Wait = {
@@ -1249,8 +1270,13 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
                 callId: string,
             ) => Promise<JsonValue>,
             invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
+            await afterReview?.("call-tmux-read");
             logicalReadCalls += 1;
             const result = await readTmux(
                 invocationInput === undefined

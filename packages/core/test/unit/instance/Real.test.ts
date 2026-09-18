@@ -1031,25 +1031,26 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         const records = await instance.readToolCalls();
         assert.deepEqual(
             records.map((record) => record.status),
-            ["completed", "completed", "failed"],
+            ["failed", "completed", "completed", "failed"],
         );
-        assert.equal(records[0]?.source, "cli");
-        assert.equal(records[0]?.inputSummary, '{"command":"pwd"}');
-        assert.deepEqual(records[0]?.output, { exitCode: 0 });
-        assert.equal(records[0]?.stdoutBytes, 240);
-        assert.equal(records[0]?.stderrBytes, 0);
-        assert.equal(records[0]?.termination, undefined);
-        assert.equal(records[2]?.error, "tool.invalidArguments");
+        assert.equal(records[0]?.error, errorCodes.coreInstanceNotReady);
+        assert.equal(records[1]?.source, "cli");
+        assert.equal(records[1]?.inputSummary, '{"command":"pwd"}');
+        assert.deepEqual(records[1]?.output, { exitCode: 0 });
+        assert.equal(records[1]?.stdoutBytes, 240);
+        assert.equal(records[1]?.stderrBytes, 0);
+        assert.equal(records[1]?.termination, undefined);
+        assert.equal(records[3]?.error, "tool.invalidArguments");
         assert.deepEqual(
             (
                 await instance.readToolCalls({
-                    after: records[1]?.callId,
+                    after: records[2]?.callId,
                     limit: 1,
                     status: "failed",
                     toolName: "bash_run",
                 })
             ).map((record) => record.callId),
-            [records[2]?.callId],
+            [records[3]?.callId],
         );
 
         const logs = await instance.readLogs();
@@ -1058,7 +1059,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.equal(logs[0]?.message, stdout);
         assert.equal(logs[1]?.stream, "stdout");
         assert.equal(logs[1]?.message, "ls output\n");
-        assert.deepEqual(toolCallOutput(records[0]!, logs), {
+        assert.deepEqual(toolCallOutput(records[1]!, logs), {
             exitCode: 0,
             stdout,
         });
@@ -1084,12 +1085,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
                 .filter((event) => jsonRecord(event.data)?.callId === callId)
                 .map((event) => event.type);
 
-        assert.deepEqual(eventTypesForCall(records[0]?.callId), [
-            "toolCall.queued",
-            "toolCall.running",
-            "log.appended",
-            "toolCall.completed",
-        ]);
+        assert.deepEqual(eventTypesForCall(records[0]?.callId), []);
         assert.deepEqual(eventTypesForCall(records[1]?.callId), [
             "toolCall.queued",
             "toolCall.running",
@@ -1099,32 +1095,38 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         assert.deepEqual(eventTypesForCall(records[2]?.callId), [
             "toolCall.queued",
             "toolCall.running",
+            "log.appended",
+            "toolCall.completed",
+        ]);
+        assert.deepEqual(eventTypesForCall(records[3]?.callId), [
+            "toolCall.queued",
+            "toolCall.running",
             "toolCall.failed",
         ]);
 
         const firstQueued = replay.events.find(
             (event) =>
                 event.type === "toolCall.queued" &&
-                jsonRecord(event.data)?.callId === records[0]?.callId,
+                jsonRecord(event.data)?.callId === records[1]?.callId,
         );
         const firstRunning = replay.events.find(
             (event) =>
                 event.type === "toolCall.running" &&
-                jsonRecord(event.data)?.callId === records[0]?.callId,
+                jsonRecord(event.data)?.callId === records[1]?.callId,
         );
         const failedEvent = replay.events.find(
             (event) =>
                 event.type === "toolCall.failed" &&
-                jsonRecord(event.data)?.callId === records[2]?.callId,
+                jsonRecord(event.data)?.callId === records[3]?.callId,
         );
         const completedEvent = replay.events.find(
             (event) =>
                 event.type === "toolCall.completed" &&
-                jsonRecord(event.data)?.callId === records[0]?.callId,
+                jsonRecord(event.data)?.callId === records[1]?.callId,
         );
 
         assert.deepEqual(firstQueued?.data, {
-            callId: records[0]?.callId,
+            callId: records[1]?.callId,
             inputSummary: '{"command":"pwd"}',
             queuedAt: jsonRecord(firstQueued?.data)?.queuedAt,
             source: "cli",
@@ -1133,7 +1135,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             toolName: "bash_run",
         });
         assert.deepEqual(firstRunning?.data, {
-            callId: records[0]?.callId,
+            callId: records[1]?.callId,
             inputSummary: '{"command":"pwd"}',
             source: "cli",
             startedAt: jsonRecord(firstQueued?.data)?.startedAt,
@@ -1141,9 +1143,9 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             toolName: "bash_run",
         });
         assert.equal(jsonRecord(completedEvent?.data)?.output, undefined);
-        assert.deepEqual(records[0]?.output, { exitCode: 0 });
+        assert.deepEqual(records[1]?.output, { exitCode: 0 });
         assert.deepEqual(failedEvent?.data, {
-            callId: records[2]?.callId,
+            callId: records[3]?.callId,
             completedAt: jsonRecord(failedEvent?.data)?.completedAt,
             errorCode: "tool.invalidArguments",
             inputSummary: '{"bad":true}',

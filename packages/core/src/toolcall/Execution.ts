@@ -89,8 +89,8 @@ export class ToolCallExecution {
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
-        this.#assertReady();
         return await this.#call(
             toolName,
             input,
@@ -101,6 +101,10 @@ export class ToolCallExecution {
             onProgress,
             recording,
             onFeedback,
+            async (callId) => {
+                await afterReview?.(callId);
+                this.#assertReady();
+            },
             async (innerInput, callId, boundaryProgress, executionSignal) =>
                 await this.#toolInvoker.invoke(
                     toolName,
@@ -119,6 +123,7 @@ export class ToolCallExecution {
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
         onFeedback?: (feedback: readonly string[]) => void,
+        afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<T> {
         return (await this.#call(
             toolName,
@@ -130,6 +135,7 @@ export class ToolCallExecution {
             undefined,
             "host",
             onFeedback,
+            afterReview,
             async (innerInput, callId) => await operation(callId, innerInput),
         )) as T;
     }
@@ -148,6 +154,7 @@ export class ToolCallExecution {
         onProgress: ((progress: JsonValue) => void) | undefined,
         recording: "caller" | "host",
         onFeedback: ((feedback: readonly string[]) => void) | undefined,
+        afterReview: ((callId: string) => Promise<void> | void) | undefined,
         execute: (
             input: JsonValue,
             callId: string,
@@ -241,11 +248,19 @@ export class ToolCallExecution {
                     },
                     signal,
                 );
-                if (hostRecorded) await this.#audit.queued(scope);
             } catch (error) {
                 if (hostRecorded) await this.#audit.failActive(scope, error);
                 throw normalizeToolSchedulerError(error);
             }
+
+            try {
+                await afterReview?.(scope.callId);
+            } catch (error) {
+                reservation.release();
+                if (hostRecorded) await this.#audit.failActive(scope, error);
+                throw error;
+            }
+            if (hostRecorded) await this.#audit.queued(scope);
 
             let approvalState: Awaited<
                 ReturnType<ToolCallApproval["prepare"]>

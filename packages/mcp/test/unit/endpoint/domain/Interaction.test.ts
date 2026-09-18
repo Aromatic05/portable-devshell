@@ -214,8 +214,12 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 input: JsonValue,
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
+                _signal?: AbortSignal,
+                _onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 audited.push({ instance, toolName });
+                await afterReview?.(`audit-${toolName}`);
                 return await operation(`audit-${toolName}`, input);
             },
             async consumeContextMessages(
@@ -376,7 +380,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 input: JsonValue,
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
+                _signal?: AbortSignal,
+                _onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
+                await afterReview?.("call-test");
                 return await operation("call-test", input);
             },
             async callTool(
@@ -388,10 +396,16 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                     result: JsonValue,
                     callId: string,
                 ) => Promise<JsonValue>,
+                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+                _onProgress?: (progress: JsonValue) => void,
+                _recording?: "caller" | "host",
+                _onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<JsonValue> {
                 if (worker.fail) throw new Error("worker failed");
-                const result = { exitCode: 0, stderr: "", stdout: "ok" };
                 const callId = `worker-call-${++callSequence}`;
+                await afterReview?.(callId);
+                const result = { exitCode: 0, stderr: "", stdout: "ok" };
                 return transformResult === undefined
                     ? result
                     : await transformResult(result, callId);

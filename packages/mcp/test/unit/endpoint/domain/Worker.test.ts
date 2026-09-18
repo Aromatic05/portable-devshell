@@ -295,6 +295,101 @@ test("environment tools cross the ToolCall operation boundary before side effect
     );
 });
 
+test("ordinary MCP tools cross inbound Review before mutable Context and Todo preparation", async () => {
+    let now = Date.parse("2026-09-18T00:00:00.000Z");
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-review-admission",
+        now: () => now,
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    const boundaryCalls: string[] = [];
+    let appendCalls = 0;
+    let prepareCalls = 0;
+    let todoGateCalls = 0;
+    let touchAlertCalls = 0;
+    const worker = {
+        ...createWorker(),
+        async appendMcpToolCalled() {
+            appendCalls += 1;
+        },
+        async callTool(toolName: string) {
+            boundaryCalls.push(toolName);
+            throw new Error("boundary rejected");
+        },
+        async callToolOperation<T extends JsonValue>(toolName: string): Promise<T> {
+            boundaryCalls.push(toolName);
+            throw new Error("boundary rejected");
+        },
+        async prepareWorkspace(workspace: string) {
+            prepareCalls += 1;
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: workspace,
+                projectMemoryPresent: true,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+        async touchAlerts() {
+            touchAlertCalls += 1;
+        },
+    };
+    const gateway = createGateway({
+        async beforeTodoToolCall() {
+            todoGateCalls += 1;
+        },
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry,
+        gateway,
+        instanceName: "main-pc",
+        worker,
+    });
+    const beforeContext = await registry.lookup(created.ctxId, {
+        principal: "local",
+    });
+    const beforeExecution = await registry.readAutomaticReentry(
+        created.ctxId,
+        "main-pc",
+    );
+    now += 1_000;
+
+    await assert.rejects(
+        endpoint.callTool(
+            "bash_run",
+            { command: "pwd", ctxId: created.ctxId },
+            context,
+        ),
+        /boundary rejected/u,
+    );
+    await assert.rejects(
+        endpoint.callTool("todo_read", { ctxId: created.ctxId }, context),
+        /boundary rejected/u,
+    );
+
+    const afterContext = await registry.lookup(created.ctxId, {
+        principal: "local",
+    });
+    const afterExecution = await registry.readAutomaticReentry(
+        created.ctxId,
+        "main-pc",
+    );
+    assert.deepEqual(boundaryCalls, ["bash_run", "todo_read"]);
+    assert.equal(appendCalls, 0);
+    assert.equal(prepareCalls, 0);
+    assert.equal(todoGateCalls, 0);
+    assert.equal(touchAlertCalls, 0);
+    assert.equal(afterContext.lastAccessedAt, beforeContext.lastAccessedAt);
+    assert.equal(afterContext.expiresAt, beforeContext.expiresAt);
+    assert.equal(afterExecution.executionEpoch, beforeExecution.executionEpoch);
+    assert.equal(afterExecution.executionActive, beforeExecution.executionActive);
+    assert.equal(afterExecution.executionLeaseUntil, beforeExecution.executionLeaseUntil);
+});
+
 test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-environ-remote",
@@ -770,8 +865,9 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
     ]);
 });
 
-test("remote worker calls check target readiness before tool exposure", async () => {
+test("remote worker calls may inspect tool exposure before post-Review readiness but never execute while not ready", async () => {
     let listToolsCalled = false;
+    let remoteCalled = false;
     const notReady = Object.assign(new Error("not ready"), {
         code: "core.instanceNotReady",
         details: { instance: "remote-server" },
@@ -784,6 +880,10 @@ test("remote worker calls check target readiness before tool exposure", async ()
         listTools() {
             listToolsCalled = true;
             return [bashTool];
+        },
+        async callTool() {
+            remoteCalled = true;
+            return { ok: true };
         },
     });
     const endpoint = createManagedEndpoint(createWorker(), gateway, {
@@ -809,7 +909,8 @@ test("remote worker calls check target readiness before tool exposure", async ()
             return true;
         },
     );
-    assert.equal(listToolsCalled, false);
+    assert.equal(listToolsCalled, true);
+    assert.equal(remoteCalled, false);
 });
 
 test("worker tools missing from the endpoint catalog cannot be recovered from a remote instance", async () => {
@@ -944,7 +1045,11 @@ function createWorker(
             input: JsonValue,
             _context: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
+            _signal?: AbortSignal,
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
+            await afterReview?.("call-test");
             return await operation("call-test", input);
         },
         async appendMcpSessionClosed() {},
@@ -954,7 +1059,18 @@ function createWorker(
             toolName: string,
             input: JsonValue,
             callContext: ToolCallContext,
+            _signal?: AbortSignal,
+            _transformResult?: (
+                result: JsonValue,
+                callId: string,
+            ) => Promise<JsonValue>,
+            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+            _onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ) {
+            await afterReview?.("call-test");
             return await (options.callTool?.(toolName, input, callContext) ??
                 Promise.resolve({ ok: true }));
         },
@@ -1016,6 +1132,8 @@ function createGateway(
             callContext: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
             signal?: AbortSignal,
+            onFeedback?: (feedback: readonly string[]) => void,
+            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
                 return await overrides.callToolOperation(
@@ -1025,8 +1143,11 @@ function createGateway(
                     callContext,
                     operation,
                     signal,
+                    onFeedback,
+                    afterReview,
                 );
             }
+            await afterReview?.("call-test");
             return await operation("call-test", input);
         },
         async callTool(
@@ -1038,7 +1159,9 @@ function createGateway(
             transformResult,
             invocationInput,
             onFeedback,
+            afterReview,
         ) {
+            await afterReview?.("call-test");
             const result =
                 overrides.callTool === undefined
                     ? { instance, toolName }
@@ -1051,6 +1174,7 @@ function createGateway(
                           transformResult,
                           invocationInput,
                           onFeedback,
+                          afterReview,
                       );
             return transformResult === undefined
                 ? result

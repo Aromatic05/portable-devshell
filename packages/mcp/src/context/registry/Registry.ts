@@ -212,15 +212,13 @@ export class McpContextRegistry {
             if (matches.length !== 1) throw invalidExternalBinding();
             const record = matches[0]!;
             const now = this.#now();
+            const snapshot = cloneRecord(record);
             if (
-                record.status === "active" &&
-                Date.parse(record.expiresAt) <= now
-            ) {
-                await this.#mutateAndPersist(() => {
-                    record.status = "expired";
-                });
-            }
-            return cloneRecord(record);
+                snapshot.status === "active" &&
+                Date.parse(snapshot.expiresAt) <= now
+            )
+                snapshot.status = "expired";
+            return snapshot;
         });
     }
 
@@ -270,16 +268,13 @@ export class McpContextRegistry {
             ) {
                 throw invalidContext(ctxId);
             }
-            const now = this.#now();
+            const snapshot = cloneRecord(record);
             if (
-                record.status === "active" &&
-                Date.parse(record.expiresAt) <= now
-            ) {
-                await this.#mutateAndPersist(() => {
-                    record.status = "expired";
-                });
-            }
-            return cloneRecord(record);
+                snapshot.status === "active" &&
+                Date.parse(snapshot.expiresAt) <= this.#now()
+            )
+                snapshot.status = "expired";
+            return snapshot;
         });
     }
 

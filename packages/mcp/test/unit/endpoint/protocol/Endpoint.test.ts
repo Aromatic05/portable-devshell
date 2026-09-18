@@ -2084,8 +2084,12 @@ function createWorkerHarness(options?: {
                 input: JsonValue,
                 context: { ctxId?: string; requestId?: string; source: string },
                 operation: (callId: string, input: JsonValue) => Promise<T>,
+                _signal?: AbortSignal,
+                _onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 auditedCalls.push({ context, input, toolName });
+                await afterReview?.("call-test");
                 return await operation("call-test", input);
             },
             async appendMcpSessionClosed(sessionId: string) {
@@ -2174,6 +2178,7 @@ function createWorkerHarness(options?: {
                 _onProgress?: (progress: JsonValue) => void,
                 _recording?: "caller" | "host",
                 onFeedback?: (feedback: readonly string[]) => void,
+                afterReview?: (callId: string) => Promise<void> | void,
             ) {
                 if (!ready) {
                     const error = new Error("not ready");
@@ -2184,6 +2189,8 @@ function createWorkerHarness(options?: {
                     });
                     throw error;
                 }
+
+                await afterReview?.("call-test");
 
                 onFeedback?.(options?.feedback ?? []);
                 calls.push({ toolName, input, ...context });
