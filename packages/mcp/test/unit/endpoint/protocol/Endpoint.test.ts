@@ -726,6 +726,37 @@ test("tools/call returns a structured hint when the tool fails", async () => {
     }
 });
 
+test("tools/call preserves feedback when the thrown Error is frozen", async () => {
+    const frozen = Object.freeze(new Error("command failed"));
+    const harness = createWorkerHarness({
+        async callHandler() {
+            throw frozen;
+        },
+        feedback: ["[error.unknown] Inspect the error before retrying."],
+    });
+    const binding = createBinding(harness);
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        const ctxId = await createContext(server.url, session.headers);
+        const response = await postJson(
+            server.url,
+            withToolContext(await readFixture("mcp-tools-call.json"), ctxId),
+            session.headers,
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(response.body.error?.message, "command failed");
+        assert.deepEqual(response.body.error?.data?.comment, [
+            "[error.unknown] Inspect the error before retrying.",
+        ]);
+        assert.equal("comment" in frozen, false);
+    } finally {
+        await server.close();
+    }
+});
+
 test("tools/call appends a worker result hint and keeps the flat shape", async () => {
     const harness = createWorkerHarness({
         feedback: ["[bash.nonZeroExit] Exited with code 7; inspect output."],

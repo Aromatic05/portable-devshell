@@ -22,6 +22,7 @@ import {
     type McpInstanceGateway,
     type McpTmuxWaitGateway,
 } from "../Port.js";
+import { McpEndpointCallError } from "./Feedback.js";
 import type { McpToolCatalogArtifactName } from "../domain/artifact/Catalog.js";
 import { mcpEnvironmentToolName } from "../domain/environment/Catalog.js";
 import type { McpToolCatalogInteractionName } from "../domain/interaction/Catalog.js";
@@ -194,8 +195,8 @@ export class McpEndpointDispatch {
                 feedback,
             );
         } catch (error) {
-            attachErrorFeedback(error, feedback);
-            throw error;
+            if (feedback.length === 0) throw error;
+            throw new McpEndpointCallError(error, feedback);
         }
     }
 
@@ -1952,24 +1953,6 @@ function attachEndpointFeedback(
         });
     }
     return attachMcpComments(result, feedback);
-}
-
-function attachErrorFeedback(error: unknown, feedback: readonly string[]): void {
-    if (feedback.length === 0 || typeof error !== "object" || error === null)
-        return;
-    const record = error as { comment?: unknown };
-    const comments = Array.isArray(record.comment)
-        ? record.comment.filter(
-              (entry): entry is string =>
-                  typeof entry === "string" && entry.length > 0,
-          )
-        : [];
-    appendUnique(comments, feedback);
-    try {
-        record.comment = comments;
-    } catch {
-        // Feedback is non-blocking.
-    }
 }
 
 function isAppOnlyInteractionTool(toolName: string): boolean {

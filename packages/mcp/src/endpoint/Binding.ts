@@ -31,6 +31,7 @@ import {
 } from "../workspace/app/App.js";
 import { McpEndpointWorker } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./Endpoint.js";
+import { McpEndpointCallError } from "./dispatch/Feedback.js";
 
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;
@@ -207,11 +208,17 @@ function toCallToolResult(result: McpEndpointResult) {
 }
 
 function toMcpError(error: unknown): ProtocolError {
-    const body = toControlErrorBody(error);
-    const comment = readComment(error);
-    if (error instanceof McpToolSchemaUnavailableError) {
-        return new ProtocolError(-32002, error.message, {
-            code: error.code,
+    const failure =
+        error instanceof McpEndpointCallError ? error : undefined;
+    const sourceError = failure?.original ?? error;
+    const body = toControlErrorBody(sourceError);
+    const comment =
+        failure === undefined || failure.feedback.length === 0
+            ? undefined
+            : [...failure.feedback];
+    if (sourceError instanceof McpToolSchemaUnavailableError) {
+        return new ProtocolError(-32002, sourceError.message, {
+            code: sourceError.code,
             ...(comment === undefined ? {} : { comment }),
         });
     }
@@ -237,10 +244,10 @@ function toMcpError(error: unknown): ProtocolError {
         );
     }
 
-    if (error instanceof Error) {
+    if (sourceError instanceof Error) {
         return new ProtocolError(
             ProtocolErrorCode.InternalError,
-            error.message,
+            sourceError.message,
             comment === undefined ? undefined : { comment },
         );
     }
@@ -264,16 +271,6 @@ function toProtocolTool(
         throw new McpToolSchemaUnavailableError(tool.name);
     }
     return tool as unknown as Tool;
-}
-
-function readComment(error: unknown): string[] | undefined {
-    if (typeof error !== "object" || error === null || !("comment" in error))
-        return undefined;
-    const { comment } = error;
-    return Array.isArray(comment) &&
-        comment.every((entry) => typeof entry === "string")
-        ? comment
-        : undefined;
 }
 
 function sanitizeErrorBody(body: ControlErrorBody): Record<string, JsonValue> {
