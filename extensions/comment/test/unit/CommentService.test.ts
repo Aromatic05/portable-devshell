@@ -225,6 +225,36 @@ test("CommentService failAllPending retires all undelivered Comments for instanc
     });
 });
 
+test("CommentService retirement permanently fences stale service references", async () => {
+    const root = await createTestTempDirectory("context-message-retirement-fence");
+    const service = createCommentService(root);
+    await service.queue({ ctxId: "ctx-a", text: "Pending before retirement" });
+
+    await service.retire("Instance alpha was disabled before Comment delivery.");
+
+    for (const operation of [
+        async () => await service.queue({ ctxId: "ctx-a", text: "late" }),
+        async () => await service.list("ctx-a"),
+        async () => await service.reviewToolCall("ctx-a", "file_read"),
+        async () => await service.consumePending("ctx-a", "call-late"),
+    ]) {
+        await assert.rejects(operation, /not found or is disabled/u);
+    }
+
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    });
+    assert.deepEqual(
+        store.listComments({ ctxId: "ctx-a" }).map((comment) => [
+            comment.text,
+            comment.status,
+        ]),
+        [["Pending before retirement", "failed"]],
+    );
+    store.close();
+});
+
 test("CommentService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
     const service = createCommentService(root, async (type) => {

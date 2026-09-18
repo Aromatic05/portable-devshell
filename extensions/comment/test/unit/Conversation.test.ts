@@ -262,6 +262,7 @@ test("ConversationService imports historical todo_report calls and records new r
         toolName: "todo_report",
     };
     const service = new ConversationService({
+        instanceName: "alpha",
         legacyReports: async () => {
             migrations += 1;
             return [historical];
@@ -300,6 +301,77 @@ test("ConversationService imports historical todo_report calls and records new r
     );
     assert.equal(migrations, 1);
     service.close();
+});
+
+test("ConversationService retirement fences new work and drains an in-flight legacy migration before close", async () => {
+    const root = await createTestTempDirectory("conversation-retirement-drain");
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    });
+    let releaseMigration!: () => void;
+    const migrationGate = new Promise<void>((resolve) => {
+        releaseMigration = resolve;
+    });
+    let markMigrationStarted!: () => void;
+    const migrationStarted = new Promise<void>((resolve) => {
+        markMigrationStarted = resolve;
+    });
+    const historical: ToolCallRecord = {
+        callId: "call-old",
+        completedAt: "2026-09-10T10:02:00.000Z",
+        ctxId: "ctx-a",
+        input: { message: "Historical report" },
+        inputSummary: "Historical report",
+        instance: asInstanceName("alpha"),
+        source: "mcp",
+        startedAt: "2026-09-10T10:01:00.000Z",
+        status: "completed",
+        toolName: "todo_report",
+    };
+    const service = new ConversationService({
+        instanceName: "alpha",
+        legacyReports: async () => {
+            markMigrationStarted();
+            await migrationGate;
+            return [historical];
+        },
+        store,
+    });
+
+    const listing = service.list();
+    await migrationStarted;
+    let retirementFinished = false;
+    const retirement = service.retire().then(() => {
+        retirementFinished = true;
+    });
+    await Promise.resolve();
+    assert.equal(retirementFinished, false);
+    await assert.rejects(
+        service.recordReport({
+            callId: "call-late",
+            ctxId: "ctx-a",
+            text: "Must not be recorded",
+        }),
+        /not found or is disabled/u,
+    );
+    await assert.rejects(service.list(), /not found or is disabled/u);
+
+    releaseMigration();
+    assert.equal((await listing)[0]?.text, "Historical report");
+    await retirement;
+    assert.equal(retirementFinished, true);
+    service.close();
+
+    const reopened = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    });
+    assert.deepEqual(
+        reopened.list().map((entry) => entry.text),
+        ["Historical report"],
+    );
+    reopened.close();
 });
 
 function createFutureDatabase(filePath: string, version: number): void {

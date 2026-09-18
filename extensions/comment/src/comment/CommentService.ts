@@ -33,6 +33,8 @@ export class CommentService {
     readonly #state = new CommentState();
     readonly #store: ConversationStore;
     #operation: Promise<void> = Promise.resolve();
+    #retired = false;
+    #retirement?: Promise<void>;
 
     constructor(options: CommentServiceOptions) {
         this.#appendEvent = options.appendEvent;
@@ -66,9 +68,10 @@ export class CommentService {
     async list(
         input: ContextMessageListInput | string = {},
     ): Promise<ContextMessageRecord[]> {
-        await this.#operation;
-        const query = typeof input === "string" ? { ctxId: input } : input;
-        return this.#store.listComments(query);
+        return await this.#runExclusive(async () => {
+            const query = typeof input === "string" ? { ctxId: input } : input;
+            return this.#store.listComments(query);
+        });
     }
 
     async reviewToolCall(
@@ -154,16 +157,21 @@ export class CommentService {
     }
 
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {
-        return await this.#runExclusive(async () => {
-            const records = this.#store.pendingComments();
-            if (records.length > 0) await this.#markFailed(records, reason);
-            this.#store.clearAllControlStates();
-            if (records.length === 0) return [];
-            const ids = new Set(records.map((record) => record.id));
-            return this.#store
-                .listComments()
-                .filter((message) => ids.has(message.id));
-        });
+        return await this.#runExclusive(
+            async () => await this.#failAllPending(reason),
+        );
+    }
+
+    retire(reason?: string): Promise<void> {
+        if (this.#retirement !== undefined) return this.#retirement;
+        this.#retired = true;
+        this.#retirement = this.#runExclusive(
+            async () => {
+                if (reason !== undefined) await this.#failAllPending(reason);
+            },
+            true,
+        );
+        return this.#retirement;
     }
 
     async failPending(
@@ -248,7 +256,23 @@ export class CommentService {
         }
     }
 
-    async #runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    async #failAllPending(reason: string): Promise<ContextMessageRecord[]> {
+        const records = this.#store.pendingComments();
+        if (records.length > 0) await this.#markFailed(records, reason);
+        this.#store.clearAllControlStates();
+        if (records.length === 0) return [];
+        const ids = new Set(records.map((record) => record.id));
+        return this.#store
+            .listComments()
+            .filter((message) => ids.has(message.id));
+    }
+
+    async #runExclusive<T>(
+        operation: () => Promise<T>,
+        allowRetired = false,
+    ): Promise<T> {
+        if (this.#retired && !allowRetired)
+            throw retiredCommentService(this.#instanceName);
         const previous = this.#operation;
         let release!: () => void;
         this.#operation = new Promise<void>((resolve) => {
@@ -261,6 +285,15 @@ export class CommentService {
             release();
         }
     }
+}
+
+function retiredCommentService(instance: string): Error {
+    return createError({
+        code: errorCodes.instanceMissing,
+        details: { instance },
+        message: `Instance ${instance} was not found or is disabled.`,
+        retryable: false,
+    });
 }
 
 function eventData(record: ContextMessageRecord): Record<string, JsonValue> {

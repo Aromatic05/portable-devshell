@@ -98,6 +98,7 @@ interface CommentExtensionInstanceState {
     readonly conversation: ConversationService;
     enabled: boolean;
     readonly key: object;
+    retirement?: Promise<void>;
 }
 
 export class CommentExtension {
@@ -105,6 +106,7 @@ export class CommentExtension {
     readonly conversation: ConversationPort;
     readonly routes: CommentRoutePort;
     readonly #instances = new Map<string, CommentExtensionInstanceState>();
+    readonly #retirements = new Set<Promise<void>>();
     readonly #source: CommentInstanceSource;
     readonly #unsubscribe: () => void;
 
@@ -151,8 +153,18 @@ export class CommentExtension {
                 return state === undefined || !state.enabled
                     ? []
                     : [
-                          createCommentRouteModule(state.comment),
-                          createConversationRouteModule(state.conversation),
+                          createCommentRouteModule({
+                              list: async (input) =>
+                                  await this.#require(instance).comment.list(input),
+                              queue: async (input) =>
+                                  await this.#require(instance).comment.queue(input),
+                          }),
+                          createConversationRouteModule({
+                              list: async (input) =>
+                                  await this.#require(instance).conversation.list(
+                                      input,
+                                  ),
+                          }),
                       ];
             },
         };
@@ -165,20 +177,26 @@ export class CommentExtension {
         const state = this.#instances.get(instance);
         if (state === undefined) return;
         state.enabled = false;
-        try {
-            await state.comment.failAllPending(reason);
-        } finally {
-            if (this.#instances.get(instance) === state) {
-                this.#instances.delete(instance);
-                state.conversation.close();
-            }
-        }
+        if (this.#instances.get(instance) === state) this.#instances.delete(instance);
+        await this.#retireState(state, reason);
     }
 
-    close(): void {
+    async close(): Promise<void> {
         this.#unsubscribe();
-        for (const state of this.#instances.values()) state.conversation.close();
+        const states = [...this.#instances.values()];
+        for (const state of states) state.enabled = false;
         this.#instances.clear();
+        for (const state of states) this.#retireState(state);
+        const settled = await Promise.allSettled([...this.#retirements]);
+        const failures = settled
+            .filter(
+                (result): result is PromiseRejectedResult =>
+                    result.status === "rejected",
+            )
+            .map((result) => result.reason);
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1)
+            throw new AggregateError(failures, "Comment shutdown was incomplete.");
     }
 
     #sync(): void {
@@ -211,6 +229,7 @@ export class CommentExtension {
                     store,
                 }),
                 conversation: new ConversationService({
+                    instanceName: instance.name,
                     legacyReports: instance.legacyReports,
                     store,
                 }),
@@ -218,7 +237,10 @@ export class CommentExtension {
                 key: instance.key,
             };
             this.#instances.set(instance.name, next);
-            current?.conversation.close();
+            if (current !== undefined) {
+                current.enabled = false;
+                void this.#retireState(current).catch(reportBackgroundError);
+            }
         }
         for (const name of [...this.#instances.keys()]) {
             if (names.has(name)) continue;
@@ -240,6 +262,43 @@ export class CommentExtension {
             message: `Instance ${instance} was not found or is disabled.`,
             retryable: false,
         });
+    }
+
+    #retireState(
+        state: CommentExtensionInstanceState,
+        reason?: string,
+    ): Promise<void> {
+        if (state.retirement !== undefined) return state.retirement;
+        state.enabled = false;
+        const comment = state.comment.retire(reason);
+        const conversation = state.conversation.retire();
+        const retirement = (async () => {
+            const settled = await Promise.allSettled([comment, conversation]);
+            const failures = settled
+                .filter(
+                    (result): result is PromiseRejectedResult =>
+                        result.status === "rejected",
+                )
+                .map((result) => result.reason);
+            try {
+                state.conversation.close();
+            } catch (error) {
+                failures.push(error);
+            }
+            if (failures.length === 1) throw failures[0];
+            if (failures.length > 1)
+                throw new AggregateError(
+                    failures,
+                    "Comment instance retirement was incomplete.",
+                );
+        })();
+        state.retirement = retirement;
+        this.#retirements.add(retirement);
+        void retirement.then(
+            () => this.#retirements.delete(retirement),
+            () => this.#retirements.delete(retirement),
+        );
+        return retirement;
     }
 }
 

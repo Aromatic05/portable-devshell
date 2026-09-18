@@ -2,13 +2,18 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { JsonValue, PrefixRouteContext } from "@portable-devshell/shared";
+import {
+    errorCodes,
+    type JsonValue,
+    type PrefixRouteContext,
+} from "@portable-devshell/shared";
 
 import {
     CommentExtension,
     type CommentExtensionInstance,
     type CommentInstanceSource,
 } from "../../src/index.ts";
+import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const routeContext = {
@@ -145,7 +150,7 @@ test("CommentExtension owns instance state, routes, preferences, and replacement
 
     instances.replace([]);
     assert.deepEqual(extension.routes.instance("alpha"), []);
-    extension.close();
+    await extension.close();
     assert.equal(events.some((event) => event.type === "context.message.queued"), true);
 });
 
@@ -198,5 +203,96 @@ test("CommentExtension preserves state across a transient disable until committe
         history.map((entry) => ({ kind: entry.kind, text: entry.text })),
         [{ kind: "comment", text: "Keep this Comment" }],
     );
-    extension.close();
+    await extension.close();
+});
+
+test("CommentExtension fences a captured route before committed retirement drains and closes state", async () => {
+    const root = await createTestTempDirectory("comment-extension-retire-fence");
+    const conversationDatabaseFile = join(root, "conversation.sqlite3");
+    let releaseQueued!: () => void;
+    const queuedGate = new Promise<void>((resolve) => {
+        releaseQueued = resolve;
+    });
+    let markQueuedStarted!: () => void;
+    const queuedStarted = new Promise<void>((resolve) => {
+        markQueuedStarted = resolve;
+    });
+    let holdQueuedEvent = true;
+    const instances = new TestCommentInstances([
+        {
+            appendEvent: async (type) => {
+                if (type !== "context.message.queued" || !holdQueuedEvent) return;
+                holdQueuedEvent = false;
+                markQueuedStarted();
+                await queuedGate;
+            },
+            conversationDatabaseFile,
+            enabled: true,
+            key: {},
+            legacyReports: async () => [],
+            name: "alpha",
+        },
+    ]);
+    const extension = new CommentExtension({
+        instances,
+        preferencesFile: join(root, "conversation-preferences.json"),
+    });
+    const contextMessage = extension
+        .routes.instance("alpha")
+        .find((route) => route.name === "contextMessage");
+    const queue = contextMessage?.operations.find(
+        (operation) => operation.name === "queue",
+    );
+    if (queue === undefined) throw new Error("contextMessage.queue is missing");
+
+    const admitted = queue.handle(
+        {
+            id: "queue-admitted",
+            name: "queue",
+            payload: { ctxId: "ctx-alpha", text: "Already admitted" },
+        },
+        routeContext,
+    );
+    await queuedStarted;
+    const retiring = extension.retireInstance(
+        "alpha",
+        "Instance alpha was disabled before Comment delivery.",
+    );
+
+    await assert.rejects(
+        queue.handle(
+            {
+                id: "queue-late",
+                name: "queue",
+                payload: { ctxId: "ctx-alpha", text: "Must never reopen" },
+            },
+            routeContext,
+        ),
+        (error: unknown) => {
+            assert.equal(
+                (error as { code?: string }).code,
+                errorCodes.instanceMissing,
+            );
+            return true;
+        },
+    );
+
+    releaseQueued();
+    await admitted;
+    await retiring;
+    assert.deepEqual(extension.routes.instance("alpha"), []);
+
+    const store = new ConversationStore({
+        filePath: conversationDatabaseFile,
+        instanceName: "alpha",
+    });
+    assert.deepEqual(
+        store.listComments({ ctxId: "ctx-alpha" }).map((comment) => ({
+            status: comment.status,
+            text: comment.text,
+        })),
+        [{ status: "failed", text: "Already admitted" }],
+    );
+    store.close();
+    await extension.close();
 });

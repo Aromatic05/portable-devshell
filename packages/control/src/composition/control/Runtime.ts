@@ -51,7 +51,7 @@ import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 interface ControlRuntimeComment {
     readonly comment: ToolCallCommentPort;
     readonly routes: ControlRouteCommentPort;
-    close(): void;
+    close(): Promise<void>;
     retireInstance(instance: string, reason: string): Promise<void>;
 }
 
@@ -305,7 +305,7 @@ export class ControlRuntime {
         }
         await this.#mcp.stop().catch((error) => failures.push(error));
         try {
-            this.#comment.close();
+            await this.#comment.close();
         } catch (error) {
             failures.push(error);
         }

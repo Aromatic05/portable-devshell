@@ -11,14 +11,20 @@ import { migrateLegacyReports } from "./migration/Report.js";
 import { ConversationStore } from "./store/ConversationStore.js";
 
 export class ConversationService {
+    readonly #instanceName: string;
     readonly #legacyReports?: () => Promise<ToolCallRecord[]>;
     readonly #store: ConversationStore;
     #migration?: Promise<void>;
+    #operation: Promise<void> = Promise.resolve();
+    #retired = false;
+    #retirement?: Promise<void>;
 
     constructor(options: {
+        instanceName: string;
         legacyReports?: () => Promise<ToolCallRecord[]>;
         store: ConversationStore;
     }) {
+        this.#instanceName = options.instanceName;
         this.#legacyReports = options.legacyReports;
         this.#store = options.store;
     }
@@ -26,8 +32,10 @@ export class ConversationService {
     async list(
         input: ConversationListInput = {},
     ): Promise<ConversationEntry[]> {
-        await this.#ensureLegacyReportsMigrated();
-        return this.#store.list(input);
+        return await this.#runExclusive(async () => {
+            await this.#ensureLegacyReportsMigrated();
+            return this.#store.list(input);
+        });
     }
 
     async recordReport(input: {
@@ -37,16 +45,25 @@ export class ConversationService {
         replyCommentId?: string;
         text: string;
     }): Promise<void> {
-        await this.#ensureLegacyReportsMigrated();
-        this.#store.appendReport({
-            callId: input.callId,
-            createdAt: input.createdAt ?? new Date().toISOString(),
-            ctxId: input.ctxId,
-            ...(input.replyCommentId === undefined
-                ? {}
-                : { replyCommentId: input.replyCommentId }),
-            text: input.text,
+        await this.#runExclusive(async () => {
+            await this.#ensureLegacyReportsMigrated();
+            this.#store.appendReport({
+                callId: input.callId,
+                createdAt: input.createdAt ?? new Date().toISOString(),
+                ctxId: input.ctxId,
+                ...(input.replyCommentId === undefined
+                    ? {}
+                    : { replyCommentId: input.replyCommentId }),
+                text: input.text,
+            });
         });
+    }
+
+    retire(): Promise<void> {
+        if (this.#retirement !== undefined) return this.#retirement;
+        this.#retired = true;
+        this.#retirement = this.#runExclusive(async () => undefined, true);
+        return this.#retirement;
     }
 
     close(): void {
@@ -64,6 +81,33 @@ export class ConversationService {
         }
     }
 
+    async #runExclusive<T>(
+        operation: () => Promise<T>,
+        allowRetired = false,
+    ): Promise<T> {
+        if (this.#retired && !allowRetired)
+            throw retiredConversationService(this.#instanceName);
+        const previous = this.#operation;
+        let release!: () => void;
+        this.#operation = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+}
+
+function retiredConversationService(instance: string): Error {
+    return createError({
+        code: errorCodes.instanceMissing,
+        details: { instance },
+        message: `Instance ${instance} was not found or is disabled.`,
+        retryable: false,
+    });
 }
 
 export function createConversationRouteModule(
