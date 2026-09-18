@@ -7,11 +7,11 @@ import {
     type PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
-import type { ContextMessageService } from "./Service.js";
+import type { CommentService } from "./Service.js";
 import { routeModule } from "../../server/Route.js";
 
 export function createContextMessageRouteModule(
-    service: Pick<ContextMessageService, "list" | "queue">,
+    service: Pick<CommentService, "list" | "queue">,
 ): PrefixRouteModuleDefinition {
     return routeModule("contextMessage", {
         list: async (request) =>

@@ -6,23 +6,23 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type { ContextMessageRecord } from "@portable-devshell/shared";
 import { cleanupStaleAtomicStateTemps } from "../AtomicState.js";
 
-export class ContextMessageStore {
+export class CommentStore {
     readonly #filePath: string;
     readonly #instanceName: string;
-    readonly #state: ContextMessageState;
-    #document?: ContextMessageDocument;
+    readonly #state: CommentState;
+    #document?: CommentDocument;
 
     constructor(options: {
         filePath: string;
         instanceName: string;
-        state: ContextMessageState;
+        state: CommentState;
     }) {
         this.#filePath = options.filePath;
         this.#instanceName = options.instanceName;
         this.#state = options.state;
     }
 
-    read(): ContextMessageDocument {
+    read(): CommentDocument {
         return structuredClone(this.#current());
     }
 
@@ -46,8 +46,8 @@ export class ContextMessageStore {
     }
 
     async transition<T>(
-        operation: (document: ContextMessageDocument) => {
-            document: ContextMessageDocument;
+        operation: (document: CommentDocument) => {
+            document: CommentDocument;
             result: T;
         },
     ): Promise<T> {
@@ -58,7 +58,7 @@ export class ContextMessageStore {
     }
 
     async update(
-        operation: (document: ContextMessageDocument) => ContextMessageDocument,
+        operation: (document: CommentDocument) => CommentDocument,
     ): Promise<void> {
         const next = operation(this.#current());
         await this.#writeAtomic(next);
@@ -66,15 +66,15 @@ export class ContextMessageStore {
     }
 
     async write(
-        document: ContextMessageDocument,
-    ): Promise<ContextMessageDocument> {
+        document: CommentDocument,
+    ): Promise<CommentDocument> {
         const normalized = this.#state.normalizeDocument(document);
         await this.#writeAtomic(normalized);
         this.#document = normalized;
         return this.read();
     }
 
-    #current(): ContextMessageDocument {
+    #current(): CommentDocument {
         if (this.#document === undefined) {
             cleanupStaleAtomicStateTemps(this.#filePath);
             this.#document = this.#load();
@@ -82,7 +82,7 @@ export class ContextMessageStore {
         return this.#document;
     }
 
-    #load(): ContextMessageDocument {
+    #load(): CommentDocument {
         if (!existsSync(this.#filePath)) return this.#state.emptyDocument();
         try {
             return this.#state.normalizeDocument(
@@ -99,7 +99,7 @@ export class ContextMessageStore {
         }
     }
 
-    async #writeAtomic(document: ContextMessageDocument): Promise<void> {
+    async #writeAtomic(document: CommentDocument): Promise<void> {
         const directory = dirname(this.#filePath);
         await mkdir(directory, { mode: 0o700, recursive: true });
         const temporary = `${this.#filePath}.tmp.${process.pid}.${randomUUID()}`;
@@ -128,5 +128,5 @@ export class ContextMessageStore {
 }
 
 
-export { ContextMessageState, type ContextMessageDocument } from "@portable-devshell/comment-extension";
-import { ContextMessageState, type ContextMessageDocument } from "@portable-devshell/comment-extension";
+export { CommentState, type CommentDocument } from "@portable-devshell/comment-extension";
+import { CommentState, type CommentDocument } from "@portable-devshell/comment-extension";

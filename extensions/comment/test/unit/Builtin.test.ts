@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-import { activate } from "../../src/runtime/index.ts";
+import { activate } from "../../src/builtin/index.ts";
 
 test("Comment Extension activates one toolcall.review binding without a global capability", async () => {
     const registrations: Array<{ id: string; pointId: string; binding: unknown }> = [];

@@ -13,7 +13,7 @@ import {
     type PrefixRouteSnapshot,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
-import { ContextMessageService } from "../../../../control/src/instance/context/Service.ts";
+import { CommentService } from "../../../../control/src/instance/context/Service.ts";
 import { ConversationPreferenceStore } from "../../../../control/src/control/config/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
 import { createTuiClients } from "../../../src/app/control/Client.ts";
@@ -539,7 +539,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
 
     interface Harness {
         close(): Promise<void>;
-        messages: ContextMessageService;
+        messages: CommentService;
         routeCalls: { contextQueue: number };
         runtime: TuiRuntime;
         start(): Promise<void>;
@@ -551,7 +551,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     ): Promise<Harness> {
         const root = await createTestTempDirectory("tui-context-rpc");
         const socketPath = createTestIpcPath("tui-context-rpc", root);
-        const messages = new ContextMessageService({
+        const messages = new CommentService({
             appendEvent: async () => undefined,
             filePath: join(root, "context-messages.json"),
             instanceName: "alpha",
@@ -612,7 +612,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     }
 
     function createRoutes(
-        messages: ContextMessageService,
+        messages: CommentService,
         preferences: ConversationPreferenceStore,
         toolCalls: readonly ToolCallRecord[],
         routeCalls: { contextQueue: number },

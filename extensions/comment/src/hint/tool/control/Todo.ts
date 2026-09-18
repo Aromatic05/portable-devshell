@@ -1,5 +1,5 @@
 import type { ControlErrorBody } from "@portable-devshell/shared";
-import { errorHint, type ToolDiagnosticHint } from "../Hint.js";
+import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
 export function todoErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
     switch (body.code) {

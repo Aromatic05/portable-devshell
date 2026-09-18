@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 
-import { createCommentReview } from "../../src/runtime/Review.ts";
+import { createCommentReview } from "../../src/builtin/CommentReview.ts";
 
 const base = {
     context: {

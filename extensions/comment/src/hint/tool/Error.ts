@@ -93,6 +93,32 @@ export function crossToolErrorHints(
     return hints;
 }
 
-export function hasCrossToolHint(code: string): boolean {
-    return crossToolHints[code] !== undefined;
+export function workerErrorHints(
+    body: ControlErrorBody,
+): ToolDiagnosticHint[] {
+    switch (body.code) {
+        case "tool.invalidArguments":
+            return [
+                errorHint(
+                    "tool.invalidArguments",
+                    "Correct the arguments against the schema.",
+                ),
+            ];
+        case "tool.internalError":
+            return [
+                errorHint(
+                    "tool.internalError",
+                    "Inspect worker state before retrying.",
+                ),
+            ];
+        case "tool.notFound":
+            return [
+                errorHint(
+                    "tool.notFound",
+                    "Check the tool name and worker capability.",
+                ),
+            ];
+        default:
+            return [];
+    }
 }

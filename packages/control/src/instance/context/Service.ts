@@ -1,1 +1,1 @@
-export { ContextMessageService, type ContextMessageServiceOptions } from "@portable-devshell/comment-extension";
+export { CommentService, type CommentServiceOptions } from "@portable-devshell/comment-extension";

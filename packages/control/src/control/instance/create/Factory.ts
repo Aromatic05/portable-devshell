@@ -14,7 +14,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../Descriptor.js";
-import { ContextMessageService } from "../../../instance/context/Service.js";
+import { CommentService } from "../../../instance/context/Service.js";
 import { ConversationService } from "../../../instance/conversation/Service.js";
 import { ConversationStore } from "../../../instance/conversation/Store.js";
 import { GoalService } from "../../../instance/workflow/goal/Service.js";
@@ -60,7 +60,7 @@ export class InstanceFactory {
             filePath: paths.todoFile,
             instanceName: instance.name,
         });
-        const contextMessages = new ContextMessageService({
+        const contextMessages = new CommentService({
             appendEvent: async (type, data) => {
                 await workerHolder.value?.appendControlEvent(type, data);
             },

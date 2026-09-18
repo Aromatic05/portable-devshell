@@ -6,13 +6,13 @@ import {
     asNumber,
     asRecord,
     asString,
-} from "../common/JsonRead.js";
+} from "../Value.js";
 import {
     diagnosticHint,
     errorHint,
     type ToolDiagnosticHint,
-} from "../Hint.js";
-import { workerCommonErrorHints } from "../common/Worker.js";
+} from "../../Hint.js";
+import { workerErrorHints } from "../Error.js";
 
 export function bashResultHints(result: JsonValue): ToolDiagnosticHint[] {
     const record = asRecord(result);
@@ -113,6 +113,6 @@ export function bashErrorHints(body: ControlErrorBody): ToolDiagnosticHint[] {
                 ),
             ];
         default:
-            return workerCommonErrorHints(body);
+            return workerErrorHints(body);
     }
 }

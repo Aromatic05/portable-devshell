@@ -4,8 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
-import { ContextMessageState } from "../../../../../src/instance/context/Store.ts";
-import { ContextMessageStore } from "../../../../../src/instance/context/Store.ts";
+import { CommentState } from "../../../../../src/instance/context/Store.ts";
+import { CommentStore } from "../../../../../src/instance/context/Store.ts";
 import { GoalState } from "../../../../../src/instance/workflow/goal/storage/State.ts";
 import { GoalStore } from "../../../../../src/instance/workflow/goal/storage/Store.ts";
 import { TodoState } from "../../../../../src/instance/workflow/todo/Store.ts";
@@ -27,10 +27,10 @@ test("interaction state stores defer persisted state loading until first access"
         ),
     );
 
-    const context = new ContextMessageStore({
+    const context = new CommentStore({
         filePath: files.context,
         instanceName: "alpha",
-        state: new ContextMessageState(),
+        state: new CommentState(),
     });
     const goal = new GoalStore({
         filePath: files.goal,

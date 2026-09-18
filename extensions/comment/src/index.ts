@@ -1,24 +1,27 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export * from "./runtime/Review.js";
+export { CommentService, type CommentServiceOptions } from "./comment/CommentService.js";
+export { CommentState, type CommentDocument } from "./comment/CommentState.js";
+export { composeComments, mergeComments, type CommentAdvice } from "./comment/Merge.js";
+export { ConversationService } from "./conversation/ConversationService.js";
+export {
+    ConversationStore,
+    type ConversationStoreStats,
+} from "./conversation/store/ConversationStore.js";
+export {
+    CONVERSATION_DATABASE_SCHEMA_VERSION,
+    defaultConversationStorageLimits,
+} from "./conversation/store/Schema.js";
+export type { ConversationControlState } from "./conversation/ConversationControl.js";
+export {
+    diagnosticHint,
+    errorHint,
+    formatHint,
+    type ToolDiagnosticHint,
+} from "./hint/Hint.js";
+export { resolveErrorHints, resolveResultHints } from "./hint/Resolver.js";
 
 export function commentExtensionDirectory(): string {
-    return resolve(dirname(fileURLToPath(import.meta.url)), "runtime");
+    return resolve(dirname(fileURLToPath(import.meta.url)), "builtin");
 }
-
-export * from "./control/Comment.js";
-export * from "./control/Conversation.js";
-export * from "./control/Store.js";
-
-export * from "./hint/Hint.js";
-export * from "./hint/ToolHintResolver.js";
-export * from "./hint/common/CrossTool.js";
-export * from "./hint/common/JsonRead.js";
-export * from "./hint/common/Worker.js";
-export * from "./hint/execution/Bash.js";
-export * from "./hint/execution/File.js";
-export * from "./hint/execution/Tmux.js";
-export * from "./hint/management/Artifact.js";
-export * from "./hint/management/Instance.js";
-export * from "./hint/management/Todo.js";

@@ -41,7 +41,7 @@ import {
 } from "@portable-devshell/core/testing";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
-import { ContextMessageService } from "../../../control/src/instance/context/Service.ts";
+import { CommentService } from "../../../control/src/instance/context/Service.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
@@ -109,7 +109,7 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async () => {
         const contextRoot = await createTestTempDirectory("real-comment-state");
-        const messages = new ContextMessageService({
+        const messages = new CommentService({
             appendEvent: async () => undefined,
             filePath: join(contextRoot, "context-messages.json"),
             instanceName: "real-comment",

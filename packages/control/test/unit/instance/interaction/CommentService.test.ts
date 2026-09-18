@@ -5,11 +5,11 @@ import test from "node:test";
 
 import type { InstanceEventType, JsonValue } from "@portable-devshell/shared";
 
-import { ContextMessageService } from "../../../../src/instance/context/Service.ts";
-import { ContextMessageState } from "../../../../src/instance/context/Store.ts";
+import { CommentService } from "../../../../src/instance/context/Service.ts";
+import { CommentState } from "../../../../src/instance/context/Store.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
-test("ContextMessageService merges pending Comments into one call-bound delivery", async () => {
+test("CommentService merges pending Comments into one call-bound delivery", async () => {
     const root = await createTestTempDirectory("context-message");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const options = {
@@ -22,7 +22,7 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
         filePath: join(root, "context-messages.json"),
         instanceName: "alpha",
     };
-    const service = new ContextMessageService(options);
+    const service = new CommentService(options);
 
     const first = await service.queue({
         ctxId: "ctx-a",
@@ -88,7 +88,7 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
         true,
     );
 
-    const reloaded = new ContextMessageService(options);
+    const reloaded = new CommentService(options);
     assert.deepEqual(
         (await reloaded.list()).map((message) => [
             message.id,
@@ -115,9 +115,9 @@ test("ContextMessageService merges pending Comments into one call-bound delivery
     assert.deepEqual(deliveryEvent.ids, [first.id, followUp.id]);
 });
 
-test("ContextMessageService marks a queued message failed when its audit event cannot be recorded", async () => {
+test("CommentService marks a queued message failed when its audit event cannot be recorded", async () => {
     const root = await createTestTempDirectory("context-message-failure");
-    const service = new ContextMessageService({
+    const service = new CommentService({
         appendEvent: async (type) => {
             if (type === "context.message.queued")
                 throw new Error("audit unavailable");
@@ -135,10 +135,10 @@ test("ContextMessageService marks a queued message failed when its audit event c
     assert.equal(record?.error, "audit unavailable");
 });
 
-test("ContextMessageService fails undelivered Comments when their Context is retired", async () => {
+test("CommentService fails undelivered Comments when their Context is retired", async () => {
     const root = await createTestTempDirectory("context-message-retired");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
-    const service = new ContextMessageService({
+    const service = new CommentService({
         appendEvent: async (type, data) => {
             events.push({ data, type });
         },
@@ -183,9 +183,9 @@ test("ContextMessageService fails undelivered Comments when their Context is ret
     });
 });
 
-test("ContextMessageService failAllPending retires all undelivered Comments for instance deletion", async () => {
+test("CommentService failAllPending retires all undelivered Comments for instance deletion", async () => {
     const root = await createTestTempDirectory("context-message-delete");
-    const service = new ContextMessageService({
+    const service = new CommentService({
         appendEvent: async () => undefined,
         filePath: join(root, "context-messages.json"),
         instanceName: "alpha",
@@ -221,9 +221,9 @@ test("ContextMessageService failAllPending retires all undelivered Comments for 
     });
 });
 
-test("ContextMessageService delivery event failure never blocks or requeues a completed call", async () => {
+test("CommentService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
-    const service = new ContextMessageService({
+    const service = new CommentService({
         appendEvent: async (type) => {
             if (type === "context.message.delivered") {
                 throw new Error("audit temporarily unavailable");
@@ -256,14 +256,14 @@ test("ContextMessageService delivery event failure never blocks or requeues a co
     });
 });
 
-test("ContextMessageService keeps #stop durable and delivers #resume before tools continue", async () => {
+test("CommentService keeps #stop durable and delivers #resume before tools continue", async () => {
     const root = await createTestTempDirectory("context-message-stop-control");
     const options = {
         appendEvent: async () => undefined,
         conversationFilePath: join(root, "conversation.sqlite3"),
         instanceName: "alpha",
     };
-    const service = new ContextMessageService(options);
+    const service = new CommentService(options);
     const stop = await service.queue({
         ctxId: "ctx-a",
         text: "#stop Stop before the next tool",
@@ -277,7 +277,7 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
             kind: "stop",
         },
     );
-    const reloaded = new ContextMessageService(options);
+    const reloaded = new CommentService(options);
     assert.equal(
         (await reloaded.reviewToolCall("ctx-a", "file_read")).kind,
         "stop",
@@ -303,11 +303,11 @@ test("ContextMessageService keeps #stop durable and delivers #resume before tool
     });
 });
 
-test("ContextMessageService delivers queued Stop-era messages through Resume without reactivating an old Stop", async () => {
+test("CommentService delivers queued Stop-era messages through Resume without reactivating an old Stop", async () => {
     const root = await createTestTempDirectory(
         "context-message-stop-resume-queued",
     );
-    const service = new ContextMessageService({
+    const service = new CommentService({
         appendEvent: async () => undefined,
         conversationFilePath: join(root, "conversation.sqlite3"),
         instanceName: "alpha",
@@ -341,14 +341,14 @@ test("ContextMessageService delivers queued Stop-era messages through Resume wit
     });
 });
 
-test("ContextMessageService persists the remaining #push budget without replenishing repeated Push", async () => {
+test("CommentService persists the remaining #push budget without replenishing repeated Push", async () => {
     const root = await createTestTempDirectory("context-message-push-control");
     const options = {
         appendEvent: async () => undefined,
         conversationFilePath: join(root, "conversation.sqlite3"),
         instanceName: "alpha",
     };
-    const service = new ContextMessageService(options);
+    const service = new CommentService(options);
     await service.queue({ ctxId: "ctx-a", text: "#push Answer this first" });
     await service.consumePending("ctx-a", "delivery-one");
     for (let index = 0; index < 4; index += 1) {
@@ -360,7 +360,7 @@ test("ContextMessageService persists the remaining #push budget without replenis
     await service.queue({ ctxId: "ctx-a", text: "#push I am still waiting" });
     await service.consumePending("ctx-a", "delivery-two");
 
-    const reloaded = new ContextMessageService(options);
+    const reloaded = new CommentService(options);
     assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
@@ -369,8 +369,8 @@ test("ContextMessageService persists the remaining #push budget without replenis
     if (blocked.kind === "push") assert.equal(blocked.toolCallBudget, 5);
 });
 
-test("ContextMessageState retains all pending messages while bounding terminal history", () => {
-    const state = new ContextMessageState();
+test("CommentState retains all pending messages while bounding terminal history", () => {
+    const state = new CommentState();
     const messages = [
         ...Array.from({ length: 5 }, (_, index) => ({
             createdAt: new Date(index).toISOString(),

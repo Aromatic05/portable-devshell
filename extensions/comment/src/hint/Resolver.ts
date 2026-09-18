@@ -1,24 +1,24 @@
 import type { ControlErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
-import { crossToolErrorHints } from "./common/CrossTool.js";
+import { crossToolErrorHints } from "./tool/Error.js";
 import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
-import { artifactControlErrorHints } from "./management/Artifact.js";
-import { instanceErrorHints } from "./management/Instance.js";
-import { todoErrorHints } from "./management/Todo.js";
-import { bashErrorHints, bashResultHints } from "./execution/Bash.js";
+import { artifactControlErrorHints } from "./tool/control/Artifact.js";
+import { instanceErrorHints } from "./tool/control/Instance.js";
+import { todoErrorHints } from "./tool/control/Todo.js";
+import { bashErrorHints, bashResultHints } from "./tool/worker/Bash.js";
 import {
     fileEditResultHints,
     fileErrorHints,
     fileGlobResultHints,
     fileGrepResultHints,
     fileReadResultHints,
-} from "./execution/File.js";
+} from "./tool/worker/File.js";
 import {
     tmuxErrorHints,
     tmuxInspectResultHints,
     tmuxListResultHints,
     tmuxTaskResultHints,
-} from "./execution/Tmux.js";
+} from "./tool/worker/Tmux.js";
 
 type ResultResolver = (
     toolName: string,

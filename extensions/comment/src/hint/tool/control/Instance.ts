@@ -1,6 +1,6 @@
 import type { ControlErrorBody } from "@portable-devshell/shared";
-import { asRecord, asString } from "../common/JsonRead.js";
-import { errorHint, type ToolDiagnosticHint } from "../Hint.js";
+import { asRecord, asString } from "../Value.js";
+import { errorHint, type ToolDiagnosticHint } from "../../Hint.js";
 
 export function instanceErrorHints(
     body: ControlErrorBody,

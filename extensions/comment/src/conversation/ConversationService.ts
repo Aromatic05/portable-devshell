@@ -4,7 +4,8 @@ import type {
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
-import { ConversationStore } from "./Store.js";
+import { migrateLegacyReports } from "./migration/Report.js";
+import { ConversationStore } from "./store/ConversationStore.js";
 
 export class ConversationService {
     readonly #legacyReports?: () => Promise<ToolCallRecord[]>;
@@ -52,7 +53,7 @@ export class ConversationService {
     async #ensureLegacyReportsMigrated(): Promise<void> {
         if (this.#store.isLegacyReportMigrationComplete()) return;
         if (this.#migration !== undefined) return await this.#migration;
-        this.#migration = this.#migrateLegacyReports();
+        this.#migration = migrateLegacyReports(this.#store, this.#legacyReports);
         try {
             await this.#migration;
         } finally {
@@ -60,37 +61,4 @@ export class ConversationService {
         }
     }
 
-    async #migrateLegacyReports(): Promise<void> {
-        const calls = (await this.#legacyReports?.()) ?? [];
-        for (const call of calls) {
-            if (
-                call.toolName !== "todo_report" ||
-                call.status !== "completed" ||
-                call.ctxId === undefined
-            )
-                continue;
-            const text = reportText(call);
-            if (text === undefined) continue;
-            this.#store.appendReport({
-                callId: call.callId,
-                createdAt: call.completedAt ?? call.startedAt,
-                ctxId: call.ctxId,
-                text,
-            });
-        }
-        this.#store.completeLegacyReportMigration();
-    }
-}
-
-function reportText(call: ToolCallRecord): string | undefined {
-    if (
-        typeof call.input !== "object" ||
-        call.input === null ||
-        Array.isArray(call.input)
-    )
-        return undefined;
-    const message = call.input.message;
-    return typeof message === "string" && message.length > 0
-        ? message
-        : undefined;
 }
