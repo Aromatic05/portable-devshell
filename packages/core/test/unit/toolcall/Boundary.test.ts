@@ -82,7 +82,7 @@ test("review aggregates non-blocking feedback without changing decision preceden
     });
 });
 
-test("review aggregation is independent of reviewer registration order", async () => {
+test("review decision aggregation is independent of reviewer registration order", async () => {
     const makeReview = (decision: "accept" | "approve" | "reject"): ToolCallReview =>
         async () => ({ decision });
     const payload = { command: "echo ok" };

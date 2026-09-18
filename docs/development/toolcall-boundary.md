@@ -203,6 +203,8 @@ control.modelResumed
 
 等机器可读反馈，现有 hint resolver 仍可沿 cause chain 生成指导，但 Extension 不能借此伪造 Core authority 或 Audit status。
 
+这里的“注册顺序不得改变最终安全语义”只约束 `reject > approve > accept` 的最终 decision。`reason/error` 是单个最高级 decision 携带的诊断 metadata，第一版不定义多个同级 reviewer 之间的单值合并规则；调用方不得把它当成与注册顺序无关的 authority。需要保留多个 reviewer 的外部反馈时使用 `feedback[]`。
+
 ## 6. Approval
 
 Approval 保持 Core authority。
