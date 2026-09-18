@@ -14,7 +14,6 @@ import {
     parseContextMessageDirective,
 } from "@portable-devshell/shared";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
 
 import { ConversationStore } from "../conversation/store/ConversationStore.js";
 import { CommentState } from "./CommentState.js";
@@ -24,10 +23,8 @@ export interface CommentServiceOptions {
         type: Extract<InstanceEventType, `context.message.${string}`>,
         data: JsonValue,
     ): Promise<void>;
-    conversationFilePath?: string;
-    filePath?: string;
     instanceName: string;
-    store?: ConversationStore;
+    store: ConversationStore;
 }
 
 export class CommentService {
@@ -40,17 +37,7 @@ export class CommentService {
     constructor(options: CommentServiceOptions) {
         this.#appendEvent = options.appendEvent;
         this.#instanceName = options.instanceName;
-        this.#store =
-            options.store ??
-            new ConversationStore({
-                filePath:
-                    options.conversationFilePath ??
-                    defaultConversationFile(options.filePath),
-                instanceName: options.instanceName,
-                ...(options.filePath === undefined
-                    ? {}
-                    : { legacyContextMessagesFile: options.filePath }),
-            });
+        this.#store = options.store;
     }
 
     async queue(
@@ -274,15 +261,6 @@ export class CommentService {
             release();
         }
     }
-}
-
-function defaultConversationFile(legacyFilePath: string | undefined): string {
-    if (legacyFilePath === undefined) {
-        throw new Error(
-            "CommentService requires store, conversationFilePath, or filePath.",
-        );
-    }
-    return join(dirname(legacyFilePath), "conversation.sqlite3");
 }
 
 function eventData(record: ContextMessageRecord): Record<string, JsonValue> {

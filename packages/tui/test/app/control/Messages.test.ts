@@ -14,6 +14,7 @@ import {
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
+import { ConversationStore } from "../../../../../extensions/comment/src/conversation/store/ConversationStore.ts";
 import { ConversationPreferenceStore } from "../../../../../extensions/comment/src/conversation/preference/Store.ts";
 import { ControlSocketServer } from "../../../../control/src/server/endpoint/Socket.ts";
 import { createTuiClients } from "../../../src/app/control/Client.ts";
@@ -551,10 +552,15 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
     ): Promise<Harness> {
         const root = await createTestTempDirectory("tui-context-rpc");
         const socketPath = createTestIpcPath("tui-context-rpc", root);
+        const commentStore = new ConversationStore({
+            filePath: join(root, "conversation.sqlite3"),
+            instanceName: "alpha",
+            legacyContextMessagesFile: join(root, "context-messages.json"),
+        });
         const messages = new CommentService({
             appendEvent: async () => undefined,
-            filePath: join(root, "context-messages.json"),
             instanceName: "alpha",
+            store: commentStore,
         });
         const preferences = new ConversationPreferenceStore(
             join(root, "conversation-preferences.json"),
@@ -606,6 +612,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 if (running !== undefined) await running;
                 clients.close();
                 await server.stop();
+                commentStore.close();
                 await rm(root, { force: true, recursive: true });
             },
         };

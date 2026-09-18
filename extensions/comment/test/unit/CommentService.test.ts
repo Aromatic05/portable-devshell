@@ -5,24 +5,40 @@ import test from "node:test";
 
 import type { InstanceEventType, JsonValue } from "@portable-devshell/shared";
 
-import { CommentService } from "../../src/comment/CommentService.ts";
+import {
+    CommentService,
+    type CommentServiceOptions,
+} from "../../src/comment/CommentService.ts";
 import { CommentState } from "../../src/comment/CommentState.ts";
+import { ConversationStore } from "../../src/conversation/store/ConversationStore.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+
+function createCommentService(
+    root: string,
+    appendEvent: CommentServiceOptions["appendEvent"] = async () => undefined,
+): CommentService {
+    return new CommentService({
+        appendEvent,
+        instanceName: "alpha",
+        store: new ConversationStore({
+            filePath: join(root, "conversation.sqlite3"),
+            instanceName: "alpha",
+            legacyContextMessagesFile: join(root, "context-messages.json"),
+        }),
+    });
+}
 
 test("CommentService merges pending Comments into one call-bound delivery", async () => {
     const root = await createTestTempDirectory("context-message");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
-    const options = {
-        appendEvent: async (
+    const createService = () =>
+        createCommentService(root, async (
             type: Extract<InstanceEventType, `context.message.${string}`>,
             data: JsonValue,
         ) => {
             events.push({ data, type });
-        },
-        filePath: join(root, "context-messages.json"),
-        instanceName: "alpha",
-    };
-    const service = new CommentService(options);
+        });
+    const service = createService();
 
     const first = await service.queue({
         ctxId: "ctx-a",
@@ -88,7 +104,7 @@ test("CommentService merges pending Comments into one call-bound delivery", asyn
         true,
     );
 
-    const reloaded = new CommentService(options);
+    const reloaded = createService();
     assert.deepEqual(
         (await reloaded.list()).map((message) => [
             message.id,
@@ -117,13 +133,9 @@ test("CommentService merges pending Comments into one call-bound delivery", asyn
 
 test("CommentService marks a queued message failed when its audit event cannot be recorded", async () => {
     const root = await createTestTempDirectory("context-message-failure");
-    const service = new CommentService({
-        appendEvent: async (type) => {
+    const service = createCommentService(root, async (type) => {
             if (type === "context.message.queued")
                 throw new Error("audit unavailable");
-        },
-        filePath: join(root, "context-messages.json"),
-        instanceName: "alpha",
     });
 
     await assert.rejects(
@@ -138,12 +150,8 @@ test("CommentService marks a queued message failed when its audit event cannot b
 test("CommentService fails undelivered Comments when their Context is retired", async () => {
     const root = await createTestTempDirectory("context-message-retired");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
-    const service = new CommentService({
-        appendEvent: async (type, data) => {
+    const service = createCommentService(root, async (type, data) => {
             events.push({ data, type });
-        },
-        filePath: join(root, "context-messages.json"),
-        instanceName: "alpha",
     });
     const first = await service.queue({
         ctxId: "ctx-retired",
@@ -185,11 +193,7 @@ test("CommentService fails undelivered Comments when their Context is retired", 
 
 test("CommentService failAllPending retires all undelivered Comments for instance deletion", async () => {
     const root = await createTestTempDirectory("context-message-delete");
-    const service = new CommentService({
-        appendEvent: async () => undefined,
-        filePath: join(root, "context-messages.json"),
-        instanceName: "alpha",
-    });
+    const service = createCommentService(root);
     await service.queue({ ctxId: "ctx-a", text: "First" });
     const delivered = await service.queue({
         ctxId: "ctx-b",
@@ -223,14 +227,10 @@ test("CommentService failAllPending retires all undelivered Comments for instanc
 
 test("CommentService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
-    const service = new CommentService({
-        appendEvent: async (type) => {
+    const service = createCommentService(root, async (type) => {
             if (type === "context.message.delivered") {
                 throw new Error("audit temporarily unavailable");
             }
-        },
-        filePath: join(root, "context-messages.json"),
-        instanceName: "alpha",
     });
     const queued = await service.queue({
         ctxId: "ctx-a",
@@ -258,12 +258,7 @@ test("CommentService delivery event failure never blocks or requeues a completed
 
 test("CommentService keeps #stop durable and delivers #resume before tools continue", async () => {
     const root = await createTestTempDirectory("context-message-stop-control");
-    const options = {
-        appendEvent: async () => undefined,
-        conversationFilePath: join(root, "conversation.sqlite3"),
-        instanceName: "alpha",
-    };
-    const service = new CommentService(options);
+    const service = createCommentService(root);
     const stop = await service.queue({
         ctxId: "ctx-a",
         text: "#stop Stop before the next tool",
@@ -277,7 +272,7 @@ test("CommentService keeps #stop durable and delivers #resume before tools conti
             kind: "stop",
         },
     );
-    const reloaded = new CommentService(options);
+    const reloaded = createCommentService(root);
     assert.equal(
         (await reloaded.reviewToolCall("ctx-a", "file_read")).kind,
         "stop",
@@ -307,11 +302,7 @@ test("CommentService delivers queued Stop-era messages through Resume without re
     const root = await createTestTempDirectory(
         "context-message-stop-resume-queued",
     );
-    const service = new CommentService({
-        appendEvent: async () => undefined,
-        conversationFilePath: join(root, "conversation.sqlite3"),
-        instanceName: "alpha",
-    });
+    const service = createCommentService(root);
     await service.queue({ ctxId: "ctx-a", text: "#stop Stop now" });
     await service.queue({ ctxId: "ctx-a", text: "Also keep this constraint" });
     const resume = await service.queue({
@@ -343,12 +334,7 @@ test("CommentService delivers queued Stop-era messages through Resume without re
 
 test("CommentService persists the remaining #push budget without replenishing repeated Push", async () => {
     const root = await createTestTempDirectory("context-message-push-control");
-    const options = {
-        appendEvent: async () => undefined,
-        conversationFilePath: join(root, "conversation.sqlite3"),
-        instanceName: "alpha",
-    };
-    const service = new CommentService(options);
+    const service = createCommentService(root);
     await service.queue({ ctxId: "ctx-a", text: "#push Answer this first" });
     await service.consumePending("ctx-a", "delivery-one");
     for (let index = 0; index < 4; index += 1) {
@@ -360,7 +346,7 @@ test("CommentService persists the remaining #push budget without replenishing re
     await service.queue({ ctxId: "ctx-a", text: "#push I am still waiting" });
     await service.consumePending("ctx-a", "delivery-two");
 
-    const reloaded = new CommentService(options);
+    const reloaded = createCommentService(root);
     assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
