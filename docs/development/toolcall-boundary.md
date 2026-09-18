@@ -272,6 +272,8 @@ Rewrite 只允许做 **文本替换**。
 
 Core 负责遍历 ToolCall payload 中的字符串叶子，Extension 只接收字符串位置与字符串内容，并返回替换后的字符串。
 
+这个遍历属于 Boundary 自身的基础设施，不应把 JSON 嵌套深度映射成 JavaScript 调用栈深度。实现使用显式遍历状态；Review 的 canonical clone/freeze 与 Rewrite 都必须能处理深层合法 JSON，而不是依赖递归调用栈。
+
 概念接口：
 
 ```text
@@ -633,6 +635,8 @@ comment.feedback
 ```
 
 这两个 interface 都不接受 Extension 提供的 instance / ctxId / toolName 参数，而是绑定到当前 Boundary invocation 的 authoritative context；调用结束后 interfacePort 随 invocation id 一起释放。只有 builtin `comment` registration 可以请求这些 operation。
+
+`CommentReview` 自己决定哪些 invocation 适用 Comment 控制语义；当前策略是 inbound `call`、`source=mcp` 且存在 `ctxId`。Control 的 scoped interface 只提供 authoritative Comment capability，不重复判断 direction / kind / source，也不拥有 Comment applicability policy。
 
 实现所有权位于：
 
