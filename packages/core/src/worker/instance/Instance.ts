@@ -70,7 +70,6 @@ import type {
 } from "../protocol/Terminal.js";
 import type { WorkerRpcError } from "../protocol/rpc/Message.js";
 import type { FrameStream } from "@portable-devshell/shared/transport/frame";
-import { WorkerHandle } from "./capability/Handle.js";
 import type { AuditToolCallHistory } from "../../storage/audit/ToolCallHistory.js";
 import type { InstanceStateMachine } from "../../instance/state/Machine.js";
 import type { InstanceSnapshot } from "../../instance/state/Snapshot.js";
@@ -114,7 +113,6 @@ export class WorkerInstance {
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #connection: WorkerInstanceConnection;
     readonly #commandSessions: WorkerCommandSessionBridge;
-    readonly #handle: WorkerHandle;
     readonly #lifecycle: WorkerInstanceLifecycle;
     readonly #protocolClient: WorkerProtocolClient;
     readonly #state: WorkerInstanceState;
@@ -128,13 +126,6 @@ export class WorkerInstance {
         this.#catalog = dependencies.catalog;
         this.#config = dependencies.config;
         this.#protocolClient = dependencies.protocolClient;
-        this.#handle = new WorkerHandle({
-            assertReady: () => this.#assertReady(),
-            catalog: dependencies.catalog,
-            isReady: () => this.snapshot().ready,
-            protocolClient: dependencies.protocolClient,
-            toolInvoker: dependencies.toolInvoker,
-        });
         this.#state = new WorkerInstanceState({
             config: this.#config,
             eventBuffer: dependencies.eventBuffer,
@@ -195,10 +186,6 @@ export class WorkerInstance {
 
     snapshot(): InstanceSnapshot {
         return this.#state.snapshot(this.#connection.snapshotReverse());
-    }
-
-    get handle(): WorkerHandle {
-        return this.#handle;
     }
 
     get managementMode(): ResolvedWorkerInstanceConfig["managementMode"] {

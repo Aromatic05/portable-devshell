@@ -8,15 +8,11 @@ test("instance connection service shares one managed Worker across MCP and Agent
     let ready = false;
     let starts = 0;
     let stops = 0;
-    const handle = { marker: "shared-worker-handle" };
     const registry = new InstanceRegistry([
         {
             enabled: true,
             name: "worker-a",
             worker: {
-                get handle() {
-                    return handle;
-                },
                 managementMode: "controllerManaged",
                 snapshot() {
                     return { ready };
@@ -40,8 +36,7 @@ test("instance connection service shares one managed Worker across MCP and Agent
     const agent = await connections.acquire("worker-a", "agent:ag-1");
 
     assert.equal(starts, 1);
-    assert.equal(mcp.handle, handle);
-    assert.equal(agent.handle, handle);
+    assert.equal(mcp.worker, agent.worker);
 
     await connections.release("worker-a", "ctx:mcp");
     assert.equal(stops, 0);
@@ -54,9 +49,6 @@ test("instance connection references remain bound to the Worker generation they 
     const worker = (generation: string) => {
         let ready = false;
         return {
-            get handle() {
-                return { generation };
-            },
             managementMode: "controllerManaged" as const,
             snapshot() {
                 return {

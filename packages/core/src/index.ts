@@ -28,7 +28,6 @@ export type {
     WorkerCommandSessionOutput,
     WorkerCommandSessionStream,
 } from "./worker/protocol/CommandSession.js";
-export { WorkerHandle } from "./worker/instance/capability/Handle.js";
 export { WorkerInstance } from "./worker/instance/Instance.js";
 export type { WorkerInstanceConfig } from "./worker/instance/Config.js";
 export { WorkerInstanceFactory } from "./worker/instance/Factory.js";

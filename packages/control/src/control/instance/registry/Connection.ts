@@ -1,11 +1,9 @@
-import type { WorkerHandle } from "@portable-devshell/core";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { InstanceDescriptor } from "../Descriptor.js";
 import type { InstanceRegistry } from "./Registry.js";
 
 export interface InstanceConnectionLease {
-    handle: WorkerHandle;
     snapshot: ReturnType<InstanceDescriptor["worker"]["snapshot"]>;
     worker: InstanceDescriptor["worker"];
 }
@@ -66,7 +64,6 @@ export class InstanceConnectionService {
             );
         }
         return {
-            handle: descriptor.worker.handle,
             snapshot,
             worker: descriptor.worker,
         };
