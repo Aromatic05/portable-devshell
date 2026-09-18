@@ -179,3 +179,54 @@ test("rewrite rejects non-string replacement results", async () => {
         /must return a string/u,
     );
 });
+
+test("review handles deeply nested JSON without recursive stack growth", async () => {
+    const depth = 10_000;
+    let payload: ToolCallReviewInput["payload"] = "leaf";
+    for (let index = 0; index < depth; index += 1) payload = [payload];
+    let reviewed: ToolCallReviewInput["payload"] | undefined;
+    const sequence = new ToolCallBoundarySequence({
+        reviews: [async (reviewInput) => {
+            reviewed = reviewInput.payload;
+            return { decision: "accept" };
+        }],
+    });
+
+    assert.equal((await sequence.review(input(payload))).decision, "accept");
+    let current = reviewed;
+    for (let index = 0; index < depth; index += 1) {
+        assert.equal(Array.isArray(current), true);
+        assert.equal(Object.isFrozen(current), true);
+        current = (current as ToolCallReviewInput["payload"][])[0];
+    }
+    assert.equal(current, "leaf");
+});
+
+test("rewrite handles deeply nested JSON and materializes the leaf path once", async () => {
+    const depth = 10_000;
+    let payload: ToolCallReviewInput["payload"] = "leaf";
+    for (let index = 0; index < depth; index += 1) payload = [payload];
+    let pathLength = 0;
+    const sequence = new ToolCallBoundarySequence({
+        rewrites: [async (rewriteInput) => {
+            pathLength = rewriteInput.path.length;
+            assert.equal(rewriteInput.path.every((segment) => segment === 0), true);
+            return `rewritten:${rewriteInput.text}`;
+        }],
+    });
+
+    let rewritten = await sequence.rewrite({
+        context,
+        direction: "inbound",
+        kind: "call",
+        payload,
+        signal: new AbortController().signal,
+        toolName: "bash_run",
+    });
+    for (let index = 0; index < depth; index += 1) {
+        assert.equal(Array.isArray(rewritten), true);
+        rewritten = (rewritten as ToolCallReviewInput["payload"][])[0]!;
+    }
+    assert.equal(rewritten, "rewritten:leaf");
+    assert.equal(pathLength, depth);
+});
