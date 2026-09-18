@@ -230,16 +230,9 @@ export class ConfigEditorCoordinator {
         const rebuildRequired =
             existing !== undefined &&
             instance !== undefined &&
+            instance.enabled &&
             descriptor !== undefined &&
             requiresWorkerRebuild(existing, instance);
-        const preparedDescriptor =
-            instance === undefined
-                ? undefined
-                : this.#prepareInstanceDescriptor(
-                      instance,
-                      descriptor,
-                      rebuildRequired,
-                  );
         const authChanged =
             existing !== undefined &&
             instance !== undefined &&
@@ -276,42 +269,42 @@ export class ConfigEditorCoordinator {
                 nextConfig,
             );
         }
-        const stoppedForDisable = await this.#stopForDisable(
+        const preparedDescriptor =
+            instance === undefined
+                ? undefined
+                : this.#prepareInstanceDescriptor(
+                      instance,
+                      descriptor,
+                      rebuildRequired,
+                  );
+        await this.#persistInstanceConfig(
+            nextConfig,
+            preparedDescriptor,
+            descriptor,
+        );
+
+        const runtimeChanges: ConfigRuntimeChangeSet = {
+            instanceAuth: authChanged,
+            mcp: request.mcp !== undefined,
+            web: request.web !== undefined,
+        };
+        const hotApplied = await this.#applyPersistedChanges({
+            currentConfig,
+            descriptor,
+            existing,
+            instance,
+            nextConfig,
+            preparedDescriptor,
+            rebuildRequired,
+            runtimeChanges,
+        });
+        await this.#cleanupCommittedInstanceChange(
             existing,
             instance,
             descriptor,
+            preparedDescriptor,
+            rebuildRequired,
         );
-        let hotApplied = false;
-        try {
-            await this.#retireInteractionsForDisable(
-                existing,
-                instance,
-                descriptor,
-            );
-            await this.#persistConfig(nextConfig);
-
-            const runtimeChanges: ConfigRuntimeChangeSet = {
-                instanceAuth: authChanged,
-                mcp: request.mcp !== undefined,
-                web: request.web !== undefined,
-            };
-            hotApplied = await this.#applyPersistedChanges({
-                currentConfig,
-                descriptor,
-                existing,
-                instance,
-                nextConfig,
-                preparedDescriptor,
-                rebuildRequired,
-                runtimeChanges,
-            });
-        } catch (error) {
-            await this.#restoreAfterFailedDisable(
-                descriptor,
-                stoppedForDisable,
-                error,
-            );
-        }
 
         const changes = [
             ...(instanceRequest === undefined
@@ -371,6 +364,7 @@ export class ConfigEditorCoordinator {
         const descriptor = this.#instanceRegistry.get(request.instanceName);
         const rebuildRequired =
             descriptor !== undefined &&
+            instance.enabled &&
             requiresWorkerRebuild(existing, instance);
         const preparedDescriptor = this.#prepareInstanceDescriptor(
             instance,
@@ -383,40 +377,32 @@ export class ConfigEditorCoordinator {
         if (rebuildRequired)
             this.#assertInstanceStopped(request.instanceName, "update");
 
-        const stoppedForDisable = await this.#stopForDisable(
+        await this.#persistInstanceConfig(
+            nextConfig,
+            preparedDescriptor,
+            descriptor,
+        );
+        const hotApplied = await this.#applyPersistedChanges({
+            currentConfig,
+            descriptor,
+            existing,
+            instance,
+            nextConfig,
+            preparedDescriptor,
+            rebuildRequired,
+            runtimeChanges: {
+                instanceAuth: authChanged,
+                mcp: false,
+                web: false,
+            },
+        });
+        await this.#cleanupCommittedInstanceChange(
             existing,
             instance,
             descriptor,
+            preparedDescriptor,
+            rebuildRequired,
         );
-        let hotApplied = false;
-        try {
-            await this.#retireInteractionsForDisable(
-                existing,
-                instance,
-                descriptor,
-            );
-            await this.#persistConfig(nextConfig);
-            hotApplied = await this.#applyPersistedChanges({
-                currentConfig,
-                descriptor,
-                existing,
-                instance,
-                nextConfig,
-                preparedDescriptor,
-                rebuildRequired,
-                runtimeChanges: {
-                    instanceAuth: authChanged,
-                    mcp: false,
-                    web: false,
-                },
-            });
-        } catch (error) {
-            await this.#restoreAfterFailedDisable(
-                descriptor,
-                stoppedForDisable,
-                error,
-            );
-        }
         return this.#finalizeApplyResult(
             currentConfig,
             nextConfig,
@@ -525,6 +511,7 @@ export class ConfigEditorCoordinator {
 
         const skipRuntimeRetirement =
             this.#assertInstanceDeletable(instanceName);
+        const descriptor = this.#instanceRegistry.get(instanceName);
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.filter(
@@ -532,25 +519,38 @@ export class ConfigEditorCoordinator {
             ),
         });
 
-        for (const retire of [...this.#instanceDeleteRetirements]) {
-            await retire(existing);
-        }
-        await this.#retireStateForDelete(
-            this.#instanceRegistry.get(instanceName),
-            skipRuntimeRetirement,
-        );
-        await this.#getMcpHost()?.contextAdmin.detachInstance(instanceName);
         await this.#persistConfig(nextConfig);
-        this.#getMcpHost()?.unregisterInstance(instanceName);
-        let committedCleanupError: unknown;
-        try {
-            await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing);
-        } catch (error) {
-            committedCleanupError = error;
-        } finally {
-            this.#instanceRegistry.delete(instanceName);
+        const cleanupFailures: unknown[] = [];
+        if (descriptor !== undefined) {
+            descriptor.enabled = false;
+            try {
+                this.#instanceRegistry.update(descriptor);
+            } catch (error) {
+                cleanupFailures.push(error);
+            }
         }
-        if (committedCleanupError !== undefined) throw committedCleanupError;
+        try {
+            this.#getMcpHost()?.unregisterInstance(instanceName);
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+        cleanupFailures.push(
+            ...(await this.#cleanupCommittedDelete(
+                existing,
+                descriptor,
+                skipRuntimeRetirement,
+            )),
+        );
+        try {
+            this.#instanceRegistry.delete(instanceName);
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+        this.#warnCommittedCleanupFailures(
+            instanceName,
+            "delete",
+            cleanupFailures,
+        );
         return this.#finalizeApplyResult(currentConfig, nextConfig, [
             { kind: "instance.deleted", target: instanceName },
         ]);
@@ -599,38 +599,28 @@ export class ConfigEditorCoordinator {
             descriptor,
             false,
         );
-        const stoppedForDisable = await this.#stopForDisable(
+        await this.#persistInstanceConfig(
+            nextConfig,
+            preparedDescriptor,
+            descriptor,
+        );
+        await this.#applyPersistedChanges({
+            currentConfig,
+            descriptor,
+            existing,
+            instance,
+            nextConfig,
+            preparedDescriptor,
+            rebuildRequired: false,
+            runtimeChanges: { instanceAuth: false, mcp: false, web: false },
+        });
+        await this.#cleanupCommittedInstanceChange(
             existing,
             instance,
             descriptor,
+            preparedDescriptor,
+            false,
         );
-        try {
-            await this.#retireInteractionsForDisable(
-                existing,
-                instance,
-                descriptor,
-            );
-            await this.#persistConfig(nextConfig);
-            await this.#applyPersistedChanges({
-                currentConfig,
-                descriptor,
-                existing,
-                instance,
-                nextConfig,
-                preparedDescriptor,
-                rebuildRequired: false,
-                runtimeChanges: { instanceAuth: false, mcp: false, web: false },
-            });
-        } catch (error) {
-            await this.#restoreAfterFailedDisable(
-                descriptor,
-                stoppedForDisable,
-                error,
-            );
-        }
-        if (existing.enabled && !instance.enabled) {
-            await this.#notifyInstanceLifecycle(this.#instanceDisabled, existing);
-        }
         return this.#finalizeApplyResult(currentConfig, nextConfig, [
             {
                 kind: enabled ? "instance.enabled" : "instance.disabled",
@@ -645,23 +635,36 @@ export class ConfigEditorCoordinator {
     ): Promise<void> {
         if (descriptor === undefined) return;
         const reason = `Instance ${descriptor.name} was deleted.`;
+        const failures: unknown[] = [];
 
-        for (const approval of await descriptor.worker.listApprovals()) {
-            if (approval.status === "pending") {
-                await descriptor.worker.cancelApproval(
-                    approval.approvalId,
-                    reason,
-                );
+        try {
+            for (const approval of await descriptor.worker.listApprovals()) {
+                if (approval.status !== "pending") continue;
+                await descriptor.worker
+                    .cancelApproval(approval.approvalId, reason)
+                    .catch((error) => failures.push(error));
             }
+        } catch (error) {
+            failures.push(error);
         }
 
         if (descriptor.wait !== undefined) {
-            for (const wait of await descriptor.wait.list()) {
-                if (wait.status === "waiting" || wait.status === "detached") {
+            try {
+                for (const wait of await descriptor.wait.list()) {
+                    if (
+                        wait.status !== "waiting" &&
+                        wait.status !== "detached" &&
+                        wait.status !== "resolved"
+                    )
+                        continue;
                     try {
-                        await descriptor.wait.cancel(wait.waitId);
+                        if (wait.status === "resolved")
+                            await descriptor.wait.consume(wait.waitId);
+                        else await descriptor.wait.cancel(wait.waitId);
                     } catch (error) {
-                        const current = await descriptor.wait.get(wait.waitId);
+                        const current = await descriptor.wait
+                            .get(wait.waitId)
+                            .catch(() => undefined);
                         if (
                             current === undefined ||
                             current.status === "cancelled" ||
@@ -669,126 +672,156 @@ export class ConfigEditorCoordinator {
                             current.status === "resolved"
                         )
                             continue;
-                        throw error;
-                    }
-                } else if (wait.status === "resolved") {
-                    try {
-                        await descriptor.wait.consume(wait.waitId);
-                    } catch (error) {
-                        const current = await descriptor.wait.get(wait.waitId);
-                        if (
-                            current === undefined ||
-                            current.status === "cancelled" ||
-                            current.status === "consumed"
-                        )
-                            continue;
-                        throw error;
+                        failures.push(error);
                     }
                 }
+            } catch (error) {
+                failures.push(error);
             }
         }
 
-        await descriptor.goal.stopAll();
-        await descriptor.todo.cancelAll();
+        await descriptor.goal.stopAll().catch((error) => failures.push(error));
+        await descriptor.todo.cancelAll().catch((error) => failures.push(error));
         if (!skipRuntimeRetirement) {
-            await descriptor.worker.retireRuntime().catch(() => undefined);
+            await descriptor.worker
+                .retireRuntime()
+                .catch((error) => failures.push(error));
         }
         await descriptor.worker
             .retireProviderResources()
-            .catch(() => undefined);
-    }
-
-    async #retireInteractionsForDisable(
-        existing: ControlConfig["instances"][number] | undefined,
-        next: ControlConfig["instances"][number] | undefined,
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-    ): Promise<void> {
-        if (
-            existing === undefined ||
-            next === undefined ||
-            descriptor === undefined ||
-            !existing.enabled
-        )
-            return;
-
-        const instanceDisabled = !next.enabled;
-        const workspaceDisabled =
-            existing.workspace.enabled && !next.workspace.enabled;
-        if (!instanceDisabled && !workspaceDisabled) return;
-
-        if (workspaceDisabled || instanceDisabled) {
-            await this.#getMcpHost()?.retireWorkspaceApp(existing.name);
-        }
-        if (!instanceDisabled) return;
-
-        for (const retire of [...this.#instanceDisableRetirements]) {
-            await retire(existing);
-        }
-
-        for (const approval of await descriptor.worker.listApprovals()) {
-            if (approval.status === "pending") {
-                await descriptor.worker.cancelApproval(
-                    approval.approvalId,
-                    `Instance ${descriptor.name} was disabled before approval.`,
-                );
-            }
-        }
-
-        if (descriptor.wait === undefined) return;
-        for (const wait of await descriptor.wait.list()) {
-            if (wait.status !== "waiting" && wait.status !== "detached")
-                continue;
-            try {
-                await descriptor.wait.cancel(wait.waitId);
-            } catch (error) {
-                const current = await descriptor.wait.get(wait.waitId);
-                if (
-                    current === undefined ||
-                    current.status === "cancelled" ||
-                    current.status === "consumed" ||
-                    current.status === "resolved"
-                )
-                    continue;
-                throw error;
-            }
-        }
-    }
-
-    async #stopForDisable(
-        existing: ControlConfig["instances"][number] | undefined,
-        next: ControlConfig["instances"][number] | undefined,
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-    ): Promise<boolean> {
-        if (
-            existing === undefined ||
-            next === undefined ||
-            descriptor === undefined ||
-            !existing.enabled ||
-            next.enabled ||
-            descriptor.worker.managementMode === "selfManaged"
-        )
-            return false;
-        if (descriptor.worker.snapshot().daemonState === "stopped")
-            return false;
-        await descriptor.worker.stop();
-        return true;
-    }
-
-    async #restoreAfterFailedDisable(
-        descriptor: ReturnType<InstanceRegistry["get"]>,
-        stoppedForDisable: boolean,
-        error: unknown,
-    ): Promise<never> {
-        if (!stoppedForDisable || descriptor === undefined) throw error;
-        try {
-            await descriptor.worker.start();
-        } catch (restoreError) {
+            .catch((error) => failures.push(error));
+        if (failures.length > 0)
             throw new AggregateError(
-                [error, restoreError],
-                `Disabling ${descriptor.name} failed and the previous running state could not be restored.`,
+                failures,
+                `Instance ${descriptor.name} delete cleanup was incomplete.`,
+            );
+    }
+
+    async #cleanupCommittedInstanceChange(
+        existing: ControlConfig["instances"][number] | undefined,
+        next: ControlConfig["instances"][number] | undefined,
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        rebuildRequired: boolean,
+    ): Promise<void> {
+        const failures: unknown[] = [];
+        if (
+            existing !== undefined &&
+            next !== undefined &&
+            descriptor !== undefined &&
+            existing.enabled
+        ) {
+            const instanceDisabled = !next.enabled;
+            const workspaceDisabled =
+                existing.workspace.enabled && !next.workspace.enabled;
+            if (workspaceDisabled || instanceDisabled) {
+                await this.#getMcpHost()
+                    ?.retireWorkspaceApp(existing.name)
+                    .catch((error) => failures.push(error));
+            }
+            if (instanceDisabled) {
+                if (
+                    descriptor.worker.managementMode !== "selfManaged" &&
+                    descriptor.worker.snapshot().daemonState !== "stopped"
+                ) {
+                    await descriptor.worker
+                        .stop()
+                        .catch((error) => failures.push(error));
+                }
+                for (const retire of [...this.#instanceDisableRetirements]) {
+                    await retire(existing).catch((error) => failures.push(error));
+                }
+                try {
+                    for (const approval of await descriptor.worker.listApprovals()) {
+                        if (approval.status !== "pending") continue;
+                        await descriptor.worker
+                            .cancelApproval(
+                                approval.approvalId,
+                                `Instance ${descriptor.name} was disabled before approval.`,
+                            )
+                            .catch((error) => failures.push(error));
+                    }
+                } catch (error) {
+                    failures.push(error);
+                }
+                if (descriptor.wait !== undefined) {
+                    try {
+                        for (const wait of await descriptor.wait.list()) {
+                            if (
+                                wait.status !== "waiting" &&
+                                wait.status !== "detached"
+                            )
+                                continue;
+                            await descriptor.wait
+                                .cancel(wait.waitId)
+                                .catch((error) => failures.push(error));
+                        }
+                    } catch (error) {
+                        failures.push(error);
+                    }
+                }
+                await this.#notifyInstanceLifecycle(
+                    this.#instanceDisabled,
+                    existing,
+                ).catch((error) => failures.push(error));
+            }
+        }
+
+        if (
+            rebuildRequired &&
+            descriptor !== undefined &&
+            preparedDescriptor !== undefined &&
+            descriptor !== preparedDescriptor
+        ) {
+            await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
+                failures.push(error),
             );
         }
-        throw error;
+        this.#warnCommittedCleanupFailures(
+            next?.name ?? existing?.name ?? "unknown",
+            "update",
+            failures,
+        );
+    }
+
+    async #cleanupCommittedDelete(
+        existing: ControlConfig["instances"][number],
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        skipRuntimeRetirement: boolean,
+    ): Promise<unknown[]> {
+        const failures: unknown[] = [];
+        for (const retire of [...this.#instanceDeleteRetirements]) {
+            await retire(existing).catch((error) => failures.push(error));
+        }
+        await this.#retireStateForDelete(descriptor, skipRuntimeRetirement).catch(
+            (error) => failures.push(error),
+        );
+        if (descriptor !== undefined) {
+            await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
+                failures.push(error),
+            );
+        }
+        await this.#getMcpHost()
+            ?.contextAdmin.detachInstance(existing.name)
+            .catch((error) => failures.push(error));
+        await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing).catch(
+            (error) => failures.push(error),
+        );
+        return failures;
+    }
+
+    #warnCommittedCleanupFailures(
+        instance: string,
+        operation: "delete" | "update",
+        failures: readonly unknown[],
+    ): void {
+        if (failures.length === 0) return;
+        console.warn(
+            new AggregateError(
+                [...failures],
+                `Instance ${instance} ${operation} committed but cleanup was incomplete.`,
+            ),
+        );
     }
 
     async #applyPersistedChanges(input: {
@@ -929,7 +962,7 @@ export class ConfigEditorCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            this.#instanceRegistry.add(preparedDescriptor);
+            this.#instanceRegistry.update(preparedDescriptor);
             return;
         }
         if (instance.enabled) {
@@ -1041,6 +1074,31 @@ export class ConfigEditorCoordinator {
     async #persistConfig(config: ControlConfig): Promise<void> {
         await this.#configStore.write(config, this.#homeDirectory);
         this.#setConfig(config);
+    }
+
+    async #persistInstanceConfig(
+        config: ControlConfig,
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        currentDescriptor: ReturnType<InstanceRegistry["get"]>,
+    ): Promise<void> {
+        try {
+            await this.#persistConfig(config);
+        } catch (error) {
+            if (
+                preparedDescriptor === undefined ||
+                preparedDescriptor === currentDescriptor
+            )
+                throw error;
+            try {
+                await closeDescriptorResourcesBestEffort(preparedDescriptor);
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [error, cleanupError],
+                    `Configuration persistence failed and prepared instance ${preparedDescriptor.name} cleanup was incomplete.`,
+                );
+            }
+            throw error;
+        }
     }
 
     async #applyRuntimeOrRestore(

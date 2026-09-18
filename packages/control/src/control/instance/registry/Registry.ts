@@ -3,8 +3,14 @@ import type { InstanceDescriptor } from "../Descriptor.js";
 export class InstanceRegistry {
     readonly #descriptors = new Map<string, InstanceDescriptor>();
     readonly #owned = new Set<string>();
-    readonly #ownedConnectionReferences = new Set<string>();
-    readonly #connectionReferences = new Map<string, Set<string>>();
+    readonly #ownedConnectionWorkers = new Map<
+        string,
+        Set<InstanceDescriptor["worker"]>
+    >();
+    readonly #connectionReferences = new Map<
+        string,
+        Map<InstanceDescriptor["worker"], Set<string>>
+    >();
     readonly #changeListeners = new Set<() => void>();
 
     constructor(descriptors: readonly InstanceDescriptor[]) {
@@ -49,37 +55,76 @@ export class InstanceRegistry {
 
     clearOwned(name: string): void {
         this.#owned.delete(name);
-        this.#ownedConnectionReferences.delete(name);
+        this.#ownedConnectionWorkers.delete(name);
         this.#connectionReferences.delete(name);
     }
 
     retainConnectionReference(
         name: string,
+        worker: InstanceDescriptor["worker"],
         reference: string,
         ownsLifecycle: boolean,
     ): void {
-        const references =
-            this.#connectionReferences.get(name) ?? new Set<string>();
+        const workers =
+            this.#connectionReferences.get(name) ??
+            new Map<InstanceDescriptor["worker"], Set<string>>();
+        for (const [candidate, references] of workers) {
+            if (candidate !== worker && references.has(reference)) {
+                throw new Error(
+                    `Connection reference ${reference} is already bound to another Worker generation for ${name}.`,
+                );
+            }
+        }
+        const references = workers.get(worker) ?? new Set<string>();
         references.add(reference);
-        this.#connectionReferences.set(name, references);
+        workers.set(worker, references);
+        this.#connectionReferences.set(name, workers);
         if (ownsLifecycle) {
-            this.#ownedConnectionReferences.add(name);
+            const owned =
+                this.#ownedConnectionWorkers.get(name) ??
+                new Set<InstanceDescriptor["worker"]>();
+            owned.add(worker);
+            this.#ownedConnectionWorkers.set(name, owned);
         }
     }
 
-    releaseConnectionReference(name: string, reference: string): boolean {
-        const references = this.#connectionReferences.get(name);
-        if (references === undefined) return false;
-        references.delete(reference);
-        if (references.size > 0) return false;
-        this.#connectionReferences.delete(name);
-        return (
-            this.#ownedConnectionReferences.has(name) && !this.#owned.has(name)
+    releaseConnectionReference(name: string, reference: string):
+        | {
+              shouldStop: boolean;
+              worker: InstanceDescriptor["worker"];
+          }
+        | undefined {
+        const workers = this.#connectionReferences.get(name);
+        if (workers === undefined) return undefined;
+        const matched = [...workers.entries()].filter(([, references]) =>
+            references.has(reference),
         );
+        if (matched.length === 0) return undefined;
+        if (matched.length > 1)
+            throw new Error(
+                `Connection reference ${reference} is ambiguous for instance ${name}.`,
+            );
+        const [worker, references] = matched[0]!;
+        references.delete(reference);
+        if (references.size > 0) return { shouldStop: false, worker };
+        workers.delete(worker);
+        if (workers.size === 0) this.#connectionReferences.delete(name);
+        return {
+            shouldStop:
+                this.#ownedConnectionWorkers.get(name)?.has(worker) === true &&
+                !this.#owned.has(name),
+            worker,
+        };
     }
 
-    clearConnectionOwnership(name: string): void {
-        this.#ownedConnectionReferences.delete(name);
+    clearConnectionOwnership(
+        name: string,
+        worker: InstanceDescriptor["worker"],
+    ): void {
+        const owned = this.#ownedConnectionWorkers.get(name);
+        if (owned === undefined) return;
+        owned.delete(worker);
+        if (owned.size === 0) this.#ownedConnectionWorkers.delete(name);
     }
 
     onChange(listener: () => void): () => void {
@@ -91,20 +136,23 @@ export class InstanceRegistry {
 
     async stopOwned(): Promise<void> {
         const failures: Error[] = [];
-
-        const owned = new Set([
-            ...this.#owned,
-            ...this.#ownedConnectionReferences,
-        ]);
-        for (const name of owned) {
+        const ownedWorkers = new Map<InstanceDescriptor["worker"], string>();
+        for (const name of this.#owned) {
             const descriptor = this.#descriptors.get(name);
             if (descriptor === undefined) {
                 this.clearOwned(name);
                 continue;
             }
+            ownedWorkers.set(descriptor.worker, name);
+        }
+        for (const [name, workers] of this.#ownedConnectionWorkers) {
+            for (const worker of workers) ownedWorkers.set(worker, name);
+        }
+        for (const [worker, name] of ownedWorkers) {
             try {
-                await descriptor.worker.stop();
-                this.clearOwned(name);
+                await worker.stop();
+                this.#owned.delete(name);
+                this.clearConnectionOwnership(name, worker);
             } catch (error) {
                 failures.push(
                     error instanceof Error ? error : new Error(String(error)),

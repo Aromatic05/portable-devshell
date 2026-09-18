@@ -48,3 +48,56 @@ test("instance connection service shares one managed Worker across MCP and Agent
     await connections.release("worker-a", "agent:ag-1");
     assert.equal(stops, 1);
 });
+
+test("instance connection references remain bound to the Worker generation they acquired", async () => {
+    const stopped: string[] = [];
+    const worker = (generation: string) => {
+        let ready = false;
+        return {
+            get handle() {
+                return { generation };
+            },
+            managementMode: "controllerManaged" as const,
+            snapshot() {
+                return {
+                    daemonState: ready ? "running" : "stopped",
+                    ready,
+                };
+            },
+            async start() {
+                ready = true;
+                return { daemonState: "running", ready: true };
+            },
+            async stop() {
+                stopped.push(generation);
+                ready = false;
+                return { daemonState: "stopped", ready: false };
+            },
+        };
+    };
+    const first = worker("first");
+    const second = worker("second");
+    const registry = new InstanceRegistry([
+        {
+            enabled: true,
+            name: "worker-a",
+            worker: first,
+        } as never,
+    ]);
+    const connections = new InstanceConnectionService(registry);
+
+    await connections.acquire("worker-a", "ctx:first");
+    registry.update({
+        enabled: true,
+        name: "worker-a",
+        worker: second,
+    } as never);
+    await connections.acquire("worker-a", "ctx:second");
+
+    await connections.release("worker-a", "ctx:first");
+    assert.deepEqual(stopped, ["first"]);
+    assert.equal(second.snapshot().ready, true);
+
+    await connections.release("worker-a", "ctx:second");
+    assert.deepEqual(stopped, ["first", "second"]);
+});

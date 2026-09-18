@@ -60,6 +60,7 @@ export class InstanceConnectionService {
         if (descriptor.worker.managementMode !== "selfManaged") {
             this.#registry.retainConnectionReference(
                 instance,
+                descriptor.worker,
                 reference,
                 ownsLifecycle,
             );
@@ -72,14 +73,16 @@ export class InstanceConnectionService {
     }
 
     async release(instance: string, reference: string): Promise<void> {
-        const descriptor = this.#requireDescriptor(instance);
-        if (descriptor.worker.managementMode === "selfManaged") return;
-        if (!this.#registry.releaseConnectionReference(instance, reference))
-            return;
-        if (descriptor.worker.snapshot().daemonState !== "stopped") {
-            await descriptor.worker.stop();
+        const released = this.#registry.releaseConnectionReference(
+            instance,
+            reference,
+        );
+        if (released === undefined || !released.shouldStop) return;
+        const { worker } = released;
+        if (worker.snapshot().daemonState !== "stopped") {
+            await worker.stop();
         }
-        this.#registry.clearConnectionOwnership(instance);
+        this.#registry.clearConnectionOwnership(instance, worker);
     }
 
     #requireDescriptor(instance: string): InstanceDescriptor {

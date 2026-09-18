@@ -594,7 +594,7 @@ test("generic enabled=false config patch stops the worker and cancels unresolved
     assert.equal(registry.get("demo-local")?.enabled, false);
 });
 
-test("failed managed-instance stop leaves enabled configuration unchanged", async () => {
+test("failed managed-instance stop does not roll back a committed disable", async () => {
     let config = createConfig();
     const writes: ControlConfig[] = [];
     const registry = new InstanceRegistry([
@@ -619,16 +619,18 @@ test("failed managed-instance stop leaves enabled configuration unchanged", asyn
         },
     });
 
-    await assert.rejects(
-        service.disableInstance({ instanceName: "demo-local" }),
-        /worker stop failed/u,
+    const warnings = await captureWarnings(
+        async () =>
+            await service.disableInstance({ instanceName: "demo-local" }),
     );
-    assert.equal(writes.length, 0);
-    assert.equal(config.instances[0]?.enabled, true);
-    assert.equal(registry.get("demo-local")?.enabled, true);
+    assert.equal(writes.length, 1);
+    assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]), /cleanup was incomplete/u);
 });
 
-test("every disable entrypoint restores a managed worker when interaction retirement fails after stop", async (t) => {
+test("every disable entrypoint commits before cleanup and runs committed lifecycle once", async (t) => {
     const entrypoints: Array<{
         name: string;
         run(service: ConfigEditorCoordinator): Promise<unknown>;
@@ -664,6 +666,7 @@ test("every disable entrypoint restores a managed worker when interaction retire
             const writes: ControlConfig[] = [];
             let stopCalls = 0;
             let startCalls = 0;
+            let committed = 0;
             const waiting = {
                 status: "waiting",
                 waitId: "wait-retirement-failure",
@@ -714,21 +717,25 @@ test("every disable entrypoint restores a managed worker when interaction retire
                     config = nextConfig;
                 },
             });
+            service.registerInstanceDisabled(async () => {
+                committed += 1;
+            });
 
-            await assert.rejects(
-                entrypoint.run(service),
-                /wait retirement failed/u,
+            const warnings = await captureWarnings(
+                async () => await entrypoint.run(service),
             );
             assert.equal(stopCalls, 1);
-            assert.equal(startCalls, 1);
-            assert.equal(writes.length, 0);
-            assert.equal(config.instances[0]?.enabled, true);
-            assert.equal(registry.get("demo-local")?.enabled, true);
+            assert.equal(startCalls, 0);
+            assert.equal(committed, 1);
+            assert.equal(writes.length, 1);
+            assert.equal(config.instances[0]?.enabled, false);
+            assert.equal(registry.get("demo-local")?.enabled, false);
+            assert.equal(warnings.length, 1);
         });
     }
 });
 
-test("disable runs registered instance interaction retirement after stopping the Worker", async () => {
+test("disable commits before stopping the Worker and retiring interactions", async () => {
     let config = createConfig();
     const actions: string[] = [];
     const registry = new InstanceRegistry([
@@ -765,14 +772,14 @@ test("disable runs registered instance interaction retirement after stopping the
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.deepEqual(actions.slice(0, 3), [
+        "config.write",
         "worker.stop",
         "interaction.retire:demo-local",
-        "config.write",
     ]);
     assert.equal(config.instances[0]?.enabled, false);
 });
 
-test("disable restarts a managed worker when persistence fails after stop", async () => {
+test("disable persistence failure performs no Worker or interaction cleanup", async () => {
     let config = createConfig();
     let stopCalls = 0;
     let startCalls = 0;
@@ -811,8 +818,8 @@ test("disable restarts a managed worker when persistence fails after stop", asyn
         service.disableInstance({ instanceName: "demo-local" }),
         /config persistence failed/u,
     );
-    assert.equal(stopCalls, 1);
-    assert.equal(startCalls, 1);
+    assert.equal(stopCalls, 0);
+    assert.equal(startCalls, 0);
     assert.equal(config.instances[0]?.enabled, true);
     assert.equal(registry.get("demo-local")?.enabled, true);
 });
@@ -904,6 +911,32 @@ test("disable committed listeners run after persisted descriptor state is visibl
         "registry:false",
         "committed:false:false",
     ]);
+});
+
+test("disable committed-listener failure is cleanup degradation, not transaction failure", async () => {
+    let config = createConfig();
+    const registry = new InstanceRegistry([
+        descriptor({ snapshot: stoppedSnapshot }),
+    ]);
+    const service = createService(
+        () => config,
+        (next) => {
+            config = next;
+        },
+        registry,
+    );
+    service.registerInstanceDisabled(async () => {
+        throw new Error("comment retirement failed");
+    });
+
+    const warnings = await captureWarnings(
+        async () => await service.disableInstance({ instanceName: "demo-local" }),
+    );
+
+    assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]), /cleanup was incomplete/u);
 });
 
 test("Control disable does not stop self-managed reverse workers but retires local pending interactions", async () => {
@@ -1019,6 +1052,88 @@ test("instance reconfigure failure restores persisted and runtime configuration"
     assert.equal(runtimeSecurityMode, "disabled");
 });
 
+test("successful instance rebuild replaces the descriptor then closes the old Worker generation", async () => {
+    let config = createConfig();
+    const actions: string[] = [];
+    const oldDescriptor = descriptor({
+        snapshot: stoppedSnapshot,
+        async close() {
+            actions.push("old.close");
+        },
+    });
+    const replacement = descriptor({ snapshot: stoppedSnapshot });
+    const registry = new InstanceRegistry([oldDescriptor]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                actions.push("config.write");
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: {
+            map() {
+                actions.push("replacement.prepare");
+                return replacement;
+            },
+        } as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await service.updateInstanceConfig({
+        instanceName: "demo-local",
+        patch: { tools: { scheduler: { maxRunning: 2 } } },
+    });
+
+    assert.equal(registry.get("demo-local"), replacement);
+    assert.deepEqual(actions, [
+        "replacement.prepare",
+        "config.write",
+        "old.close",
+    ]);
+});
+
+test("failed rebuild persistence closes the uncommitted replacement descriptor", async () => {
+    let config = createConfig();
+    let replacementClosed = 0;
+    const oldDescriptor = descriptor({ snapshot: stoppedSnapshot });
+    const replacement = descriptor({
+        snapshot: stoppedSnapshot,
+        async close() {
+            replacementClosed += 1;
+        },
+    });
+    const registry = new InstanceRegistry([oldDescriptor]);
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write() {
+                throw new Error("rebuild persistence failed");
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: { map: () => replacement } as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await assert.rejects(
+        service.updateInstanceConfig({
+            instanceName: "demo-local",
+            patch: { tools: { scheduler: { maxRunning: 2 } } },
+        }),
+        /rebuild persistence failed/u,
+    );
+
+    assert.equal(replacementClosed, 1);
+    assert.equal(registry.get("demo-local"), oldDescriptor);
+    assert.equal(config.instances[0]?.tools, undefined);
+});
+
 test("instance delete terminalizes live state and detaches Context environments before descriptor removal", async () => {
     let config = createConfig();
     const actions: string[] = [];
@@ -1043,6 +1158,9 @@ test("instance delete terminalizes live state and detaches Context environments 
                 },
                 async retireProviderResources() {
                     actions.push("provider.retire");
+                },
+                async close() {
+                    actions.push("worker.close");
                 },
             },
             {
@@ -1142,6 +1260,7 @@ test("instance delete terminalizes live state and detaches Context environments 
     await service.deleteInstance({ instanceName: "demo-local" });
 
     assert.deepEqual(actions, [
+        "mcp.unregister:demo-local",
         "approval.cancel:approval-live",
         "wait.cancel:wait-live",
         "wait.consume:wait-result",
@@ -1149,14 +1268,14 @@ test("instance delete terminalizes live state and detaches Context environments 
         "todos.cancelAll",
         "runtime.retire",
         "provider.retire",
+        "worker.close",
         "context.detach:demo-local",
-        "mcp.unregister:demo-local",
     ]);
     assert.equal(config.instances.length, 0);
     assert.equal(registry.get("demo-local"), undefined);
 });
 
-test("instance delete runs generation retirement before any configuration deletion write", async () => {
+test("instance delete commits configuration before generation retirement", async () => {
     let config = createConfig();
     const actions: string[] = [];
     const registry = new InstanceRegistry([
@@ -1224,12 +1343,12 @@ test("instance delete runs generation retirement before any configuration deleti
     await service.deleteInstance({ instanceName: "demo-local" });
 
     assert.deepEqual(actions, [
-        "generation.retire:demo-local",
         "config.write:0",
+        "generation.retire:demo-local",
     ]);
 });
 
-test("instance delete leaves configuration untouched when generation retirement fails", async () => {
+test("instance delete remains committed when generation retirement fails", async () => {
     let config = createConfig();
     const writes: number[] = [];
     const registry = new InstanceRegistry([
@@ -1252,16 +1371,16 @@ test("instance delete leaves configuration untouched when generation retirement 
         throw new Error("generation retirement failed");
     });
 
-    await assert.rejects(
-        service.deleteInstance({ instanceName: "demo-local" }),
-        /generation retirement failed/u,
+    const warnings = await captureWarnings(
+        async () => await service.deleteInstance({ instanceName: "demo-local" }),
     );
-    assert.deepEqual(writes, []);
-    assert.equal(config.instances.length, 1);
-    assert.notEqual(registry.get("demo-local"), undefined);
+    assert.deepEqual(writes, [0]);
+    assert.equal(config.instances.length, 0);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(warnings.length, 1);
 });
 
-test("instance delete leaves configuration untouched when live-state retirement fails", async () => {
+test("instance delete remains committed when live-state retirement fails", async () => {
     let config = createConfig();
     const writes: number[] = [];
     const registry = new InstanceRegistry([
@@ -1302,16 +1421,42 @@ test("instance delete leaves configuration untouched when live-state retirement 
         },
     });
 
-    await assert.rejects(
-        service.deleteInstance({ instanceName: "demo-local" }),
-        /goal retirement failed/u,
+    const warnings = await captureWarnings(
+        async () => await service.deleteInstance({ instanceName: "demo-local" }),
     );
-    assert.deepEqual(writes, []);
-    assert.equal(config.instances.length, 1);
-    assert.notEqual(registry.get("demo-local"), undefined);
+    assert.deepEqual(writes, [0]);
+    assert.equal(config.instances.length, 0);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(warnings.length, 1);
 });
 
-test("instance delete keeps retired live state when final config persistence fails", async () => {
+test("instance delete committed-listener failure does not reverse the delete", async () => {
+    let config = createConfig();
+    const registry = new InstanceRegistry([
+        descriptor({ snapshot: stoppedSnapshot }),
+    ]);
+    const service = createService(
+        () => config,
+        (next) => {
+            config = next;
+        },
+        registry,
+    );
+    service.registerInstanceDeleted(async () => {
+        throw new Error("comment delete cleanup failed");
+    });
+
+    const warnings = await captureWarnings(
+        async () => await service.deleteInstance({ instanceName: "demo-local" }),
+    );
+
+    assert.equal(config.instances.length, 0);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(warnings.length, 1);
+    assert.match(String(warnings[0]), /cleanup was incomplete/u);
+});
+
+test("instance delete persistence failure performs no destructive cleanup", async () => {
     let config = createConfig();
     const actions: string[] = [];
     const registry = new InstanceRegistry([
@@ -1393,11 +1538,7 @@ test("instance delete keeps retired live state when final config persistence fai
         service.deleteInstance({ instanceName: "demo-local" }),
         /delete persistence failed/u,
     );
-    assert.deepEqual(actions, [
-        "goals.stopAll",
-        "todos.cancelAll",
-        "context.detach:demo-local",
-    ]);
+    assert.deepEqual(actions, []);
     assert.equal(config.instances.length, 1);
     assert.notEqual(registry.get("demo-local"), undefined);
 });
@@ -1814,10 +1955,52 @@ function descriptor(
 ) {
     return {
         enabled: true,
+        goal: {
+            async continuation() {
+                return {};
+            },
+            async list() {
+                return [];
+            },
+            async manage() {
+                return undefined;
+            },
+            async read() {
+                return undefined;
+            },
+            async recordReentry() {},
+            async stopAll() {
+                return [];
+            },
+            async touch() {},
+        },
         mcpEnabled: true,
         mcpPath: "/demo-local/mcp",
         modelExtensions: ["instance"],
         name: "demo-local",
+        todo: {
+            async cancelAll() {},
+            async control() {
+                throw new Error("unused");
+            },
+            currentAssociation() {
+                return undefined;
+            },
+            async delete() {},
+            async read() {
+                return {
+                    items: [],
+                    revision: 0,
+                    summary: { completed: 0, total: 0 },
+                };
+            },
+            summaries() {
+                return [];
+            },
+            async write() {
+                throw new Error("unused");
+            },
+        },
         worker: {
             managementMode: "controllerManaged",
             async listApprovals() {
@@ -1856,6 +2039,20 @@ function runningSnapshot() {
         ready: true,
         status: "ready",
     };
+}
+
+async function captureWarnings(operation: () => Promise<unknown>): Promise<unknown[]> {
+    const warnings: unknown[] = [];
+    const originalWarn = console.warn;
+    console.warn = (value?: unknown) => {
+        warnings.push(value);
+    };
+    try {
+        await operation();
+    } finally {
+        console.warn = originalWarn;
+    }
+    return warnings;
 }
 
 function hasCode(code: string): (error: unknown) => boolean {
