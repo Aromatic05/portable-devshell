@@ -545,14 +545,13 @@ export class McpEndpointDispatch {
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
             throw new Error("tmux_read durable wait state is unavailable.");
         }
-        const task = readTmuxReadTask(input);
         const startedAt = Date.now();
-        const invocationInput = {
+        const invocationInput = (rewrittenInput: JsonValue): JsonValue => ({
             consumeOutput: false,
             line: 0,
-            task,
+            task: readTmuxReadTask(rewrittenInput),
             timeMs: 0,
-        } as JsonValue;
+        });
         const transformResult = async (observed: JsonValue, callId: string) => {
             await recordProvenance(callId);
             return await this.#finishTmuxRead(
@@ -804,11 +803,11 @@ export class McpEndpointDispatch {
             throw new Error("tmux_run block wait state is unavailable.");
         }
         const startedAt = Date.now();
-        const initialInput = {
-            ...(isRecord(input) ? input : {}),
+        const invocationInput = (rewrittenInput: JsonValue): JsonValue => ({
+            ...(isRecord(rewrittenInput) ? rewrittenInput : {}),
             consumeOutput: false,
             wait: "nonblock",
-        } as JsonValue;
+        });
         const transformResult = async (started: JsonValue, callId: string) => {
             await recordProvenance(callId);
             return await this.#finishTmuxRun(
@@ -830,7 +829,7 @@ export class McpEndpointDispatch {
                   context,
                   signal,
                   transformResult,
-                  initialInput,
+                  invocationInput,
               )
             : await gateway.callTool(
                   instance,
@@ -839,7 +838,7 @@ export class McpEndpointDispatch {
                   context,
                   signal,
                   transformResult,
-                  initialInput,
+                  invocationInput,
               );
     }
 

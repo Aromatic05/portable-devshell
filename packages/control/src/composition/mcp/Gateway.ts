@@ -143,7 +143,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: JsonValue,
+        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         return await descriptor.worker.callTool(

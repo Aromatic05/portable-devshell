@@ -46,7 +46,7 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: JsonValue,
+        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
     ): Promise<JsonValue>;
     invokeToolInternal?(
         toolName: string,
@@ -137,7 +137,7 @@ export interface McpInstanceGateway {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: JsonValue,
+        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
     ): Promise<JsonValue>;
     invokeToolInternal?(
         instance: string,

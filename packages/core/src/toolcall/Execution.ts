@@ -85,7 +85,7 @@ export class ToolCallExecution {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput: JsonValue = input,
+        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {
@@ -123,7 +123,7 @@ export class ToolCallExecution {
             context,
             signal,
             undefined,
-            input,
+            undefined,
             undefined,
             "host",
             async (innerInput, callId) => await operation(callId, innerInput),
@@ -138,7 +138,9 @@ export class ToolCallExecution {
         transformResult:
             | ((result: JsonValue, callId: string) => Promise<JsonValue>)
             | undefined,
-        invocationInput: JsonValue,
+        invocationInput:
+            | ((input: JsonValue) => Promise<JsonValue> | JsonValue)
+            | undefined,
         onProgress: ((progress: JsonValue) => void) | undefined,
         recording: "caller" | "host",
         execute: (
@@ -317,14 +319,18 @@ export class ToolCallExecution {
                             runningContext,
                             approvalState,
                         );
-                    const innerInput = await boundary.rewrite({
+                    const rewrittenInput = await boundary.rewrite({
                         context: boundaryContext,
                         direction: "inbound",
                         kind: "call",
-                        payload: invocationInput,
+                        payload: input,
                         signal: boundarySignal,
                         toolName,
                     });
+                    const innerInput =
+                        invocationInput === undefined
+                            ? rewrittenInput
+                            : await invocationInput(rewrittenInput);
                     return await execute(
                         innerInput,
                         scope.callId,

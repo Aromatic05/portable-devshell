@@ -87,7 +87,7 @@ export class WorkerInstanceTool {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: JsonValue,
+        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
     ): Promise<JsonValue> {

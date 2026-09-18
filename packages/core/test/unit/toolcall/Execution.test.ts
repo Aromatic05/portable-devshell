@@ -327,14 +327,16 @@ test("ToolCallExecution rewrites only at the trusted execution edge and exposes 
         async (raw) => ({
             text: `adapted ${(raw as { text: string }).text}`,
         }),
-        { command: "wrapped ${SECRET:github}" },
+        (rewritten) => ({
+            command: `wrapped ${(rewritten as { command: string }).command}`,
+        }),
         (value) => {
             events.push("progress.external");
             progress.push(value);
         },
     );
 
-    assert.deepEqual(invoked, [{ command: "wrapped real-token" }]);
+    assert.deepEqual(invoked, [{ command: "wrapped echo real-token" }]);
     assert.deepEqual(progress, [{ text: "progress ${SECRET:github}" }]);
     assert.deepEqual(completed, [{ text: "adapted result ${SECRET:github}" }]);
     assert.deepEqual(result, { text: "adapted result ${SECRET:github}" });

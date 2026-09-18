@@ -79,7 +79,7 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
             context: ToolCallContext,
             signal?: AbortSignal,
             _transformResult?: unknown,
-            _invocationInput?: JsonValue,
+            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             onProgress?: (progress: JsonValue) => void,
             recording?: "caller" | "host",
         ) {
@@ -212,7 +212,7 @@ test("delegated Worker capability fixes caller-owned recording at the host bound
             _context: ToolCallContext,
             _signal?: AbortSignal,
             _transformResult?: unknown,
-            _invocationInput?: JsonValue,
+            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             recording?: "caller" | "host",
         ) {

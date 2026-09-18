@@ -135,7 +135,7 @@ test("control tool stream forwards progress before completing the unchanged fina
                 context: Record<string, unknown>,
                 _signal?: AbortSignal,
                 _transformResult?: unknown,
-                _invocationInput?: JsonValue,
+                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 onProgress?: (progress: JsonValue) => void,
                 recording?: "caller" | "host",
             ) {

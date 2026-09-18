@@ -757,7 +757,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: JsonValue,
+            invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
             assert.deepEqual(input, {
@@ -765,12 +765,17 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 timeout: 660_000,
                 wait: "block",
             });
-            assert.deepEqual(invocationInput, {
-                command: "sleep 10",
-                consumeOutput: false,
-                timeout: 660_000,
-                wait: "nonblock",
-            });
+            assert.deepEqual(
+                invocationInput === undefined
+                    ? input
+                    : await invocationInput(input),
+                {
+                    command: "sleep 10",
+                    consumeOutput: false,
+                    timeout: 660_000,
+                    wait: "nonblock",
+                },
+            );
             runCalls += 1;
             const result = {
                 task: { id: `task-${runCalls}`, status: "running" },
@@ -1243,11 +1248,15 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: JsonValue,
+            invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
             logicalReadCalls += 1;
-            const result = await readTmux(invocationInput ?? input);
+            const result = await readTmux(
+                invocationInput === undefined
+                    ? input
+                    : await invocationInput(input),
+            );
             return transformResult === undefined
                 ? result
                 : await transformResult(result, "call-tmux-read");
