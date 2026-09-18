@@ -1,11 +1,16 @@
-import type {
-    ExtensionRemoveResult,
-    ExtensionRuntimeRecord,
+import {
+    createError,
+    errorCodes,
+    type ExtensionRemoveResult,
+    type ExtensionRuntimeRecord,
 } from "@portable-devshell/shared";
 
 import type { ExtensionControlPort } from "./Route.js";
 import type { ExtensionHost } from "./Host.js";
-import type { ExtensionInstallService } from "./install/Service.js";
+import {
+    REQUIRED_BUILTIN_EXTENSION_IDS,
+    type ExtensionInstallService,
+} from "./install/Service.js";
 
 export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: ExtensionHost;
@@ -20,6 +25,8 @@ export class ExtensionControlService implements ExtensionControlPort {
     }
 
     async disable(id: string): Promise<void> {
+        if (REQUIRED_BUILTIN_EXTENSION_IDS.has(id))
+            throw requiredBuiltinDisableError(id);
         await this.#host.disable(id);
     }
 
@@ -49,4 +56,13 @@ export class ExtensionControlService implements ExtensionControlPort {
     async remove(id: string, purge: boolean): Promise<ExtensionRemoveResult> {
         return await this.#installer.remove(id, purge);
     }
+}
+
+function requiredBuiltinDisableError(id: string): Error {
+    return createError({
+        code: errorCodes.controlExtensionAccessDenied,
+        details: { extensionId: id, operation: "disable" },
+        message: `Extension ${id} is a required builtin and cannot be disabled.`,
+        retryable: false,
+    });
 }

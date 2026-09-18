@@ -291,14 +291,16 @@ export class ExtensionHost {
 
             const snapshot = this.#requireRegistry();
             const next = cloneExtensionRegistry(snapshot);
+            const enabled = snapshot.extensions[id]?.enabled ?? true;
             next.extensions[id] = {
-                enabled: true,
+                enabled,
                 lastKnownGoodGeneration: generation,
                 selectedGeneration: generation,
             };
             await this.#registry.write(next);
             this.#registrySnapshot = next;
-            this.#catalog.replace(id, generation, candidate.manifest);
+            if (enabled) this.#catalog.replace(id, generation, candidate.manifest);
+            else this.#catalog.remove(id);
 
             const active = this.#active.get(id);
             if (active !== undefined) {

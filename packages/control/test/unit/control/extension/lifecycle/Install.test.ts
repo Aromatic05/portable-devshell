@@ -13,10 +13,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+import { errorCodes } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
 import { createArtifactDirectoryArchive } from "../../../../../src/control/artifact/host/storage/Archive.ts";
 import { ExtensionHost } from "../../../../../src/control/extension/Host.ts";
+import { ExtensionControlService } from "../../../../../src/control/extension/Service.ts";
 import { ExtensionInstallService } from "../../../../../src/control/extension/install/Service.ts";
 import { ExtensionLoader } from "../../../../../src/control/extension/generation/discovery/Loader.ts";
 import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
@@ -203,6 +205,22 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
         commentSource,
     );
     assert.equal(installedComment.id, "comment");
+    const control = new ExtensionControlService({
+        host: h.host,
+        installer: h.service,
+    });
+    await assert.rejects(
+        control.disable("comment"),
+        (error: unknown) =>
+            (error as { code?: string }).code ===
+            errorCodes.controlExtensionAccessDenied,
+    );
+    await assert.rejects(
+        control.remove("comment", false),
+        (error: unknown) =>
+            (error as { code?: string }).code ===
+            errorCodes.controlExtensionAccessDenied,
+    );
 
     const installed = await h.service.installBuiltin("skill", source);
 
@@ -290,6 +308,76 @@ test("reinstalling the selected builtin generation preserves lazy startup until 
         { kind: "json", value: { version: "1.0.0" } },
     );
     assert.equal((await host.list())[0]?.state, "active");
+});
+
+test("reinstalling a disabled builtin keeps it disabled across Control restart", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("builtin-skill-disabled", { id: "skill" });
+    const first = await h.service.installBuiltin("skill", source);
+    await h.host.disable("skill");
+    await h.host.stop();
+
+    const host = new ExtensionHost({
+        loader: new ExtensionLoader({
+            instances: { list: () => [] } as never,
+            paths: h.paths,
+            points: createControlExtensionPointRegistry(),
+        }),
+        registry: new ExtensionRegistryStore(h.paths.registryFile),
+    });
+    await host.start();
+    try {
+        assert.equal((await host.list())[0]?.state, "disabled");
+        const service = new ExtensionInstallService({ host, paths: h.paths });
+        const repeated = await service.installBuiltin("skill", source);
+
+        assert.equal(repeated.enabled, false);
+        assert.equal(repeated.state, "disabled");
+        assert.equal(repeated.selectedGeneration, first.selectedGeneration);
+        await assert.rejects(
+            host.acquireRegistration("cli.native-commands", "skill"),
+            /No Extension registration/u,
+        );
+    } finally {
+        await host.stop();
+    }
+});
+
+test("updating a disabled Extension selects the new generation without enabling it", async (t) => {
+    const h = await harness(t);
+    const firstSource = await h.source("disabled-update-v1", {
+        id: "example",
+        version: "1.0.0",
+    });
+    const first = await h.service.install(firstSource);
+    await h.host.disable("example");
+    const secondSource = await h.source("disabled-update-v2", {
+        id: "example",
+        version: "2.0.0",
+    });
+
+    const updated = await h.service.install(secondSource);
+
+    assert.equal(updated.enabled, false);
+    assert.equal(updated.state, "disabled");
+    assert.notEqual(updated.selectedGeneration, first.selectedGeneration);
+    await assert.rejects(
+        h.host.acquireRegistration("cli.native-commands", "example"),
+        /No Extension registration/u,
+    );
+});
+
+test("reinstalling required Comment heals a legacy disabled registry entry", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("builtin-comment-required", { id: "comment" });
+    await h.service.installBuiltin("comment", source);
+    await h.host.disable("comment");
+    assert.equal((await h.host.list())[0]?.state, "disabled");
+
+    const repeated = await h.service.installBuiltin("comment", source);
+
+    assert.equal(repeated.enabled, true);
+    assert.equal(repeated.state, "installed");
 });
 
 test("builtin Extension generation resolves host runtime dependencies without copying node_modules", async (t) => {

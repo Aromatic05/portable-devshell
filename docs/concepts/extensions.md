@@ -89,7 +89,9 @@ CLI/Web request
 
 Install/update 都保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次验证 runtime；只有验证和 cleanup 都成功后，才提交 selected / last-known-good generation 和静态 catalog。因此安装成功不会留下常驻 sandbox，第一次真实调用仍然是独立的 runtime activation。`devshell extension update <bundle-or-directory>` 是已安装 Extension 更新 generation 的显式用户入口，与 install 复用同一个原子验证/切换事务；重复提交当前已经选择且健康的同一 content generation 是幂等操作。
 
-显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
+显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation，但不会改变 Extension 已有的 `enabled` 状态。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
+
+`comment` 是当前唯一 lifecycle-protected builtin。Conversation、Comment queue、preferences 与 ToolCall Review 共同组成一个宿主拥有的 Comment 子系统，因此不能只关闭它的 generation registration。公共 lifecycle 会拒绝 `disable comment` 与 `remove comment`；启动安装 builtin 时会把旧版本遗留的 disabled Comment registry 状态恢复为 enabled。其他 builtin 仍可正常 disable，并且 disabled 状态会跨 generation 更新与 Control 重启保持不变。
 
 ## ExtensionContext
 

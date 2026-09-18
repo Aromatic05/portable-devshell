@@ -571,6 +571,34 @@ test("Extension enable validates and publishes the static catalog without activa
     await host.stop();
 });
 
+test("selecting a new generation preserves a disabled Extension state", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: false, selectedGeneration: "a" } },
+        schemaVersion: 1,
+    });
+    const host = new ExtensionHost({
+        loader: createLoader(async (id, name) =>
+            generation(id, name, () => name, []),
+        ),
+        registry,
+    });
+    await host.start();
+
+    await host.selectGeneration("example", "b");
+
+    assert.equal(registry.value.extensions.example?.enabled, false);
+    assert.equal(registry.value.extensions.example?.selectedGeneration, "b");
+    const record = (await host.list())[0]!;
+    assert.equal(record.enabled, false);
+    assert.equal(record.state, "disabled");
+    assert.equal(record.selectedGeneration, "b");
+    await assert.rejects(
+        host.acquireRegistration("cli.native-commands", "example"),
+        /No Extension registration/u,
+    );
+    await host.stop();
+});
+
 test("Extension host reports a faulted active generation as failed and rejects new leases", async () => {
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: true, selectedGeneration: "a" } },

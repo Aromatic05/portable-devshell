@@ -42,8 +42,11 @@ export const BUILTIN_EXTENSION_IDS = new Set([
     "storage",
 ]);
 
+export const REQUIRED_BUILTIN_EXTENSION_IDS = new Set(["comment"]);
+
 export interface ExtensionInstallHost {
     disable(id: string): Promise<void>;
+    enable(id: string): Promise<void>;
     forget(id: string): Promise<void>;
     list(): Promise<ExtensionRuntimeRecord[]>;
     selectGeneration(id: string, generation: string): Promise<void>;
@@ -80,7 +83,11 @@ export class ExtensionInstallService {
                 `Extension id ${id} is not a registered builtin.`,
             );
         }
-        return await this.#install(sourcePath, id);
+        const installed = await this.#install(sourcePath, id);
+        if (!REQUIRED_BUILTIN_EXTENSION_IDS.has(id) || installed.enabled)
+            return installed;
+        await this.#host.enable(id);
+        return await requireRuntimeRecord(this.#host, id);
     }
 
     async #install(
@@ -199,9 +206,11 @@ export class ExtensionInstallService {
             );
             if (
                 !installedDirectoryCreated &&
-                current?.enabled === true &&
+                current !== undefined &&
                 current.selectedGeneration === generation &&
-                (current.state === "installed" || current.state === "active")
+                (current.state === "installed" ||
+                    current.state === "active" ||
+                    current.state === "disabled")
             ) {
                 return current;
             }
@@ -231,6 +240,8 @@ export class ExtensionInstallService {
     }
 
     async remove(id: string, purge = false): Promise<ExtensionRemoveResult> {
+        if (REQUIRED_BUILTIN_EXTENSION_IDS.has(id))
+            throw requiredBuiltinRemoveError(id);
         await this.#host.disable(id);
         await this.#host.waitForDrain(id);
         await this.#host.forget(id);
@@ -262,6 +273,15 @@ export class ExtensionInstallService {
         }
         return { id, purged: purge, removed: true };
     }
+}
+
+function requiredBuiltinRemoveError(id: string): Error {
+    return createError({
+        code: errorCodes.controlExtensionAccessDenied,
+        details: { extensionId: id, operation: "remove" },
+        message: `Extension ${id} is a required builtin and cannot be removed.`,
+        retryable: false,
+    });
 }
 
 async function readStagedManifest(
