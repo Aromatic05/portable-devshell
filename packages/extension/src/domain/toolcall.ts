@@ -38,6 +38,10 @@ export interface ToolCallReviewError {
 }
 
 export interface ToolCallReviewResult {
+    /**
+     * Admission decision for inbound calls. Outbound review is feedback-only;
+     * its decision does not change an already-established ToolCall outcome.
+     */
     readonly decision: ToolCallReviewDecision;
     readonly error?: ToolCallReviewError;
     readonly feedback?: readonly string[];

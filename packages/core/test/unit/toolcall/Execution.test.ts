@@ -438,6 +438,151 @@ test("ToolCallExecution serializes asynchronous progress rewrites before complet
     ]);
 });
 
+test("ToolCallExecution keeps successful result and progress semantics when outbound Review fails", async () => {
+    const completed: unknown[] = [];
+    const progress: unknown[] = [];
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (value?: unknown) => warnings.push(String(value));
+    try {
+        const execution = new ToolCallExecution({
+            approval: { async prepare() { return {}; } },
+            assertReady() {},
+            audit: {
+                createScope(toolName: string, input: unknown, callContext: typeof context) {
+                    return createToolCallScope(toolName, input as never, callContext);
+                },
+                async requested() {},
+                async queued() {},
+                runningContext() { return {}; },
+                async running() {},
+                async completed(_scope: unknown, _running: unknown, _approval: unknown, result: unknown) {
+                    completed.push(result);
+                },
+                async failed() {},
+                async failActive() {},
+                async nonRunning() {},
+            },
+            boundary: async () => ({
+                release() {},
+                sequence: new ToolCallBoundarySequence({
+                    reviews: [async (input) => {
+                        if (input.direction === "outbound")
+                            throw new Error(`review failed for ${input.kind}`);
+                        return { decision: "accept" };
+                    }],
+                }),
+            }),
+            instanceName: asInstanceName("boundary-outbound-review-failure"),
+            log: { async append() {} },
+            toolCallScheduler: {
+                reserve() {
+                    return {
+                        markPendingApproval() {},
+                        release() {},
+                        async run(operation: () => Promise<unknown>) { return await operation(); },
+                    };
+                },
+            },
+            toolInvoker: {
+                async invoke(_toolName: string, _input: unknown, _context: unknown, _signal: unknown, onProgress?: (value: unknown) => void) {
+                    onProgress?.({ step: 1 });
+                    return { ok: true };
+                },
+            },
+        } as never);
+
+        assert.deepEqual(
+            await execution.call(
+                "bash_run",
+                {},
+                context,
+                undefined,
+                undefined,
+                undefined,
+                (value) => progress.push(value),
+            ),
+            { ok: true },
+        );
+        assert.deepEqual(progress, [{ step: 1 }]);
+        assert.deepEqual(completed, [{ ok: true }]);
+        assert.equal(warnings.length, 2);
+    } finally {
+        console.warn = originalWarn;
+    }
+});
+
+test("ToolCallExecution preserves the original failure when outbound error Review fails", async () => {
+    const failedCodes: string[] = [];
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (value?: unknown) => warnings.push(String(value));
+    try {
+        const execution = new ToolCallExecution({
+            approval: { async prepare() { return {}; } },
+            assertReady() {},
+            audit: {
+                createScope(toolName: string, input: unknown, callContext: typeof context) {
+                    return createToolCallScope(toolName, input as never, callContext);
+                },
+                async requested() {},
+                async queued() {},
+                runningContext() { return {}; },
+                async running() {},
+                async completed() {},
+                async failed(_scope: unknown, _running: unknown, _approval: unknown, errorCode: string) {
+                    failedCodes.push(errorCode);
+                },
+                async failActive() {},
+                async nonRunning() {},
+            },
+            boundary: async () => ({
+                release() {},
+                sequence: new ToolCallBoundarySequence({
+                    reviews: [async (input) => {
+                        if (input.direction === "outbound" && input.kind === "error")
+                            throw new Error("error review failed");
+                        return { decision: "accept" };
+                    }],
+                }),
+            }),
+            instanceName: asInstanceName("boundary-outbound-error-review-failure"),
+            log: { async append() {} },
+            toolCallScheduler: {
+                reserve() {
+                    return {
+                        markPendingApproval() {},
+                        release() {},
+                        async run(operation: () => Promise<unknown>) { return await operation(); },
+                    };
+                },
+            },
+            toolInvoker: {
+                async invoke() {
+                    throw createError({
+                        code: "tool.originalFailure",
+                        message: "original failure",
+                        retryable: false,
+                    });
+                },
+            },
+        } as never);
+
+        await assert.rejects(
+            execution.call("bash_run", {}, context),
+            (error: unknown) => {
+                assert.equal((error as { code?: string }).code, "tool.originalFailure");
+                assert.equal((error as Error).message, "original failure");
+                return true;
+            },
+        );
+        assert.deepEqual(failedCodes, ["tool.originalFailure"]);
+        assert.equal(warnings.length, 1);
+    } finally {
+        console.warn = originalWarn;
+    }
+});
+
 test("ToolCallExecution masks error message, details, and command streams before audit and delivery", async () => {
     const failedResults: unknown[] = [];
     const reviewed: unknown[] = [];
