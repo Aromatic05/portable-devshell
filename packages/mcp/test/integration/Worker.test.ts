@@ -545,7 +545,7 @@ import { tmpdir } from "node:os";
     );
 
     test(
-        "MCP tools/call waits for approval before invoking the worker tool",
+        "MCP control and worker tool calls share the approval boundary",
         realWorkerTestOptions(workerBinaryPath),
         async () => {
             const instanceName = "aromatic-pc-mcp-approval";
@@ -606,11 +606,21 @@ import { tmpdir } from "node:os";
                     sessionHeaders,
                 );
 
-                const ctxId = await createContext(
+                const contextPromise = createContext(
                     endpoint,
                     sessionHeaders,
                     workspacePath,
                 );
+                const contextApproval = await waitForPendingApproval(instance);
+                assert.equal(contextApproval.source, "mcp");
+                assert.equal(contextApproval.toolName, "environ_info");
+                await instance.decideApproval(contextApproval.approvalId, {
+                    decidedBy: "cli",
+                    decision: "approve",
+                    reason: "approved MCP environment bootstrap",
+                });
+                const ctxId = await contextPromise;
+
                 callPromise = postJson(
                     endpoint,
                     withToolContext(
@@ -623,6 +633,7 @@ import { tmpdir } from "node:os";
                 const pendingApproval = await waitForPendingApproval(instance);
                 assert.equal(pendingApproval.status, "pending");
                 assert.equal(pendingApproval.source, "mcp");
+                assert.equal(pendingApproval.toolName, "bash_run");
                 assert.equal(
                     (await instance.readToolCalls()).some(
                         (record) =>
@@ -812,9 +823,19 @@ import { tmpdir } from "node:os";
 
     async function waitForPendingApproval(instance: {
         listApprovals(): Promise<
-            Array<{ approvalId: string; source: string; status: string }>
+            Array<{
+                approvalId: string;
+                source: string;
+                status: string;
+                toolName: string;
+            }>
         >;
-    }): Promise<{ approvalId: string; source: string; status: string }> {
+    }): Promise<{
+        approvalId: string;
+        source: string;
+        status: string;
+        toolName: string;
+    }> {
         for (let attempt = 0; attempt < 50; attempt += 1) {
             const pending = (await instance.listApprovals()).find(
                 (approval) => approval.status === "pending",
