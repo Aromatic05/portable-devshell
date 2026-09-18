@@ -53,6 +53,37 @@ test("ToolCall Comment interface exposes only the current review decision to the
     ]);
 });
 
+test("ToolCall Comment interface does not own Comment applicability policy", async () => {
+    const calls: unknown[] = [];
+    const review = new ToolCallCommentReview({
+        feedback() {
+            return [];
+        },
+        async reviewToolCall(instance, ctxId, toolName, requestId) {
+            calls.push({ ctxId, instance, requestId, toolName });
+            return { kind: "allow" as const };
+        },
+    });
+
+    assert.deepEqual(
+        await review
+            .context("comment", {
+                ...input,
+                context: { ...input.context, source: "extension" },
+            })
+            .requestInterface(commentReviewInterfaceOperation),
+        { kind: "allow" },
+    );
+    assert.deepEqual(calls, [
+        {
+            ctxId: "ctx-1",
+            instance: "demo",
+            requestId: "request-1",
+            toolName: "bash_run",
+        },
+    ]);
+});
+
 test("ToolCall Comment interface resolves outbound feedback through Comment-owned Hint logic", async () => {
     const review = new ToolCallCommentReview({
         feedback() {

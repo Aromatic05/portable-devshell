@@ -61,17 +61,12 @@ export class ToolCallCommentReview {
     async #review(
         input: ToolCallReviewInvocation,
     ): Promise<ExtensionCommentControlDecision> {
-        if (
-            input.direction !== "inbound" ||
-            input.kind !== "call" ||
-            input.context.source !== "mcp" ||
-            input.context.ctxId === undefined
-        ) {
-            return { kind: "allow" };
-        }
+        const ctxId = input.context.ctxId;
+        if (ctxId === undefined)
+            throw new TypeError("Comment review requires a Context id.");
         return await this.#requireComment().reviewToolCall(
             input.context.instance,
-            input.context.ctxId,
+            ctxId,
             input.toolName,
             input.context.requestId,
         );
