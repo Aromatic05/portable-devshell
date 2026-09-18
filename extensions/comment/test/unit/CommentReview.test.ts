@@ -39,6 +39,38 @@ test("Comment review applies model control only to inbound MCP calls with a Cont
     assert.equal(calls.length, 1);
 });
 
+test("Comment outbound review returns non-blocking feedback", async () => {
+    const calls: unknown[] = [];
+    const review = createCommentReview();
+    const invocation = {
+        async requestInterface(operation: string, input?: unknown) {
+            calls.push({ input, operation });
+            if (operation === "comment.feedback")
+                return ["[bash.nonZeroExit] Exited with code 7; inspect output."];
+            throw new Error(`unexpected operation ${operation}`);
+        },
+    };
+
+    assert.deepEqual(
+        await review(
+            {
+                ...base,
+                direction: "outbound",
+                kind: "result",
+                payload: { exitCode: 7 },
+            },
+            invocation,
+        ),
+        {
+            decision: "accept",
+            feedback: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
+        },
+    );
+    assert.deepEqual(calls, [
+        { input: undefined, operation: "comment.feedback" },
+    ]);
+});
+
 test("Comment review maps push stop and resume to rejected ToolCalls", async () => {
     const decisions: ExtensionJsonValue[] = [
         { commentId: "push-1", kind: "push", toolCallBudget: 5 },

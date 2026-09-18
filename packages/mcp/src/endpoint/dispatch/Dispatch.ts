@@ -1,4 +1,3 @@
-import { mergeComments, resolveResultHints } from "@portable-devshell/comment-extension";
 import {
     createError,
     errorCodes,
@@ -179,6 +178,34 @@ export class McpEndpointDispatch {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
+        const feedback: string[] = [];
+        const onFeedback = (entries: readonly string[]): void => {
+            appendUnique(feedback, entries);
+        };
+        try {
+            return attachEndpointFeedback(
+                await this.#callTool(
+                    toolName,
+                    input,
+                    requestContext,
+                    signal,
+                    onFeedback,
+                ),
+                feedback,
+            );
+        } catch (error) {
+            attachErrorFeedback(error, feedback);
+            throw error;
+        }
+    }
+
+    async #callTool(
+        toolName: string,
+        input: JsonValue,
+        requestContext: McpEndpointCallContext,
+        signal: AbortSignal | undefined,
+        onFeedback: (feedback: readonly string[]) => void,
+    ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const requestedToolName = toolName;
         const requestedInput = input;
@@ -220,6 +247,7 @@ export class McpEndpointDispatch {
                 requestContext,
                 selected !== undefined,
                 signal,
+                onFeedback,
             );
             const workspaceApp = snapshot.exposed.some(
                 (entry) =>
@@ -416,6 +444,7 @@ export class McpEndpointDispatch {
                     routed.instance,
                     recordProvenance,
                     signal,
+                    onFeedback,
                 );
             }
 
@@ -437,6 +466,7 @@ export class McpEndpointDispatch {
                     recordProvenance,
                     signal,
                     executionEpoch,
+                    onFeedback,
                 );
             }
 
@@ -458,6 +488,7 @@ export class McpEndpointDispatch {
                     recordProvenance,
                     signal,
                     executionEpoch,
+                    onFeedback,
                 );
             }
 
@@ -483,8 +514,7 @@ export class McpEndpointDispatch {
                         );
                     }
                     const withComments = await this.#attachComments(
-                        toolName,
-                        result,
+                                                result,
                         context,
                         callId,
                         routed.instance,
@@ -497,6 +527,7 @@ export class McpEndpointDispatch {
                           )
                         : withComments;
                 },
+                onFeedback,
             );
         } catch (error) {
             if (
@@ -540,6 +571,7 @@ export class McpEndpointDispatch {
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: number,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
@@ -574,6 +606,9 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
+                  undefined,
+                  "host",
+                  onFeedback,
               )
             : await gateway.callTool(
                   instance,
@@ -583,6 +618,7 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
+                  onFeedback,
               );
     }
 
@@ -625,8 +661,7 @@ export class McpEndpointDispatch {
                 false,
             );
             return await this.#attachComments(
-                "tmux_read",
-                completed,
+                                completed,
                 context,
                 callId,
                 instance,
@@ -758,8 +793,7 @@ export class McpEndpointDispatch {
             (current?.status === "resolved" && current.detachedAt !== undefined)
         ) {
             return await this.#attachComments(
-                "tmux_read",
-                { ...observed, detached: true },
+                                { ...observed, detached: true },
                 context,
                 callId,
                 instance,
@@ -774,8 +808,7 @@ export class McpEndpointDispatch {
                 context,
             );
             return await this.#attachComments(
-                "tmux_read",
-                completed,
+                                completed,
                 context,
                 callId,
                 instance,
@@ -797,6 +830,7 @@ export class McpEndpointDispatch {
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: number,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
         if (!isMcpTmuxWaitGateway(gateway) || context.ctxId === undefined) {
@@ -830,6 +864,9 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
+                  undefined,
+                  "host",
+                  onFeedback,
               )
             : await gateway.callTool(
                   instance,
@@ -839,6 +876,7 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
+                  onFeedback,
               );
     }
 
@@ -876,8 +914,7 @@ export class McpEndpointDispatch {
                 signal,
             );
             return await this.#attachComments(
-                "tmux_run",
-                { ...started, ...completed },
+                                { ...started, ...completed },
                 context,
                 callId,
                 instance,
@@ -1003,8 +1040,7 @@ export class McpEndpointDispatch {
             (current?.status === "resolved" && current.detachedAt !== undefined)
         ) {
             return await this.#attachComments(
-                "tmux_run",
-                { ...started, detached: true },
+                                { ...started, detached: true },
                 context,
                 callId,
                 instance,
@@ -1026,8 +1062,7 @@ export class McpEndpointDispatch {
                     signal,
                 );
                 return await this.#attachComments(
-                    "tmux_run",
-                    { ...started, ...current.result, ...completed },
+                                        { ...started, ...current.result, ...completed },
                     context,
                     callId,
                     instance,
@@ -1040,8 +1075,7 @@ export class McpEndpointDispatch {
                 context,
             );
             return await this.#attachComments(
-                "tmux_run",
-                { ...started, ...current.result, ...completed },
+                                { ...started, ...current.result, ...completed },
                 context,
                 callId,
                 instance,
@@ -1592,23 +1626,20 @@ export class McpEndpointDispatch {
     }
 
     async #attachComments(
-        toolName: string,
         result: JsonValue,
         context: ToolCallContext,
         callId: string,
         instance: string = this.#instanceName,
     ): Promise<JsonValue> {
         if (context.ctxId === undefined) return result;
-        const queuedComments = await this.#consumeQueuedComments(
-            instance,
-            context.ctxId,
-            callId,
+        return attachMcpComments(
+            result,
+            await this.#consumeQueuedComments(
+                instance,
+                context.ctxId,
+                callId,
+            ),
         );
-        const comments = mergeComments(
-            queuedComments,
-            resolveResultHints(toolName, result),
-        );
-        return attachMcpComments(result, comments);
     }
 
     async #consumeQueuedComments(
@@ -1803,6 +1834,7 @@ export class McpEndpointDispatch {
         instance: string,
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
         const structuredResult = await callMcpEndpointToolOperation({
@@ -1810,6 +1842,7 @@ export class McpEndpointDispatch {
             gateway: this.#gateway,
             input,
             localInstance: this.#instanceName,
+            onFeedback,
             operation: async (callId, operationInput) => {
                 await recordProvenance(callId);
                 const result = await this.#callControlTool(
@@ -1822,8 +1855,7 @@ export class McpEndpointDispatch {
                 );
                 if (result instanceof McpNativeToolResult) {
                     const structuredContent = await this.#attachComments(
-                        toolName,
-                        result.structuredContent,
+                                                result.structuredContent,
                         context,
                         callId,
                         instance,
@@ -1839,8 +1871,7 @@ export class McpEndpointDispatch {
                     return structuredContent;
                 }
                 return await this.#attachComments(
-                    toolName,
-                    result,
+                                        result,
                     context,
                     callId,
                     instance,
@@ -1895,6 +1926,49 @@ export class McpEndpointDispatch {
                     callId,
                 );
         }
+    }
+}
+
+function appendUnique(target: string[], entries: readonly string[]): void {
+    for (const entry of entries) {
+        if (!target.includes(entry)) target.push(entry);
+    }
+}
+
+function attachEndpointFeedback(
+    result: McpEndpointResult,
+    feedback: readonly string[],
+): McpEndpointResult {
+    if (feedback.length === 0) return result;
+    if (result instanceof McpNativeToolResult) {
+        return new McpNativeToolResult({
+            ...(result._meta === undefined ? {} : { _meta: result._meta }),
+            content: result.content,
+            isError: result.isError,
+            structuredContent: attachMcpComments(
+                result.structuredContent,
+                feedback,
+            ),
+        });
+    }
+    return attachMcpComments(result, feedback);
+}
+
+function attachErrorFeedback(error: unknown, feedback: readonly string[]): void {
+    if (feedback.length === 0 || typeof error !== "object" || error === null)
+        return;
+    const record = error as { comment?: unknown };
+    const comments = Array.isArray(record.comment)
+        ? record.comment.filter(
+              (entry): entry is string =>
+                  typeof entry === "string" && entry.length > 0,
+          )
+        : [];
+    appendUnique(comments, feedback);
+    try {
+        record.comment = comments;
+    } catch {
+        // Feedback is non-blocking.
     }
 }
 

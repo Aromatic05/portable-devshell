@@ -1,10 +1,8 @@
-import { mergeComments, resolveErrorHints, resolveResultHints } from "@portable-devshell/comment-extension";
 import type { WorkerInstance } from "@portable-devshell/core";
 import {
     ControlError,
     createError,
     errorCodes,
-    toControlErrorBody,
     type JsonValue,
     type PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
@@ -46,6 +44,10 @@ export function createToolRouteModule(
             const { input, recording, toolName, workspace } = readToolCall(
                 request.payload,
             );
+            const feedback: string[] = [];
+            const onFeedback = (entries: readonly string[]): void => {
+                appendFeedback(feedback, entries);
+            };
             try {
                 const result = await instance.worker.callTool(
                     toolName,
@@ -61,11 +63,9 @@ export function createToolRouteModule(
                     undefined,
                     undefined,
                     recording,
+                    onFeedback,
                 );
-                return attachComments(
-                    result,
-                    mergeComments([], resolveResultHints(toolName, result)),
-                );
+                return attachComments(result, feedback);
             } catch (error) {
                 const failure =
                     error instanceof ControlError
@@ -78,11 +78,8 @@ export function createToolRouteModule(
                                       : String(error),
                               retryable: false,
                           });
-                const body = toControlErrorBody(error);
-                const hints =
-                    body === undefined ? [] : resolveErrorHints(toolName, body);
                 return {
-                    comment: mergeComments([], hints),
+                    comment: feedback,
                     error: {
                         code: failure.code,
                         message: failure.message,
@@ -122,6 +119,10 @@ export function createToolRouteModule(
                         controller.abort(error);
                     });
             };
+            const feedback: string[] = [];
+            const onFeedback = (entries: readonly string[]): void => {
+                appendFeedback(feedback, entries);
+            };
             let result: JsonValue;
             try {
                 const raw = await instance.worker.callTool(
@@ -139,11 +140,9 @@ export function createToolRouteModule(
                     undefined,
                     emitProgress,
                     recording,
+                    onFeedback,
                 );
-                result = attachComments(
-                    raw,
-                    mergeComments([], resolveResultHints(toolName, raw)),
-                );
+                result = attachComments(raw, feedback);
             } catch (error) {
                 const failure =
                     error instanceof ControlError
@@ -156,11 +155,8 @@ export function createToolRouteModule(
                                       : String(error),
                               retryable: false,
                           });
-                const body = toControlErrorBody(error);
-                const hints =
-                    body === undefined ? [] : resolveErrorHints(toolName, body);
                 result = {
-                    comment: mergeComments([], hints),
+                    comment: feedback,
                     error: {
                         code: failure.code,
                         message: failure.message,
@@ -221,6 +217,15 @@ export function createToolRouteModule(
                 },
             )) as unknown as JsonValue,
     });
+}
+
+function appendFeedback(
+    target: string[],
+    entries: readonly string[],
+): void {
+    for (const entry of entries) {
+        if (!target.includes(entry)) target.push(entry);
+    }
 }
 
 function attachComments(

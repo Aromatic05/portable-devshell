@@ -37,6 +37,7 @@ export class McpEndpointHandlerWorker {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(
             input,
@@ -63,6 +64,10 @@ export class McpEndpointHandlerWorker {
                 context,
                 signal,
                 transformResult,
+                undefined,
+                undefined,
+                "host",
+                onFeedback,
             );
         }
 
@@ -87,6 +92,8 @@ export class McpEndpointHandlerWorker {
             context,
             signal,
             transformResult,
+            undefined,
+            onFeedback,
         );
     }
 }

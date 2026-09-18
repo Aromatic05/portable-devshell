@@ -63,6 +63,25 @@ test("reviewers see one frozen outer payload and aggregate reject over approve o
     assert.equal(Object.isFrozen(outer), false);
 });
 
+test("review aggregates non-blocking feedback without changing decision precedence", async () => {
+    const sequence = new ToolCallBoundarySequence({
+        reviews: [
+            async () => ({ decision: "accept", feedback: ["first"] }),
+            async () => ({ decision: "approve", feedback: ["second"] }),
+            async () => ({
+                decision: "reject",
+                feedback: ["third"],
+                reason: "blocked",
+            }),
+        ],
+    });
+    assert.deepEqual(await sequence.review(input({ command: "echo ok" })), {
+        decision: "reject",
+        feedback: ["first", "second", "third"],
+        reason: "blocked",
+    });
+});
+
 test("review aggregation is independent of reviewer registration order", async () => {
     const makeReview = (decision: "accept" | "approve" | "reject"): ToolCallReview =>
         async () => ({ decision });

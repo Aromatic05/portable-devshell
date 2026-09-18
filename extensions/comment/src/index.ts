@@ -20,6 +20,7 @@ export {
     formatHint,
     type ToolDiagnosticHint,
 } from "./hint/Hint.js";
+export { resolveToolCallFeedback } from "./hint/Feedback.js";
 export { resolveErrorHints, resolveResultHints } from "./hint/Resolver.js";
 
 export function commentExtensionDirectory(): string {

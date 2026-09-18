@@ -179,7 +179,9 @@ Outbound Review 发生在 outbound Rewrite 之后，因此它只能看到已经�
 
 它可以产生 Comment、hint 或其他外部反馈，但不得读取 Rewrite 之前的内部 secret-bearing payload。
 
-第一版不把 outbound Review 定义成任意结果 mutation middleware。
+Review result 的非阻断反馈统一放在 `feedback[]`。Core 对所有 reviewer 的 feedback 按 review invocation 顺序聚合；它不参与 `reject > approve > accept` 的 authority 排序，也不允许修改 ToolCall payload。调用方通过独立 side-channel 消费 feedback，因此 presentation 失败不能反向改变 ToolCall 成功/失败语义。
+
+Outbound Review 仍然不是任意结果 mutation middleware。
 
 ### 5.3 Rejection feedback metadata
 
@@ -618,29 +620,39 @@ Inbound Review 负责：
 tool-call reply deadline
 ```
 
-Sandboxed Comment Extension 不直接获得 Control、ConversationStore 或 Audit authority，也不新增 resource capability。Control 只在一次 `toolcall.review` invocation 内提供一个窄 interface：
+Sandboxed Comment Extension 不直接获得 Control、ConversationStore 或 Audit authority，也不新增 resource capability。Control 只在一次 `toolcall.review` invocation 内提供两个窄 interface：
 
 ```text
 comment.reviewToolCall
     -> allow | push | stop | resume
+
+comment.feedback
+    -> string[]
 ```
 
-该 interface 不接受 Extension 提供的 instance / ctxId / toolName 参数，而是绑定到当前 Boundary invocation 的 authoritative context；调用结束后 interfacePort 随 invocation id 一起释放。只有 builtin `comment` registration 可以请求该 operation。Conversation、Comment queue/list、pending reply 与 Context lifecycle 仍由 Comment 自己的业务服务负责；Control 现有 RPC/route 只是这些服务的 facade。
+这两个 interface 都不接受 Extension 提供的 instance / ctxId / toolName 参数，而是绑定到当前 Boundary invocation 的 authoritative context；调用结束后 interfacePort 随 invocation id 一起释放。只有 builtin `comment` registration 可以请求这些 operation。
 
-实现所有权已经迁到：
+实现所有权位于：
 
 ```text
 extensions/comment/src/
-├── control/
-│   ├── Comment.ts
-│   ├── Conversation.ts
-│   └── Store.ts
+├── builtin/
+│   ├── CommentReview.ts
+│   ├── devshell-extension.json
+│   └── index.ts
+├── comment/
+├── conversation/
 ├── hint/
-├── runtime/
+│   ├── Feedback.ts
+│   ├── Hint.ts
+│   ├── Resolver.ts
+│   └── tool/
 └── index.ts
 ```
 
-`hint` 规则也由 Comment package 持有，不再属于 `shared`。当前 hint delivery 仍位于现有 MCP/Control outer presentation path：它只消费已经经过 outbound Rewrite 的 outer result/error，因此不需要为了形式把现有 presentation adapter 强行改造成 outbound Review。等未来 Comment feedback 需要真正参与 Extension registration/composition 时，再把 delivery 收敛到 outbound review。
+`hint` 规则也由 Comment package 持有，不再属于 `shared`。Result/error Hint 现在由 Comment outbound Review 通过 `feedback[]` 返回；MCP 与 Control Tool Route 只消费 generic ToolCall feedback，不再直接 import Comment 的 resolver。
+
+Conversation、Comment queue/list、pending reply、preferences 与 Context lifecycle 的 runtime ownership 仍需要继续从 Control composition 中收口；这属于 Comment extraction 的后续阶段，不由 ToolCall Boundary 代替。
 
 Todo 的 enable/rate-limit/report token policy 与 Comment 是不同 authority，继续保留独立的 Todo-only gate；迁移 Comment 不得把 Todo policy 一起吸入 reviewer。
 

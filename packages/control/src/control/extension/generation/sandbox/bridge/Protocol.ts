@@ -114,6 +114,7 @@ export type ExtensionSandboxCapabilityOperation =
     | "workers.openSession";
 
 export type ExtensionSandboxInterfaceOperation =
+    | "comment.feedback"
     | "comment.reviewToolCall"
     | "secret.environment"
     | "cli.context.instanceReference"

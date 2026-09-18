@@ -40,6 +40,7 @@ export interface ToolCallReviewError {
 export interface ToolCallReviewResult {
     readonly decision: ToolCallReviewDecision;
     readonly error?: ToolCallReviewError;
+    readonly feedback?: readonly string[];
     readonly reason?: string;
 }
 

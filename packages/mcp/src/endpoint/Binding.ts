@@ -1,4 +1,3 @@
-import { mergeComments, resolveErrorHints } from "@portable-devshell/comment-extension";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
@@ -135,7 +134,7 @@ export class McpEndpointBinding {
                     tools: this.#worker.listTools().map(toProtocolTool),
                 };
             } catch (error) {
-                throw toMcpError(error, undefined);
+                throw toMcpError(error);
             }
         });
 
@@ -155,7 +154,7 @@ export class McpEndpointBinding {
                 );
                 return toCallToolResult(result);
             } catch (error) {
-                throw toMcpError(error, request.params.name);
+                throw toMcpError(error);
             }
         });
 
@@ -207,12 +206,9 @@ function toCallToolResult(result: McpEndpointResult) {
     };
 }
 
-function toMcpError(
-    error: unknown,
-    toolName: string | undefined,
-): ProtocolError {
+function toMcpError(error: unknown): ProtocolError {
     const body = toControlErrorBody(error);
-    const comment = mergeErrorComment(error, body, toolName);
+    const comment = readComment(error);
     if (error instanceof McpToolSchemaUnavailableError) {
         return new ProtocolError(-32002, error.message, {
             code: error.code,
@@ -268,18 +264,6 @@ function toProtocolTool(
         throw new McpToolSchemaUnavailableError(tool.name);
     }
     return tool as unknown as Tool;
-}
-
-function mergeErrorComment(
-    error: unknown,
-    body: ControlErrorBody | undefined,
-    toolName: string | undefined,
-): string[] | undefined {
-    const userComments = readComment(error) ?? [];
-    const hints =
-        body === undefined ? [] : resolveErrorHints(toolName ?? "", body);
-    const merged = mergeComments(userComments, hints);
-    return merged.length > 0 ? merged : undefined;
 }
 
 function readComment(error: unknown): string[] | undefined {

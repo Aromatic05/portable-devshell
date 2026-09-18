@@ -289,6 +289,7 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
                         code: "control.modelStopped",
                         details: { commentId: "stop-1" },
                     },
+                    feedback: ["safe feedback"],
                     reason: "blocked",
                 };
             },
@@ -317,6 +318,7 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
                 code: "control.modelStopped",
                 details: { commentId: "stop-1" },
             },
+            feedback: ["safe feedback"],
             reason: "blocked",
         },
     );
@@ -357,6 +359,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                         code: "control.modelReplyRequired",
                         details: { commentId: "push-1", toolCallBudget: 5 },
                     },
+                    feedback: ["reply feedback"],
                     reason: "reply first",
                 };
             },
@@ -381,6 +384,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 code: "control.modelReplyRequired",
                 details: { commentId: "push-1", toolCallBudget: 5 },
             },
+            feedback: ["reply feedback"],
             reason: "reply first",
         },
     );

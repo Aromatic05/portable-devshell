@@ -44,6 +44,7 @@ test("Comment source tree follows domain entities and the builtin source is self
         "Schema.ts",
     ]);
     assert.deepEqual(await entries(new URL("../../src/hint/", import.meta.url)), [
+        "Feedback.ts",
         "Hint.ts",
         "Resolver.ts",
         "tool",

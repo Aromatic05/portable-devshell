@@ -1,4 +1,5 @@
 import {
+    readCommentFeedback,
     reviewCommentToolCall,
     type ExtensionCommentControlDecision,
 } from "@portable-devshell/extension/comment";
@@ -14,6 +15,16 @@ export function createCommentReview(): ToolCallReviewBinding {
         input: ToolCallReviewInvocation,
         context: ToolCallReviewContext,
     ): Promise<ToolCallReviewResult> => {
+        if (
+            input.direction === "outbound" &&
+            (input.kind === "result" || input.kind === "error")
+        ) {
+            const feedback = await readCommentFeedback(context);
+            return {
+                decision: "accept",
+                ...(feedback.length === 0 ? {} : { feedback }),
+            };
+        }
         if (
             input.direction !== "inbound" ||
             input.kind !== "call" ||

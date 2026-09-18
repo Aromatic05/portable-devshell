@@ -704,6 +704,7 @@ test("tools/call returns a structured hint when the tool fails", async () => {
         async callHandler() {
             throw new Error("command failed");
         },
+        feedback: ["[error.unknown] Inspect the error before retrying."],
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -727,6 +728,7 @@ test("tools/call returns a structured hint when the tool fails", async () => {
 
 test("tools/call appends a worker result hint and keeps the flat shape", async () => {
     const harness = createWorkerHarness({
+        feedback: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
         result: {
             exitCode: 7,
             stderr: "boom",
@@ -1993,6 +1995,7 @@ function createWorkerHarness(options?: {
         context: { ctxId?: string; requestId?: string; source: string },
         signal?: AbortSignal,
     ) => Promise<CommandResult>;
+    feedback?: readonly string[];
     hasToolSchemaCache?: boolean;
     ready?: boolean;
     result?: CommandResult;
@@ -2136,6 +2139,10 @@ function createWorkerHarness(options?: {
                     result: JsonValue,
                     callId: string,
                 ) => Promise<JsonValue>,
+                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+                _onProgress?: (progress: JsonValue) => void,
+                _recording?: "caller" | "host",
+                onFeedback?: (feedback: readonly string[]) => void,
             ) {
                 if (!ready) {
                     const error = new Error("not ready");
@@ -2147,6 +2154,7 @@ function createWorkerHarness(options?: {
                     throw error;
                 }
 
+                onFeedback?.(options?.feedback ?? []);
                 calls.push({ toolName, input, ...context });
                 const toolResult =
                     options?.callHandler === undefined

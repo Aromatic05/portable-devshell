@@ -76,6 +76,7 @@ export class McpEndpointHandlerEnvironment {
         requestContext: McpEndpointCallContext,
         exposed: boolean,
         signal?: AbortSignal,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<McpEnvironmentHandlerResult> {
         if (!exposed) {
             throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
@@ -86,12 +87,14 @@ export class McpEndpointHandlerEnvironment {
                     input,
                     requestContext,
                     signal,
+                    onFeedback,
                 );
             case mcpRemoteEnvironmentToolName:
                 return await this.#remoteEnvironmentCommand(
                     input,
                     requestContext,
                     signal,
+                    onFeedback,
                 );
             default:
                 throw mcpEndpointToolNotExposed(toolName, this.#instanceName);
@@ -102,6 +105,7 @@ export class McpEndpointHandlerEnvironment {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<McpEnvironmentHandlerResult> {
         const remote = this.#remoteEnvironment;
         if (remote === undefined) {
@@ -134,6 +138,7 @@ export class McpEndpointHandlerEnvironment {
             context,
             input,
             localInstance: this.#instanceName,
+            onFeedback,
             operation: async () => {
                 if (!resolution.created) {
                     record = await this.#touchEnvironmentContext(
@@ -223,6 +228,7 @@ export class McpEndpointHandlerEnvironment {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<McpEnvironmentHandlerResult> {
         const environmentInput = readMcpEnvironmentInfoInput(input, {
             allowContextId: this.#contextSelector.requiresExplicitContextId,
@@ -251,6 +257,7 @@ export class McpEndpointHandlerEnvironment {
                 context,
                 input,
                 localInstance: this.#instanceName,
+                onFeedback,
                 operation: async () => {
                     if (!resolution.created) {
                         record = await this.#touchEnvironmentContext(

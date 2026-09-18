@@ -19,10 +19,22 @@ function routeContext(connectionId: string): PrefixRouteContext {
 
 function callHandler(
     callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>,
+    feedback: readonly string[] = [],
 ) {
     const module = createToolRouteModule({
         worker: {
-            async callTool(toolName: string, input: JsonValue) {
+            async callTool(
+                toolName: string,
+                input: JsonValue,
+                _context?: unknown,
+                _signal?: AbortSignal,
+                _transformResult?: unknown,
+                _invocationInput?: unknown,
+                _onProgress?: unknown,
+                _recording?: "caller" | "host",
+                onFeedback?: (feedback: readonly string[]) => void,
+            ) {
+                onFeedback?.(feedback);
                 return callTool(toolName, input);
             },
             async decideApproval() {
@@ -64,6 +76,7 @@ test("control tool route appends the worker result hint", async () => {
                 stdout: "",
                 termination: "exited",
             }) as JsonValue,
+        ["[bash.nonZeroExit] Exited with code 7; inspect output."],
     );
 
     const result = (await handle(
@@ -89,13 +102,18 @@ test("control tool route appends the worker result hint", async () => {
 });
 
 test("control tool route turns a thrown error into a structured hint instead of copying the message", async () => {
-    const handle = callHandler(async () => {
-        throw createError({
-            code: "file.revisionMismatch",
-            message: "stale revision",
-            retryable: true,
-        });
-    });
+    const handle = callHandler(
+        async () => {
+            throw createError({
+                code: "file.revisionMismatch",
+                message: "stale revision",
+                retryable: true,
+            });
+        },
+        [
+            "[file.revisionMismatch] Read the latest content and regenerate the operation before retrying.",
+        ],
+    );
 
     const result = (await handle(
         {
@@ -138,6 +156,7 @@ test("control tool stream forwards progress before completing the unchanged fina
                 _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 onProgress?: (progress: JsonValue) => void,
                 recording?: "caller" | "host",
+                _onFeedback?: (feedback: readonly string[]) => void,
             ) {
                 workerContext = context;
                 workerRecording = recording;

@@ -88,6 +88,7 @@ export class ToolCallExecution {
         invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<JsonValue> {
         this.#assertReady();
         return await this.#call(
@@ -99,6 +100,7 @@ export class ToolCallExecution {
             invocationInput,
             onProgress,
             recording,
+            onFeedback,
             async (innerInput, callId, boundaryProgress, executionSignal) =>
                 await this.#toolInvoker.invoke(
                     toolName,
@@ -116,6 +118,7 @@ export class ToolCallExecution {
         context: ToolCallContext,
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
+        onFeedback?: (feedback: readonly string[]) => void,
     ): Promise<T> {
         return (await this.#call(
             toolName,
@@ -126,6 +129,7 @@ export class ToolCallExecution {
             undefined,
             undefined,
             "host",
+            onFeedback,
             async (innerInput, callId) => await operation(callId, innerInput),
         )) as T;
     }
@@ -143,6 +147,7 @@ export class ToolCallExecution {
             | undefined,
         onProgress: ((progress: JsonValue) => void) | undefined,
         recording: "caller" | "host",
+        onFeedback: ((feedback: readonly string[]) => void) | undefined,
         execute: (
             input: JsonValue,
             callId: string,
@@ -181,6 +186,7 @@ export class ToolCallExecution {
                     signal: boundarySignal,
                     toolName,
                 });
+                deliverFeedback(review.feedback, onFeedback);
             } catch (error) {
                 if (hostRecorded) await this.#audit.failActive(scope, error);
                 throw error;
@@ -284,7 +290,7 @@ export class ToolCallExecution {
                                       signal: boundarySignal,
                                       toolName,
                                   });
-                                  await boundary.review({
+                                  const progressReview = await boundary.review({
                                       context: boundaryContext,
                                       direction: "outbound",
                                       kind: "progress",
@@ -292,6 +298,10 @@ export class ToolCallExecution {
                                       signal: boundarySignal,
                                       toolName,
                                   });
+                                  deliverFeedback(
+                                      progressReview.feedback,
+                                      onFeedback,
+                                  );
                                   try {
                                       onProgress(outerProgress);
                                   } catch (error) {
@@ -378,7 +388,7 @@ export class ToolCallExecution {
                         },
                     );
                 }
-                await boundary.review({
+                const resultReview = await boundary.review({
                     context: boundaryContext,
                     direction: "outbound",
                     kind: "result",
@@ -386,6 +396,7 @@ export class ToolCallExecution {
                     signal: boundarySignal,
                     toolName,
                 });
+                deliverFeedback(resultReview.feedback, onFeedback);
                 return result;
             } catch (error) {
                 if (toolExecutionSucceeded) throw error;
@@ -440,7 +451,7 @@ export class ToolCallExecution {
                             errorCode,
                         );
                     }
-                    await boundary.review({
+                    const errorReview = await boundary.review({
                         context: boundaryContext,
                         direction: "outbound",
                         kind: "error",
@@ -448,6 +459,7 @@ export class ToolCallExecution {
                         signal: boundarySignal,
                         toolName,
                     });
+                    deliverFeedback(errorReview.feedback, onFeedback);
                     throw normalizeToolSchedulerError(outerFailure.error);
                 }
 
@@ -468,7 +480,7 @@ export class ToolCallExecution {
                         },
                     );
                 }
-                await boundary.review({
+                const errorReview = await boundary.review({
                     context: boundaryContext,
                     direction: "outbound",
                     kind: "error",
@@ -476,11 +488,25 @@ export class ToolCallExecution {
                     signal: boundarySignal,
                     toolName,
                 });
+                deliverFeedback(errorReview.feedback, onFeedback);
                 throw outerFailure.error;
             }
         } finally {
             boundaryLease.release();
         }
+    }
+}
+
+function deliverFeedback(
+    feedback: readonly string[] | undefined,
+    onFeedback: ((feedback: readonly string[]) => void) | undefined,
+): void {
+    if (feedback === undefined || feedback.length === 0 || onFeedback === undefined)
+        return;
+    try {
+        onFeedback(feedback);
+    } catch (error) {
+        console.warn(error instanceof Error ? error : new Error(String(error)));
     }
 }
 

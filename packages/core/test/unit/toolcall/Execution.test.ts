@@ -536,6 +536,7 @@ test("ToolCallExecution masks error message, details, and command streams before
 test("ToolCallExecution callOperation uses the same Boundary without requiring Worker readiness", async () => {
     const events: string[] = [];
     const reviews: string[] = [];
+    const feedback: string[] = [];
     const operationInputs: unknown[] = [];
     let readinessChecks = 0;
     const execution = new ToolCallExecution({
@@ -566,7 +567,10 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
             sequence: new ToolCallBoundarySequence({
                 reviews: [async (input) => {
                     reviews.push(`${input.direction}:${input.kind}`);
-                    return { decision: "accept" };
+                    return {
+                        decision: "accept",
+                        feedback: [`${input.direction}:${input.kind}:feedback`],
+                    };
                 }],
                 rewrites: [async (input) =>
                     input.direction === "inbound"
@@ -606,12 +610,18 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
             operationInputs.push(input);
             return { value: "inner-result" };
         },
+        undefined,
+        (entries) => feedback.push(...entries),
     );
 
     assert.equal(readinessChecks, 0);
     assert.deepEqual(operationInputs, [{ value: "inner-input" }]);
     assert.deepEqual(result, { value: "outer-result" });
     assert.deepEqual(reviews, ["inbound:call", "outbound:result"]);
+    assert.deepEqual(feedback, [
+        "inbound:call:feedback",
+        "outbound:result:feedback",
+    ]);
     assert.deepEqual(events, [
         "audit.requested",
         "reserve",

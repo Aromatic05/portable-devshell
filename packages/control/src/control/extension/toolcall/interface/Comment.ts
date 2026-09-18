@@ -1,5 +1,6 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
+    commentFeedbackInterfaceOperation,
     commentReviewInterfaceOperation,
     type ExtensionCommentControlDecision,
 } from "@portable-devshell/extension/comment";
@@ -7,6 +8,7 @@ import type {
     ToolCallReviewContext,
     ToolCallReviewInvocation,
 } from "@portable-devshell/extension/toolcall";
+import { resolveToolCallFeedback } from "@portable-devshell/comment-extension";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -27,20 +29,23 @@ export class ToolCallCommentReview {
                 operation: string,
                 requestInput?: ExtensionJsonValue,
             ): Promise<ExtensionJsonValue | undefined> => {
-                if (
-                    extensionId !== "comment" ||
-                    operation !== commentReviewInterfaceOperation
-                ) {
+                if (extensionId !== "comment") {
                     throw new TypeError(
                         `Unsupported ToolCall review interface operation for Extension ${extensionId ?? "unknown"}: ${operation}.`,
                     );
                 }
                 if (requestInput !== undefined) {
                     throw new TypeError(
-                        `${commentReviewInterfaceOperation} does not accept Extension-provided input.`,
+                        `${operation} does not accept Extension-provided input.`,
                     );
                 }
-                return (await this.#review(input)) as ExtensionJsonValue;
+                if (operation === commentReviewInterfaceOperation)
+                    return (await this.#review(input)) as ExtensionJsonValue;
+                if (operation === commentFeedbackInterfaceOperation)
+                    return [...resolveToolCallFeedback(input)] as ExtensionJsonValue;
+                throw new TypeError(
+                    `Unsupported ToolCall review interface operation for Extension ${extensionId}: ${operation}.`,
+                );
             },
         });
     }

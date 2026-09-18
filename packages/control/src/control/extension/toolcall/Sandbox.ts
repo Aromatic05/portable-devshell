@@ -203,6 +203,9 @@ function encodeReviewResult(result: ToolCallReviewResult): ExtensionJsonValue {
                           : { details: decoded.error.details }),
                   },
               }),
+        ...(decoded.feedback === undefined
+            ? {}
+            : { feedback: [...decoded.feedback] }),
         ...(decoded.reason === undefined ? {} : { reason: decoded.reason }),
     };
 }
@@ -212,6 +215,21 @@ function decodeReviewResult(value: unknown): ToolCallReviewResult {
     const decision = record.decision;
     if (decision !== "accept" && decision !== "approve" && decision !== "reject")
         throw new TypeError("ToolCall review decision is invalid.");
+    const feedbackValue = record.feedback;
+    let feedback: readonly string[] | undefined;
+    if (feedbackValue !== undefined) {
+        if (
+            !Array.isArray(feedbackValue) ||
+            !feedbackValue.every(
+                (entry) => typeof entry === "string" && entry.length > 0,
+            )
+        ) {
+            throw new TypeError(
+                "ToolCall review feedback must contain non-empty strings.",
+            );
+        }
+        feedback = Object.freeze([...feedbackValue]);
+    }
     const reason = record.reason;
     if (reason !== undefined && typeof reason !== "string")
         throw new TypeError("ToolCall review reason must be a string.");
@@ -241,6 +259,7 @@ function decodeReviewResult(value: unknown): ToolCallReviewResult {
     return Object.freeze({
         decision,
         ...(error === undefined ? {} : { error }),
+        ...(feedback === undefined ? {} : { feedback }),
         ...(reason === undefined ? {} : { reason }),
     });
 }

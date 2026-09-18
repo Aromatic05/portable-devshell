@@ -113,6 +113,7 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
     input: JsonValue;
     localInstance: string;
     operation: (callId: string, input: JsonValue) => Promise<T>;
+    onFeedback?: (feedback: readonly string[]) => void;
     signal?: AbortSignal;
     targetInstance: string;
     toolName: string;
@@ -125,6 +126,7 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
             options.context,
             options.operation,
             options.signal,
+            options.onFeedback,
         );
     }
     return await requireMcpEndpointGateway(
@@ -137,6 +139,7 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
         options.context,
         options.operation,
         options.signal,
+        options.onFeedback,
     );
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { commentReviewInterfaceOperation } from "@portable-devshell/extension/comment";
+import { commentFeedbackInterfaceOperation, commentReviewInterfaceOperation } from "@portable-devshell/extension/comment";
 import type { ToolCallReviewInvocation } from "@portable-devshell/extension/toolcall";
 
 import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/interface/Comment.ts";
@@ -46,6 +46,30 @@ test("ToolCall Comment interface exposes only the current review decision to the
     assert.deepEqual(calls, [
         { ctxId: "ctx-1", requestId: "request-1", toolName: "bash_run" },
     ]);
+});
+
+test("ToolCall Comment interface resolves outbound feedback through Comment-owned Hint logic", async () => {
+    const review = new ToolCallCommentReview(new InstanceRegistry([]));
+    assert.deepEqual(
+        await review
+            .context("comment", {
+                ...input,
+                direction: "outbound",
+                kind: "result",
+                payload: {
+                    exitCode: 7,
+                    stderr: "",
+                    stderrBytes: 0,
+                    stderrTruncated: false,
+                    stdout: "",
+                    stdoutBytes: 0,
+                    stdoutTruncated: false,
+                    termination: "exited",
+                },
+            })
+            .requestInterface(commentFeedbackInterfaceOperation),
+        ["[bash.nonZeroExit] Exited with code 7; inspect output."],
+    );
 });
 
 test("ToolCall Comment interface is invocation-scoped and unavailable to other Extensions", async () => {

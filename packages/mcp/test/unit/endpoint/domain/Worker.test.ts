@@ -725,7 +725,19 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
         workspace: "/remote-workspace",
     });
     const gateway = createGateway({
-        async callTool() {
+        async callTool(
+            _instance,
+            _toolName,
+            _input,
+            _context,
+            _signal,
+            _transformResult,
+            _invocationInput,
+            onFeedback,
+        ) {
+            onFeedback?.([
+                "[bash.outputTruncated] stdout output is incomplete.",
+            ]);
             return {
                 exitCode: 0,
                 stderr: "",
@@ -1024,6 +1036,8 @@ function createGateway(
             callContext,
             signal,
             transformResult,
+            invocationInput,
+            onFeedback,
         ) {
             const result =
                 overrides.callTool === undefined
@@ -1034,6 +1048,9 @@ function createGateway(
                           input,
                           callContext,
                           signal,
+                          transformResult,
+                          invocationInput,
+                          onFeedback,
                       );
             return transformResult === undefined
                 ? result

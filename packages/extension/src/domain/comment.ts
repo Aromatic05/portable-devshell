@@ -1,6 +1,7 @@
 import type { ExtensionJsonValue } from "../ExtensionApi.js";
 import type { ToolCallReviewContext } from "./toolcall.js";
 
+export const commentFeedbackInterfaceOperation = "comment.feedback";
 export const commentReviewInterfaceOperation = "comment.reviewToolCall";
 
 export type ExtensionCommentControlDecision =
@@ -20,6 +21,21 @@ export type ExtensionCommentControlDecision =
           readonly commentId: string;
           readonly kind: "stop";
       };
+
+export async function readCommentFeedback(
+    context: Pick<ToolCallReviewContext, "requestInterface">,
+): Promise<readonly string[]> {
+    const value = await context.requestInterface(commentFeedbackInterfaceOperation);
+    if (!Array.isArray(value))
+        throw new TypeError("Comment feedback interface returned invalid feedback.");
+    const feedback = value.filter(
+        (entry): entry is string =>
+            typeof entry === "string" && entry.length > 0,
+    );
+    if (feedback.length !== value.length)
+        throw new TypeError("Comment feedback interface returned invalid feedback.");
+    return Object.freeze(feedback);
+}
 
 export async function reviewCommentToolCall(
     context: Pick<ToolCallReviewContext, "requestInterface">,
