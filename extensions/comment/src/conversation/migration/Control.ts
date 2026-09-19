@@ -15,7 +15,7 @@ import {
     toCommentRecord,
 } from "../store/Query.js";
 
-const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v1";
+const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v2";
 
 export function migrateConversationControlState(database: DatabaseSync): void {
     if (readMetadata(database, CONTROL_STATE_MIGRATION_KEY) === "complete")
@@ -76,7 +76,12 @@ function deriveControlStatesFromHistory(
         }
         const directive = parseContextMessageDirective(record.text).directive;
         applyDeliveredControls(state, [record]);
-        if (directive === "push") state.pushToolCallsRemaining = 0;
+        if (
+            directive === "push" &&
+            state.pendingPushCommentId === record.id
+        ) {
+            state.pushToolCallsRemaining = 0;
+        }
         states.set(row.ctxId, state);
     }
     for (const [ctxId, state] of states) {

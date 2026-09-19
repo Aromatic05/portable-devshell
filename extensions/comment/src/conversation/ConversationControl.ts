@@ -89,10 +89,11 @@ export function applyDeliveredControls(
                 state.pendingReplyCommentId = record.id;
                 break;
             case "push":
-                state.pendingReplyCommentId = record.id;
-                state.pendingPushCommentId = record.id;
-                state.pushToolCallsRemaining ??=
-                    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+                if (state.pendingReplyCommentId !== undefined) {
+                    state.pendingPushCommentId = record.id;
+                    state.pushToolCallsRemaining ??=
+                        CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+                }
                 break;
             default:
                 state.pendingReplyCommentId = record.id;

@@ -365,24 +365,58 @@ test("CommentService delivers queued Stop-era messages through Resume without re
 test("CommentService persists the remaining #push budget without replenishing repeated Push", async () => {
     const root = await createTestTempDirectory("context-message-push-control");
     const service = createCommentService(root);
-    await service.queue({ ctxId: "ctx-a", text: "#push Answer this first" });
+    const question = await service.queue({
+        ctxId: "ctx-a",
+        text: "Explain why the deployment is failing",
+    });
+    await service.consumePending("ctx-a", "question-delivery");
+    const firstPush = await service.queue({
+        ctxId: "ctx-a",
+        text: "#push Answer this first",
+    });
     await service.consumePending("ctx-a", "delivery-one");
+    assert.equal(await service.pendingReplyCommentId("ctx-a"), question.id);
     for (let index = 0; index < 4; index += 1) {
         assert.deepEqual(
             await service.reviewToolCall("ctx-a", "file_read"),
             { kind: "allow" },
         );
     }
-    await service.queue({ ctxId: "ctx-a", text: "#push I am still waiting" });
+    const secondPush = await service.queue({
+        ctxId: "ctx-a",
+        text: "#push I am still waiting",
+    });
     await service.consumePending("ctx-a", "delivery-two");
+    assert.notEqual(firstPush.id, secondPush.id);
+    assert.equal(await service.pendingReplyCommentId("ctx-a"), question.id);
 
     const reloaded = createCommentService(root);
     assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
     const blocked = await reloaded.reviewToolCall("ctx-a", "file_read");
-    assert.equal(blocked.kind, "push");
-    if (blocked.kind === "push") assert.equal(blocked.toolCallBudget, 5);
+    assert.deepEqual(blocked, {
+        comment: "Explain why the deployment is failing",
+        commentId: secondPush.id,
+        kind: "push",
+        replyCommentId: question.id,
+        toolCallBudget: 5,
+    });
+});
+
+test("CommentService ignores #push when there is no pending user reply", async () => {
+    const root = await createTestTempDirectory("context-message-push-without-reply");
+    const service = createCommentService(root);
+    await service.queue({ ctxId: "ctx-a", text: "#push" });
+    await service.consumePending("ctx-a", "push-only-delivery");
+
+    assert.equal(await service.pendingReplyCommentId("ctx-a"), undefined);
+    for (let index = 0; index < 8; index += 1) {
+        assert.deepEqual(
+            await service.reviewToolCall("ctx-a", "file_read"),
+            { kind: "allow" },
+        );
+    }
 });
 
 test("CommentState retains all pending messages while bounding terminal history", () => {

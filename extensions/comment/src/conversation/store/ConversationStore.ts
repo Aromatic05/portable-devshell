@@ -27,6 +27,7 @@ import {
     conversationPayloadBytesSql,
     listConversationRows,
     pendingCommentRecords,
+    readCommentRecord,
     readConversationEntryPayloadBytes,
     readConversationPayloadBytes,
     toCommentRecord,
@@ -129,6 +130,10 @@ export class ConversationStore {
 
     pendingComments(ctxId?: string): ContextMessageRecord[] {
         return pendingCommentRecords(this.#open(), this.#instanceName, ctxId);
+    }
+
+    comment(ctxId: string, id: string): ContextMessageRecord | undefined {
+        return readCommentRecord(this.#open(), this.#instanceName, ctxId, id);
     }
 
     insertComment(record: ContextMessageRecord): void {

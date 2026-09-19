@@ -81,7 +81,7 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         databaseFile,
         `
         DELETE FROM conversation_metadata
-        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v1'
+        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v2'
     `,
     );
 
@@ -105,6 +105,61 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         stoppedByCommentId: "legacy-stop",
     });
     withoutHistory.close();
+});
+
+test("ConversationStore v2 control migration repairs legacy #push reply targets", async () => {
+    const root = await createTestTempDirectory("conversation-control-v2-push");
+    const databaseFile = join(root, "conversation.sqlite3");
+    const store = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    store.insertComment({
+        createdAt: "2026-09-10T10:00:00.000Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-10T10:00:01.000Z",
+        id: "question-1",
+        instance: "alpha",
+        status: "delivered",
+        text: "Explain the original failure",
+    });
+    store.insertComment({
+        createdAt: "2026-09-10T10:00:02.000Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-10T10:00:03.000Z",
+        id: "push-1",
+        instance: "alpha",
+        status: "delivered",
+        text: "#push",
+    });
+    store.close();
+    mutateConversationDatabase(
+        databaseFile,
+        `
+        DELETE FROM conversation_metadata
+        WHERE key = 'migration:context-control-v2';
+        INSERT INTO conversation_metadata(key, value)
+        VALUES ('migration:context-control-v1', 'complete')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+        INSERT INTO conversation_metadata(key, value)
+        VALUES (
+            'context-control:v1:ctx-a',
+            '{"pendingPushCommentId":"push-1","pendingReplyCommentId":"push-1","pushToolCallsRemaining":0}'
+        )
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+    `,
+    );
+
+    const migrated = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    assert.deepEqual(migrated.readControlState("ctx-a"), {
+        pendingPushCommentId: "push-1",
+        pendingReplyCommentId: "question-1",
+        pushToolCallsRemaining: 0,
+    });
+    migrated.close();
 });
 
 test("ConversationStore rejects a newer schema without modifying it", async () => {

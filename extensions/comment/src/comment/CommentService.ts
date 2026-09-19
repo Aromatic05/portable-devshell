@@ -80,7 +80,13 @@ export class CommentService {
         requestId?: string,
     ): Promise<
         | { kind: "allow" }
-        | { commentId: string; kind: "push"; toolCallBudget: number }
+        | {
+              comment: string;
+              commentId: string;
+              kind: "push";
+              replyCommentId: string;
+              toolCallBudget: number;
+          }
         | { comment: string; commentId: string; kind: "resume" }
         | { comment?: string; commentId: string; kind: "stop" }
     > {
@@ -137,9 +143,23 @@ export class CommentService {
                 state.pushToolCallsRemaining ??
                 CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
             if (remaining <= 0) {
+                const replyCommentId = state.pendingReplyCommentId;
+                if (replyCommentId === undefined) {
+                    throw new Error(
+                        "Conversation Push deadline has no pending reply Comment.",
+                    );
+                }
+                const replyComment = this.#store.comment(ctxId, replyCommentId);
+                if (replyComment === undefined) {
+                    throw new Error(
+                        `Conversation pending reply Comment ${replyCommentId} was not found.`,
+                    );
+                }
                 return {
+                    comment: replyComment.text,
                     commentId: state.pendingPushCommentId,
                     kind: "push",
+                    replyCommentId,
                     toolCallBudget: CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
                 };
             }

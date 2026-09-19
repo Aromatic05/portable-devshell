@@ -73,7 +73,13 @@ test("Comment outbound review returns non-blocking feedback", async () => {
 
 test("Comment review maps push stop and resume to rejected ToolCalls", async () => {
     const decisions: ExtensionJsonValue[] = [
-        { commentId: "push-1", kind: "push", toolCallBudget: 5 },
+        {
+            comment: "Explain the original failure",
+            commentId: "push-1",
+            kind: "push",
+            replyCommentId: "question-1",
+            toolCallBudget: 5,
+        },
         { comment: "finish this first", commentId: "stop-1", kind: "stop" },
         { comment: "continue now", commentId: "resume-1", kind: "resume" },
     ];
@@ -88,9 +94,18 @@ test("Comment review maps push stop and resume to rejected ToolCalls", async () 
         decision: "reject",
         error: {
             code: "control.modelReplyRequired",
-            details: { commentId: "push-1", toolCallBudget: 5 },
+            details: {
+                commentId: "push-1",
+                replyCommentId: "question-1",
+                toolCallBudget: 5,
+            },
         },
-        reason: "#push response deadline reached. Call todo_report before using more tools.",
+        reason: [
+            "#push response deadline reached.",
+            "You must reply to the pending user Comment before using more tools.",
+            "Pending user Comment: Explain the original failure",
+            "Call todo_report with a direct response to the Comment above.",
+        ].join("\n\n"),
     });
     assert.deepEqual(await review(base, invocation), {
         decision: "reject",

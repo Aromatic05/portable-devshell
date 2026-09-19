@@ -7,8 +7,10 @@ export const commentReviewInterfaceOperation = "comment.reviewToolCall";
 export type ExtensionCommentControlDecision =
     | { readonly kind: "allow" }
     | {
+          readonly comment: string;
           readonly commentId: string;
           readonly kind: "push";
+          readonly replyCommentId: string;
           readonly toolCallBudget: number;
       }
     | {
@@ -52,8 +54,13 @@ function readDecision(value: ExtensionJsonValue | undefined): ExtensionCommentCo
             return { kind: "allow" };
         case "push":
             return {
+                comment: readString(value.comment, "comment"),
                 commentId: readString(value.commentId, "commentId"),
                 kind: "push",
+                replyCommentId: readString(
+                    value.replyCommentId,
+                    "replyCommentId",
+                ),
                 toolCallBudget: readNumber(value.toolCallBudget, "toolCallBudget"),
             };
         case "resume":

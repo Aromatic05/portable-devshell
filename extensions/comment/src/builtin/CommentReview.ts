@@ -50,11 +50,16 @@ function reviewDecision(
                     code: "control.modelReplyRequired",
                     details: {
                         commentId: decision.commentId,
+                        replyCommentId: decision.replyCommentId,
                         toolCallBudget: decision.toolCallBudget,
                     },
                 },
-                reason:
-                    "#push response deadline reached. Call todo_report before using more tools.",
+                reason: [
+                    "#push response deadline reached.",
+                    "You must reply to the pending user Comment before using more tools.",
+                    `Pending user Comment: ${decision.comment}`,
+                    "Call todo_report with a direct response to the Comment above.",
+                ].join("\n\n"),
             };
         case "resume":
             return {

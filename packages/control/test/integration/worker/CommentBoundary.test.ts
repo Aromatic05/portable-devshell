@@ -168,9 +168,11 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
     assert.equal(allowed.result?.isError, false, JSON.stringify(allowed));
     assert.equal(executions, 1);
 
+    await queueComment(comment, ctxId, "Explain the original failure");
     await queueComment(comment, ctxId, "#push Reply before continuing");
     const pushDelivered = await callBash(endpoint, headers, ctxId, "push-delivery");
     assert.equal(pushDelivered.error, undefined, JSON.stringify(pushDelivered));
+    assert.match(JSON.stringify(pushDelivered.result), /Explain the original failure/u);
     assert.match(JSON.stringify(pushDelivered.result), /#push Reply before continuing/u);
     assert.equal(executions, 2);
 
@@ -187,6 +189,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
 
     const exhausted = await callBash(endpoint, headers, ctxId, "push-exhausted");
     assert.match(JSON.stringify(exhausted.error), /control\.modelReplyRequired/u);
+    assert.match(JSON.stringify(exhausted.error), /Explain the original failure/u);
     assert.equal(executions, 2 + CONTEXT_MESSAGE_PUSH_TOOL_BUDGET);
 });
 
