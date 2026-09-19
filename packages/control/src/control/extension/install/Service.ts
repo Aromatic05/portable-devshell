@@ -240,8 +240,7 @@ export class ExtensionInstallService {
     }
 
     async remove(id: string, purge = false): Promise<ExtensionRemoveResult> {
-        if (REQUIRED_BUILTIN_EXTENSION_IDS.has(id))
-            throw requiredBuiltinRemoveError(id);
+        if (BUILTIN_EXTENSION_IDS.has(id)) throw builtinRemoveError(id);
         await this.#host.disable(id);
         await this.#host.waitForDrain(id);
         await this.#host.forget(id);
@@ -275,11 +274,11 @@ export class ExtensionInstallService {
     }
 }
 
-function requiredBuiltinRemoveError(id: string): Error {
+function builtinRemoveError(id: string): Error {
     return createError({
         code: errorCodes.controlExtensionAccessDenied,
         details: { extensionId: id, operation: "remove" },
-        message: `Extension ${id} is a required builtin and cannot be removed.`,
+        message: `Extension ${id} is a builtin and cannot be removed; disable it instead.`,
         retryable: false,
     });
 }

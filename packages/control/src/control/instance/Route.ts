@@ -1,4 +1,5 @@
 import type {
+    ControlConfig,
     InstanceCreateResult,
     InstanceCreateSchema,
     InstanceCreateSummary,
@@ -6,6 +7,7 @@ import type {
     JsonValue,
     PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
+import { asInstanceName } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
 import type { InstanceRegistry } from "./registry/Registry.js";
@@ -23,6 +25,7 @@ export interface InstanceEditorPort {
 }
 
 export interface InstanceRouteModuleOptions {
+    configuredInstances?: () => readonly ControlConfig["instances"][number][];
     create?: InstanceCreatePort;
     editor?: InstanceEditorPort;
     registry: InstanceRegistry;
@@ -36,18 +39,32 @@ export function createInstanceRouteModule(
     const editor = () =>
         requirePort(options.editor, "Config editing is not available.");
     return routeModule("instance", {
-        list: () =>
-            options.registry.list().map((descriptor): InstanceListEntry => ({
-                ...(descriptor.worker.handshake?.homeDirectory === undefined
-                    ? {}
-                    : {
-                          homeDirectory:
-                              descriptor.worker.handshake.homeDirectory,
-                      }),
-                mcpEnabled: descriptor.mcpEnabled,
-                name: descriptor.name,
-                snapshot: descriptor.worker.snapshot(),
-            })) as never,
+        list: () => {
+            const configured =
+                options.configuredInstances?.() ??
+                options.registry.list().map((descriptor) => ({
+                    enabled: true,
+                    mcp: { enabled: descriptor.mcpEnabled },
+                    name: descriptor.name,
+                }));
+            return configured.map((instance): InstanceListEntry => {
+                const descriptor = options.registry.get(instance.name);
+                return {
+                    enabled: instance.enabled,
+                    ...(descriptor?.worker.handshake?.homeDirectory === undefined
+                        ? {}
+                        : {
+                              homeDirectory:
+                                  descriptor.worker.handshake.homeDirectory,
+                          }),
+                    mcpEnabled: instance.mcp.enabled,
+                    name: instance.name,
+                    snapshot:
+                        descriptor?.worker.snapshot() ??
+                        inactiveSnapshot(instance.name),
+                };
+            }) as never;
+        },
         createSchema: () => create().getSchema() as never,
         validateCreate: (request) =>
             create().validateDraft(request.payload) as never,
@@ -60,4 +77,15 @@ export function createInstanceRouteModule(
         delete: async (request) =>
             await editor().deleteInstance(request.payload),
     });
+}
+
+function inactiveSnapshot(name: string): InstanceListEntry["snapshot"] {
+    return {
+        connectionState: "disconnected",
+        daemonState: "stopped",
+        lastSeq: 0,
+        name: asInstanceName(name),
+        ready: false,
+        status: "stopped",
+    };
 }

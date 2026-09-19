@@ -52,8 +52,18 @@ test("reverse runtime is ready before the first reverse instance is created", as
     let deleteRetirement:
         | ((instance: ControlConfig["instances"][number]) => Promise<void>)
         | undefined;
+    let disableRetirement:
+        | ((instance: ControlConfig["instances"][number]) => Promise<void>)
+        | undefined;
     const mcp = {
         configEditor: {
+            registerInstanceDisableRetirement(
+                retire: (
+                    instance: ControlConfig["instances"][number],
+                ) => Promise<void>,
+            ) {
+                disableRetirement = retire;
+            },
             registerInstanceDeleteRetirement(
                 retire: (
                     instance: ControlConfig["instances"][number],
@@ -68,6 +78,7 @@ test("reverse runtime is ready before the first reverse instance is created", as
     const reverse = new ControlRuntimeReverse({ mcp, state });
 
     assert.notEqual(reverse.service, undefined);
+    assert.notEqual(disableRetirement, undefined);
     assert.notEqual(deleteRetirement, undefined);
     assert.equal(host.rawPaths.includes("/reverse/v1/enroll"), true);
     assert.equal(host.upgradePaths.includes("/reverse/v1/connect"), true);
@@ -87,7 +98,10 @@ test("reverse runtime adopts a changed MCP public URL on the replacement host", 
         requireConfig: () => config,
     } as unknown as ControlRuntimeState;
     const mcp = {
-        configEditor: { registerInstanceDeleteRetirement() {} },
+        configEditor: {
+            registerInstanceDeleteRetirement() {},
+            registerInstanceDisableRetirement() {},
+        },
         host: { server: firstHost as unknown as HttpHost },
     } as unknown as ControlRuntimeMcp;
     const reverse = new ControlRuntimeReverse({ mcp, state });

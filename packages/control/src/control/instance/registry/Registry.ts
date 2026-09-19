@@ -1,7 +1,22 @@
 import type { InstanceDescriptor } from "../Descriptor.js";
 
+export interface InstanceGenerationLease {
+    readonly descriptor: InstanceDescriptor;
+    release(): void;
+}
+
+interface InstanceGenerationState {
+    admitted: number;
+    retired: boolean;
+    waiters: Set<() => void>;
+}
+
 export class InstanceRegistry {
     readonly #descriptors = new Map<string, InstanceDescriptor>();
+    readonly #generations = new WeakMap<
+        InstanceDescriptor,
+        InstanceGenerationState
+    >();
     readonly #owned = new Set<string>();
     readonly #ownedConnectionWorkers = new Map<
         string,
@@ -16,6 +31,7 @@ export class InstanceRegistry {
     constructor(descriptors: readonly InstanceDescriptor[]) {
         for (const descriptor of descriptors) {
             this.#descriptors.set(descriptor.name, descriptor);
+            this.#generations.set(descriptor, createGenerationState());
         }
     }
 
@@ -24,25 +40,90 @@ export class InstanceRegistry {
     }
 
     add(descriptor: InstanceDescriptor): void {
+        if (this.#descriptors.has(descriptor.name)) {
+            throw new Error(
+                `Cannot add active instance generation ${descriptor.name}; retire the current generation first.`,
+            );
+        }
         this.#descriptors.set(descriptor.name, descriptor);
+        this.#generations.set(descriptor, createGenerationState());
         this.#emitChange();
     }
 
     update(descriptor: InstanceDescriptor): void {
-        if (!this.#descriptors.has(descriptor.name)) {
+        const current = this.#descriptors.get(descriptor.name);
+        if (current === undefined) {
             throw new Error(
                 `Cannot update unregistered instance ${descriptor.name}.`,
             );
         }
-        this.#descriptors.set(descriptor.name, descriptor);
+        if (current !== descriptor) {
+            throw new Error(
+                `Cannot replace active instance generation ${descriptor.name} with update(); retire it first.`,
+            );
+        }
         this.#emitChange();
     }
 
     delete(name: string): void {
-        if (this.#descriptors.delete(name)) {
+        const descriptor = this.#descriptors.get(name);
+        if (descriptor !== undefined) {
+            this.#retireAdmission(descriptor);
+            this.#descriptors.delete(name);
             this.clearOwned(name);
             this.#emitChange();
         }
+    }
+
+    acquireGeneration(
+        name: string,
+        expected?: InstanceDescriptor,
+    ): InstanceGenerationLease {
+        const descriptor = this.#descriptors.get(name);
+        if (descriptor === undefined || (expected !== undefined && descriptor !== expected)) {
+            throw new Error(`Instance generation ${name} is not active.`);
+        }
+        const state = this.#requireGenerationState(descriptor);
+        if (state.retired) {
+            throw new Error(`Instance generation ${name} is retired.`);
+        }
+        state.admitted += 1;
+        let released = false;
+        return {
+            descriptor,
+            release: () => {
+                if (released) return;
+                released = true;
+                state.admitted -= 1;
+                if (state.admitted !== 0) return;
+                for (const waiter of state.waiters) waiter();
+                state.waiters.clear();
+            },
+        };
+    }
+
+    async retireGeneration(
+        name: string,
+        expected?: InstanceDescriptor,
+    ): Promise<InstanceDescriptor | undefined> {
+        const descriptor = this.#descriptors.get(name);
+        if (descriptor === undefined) return undefined;
+        if (expected !== undefined && descriptor !== expected) {
+            throw new Error(
+                `Cannot retire stale instance generation ${name}.`,
+            );
+        }
+        const state = this.#requireGenerationState(descriptor);
+        this.#retireAdmission(descriptor);
+        this.#descriptors.delete(name);
+        this.#owned.delete(name);
+        this.#emitChange();
+        if (state.admitted > 0)
+            await new Promise<void>((resolve) => {
+                if (state.admitted === 0) resolve();
+                else state.waiters.add(resolve);
+            });
+        return descriptor;
     }
 
     list(): readonly InstanceDescriptor[] {
@@ -173,4 +254,26 @@ export class InstanceRegistry {
             listener();
         }
     }
+
+    #requireGenerationState(
+        descriptor: InstanceDescriptor,
+    ): InstanceGenerationState {
+        const state = this.#generations.get(descriptor);
+        if (state !== undefined) return state;
+        throw new Error(
+            `Instance generation ${descriptor.name} is not registered.`,
+        );
+    }
+
+    #retireAdmission(descriptor: InstanceDescriptor): void {
+        this.#requireGenerationState(descriptor).retired = true;
+    }
+}
+
+function createGenerationState(): InstanceGenerationState {
+    return {
+        admitted: 0,
+        retired: false,
+        waiters: new Set(),
+    };
 }

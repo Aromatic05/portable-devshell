@@ -161,6 +161,9 @@ export class ControlRuntime {
             }),
             comment: this.#comment.routes,
             config: options.mcp.configEditor,
+            ...(options.config === undefined
+                ? {}
+                : { configuredInstances: () => options.config!().instances }),
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,
             extension: this.#extensionControl,
@@ -195,22 +198,17 @@ export class ControlRuntime {
                 );
             },
         );
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+        this.#mcp.configEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceResources(instance.name);
             },
         );
-        this.#mcp.configEditor.registerInstanceDisableRetirement(
-            async (instance) => {
-                await this.#extensions.retireInstanceResources(instance.name);
-            },
-        );
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+        this.#mcp.configEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#debug.retireInstance(instance.name);
             },
         );
-        this.#mcp.configEditor.registerInstanceDeleteRetirement(
+        this.#mcp.configEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#routes.retireInstance(instance.name);
             },
@@ -273,7 +271,6 @@ export class ControlRuntime {
             if (this.#webFlow !== undefined && webHost !== undefined) {
                 this.#webFlowUninstall = this.#webFlow.install(webHost);
             }
-            await this.#mcp.start();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
                 await this.#extensionControl.installBuiltin(
@@ -281,6 +278,8 @@ export class ControlRuntime {
                     source.path,
                 );
             }
+            await this.#mcp.prepare();
+            await this.#mcp.start();
             await this.#channels.start();
         } catch (error) {
             await this.stop().catch(() => undefined);
@@ -293,6 +292,7 @@ export class ControlRuntime {
         this.#modelDevshell.dispose();
         this.#toolCallInstanceUnsubscribe();
         await this.#channels.close().catch((error) => failures.push(error));
+        await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
         await this.#debug.dispose().catch((error) => failures.push(error));
         this.#webFlowUninstall?.();
@@ -303,7 +303,6 @@ export class ControlRuntime {
         } catch (error) {
             failures.push(error);
         }
-        await this.#mcp.stop().catch((error) => failures.push(error));
         try {
             await this.#comment.close();
         } catch (error) {

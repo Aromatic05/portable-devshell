@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import {
     HttpHost,
+    McpRuntimeState,
     type McpHost,
     type McpOAuthApprovalService,
 } from "@portable-devshell/mcp";
@@ -53,6 +54,7 @@ export class ControlRuntimeMcp {
     readonly #state: ControlRuntimeState;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #controlPaths: ControlPathHome;
+    readonly #runtimeState: McpRuntimeState;
     #applyWebConfig?: (
         previous: ControlConfig,
         next: ControlConfig,
@@ -68,6 +70,11 @@ export class ControlRuntimeMcp {
         this.#state = options.state;
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
+        this.#runtimeState = new McpRuntimeState({
+            contextFile: options.controlPaths.contextsFile,
+            storageDir: options.controlPaths.oauthDir,
+            workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile,
+        });
         this.toolProvenance = new ToolCallProvenanceStore(
             options.controlPaths.toolProvenanceFile,
         );
@@ -78,6 +85,8 @@ export class ControlRuntimeMcp {
         this.#webEnabled = config.web.enabled;
         const gatewayHolder: { value?: McpInstanceGatewayControl } = {};
         this.instanceCreate = new InstanceCreateCoordinator({
+            assertCleanupSettled: async (instance) =>
+                await this.configEditor.assertInstanceCleanupSettled(instance),
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
             getMcpHost: () => this.#host,
@@ -105,6 +114,7 @@ export class ControlRuntimeMcp {
                     options.artifact.service,
                 ),
                 storageDir: options.controlPaths.oauthDir,
+                runtimeState: this.#runtimeState,
                 toolProvenance: this.toolProvenance,
                 workspaceAppLeaseFile:
                     options.controlPaths.workspaceAppLeasesFile,
@@ -123,6 +133,7 @@ export class ControlRuntimeMcp {
         if (this.#host !== undefined)
             options.artifact.installHttpRoute(this.#host.server);
         this.configEditor = new ConfigEditorCoordinator({
+            cleanupDebtFile: options.controlPaths.lifecycleCleanupFile,
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
             getMcpHost: () => this.#host,
@@ -140,6 +151,11 @@ export class ControlRuntimeMcp {
             },
             setConfig: (config) => options.state.setConfig(config),
         });
+    }
+
+    async prepare(): Promise<void> {
+        await this.#runtimeState.initialize();
+        await this.configEditor.reconcileCleanupDebt();
     }
 
     get host(): McpHost | undefined {
@@ -173,6 +189,7 @@ export class ControlRuntimeMcp {
                 this.#artifact.service,
             ),
             storageDir: this.#controlPaths.oauthDir,
+            runtimeState: this.#runtimeState,
             toolProvenance: this.toolProvenance,
             workspaceAppLeaseFile: this.#controlPaths.workspaceAppLeasesFile,
         });

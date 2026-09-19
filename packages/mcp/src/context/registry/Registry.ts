@@ -917,6 +917,37 @@ export class McpContextRegistry {
         });
     }
 
+    async detachEnvironment(
+        ctxId: string,
+        instance: string,
+    ): Promise<McpContextRecord> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (record.instance === instance) {
+                throw new Error(
+                    `Cannot detach primary Context environment ${instance}.`,
+                );
+            }
+            if (
+                !record.environments.some(
+                    (environment) => environment.instance === instance,
+                )
+            ) {
+                return cloneRecord(record);
+            }
+            await this.#mutateAndPersist(() => {
+                record.environments = record.environments.filter(
+                    (environment) => environment.instance !== instance,
+                );
+            });
+            return cloneRecord(record);
+        });
+    }
+
     async referenceInstance(
         ctxId: string,
         instance: string,
@@ -1023,6 +1054,19 @@ export class McpContextRegistry {
         });
     }
 
+    async listCleanupPending(): Promise<McpContextRecord[]> {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            return [...this.#contexts.values()]
+                .filter(
+                    (record) =>
+                        record.status === "disabled" &&
+                        record.cleanupPending !== false,
+                )
+                .map(cloneRecord);
+        });
+    }
+
     async disable(ctxId: string): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -1030,10 +1074,31 @@ export class McpContextRegistry {
             if (record === undefined || !isCtxId(ctxId)) {
                 throw invalidContext(ctxId);
             }
-            await this.#mutateAndPersist(() => {
-                record.status = "disabled";
-            });
+            if (
+                record.status !== "disabled" ||
+                record.cleanupPending === undefined
+            ) {
+                await this.#mutateAndPersist(() => {
+                    record.status = "disabled";
+                    record.cleanupPending = true;
+                });
+            }
             return cloneRecord(record);
+        });
+    }
+
+    async settleCleanup(ctxId: string): Promise<void> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (record.status !== "disabled" || record.cleanupPending === false)
+                return;
+            await this.#mutateAndPersist(() => {
+                record.cleanupPending = false;
+            });
         });
     }
 
@@ -1414,6 +1479,7 @@ function isCtxId(value: string): boolean {
 
 function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
     const {
+        cleanupPending: _cleanupPending,
         executionEpoch: _executionEpoch,
         executionLastActivityAt: _executionLastActivityAt,
         executionLeaseUntil: _executionLeaseUntil,
@@ -1569,6 +1635,8 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         typeof record.expiresAt !== "string" ||
         (record.temporaryDirectory !== undefined &&
             typeof record.temporaryDirectory !== "string") ||
+        (raw.cleanupPending !== undefined &&
+            typeof raw.cleanupPending !== "boolean") ||
         (status !== "active" && status !== "expired" && status !== "disabled")
     ) {
         return undefined;
@@ -1597,6 +1665,9 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
             ? raw.automaticReentryInstance
             : undefined;
     return {
+        ...(raw.cleanupPending === undefined
+            ? {}
+            : { cleanupPending: raw.cleanupPending as boolean }),
         ...(typeof raw.executionEpoch === "number" &&
         Number.isSafeInteger(raw.executionEpoch) &&
         raw.executionEpoch >= 0

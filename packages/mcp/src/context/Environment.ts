@@ -6,6 +6,7 @@ import {
 } from "@portable-devshell/shared";
 
 import type { McpInstanceGateway } from "../endpoint/Port.js";
+import type { McpContextMaskedInstance } from "./registry/Model.js";
 import type { McpContextRegistry } from "./registry/Registry.js";
 
 export interface McpContextRemoteEnvironmentOptions {
@@ -17,6 +18,7 @@ export interface McpContextRemoteEnvironmentOptions {
 export class McpContextRemoteEnvironment {
     readonly #contextRegistry: McpContextRegistry;
     readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
+    readonly #transactions = new Map<string, Promise<void>>();
 
     constructor(options: McpContextRemoteEnvironmentOptions) {
         this.#contextRegistry = options.contextRegistry;
@@ -30,80 +32,89 @@ export class McpContextRemoteEnvironment {
         signal?: AbortSignal,
     ): Promise<JsonValue> {
         signal?.throwIfAborted();
-        const instance =
-            await this.#contextRegistry.resolveRemoteInstanceHandle(
+        const operation = this.#runTransaction(ctxId, handle, async () => {
+            const instance =
+                await this.#contextRegistry.resolveRemoteInstanceHandle(
+                    ctxId,
+                    handle,
+                );
+            return await this.#attachTransaction(
                 ctxId,
-                handle,
+                instance,
+                workspace,
+                signal,
             );
+        });
+        return await waitAbortable(operation, signal);
+    }
+
+    async #attachTransaction(
+        ctxId: string,
+        instance: string,
+        workspace: string | undefined,
+        signal: AbortSignal | undefined,
+    ): Promise<JsonValue> {
+        signal?.throwIfAborted();
         const gateway = this.#requireGateway(instance);
         const previous = await this.#environment(ctxId, instance);
-        const connected = await waitAbortable(
-            gateway.connectInstance(instance, ctxId),
-            signal,
-        );
-        if (workspace === undefined) {
-            try {
+        let attached = false;
+        let connected = false;
+        let preparedWorkspace: string | undefined;
+        try {
+            const connection = await gateway.connectInstance(instance, ctxId);
+            connected = true;
+            signal?.throwIfAborted();
+            if (workspace === undefined) {
                 await this.#contextRegistry.attachEnvironment(ctxId, {
                     instance,
                 });
+                attached = true;
+                signal?.throwIfAborted();
                 return {
-                    ...(isRecord(connected)
-                        ? connected
-                        : { result: connected }),
+                    ...(isRecord(connection)
+                        ? connection
+                        : { result: connection }),
                     instance,
                 };
-            } catch (error) {
-                if (previous === undefined)
-                    await gateway.releaseInstanceReference?.(instance, ctxId);
-                throw error;
             }
-        }
 
-        if (
-            previous?.workspace === workspace &&
-            previous.temporaryDirectory !== undefined
-        ) {
-            try {
-                await waitAbortable(
-                    gateway.touchTemporaryDirectory(
+            if (
+                previous?.workspace === workspace &&
+                previous.temporaryDirectory !== undefined
+            ) {
+                try {
+                    await gateway.touchTemporaryDirectory(
                         instance,
                         previous.temporaryDirectory,
-                    ),
-                    signal,
-                );
-                await waitAbortable(
-                    gateway.touchAlerts(instance, workspace),
-                    signal,
-                );
-                return {
-                    ...(isRecord(connected)
-                        ? connected
-                        : { result: connected }),
-                    instance,
-                    temporaryDirectory: previous.temporaryDirectory,
-                    workspace,
-                };
-            } catch (error) {
-                if (!isRecoverableTemporaryError(error)) throw error;
+                    );
+                    signal?.throwIfAborted();
+                    await gateway.touchAlerts(instance, workspace);
+                    signal?.throwIfAborted();
+                    return {
+                        ...(isRecord(connection)
+                            ? connection
+                            : { result: connection }),
+                        instance,
+                        temporaryDirectory: previous.temporaryDirectory,
+                        workspace,
+                    };
+                } catch (error) {
+                    if (!isRecoverableTemporaryError(error)) throw error;
+                }
             }
-        }
 
-        let preparedWorkspace: string | undefined;
-        try {
-            const prepared = await waitAbortable(
-                gateway.prepareWorkspace(instance, workspace),
-                signal,
-            );
+            const prepared = await gateway.prepareWorkspace(instance, workspace);
+            signal?.throwIfAborted();
             preparedWorkspace = prepared.workspace;
-            const alerts = await waitAbortable(
-                gateway.readAlerts(instance, prepared.workspace),
-                signal,
-            );
+            const alerts = await gateway.readAlerts(instance, prepared.workspace);
+            signal?.throwIfAborted();
             await this.#contextRegistry.attachEnvironment(ctxId, {
                 instance,
                 temporaryDirectory: prepared.temporaryDirectory,
                 workspace: prepared.workspace,
             });
+            attached = true;
+            signal?.throwIfAborted();
             if (
                 previous?.workspace !== undefined &&
                 previous.workspace !== prepared.workspace
@@ -114,9 +125,9 @@ export class McpContextRemoteEnvironment {
                     previous.workspace,
                 ).catch(() => undefined);
             }
-            const base = isRecord(connected)
-                ? connected
-                : { result: connected };
+            const base = isRecord(connection)
+                ? connection
+                : { result: connection };
             return {
                 ...base,
                 comment: [
@@ -142,15 +153,34 @@ export class McpContextRemoteEnvironment {
                 workspace: prepared.workspace,
             };
         } catch (error) {
+            const cleanupFailures: unknown[] = [];
+            if (attached) {
+                await this.#restoreEnvironment(
+                    ctxId,
+                    instance,
+                    previous,
+                ).catch((cleanupError) => cleanupFailures.push(cleanupError));
+            }
             if (preparedWorkspace !== undefined) {
                 await this.#releaseAlertsIfUnused(
                     gateway,
                     instance,
                     preparedWorkspace,
-                ).catch(() => undefined);
+                ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             }
-            if (previous === undefined)
-                await gateway.releaseInstanceReference?.(instance, ctxId);
+            if (connected && previous === undefined) {
+                try {
+                    await gateway.releaseInstanceReference?.(instance, ctxId);
+                } catch (cleanupError) {
+                    cleanupFailures.push(cleanupError);
+                }
+            }
+            if (cleanupFailures.length > 0) {
+                throw new AggregateError(
+                    [error, ...cleanupFailures],
+                    `Remote environment attach failed and cleanup was incomplete for ${instance}.`,
+                );
+            }
             throw error;
         }
     }
@@ -159,10 +189,19 @@ export class McpContextRemoteEnvironment {
         ctxId: string,
         handle: string,
     ): Promise<{ instance: string; masked: true }> {
-        const masked = await this.#contextRegistry.maskRemoteInstance(
-            ctxId,
-            handle,
-        );
+        return await this.#runTransaction(ctxId, handle, async () => {
+            const masked = await this.#contextRegistry.maskRemoteInstance(
+                ctxId,
+                handle,
+            );
+            return await this.#maskTransaction(ctxId, masked);
+        });
+    }
+
+    async #maskTransaction(
+        ctxId: string,
+        masked: McpContextMaskedInstance,
+    ): Promise<{ instance: string; masked: true }> {
         if (masked.environment !== undefined) {
             const gateway = this.#gateway(masked.instance);
             if (gateway !== undefined) {
@@ -179,6 +218,38 @@ export class McpContextRemoteEnvironment {
             }
         }
         return { instance: masked.instance, masked: true };
+    }
+
+    async #restoreEnvironment(
+        ctxId: string,
+        instance: string,
+        previous: McpContextEnvironment | undefined,
+    ): Promise<void> {
+        if (previous === undefined) {
+            await this.#contextRegistry.detachEnvironment(ctxId, instance);
+            return;
+        }
+        await this.#contextRegistry.attachEnvironment(ctxId, previous);
+    }
+
+    #runTransaction<T>(
+        ctxId: string,
+        handle: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        const key = `${ctxId}\0${handle}`;
+        const previous = this.#transactions.get(key) ?? Promise.resolve();
+        const run = previous.then(operation, operation);
+        const completion = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        this.#transactions.set(key, completion);
+        void completion.then(() => {
+            if (this.#transactions.get(key) === completion)
+                this.#transactions.delete(key);
+        });
+        return run;
     }
 
     #requireGateway(instance: string): McpInstanceGateway {

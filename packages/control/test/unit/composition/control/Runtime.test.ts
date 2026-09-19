@@ -59,6 +59,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
             instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {},
@@ -105,6 +106,7 @@ test("runtime wires Comment retirement only to committed instance lifecycle even
         | undefined;
     let disableRetirements = 0;
     let deleteRetirements = 0;
+    let generationRetirements = 0;
     const baseComment = testComment();
     const runtime = new ControlRuntime({
         artifact: { service: undefined, async stop() {} } as never,
@@ -139,11 +141,16 @@ test("runtime wires Comment retirement only to committed instance lifecycle even
                     deleteRetirements += 1;
                     return () => undefined;
                 },
+                registerInstanceGenerationRetirement() {
+                    generationRetirements += 1;
+                    return () => undefined;
+                },
             },
             instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: undefined,
             webEnabled: false,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {},
@@ -158,8 +165,9 @@ test("runtime wires Comment retirement only to committed instance lifecycle even
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
-    assert.equal(disableRetirements, 1);
-    assert.equal(deleteRetirements, 3);
+    assert.equal(disableRetirements, 0);
+    assert.equal(deleteRetirements, 0);
+    assert.equal(generationRetirements, 3);
     assert.notEqual(disabled, undefined);
     assert.notEqual(deleted, undefined);
 
@@ -238,6 +246,9 @@ function testConfigEditor() {
         registerInstanceDeleteRetirement() {
             return () => undefined;
         },
+        registerInstanceGenerationRetirement() {
+            return () => undefined;
+        },
     };
 }
 
@@ -295,6 +306,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
             instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {
@@ -320,7 +332,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     await runtime.start();
     await assert.rejects(runtime.stop(), AggregateError);
 
-    assert.deepEqual(calls, ["reverse", "mcp", "artifact", "instances"]);
+    assert.deepEqual(calls, ["mcp", "reverse", "artifact", "instances"]);
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
@@ -359,6 +371,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
             applyMcpConfig = apply;
         },
         webEnabled: false,
+        async prepare() {},
         async start() {},
         status: () => ({ running: false }),
         async stop() {},
@@ -428,6 +441,7 @@ test("Web hot replacement preserves the original failure when host rollback also
             applyWebConfig = apply;
         },
         async stopRetiredWebHost() {},
+        async prepare() {},
         async start() {},
         status: () => ({ running: false }),
         async stop() {},
@@ -523,6 +537,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
             webHost: http,
             webPublicBaseUrl: "https://devshell.example",
             webEnabled: true,
+            async prepare() {},
             async start() {},
             status: () => ({ running: true }),
             async stop() {},
@@ -593,6 +608,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
             oauthApprovals: undefined,
             publicBaseUrl: "http://127.0.0.1:17890",
             webEnabled: false,
+            async prepare() {},
             async start() {},
             status: () => ({ running: true }),
             async stop() {},
@@ -826,6 +842,7 @@ test("runtime installs builtin Extensions through the normal installer before op
             instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {},
@@ -889,6 +906,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             instanceGateway: testInstanceGateway(),
             instanceCreate: undefined,
             oauthApprovals: () => undefined,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {},
@@ -968,6 +986,7 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
             instanceCreate: undefined,
             oauthApprovals: undefined,
             webEnabled: false,
+            async prepare() {},
             async start() {},
             status: () => ({ running: false }),
             async stop() {},

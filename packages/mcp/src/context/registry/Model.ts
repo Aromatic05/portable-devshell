@@ -49,6 +49,7 @@ export type McpContextAutomaticReentryMode =
     "automatic" | "user_owned" | "paused";
 
 export interface McpContextStoredRecord extends McpContextRecord {
+    cleanupPending?: boolean;
     executionEpoch?: number;
     executionLastActivityAt?: string;
     executionLeaseUntil?: string;

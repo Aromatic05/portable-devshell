@@ -86,7 +86,11 @@ export class ReverseConnectionService {
         transport: "sse" | "wss",
         channel: Channel,
     ): Promise<void> {
+        let generation:
+            | ReturnType<ReverseInstanceLookupPort["acquireGeneration"]>
+            | undefined;
         try {
+            generation = this.#acquireIdentityGeneration(identity);
             await this.#exclusive(identity.descriptor.name, async () => {
                 this.#assertRunning(channel);
                 let active: ActiveReverseConnection | undefined;
@@ -133,6 +137,8 @@ export class ReverseConnectionService {
         } catch (error) {
             channel.close();
             throw error;
+        } finally {
+            generation?.release();
         }
     }
 
@@ -182,41 +188,64 @@ export class ReverseConnectionService {
         identity: ReverseConnectionIdentity,
         batch: ReverseUpstreamBatch,
     ): JsonValue {
-        if (batch.generation !== identity.generation) {
-            throw createError({
-                code: errorCodes.reverseGenerationInvalid,
-                message:
-                    "Upstream generation does not match request generation.",
-                retryable: true,
-            });
-        }
+        const generation = this.#acquireIdentityGeneration(identity);
+        try {
+            if (batch.generation !== identity.generation) {
+                throw createError({
+                    code: errorCodes.reverseGenerationInvalid,
+                    message:
+                        "Upstream generation does not match request generation.",
+                    retryable: true,
+                });
+            }
 
-        const active = this.#active.get(identity.descriptor.name);
-        if (
-            active === undefined ||
-            active.transport !== "sse" ||
-            active.generation !== identity.generation ||
-            !(active.channel instanceof ReverseSseChannel)
-        ) {
-            throw createError({
-                code: errorCodes.reverseConnectionSuperseded,
-                message: "SSE connection is not the active generation.",
-                retryable: true,
-            });
-        }
+            const active = this.#active.get(identity.descriptor.name);
+            if (
+                active === undefined ||
+                active.transport !== "sse" ||
+                active.generation !== identity.generation ||
+                !(active.channel instanceof ReverseSseChannel)
+            ) {
+                throw createError({
+                    code: errorCodes.reverseConnectionSuperseded,
+                    message: "SSE connection is not the active generation.",
+                    retryable: true,
+                });
+            }
 
-        let acceptedThrough = active.channel.acceptedUpstreamSeq;
-        for (const frame of batch.frames) {
-            acceptedThrough = active.channel.acceptUpstream(
-                frame.seq,
-                frame.frame,
+            let acceptedThrough = active.channel.acceptedUpstreamSeq;
+            for (const frame of batch.frames) {
+                acceptedThrough = active.channel.acceptUpstream(
+                    frame.seq,
+                    frame.frame,
+                );
+            }
+
+            return {
+                acceptedThrough,
+                generation: identity.generation,
+            };
+        } finally {
+            generation.release();
+        }
+    }
+
+    #acquireIdentityGeneration(
+        identity: ReverseConnectionIdentity,
+    ): ReturnType<ReverseInstanceLookupPort["acquireGeneration"]> {
+        let generation: ReturnType<
+            ReverseInstanceLookupPort["acquireGeneration"]
+        >;
+        try {
+            generation = this.#instanceRegistry.acquireGeneration(
+                identity.descriptor.name,
             );
+        } catch {
+            throw retiredGeneration(identity.descriptor.name);
         }
-
-        return {
-            acceptedThrough,
-            generation: identity.generation,
-        };
+        if (generation.descriptor === identity.descriptor) return generation;
+        generation.release();
+        throw retiredGeneration(identity.descriptor.name);
     }
 
     disconnect(instance: string): void {
@@ -300,5 +329,14 @@ function invalidDeviceToken(instance: string): Error {
         details: { instance },
         message: "Device token is invalid or revoked.",
         retryable: false,
+    });
+}
+
+function retiredGeneration(instance: string): Error {
+    return createError({
+        code: errorCodes.instanceConflict,
+        details: { instance, operation: "reverse.connect" },
+        message: `Instance ${instance} generation was retired during reverse connection admission.`,
+        retryable: true,
     });
 }

@@ -13,6 +13,7 @@ export class ControlPathHome {
     readonly configFile: string;
     readonly contextsFile: string;
     readonly conversationPreferencesFile: string;
+    readonly lifecycleCleanupFile: string;
     readonly toolProvenanceFile: string;
     readonly workspaceAppLeasesFile: string;
     readonly instancesDir: string;
@@ -27,6 +28,10 @@ export class ControlPathHome {
         this.conversationPreferencesFile = join(
             this.controlHomeDir,
             "conversation-preferences.json",
+        );
+        this.lifecycleCleanupFile = join(
+            this.controlHomeDir,
+            "lifecycle-cleanup.json",
         );
         this.toolProvenanceFile = join(
             this.controlHomeDir,

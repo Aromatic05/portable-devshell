@@ -67,10 +67,11 @@ export class ReverseCredentialService {
     }
 
     async retireInstance(instance: string): Promise<void> {
-        const descriptor = this.#requireReverseInstance(instance);
+        const descriptor = this.#instanceRegistry.get(instance);
         await this.#credentialStore.retire(instance);
         this.#disconnect?.(instance);
-        await descriptor.worker.setReverseEnrollmentState("revoked");
+        if (descriptor?.provider === "reverse")
+            await descriptor.worker.setReverseEnrollmentState("revoked");
     }
 
     #requireReverseInstance(instance: string): ReverseInstancePort {

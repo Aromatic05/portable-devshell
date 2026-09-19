@@ -69,21 +69,22 @@ test("instance connection references remain bound to the Worker generation they 
     };
     const first = worker("first");
     const second = worker("second");
-    const registry = new InstanceRegistry([
-        {
-            enabled: true,
-            name: "worker-a",
-            worker: first,
-        } as never,
-    ]);
-    const connections = new InstanceConnectionService(registry);
-
-    await connections.acquire("worker-a", "ctx:first");
-    registry.update({
+    const firstDescriptor = {
+        enabled: true,
+        name: "worker-a",
+        worker: first,
+    } as never;
+    const secondDescriptor = {
         enabled: true,
         name: "worker-a",
         worker: second,
-    } as never);
+    } as never;
+    const registry = new InstanceRegistry([firstDescriptor]);
+    const connections = new InstanceConnectionService(registry);
+
+    await connections.acquire("worker-a", "ctx:first");
+    await registry.retireGeneration("worker-a", firstDescriptor);
+    registry.add(secondDescriptor);
     await connections.acquire("worker-a", "ctx:second");
 
     await connections.release("worker-a", "ctx:first");
@@ -92,4 +93,70 @@ test("instance connection references remain bound to the Worker generation they 
 
     await connections.release("worker-a", "ctx:second");
     assert.deepEqual(stopped, ["first", "second"]);
+});
+
+test("instance connection rejects a late acquire after its generation is retired", async () => {
+    let ready = false;
+    let signalStart!: () => void;
+    let finishStart!: () => void;
+    let stops = 0;
+    const startEntered = new Promise<void>((resolve) => {
+        signalStart = resolve;
+    });
+    const startGate = new Promise<void>((resolve) => {
+        finishStart = resolve;
+    });
+    const descriptor = {
+        enabled: true,
+        name: "worker-a",
+        worker: {
+            managementMode: "controllerManaged" as const,
+            snapshot() {
+                return {
+                    daemonState: ready ? "running" : "stopped",
+                    ready,
+                };
+            },
+            async start() {
+                signalStart();
+                await startGate;
+                ready = true;
+                return { daemonState: "running", ready: true };
+            },
+            async stop() {
+                stops += 1;
+                ready = false;
+                return { daemonState: "stopped", ready: false };
+            },
+        },
+    } as never;
+    const registry = new InstanceRegistry([descriptor]);
+    const connections = new InstanceConnectionService(registry);
+
+    const acquire = connections.acquire("worker-a", "ctx:late");
+    await startEntered;
+    let retired = false;
+    const retirement = registry
+        .retireGeneration("worker-a", descriptor)
+        .then(() => {
+            retired = true;
+        });
+
+    assert.equal(registry.get("worker-a"), undefined);
+    await Promise.resolve();
+    assert.equal(retired, false);
+
+    finishStart();
+    await assert.rejects(
+        acquire,
+        (error: unknown) =>
+            (error as { code?: string }).code === "instance.conflict",
+    );
+    await retirement;
+
+    assert.equal(stops, 1);
+    assert.equal(
+        registry.releaseConnectionReference("worker-a", "ctx:late"),
+        undefined,
+    );
 });

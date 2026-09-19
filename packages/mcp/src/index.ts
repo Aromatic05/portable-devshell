@@ -5,7 +5,7 @@ export type {
     McpOAuthAccessRevocation,
     McpOAuthAccessTokenVerification,
 } from "./auth/oauth/provider/Provider.js";
-export { McpHost } from "./host/Host.js";
+export { McpHost, McpRuntimeState } from "./host/Host.js";
 export type { McpHostInstanceConfig } from "./host/Host.js";
 export type {
     McpToolProvenanceRecord,

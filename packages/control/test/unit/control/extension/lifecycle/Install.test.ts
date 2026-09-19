@@ -228,6 +228,12 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
     assert.equal(installed.state, "installed");
     assert.equal(installed.activeGeneration, undefined);
     await assert.rejects(
+        control.remove("skill", false),
+        (error: unknown) =>
+            (error as { code?: string }).code ===
+            errorCodes.controlExtensionAccessDenied,
+    );
+    await assert.rejects(
         h.service.installBuiltin(
             "skill",
             await h.source("wrong-builtin", { id: "example" }),

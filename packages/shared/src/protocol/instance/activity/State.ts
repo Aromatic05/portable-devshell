@@ -31,6 +31,7 @@ export interface InstanceRuntimeEnvelope {
 }
 
 export interface InstanceListEntry {
+    enabled: boolean;
     homeDirectory?: string;
     mcpEnabled: boolean;
     name: string;

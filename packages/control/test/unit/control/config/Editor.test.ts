@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -14,6 +16,7 @@ import {
     type ControlConfig,
     type JsonValue,
 } from "@portable-devshell/shared";
+import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 test("config editor returns each patch apply summary to the initiating request", async () => {
     let config = createConfig();
@@ -521,7 +524,7 @@ test("config editor reconfigures and disables a running instance without replaci
         "disabled",
     );
     assert.equal(reconfigure.env?.DEVSHELL_WORKER_SECURITY_MODE, "disabled");
-    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
     assert.deepEqual(enabledChanges, [false]);
 
     await service.enableInstance({ instanceName: "demo-local" });
@@ -591,7 +594,7 @@ test("generic enabled=false config patch stops the worker and cancels unresolved
         "resolved",
     );
     assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
 });
 
 test("failed managed-instance stop does not roll back a committed disable", async () => {
@@ -625,9 +628,155 @@ test("failed managed-instance stop does not roll back a committed disable", asyn
     );
     assert.equal(writes.length, 1);
     assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
     assert.equal(warnings.length, 1);
     assert.match(String(warnings[0]), /cleanup was incomplete/u);
+});
+
+test("instance cleanup debt survives coordinator restart and gates the next generation", async () => {
+    const root = await createTestTempDirectory("instance-cleanup-debt");
+    const cleanupDebtFile = join(root, "lifecycle-cleanup.json");
+    let config = createConfig();
+    const firstRegistry = new InstanceRegistry([
+        descriptor({
+            snapshot: runningSnapshot,
+            async stop() {
+                return stoppedSnapshot();
+            },
+        }),
+    ]);
+    const mapper = {
+        map() {
+            return descriptor({
+                snapshot: stoppedSnapshot,
+                async retireRuntime() {},
+            });
+        },
+    } as never;
+    const first = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: mapper,
+        instanceRegistry: firstRegistry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    first.registerInstanceGenerationRetirement(async () => {
+        throw new Error("terminal retirement failed");
+    });
+
+    const warnings = await captureWarnings(
+        async () =>
+            await first.disableInstance({ instanceName: "demo-local" }),
+    );
+
+    assert.equal(config.instances[0]?.enabled, false);
+    assert.equal(firstRegistry.get("demo-local"), undefined);
+    assert.equal(warnings.length, 1);
+
+    const secondRegistry = new InstanceRegistry([]);
+    const second = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: mapper,
+        instanceRegistry: secondRegistry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    let replayedGenerationRetirement = 0;
+    second.registerInstanceGenerationRetirement(async () => {
+        replayedGenerationRetirement += 1;
+    });
+
+    await second.reconcileCleanupDebt();
+    await second.reconcileCleanupDebt();
+    assert.equal(replayedGenerationRetirement, 1);
+
+    await second.enableInstance({ instanceName: "demo-local" });
+    assert.equal(config.instances[0]?.enabled, true);
+    assert.notEqual(secondRegistry.get("demo-local"), undefined);
+});
+
+test("failed cleanup debt persistence does not leave a phantom in-memory debt", async () => {
+    const root = await createTestTempDirectory("instance-cleanup-debt-write-failure");
+    const cleanupDebtFile = join(root, "lifecycle-cleanup.json");
+    await writeFile(cleanupDebtFile, "[]\n", "utf8");
+    let config = createConfig();
+    const registry = new InstanceRegistry([
+        descriptor({ snapshot: stoppedSnapshot }),
+    ]);
+    const mapper = {
+        map() {
+            return descriptor({ snapshot: stoppedSnapshot });
+        },
+    } as never;
+    const service = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: mapper,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    let generationRetirements = 0;
+    service.registerInstanceGenerationRetirement(async () => {
+        generationRetirements += 1;
+    });
+    await service.reconcileCleanupDebt();
+    await rm(cleanupDebtFile);
+    await mkdir(cleanupDebtFile);
+
+    const warnings = await captureWarnings(
+        async () =>
+            await service.disableInstance({ instanceName: "demo-local" }),
+    );
+    assert.equal(warnings.length, 1);
+    assert.equal(generationRetirements, 1);
+
+    await service.enableInstance({ instanceName: "demo-local" });
+    assert.equal(generationRetirements, 1);
+    assert.equal(config.instances[0]?.enabled, true);
+});
+
+test("invalid cleanup debt remains fail-closed on repeated reads", async () => {
+    const root = await createTestTempDirectory("instance-cleanup-debt-invalid");
+    const cleanupDebtFile = join(root, "lifecycle-cleanup.json");
+    await writeFile(cleanupDebtFile, "{invalid", "utf8");
+    let config = createConfig();
+    const service = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistry([]),
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await assert.rejects(service.reconcileCleanupDebt(), SyntaxError);
+    await assert.rejects(service.reconcileCleanupDebt(), SyntaxError);
 });
 
 test("every disable entrypoint commits before cleanup and runs committed lifecycle once", async (t) => {
@@ -729,7 +878,7 @@ test("every disable entrypoint commits before cleanup and runs committed lifecyc
             assert.equal(committed, 1);
             assert.equal(writes.length, 1);
             assert.equal(config.instances[0]?.enabled, false);
-            assert.equal(registry.get("demo-local")?.enabled, false);
+            assert.equal(registry.get("demo-local"), undefined);
             assert.equal(warnings.length, 1);
         });
     }
@@ -908,8 +1057,8 @@ test("disable committed listeners run after persisted descriptor state is visibl
     await service.disableInstance({ instanceName: "demo-local" });
 
     assert.deepEqual(observed, [
-        "registry:false",
-        "committed:false:false",
+        "registry:undefined",
+        "committed:false:undefined",
     ]);
 });
 
@@ -934,7 +1083,7 @@ test("disable committed-listener failure is cleanup degradation, not transaction
     );
 
     assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
     assert.equal(warnings.length, 1);
     assert.match(String(warnings[0]), /cleanup was incomplete/u);
 });
@@ -998,7 +1147,7 @@ test("Control disable does not stop self-managed reverse workers but retires loc
     assert.deepEqual(cancelledApprovals, ["approval-self-managed"]);
     assert.deepEqual(cancelledWaits, ["wait-self-managed"]);
     assert.equal(config.instances[0]?.enabled, false);
-    assert.equal(registry.get("demo-local")?.enabled, false);
+    assert.equal(registry.get("demo-local"), undefined);
 });
 
 test("instance reconfigure failure restores persisted and runtime configuration", async () => {

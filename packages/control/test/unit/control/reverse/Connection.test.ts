@@ -71,10 +71,7 @@ test("ReverseConnectionService enrolls and authenticates without an HTTP server"
     };
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (instanceName) =>
-                instanceName === descriptor.name ? descriptor : undefined,
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test/devshell",
     });
     const code = await credentialStore.createDeviceCode(descriptor.name);
@@ -146,10 +143,7 @@ test("ReverseConnectionService owns generation replacement and disconnect state"
     };
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (instanceName) =>
-                instanceName === descriptor.name ? descriptor : undefined,
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     const code = await credentialStore.createDeviceCode(descriptor.name);
@@ -201,9 +195,7 @@ test("ReverseConnectionService rejects activation after an authenticated token i
     });
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (name) => (name === descriptor.name ? descriptor : undefined),
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     const code = await credentialStore.createDeviceCode(descriptor.name);
@@ -247,16 +239,12 @@ test("ReverseConnectionService lets token rotation disconnect a pending activati
     });
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (name) => (name === descriptor.name ? descriptor : undefined),
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     const credentialService = new ReverseCredentialService({
         credentialStore,
-        instanceRegistry: {
-            get: (name) => (name === descriptor.name ? descriptor : undefined),
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     credentialService.setDisconnectHandler((instance) =>
@@ -307,9 +295,7 @@ test("ReverseConnectionService rejects queued activation after stop", async () =
     });
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (name) => (name === descriptor.name ? descriptor : undefined),
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     const code = await credentialStore.createDeviceCode(descriptor.name);
@@ -357,9 +343,7 @@ test("ReverseConnectionService closes the channel when credential activation fai
     } as unknown as ReverseCredentialStore;
     const service = new ReverseConnectionService({
         credentialStore,
-        instanceRegistry: {
-            get: (name) => (name === descriptor.name ? descriptor : undefined),
-        },
+        instanceRegistry: instanceRegistryFor(descriptor),
         publicBaseUrl: "https://example.test",
     });
     const channel = new MemoryRpcChannel();
@@ -407,6 +391,21 @@ function reverseDescriptor(
                 reverseSnapshot(),
             snapshot: () => ({}) as never,
         },
+    };
+}
+
+function instanceRegistryFor<T extends { name: string }>(descriptor: T) {
+    return {
+        acquireGeneration(name: string) {
+            if (name !== descriptor.name)
+                throw new Error(`Instance generation ${name} is not active.`);
+            return {
+                descriptor,
+                release() {},
+            };
+        },
+        get: (name: string) =>
+            name === descriptor.name ? descriptor : undefined,
     };
 }
 

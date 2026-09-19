@@ -9,6 +9,7 @@ import {
     McpHost,
     McpNativeToolResult,
 } from "@portable-devshell/mcp/testing";
+import { McpRuntimeState } from "@portable-devshell/mcp";
 import type {
     JsonValue,
     ToolCallContext,
@@ -1531,6 +1532,123 @@ test("McpHost context admin releases alerts only after the last workspace contex
     });
     await host.contextAdmin.renew(renewed.ctxId);
     assert.deepEqual(touched, ["/projects/beta"]);
+});
+
+test("disabled Context cleanup is reconciled from durable state after restart", async () => {
+    const root = await createTestTempDirectory("context-cleanup-reconcile");
+    const contextFile = join(root, "contexts.json");
+    let releaseAttempts = 0;
+    const firstState = new McpRuntimeState({ contextFile });
+    const firstHost = new McpHost(
+        {
+            contextFile,
+            instances: [
+                {
+                    gateway: {
+                        async releaseInstanceReference() {
+                            releaseAttempts += 1;
+                            throw new Error("release failed");
+                        },
+                    } as never,
+                    name: "demo-local",
+                    worker: {
+                        snapshot: () => ({ ready: false }),
+                    } as never,
+                },
+            ],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+        },
+        firstState,
+    );
+    await firstState.initialize();
+    const context = await firstHost.contextRegistry.create({
+        instance: "demo-local",
+        principal: "local",
+        workspace: "/projects/reconcile",
+    });
+    const originalWarn = console.warn;
+    const warnings: unknown[] = [];
+    console.warn = (warning?: unknown) => warnings.push(warning);
+    try {
+        await firstHost.contextAdmin.disable(context.ctxId);
+    } finally {
+        console.warn = originalWarn;
+    }
+    assert.equal(releaseAttempts, 1);
+    assert.equal(warnings.length, 1);
+    assert.equal(
+        (await firstHost.contextRegistry.list()).find(
+            (candidate) => candidate.ctxId === context.ctxId,
+        )?.status,
+        "disabled",
+    );
+
+    const secondState = new McpRuntimeState({ contextFile });
+    const secondHost = new McpHost(
+        {
+            contextFile,
+            instances: [
+                {
+                    gateway: {
+                        async releaseInstanceReference() {
+                            releaseAttempts += 1;
+                        },
+                    } as never,
+                    name: "demo-local",
+                    worker: {
+                        snapshot: () => ({ ready: false }),
+                    } as never,
+                },
+            ],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+        },
+        secondState,
+    );
+    try {
+        await secondHost.start();
+        assert.equal(releaseAttempts, 2);
+        assert.deepEqual(
+            await secondState.contextRegistry.listCleanupPending(),
+            [],
+        );
+    } finally {
+        await secondHost.stop();
+    }
+
+    const thirdState = new McpRuntimeState({ contextFile });
+    const thirdHost = new McpHost(
+        {
+            contextFile,
+            instances: [
+                {
+                    gateway: {
+                        async releaseInstanceReference() {
+                            releaseAttempts += 1;
+                        },
+                    } as never,
+                    name: "demo-local",
+                    worker: {
+                        snapshot: () => ({ ready: false }),
+                    } as never,
+                },
+            ],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+        },
+        thirdState,
+    );
+    try {
+        await thirdHost.start();
+        assert.equal(releaseAttempts, 2);
+        assert.deepEqual(
+            await thirdState.contextRegistry.listCleanupPending(),
+            [],
+        );
+    } finally {
+        await thirdHost.stop();
+    }
 });
 
 test("McpEndpointWorker exposes Context tools while explicit mode still requires a resolvable Context at runtime", async () => {

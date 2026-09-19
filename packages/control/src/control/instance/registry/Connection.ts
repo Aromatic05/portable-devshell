@@ -26,8 +26,10 @@ export class InstanceConnectionService {
         instance: string,
         reference: string,
     ): Promise<InstanceConnectionLease> {
-        const descriptor = this.#requireDescriptor(instance);
+        const generation = this.#registry.acquireGeneration(instance);
+        const descriptor = generation.descriptor;
         if (!descriptor.enabled) {
+            generation.release();
             throw createError({
                 code: errorCodes.instanceConflict,
                 details: { instance, operation: "connect" },
@@ -36,37 +38,56 @@ export class InstanceConnectionService {
             });
         }
 
-        let snapshot = descriptor.worker.snapshot();
         let ownsLifecycle = false;
-        if (!snapshot.ready) {
-            if (descriptor.worker.managementMode === "selfManaged") {
-                snapshot = await descriptor.worker.refreshStatus();
-                if (!snapshot.ready) {
-                    throw createError({
-                        code: errorCodes.reverseSelfManagedOffline,
-                        details: { instance },
-                        message: `Instance ${instance} is self-managed and is not connected.`,
-                        retryable: true,
-                    });
+        try {
+            let snapshot = descriptor.worker.snapshot();
+            if (!snapshot.ready) {
+                if (descriptor.worker.managementMode === "selfManaged") {
+                    snapshot = await descriptor.worker.refreshStatus();
+                    if (!snapshot.ready) {
+                        throw createError({
+                            code: errorCodes.reverseSelfManagedOffline,
+                            details: { instance },
+                            message: `Instance ${instance} is self-managed and is not connected.`,
+                            retryable: true,
+                        });
+                    }
+                } else {
+                    snapshot = await descriptor.worker.start();
+                    ownsLifecycle = true;
                 }
-            } else {
-                snapshot = await descriptor.worker.start();
-                ownsLifecycle = true;
             }
-        }
 
-        if (descriptor.worker.managementMode !== "selfManaged") {
-            this.#registry.retainConnectionReference(
-                instance,
-                descriptor.worker,
-                reference,
-                ownsLifecycle,
-            );
+            if (this.#registry.get(instance) !== descriptor) {
+                if (
+                    ownsLifecycle &&
+                    descriptor.worker.snapshot().daemonState !== "stopped"
+                ) {
+                    await descriptor.worker.stop();
+                }
+                throw createError({
+                    code: errorCodes.instanceConflict,
+                    details: { instance, operation: "connect" },
+                    message: `Instance ${instance} generation was retired while connecting.`,
+                    retryable: true,
+                });
+            }
+
+            if (descriptor.worker.managementMode !== "selfManaged") {
+                this.#registry.retainConnectionReference(
+                    instance,
+                    descriptor.worker,
+                    reference,
+                    ownsLifecycle,
+                );
+            }
+            return {
+                snapshot,
+                worker: descriptor.worker,
+            };
+        } finally {
+            generation.release();
         }
-        return {
-            snapshot,
-            worker: descriptor.worker,
-        };
     }
 
     async release(instance: string, reference: string): Promise<void> {
@@ -82,14 +103,4 @@ export class InstanceConnectionService {
         this.#registry.clearConnectionOwnership(instance, worker);
     }
 
-    #requireDescriptor(instance: string): InstanceDescriptor {
-        const descriptor = this.#registry.get(instance);
-        if (descriptor !== undefined) return descriptor;
-        throw createError({
-            code: errorCodes.instanceMissing,
-            details: { instance },
-            message: `Instance ${instance} was not found.`,
-            retryable: false,
-        });
-    }
 }

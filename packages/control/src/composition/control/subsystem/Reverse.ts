@@ -55,6 +55,12 @@ export class ControlRuntimeReverse {
                 await this.service?.retireInstance(instance.name);
             },
         );
+        options.mcp.configEditor.registerInstanceDisableRetirement(
+            async (instance) => {
+                if (instance.provider !== "reverse") return;
+                await this.service?.retireInstance(instance.name);
+            },
+        );
     }
 
     stop(): void {

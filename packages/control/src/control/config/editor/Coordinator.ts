@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { dirname } from "node:path";
+
 import type { McpHost, McpInstanceGateway } from "@portable-devshell/mcp";
 import {
     ConfigInputError,
@@ -13,10 +17,12 @@ import {
     normalizeConfigInstanceDraft,
     parseConfigBatchUpdateRequest,
     parseConfigDraft,
+    parseConfigInstanceDraft,
     parseConfigInstanceTargetRequest,
     parseConfigUpdateInstanceRequest,
     parseConfigUpdateMcpRequest,
     parseConfigUpdateWebRequest,
+    toConfigInstanceDraft,
     toConfigView,
     type ConfigDraft,
     type ControlConfig,
@@ -49,6 +55,7 @@ export interface ConfigRuntimeChangeSet {
 }
 
 interface ConfigEditorCoordinatorOptions {
+    cleanupDebtFile?: string;
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getMcpHost?: () => McpHost | undefined;
@@ -77,7 +84,174 @@ interface ConfigEditorCoordinatorOptions {
     validator?: ControlConfigValidator;
 }
 
+interface InstanceCleanupDebtRecord {
+    instance: ControlConfig["instances"][number];
+    operation: "delete" | "disable";
+    skipRuntimeRetirement?: boolean;
+}
+
+class InstanceCleanupDebtStore {
+    readonly #filePath?: string;
+    readonly #records = new Map<string, InstanceCleanupDebtRecord>();
+    #loaded = false;
+    #tail = Promise.resolve();
+
+    constructor(filePath?: string) {
+        this.#filePath = filePath;
+    }
+
+    async get(instance: string): Promise<InstanceCleanupDebtRecord | undefined> {
+        return await this.#exclusive(async () => this.#records.get(instance));
+    }
+
+    async list(): Promise<InstanceCleanupDebtRecord[]> {
+        return await this.#exclusive(async () => [...this.#records.values()]);
+    }
+
+    async put(record: InstanceCleanupDebtRecord): Promise<void> {
+        await this.#exclusive(async () => {
+            const previous = this.#records.get(record.instance.name);
+            this.#records.set(record.instance.name, record);
+            try {
+                await this.#persist();
+            } catch (error) {
+                if (previous === undefined)
+                    this.#records.delete(record.instance.name);
+                else this.#records.set(record.instance.name, previous);
+                throw error;
+            }
+        });
+    }
+
+    async clear(instance: string): Promise<void> {
+        await this.#exclusive(async () => {
+            const previous = this.#records.get(instance);
+            if (previous === undefined) return;
+            this.#records.delete(instance);
+            try {
+                await this.#persist();
+            } catch (error) {
+                this.#records.set(instance, previous);
+                throw error;
+            }
+        });
+    }
+
+    async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
+        const previous = this.#tail;
+        let release!: () => void;
+        this.#tail = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await previous;
+        try {
+            await this.#load();
+            return await operation();
+        } finally {
+            release();
+        }
+    }
+
+    async #load(): Promise<void> {
+        if (this.#loaded) return;
+        this.#loaded = true;
+        if (this.#filePath === undefined) return;
+        let source: string;
+        try {
+            source = await readFile(this.#filePath, "utf8");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+            this.#loaded = false;
+            throw error;
+        }
+        try {
+            const parsed = JSON.parse(source) as unknown;
+            if (!Array.isArray(parsed)) {
+                throw new Error(
+                    `Invalid lifecycle cleanup state: ${this.#filePath}.`,
+                );
+            }
+            this.#records.clear();
+            for (const value of parsed) {
+                const record = parseCleanupDebtRecord(value);
+                this.#records.set(record.instance.name, record);
+            }
+        } catch (error) {
+            this.#records.clear();
+            this.#loaded = false;
+            throw error;
+        }
+    }
+
+    async #persist(): Promise<void> {
+        if (this.#filePath === undefined) return;
+        const directory = dirname(this.#filePath);
+        await mkdir(directory, { mode: 0o700, recursive: true });
+        const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
+        const file = await open(temporary, "wx", 0o600);
+        try {
+            const persisted = [...this.#records.values()].map((record) => ({
+                ...record,
+                instance: toConfigInstanceDraft(record.instance),
+            }));
+            await file.writeFile(
+                `${JSON.stringify(persisted)}\n`,
+                "utf8",
+            );
+            await file.sync();
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
+        await file.close();
+        try {
+            await rename(temporary, this.#filePath);
+        } catch (error) {
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
+        if (process.platform !== "win32") {
+            const parent = await open(directory, "r");
+            try {
+                await parent.sync();
+            } finally {
+                await parent.close();
+            }
+        }
+    }
+}
+
+function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("Invalid lifecycle cleanup record.");
+    }
+    const record = value as Record<string, unknown>;
+    if (record.operation !== "delete" && record.operation !== "disable") {
+        throw new Error("Invalid lifecycle cleanup operation.");
+    }
+    const instance = normalizeConfigInstanceDraft(
+        parseConfigInstanceDraft(record.instance, ["instance"]),
+    );
+    if (
+        record.skipRuntimeRetirement !== undefined &&
+        typeof record.skipRuntimeRetirement !== "boolean"
+    ) {
+        throw new Error("Invalid lifecycle cleanup retirement flag.");
+    }
+    return {
+        instance,
+        operation: record.operation,
+        ...(record.skipRuntimeRetirement === undefined
+            ? {}
+            : {
+                  skipRuntimeRetirement: record.skipRuntimeRetirement,
+              }),
+    };
+}
+
 export class ConfigEditorCoordinator {
+    readonly #cleanupDebts: InstanceCleanupDebtStore;
     readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
@@ -96,6 +270,9 @@ export class ConfigEditorCoordinator {
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
     readonly #instanceDeleteRetirements = new Set<
+        (instance: ControlConfig["instances"][number]) => Promise<void>
+    >();
+    readonly #instanceGenerationRetirements = new Set<
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
     readonly #markRestartControlRequired: () => void;
@@ -118,6 +295,9 @@ export class ConfigEditorCoordinator {
     readonly #validator: ControlConfigValidator;
 
     constructor(options: ConfigEditorCoordinatorOptions) {
+        this.#cleanupDebts = new InstanceCleanupDebtStore(
+            options.cleanupDebtFile,
+        );
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#getMcpHost = options.getMcpHost ?? (() => undefined);
@@ -156,6 +336,13 @@ export class ConfigEditorCoordinator {
         return () => this.#instanceDisableRetirements.delete(retire);
     }
 
+    registerInstanceGenerationRetirement(
+        retire: (instance: ControlConfig["instances"][number]) => Promise<void>,
+    ): () => void {
+        this.#instanceGenerationRetirements.add(retire);
+        return () => this.#instanceGenerationRetirements.delete(retire);
+    }
+
     registerInstanceDisabled(
         listener: (instance: ControlConfig["instances"][number]) => Promise<void>,
     ): () => void {
@@ -168,6 +355,37 @@ export class ConfigEditorCoordinator {
     ): () => void {
         this.#instanceDeleted.add(listener);
         return () => this.#instanceDeleted.delete(listener);
+    }
+
+    async assertInstanceCleanupSettled(instance: string): Promise<void> {
+        if ((await this.#cleanupDebts.get(instance)) === undefined) return;
+        if (this.#instanceRegistry.get(instance) === undefined) {
+            await this.reconcileCleanupDebt(instance);
+        }
+        if ((await this.#cleanupDebts.get(instance)) === undefined) return;
+        throw createError({
+            code: errorCodes.instanceConflict,
+            details: { instance, operation: "cleanup" },
+            message: `Instance ${instance} still has incomplete lifecycle cleanup.`,
+            retryable: true,
+        });
+    }
+
+    async reconcileCleanupDebt(instance?: string): Promise<void> {
+        for (const record of await this.#cleanupDebts.list()) {
+            if (instance !== undefined && record.instance.name !== instance)
+                continue;
+            const failures = await this.#reconcileCleanupRecord(record);
+            if (failures.length === 0) {
+                await this.#cleanupDebts.clear(record.instance.name);
+                continue;
+            }
+            this.#warnCommittedCleanupFailures(
+                record.instance.name,
+                record.operation === "delete" ? "delete" : "update",
+                failures,
+            );
+        }
     }
 
     getConfigView(): JsonValue {
@@ -223,6 +441,14 @@ export class ConfigEditorCoordinator {
                           ),
                       ),
                   );
+        if (
+            existing !== undefined &&
+            instance !== undefined &&
+            !existing.enabled &&
+            instance.enabled
+        ) {
+            await this.assertInstanceCleanupSettled(existing.name);
+        }
         const descriptor =
             instanceRequest === undefined
                 ? undefined
@@ -298,7 +524,7 @@ export class ConfigEditorCoordinator {
             rebuildRequired,
             runtimeChanges,
         });
-        await this.#cleanupCommittedInstanceChange(
+        await this.#cleanupCommittedInstanceChangeWithDebt(
             existing,
             instance,
             descriptor,
@@ -355,6 +581,9 @@ export class ConfigEditorCoordinator {
                 applyConfigInstancePatch(existing, request.patch),
             ),
         );
+        if (!existing.enabled && instance.enabled) {
+            await this.assertInstanceCleanupSettled(existing.name);
+        }
         const nextConfig = this.#validateConfig({
             ...currentConfig,
             instances: currentConfig.instances.map((entry) =>
@@ -396,7 +625,7 @@ export class ConfigEditorCoordinator {
                 web: false,
             },
         });
-        await this.#cleanupCommittedInstanceChange(
+        await this.#cleanupCommittedInstanceChangeWithDebt(
             existing,
             instance,
             descriptor,
@@ -508,6 +737,7 @@ export class ConfigEditorCoordinator {
             (entry) => entry.name === instanceName,
         );
         if (existing === undefined) throw missingInstance(instanceName);
+        await this.assertInstanceCleanupSettled(instanceName);
 
         const skipRuntimeRetirement =
             this.#assertInstanceDeletable(instanceName);
@@ -522,13 +752,23 @@ export class ConfigEditorCoordinator {
         await this.#persistConfig(nextConfig);
         const cleanupFailures: unknown[] = [];
         if (descriptor !== undefined) {
-            descriptor.enabled = false;
-            try {
-                this.#instanceRegistry.update(descriptor);
-            } catch (error) {
-                cleanupFailures.push(error);
-            }
+            await this.#instanceRegistry
+                .retireGeneration(instanceName, descriptor)
+                .catch((error) => cleanupFailures.push(error));
         }
+        let debtPersisted = false;
+        await this.#cleanupDebts
+            .put({
+                instance: existing,
+                operation: "delete",
+                ...(skipRuntimeRetirement
+                    ? { skipRuntimeRetirement: true }
+                    : {}),
+            })
+            .then(() => {
+                debtPersisted = true;
+            })
+            .catch((error) => cleanupFailures.push(error));
         try {
             this.#getMcpHost()?.unregisterInstance(instanceName);
         } catch (error) {
@@ -541,10 +781,10 @@ export class ConfigEditorCoordinator {
                 skipRuntimeRetirement,
             )),
         );
-        try {
-            this.#instanceRegistry.delete(instanceName);
-        } catch (error) {
-            cleanupFailures.push(error);
+        if (debtPersisted && cleanupFailures.length === 0) {
+            await this.#cleanupDebts
+                .clear(instanceName)
+                .catch((error) => cleanupFailures.push(error));
         }
         this.#warnCommittedCleanupFailures(
             instanceName,
@@ -583,6 +823,9 @@ export class ConfigEditorCoordinator {
             (entry) => entry.name === instanceName,
         );
         if (existing === undefined) throw missingInstance(instanceName);
+        if (enabled && !existing.enabled) {
+            await this.assertInstanceCleanupSettled(instanceName);
+        }
 
         const instance = normalizeConfigInstanceDraft(
             applyConfigInstancePatch(existing, { enabled }),
@@ -614,7 +857,7 @@ export class ConfigEditorCoordinator {
             rebuildRequired: false,
             runtimeChanges: { instanceAuth: false, mcp: false, web: false },
         });
-        await this.#cleanupCommittedInstanceChange(
+        await this.#cleanupCommittedInstanceChangeWithDebt(
             existing,
             instance,
             descriptor,
@@ -703,7 +946,7 @@ export class ConfigEditorCoordinator {
         descriptor: ReturnType<InstanceRegistry["get"]>,
         preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
         rebuildRequired: boolean,
-    ): Promise<void> {
+    ): Promise<unknown[]> {
         const failures: unknown[] = [];
         if (
             existing !== undefined &&
@@ -720,6 +963,9 @@ export class ConfigEditorCoordinator {
                     .catch((error) => failures.push(error));
             }
             if (instanceDisabled) {
+                await this.#retireGenerationResources(existing).catch((error) =>
+                    failures.push(error),
+                );
                 if (
                     descriptor.worker.managementMode !== "selfManaged" &&
                     descriptor.worker.snapshot().daemonState !== "stopped"
@@ -777,6 +1023,53 @@ export class ConfigEditorCoordinator {
                 failures.push(error),
             );
         }
+        return failures;
+    }
+
+    async #cleanupCommittedInstanceChangeWithDebt(
+        existing: ControlConfig["instances"][number] | undefined,
+        next: ControlConfig["instances"][number] | undefined,
+        descriptor: ReturnType<InstanceRegistry["get"]>,
+        preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
+        rebuildRequired: boolean,
+    ): Promise<void> {
+        const debt =
+            existing !== undefined &&
+            next !== undefined &&
+            existing.enabled &&
+            !next.enabled
+                ? ({
+                      instance: existing,
+                      operation: "disable",
+                  } satisfies InstanceCleanupDebtRecord)
+                : undefined;
+        const failures: unknown[] = [];
+        let debtPersisted = false;
+        if (debt !== undefined) {
+            await this.#cleanupDebts
+                .put(debt)
+                .then(() => {
+                    debtPersisted = true;
+                })
+                .catch((error) => failures.push(error));
+        }
+        const cleanupFailures = await this.#cleanupCommittedInstanceChange(
+            existing,
+            next,
+            descriptor,
+            preparedDescriptor,
+            rebuildRequired,
+        );
+        failures.push(...cleanupFailures);
+        if (
+            debt !== undefined &&
+            debtPersisted &&
+            cleanupFailures.length === 0
+        ) {
+            await this.#cleanupDebts
+                .clear(debt.instance.name)
+                .catch((error) => failures.push(error));
+        }
         this.#warnCommittedCleanupFailures(
             next?.name ?? existing?.name ?? "unknown",
             "update",
@@ -790,6 +1083,9 @@ export class ConfigEditorCoordinator {
         skipRuntimeRetirement: boolean,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
+        await this.#retireGenerationResources(existing).catch((error) =>
+            failures.push(error),
+        );
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing).catch((error) => failures.push(error));
         }
@@ -810,6 +1106,60 @@ export class ConfigEditorCoordinator {
         return failures;
     }
 
+    async #reconcileCleanupRecord(
+        record: InstanceCleanupDebtRecord,
+    ): Promise<unknown[]> {
+        const failures: unknown[] = [];
+        const descriptor = this.#instanceConfigMapper.map(record.instance);
+        await this.#retireGenerationResources(record.instance).catch((error) =>
+            failures.push(error),
+        );
+        if (record.operation === "disable") {
+            await this.#getMcpHost()
+                ?.retireWorkspaceApp(record.instance.name)
+                .catch((error) => failures.push(error));
+            for (const retire of [...this.#instanceDisableRetirements]) {
+                await retire(record.instance).catch((error) =>
+                    failures.push(error),
+                );
+            }
+            if (descriptor.worker.managementMode !== "selfManaged") {
+                await descriptor.worker
+                    .retireRuntime()
+                    .catch((error) => failures.push(error));
+            }
+            await this.#notifyInstanceLifecycle(
+                this.#instanceDisabled,
+                record.instance,
+            ).catch((error) => failures.push(error));
+        } else {
+            for (const retire of [...this.#instanceDeleteRetirements]) {
+                await retire(record.instance).catch((error) =>
+                    failures.push(error),
+                );
+            }
+            if (record.skipRuntimeRetirement !== true) {
+                await descriptor.worker
+                    .retireRuntime()
+                    .catch((error) => failures.push(error));
+            }
+            await descriptor.worker
+                .retireProviderResources()
+                .catch((error) => failures.push(error));
+            await this.#getMcpHost()
+                ?.contextAdmin.detachInstance(record.instance.name)
+                .catch((error) => failures.push(error));
+            await this.#notifyInstanceLifecycle(
+                this.#instanceDeleted,
+                record.instance,
+            ).catch((error) => failures.push(error));
+        }
+        await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
+            failures.push(error),
+        );
+        return failures;
+    }
+
     #warnCommittedCleanupFailures(
         instance: string,
         operation: "delete" | "update",
@@ -822,6 +1172,21 @@ export class ConfigEditorCoordinator {
                 `Instance ${instance} ${operation} committed but cleanup was incomplete.`,
             ),
         );
+    }
+
+    async #retireGenerationResources(
+        instance: ControlConfig["instances"][number],
+    ): Promise<void> {
+        const failures: unknown[] = [];
+        for (const retire of [...this.#instanceGenerationRetirements]) {
+            await retire(instance).catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                `Instance ${instance.name} generation retirement was incomplete.`,
+            );
+        }
     }
 
     async #applyPersistedChanges(input: {
@@ -849,6 +1214,7 @@ export class ConfigEditorCoordinator {
                 : false;
             if (input.existing !== undefined && input.instance !== undefined) {
                 await this.#applyInstanceConfig(
+                    input.existing,
                     input.instance,
                     input.descriptor,
                     input.rebuildRequired,
@@ -904,9 +1270,20 @@ export class ConfigEditorCoordinator {
     ): Promise<void> {
         const failures: unknown[] = [];
         if (descriptor === undefined) {
-            this.#instanceRegistry.delete(existing.name);
+            const current = this.#instanceRegistry.get(existing.name);
+            if (current !== undefined)
+                await this.#instanceRegistry
+                    .retireGeneration(existing.name, current)
+                    .catch((error) => failures.push(error));
         } else {
             try {
+                const current = this.#instanceRegistry.get(existing.name);
+                if (current !== undefined && current !== descriptor) {
+                    await this.#instanceRegistry.retireGeneration(
+                        existing.name,
+                        current,
+                    );
+                }
                 await descriptor.worker.reconfigure(
                     toWorkerReconfigureInput(existing),
                 );
@@ -915,7 +1292,9 @@ export class ConfigEditorCoordinator {
                 descriptor.mcpEnabled = existing.mcp.enabled;
                 descriptor.mcpPath = existing.mcp.path;
                 descriptor.modelExtensions = [...existing.extensions.model];
-                this.#instanceRegistry.update(descriptor);
+                if (this.#instanceRegistry.get(existing.name) === descriptor)
+                    this.#instanceRegistry.update(descriptor);
+                else this.#instanceRegistry.add(descriptor);
             } catch (error) {
                 failures.push(error);
             }
@@ -947,13 +1326,22 @@ export class ConfigEditorCoordinator {
     }
 
     async #applyInstanceConfig(
+        existing: ControlConfig["instances"][number],
         instance: ControlConfig["instances"][number],
         descriptor: ReturnType<InstanceRegistry["get"]>,
         rebuildRequired: boolean,
         preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
     ): Promise<void> {
+        if (!instance.enabled) {
+            if (descriptor !== undefined)
+                await this.#instanceRegistry.retireGeneration(
+                    instance.name,
+                    descriptor,
+                );
+            return;
+        }
         if (descriptor === undefined) {
-            if (instance.enabled && preparedDescriptor !== undefined)
+            if (preparedDescriptor !== undefined)
                 this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
@@ -962,16 +1350,17 @@ export class ConfigEditorCoordinator {
                 throw new Error(
                     `Missing prepared descriptor for ${instance.name}.`,
                 );
-            this.#instanceRegistry.update(preparedDescriptor);
+            await this.#instanceRegistry.retireGeneration(
+                instance.name,
+                descriptor,
+            );
+            await this.#retireGenerationResources(existing);
+            this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
-        if (instance.enabled) {
-            await descriptor.worker.reconfigure(
-                toWorkerReconfigureInput(instance),
-            );
-        }
+        await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
         descriptor.mcpContextMode = instance.mcp.contextMode;
-        descriptor.enabled = instance.enabled;
+        descriptor.enabled = true;
         descriptor.mcpEnabled = instance.mcp.enabled;
         descriptor.mcpPath = instance.mcp.path;
         descriptor.modelExtensions = [...instance.extensions.model];

@@ -948,36 +948,133 @@ test("worker tools missing from the endpoint catalog cannot be recovered from a 
 });
 
 test("cancelling remote environment attach stops MCP waiting while the gateway operation continues", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-cancel-remote",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
     let resolveStart!: (value: JsonValue) => void;
+    let resolveConnectStarted!: () => void;
+    let resolveRelease!: () => void;
+    const connectStarted = new Promise<void>((resolve) => {
+        resolveConnectStarted = resolve;
+    });
     const start = new Promise<JsonValue>((resolve) => {
         resolveStart = resolve;
     });
+    const released = new Promise<void>((resolve) => {
+        resolveRelease = resolve;
+    });
+    const releasedReferences: string[] = [];
     const gateway = createGateway({
         async connectInstance() {
+            resolveConnectStarted();
             return await start;
+        },
+        async releaseInstanceReference(instance, reference) {
+            releasedReferences.push(`${instance}:${reference}`);
+            resolveRelease();
         },
     });
     const remote = new McpContextRemoteEnvironment({
-        contextRegistry,
+        contextRegistry: registry,
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
-        contextRegistry,
-        activeContext.ctxId,
+        registry,
+        created.ctxId,
         "remote-server",
     );
     const controller = new AbortController();
     const pending = remote.attach(
-        activeContext.ctxId,
+        created.ctxId,
         handle,
         undefined,
         controller.signal,
     );
 
+    await connectStarted;
     controller.abort(new Error("gateway timeout"));
     await assert.rejects(pending, /gateway timeout/u);
     resolveStart({ instance: "remote-server", state: "running" });
-    await start;
+    await released;
+
+    assert.deepEqual(releasedReferences, [
+        "remote-server:" + created.ctxId,
+    ]);
+    const contextAfterAbort = (await registry.list()).find(
+        (candidate) => candidate.ctxId === created.ctxId,
+    );
+    assert.equal(
+        contextAfterAbort?.environments.some(
+            (environment) => environment.instance === "remote-server",
+        ),
+        false,
+    );
+});
+
+test("concurrent remote attaches serialize one Context reference transaction", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-concurrent-remote",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    let referenceHeld = false;
+    const gateway = createGateway({
+        async connectInstance() {
+            referenceHeld = true;
+            return { instance: "remote-server", state: "running" };
+        },
+        async prepareWorkspace(instance, workspace) {
+            if (workspace === "/first") {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+                throw new Error("first attach failed");
+            }
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.memory`,
+                projectMemoryPresent: true,
+                temporaryDirectory: `/tmp/${instance}`,
+                workspace,
+            };
+        },
+        async releaseInstanceReference() {
+            referenceHeld = false;
+        },
+    });
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+
+    const [first, second] = await Promise.allSettled([
+        remote.attach(created.ctxId, handle, "/first"),
+        remote.attach(created.ctxId, handle, "/second"),
+    ]);
+
+    assert.equal(first.status, "rejected");
+    assert.equal(second.status, "fulfilled");
+    assert.equal(referenceHeld, true);
+    const context = (await registry.list()).find(
+        (candidate) => candidate.ctxId === created.ctxId,
+    );
+    assert.equal(
+        context?.environments.find(
+            (environment) => environment.instance === "remote-server",
+        )?.workspace,
+        "/second",
+    );
 });
 
 test("remote environment attach service is independent from local Worker readiness", async () => {

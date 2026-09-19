@@ -57,6 +57,7 @@ interface ControlConfigWriter {
 }
 
 export interface InstanceCreateCoordinatorOptions {
+    assertCleanupSettled?: (instance: string) => Promise<void>;
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getMcpHost: () => McpHost | undefined;
@@ -72,6 +73,7 @@ export interface InstanceCreateCoordinatorOptions {
 }
 
 export class InstanceCreateCoordinator {
+    readonly #assertCleanupSettled: (instance: string) => Promise<void>;
     readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #getMcpHost: () => McpHost | undefined;
@@ -86,6 +88,8 @@ export class InstanceCreateCoordinator {
     readonly #validator: ControlConfigValidator;
 
     constructor(options: InstanceCreateCoordinatorOptions) {
+        this.#assertCleanupSettled =
+            options.assertCleanupSettled ?? (async () => {});
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#getMcpHost = options.getMcpHost;
@@ -128,6 +132,7 @@ export class InstanceCreateCoordinator {
     async #createNormalized(
         normalized: ControlInstanceConfig,
     ): Promise<InstanceCreateResult> {
+        await this.#assertCleanupSettled(normalized.name);
         const previousConfig = this.#getConfig();
         const nextConfig = this.#validateMergedConfig(normalized);
         const descriptor = normalized.enabled

@@ -25,7 +25,10 @@ import {
     type ExtensionControlPort,
 } from "../control/extension/Route.js";
 import type { InstanceCreatePort } from "../control/instance/Route.js";
-import { createInstanceRouteModule } from "../control/instance/Route.js";
+import {
+    createInstanceRouteModule,
+    type InstanceRouteModuleOptions,
+} from "../control/instance/Route.js";
 import type { InstanceRegistry } from "../control/instance/registry/Registry.js";
 import {
     createContextRouteModule,
@@ -44,7 +47,6 @@ import { RuntimeSubscriptionManager } from "../instance/execution/runtime/Subscr
 import { createServiceRouteModule } from "../server/endpoint/Channel.js";
 import { createTodoRouteModule } from "../instance/workflow/todo/Route.js";
 import { createTerminalRouteModule } from "../instance/execution/terminal/Route.js";
-import type { TerminalBackend } from "../instance/execution/terminal/Backend.js";
 import { TerminalSessionService } from "../instance/execution/terminal/Service.js";
 import { createToolRouteModule } from "../instance/execution/tool/Route.js";
 import {
@@ -66,6 +68,7 @@ export interface ControlRouteCompositionOptions {
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
     instanceCreate?: InstanceCreatePort;
+    configuredInstances?: InstanceRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
     mcpStatus?: () => JsonValue;
     oauthApprovals?: () => McpOAuthApprovalService | undefined;
@@ -83,7 +86,6 @@ export class ControlRouteComposition {
     readonly #overview: OperationalOverviewPort;
     readonly #options: ControlRouteCompositionOptions;
     readonly #subscriptions: RuntimeSubscriptionManager;
-    readonly #terminalBackends = new Map<string, TerminalBackend>();
     readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeInstances: () => void;
     #snapshot: PrefixRouteSnapshot;
@@ -123,7 +125,6 @@ export class ControlRouteComposition {
 
     #build(): PrefixRouteSnapshot {
         const descriptors = this.#options.instances.list();
-        const nextTerminalBackends = new Map<string, TerminalBackend>();
         const definitions: PrefixRouteDestinationDefinition[] = [
             {
                 destination: "@control",
@@ -168,6 +169,7 @@ export class ControlRouteComposition {
                     ...(this.#options.comment?.control() ?? []),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
+                        configuredInstances: this.#options.configuredInstances,
                         create: this.#options.instanceCreate,
                         editor: this.#options.config,
                         registry: this.#options.instances,
@@ -180,63 +182,76 @@ export class ControlRouteComposition {
         ];
 
         for (const descriptor of descriptors) {
-            if (descriptor.terminal !== undefined) {
-                nextTerminalBackends.set(descriptor.name, descriptor.terminal);
-            }
+            const modules: PrefixRouteModuleDefinition[] = [
+                createRuntimeRouteModule(
+                    {
+                        enabled: descriptor.enabled,
+                        name: descriptor.name,
+                        todoSummaries: () => descriptor.todo.summaries(),
+                        worker: descriptor.worker,
+                    },
+                    this.#options.instances,
+                    this.#subscriptions,
+                ),
+                ...(this.#options.comment?.instance(descriptor.name) ?? []),
+                createGoalRouteModule(descriptor),
+                createTodoRouteModule(descriptor, this.#subscriptions),
+                createToolRouteModule(
+                    descriptor,
+                    this.#options.toolProvenance,
+                ),
+                ...(descriptor.terminal === undefined
+                    ? []
+                    : [
+                          createTerminalRouteModule({
+                              backend: descriptor.terminal,
+                              instance: descriptor.name,
+                              ...(this.#options.terminalMaxUnackedBytes ===
+                              undefined
+                                  ? {}
+                                  : {
+                                        maxUnackedBytes:
+                                            this.#options
+                                                .terminalMaxUnackedBytes,
+                                    }),
+                              sessions: this.#terminals,
+                          }),
+                      ]),
+            ];
             definitions.push({
                 destination: asInstanceName(descriptor.name),
-                modules: [
-                    createRuntimeRouteModule(
-                        {
-                            enabled: descriptor.enabled,
-                            name: descriptor.name,
-                            todoSummaries: () => descriptor.todo.summaries(),
-                            worker: descriptor.worker,
-                        },
-                        this.#options.instances,
-                        this.#subscriptions,
-                    ),
-                    ...(this.#options.comment?.instance(descriptor.name) ?? []),
-                    createGoalRouteModule(descriptor),
-                    createTodoRouteModule(descriptor, this.#subscriptions),
-                    createToolRouteModule(
-                        descriptor,
-                        this.#options.toolProvenance,
-                    ),
-                    ...(descriptor.terminal === undefined
-                        ? []
-                        : [
-                              createTerminalRouteModule({
-                                  backend: descriptor.terminal,
-                                  instance: descriptor.name,
-                                  ...(this.#options.terminalMaxUnackedBytes ===
-                                  undefined
-                                      ? {}
-                                      : {
-                                            maxUnackedBytes:
-                                                this.#options
-                                                    .terminalMaxUnackedBytes,
-                                        }),
-                                  sessions: this.#terminals,
-                              }),
-                          ]),
-                ],
+                modules: fenceInstanceGeneration(
+                    modules,
+                    this.#options.instances,
+                    descriptor,
+                ),
             });
-        }
-
-        for (const [name, backend] of this.#terminalBackends) {
-            if (nextTerminalBackends.get(name) === backend) continue;
-            void this.#terminals.closeInstance(name).catch((error: unknown) => {
-                console.warn(
-                    error instanceof Error ? error : new Error(String(error)),
-                );
-            });
-        }
-        this.#terminalBackends.clear();
-        for (const [name, backend] of nextTerminalBackends) {
-            this.#terminalBackends.set(name, backend);
         }
 
         return PrefixRoute.snapshot(definitions);
     }
+}
+
+function fenceInstanceGeneration(
+    modules: readonly PrefixRouteModuleDefinition[],
+    registry: InstanceRegistry,
+    descriptor: NonNullable<ReturnType<InstanceRegistry["get"]>>,
+): PrefixRouteModuleDefinition[] {
+    return modules.map((module) => ({
+        ...module,
+        operations: module.operations.map((operation) => ({
+            ...operation,
+            handle: async (request, context) => {
+                const generation = registry.acquireGeneration(
+                    descriptor.name,
+                    descriptor,
+                );
+                try {
+                    return await operation.handle(request, context);
+                } finally {
+                    generation.release();
+                }
+            },
+        })),
+    }));
 }

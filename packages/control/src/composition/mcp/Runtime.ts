@@ -1,5 +1,6 @@
 import {
     McpHost,
+    McpRuntimeState,
     resolvePortableDevshellApplicationVersion,
     type McpInstanceGateway,
     type McpToolProvenanceRecorder,
@@ -27,6 +28,7 @@ export class McpRuntimeFactory {
         options?: {
             contextFile?: string;
             gateway?: McpInstanceGateway;
+            runtimeState?: McpRuntimeState;
             storageDir?: string;
             toolProvenance?: McpToolProvenanceRecorder;
             workspaceAppLeaseFile?: string;
@@ -57,20 +59,32 @@ export class McpRuntimeFactory {
                   })
             : [];
 
-        return new McpHost({
-            ...(options?.contextFile === undefined
-                ? {}
-                : { contextFile: options.contextFile }),
-            instances: endpoints,
-            listenHost: config.mcp.listenHost,
-            listenPort: config.mcp.listenPort,
-            publicBaseUrl: config.mcp.publicBaseUrl,
-            serverVersion:
-                this.#serverVersion ??
-                resolvePortableDevshellApplicationVersion(),
-            storageDir: options?.storageDir,
-            toolProvenance: options?.toolProvenance,
-            workspaceAppLeaseFile: options?.workspaceAppLeaseFile,
-        });
+        return new McpHost(
+            {
+                ...(options?.contextFile === undefined
+                    ? {}
+                    : { contextFile: options.contextFile }),
+                instances: endpoints,
+                listenHost: config.mcp.listenHost,
+                listenPort: config.mcp.listenPort,
+                publicBaseUrl: config.mcp.publicBaseUrl,
+                serverVersion:
+                    this.#serverVersion ??
+                    resolvePortableDevshellApplicationVersion(),
+                ...(options?.storageDir === undefined
+                    ? {}
+                    : { storageDir: options.storageDir }),
+                ...(options?.toolProvenance === undefined
+                    ? {}
+                    : { toolProvenance: options.toolProvenance }),
+                ...(options?.workspaceAppLeaseFile === undefined
+                    ? {}
+                    : {
+                          workspaceAppLeaseFile:
+                              options.workspaceAppLeaseFile,
+                      }),
+            },
+            options?.runtimeState,
+        );
     }
 }

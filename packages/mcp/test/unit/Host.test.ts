@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+    McpHost,
+    McpRuntimeState,
+} from "@portable-devshell/mcp";
+import {
     McpEndpointBinding,
     McpEndpointWorker,
     McpHostRouteMatcher,
@@ -12,6 +16,46 @@ import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
 import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
+
+test("McpRuntimeState owns state across replaceable listener hosts", () => {
+    const storageDir = "/virtual/oauth";
+    const state = new McpRuntimeState({ storageDir });
+    const firstHost = new McpHost(
+        {
+            instances: [],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+        },
+        state,
+    );
+    const secondHost = new McpHost(
+        {
+            instances: [],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+        },
+        state,
+    );
+    const oauthConfig = {
+        requiredScopes: ["mcp"],
+        resourceName: "portable-devshell",
+    } as never;
+    const firstOAuth = state.oauthResource(
+        oauthConfig,
+        "https://controller.example",
+        storageDir,
+        false,
+    );
+    const secondOAuth = state.oauthResource(
+        oauthConfig,
+        "https://controller.example",
+        storageDir,
+        false,
+    );
+
+    assert.equal(firstHost.contextRegistry, secondHost.contextRegistry);
+    assert.equal(firstOAuth, secondOAuth);
+});
 
 {
     test("/<instance>/mcp route matches", () => {

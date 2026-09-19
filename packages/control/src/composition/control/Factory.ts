@@ -161,7 +161,7 @@ export class ControlRuntimeFactory {
                 mcp,
                 state: options.state,
             });
-            mcp.configEditor.registerInstanceDeleteRetirement(
+            mcp.configEditor.registerInstanceGenerationRetirement(
                 async (instance) => {
                     await artifact.service.retireInstance(instance.name);
                 },

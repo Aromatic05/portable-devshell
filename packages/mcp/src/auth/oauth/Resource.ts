@@ -11,6 +11,7 @@ import {
 import { McpOAuthRegistrationLimiter } from "./interaction/Registration.js";
 
 export interface McpOAuthProtectedResourceOptions {
+    approvals?: McpOAuthApprovalService;
     trustProxy?: boolean;
 }
 
@@ -26,7 +27,8 @@ export class McpOAuthProtectedResource {
         storageDir: string,
         options: McpOAuthProtectedResourceOptions = {},
     ) {
-        this.#approvals = new McpOAuthApprovalService(storageDir);
+        this.#approvals =
+            options.approvals ?? new McpOAuthApprovalService(storageDir);
         this.#runtime = new McpOAuthProviderRuntime({
             approvals: this.#approvals,
             config,

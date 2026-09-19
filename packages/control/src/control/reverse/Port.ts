@@ -14,5 +14,9 @@ export interface ReverseInstancePort {
 }
 
 export interface ReverseInstanceLookupPort {
+    acquireGeneration(instanceName: string): {
+        readonly descriptor: ReverseInstancePort;
+        release(): void;
+    };
     get(instanceName: string): ReverseInstancePort | undefined;
 }
