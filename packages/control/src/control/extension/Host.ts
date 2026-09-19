@@ -584,8 +584,16 @@ export class ExtensionHost {
             const currentSnapshot = this.#requireRegistry();
             const current = currentSnapshot.extensions[id];
             if (current === undefined) {
-                await candidate.retire().catch(() => undefined);
-                throw extensionNotFound(id);
+                const failure = extensionNotFound(id);
+                try {
+                    await candidate.retire();
+                } catch (cleanupError) {
+                    throw new AggregateError(
+                        [failure, cleanupError],
+                        `Extension ${id} disappeared after candidate load and cleanup was incomplete.`,
+                    );
+                }
+                throw failure;
             }
             const next = cloneExtensionRegistry(currentSnapshot);
             next.extensions[id] = {
@@ -626,10 +634,18 @@ export class ExtensionHost {
     ): Promise<ExtensionGeneration> {
         const candidate = await this.#loader.load(id, generation);
         if (candidate.manifest.id !== id) {
-            await candidate.retire().catch(() => undefined);
-            throw new Error(
+            const failure = new Error(
                 `Extension generation ${generation} declares id ${candidate.manifest.id}, expected ${id}.`,
             );
+            try {
+                await candidate.retire();
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [failure, cleanupError],
+                    `Extension generation ${generation} identity validation failed and cleanup was incomplete.`,
+                );
+            }
+            throw failure;
         }
         return candidate;
     }

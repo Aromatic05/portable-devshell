@@ -251,6 +251,43 @@ test("Extension candidate failure leaves the active generation and registry sele
     await host.stop();
 });
 
+test("Extension manifest identity mismatch preserves candidate cleanup failure", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            example: {
+                enabled: true,
+                selectedGeneration: "a",
+            },
+        },
+        schemaVersion: 1,
+    });
+    const host = new ExtensionHost({
+        loader: createLoader(async (_id, name) =>
+            unregisteredGeneration("other", name, async () => {
+                throw new Error("mismatched candidate cleanup failed");
+            }),
+        ),
+        registry,
+    });
+    await host.start();
+
+    await assert.rejects(
+        host.activateGeneration("example", "b"),
+        (error: unknown) => {
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(
+                error.errors.map((entry) => (entry as Error).message),
+                [
+                    "Extension generation b declares id other, expected example.",
+                    "mismatched candidate cleanup failed",
+                ],
+            );
+            return true;
+        },
+    );
+    await host.stop();
+});
+
 test("Extension candidate fault during registry commit rolls back selection and preserves the old active generation", async () => {
     const registry = new MemoryRegistry({
         extensions: {
