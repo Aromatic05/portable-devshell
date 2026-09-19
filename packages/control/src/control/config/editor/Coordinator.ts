@@ -905,16 +905,31 @@ export class ConfigEditorCoordinator {
                             await descriptor.wait.consume(wait.waitId);
                         else await descriptor.wait.cancel(wait.waitId);
                     } catch (error) {
-                        const current = await descriptor.wait
-                            .get(wait.waitId)
-                            .catch(() => undefined);
+                        let current;
+                        try {
+                            current = await descriptor.wait.get(wait.waitId);
+                        } catch (readError) {
+                            failures.push(error, readError);
+                            continue;
+                        }
                         if (
                             current === undefined ||
                             current.status === "cancelled" ||
-                            current.status === "consumed" ||
-                            current.status === "resolved"
+                            current.status === "consumed"
                         )
                             continue;
+                        if (
+                            current.status === "resolved" &&
+                            wait.status !== "resolved"
+                        ) {
+                            try {
+                                await descriptor.wait.consume(wait.waitId);
+                                continue;
+                            } catch (consumeError) {
+                                failures.push(error, consumeError);
+                                continue;
+                            }
+                        }
                         failures.push(error);
                     }
                 }

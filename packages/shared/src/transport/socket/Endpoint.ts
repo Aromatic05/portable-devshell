@@ -176,7 +176,12 @@ export async function removeControlIpcEndpoint(
     unlinkFunction: (path: string) => Promise<unknown> = unlink,
 ): Promise<void> {
     if (!isWindowsNamedPipePath(path)) {
-        await unlinkFunction(path).catch(() => undefined);
+        try {
+            await unlinkFunction(path);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+            throw error;
+        }
     }
 }
 

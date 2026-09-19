@@ -436,13 +436,23 @@ export class ControlRuntimeMcp {
     }
 
     async stop(): Promise<void> {
+        const failures: unknown[] = [];
         if (
             this.#webHost !== undefined &&
             this.#webHost !== this.#host?.server
         ) {
-            await this.#webHost.stop();
+            await this.#webHost
+                .stop()
+                .catch((error) => failures.push(error));
         }
-        await this.#host?.stop();
+        await this.#host?.stop().catch((error) => failures.push(error));
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) {
+            throw new AggregateError(
+                failures,
+                "MCP runtime failed to stop every listener cleanly.",
+            );
+        }
     }
 }
 

@@ -24,3 +24,26 @@ test("Unix socket files are removed through filesystem unlink", async () => {
     );
     assert.deepEqual(paths, ["/run/user/1000/portable-devshell/control.sock"]);
 });
+
+test("Unix socket removal ignores only an absent endpoint", async () => {
+    await removeControlIpcEndpoint(
+        "/run/user/1000/portable-devshell/missing.sock",
+        async () => {
+            throw Object.assign(new Error("missing endpoint"), {
+                code: "ENOENT",
+            });
+        },
+    );
+
+    await assert.rejects(
+        removeControlIpcEndpoint(
+            "/run/user/1000/portable-devshell/control.sock",
+            async () => {
+                throw Object.assign(new Error("permission denied"), {
+                    code: "EACCES",
+                });
+            },
+        ),
+        /permission denied/u,
+    );
+});

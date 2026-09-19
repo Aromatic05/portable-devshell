@@ -94,6 +94,123 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
+test("runtime startup preserves cleanup failures from rollback", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-start-rollback");
+    const socketPath = createTestIpcPath("control-runtime-start", runtimeDir);
+    const calls: string[] = [];
+    const runtime = new ControlRuntime({
+        artifact: { service: undefined, async stop() {} } as never,
+        comment: testComment(),
+        extensionPaths: testExtensionPaths(),
+        extensions: testExtensions(),
+        instances: {
+            list: () => [],
+            onChange: () => () => undefined,
+            async stopOwned() {},
+        } as never,
+        mcp: {
+            configEditor: testConfigEditor(),
+            instanceGateway: testInstanceGateway(),
+            instanceCreate: undefined,
+            oauthApprovals: undefined,
+            async prepare() {},
+            async start() {
+                calls.push("mcp.start");
+                throw new Error("mcp start failed");
+            },
+            status: () => ({ running: false }),
+            async stop() {
+                calls.push("mcp.stop");
+                throw new Error("mcp stop failed");
+            },
+        } as never,
+        restart: async () => undefined,
+        reverse: { service: undefined, stop() {} } as never,
+        shutdown: async () => undefined,
+        socketPath,
+    });
+    t.after(async () => {
+        await rm(runtimeDir, { force: true, recursive: true });
+    });
+
+    await assert.rejects(runtime.start(), (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.equal((error.errors[0] as Error).message, "mcp start failed");
+        const cleanup = error.errors[1];
+        assert.ok(cleanup instanceof AggregateError);
+        assert.match(cleanup.message, /failed to stop cleanly/u);
+        return true;
+    });
+    assert.deepEqual(calls, ["mcp.start", "mcp.stop"]);
+});
+
+test("MCP runtime stop attempts both independent listener hosts", async (t) => {
+    const homeDirectory = await createTestTempDirectory("mcp-stop-all-hosts");
+    const config = createDefaultControlConfig();
+    config.mcp = {
+        ...config.mcp,
+        enabled: true,
+        listenPort: 18001,
+        publicBaseUrl: "http://127.0.0.1:18001",
+    };
+    config.web = {
+        ...config.web,
+        enabled: true,
+        listenPort: 18002,
+        publicBaseUrl: "http://127.0.0.1:18002",
+    };
+    const state = new ControlRuntimeState({
+        configStore: {
+            async readOrCreate() {
+                return config;
+            },
+            async write() {},
+        } as never,
+        homeDirectory,
+    });
+    await state.load();
+    const mcp = new ControlRuntimeMcp({
+        artifact: {
+            installHttpRoute() {},
+            service: undefined,
+            async stop() {},
+        } as never,
+        comment: testComment().comment,
+        conversation: testConversation(),
+        controlPaths: new ControlPathHome(homeDirectory),
+        state,
+    });
+    const mcpHost = mcp.host;
+    const webHost = mcp.webHost;
+    assert.notEqual(mcpHost, undefined);
+    assert.notEqual(webHost, undefined);
+    assert.notEqual(webHost, mcpHost?.server);
+    if (mcpHost === undefined || webHost === undefined)
+        throw new Error("expected independent MCP and Web hosts");
+    const calls: string[] = [];
+    mcpHost.stop = async () => {
+        calls.push("mcp");
+        throw new Error("mcp host stop failed");
+    };
+    webHost.stop = async () => {
+        calls.push("web");
+        throw new Error("web host stop failed");
+    };
+    t.after(async () => {
+        await rm(homeDirectory, { force: true, recursive: true });
+    });
+
+    await assert.rejects(mcp.stop(), (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.deepEqual(
+            error.errors.map((entry) => (entry as Error).message),
+            ["web host stop failed", "mcp host stop failed"],
+        );
+        return true;
+    });
+    assert.deepEqual(calls, ["web", "mcp"]);
+});
+
 test("runtime wires Comment retirement only to committed instance lifecycle events", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-comment-lifecycle");
     const socketPath = createTestIpcPath("control-runtime-comment", runtimeDir);

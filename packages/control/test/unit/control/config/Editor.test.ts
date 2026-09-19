@@ -1424,6 +1424,102 @@ test("instance delete terminalizes live state and detaches Context environments 
     assert.equal(registry.get("demo-local"), undefined);
 });
 
+test("instance delete preserves wait cleanup and readback failures", async () => {
+    let config = createConfig();
+    const waiting = { status: "waiting", waitId: "wait-readback" };
+    const registry = new InstanceRegistry([
+        descriptor(
+            { snapshot: stoppedSnapshot },
+            {
+                wait: {
+                    async cancel() {
+                        throw new Error("wait cancel failed");
+                    },
+                    async consume() {
+                        throw new Error("unused");
+                    },
+                    async get() {
+                        throw new Error("wait readback failed");
+                    },
+                    async list() {
+                        return [waiting];
+                    },
+                },
+            },
+        ),
+    ]);
+    const service = createService(
+        () => config,
+        (next) => {
+            config = next;
+        },
+        registry,
+    );
+
+    const warnings = await captureWarnings(
+        async () =>
+            await service.deleteInstance({ instanceName: "demo-local" }),
+    );
+
+    assert.equal(warnings.length, 1);
+    const outer = warnings[0];
+    assert.ok(outer instanceof AggregateError);
+    const inner = outer.errors[0];
+    assert.ok(inner instanceof AggregateError);
+    assert.deepEqual(
+        inner.errors.map((entry) => (entry as Error).message),
+        ["wait cancel failed", "wait readback failed"],
+    );
+});
+
+test("instance delete does not treat a still-resolved wait as consumed", async () => {
+    let config = createConfig();
+    const resolved = { status: "resolved", waitId: "wait-result" };
+    const registry = new InstanceRegistry([
+        descriptor(
+            { snapshot: stoppedSnapshot },
+            {
+                wait: {
+                    async cancel() {
+                        throw new Error("unused");
+                    },
+                    async consume() {
+                        throw new Error("wait consume failed");
+                    },
+                    async get() {
+                        return resolved;
+                    },
+                    async list() {
+                        return [resolved];
+                    },
+                },
+            },
+        ),
+    ]);
+    const service = createService(
+        () => config,
+        (next) => {
+            config = next;
+        },
+        registry,
+    );
+
+    const warnings = await captureWarnings(
+        async () =>
+            await service.deleteInstance({ instanceName: "demo-local" }),
+    );
+
+    assert.equal(warnings.length, 1);
+    const outer = warnings[0];
+    assert.ok(outer instanceof AggregateError);
+    const inner = outer.errors[0];
+    assert.ok(inner instanceof AggregateError);
+    assert.deepEqual(
+        inner.errors.map((entry) => (entry as Error).message),
+        ["wait consume failed"],
+    );
+});
+
 test("instance delete commits configuration before generation retirement", async () => {
     let config = createConfig();
     const actions: string[] = [];

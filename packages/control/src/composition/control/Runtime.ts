@@ -282,7 +282,14 @@ export class ControlRuntime {
             await this.#mcp.start();
             await this.#channels.start();
         } catch (error) {
-            await this.stop().catch(() => undefined);
+            try {
+                await this.stop();
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [error, cleanupError],
+                    "Control runtime startup failed and rollback was incomplete.",
+                );
+            }
             throw error;
         }
     }
