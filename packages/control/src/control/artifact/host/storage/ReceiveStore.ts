@@ -70,21 +70,15 @@ export class ArtifactHostReceiveStore {
         await mkdir(this.#downloadDirectory, { mode: 0o700, recursive: true });
         await mkdir(this.#root, { mode: 0o700, recursive: true });
         await mkdir(this.#temporaryDirectory, { mode: 0o700, recursive: true });
-        await chmod(this.#root, 0o700).catch(() => undefined);
-        await chmod(this.#temporaryDirectory, 0o700).catch(() => undefined);
-        for (const file of await readdir(this.#root).catch(
-            () => [] as string[],
-        )) {
+        await chmod(this.#root, 0o700);
+        await chmod(this.#temporaryDirectory, 0o700);
+        for (const file of await readdir(this.#root)) {
             if (!file.endsWith(".json")) {
                 continue;
             }
             const receiveId = file.slice(0, -5);
-            try {
-                const stored = await this.#load(receiveId);
-                await this.#recover(stored);
-            } catch {
-                await rm(join(this.#root, file), { force: true });
-            }
+            const stored = await this.#load(receiveId);
+            await this.#recover(stored);
         }
         for (const name of await readdir(this.#temporaryDirectory)) {
             await rm(join(this.#temporaryDirectory, name), {
@@ -103,7 +97,10 @@ export class ArtifactHostReceiveStore {
             input.descriptor,
         );
         const targetPath = join(this.#downloadDirectory, targetName);
-        const targetMetadata = await lstat(targetPath).catch(() => undefined);
+        const targetMetadata = await lstat(targetPath).catch((error: unknown) => {
+            if (isNotFound(error)) return undefined;
+            throw error;
+        });
         if (targetMetadata?.isSymbolicLink()) {
             throw artifactError(
                 "artifact.directoryUnsafe",
@@ -290,7 +287,7 @@ export class ArtifactHostReceiveStore {
 
     async abort(receiveId: string): Promise<void> {
         validateId(receiveId);
-        const stored = await this.#load(receiveId).catch(() => undefined);
+        const stored = await this.#loadIfPresent(receiveId);
         if (stored === undefined) {
             this.#activeReceives.delete(receiveId);
             return;
@@ -300,9 +297,10 @@ export class ArtifactHostReceiveStore {
     }
 
     async #commit(stored: StoredReceive, sourcePath: string): Promise<void> {
-        const targetMetadata = await lstat(stored.targetPath).catch(
-            () => undefined,
-        );
+        const targetMetadata = await lstat(stored.targetPath).catch((error: unknown) => {
+            if (isNotFound(error)) return undefined;
+            throw error;
+        });
         if (targetMetadata?.isSymbolicLink()) {
             throw artifactError(
                 "artifact.directoryUnsafe",
@@ -353,12 +351,8 @@ export class ArtifactHostReceiveStore {
 
     async #recover(stored: StoredReceive): Promise<void> {
         if (stored.backupPath !== undefined) {
-            const targetExists =
-                (await lstat(stored.targetPath).catch(() => undefined)) !==
-                undefined;
-            const backupExists =
-                (await lstat(stored.backupPath).catch(() => undefined)) !==
-                undefined;
+            const targetExists = await pathExists(stored.targetPath);
+            const backupExists = await pathExists(stored.backupPath);
             if (backupExists && !targetExists) {
                 await rename(stored.backupPath, stored.targetPath);
             } else if (backupExists) {
@@ -373,16 +367,26 @@ export class ArtifactHostReceiveStore {
     }
 
     async #load(receiveId: string): Promise<StoredReceive> {
+        const stored = await this.#loadIfPresent(receiveId);
+        if (stored !== undefined) return stored;
+        throw artifactError(
+            "artifact.receiveNotFound",
+            "Host receive is unavailable.",
+        );
+    }
+
+    async #loadIfPresent(receiveId: string): Promise<StoredReceive | undefined> {
         let value: unknown;
         try {
-            value = JSON.parse(
-                await readFile(this.#metadataPath(receiveId), "utf8"),
-            );
-        } catch {
-            throw artifactError(
-                "artifact.receiveNotFound",
-                "Host receive is unavailable.",
-            );
+            const body = await readFile(this.#metadataPath(receiveId), "utf8");
+            try {
+                value = JSON.parse(body);
+            } catch {
+                value = undefined;
+            }
+        } catch (error: unknown) {
+            if (isNotFound(error)) return undefined;
+            throw error;
         }
         if (!isStoredReceive(value, receiveId)) {
             throw artifactError(
@@ -396,13 +400,21 @@ export class ArtifactHostReceiveStore {
     async #persist(stored: StoredReceive): Promise<void> {
         const path = this.#metadataPath(stored.receiveId);
         const temporary = `${path}.${randomUUID()}.tmp`;
-        await writeFile(temporary, `${JSON.stringify(stored)}\n`, {
-            mode: 0o600,
-        });
+        const file = await open(temporary, "wx", 0o600);
+        try {
+            await file.writeFile(`${JSON.stringify(stored)}\n`, "utf8");
+            await file.sync();
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
+        await file.close();
         await rename(temporary, path).catch(async (error) => {
             await rm(temporary, { force: true }).catch(() => undefined);
             throw error;
         });
+        await syncDirectory(this.#root);
     }
 
     #metadataPath(receiveId: string): string {
@@ -533,4 +545,18 @@ function isStoredReceive(
 
 function artifactError(code: string, message: string) {
     return createError({ code, message, retryable: false });
+}
+
+function isNotFound(error: unknown): error is NodeJS.ErrnoException {
+    return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+async function pathExists(path: string): Promise<boolean> {
+    try {
+        await lstat(path);
+        return true;
+    } catch (error: unknown) {
+        if (isNotFound(error)) return false;
+        throw error;
+    }
 }

@@ -58,6 +58,7 @@ export class ArtifactTransferService {
     >();
     #generation = 0;
     #initialized = false;
+    #cleanupPending = false;
 
     constructor(options: ArtifactTransferServiceOptions) {
         const chunkBytes = options.chunkBytes ?? DEFAULT_ARTIFACT_CHUNK_BYTES;
@@ -90,6 +91,8 @@ export class ArtifactTransferService {
     }
 
     async initialize(): Promise<void> {
+        if (this.#cleanupPending) await this.stop();
+        this.#cleanupPending = true;
         this.#generation += 1;
         this.#transfers.clear();
 
@@ -130,6 +133,7 @@ export class ArtifactTransferService {
                 await this.#finalizeTerminal(transfer.record);
             }
             await this.#compactTerminalHistory();
+            this.#cleanupPending = false;
         } catch (error) {
             this.#initialized = false;
             throw error;
@@ -137,9 +141,10 @@ export class ArtifactTransferService {
     }
 
     async stop(): Promise<void> {
-        if (!this.#initialized) return;
+        if (!this.#initialized && !this.#cleanupPending) return;
 
         this.#initialized = false;
+        this.#cleanupPending = true;
         this.#generation += 1;
         this.#transferExecutor.cancelAll("Artifact service stopped.");
         await this.#transferExecutor.waitForCommits();
@@ -170,6 +175,7 @@ export class ArtifactTransferService {
             );
             await this.#finalizeTerminal(transfer.record);
         }
+        this.#cleanupPending = false;
     }
 
     async startTransfer(

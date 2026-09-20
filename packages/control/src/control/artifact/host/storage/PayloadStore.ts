@@ -12,7 +12,15 @@ import {
     stat,
     writeFile,
 } from "node:fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+    basename,
+    dirname,
+    isAbsolute,
+    join,
+    relative,
+    resolve,
+    sep,
+} from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -63,8 +71,8 @@ export class ArtifactHostPayloadStore {
 
     async initialize(): Promise<void> {
         await mkdir(this.#temporaryRoot, { mode: 0o700, recursive: true });
-        await chmod(this.#root, 0o700).catch(() => undefined);
-        await chmod(this.#temporaryRoot, 0o700).catch(() => undefined);
+        await chmod(this.#root, 0o700);
+        await chmod(this.#temporaryRoot, 0o700);
         await clearDirectory(this.#temporaryRoot);
         if (!this.#maintenanceScheduled) {
             this.#maintenanceScheduled = true;
@@ -234,7 +242,7 @@ export class ArtifactHostPayloadStore {
     }
 
     async #collectExpired(): Promise<void> {
-        const files = await readdir(this.#root).catch(() => [] as string[]);
+        const files = await readdir(this.#root);
         for (const file of files) {
             if (!file.endsWith(".json")) {
                 continue;
@@ -245,8 +253,12 @@ export class ArtifactHostPayloadStore {
                 if (stored.expiresAtMs <= Date.now()) {
                     await this.close(payloadId);
                 }
-            } catch {
-                await this.#removePayloadFiles(payloadId);
+            } catch (error: unknown) {
+                if (isNotFound(error)) {
+                    await this.#removePayloadFiles(payloadId);
+                    continue;
+                }
+                throw error;
             }
         }
     }
@@ -278,9 +290,12 @@ export class ArtifactHostPayloadStore {
     async #removePayloadFiles(payloadId: string): Promise<void> {
         await this.#runCountExclusive(async () => {
             const metadataPath = this.#metadataPath(payloadId);
-            const existed =
-                (await stat(metadataPath).catch(() => undefined))?.isFile() ===
-                true;
+            let existed = false;
+            try {
+                existed = (await stat(metadataPath)).isFile();
+            } catch (error: unknown) {
+                if (!isNotFound(error)) throw error;
+            }
             await rm(metadataPath, { force: true });
             await rm(this.#dataPath(payloadId), { force: true });
             if (existed && this.#activePayloadCount !== undefined) {
@@ -293,7 +308,7 @@ export class ArtifactHostPayloadStore {
     }
 
     async #countPayloadRecords(): Promise<number> {
-        const files = await readdir(this.#root).catch(() => [] as string[]);
+        const files = await readdir(this.#root);
         return files.filter((file) => /^[0-9a-f-]{36}\.json$/u.test(file))
             .length;
     }
@@ -316,10 +331,14 @@ export class ArtifactHostPayloadStore {
         validateId(payloadId);
         let value: unknown;
         try {
-            value = JSON.parse(
-                await readFile(this.#metadataPath(payloadId), "utf8"),
-            );
-        } catch {
+            const body = await readFile(this.#metadataPath(payloadId), "utf8");
+            try {
+                value = JSON.parse(body);
+            } catch {
+                value = undefined;
+            }
+        } catch (error: unknown) {
+            if (!isNotFound(error)) throw error;
             throw artifactError(
                 "artifact.payloadNotFound",
                 "Host payload is unavailable.",
@@ -331,9 +350,12 @@ export class ArtifactHostPayloadStore {
                 "Host payload metadata is invalid.",
             );
         }
-        const data = await stat(this.#dataPath(payloadId)).catch(
-            () => undefined,
-        );
+        let data;
+        try {
+            data = await stat(this.#dataPath(payloadId));
+        } catch (error: unknown) {
+            if (!isNotFound(error)) throw error;
+        }
         if (
             data === undefined ||
             !data.isFile() ||
@@ -542,11 +564,31 @@ function isStoredPayload(
 
 async function atomicWriteJson(path: string, value: unknown): Promise<void> {
     const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    const file = await open(temporary, "wx", 0o600);
+    try {
+        await file.writeFile(`${JSON.stringify(value)}\n`, "utf8");
+        await file.sync();
+    } catch (error) {
+        await file.close().catch(() => undefined);
+        await rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+    }
+    await file.close();
     await rename(temporary, path).catch(async (error) => {
         await rm(temporary, { force: true }).catch(() => undefined);
         throw error;
     });
+    await syncDirectory(dirname(path));
+}
+
+async function syncDirectory(path: string): Promise<void> {
+    if (process.platform === "win32") return;
+    const directory = await open(path, "r");
+    try {
+        await directory.sync();
+    } finally {
+        await directory.close();
+    }
 }
 
 async function clearDirectory(path: string): Promise<void> {
@@ -562,4 +604,8 @@ function artifactError(code: string, message: string, cause?: unknown) {
             cause instanceof Error ? `${message} ${cause.message}` : message,
         retryable: false,
     });
+}
+
+function isNotFound(error: unknown): error is NodeJS.ErrnoException {
+    return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }

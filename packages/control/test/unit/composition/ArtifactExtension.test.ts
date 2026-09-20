@@ -137,3 +137,28 @@ test("Artifact callers cannot forge the private Extension host authority", async
         /Instance host was not found/u,
     );
 });
+
+test("Artifact startup can be retried after initialization is repaired", async (t) => {
+    const root = await createTestTempDirectory("control-runtime-artifact-retry");
+    const home = join(root, "home");
+    const artifacts = join(home, ".devshell", "control", "artifacts");
+    await mkdir(join(artifacts, "shares"), { recursive: true });
+    await writeFile(join(artifacts, "transfers"), "blocked", "utf8");
+    const config = createDefaultControlConfig();
+    const runtime = new ControlRuntimeArtifact({
+        config: () => config,
+        controlPaths: new ControlPathHome(home),
+        homeDirectory: home,
+        instances: { get() { return undefined; } } as never,
+    });
+    t.after(async () => {
+        await runtime.stop().catch(() => undefined);
+        await rm(root, { force: true, recursive: true });
+    });
+
+    await assert.rejects(runtime.start());
+    await runtime.stop();
+    await rm(join(artifacts, "transfers"));
+    await runtime.start();
+    assert.ok(runtime.service);
+});

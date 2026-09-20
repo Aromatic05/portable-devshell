@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -123,5 +123,70 @@ test("host receive active-count bound releases capacity on abort", async (t) => 
         workspace: root,
     });
     await store.abort(reopened.receiveId);
+    t.after(() => rm(root, { force: true, recursive: true }));
+});
+
+test("host receive abort is idempotent only when metadata is absent", async (t) => {
+    const root = await createTestTempDirectory("artifact-host-receive-abort-");
+    const downloadDirectory = join(root, "Download");
+    const receiveRoot = join(root, "receives");
+    const receiveId = "00000000-0000-4000-8000-000000000004";
+    const store = new ArtifactHostReceiveStore({
+        downloadDirectory,
+        root: receiveRoot,
+    });
+    await store.initialize();
+
+    await store.abort(receiveId);
+    await mkdir(join(receiveRoot, `${receiveId}.json`));
+    await assert.rejects(
+        store.abort(receiveId),
+        (error: unknown) => (error as NodeJS.ErrnoException).code === "EISDIR",
+    );
+    t.after(() => rm(root, { force: true, recursive: true }));
+});
+
+test("host receive recovery preserves metadata and backup on non-ENOENT lstat errors", async (t) => {
+    const root = await createTestTempDirectory("artifact-host-receive-recovery-io-");
+    const downloadDirectory = join(root, "Download");
+    const receiveRoot = join(root, "receives");
+    const temporaryDirectory = join(downloadDirectory, ".devshell-receive");
+    const receiveId = "00000000-0000-4000-8000-000000000003";
+    await mkdir(downloadDirectory, { recursive: true });
+    await writeFile(join(downloadDirectory, "blocked"), "not-a-directory");
+    await mkdir(receiveRoot, { recursive: true });
+    await mkdir(temporaryDirectory, { recursive: true });
+    const backupPath = join(temporaryDirectory, `${receiveId}.backup`);
+    await writeFile(backupPath, "backup");
+    await writeFile(
+        join(receiveRoot, `${receiveId}.json`),
+        JSON.stringify({
+            backupPath,
+            descriptor: {
+                mediaType: "application/octet-stream",
+                name: "payload.bin",
+                payloadBlake3: "0".repeat(64),
+                payloadBytes: 0,
+                type: "file",
+            },
+            overwrite: true,
+            phase: "committing",
+            receiveId,
+            receivedBytes: 0,
+            targetPath: join(downloadDirectory, "blocked", "target.bin"),
+            temporaryPath: join(temporaryDirectory, `${receiveId}.payload`),
+            version: 1,
+        }),
+    );
+
+    const store = new ArtifactHostReceiveStore({
+        downloadDirectory,
+        root: receiveRoot,
+    });
+    await assert.rejects(store.initialize(), (error: unknown) =>
+        ["ENOTDIR", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? ""),
+    );
+    assert.deepEqual(await readdir(receiveRoot), [`${receiveId}.json`]);
+    assert.deepEqual(await readdir(temporaryDirectory), [`${receiveId}.backup`]);
     t.after(() => rm(root, { force: true, recursive: true }));
 });

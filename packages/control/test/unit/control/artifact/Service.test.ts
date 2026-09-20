@@ -723,6 +723,53 @@ test("control stop waits for an in-flight artifact commit and preserves complete
     );
 });
 
+test("artifact stop retries incomplete transfer cleanup after persistence recovers", async (t) => {
+    const storageDir = await createTestTempDirectory("artifact-stop-retry");
+    t.after(() => rm(storageDir, { force: true, recursive: true }));
+    const gate = new Deferred();
+    const source = new MemoryArtifactEndpoint(Buffer.from("blocked"), gate);
+    const target = new MemoryArtifactEndpoint(Buffer.alloc(0));
+    const options = {
+        resolveEndpoint: resolver({ "source-a": source, "target-b": target }),
+        shareUrl: (token: string) =>
+            `https://example.test/artifacts/share/${token}`,
+        storageDir,
+    };
+    const service = new ArtifactService(options);
+    await service.initialize();
+    const started = await service.startTransfer(
+        {
+            operation: "start",
+            sourcePath: "./blocked.bin",
+            sourceWorkspace: "/source",
+            targetInstance: "target-b",
+            targetPath: "/target/blocked.bin",
+            targetWorkspace: "/target",
+        },
+        "source-a",
+    );
+    await waitForStatus(service, started.transfer.transferId, "preparing");
+    await source.openStarted.promise;
+
+    const transfersDir = join(storageDir, "transfers");
+    await rm(transfersDir, { force: true, recursive: true });
+    await writeFile(transfersDir, "not a directory", "utf8");
+    await assert.rejects(service.stop());
+    await source.openAborted.promise;
+
+    await rm(transfersDir);
+    await mkdir(transfersDir, { mode: 0o700 });
+    await service.stop();
+
+    const reloaded = new ArtifactService(options);
+    await reloaded.initialize();
+    assert.equal(
+        reloaded.getTransfer(started.transfer.transferId).status,
+        "interrupted",
+    );
+    await reloaded.stop();
+});
+
 test("artifact cancellation rolls back its in-memory state when persistence fails", async (t) => {
     const storageDir = await createTestTempDirectory(
         "artifact-cancel-persist-failure",

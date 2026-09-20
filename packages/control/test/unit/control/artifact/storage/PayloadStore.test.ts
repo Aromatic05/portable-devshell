@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -40,6 +40,31 @@ test("host payload startup defers expired maintenance without weakening lease en
         store.read(payloadId, 0, 1),
         (error: unknown) =>
             (error as { code?: string }).code === "artifact.payloadExpired",
+    );
+    t.after(() => rm(root, { force: true, recursive: true }));
+});
+
+test("host payload preserves data when metadata loading fails with an I/O error", async (t) => {
+    const root = await createTestTempDirectory("artifact-host-payload-io-");
+    const payloadRoot = join(root, "payloads");
+    const payloadId = "00000000-0000-4000-8000-000000000002";
+    await mkdir(payloadRoot, { recursive: true });
+    await mkdir(join(payloadRoot, `${payloadId}.json`));
+    await writeFile(join(payloadRoot, `${payloadId}.bin`), "payload");
+
+    const store = new ArtifactHostPayloadStore({
+        homeDirectory: root,
+        root: payloadRoot,
+    });
+    await store.initialize();
+
+    await assert.rejects(
+        store.read(payloadId, 0, 1),
+        (error: unknown) => (error as NodeJS.ErrnoException).code === "EISDIR",
+    );
+    assert.deepEqual(
+        await readdir(payloadRoot),
+        [`${payloadId}.bin`, `${payloadId}.json`, "tmp"].sort(),
     );
     t.after(() => rm(root, { force: true, recursive: true }));
 });

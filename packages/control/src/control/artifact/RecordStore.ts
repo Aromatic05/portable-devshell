@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import {
     chmod,
     mkdir,
+    open,
     readFile,
     readdir,
     rename,
     rm,
-    writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
     ARTIFACT_RECORD_VERSION,
@@ -31,9 +31,9 @@ export class ArtifactRecordStore {
     async initialize(): Promise<void> {
         await mkdir(this.#sharesDir, { mode: 0o700, recursive: true });
         await mkdir(this.#transfersDir, { mode: 0o700, recursive: true });
-        await chmod(this.#storageDir, 0o700).catch(() => undefined);
-        await chmod(this.#sharesDir, 0o700).catch(() => undefined);
-        await chmod(this.#transfersDir, 0o700).catch(() => undefined);
+        await chmod(this.#storageDir, 0o700);
+        await chmod(this.#sharesDir, 0o700);
+        await chmod(this.#transfersDir, 0o700);
     }
 
     async loadShares(): Promise<StoredArtifactShare[]> {
@@ -110,7 +110,10 @@ export class ArtifactRecordStore {
         const previous = this.#writeQueues.get(path) ?? Promise.resolve();
         const current = previous
             .catch(() => undefined)
-            .then(async () => await rm(path, { force: true }));
+            .then(async () => {
+                await rm(path, { force: true });
+                await syncDirectory(dirname(path));
+            });
         this.#writeQueues.set(path, current);
         try {
             await current;
@@ -127,8 +130,17 @@ async function listJsonFiles(directory: string): Promise<string[]> {
 }
 
 async function readJsonFile<T>(path: string): Promise<T | undefined> {
+    let body: string;
     try {
-        return JSON.parse(await readFile(path, "utf8")) as T;
+        body = await readFile(path, "utf8");
+    } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
+    try {
+        return JSON.parse(body) as T;
     } catch {
         return undefined;
     }
@@ -136,10 +148,30 @@ async function readJsonFile<T>(path: string): Promise<T | undefined> {
 
 async function atomicWriteJson(path: string, body: string): Promise<void> {
     const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, body, { mode: 0o600 });
+    const file = await open(temporaryPath, "wx", 0o600);
+    try {
+        await file.writeFile(body, "utf8");
+        await file.sync();
+        if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+    } catch (error) {
+        await file.close().catch(() => undefined);
+        await rm(temporaryPath, { force: true }).catch(() => undefined);
+        throw error;
+    }
+    await file.close();
     await rename(temporaryPath, path).catch(async (error) => {
         await rm(temporaryPath, { force: true }).catch(() => undefined);
         throw error;
     });
-    await chmod(path, 0o600).catch(() => undefined);
+    await syncDirectory(dirname(path));
+}
+
+async function syncDirectory(directoryPath: string): Promise<void> {
+    if (process.platform === "win32") return;
+    const directory = await open(directoryPath, "r");
+    try {
+        await directory.sync();
+    } finally {
+        await directory.close();
+    }
 }

@@ -285,7 +285,7 @@ export class ArtifactImageStore {
 
     async initialize(): Promise<void> {
         await mkdir(this.#root, { mode: 0o700, recursive: true });
-        await chmod(this.#root, 0o700).catch(() => undefined);
+        await chmod(this.#root, 0o700);
     }
 
     async persist(
@@ -297,12 +297,13 @@ export class ArtifactImageStore {
         const directory = join(this.#root, blake3.slice(0, 2));
         const path = join(directory, imageRef);
         await mkdir(directory, { mode: 0o700, recursive: true });
+        await chmod(directory, 0o700);
         try {
             await writeFile(path, bytes, { flag: "wx", mode: 0o600 });
         } catch (error) {
             if (!isNodeError(error, "EEXIST")) throw error;
         }
-        await chmod(path, 0o600).catch(() => undefined);
+        await chmod(path, 0o600);
         return result(blake3, imageRef, mediaType, bytes);
     }
 

@@ -51,8 +51,8 @@ export class ControlRuntimeArtifact {
             homeDirectory: this.#homeDirectory,
             storageDir: join(this.#controlPaths.artifactsDir, "host"),
         });
-        await bridge.initialize();
         this.#bridge = bridge;
+        await bridge.initialize();
         const service = new ArtifactService({
             directTransfer: this.#config().control.artifactDirectTransfer,
             resolveEndpoint: (name, authorityInstance) =>
@@ -60,8 +60,8 @@ export class ControlRuntimeArtifact {
             shareUrl: (token) => artifactShareUrl(this.#config(), token),
             storageDir: this.#controlPaths.artifactsDir,
         });
-        await service.initialize();
         this.#service = service;
+        await service.initialize();
     }
 
     installHttpRoute(

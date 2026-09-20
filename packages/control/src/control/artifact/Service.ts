@@ -40,6 +40,7 @@ export class ArtifactService {
     readonly #shareService: ArtifactShareService;
     readonly #transferService: ArtifactTransferService;
     #initialized = false;
+    #cleanupPending = false;
 
     constructor(options: ArtifactServiceOptions) {
         const terminalHistoryLimit =
@@ -76,21 +77,42 @@ export class ArtifactService {
             return;
         }
 
-        await this.#imageService.initialize();
-        await this.#recordStore.initialize();
-        await this.#shareService.initialize();
-        await this.#transferService.initialize();
-        this.#initialized = true;
+        if (this.#cleanupPending) await this.stop();
+        this.#cleanupPending = true;
+
+        try {
+            await this.#imageService.initialize();
+            await this.#recordStore.initialize();
+            await this.#shareService.initialize();
+            await this.#transferService.initialize();
+            this.#initialized = true;
+            this.#cleanupPending = false;
+        } catch (error) {
+            this.#initialized = false;
+            this.#shareService.stop();
+            try {
+                await this.#transferService.stop();
+                this.#cleanupPending = false;
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [error, cleanupError],
+                    "Artifact service initialization failed and cleanup was incomplete.",
+                );
+            }
+            throw error;
+        }
     }
 
     async stop(): Promise<void> {
-        if (!this.#initialized) {
+        if (!this.#initialized && !this.#cleanupPending) {
             return;
         }
 
         this.#initialized = false;
+        this.#cleanupPending = true;
         this.#shareService.stop();
         await this.#transferService.stop();
+        this.#cleanupPending = false;
     }
 
     async viewImage(

@@ -56,8 +56,8 @@ export class ControlRuntimeFactory {
             homeDirectory: options.state.homeDirectory,
             instances: options.state.instances,
         });
-        await artifact.start();
         try {
+            await artifact.start();
             const extensionPaths = new ExtensionPathLayout({
                 homeDirectory: options.state.homeDirectory,
             });
@@ -182,7 +182,14 @@ export class ControlRuntimeFactory {
                 socketPath: options.socketPath,
             });
         } catch (error) {
-            await artifact.stop().catch(() => undefined);
+            try {
+                await artifact.stop();
+            } catch (cleanupError) {
+                throw new AggregateError(
+                    [error, cleanupError],
+                    "Control runtime composition failed and Artifact rollback was incomplete.",
+                );
+            }
             throw error;
         }
     }
