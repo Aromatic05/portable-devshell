@@ -210,11 +210,11 @@ it("starts a stopped local instance directly and marks the selected card", () =>
     expect(card).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("link", { name: "Config" })).toHaveAttribute(
         "href",
-        "#/config/local-one",
+        "#/instances/local-one?view=config",
     );
     expect(screen.getByRole("link", { name: "Connections" })).toHaveAttribute(
         "href",
-        "#/connections/local-one",
+        "#/instances/local-one?view=connections",
     );
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(store.start).toHaveBeenCalledWith("local-one");

@@ -22,8 +22,7 @@ describe("Web Config", () => {
         render(
             <Config
                 disabled={false}
-                navigate={vi.fn()}
-                route={{ instance: "alpha", page: "config" }}
+                instance="alpha"
                 state={state}
                 store={store}
             />,
@@ -66,8 +65,7 @@ describe("Web Config", () => {
         render(
             <Config
                 disabled={false}
-                navigate={vi.fn()}
-                route={{ instance: "alpha", page: "config" }}
+                instance="alpha"
                 state={state}
                 store={store}
             />,
@@ -104,8 +102,7 @@ describe("Web Config", () => {
         render(
             <Config
                 disabled={false}
-                navigate={vi.fn()}
-                route={{ instance: "alpha", page: "config" }}
+                instance="alpha"
                 state={state}
                 store={store}
             />,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+    ApprovalRequest,
     ArtifactStoredImageResult,
     InstanceLogEntry,
     ToolCallRecord,
@@ -13,28 +14,41 @@ import {
     toolCallDuration,
 } from "./Model.js";
 import { toolCallResult } from "./Model.js";
+import { ConfirmationDialog } from "../../../../component/Confirm.js";
 
 export function ToolCallEntry({
+    approval,
     call,
     disabled = false,
     initiallyOpen = false,
     logs,
     onLoadImage,
     onLoadDetail,
+    onDecideApproval,
     onRefresh,
 }: {
+    approval?: ApprovalRequest;
     call: ToolCallRecord;
     disabled?: boolean;
     initiallyOpen?: boolean;
     logs: readonly InstanceLogEntry[];
     onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
+    onDecideApproval(
+        approval: ApprovalRequest,
+        decision: "approve" | "deny",
+    ): Promise<void>;
     onRefresh(): Promise<void>;
 }) {
     const [open, setOpen] = useState(initiallyOpen);
     const [detail, setDetail] = useState<ToolCallRecord | undefined>();
     const [loading, setLoading] = useState(false);
     const [loadFailure, setLoadFailure] = useState<string>();
+    const [approvalDecision, setApprovalDecision] = useState<
+        "approve" | "deny"
+    >();
+    const [approvalBusy, setApprovalBusy] = useState(false);
+    const [approvalFailure, setApprovalFailure] = useState<string>();
     useEffect(() => {
         if (initiallyOpen) setOpen(true);
     }, [initiallyOpen]);
@@ -84,6 +98,38 @@ export function ToolCallEntry({
                     <span className={`result ${toolCallResult(call)}`}>
                         {call.status}
                     </span>
+                    {approval === undefined ? null : (
+                        <span
+                            className="audit-approval-actions"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                            }}
+                        >
+                            <button
+                                className="primary"
+                                disabled={disabled || approvalBusy}
+                                onClick={() => {
+                                    setApprovalFailure(undefined);
+                                    setApprovalDecision("approve");
+                                }}
+                                type="button"
+                            >
+                                Approve
+                            </button>
+                            <button
+                                className="danger subtle"
+                                disabled={disabled || approvalBusy}
+                                onClick={() => {
+                                    setApprovalFailure(undefined);
+                                    setApprovalDecision("deny");
+                                }}
+                                type="button"
+                            >
+                                Deny
+                            </button>
+                        </span>
+                    )}
                 </summary>
                 {open && loading ? <p>Loading details…</p> : null}
                 {open && loadFailure !== undefined ? (
@@ -101,6 +147,41 @@ export function ToolCallEntry({
                     />
                 ) : null}
             </details>
+            {approval === undefined || approvalDecision === undefined ? null : (
+                <ConfirmationDialog
+                    actionLabel={
+                        approvalDecision === "approve" ? "Approve" : "Deny"
+                    }
+                    busy={approvalBusy}
+                    description={`${approvalDecision === "approve" ? "Approve" : "Deny"} ${approval.toolName} on ${approval.instance}${approval.workspace === undefined ? "" : ` in ${approval.workspace}`}? ${approval.reason}`}
+                    disabled={disabled}
+                    error={approvalFailure}
+                    onCancel={() => {
+                        if (approvalBusy) return;
+                        setApprovalFailure(undefined);
+                        setApprovalDecision(undefined);
+                    }}
+                    onConfirm={() => {
+                        const decision = approvalDecision;
+                        setApprovalBusy(true);
+                        setApprovalFailure(undefined);
+                        void onDecideApproval(approval, decision)
+                            .then(() => setApprovalDecision(undefined))
+                            .catch((error: unknown) =>
+                                setApprovalFailure(
+                                    errorMessage(
+                                        error,
+                                        "Approval could not be recorded.",
+                                    ),
+                                ),
+                            )
+                            .finally(() => setApprovalBusy(false));
+                    }}
+                    variant={
+                        approvalDecision === "deny" ? "destructive" : "default"
+                    }
+                />
+            )}
         </li>
     );
 }

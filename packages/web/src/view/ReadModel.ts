@@ -1,6 +1,5 @@
 import {
     projectTodoTaskSummaries,
-    type ApprovalRequest,
     type OperationalOverview,
     type OperationalOverviewActivity,
     type OperationalOverviewAlert,
@@ -23,23 +22,6 @@ export interface TodoSummary {
     taskId: string;
     title: string;
     total: number;
-}
-
-export function pendingApprovals(state: WebState): number {
-    return (
-        toolApprovals(state).length +
-        state.readModel.oauthApprovals.filter(
-            (approval) => approval.status === "pending",
-        ).length
-    );
-}
-
-export function toolApprovals(state: WebState): ApprovalRequest[] {
-    return Object.values(state.readModel.instanceState)
-        .map((instance) => instance.approvals)
-        .flatMap((approvals) =>
-            approvals.filter((approval) => approval.status === "pending"),
-        );
 }
 
 export function todoSummaries(state: WebState): TodoSummary[] {
@@ -87,7 +69,8 @@ export function overviewToolCalls(
 export function overviewAlertRoute(
     kind: OperationalOverviewAlert["kind"],
 ): string {
-    if (kind.startsWith("approval.")) return "#/approvals";
+    if (kind === "approval.pending") return "#/audit";
+    if (kind === "approval.oauthPending") return "#/overview";
     if (kind.startsWith("todo.")) return "#/todos";
     if (kind.startsWith("activity.")) return "#/audit";
     if (kind.startsWith("instance.")) return "#/instances";

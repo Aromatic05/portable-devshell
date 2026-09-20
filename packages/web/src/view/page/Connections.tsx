@@ -10,7 +10,6 @@ import type {
 
 import type { WebState } from "../../state/Model.js";
 import type { WebStore } from "../../state/Store.js";
-import type { WebRoute } from "../../app/Route.js";
 import { ConfirmationDialog } from "../component/Confirm.js";
 
 interface ConnectionDrafts {
@@ -21,14 +20,12 @@ interface ConnectionDrafts {
 
 export function Connections({
     disabled,
-    navigate,
-    route,
+    instance,
     state,
     store,
 }: {
     disabled: boolean;
-    navigate(route: WebRoute): void;
-    route: Extract<WebRoute, { page: "connections" }>;
+    instance?: string;
     state: WebState;
     store: WebStore;
 }) {
@@ -37,10 +34,12 @@ export function Connections({
         [state.readModel.configView],
     );
     const selectedName =
-        route.instance !== undefined &&
-        instances.some((entry) => entry.name === route.instance)
-            ? route.instance
+        instance !== undefined &&
+        instances.some((entry) => entry.name === instance)
+            ? instance
             : undefined;
+    const missingInstance =
+        instance !== undefined && selectedName === undefined;
     const base = useMemo(
         () => connectionDrafts(state.readModel.configView, selectedName),
         [state.readModel.configView, selectedName],
@@ -73,6 +72,17 @@ export function Connections({
     const mcpStatus = state.readModel.mcpStatus;
     const controlRestartRequired =
         state.readModel.configView?.restartControlRequired === true;
+
+    if (missingInstance) {
+        return (
+            <section className="connections-page instance-subview">
+                <h3>Connections</h3>
+                <p className="empty">
+                    No connection configuration is available for {instance}.
+                </p>
+            </section>
+        );
+    }
 
     async function validate(): Promise<boolean> {
         const draft = fullValidationDraft(
@@ -133,43 +143,15 @@ export function Connections({
     }
 
     return (
-        <section className="connections-page">
-            <div className="page-heading-actions">
+        <section className="connections-page instance-subview">
+            <div className="instance-subview-heading">
                 <div>
-                    <h2>Connections</h2>
+                    <h3>Connections</h3>
                     <p className="hint">
                         MCP/Web endpoints, authentication, OAuth and reverse
                         enrollment.
                     </p>
                 </div>
-                {instances.length === 0 ? (
-                    <p className="hint">
-                        No instances are configured. Global connection settings
-                        remain available.
-                    </p>
-                ) : (
-                    <label className="compact-field">
-                        <span>Instance</span>
-                        <select
-                            onChange={(event) => {
-                                const instance = event.target.value;
-                                navigate(
-                                    instance.length === 0
-                                        ? { page: "connections" }
-                                        : { page: "connections", instance },
-                                );
-                            }}
-                            value={selectedName ?? ""}
-                        >
-                            <option value="">Global only</option>
-                            {instances.map((entry) => (
-                                <option key={entry.name} value={entry.name}>
-                                    {entry.name}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                )}
             </div>
 
             <div className="control-grid">
@@ -570,18 +552,6 @@ function OAuthSection({
                 {status?.running === true ? "running" : "stopped"} · pending=
                 {pending.length}
             </p>
-            {pending.length === 0 ? (
-                <p className="empty">
-                    No OAuth requests are waiting for review.
-                </p>
-            ) : (
-                <div>
-                    <p className="hint">
-                        Review OAuth requests in the unified approval queue.
-                    </p>
-                    <a href="#/approvals">Review pending approvals</a>
-                </div>
-            )}
         </article>
     );
 }

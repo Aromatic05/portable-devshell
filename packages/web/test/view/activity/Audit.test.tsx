@@ -199,6 +199,61 @@ function renderAudit({
 }
 
 describe("Audit", () => {
+    it("keeps pending approval actions on the matching Tool Call card", async () => {
+        const decideTool = vi.fn(async () => true);
+        const approvalState: WebState = {
+            ...state,
+            readModel: {
+                ...state.readModel,
+                instanceState: {
+                    ...state.readModel.instanceState,
+                    alpha: {
+                        ...state.readModel.instanceState.alpha!,
+                        approvals: [
+                            {
+                                approvalId: "approval-alpha",
+                                callId: "call-alpha",
+                                createdAt: "2026-07-31T08:59:59Z",
+                                expiresAt: "2026-07-31T09:10:00Z",
+                                inputSummary: '{"command":"false"}',
+                                instance: asInstanceName("alpha"),
+                                reason: "needs review",
+                                riskLevel: "high",
+                                source: "mcp",
+                                status: "pending",
+                                toolName: "bash_run",
+                                workspace: "/projects/alpha",
+                            },
+                        ],
+                    },
+                },
+            },
+        };
+        renderAudit({
+            state: approvalState,
+            store: {
+                decideTool,
+                get state() {
+                    return approvalState;
+                },
+            },
+        });
+
+        fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+        const dialog = screen.getByRole("dialog", { name: "Confirm approve" });
+        fireEvent.click(
+            within(dialog).getByRole("button", { name: "Approve" }),
+        );
+
+        await waitFor(() =>
+            expect(decideTool).toHaveBeenCalledWith(
+                "alpha",
+                "approval-alpha",
+                "approve",
+            ),
+        );
+    });
+
     it("uses route Scope as navigation state and defaults Context filtering to active in the last 30 minutes", () => {
         const { navigate } = renderAudit();
 

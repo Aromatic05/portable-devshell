@@ -429,6 +429,15 @@ describe("authenticated application shell", () => {
         const primary = screen.getByRole("navigation", {
             name: "Primary navigation",
         });
+        expect(
+            within(primary).queryByRole("button", { name: "Config" }),
+        ).not.toBeInTheDocument();
+        expect(
+            within(primary).queryByRole("button", { name: "Connections" }),
+        ).not.toBeInTheDocument();
+        expect(
+            within(primary).queryByRole("button", { name: "Approvals" }),
+        ).not.toBeInTheDocument();
         fireEvent.click(
             within(primary).getByRole("button", { name: "Instances" }),
         );
@@ -437,21 +446,16 @@ describe("authenticated application shell", () => {
             await screen.findByRole("heading", { name: "Instances" }),
         ).toBeInTheDocument();
 
-        fireEvent.click(
-            within(primary).getByRole("button", { name: "Config" }),
-        );
-        expect(window.location.hash).toBe("#/config");
+        fireEvent.click(await screen.findByText("demo"));
+        const instanceSections = screen.getByRole("navigation", {
+            name: "Instance sections",
+        });
         expect(
-            await screen.findByRole("heading", { name: "Config" }),
-        ).toBeInTheDocument();
-
-        fireEvent.click(
-            within(primary).getByRole("button", { name: "Connections" }),
-        );
-        expect(window.location.hash).toBe("#/connections");
+            within(instanceSections).getByRole("link", { name: "Config" }),
+        ).toHaveAttribute("href", "#/instances/demo?view=config");
         expect(
-            await screen.findByRole("heading", { name: "Connections" }),
-        ).toBeInTheDocument();
+            within(instanceSections).getByRole("link", { name: "Connections" }),
+        ).toHaveAttribute("href", "#/instances/demo?view=connections");
 
         window.location.hash = "#/overview";
         await screen.findByRole("heading", { name: "Overview" });
@@ -726,8 +730,8 @@ describe("hash routing", () => {
     it("round-trips instance selections, Messages, and Audit hierarchy through bookmarkable URLs", () => {
         const routes: WebRoute[] = [
             { page: "instances", instance: "dev/main" },
-            { page: "config", instance: "dev/main" },
-            { page: "connections", instance: "dev/main" },
+            { page: "instances", instance: "dev/main", view: "config" },
+            { page: "instances", instance: "dev/main", view: "connections" },
             { page: "messages", view: "contexts" },
             {
                 page: "messages",
@@ -771,6 +775,17 @@ describe("hash routing", () => {
 
     it("maps the legacy activity URL onto Audit without keeping activity as a page", () => {
         expect(readHashRoute("#/activity")).toEqual(pageRoute("audit"));
+        expect(readHashRoute("#/approvals")).toEqual(pageRoute("audit"));
+        expect(readHashRoute("#/config/dev%2Fmain")).toEqual({
+            page: "instances",
+            instance: "dev/main",
+            view: "config",
+        });
+        expect(readHashRoute("#/connections/dev%2Fmain")).toEqual({
+            page: "instances",
+            instance: "dev/main",
+            view: "connections",
+        });
     });
 
     it("keeps a bookmarkable route and responds to back and forward hash changes", () => {

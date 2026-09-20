@@ -3,11 +3,8 @@ import { useEffect, useState } from "react";
 export const webPages = [
     "overview",
     "instances",
-    "config",
-    "connections",
     "messages",
     "audit",
-    "approvals",
     "todos",
 ] as const;
 
@@ -20,9 +17,11 @@ export type AuditScope =
 
 export type WebRoute =
     | { page: "overview" }
-    | { page: "instances"; instance?: string }
-    | { page: "config"; instance?: string }
-    | { page: "connections"; instance?: string }
+    | {
+          page: "instances";
+          instance?: string;
+          view?: "config" | "connections";
+      }
     | { page: "messages"; view: "contexts" }
     | { page: "messages"; view: "thread"; instance: string; ctxId: string }
     | { page: "audit"; view: "timeline"; scope: AuditScope }
@@ -33,7 +32,6 @@ export type WebRoute =
           ctxId?: string;
           callId: string;
       }
-    | { page: "approvals" }
     | { page: "todos" };
 
 export function pageRoute(page: WebPage): WebRoute {
@@ -48,15 +46,28 @@ export function pageRoute(page: WebPage): WebRoute {
 }
 
 export function readHashRoute(hash = window.location.hash): WebRoute {
-    const segments = hash
-        .replace(/^#\/?/, "")
-        .split("/")
-        .filter(Boolean)
-        .map(decodeSegment);
+    const [path, query = ""] = hash.replace(/^#\/?/, "").split("?", 2);
+    const segments = path.split("/").filter(Boolean).map(decodeSegment);
     const [page, first, second, third, fourth] = segments;
+    const view = new URLSearchParams(query).get("view");
     if (page === "activity") return pageRoute("audit");
-    if (page === "instances" || page === "config" || page === "connections") {
-        return first === undefined ? { page } : { page, instance: first };
+    if (page === "approvals") return pageRoute("audit");
+    if (page === "config") {
+        return first === undefined
+            ? pageRoute("instances")
+            : { page: "instances", instance: first, view: "config" };
+    }
+    if (page === "connections") {
+        return first === undefined
+            ? pageRoute("instances")
+            : { page: "instances", instance: first, view: "connections" };
+    }
+    if (page === "instances") {
+        return {
+            page,
+            ...(first === undefined ? {} : { instance: first }),
+            ...(view === "config" || view === "connections" ? { view } : {}),
+        };
     }
     if (page === "messages") {
         return first !== undefined && second !== undefined
@@ -105,12 +116,15 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
 
 export function webRouteHref(route: WebRoute): string {
     switch (route.page) {
-        case "instances":
-        case "config":
-        case "connections":
-            return route.instance === undefined
-                ? `#/${route.page}`
-                : `#/${route.page}/${encodeSegment(route.instance)}`;
+        case "instances": {
+            const base =
+                route.instance === undefined
+                    ? "#/instances"
+                    : `#/instances/${encodeSegment(route.instance)}`;
+            return route.view === undefined
+                ? base
+                : `${base}?view=${route.view}`;
+        }
         case "messages":
             return route.view === "contexts"
                 ? "#/messages"

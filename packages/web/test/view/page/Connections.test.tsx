@@ -33,8 +33,7 @@ describe("Web Connections", () => {
         render(
             <Connections
                 disabled={false}
-                navigate={vi.fn()}
-                route={{ instance: "reverse-one", page: "connections" }}
+                instance="reverse-one"
                 state={state}
                 store={store}
             />,
@@ -63,7 +62,7 @@ describe("Web Connections", () => {
         ).toBeEnabled();
     });
 
-    it("routes OAuth review to Approvals and exposes reverse enrollment and token actions", async () => {
+    it("keeps OAuth approval controls out of Connections and exposes reverse enrollment and token actions", async () => {
         const state = connectionState();
         const store = {
             state,
@@ -79,8 +78,7 @@ describe("Web Connections", () => {
         render(
             <Connections
                 disabled={false}
-                navigate={vi.fn()}
-                route={{ instance: "reverse-one", page: "connections" }}
+                instance="reverse-one"
                 state={state}
                 store={store}
             />,
@@ -89,8 +87,8 @@ describe("Web Connections", () => {
         expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
         expect(
-            screen.getByRole("link", { name: "Review pending approvals" }),
-        ).toHaveAttribute("href", "#/approvals");
+            screen.queryByRole("link", { name: /approval/iu }),
+        ).not.toBeInTheDocument();
 
         fireEvent.click(
             screen.getByRole("button", { name: "Create enrollment code" }),
@@ -127,15 +125,7 @@ describe("Web Connections", () => {
             validateConfig: vi.fn(async () => true),
             restartControl: vi.fn(async () => true),
         } as unknown as WebStore;
-        render(
-            <Connections
-                disabled={false}
-                navigate={vi.fn()}
-                route={{ page: "connections" }}
-                state={state}
-                store={store}
-            />,
-        );
+        render(<Connections disabled={false} state={state} store={store} />);
 
         expect(
             screen.getByRole("heading", { name: "[Global] MCP listener" }),

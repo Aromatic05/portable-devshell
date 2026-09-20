@@ -11,18 +11,15 @@ import type {
 
 import type { WebState } from "../../state/Model.js";
 import type { WebStore } from "../../state/Store.js";
-import type { WebRoute } from "../../app/Route.js";
 
 export function Config({
     disabled,
-    navigate,
-    route,
+    instance,
     state,
     store,
 }: {
     disabled: boolean;
-    navigate(route: WebRoute): void;
-    route: Extract<WebRoute, { page: "config" }>;
+    instance?: string;
     state: WebState;
     store: WebStore;
 }) {
@@ -31,10 +28,11 @@ export function Config({
         [state.readModel.configView],
     );
     const selectedName =
-        route.instance !== undefined &&
-        instances.some((entry) => entry.name === route.instance)
-            ? route.instance
-            : instances[0]?.name;
+        instance === undefined
+            ? instances[0]?.name
+            : instances.some((entry) => entry.name === instance)
+              ? instance
+              : undefined;
     const baseline = useMemo(
         () =>
             editableInstance(
@@ -177,46 +175,29 @@ export function Config({
         });
     }
 
-    if (instances.length === 0) {
+    if (selectedName === undefined) {
         return (
-            <section>
-                <h2>Config</h2>
-                <p className="empty">No instance configuration is available.</p>
+            <section className="config-page instance-subview">
+                <h3>Config</h3>
+                <p className="empty">
+                    {instance === undefined
+                        ? "No instance configuration is available."
+                        : `No configuration is available for ${instance}.`}
+                </p>
             </section>
         );
     }
 
     return (
-        <section className="config-page">
-            <div className="page-heading-actions">
-                <div>
-                    <h2>Config</h2>
-                    <p className="hint">
-                        Edit the selected instance using the same persisted
-                        configuration model as the TUI.
-                    </p>
-                </div>
-                <label className="compact-field">
-                    <span>Instance</span>
-                    <select
-                        onChange={(event) =>
-                            navigate({
-                                page: "config",
-                                instance: event.target.value,
-                            })
-                        }
-                        value={selectedName}
-                    >
-                        {instances.map((entry) => (
-                            <option key={entry.name} value={entry.name}>
-                                {entry.name}
-                            </option>
-                        ))}
-                    </select>
-                </label>
+        <section className="config-page instance-subview">
+            <div className="instance-subview-heading">
+                <h3>Config</h3>
+                <p className="hint">
+                    Persisted configuration for {selectedName}.
+                </p>
             </div>
 
-            <article className="detail config-editor-panel">
+            <article className="config-editor-panel">
                 <div className="config-editor-summary">
                     <strong>{selectedName}</strong>
                     <span>{dirty ? "Unsaved changes" : "Saved"}</span>

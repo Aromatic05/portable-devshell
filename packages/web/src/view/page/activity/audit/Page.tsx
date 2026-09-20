@@ -49,6 +49,19 @@ export function Audit({
         () => Object.values(instanceState).flatMap((value) => value.toolCalls),
         [instanceState],
     );
+    const approvalsByCall = useMemo(
+        () =>
+            new Map(
+                Object.values(instanceState)
+                    .flatMap((value) => value.approvals)
+                    .filter((approval) => approval.status === "pending")
+                    .map((approval) => [
+                        `${approval.instance}\u0000${approval.callId}`,
+                        approval,
+                    ]),
+            ),
+        [instanceState],
+    );
     const scope = auditScope(route);
     const contextRecords = useMemo(
         () =>
@@ -228,6 +241,9 @@ export function Audit({
                 <ol className="feed activity-feed">
                     {selection.items.map((call) => (
                         <ToolCallEntry
+                            approval={approvalsByCall.get(
+                                `${call.instance}\u0000${call.callId}`,
+                            )}
                             call={call}
                             disabled={!interactive}
                             initiallyOpen={
@@ -245,6 +261,19 @@ export function Audit({
                                       )
                                     : call
                             }
+                            onDecideApproval={async (approval, decision) => {
+                                const succeeded = await store.decideTool(
+                                    approval.instance,
+                                    approval.approvalId,
+                                    decision,
+                                );
+                                if (!succeeded) {
+                                    throw new Error(
+                                        store.state.error ??
+                                            "Approval could not be recorded.",
+                                    );
+                                }
+                            }}
                             onRefresh={async () =>
                                 await store.refreshToolCall(call.instance)
                             }

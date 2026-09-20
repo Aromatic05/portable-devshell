@@ -3,14 +3,11 @@ import { useEffect, useSyncExternalStore } from "react";
 import { PageSwitcher } from "../view/component/Navigation.js";
 import { PartialFailures } from "../view/component/Feedback.js";
 import { useHashRoute } from "./Route.js";
-import { openTodos, pendingApprovals } from "../view/ReadModel.js";
+import { openTodos } from "../view/ReadModel.js";
 import type { WebStore } from "../state/Store.js";
 import { webFailures } from "../state/Model.js";
 import type { ApplicationBusy } from "./session/Hook.js";
-import { Approvals } from "../view/page/activity/Approvals.js";
 import { Audit } from "../view/page/activity/audit/Page.js";
-import { Config } from "../view/page/Config.js";
-import { Connections } from "../view/page/Connections.js";
 import { Instances } from "../view/page/Instances.js";
 import { Messages } from "../view/page/activity/messages/Page.js";
 import { Overview } from "../view/page/Overview.js";
@@ -46,7 +43,6 @@ export function Application({
         else if (route.page === "messages") void store.refreshMessages();
     }, [route.page, state.connection, store]);
     const counts = {
-        approvals: pendingApprovals(state),
         instances: state.readModel.instances.length,
         todos: openTodos(state),
     };
@@ -122,27 +118,6 @@ export function Application({
                         route={route}
                         store={store}
                     />
-                ) : null}
-                {route.page === "config" ? (
-                    <Config
-                        disabled={interactionDisabled}
-                        navigate={navigate}
-                        route={route}
-                        state={state}
-                        store={store}
-                    />
-                ) : null}
-                {route.page === "connections" ? (
-                    <Connections
-                        disabled={interactionDisabled}
-                        navigate={navigate}
-                        route={route}
-                        state={state}
-                        store={store}
-                    />
-                ) : null}
-                {route.page === "approvals" ? (
-                    <Approvals disabled={interactionDisabled} store={store} />
                 ) : null}
                 {route.page === "audit" ? (
                     <Audit

@@ -7,11 +7,8 @@ import { pageRoute, type WebPage, type WebRoute } from "../../app/Route.js";
 const pages: Array<{ page: WebPage; label: string }> = [
     { page: "overview", label: "Overview" },
     { page: "instances", label: "Instances" },
-    { page: "config", label: "Config" },
-    { page: "connections", label: "Connections" },
     { page: "messages", label: "Messages" },
     { page: "audit", label: "Audit" },
-    { page: "approvals", label: "Approvals" },
     { page: "todos", label: "Todos" },
 ];
 
@@ -23,7 +20,7 @@ export function PageSwitcher({
 }: {
     active: WebRoute;
     applications: readonly WebApplicationDescriptor[];
-    counts: { approvals: number; instances: number; todos: number };
+    counts: { instances: number; todos: number };
     navigate(route: WebRoute): void;
 }) {
     const [open, setOpen] = useState(false);
@@ -171,9 +168,8 @@ export function PageSwitcher({
 
 function pageBadge(
     page: WebPage,
-    counts: { approvals: number; instances: number; todos: number },
+    counts: { instances: number; todos: number },
 ): number | undefined {
-    if (page === "approvals") return counts.approvals;
     if (page === "instances") return counts.instances;
     if (page === "todos") return counts.todos;
     return undefined;

@@ -244,6 +244,7 @@ export class WebStore {
             this.#model.state.instances.map(async ({ name }) => {
                 await this.#model.refreshInstance(name, [
                     "toolCalls",
+                    "approvals",
                     "comments",
                     "logs",
                 ]);
