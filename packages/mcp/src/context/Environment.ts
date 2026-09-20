@@ -7,15 +7,151 @@ import {
 
 import type { McpInstanceGateway } from "../endpoint/Port.js";
 import type { McpContextMaskedInstance } from "./registry/Model.js";
-import type { McpContextRegistry } from "./registry/Registry.js";
+import type {
+    McpContextEnvironmentCleanup,
+    McpContextRegistry,
+} from "./registry/Registry.js";
+
+export interface McpContextEnvironmentCleanupServiceOptions {
+    contextRegistry: McpContextRegistry;
+    gateway(instance: string): McpInstanceGateway | undefined;
+    releaseLocalAlerts?(
+        instance: string,
+        workspace: string,
+    ): Promise<void>;
+}
+
+export class McpContextEnvironmentCleanupService {
+    readonly #contextRegistry: McpContextRegistry;
+    readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
+    readonly #releaseLocalAlerts?: (
+        instance: string,
+        workspace: string,
+    ) => Promise<void>;
+    readonly #transactions = new Map<string, Promise<void>>();
+
+    constructor(options: McpContextEnvironmentCleanupServiceOptions) {
+        this.#contextRegistry = options.contextRegistry;
+        this.#gateway = options.gateway;
+        this.#releaseLocalAlerts = options.releaseLocalAlerts;
+    }
+
+    async reconcile(ctxId?: string): Promise<void> {
+        const pending = await this.#contextRegistry.listEnvironmentCleanup(ctxId);
+        const contextIds = [...new Set(pending.map((entry) => entry.ctxId))];
+        const failures: unknown[] = [];
+        for (const pendingCtxId of contextIds) {
+            await this.#run(pendingCtxId, async () => {
+                const cleanupFailures =
+                    await this.#reconcileContext(pendingCtxId);
+                failures.push(...cleanupFailures);
+            });
+        }
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                ctxId === undefined
+                    ? "Context environment cleanup was incomplete."
+                    : "Context " + ctxId + " environment cleanup was incomplete.",
+            );
+        }
+    }
+
+    async #reconcileContext(ctxId: string): Promise<unknown[]> {
+        const failures: unknown[] = [];
+        for (const { cleanup } of
+            await this.#contextRegistry.listEnvironmentCleanup(ctxId)) {
+            try {
+                await this.#cleanup(ctxId, cleanup);
+                await this.#contextRegistry.settleEnvironmentCleanup(
+                    ctxId,
+                    cleanup,
+                );
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        return failures;
+    }
+
+    async #cleanup(
+        ctxId: string,
+        cleanup: McpContextEnvironmentCleanup,
+    ): Promise<void> {
+        const gateway = this.#gateway(cleanup.instance);
+        if (cleanup.kind === "instance_reference") {
+            if (gateway === undefined) {
+                throw new Error(
+                    "Instance " + cleanup.instance +
+                        " is unavailable for Context reference cleanup.",
+                );
+            }
+            if (gateway.releaseInstanceReference === undefined) {
+                throw new Error(
+                    "Instance " + cleanup.instance +
+                        " does not support Context reference cleanup.",
+                );
+            }
+            await gateway.releaseInstanceReference(cleanup.instance, ctxId);
+            return;
+        }
+
+        const now = Date.now();
+        const inUse = (await this.#contextRegistry.list()).some(
+            (context) =>
+                context.status === "active" &&
+                Date.parse(context.expiresAt) > now &&
+                context.environments.some(
+                    (environment) =>
+                        environment.instance === cleanup.instance &&
+                        environment.workspace === cleanup.workspace,
+                ),
+        );
+        if (inUse) return;
+        if (gateway !== undefined) {
+            await gateway.releaseAlerts(cleanup.instance, cleanup.workspace);
+            return;
+        }
+        if (this.#releaseLocalAlerts !== undefined) {
+            await this.#releaseLocalAlerts(
+                cleanup.instance,
+                cleanup.workspace,
+            );
+            return;
+        }
+        throw new Error(
+            "Instance " + cleanup.instance +
+                " is unavailable for alert cleanup.",
+        );
+    }
+
+    async #run(ctxId: string, operation: () => Promise<void>): Promise<void> {
+        const previous = this.#transactions.get(ctxId) ?? Promise.resolve();
+        const current = previous.then(operation, operation);
+        const completion = current.then(
+            () => undefined,
+            () => undefined,
+        );
+        this.#transactions.set(ctxId, completion);
+        try {
+            await current;
+        } finally {
+            if (this.#transactions.get(ctxId) === completion) {
+                this.#transactions.delete(ctxId);
+            }
+        }
+    }
+}
 
 export interface McpContextRemoteEnvironmentOptions {
+    cleanup?: McpContextEnvironmentCleanupService;
     contextRegistry: McpContextRegistry;
     gateway(instance: string): McpInstanceGateway | undefined;
 }
 
 /** Context-owned remote environment attach/mask operations over opaque instance handles. */
 export class McpContextRemoteEnvironment {
+    readonly #cleanup: McpContextEnvironmentCleanupService;
     readonly #contextRegistry: McpContextRegistry;
     readonly #gateway: (instance: string) => McpInstanceGateway | undefined;
     readonly #transactions = new Map<string, Promise<void>>();
@@ -23,6 +159,12 @@ export class McpContextRemoteEnvironment {
     constructor(options: McpContextRemoteEnvironmentOptions) {
         this.#contextRegistry = options.contextRegistry;
         this.#gateway = options.gateway;
+        this.#cleanup =
+            options.cleanup ??
+            new McpContextEnvironmentCleanupService({
+                contextRegistry: options.contextRegistry,
+                gateway: options.gateway,
+            });
     }
 
     async attach(
@@ -55,9 +197,11 @@ export class McpContextRemoteEnvironment {
         signal: AbortSignal | undefined,
     ): Promise<JsonValue> {
         signal?.throwIfAborted();
+        await this.#cleanup.reconcile(ctxId);
         const gateway = this.#requireGateway(instance);
         const previous = await this.#environment(ctxId, instance);
         let attached = false;
+        let committed = false;
         let connected = false;
         let preparedWorkspace: string | undefined;
         try {
@@ -70,6 +214,7 @@ export class McpContextRemoteEnvironment {
                 });
                 attached = true;
                 signal?.throwIfAborted();
+                committed = true;
                 return {
                     ...(isRecord(connection)
                         ? connection
@@ -115,16 +260,8 @@ export class McpContextRemoteEnvironment {
             });
             attached = true;
             signal?.throwIfAborted();
-            if (
-                previous?.workspace !== undefined &&
-                previous.workspace !== prepared.workspace
-            ) {
-                await this.#releaseAlertsIfUnused(
-                    gateway,
-                    instance,
-                    previous.workspace,
-                ).catch(() => undefined);
-            }
+            committed = true;
+            await this.#cleanup.reconcile(ctxId);
             const base = isRecord(connection)
                 ? connection
                 : { result: connection };
@@ -153,6 +290,7 @@ export class McpContextRemoteEnvironment {
                 workspace: prepared.workspace,
             };
         } catch (error) {
+            if (committed) throw error;
             const cleanupFailures: unknown[] = [];
             if (attached) {
                 await this.#restoreEnvironment(
@@ -161,18 +299,40 @@ export class McpContextRemoteEnvironment {
                     previous,
                 ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             }
-            if (preparedWorkspace !== undefined) {
+            const cleanupWorkspace = preparedWorkspace;
+            if (cleanupWorkspace !== undefined) {
                 await this.#releaseAlertsIfUnused(
                     gateway,
                     instance,
-                    preparedWorkspace,
-                ).catch((cleanupError) => cleanupFailures.push(cleanupError));
+                    cleanupWorkspace,
+                ).catch(async (cleanupError) => {
+                    cleanupFailures.push(cleanupError);
+                    await this.#contextRegistry
+                        .recordEnvironmentCleanup(ctxId, {
+                            instance,
+                            kind: "alerts",
+                            workspace: cleanupWorkspace,
+                        })
+                        .catch((debtError) => cleanupFailures.push(debtError));
+                });
             }
             if (connected && previous === undefined) {
                 try {
-                    await gateway.releaseInstanceReference?.(instance, ctxId);
+                    if (gateway.releaseInstanceReference === undefined) {
+                        throw new Error(
+                            "Instance " + instance +
+                                " does not support Context reference cleanup.",
+                        );
+                    }
+                    await gateway.releaseInstanceReference(instance, ctxId);
                 } catch (cleanupError) {
                     cleanupFailures.push(cleanupError);
+                    await this.#contextRegistry
+                        .recordEnvironmentCleanup(ctxId, {
+                            instance,
+                            kind: "instance_reference",
+                        })
+                        .catch((debtError) => cleanupFailures.push(debtError));
                 }
             }
             if (cleanupFailures.length > 0) {
@@ -202,21 +362,7 @@ export class McpContextRemoteEnvironment {
         ctxId: string,
         masked: McpContextMaskedInstance,
     ): Promise<{ instance: string; masked: true }> {
-        if (masked.environment !== undefined) {
-            const gateway = this.#gateway(masked.instance);
-            if (gateway !== undefined) {
-                await gateway
-                    .releaseInstanceReference?.(masked.instance, ctxId)
-                    .catch(() => undefined);
-                if (masked.environment.workspace !== undefined) {
-                    await this.#releaseAlertsIfUnused(
-                        gateway,
-                        masked.instance,
-                        masked.environment.workspace,
-                    ).catch(() => undefined);
-                }
-            }
-        }
+        await this.#cleanup.reconcile(ctxId);
         return { instance: masked.instance, masked: true };
     }
 

@@ -12,6 +12,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpContextRegistry } from "../../context/registry/Registry.js";
+import type { McpContextEnvironmentCleanupService } from "../../context/Environment.js";
 import {
     createMcpContextSelector,
     type McpContextSelector,
@@ -73,6 +74,7 @@ export type {
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
+    cleanup?: McpContextEnvironmentCleanupService;
     contextRegistry?: McpContextRegistry;
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
@@ -149,6 +151,7 @@ export class McpEndpointDispatch {
         };
         this.#artifact = new McpEndpointHandlerArtifact(controlOptions);
         this.#environment = new McpEndpointHandlerEnvironment({
+            cleanup: options.cleanup,
             contextRegistry: this.#contextRegistry,
             contextSelector: this.#contextSelector,
             gateway: options.gateway,

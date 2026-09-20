@@ -6,6 +6,7 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 import type { McpAuthConfig, McpOAuth2Config } from "../auth/Config.js";
+import { McpContextEnvironmentCleanupService } from "../context/Environment.js";
 import { McpContextRegistry } from "../context/registry/Registry.js";
 import {
     isMcpGoalGateway,
@@ -92,6 +93,7 @@ export interface McpHostConfig {
 
 export class McpRuntimeState {
     readonly contextRegistry: McpContextRegistry;
+    readonly environmentCleanup: McpContextEnvironmentCleanupService;
     readonly gateways = new Map<string, McpInstanceGateway | undefined>();
     readonly oauthApprovals?: McpOAuthApprovalService;
     readonly #oauthResources = new Map<string, McpOAuthProtectedResource>();
@@ -107,6 +109,19 @@ export class McpRuntimeState {
     }) {
         this.contextRegistry = new McpContextRegistry({
             filePath: config.contextFile,
+        });
+        this.environmentCleanup = new McpContextEnvironmentCleanupService({
+            contextRegistry: this.contextRegistry,
+            gateway: (instance) => this.gateways.get(instance),
+            releaseLocalAlerts: async (instance, workspace) => {
+                const worker = this.workers.get(instance);
+                if (worker === undefined) {
+                    throw new Error(
+                        `Instance ${instance} is unavailable for local alert cleanup.`,
+                    );
+                }
+                await worker.releaseAlerts?.(workspace);
+            },
         });
         this.workspaceAppLeases = new WorkspaceAppLeaseStore({
             filePath: config.workspaceAppLeaseFile,
@@ -246,7 +261,7 @@ export class McpHost {
             );
         }
         await this.#runtimeState.initialize();
-        await this.#reconcileDisabledContexts();
+        await this.#reconcileContextCleanup();
         await this.#oauth?.warmup();
         for (const binding of this.#registry.list()) {
             this.#httpServer.registerBinding(
@@ -280,6 +295,7 @@ export class McpHost {
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
+                cleanup: this.#runtimeState.environmentCleanup,
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
                 gateway: instance.gateway,
@@ -473,9 +489,229 @@ export class McpHost {
         return this.#contextRegistry;
     }
 
-    async #reconcileDisabledContexts(): Promise<void> {
+    async #reconcileContextCleanup(): Promise<void> {
         for (const context of await this.#contextRegistry.listCleanupPending()) {
-            await this.contextAdmin.disable(context.ctxId);
+            await this.#cleanupTerminalContext(context);
+        }
+        await this.#runtimeState.environmentCleanup
+            .reconcile()
+            .catch((error) => console.warn(error));
+    }
+
+    async #cleanupTerminalContext(terminal: McpContextRecord): Promise<void> {
+        if (terminal.status === "active") {
+            throw new Error(
+                "Active Context " + terminal.ctxId + " cannot be terminally cleaned.",
+            );
+        }
+        const failures: unknown[] = [];
+        const cleanup = async (
+            operation: () => Promise<unknown> | unknown,
+        ): Promise<void> => {
+            try {
+                await operation();
+            } catch (error) {
+                failures.push(error);
+            }
+        };
+        const terminalReason =
+            terminal.status === "disabled" ? "disabled" : "expired";
+
+        await cleanup(async () => {
+            await this.#workspaceAppLeases.revokeContext(terminal.ctxId);
+        });
+        await cleanup(() =>
+            this.#workspaceAppPresence.revokeContext(terminal.ctxId),
+        );
+
+        const contexts = await this.#contextRegistry
+            .list()
+            .catch((error) => {
+                failures.push(error);
+                return undefined;
+            });
+        const now = Date.now();
+        const reconciledInstances = new Set<string>();
+        for (const environment of terminal.environments) {
+            const gateway = this.#gateways.get(environment.instance);
+            if (
+                gateway !== undefined &&
+                !reconciledInstances.has(environment.instance)
+            ) {
+                reconciledInstances.add(environment.instance);
+                if (isMcpGoalGateway(gateway)) {
+                    const goal = await gateway
+                        .readGoal(environment.instance, terminal.ctxId)
+                        .catch((error) => {
+                            failures.push(error);
+                            return undefined;
+                        });
+                    if (goal?.status === "active" || goal?.status === "blocked") {
+                        await cleanup(async () => {
+                            await gateway.manageGoal(
+                                environment.instance,
+                                { action: "stop" },
+                                terminal.ctxId,
+                            );
+                        });
+                    }
+                }
+                if (gateway.listWaits !== undefined) {
+                    const waits = await gateway
+                        .listWaits(environment.instance)
+                        .catch((error) => {
+                            failures.push(error);
+                            return [];
+                        });
+                    for (const wait of waits) {
+                        if (wait.createdByCtxId !== terminal.ctxId) continue;
+                        if (
+                            (wait.status === "waiting" ||
+                                wait.status === "detached") &&
+                            gateway.cancelWait !== undefined
+                        ) {
+                            await cleanup(async () => {
+                                await gateway.cancelWait!(
+                                    environment.instance,
+                                    wait.waitId,
+                                );
+                            });
+                        } else if (
+                            wait.status === "resolved" &&
+                            gateway.consumeWait !== undefined
+                        ) {
+                            await cleanup(async () => {
+                                await gateway.consumeWait!(
+                                    environment.instance,
+                                    wait.waitId,
+                                );
+                            });
+                        }
+                    }
+                }
+                if (gateway.failContextMessages !== undefined) {
+                    await cleanup(async () => {
+                        await gateway.failContextMessages!(
+                            environment.instance,
+                            terminal.ctxId,
+                            "Context " +
+                                terminal.ctxId +
+                                " was " +
+                                terminalReason +
+                                " before Comment delivery.",
+                        );
+                    });
+                }
+                if (gateway.listApprovals !== undefined) {
+                    const approvals = await gateway
+                        .listApprovals(environment.instance)
+                        .catch((error) => {
+                            failures.push(error);
+                            return [];
+                        });
+                    for (const approval of approvals) {
+                        if (
+                            approval.ctxId !== terminal.ctxId ||
+                            approval.status !== "pending"
+                        ) {
+                            continue;
+                        }
+                        if (gateway.cancelApproval !== undefined) {
+                            await cleanup(async () => {
+                                await gateway.cancelApproval!(
+                                    environment.instance,
+                                    approval.approvalId,
+                                    "Context " +
+                                        terminal.ctxId +
+                                        " was " +
+                                        terminalReason +
+                                        ".",
+                                );
+                            });
+                        } else if (gateway.decideApproval !== undefined) {
+                            await cleanup(async () => {
+                                await gateway.decideApproval!(
+                                    environment.instance,
+                                    approval.approvalId,
+                                    "deny",
+                                );
+                            });
+                        }
+                    }
+                }
+            }
+
+            if (
+                environment.workspace !== undefined &&
+                contexts !== undefined
+            ) {
+                const workspace = environment.workspace;
+                const hasOtherActiveContext = contexts.some(
+                    (context) =>
+                        context.ctxId !== terminal.ctxId &&
+                        context.status === "active" &&
+                        Date.parse(context.expiresAt) > now &&
+                        context.environments.some(
+                            (candidate) =>
+                                candidate.instance === environment.instance &&
+                                candidate.workspace === workspace,
+                        ),
+                );
+                if (!hasOtherActiveContext) {
+                    const worker = this.#workers.get(environment.instance);
+                    const releaseAlerts = worker?.releaseAlerts;
+                    if (releaseAlerts !== undefined && worker !== undefined) {
+                        await cleanup(async () => {
+                            await releaseAlerts.call(worker, workspace);
+                        });
+                    } else if (gateway !== undefined) {
+                        await cleanup(async () => {
+                            await gateway.releaseAlerts(
+                                environment.instance,
+                                workspace,
+                            );
+                        });
+                    }
+                }
+            }
+
+            if (
+                gateway !== undefined ||
+                environment.instance !== terminal.instance
+            ) {
+                await cleanup(async () => {
+                    await this.#contextRegistry.recordEnvironmentCleanup(
+                        terminal.ctxId,
+                        {
+                            instance: environment.instance,
+                            kind: "instance_reference",
+                        },
+                    );
+                });
+            }
+        }
+
+        await cleanup(async () => {
+            await this.#runtimeState.environmentCleanup.reconcile(
+                terminal.ctxId,
+            );
+        });
+        if (failures.length === 0) {
+            await this.#contextRegistry
+                .settleCleanup(terminal.ctxId)
+                .catch((error) => failures.push(error));
+        }
+        if (failures.length > 0) {
+            console.warn(
+                new AggregateError(
+                    failures,
+                    "Context " +
+                        terminal.ctxId +
+                        " was " +
+                        terminalReason +
+                        ", but cleanup was incomplete.",
+                ),
+            );
         }
     }
 
@@ -503,183 +739,7 @@ export class McpHost {
             },
             disable: async (ctxId) => {
                 const disabled = await this.#contextRegistry.disable(ctxId);
-                const failures: unknown[] = [];
-                const cleanup = async (
-                    operation: () => Promise<unknown> | unknown,
-                ): Promise<void> => {
-                    try {
-                        await operation();
-                    } catch (error) {
-                        failures.push(error);
-                    }
-                };
-                await cleanup(async () => {
-                    await this.#workspaceAppLeases.revokeContext(ctxId);
-                });
-                await cleanup(() =>
-                    this.#workspaceAppPresence.revokeContext(ctxId),
-                );
-                const contexts = await this.#contextRegistry
-                    .list()
-                    .catch((error) => {
-                        failures.push(error);
-                        return undefined;
-                    });
-                const now = Date.now();
-                const reconciledInstances = new Set<string>();
-                for (const environment of disabled.environments) {
-                    const gateway = this.#gateways.get(environment.instance);
-                    if (
-                        gateway !== undefined &&
-                        !reconciledInstances.has(environment.instance)
-                    ) {
-                        reconciledInstances.add(environment.instance);
-                        if (isMcpGoalGateway(gateway)) {
-                            const goal = await gateway
-                                .readGoal(environment.instance, disabled.ctxId)
-                                .catch((error) => {
-                                    failures.push(error);
-                                    return undefined;
-                                });
-                            if (
-                                goal?.status === "active" ||
-                                goal?.status === "blocked"
-                            ) {
-                                await cleanup(async () => {
-                                    await gateway.manageGoal(
-                                        environment.instance,
-                                        { action: "stop" },
-                                        disabled.ctxId,
-                                    );
-                                });
-                            }
-                        }
-                        if (gateway.listWaits !== undefined) {
-                            const waits = await gateway
-                                .listWaits(environment.instance)
-                                .catch((error) => {
-                                    failures.push(error);
-                                    return [];
-                                });
-                            for (const wait of waits) {
-                                if (wait.createdByCtxId !== disabled.ctxId)
-                                    continue;
-                                if (
-                                    (wait.status === "waiting" ||
-                                        wait.status === "detached") &&
-                                    gateway.cancelWait !== undefined
-                                ) {
-                                    await cleanup(async () => {
-                                        await gateway.cancelWait!(
-                                            environment.instance,
-                                            wait.waitId,
-                                        );
-                                    });
-                                } else if (
-                                    wait.status === "resolved" &&
-                                    gateway.consumeWait !== undefined
-                                ) {
-                                    await cleanup(async () => {
-                                        await gateway.consumeWait!(
-                                            environment.instance,
-                                            wait.waitId,
-                                        );
-                                    });
-                                }
-                            }
-                        }
-                        if (gateway.failContextMessages !== undefined) {
-                            await cleanup(async () => {
-                                await gateway.failContextMessages!(
-                                    environment.instance,
-                                    disabled.ctxId,
-                                    `Context ${disabled.ctxId} was disabled before Comment delivery.`,
-                                );
-                            });
-                        }
-                        if (gateway.listApprovals !== undefined) {
-                            const approvals = await gateway
-                                .listApprovals(environment.instance)
-                                .catch((error) => {
-                                    failures.push(error);
-                                    return [];
-                                });
-                            for (const approval of approvals) {
-                                if (
-                                    approval.ctxId !== disabled.ctxId ||
-                                    approval.status !== "pending"
-                                )
-                                    continue;
-                                if (gateway.cancelApproval !== undefined) {
-                                    await cleanup(async () => {
-                                        await gateway.cancelApproval!(
-                                            environment.instance,
-                                            approval.approvalId,
-                                            `Context ${disabled.ctxId} was disabled.`,
-                                        );
-                                    });
-                                } else if (
-                                    gateway.decideApproval !== undefined
-                                ) {
-                                    await cleanup(async () => {
-                                        await gateway.decideApproval!(
-                                            environment.instance,
-                                            approval.approvalId,
-                                            "deny",
-                                        );
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    if (
-                        environment.workspace !== undefined &&
-                        contexts !== undefined
-                    ) {
-                        const workspace = environment.workspace;
-                        const hasOtherActiveContext = contexts.some(
-                            (context) =>
-                                context.ctxId !== disabled.ctxId &&
-                                context.status === "active" &&
-                                Date.parse(context.expiresAt) > now &&
-                                context.environments.some(
-                                    (candidate) =>
-                                        candidate.instance ===
-                                            environment.instance &&
-                                        candidate.workspace === workspace,
-                                ),
-                        );
-                        if (!hasOtherActiveContext) {
-                            const worker = this.#workers.get(
-                                environment.instance,
-                            );
-                            if (worker?.snapshot().ready === true) {
-                                await cleanup(async () => {
-                                    await worker.releaseAlerts?.(workspace);
-                                });
-                            }
-                        }
-                    }
-                    await cleanup(async () => {
-                        await gateway?.releaseInstanceReference?.(
-                            environment.instance,
-                            disabled.ctxId,
-                        );
-                    });
-                }
-                if (failures.length === 0) {
-                    await this.#contextRegistry
-                        .settleCleanup(disabled.ctxId)
-                        .catch((error) => failures.push(error));
-                }
-                if (failures.length > 0) {
-                    console.warn(
-                        new AggregateError(
-                            failures,
-                            `Context ${disabled.ctxId} was disabled, but cleanup was incomplete.`,
-                        ),
-                    );
-                }
+                await this.#cleanupTerminalContext(disabled);
                 return disabled;
             },
             list: async () => await this.#contextRegistry.list(),

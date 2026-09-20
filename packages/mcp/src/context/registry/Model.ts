@@ -45,6 +45,17 @@ export interface McpContextRemoteInstanceHandle {
     instance: string;
 }
 
+export type McpContextEnvironmentCleanup =
+    | {
+          instance: string;
+          kind: "alerts";
+          workspace: string;
+      }
+    | {
+          instance: string;
+          kind: "instance_reference";
+      };
+
 export type McpContextAutomaticReentryMode =
     "automatic" | "user_owned" | "paused";
 
@@ -66,6 +77,7 @@ export interface McpContextStoredRecord extends McpContextRecord {
         "goal" | "goal-resume" | "goal-retry" | "task-resume" | "wait";
     externalBindings?: McpContextExternalBinding[];
     maskedInstances?: string[];
+    pendingEnvironmentCleanup?: McpContextEnvironmentCleanup[];
     remoteInstanceHandles?: McpContextRemoteInstanceHandle[];
 }
 

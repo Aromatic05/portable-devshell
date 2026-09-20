@@ -1877,6 +1877,50 @@ test("environ_info rolls back an undisclosed Context when post-create event reco
     assert.deepEqual(harness.releasedAlerts, ["/projects/rollback"]);
 });
 
+test("environ_info keeps failed undisclosed cleanup disabled with durable debt", async () => {
+    const harness = createWorker({ failToolCalled: true });
+    const cleanupFailure = new Error("release failed");
+    harness.worker.releaseAlerts = async () => {
+        throw cleanupFailure;
+    };
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-rollback-cleanup",
+    });
+    const catalog = new McpEndpointCatalog({
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+    const dispatch = new McpEndpointDispatch({
+        catalog,
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: harness.worker,
+    });
+
+    await assert.rejects(
+        dispatch.callTool(
+            "environ_info",
+            { workspace: "/projects/rollback" },
+            { principal: "tester", requestId: "request-rollback-cleanup" },
+        ),
+    );
+
+    assert.deepEqual(
+        (await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })),
+        [{ ctxId: "ctx-rollback-cleanup", status: "disabled" }],
+    );
+    assert.deepEqual(await registry.listEnvironmentCleanup(), [
+        {
+            cleanup: {
+                instance: "demo-local",
+                kind: "alerts",
+                workspace: "/projects/rollback",
+            },
+            ctxId: "ctx-rollback-cleanup",
+        },
+    ]);
+});
+
 test("environ_info rollback keeps alerts leased by another Context attachment", async () => {
     const harness = createWorker({ failToolCalled: true });
     const ids = ["ctx-existing", "ctx-rollback"];

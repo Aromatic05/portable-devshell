@@ -400,13 +400,16 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
         workspace: "/workspace",
     });
     const remoteCalls: string[] = [];
+    let cleanupAttempts = 0;
     const gateway = createGateway({
         async callTool(instance) {
             remoteCalls.push(instance);
             return { remote: true };
         },
         async releaseInstanceReference() {
-            throw new Error("remote cleanup unavailable");
+            cleanupAttempts += 1;
+            if (cleanupAttempts === 1)
+                throw new Error("remote cleanup unavailable");
         },
     });
     const endpoint = new McpEndpointWorker({
@@ -481,19 +484,13 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
         { remote: true },
     );
 
-    const masked = (await endpoint.callTool(
-        "environ_remote",
-        { command: "mask", ctxId: created.ctxId, handle },
-        context,
-    )) as {
-        command?: string;
-        details?: { instance?: string; masked?: boolean };
-    };
-    assert.equal(masked.command, "mask");
-    assert.deepEqual(masked.details, {
-        instance: "remote-server",
-        masked: true,
-    });
+    await assert.rejects(
+        endpoint.callTool(
+            "environ_remote",
+            { command: "mask", ctxId: created.ctxId, handle },
+            context,
+        ),
+    );
     assert.equal(
         await registry.referenceInstance(created.ctxId, "remote-server"),
         undefined,
@@ -521,6 +518,7 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
                 "Remote instance is permanently masked for the lifetime of the current Context.",
         },
     );
+    assert.equal(cleanupAttempts, 2);
     await assert.rejects(
         endpoint.callTool(
             "environ_remote",
@@ -756,6 +754,123 @@ test("remote environment attach reuses a live workspace attachment and releases 
     assert.deepEqual(releasedAlerts, ["/remote-a"]);
 });
 
+test("remote workspace replacement keeps the committed attachment and retries cleanup debt", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-cleanup-retry",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    let releaseAttempts = 0;
+    const gateway = createGateway({
+        async prepareWorkspace(instance, workspace) {
+            return {
+                projectMemoryAgentFile: workspace + "/AGENT.md",
+                projectMemoryDirectory: workspace + "/.memory",
+                projectMemoryPresent: true,
+                temporaryDirectory: "/tmp/" + instance + "-" + workspace.slice(1),
+                workspace,
+            };
+        },
+        async releaseAlerts(_instance, workspace) {
+            assert.equal(workspace, "/remote-a");
+            releaseAttempts += 1;
+            if (releaseAttempts === 1)
+                throw new Error("old alert cleanup failed");
+        },
+    });
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+
+    await remote.attach(created.ctxId, handle, "/remote-a");
+    await assert.rejects(
+        remote.attach(created.ctxId, handle, "/remote-b"),
+    );
+    assert.equal(
+        (await registry.validateForInstance(created.ctxId, "remote-server"))
+            .environments.find(
+                (environment) => environment.instance === "remote-server",
+            )?.workspace,
+        "/remote-b",
+    );
+    assert.equal((await registry.listEnvironmentCleanup()).length, 1);
+
+    await remote.attach(created.ctxId, handle, "/remote-b");
+    assert.equal(releaseAttempts, 2);
+    assert.deepEqual(await registry.listEnvironmentCleanup(), []);
+});
+
+test("remote mask remains durable while failed cleanup is retried", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-mask-cleanup-retry",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    let referenceAttempts = 0;
+    let alertAttempts = 0;
+    const gateway = createGateway({
+        async releaseAlerts(_instance, workspace) {
+            assert.equal(workspace, "/remote-mask");
+            alertAttempts += 1;
+        },
+        async releaseInstanceReference(instance, reference) {
+            assert.equal(instance, "remote-server");
+            assert.equal(reference, created.ctxId);
+            referenceAttempts += 1;
+            if (referenceAttempts === 1)
+                throw new Error("reference cleanup failed");
+        },
+    });
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+    await remote.attach(created.ctxId, handle, "/remote-mask");
+
+    await assert.rejects(
+        remote.mask(created.ctxId, handle),
+    );
+    await assert.rejects(
+        registry.validateForInstance(created.ctxId, "remote-server"),
+        (error: unknown) =>
+            (error as { code?: string }).code ===
+            "mcp.contextInstanceMasked",
+    );
+    assert.equal(referenceAttempts, 1);
+    assert.equal(alertAttempts, 1);
+    assert.deepEqual(await registry.listEnvironmentCleanup(), [
+        {
+            cleanup: {
+                instance: "remote-server",
+                kind: "instance_reference",
+            },
+            ctxId: created.ctxId,
+        },
+    ]);
+
+    await remote.mask(created.ctxId, handle);
+    assert.equal(referenceAttempts, 2);
+    assert.equal(alertAttempts, 1);
+    assert.deepEqual(await registry.listEnvironmentCleanup(), []);
+});
+
 test("remote environment attach cleans an unused alert lease and reference when workspace preparation fails", async () => {
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-connect-failure",
@@ -803,6 +918,139 @@ test("remote environment attach cleans an unused alert lease and reference when 
     );
     assert.deepEqual(releasedAlerts, ["/remote-fail"]);
     assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
+});
+
+test("remote attach persists cleanup debt when pre-commit compensation fails", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-cleanup-debt",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    let alertReads = 0;
+    let alertReleaseAttempts = 0;
+    let referenceReleaseAttempts = 0;
+    const gateway = createGateway({
+        async prepareWorkspace(instance, workspace) {
+            return {
+                projectMemoryAgentFile: workspace + "/AGENT.md",
+                projectMemoryDirectory: workspace + "/.memory",
+                projectMemoryPresent: true,
+                temporaryDirectory: "/tmp/" + instance,
+                workspace,
+            };
+        },
+        async readAlerts() {
+            alertReads += 1;
+            if (alertReads === 1) throw new Error("alerts failed before commit");
+            return { advice: [] };
+        },
+        async releaseAlerts(_instance, workspace) {
+            assert.equal(workspace, "/remote-retry");
+            alertReleaseAttempts += 1;
+            if (alertReleaseAttempts === 1)
+                throw new Error("prepared alert cleanup failed");
+        },
+        async releaseInstanceReference(instance, reference) {
+            assert.equal(instance, "remote-server");
+            assert.equal(reference, created.ctxId);
+            referenceReleaseAttempts += 1;
+            if (referenceReleaseAttempts === 1)
+                throw new Error("pre-commit reference cleanup failed");
+        },
+    });
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+
+    await assert.rejects(
+        remote.attach(created.ctxId, handle, "/remote-retry"),
+    );
+    assert.deepEqual(await registry.listEnvironmentCleanup(), [
+        {
+            cleanup: {
+                instance: "remote-server",
+                kind: "alerts",
+                workspace: "/remote-retry",
+            },
+            ctxId: created.ctxId,
+        },
+        {
+            cleanup: {
+                instance: "remote-server",
+                kind: "instance_reference",
+            },
+            ctxId: created.ctxId,
+        },
+    ]);
+
+    await remote.attach(created.ctxId, handle, "/remote-retry");
+    assert.equal(alertReleaseAttempts, 2);
+    assert.equal(referenceReleaseAttempts, 2);
+    assert.deepEqual(await registry.listEnvironmentCleanup(), []);
+    assert.equal(
+        (await registry.validateForInstance(created.ctxId, "remote-server"))
+            .environments.find(
+                (environment) => environment.instance === "remote-server",
+            )?.workspace,
+        "/remote-retry",
+    );
+});
+
+test("remote attach records reference cleanup debt when the gateway cannot release references", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-cleanup-capability",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    const gateway = createGateway({
+        async prepareWorkspace(instance, workspace) {
+            return {
+                projectMemoryAgentFile: workspace + "/AGENT.md",
+                projectMemoryDirectory: workspace + "/.memory",
+                projectMemoryPresent: true,
+                temporaryDirectory: "/tmp/" + instance,
+                workspace,
+            };
+        },
+        async readAlerts() {
+            throw new Error("alerts failed before commit");
+        },
+    });
+    delete (gateway as { releaseInstanceReference?: unknown })
+        .releaseInstanceReference;
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+
+    await assert.rejects(
+        remote.attach(created.ctxId, handle, "/remote-missing-release"),
+    );
+    assert.equal(
+        (await registry.listEnvironmentCleanup()).some(
+            ({ cleanup }) =>
+                cleanup.kind === "instance_reference" &&
+                cleanup.instance === "remote-server",
+        ),
+        true,
+    );
 });
 
 test("remote bash truncation does not advertise the retired artifact_read tool", async () => {

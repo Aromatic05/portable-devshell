@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import {
@@ -23,6 +23,7 @@ import {
     type McpContextAutomaticReentryState,
     type McpContextBinding,
     type McpContextDocument,
+    type McpContextEnvironmentCleanup,
     type McpContextEnvironmentBinding,
     type McpContextExternalBinding,
     type McpContextInstanceReference,
@@ -42,6 +43,7 @@ export {
 export type {
     McpContextAutomaticReentryState,
     McpContextBinding,
+    McpContextEnvironmentCleanup,
     McpContextEnvironmentBinding,
     McpContextExternalBinding,
     McpContextInstanceReference,
@@ -177,22 +179,12 @@ export class McpContextRegistry {
                 throw expiredContext(ctxId, record.expiresAt);
             }
             await this.#mutateAndPersist(() => {
-                for (const existing of this.#contexts.values()) {
-                    if (existing.principal !== binding.principal) continue;
-                    existing.externalBindings = (
-                        existing.externalBindings ?? []
-                    ).filter(
-                        (candidate) =>
-                            !sameExternalBinding(candidate, external),
-                    );
-                    if (existing.externalBindings.length === 0) {
-                        existing.externalBindings = undefined;
-                    }
-                }
-                record.externalBindings = [
-                    ...(record.externalBindings ?? []),
-                    { ...external },
-                ];
+                bindExternalRecord(
+                    this.#contexts.values(),
+                    record,
+                    external,
+                    binding.principal,
+                );
             });
             return cloneRecord(record);
         });
@@ -850,7 +842,10 @@ export class McpContextRegistry {
                         record.remoteInstanceHandles = undefined;
                     }
                     if (record.environments.length === 0) {
-                        record.status = "disabled";
+                        if (record.status !== "disabled") {
+                            record.status = "disabled";
+                            record.cleanupPending = true;
+                        }
                     }
                 }
             });
@@ -861,6 +856,10 @@ export class McpContextRegistry {
     async attachEnvironment(
         ctxId: string,
         binding: McpContextEnvironmentBinding,
+        external?: {
+            bindings: readonly McpContextExternalBinding[];
+            principal: string;
+        },
     ): Promise<McpContextRecord> {
         return await this.#run(async () => {
             this.#assertInitialized();
@@ -886,12 +885,32 @@ export class McpContextRegistry {
             if ((record.maskedInstances ?? []).includes(binding.instance)) {
                 throw maskedInstance(ctxId, binding.instance);
             }
+            if (
+                external !== undefined &&
+                (record.principal !== external.principal ||
+                    external.bindings.some(
+                        (candidate) => !isExternalBinding(candidate),
+                    ))
+            ) {
+                throw invalidExternalBinding();
+            }
             await this.#mutateAndPersist(() => {
                 const index = record.environments.findIndex(
                     (environment) => environment.instance === binding.instance,
                 );
                 const current =
                     index < 0 ? undefined : record.environments[index];
+                if (
+                    current?.workspace !== undefined &&
+                    binding.workspace !== undefined &&
+                    current.workspace !== binding.workspace
+                ) {
+                    appendEnvironmentCleanup(record, {
+                        instance: binding.instance,
+                        kind: "alerts",
+                        workspace: current.workspace,
+                    });
+                }
                 const next: McpContextEnvironment =
                     binding.workspace === undefined
                         ? { ...(current ?? {}), instance: binding.instance }
@@ -911,6 +930,16 @@ export class McpContextRegistry {
                 ) {
                     record.workspace = binding.workspace;
                     record.temporaryDirectory = binding.temporaryDirectory;
+                }
+                if (external !== undefined) {
+                    for (const externalBinding of external.bindings) {
+                        bindExternalRecord(
+                            this.#contexts.values(),
+                            record,
+                            externalBinding,
+                            external.principal,
+                        );
+                    }
                 }
             });
             return cloneRecord(record);
@@ -1021,6 +1050,19 @@ export class McpContextRegistry {
                 environment !== undefined
             ) {
                 await this.#mutateAndPersist(() => {
+                    if (environment !== undefined) {
+                        appendEnvironmentCleanup(record, {
+                            instance: reference.instance,
+                            kind: "instance_reference",
+                        });
+                        if (environment.workspace !== undefined) {
+                            appendEnvironmentCleanup(record, {
+                                instance: reference.instance,
+                                kind: "alerts",
+                                workspace: environment.workspace,
+                            });
+                        }
+                    }
                     record.maskedInstances = [
                         ...new Set([
                             ...(record.maskedInstances ?? []),
@@ -1060,10 +1102,55 @@ export class McpContextRegistry {
             return [...this.#contexts.values()]
                 .filter(
                     (record) =>
-                        record.status === "disabled" &&
-                        record.cleanupPending !== false,
+                        record.cleanupPending === true ||
+                        (record.status === "disabled" &&
+                            record.cleanupPending === undefined),
                 )
                 .map(cloneRecord);
+        });
+    }
+
+    async listEnvironmentCleanup(
+        ctxId?: string,
+    ): Promise<
+        Array<{ cleanup: McpContextEnvironmentCleanup; ctxId: string }>
+    > {
+        return await this.#run(async () => {
+            this.#assertInitialized();
+            return [...this.#contexts.values()]
+                .filter((record) => ctxId === undefined || record.ctxId === ctxId)
+                .flatMap((record) =>
+                    (record.pendingEnvironmentCleanup ?? []).map((cleanup) => ({
+                        cleanup: cloneEnvironmentCleanup(cleanup),
+                        ctxId: record.ctxId,
+                    })),
+                );
+        });
+    }
+
+    async recordEnvironmentCleanup(
+        ctxId: string,
+        cleanup: McpContextEnvironmentCleanup,
+    ): Promise<void> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (parseEnvironmentCleanup(cleanup) === undefined) {
+                throw new Error("Invalid Context environment cleanup record.");
+            }
+            if (
+                (record.pendingEnvironmentCleanup ?? []).some((candidate) =>
+                    sameEnvironmentCleanup(candidate, cleanup),
+                )
+            ) {
+                return;
+            }
+            await this.#mutateAndPersist(() => {
+                appendEnvironmentCleanup(record, cleanup);
+            });
         });
     }
 
@@ -1094,10 +1181,45 @@ export class McpContextRegistry {
             if (record === undefined || !isCtxId(ctxId)) {
                 throw invalidContext(ctxId);
             }
-            if (record.status !== "disabled" || record.cleanupPending === false)
+            if (record.status === "active" || record.cleanupPending === false)
                 return;
+            if ((record.pendingEnvironmentCleanup?.length ?? 0) > 0) {
+                throw new Error(
+                    `Context ${ctxId} cannot settle terminal cleanup while environment cleanup is pending.`,
+                );
+            }
             await this.#mutateAndPersist(() => {
                 record.cleanupPending = false;
+            });
+        });
+    }
+
+    async settleEnvironmentCleanup(
+        ctxId: string,
+        cleanup: McpContextEnvironmentCleanup,
+    ): Promise<void> {
+        await this.#run(async () => {
+            this.#assertInitialized();
+            const record = this.#contexts.get(ctxId);
+            if (record === undefined || !isCtxId(ctxId)) {
+                throw invalidContext(ctxId);
+            }
+            if (
+                !(record.pendingEnvironmentCleanup ?? []).some((candidate) =>
+                    sameEnvironmentCleanup(candidate, cleanup),
+                )
+            ) {
+                return;
+            }
+            await this.#mutateAndPersist(() => {
+                record.pendingEnvironmentCleanup =
+                    record.pendingEnvironmentCleanup?.filter(
+                        (candidate) =>
+                            !sameEnvironmentCleanup(candidate, cleanup),
+                    );
+                if (record.pendingEnvironmentCleanup?.length === 0) {
+                    record.pendingEnvironmentCleanup = undefined;
+                }
             });
         });
     }
@@ -1133,6 +1255,9 @@ export class McpContextRegistry {
             if (record.status === "disabled") {
                 throw disabledContext(ctxId);
             }
+            if (record.status === "expired" && record.cleanupPending === true) {
+                throw expiredContext(ctxId, record.expiresAt);
+            }
             const now = this.#now();
             await this.#mutateAndPersist(() => {
                 record.status = "active";
@@ -1152,6 +1277,9 @@ export class McpContextRegistry {
             }
             if (record.status === "disabled") {
                 throw disabledContext(ctxId);
+            }
+            if (record.status === "expired" && record.cleanupPending === true) {
+                throw expiredContext(ctxId, record.expiresAt);
             }
             const now = this.#now();
             await this.#mutateAndPersist(() => {
@@ -1194,6 +1322,16 @@ export class McpContextRegistry {
                 throw invalidContext(ctxId);
             }
             await this.#mutateAndPersist(() => {
+                if (
+                    environment.workspace !== undefined &&
+                    environment.workspace !== binding.workspace
+                ) {
+                    appendEnvironmentCleanup(record, {
+                        instance,
+                        kind: "alerts",
+                        workspace: environment.workspace,
+                    });
+                }
                 environment.workspace = binding.workspace;
                 environment.temporaryDirectory = binding.temporaryDirectory;
                 if (record.instance === instance) {
@@ -1332,6 +1470,12 @@ export class McpContextRegistry {
             const record = parseRecord(value);
             if (record !== undefined) {
                 this.#contexts.set(record.ctxId, record);
+                continue;
+            }
+            if (hasLifecycleCleanupState(value)) {
+                throw new Error(
+                    `Invalid MCP context registry cleanup state: ${this.#filePath}`,
+                );
             }
         }
     }
@@ -1360,12 +1504,22 @@ export class McpContextRegistry {
                     : created;
             });
         let changed = false;
-        while (terminal.length > this.#maxTerminalContexts) {
-            const record = terminal.shift()!;
-            this.#contexts.delete(record.ctxId);
-            this.#executionHydrated.delete(record.ctxId);
-            this.#executionStore.delete(record.ctxId);
-            changed = true;
+        const overflow = Math.max(
+            0,
+            terminal.length - this.#maxTerminalContexts,
+        );
+        for (const record of terminal.slice(0, overflow)) {
+            if (record.cleanupPending === false) {
+                this.#contexts.delete(record.ctxId);
+                this.#executionHydrated.delete(record.ctxId);
+                this.#executionStore.delete(record.ctxId);
+                changed = true;
+                continue;
+            }
+            if (record.cleanupPending !== true) {
+                record.cleanupPending = true;
+                changed = true;
+            }
         }
         return changed;
     }
@@ -1374,7 +1528,8 @@ export class McpContextRegistry {
         if (this.#filePath === undefined) {
             return;
         }
-        await mkdir(dirname(this.#filePath), { recursive: true });
+        const directory = dirname(this.#filePath);
+        await mkdir(directory, { mode: 0o700, recursive: true });
         const document: McpContextDocument = {
             contexts: [...this.#contexts.values()].sort((left, right) =>
                 left.createdAt.localeCompare(right.createdAt),
@@ -1382,12 +1537,26 @@ export class McpContextRegistry {
             version: 1,
         };
         const temporary = `${this.#filePath}.${process.pid}.${randomUUID()}.tmp`;
+        const file = await open(temporary, "wx", 0o600);
         try {
-            await writeFile(temporary, `${JSON.stringify(document)}\n`, {
-                encoding: "utf8",
-                mode: 0o600,
-            });
+            await file.writeFile(`${JSON.stringify(document)}\n`, "utf8");
+            await file.sync();
+        } catch (error) {
+            await file.close().catch(() => undefined);
+            await rm(temporary, { force: true }).catch(() => undefined);
+            throw error;
+        }
+        await file.close();
+        try {
             await rename(temporary, this.#filePath);
+            if (process.platform !== "win32") {
+                const parent = await open(directory, "r");
+                try {
+                    await parent.sync();
+                } finally {
+                    await parent.close();
+                }
+            }
             for (const record of document.contexts) {
                 this.#persistedExpiresAt.set(
                     record.ctxId,
@@ -1494,6 +1663,7 @@ function cloneRecord(record: McpContextStoredRecord): McpContextRecord {
         automaticReentrySourceKind: _automaticReentrySourceKind,
         externalBindings: _externalBindings,
         maskedInstances: _maskedInstances,
+        pendingEnvironmentCleanup: _pendingEnvironmentCleanup,
         remoteInstanceHandles: _remoteInstanceHandles,
         ...publicRecord
     } = record;
@@ -1527,6 +1697,9 @@ function cloneStoredRecord(
             record.maskedInstances === undefined
                 ? undefined
                 : [...record.maskedInstances],
+        pendingEnvironmentCleanup: record.pendingEnvironmentCleanup?.map(
+            cloneEnvironmentCleanup,
+        ),
         remoteInstanceHandles: record.remoteInstanceHandles?.map(
             (reference) => ({ ...reference }),
         ),
@@ -1624,6 +1797,17 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         : [];
     if (maskedInstances.some((instance) => instance === undefined))
         return undefined;
+    if (
+        raw.pendingEnvironmentCleanup !== undefined &&
+        !Array.isArray(raw.pendingEnvironmentCleanup)
+    ) {
+        throw new Error("Invalid MCP Context environment cleanup state.");
+    }
+    const pendingEnvironmentCleanup =
+        raw.pendingEnvironmentCleanup?.map(parseEnvironmentCleanup) ?? [];
+    if (pendingEnvironmentCleanup.some((cleanup) => cleanup === undefined)) {
+        throw new Error("Invalid MCP Context environment cleanup state.");
+    }
     if (
         typeof record.ctxId !== "string" ||
         !isCtxId(record.ctxId) ||
@@ -1739,6 +1923,12 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
         ...(maskedInstances.length === 0
             ? {}
             : { maskedInstances: [...new Set(maskedInstances as string[])] }),
+        ...(pendingEnvironmentCleanup.length === 0
+            ? {}
+            : {
+                  pendingEnvironmentCleanup:
+                      pendingEnvironmentCleanup as McpContextEnvironmentCleanup[],
+              }),
         ...(remoteInstanceHandles.length === 0
             ? {}
             : {
@@ -1755,6 +1945,17 @@ function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     };
 }
 
+function hasLifecycleCleanupState(value: unknown): boolean {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const record = value as Record<string, unknown>;
+    return (
+        record.cleanupPending === true ||
+        record.pendingEnvironmentCleanup !== undefined
+    );
+}
+
 function parseRemoteInstanceHandle(
     value: unknown,
 ): McpContextRemoteInstanceHandle | undefined {
@@ -1769,6 +1970,73 @@ function parseRemoteInstanceHandle(
         instance.length > 0
         ? { handle, instance }
         : undefined;
+}
+
+function parseEnvironmentCleanup(
+    value: unknown,
+): McpContextEnvironmentCleanup | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return undefined;
+    const cleanup = value as Record<string, unknown>;
+    if (
+        typeof cleanup.instance !== "string" ||
+        cleanup.instance.length === 0
+    ) {
+        return undefined;
+    }
+    if (cleanup.kind === "instance_reference") {
+        return {
+            instance: cleanup.instance,
+            kind: "instance_reference",
+        };
+    }
+    if (
+        cleanup.kind === "alerts" &&
+        typeof cleanup.workspace === "string" &&
+        cleanup.workspace.length > 0
+    ) {
+        return {
+            instance: cleanup.instance,
+            kind: "alerts",
+            workspace: cleanup.workspace,
+        };
+    }
+    return undefined;
+}
+
+function cloneEnvironmentCleanup(
+    cleanup: McpContextEnvironmentCleanup,
+): McpContextEnvironmentCleanup {
+    return { ...cleanup };
+}
+
+function sameEnvironmentCleanup(
+    left: McpContextEnvironmentCleanup,
+    right: McpContextEnvironmentCleanup,
+): boolean {
+    return (
+        left.kind === right.kind &&
+        left.instance === right.instance &&
+        (left.kind !== "alerts" ||
+            (right.kind === "alerts" && left.workspace === right.workspace))
+    );
+}
+
+function appendEnvironmentCleanup(
+    record: McpContextStoredRecord,
+    cleanup: McpContextEnvironmentCleanup,
+): void {
+    if (
+        (record.pendingEnvironmentCleanup ?? []).some((candidate) =>
+            sameEnvironmentCleanup(candidate, cleanup),
+        )
+    ) {
+        return;
+    }
+    record.pendingEnvironmentCleanup = [
+        ...(record.pendingEnvironmentCleanup ?? []),
+        cloneEnvironmentCleanup(cleanup),
+    ];
 }
 
 function automaticReentryState(
@@ -1895,6 +2163,27 @@ function sameExternalBinding(
     right: McpContextExternalBinding,
 ): boolean {
     return left.kind === right.kind && left.value === right.value;
+}
+
+function bindExternalRecord(
+    contexts: Iterable<McpContextStoredRecord>,
+    record: McpContextStoredRecord,
+    external: McpContextExternalBinding,
+    principal: string,
+): void {
+    for (const existing of contexts) {
+        if (existing.principal !== principal) continue;
+        existing.externalBindings = (existing.externalBindings ?? []).filter(
+            (candidate) => !sameExternalBinding(candidate, external),
+        );
+        if (existing.externalBindings.length === 0) {
+            existing.externalBindings = undefined;
+        }
+    }
+    record.externalBindings = [
+        ...(record.externalBindings ?? []),
+        { ...external },
+    ];
 }
 
 function uniqueExternalBindings(
