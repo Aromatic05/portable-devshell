@@ -14,6 +14,7 @@ import {
     applyQueuedControl,
     clearConversationControlStates,
     type ConversationControlState,
+    readConversationControlCommentIds,
     readConversationControlState,
     writeConversationControlState,
 } from "../ConversationControl.js";
@@ -433,6 +434,13 @@ export class ConversationStore {
     #cleanup(database: DatabaseSync, forceRetention = false): void {
         const now = this.#now();
         let removed = false;
+        const protectedCommentIds = [
+            ...readConversationControlCommentIds(database),
+        ];
+        const protectedCommentClause =
+            protectedCommentIds.length === 0
+                ? ""
+                : `AND id NOT IN (${protectedCommentIds.map(() => "?").join(", ")})`;
         if (
             forceRetention ||
             now - this.#lastRetentionCleanupAt >= RETENTION_CLEANUP_INTERVAL_MS
@@ -449,10 +457,11 @@ export class ConversationStore {
                         kind = 'comment'
                         AND status IN ('delivered', 'failed')
                         AND COALESCE(delivered_at, failed_at, created_at) < ?
+                        ${protectedCommentClause}
                     )
             `,
                 )
-                .get(cutoff, cutoff) as {
+                .get(cutoff, cutoff, ...protectedCommentIds) as {
                 entries: number;
                 payloadBytes: number;
             };
@@ -467,10 +476,11 @@ export class ConversationStore {
                             kind = 'comment'
                             AND status IN ('delivered', 'failed')
                             AND COALESCE(delivered_at, failed_at, created_at) < ?
+                            ${protectedCommentClause}
                         )
                 `,
                     )
-                    .run(cutoff, cutoff);
+                    .run(cutoff, cutoff, ...protectedCommentIds);
                 this.#payloadBytes = Math.max(
                     0,
                     this.#trackedPayloadBytes() - expired.payloadBytes,
@@ -486,7 +496,11 @@ export class ConversationStore {
                     `
                 SELECT seq, ${conversationPayloadBytesSql()} AS payloadBytes
                 FROM conversation_entries
-                WHERE kind = 'report' OR (kind = 'comment' AND status IN ('delivered', 'failed'))
+                WHERE kind = 'report' OR (
+                    kind = 'comment'
+                    AND status IN ('delivered', 'failed')
+                    ${protectedCommentClause}
+                )
                 ORDER BY
                     CASE
                         WHEN kind = 'report' THEN created_at
@@ -496,7 +510,10 @@ export class ConversationStore {
                 LIMIT 256
             `,
                 )
-                .all() as Array<{ payloadBytes: number; seq: number }>;
+                .all(...protectedCommentIds) as Array<{
+                payloadBytes: number;
+                seq: number;
+            }>;
             if (candidates.length === 0) break;
             const remove = database.prepare(
                 "DELETE FROM conversation_entries WHERE seq = ?",

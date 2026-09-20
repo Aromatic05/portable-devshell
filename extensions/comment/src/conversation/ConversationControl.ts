@@ -56,6 +56,29 @@ export function clearConversationControlStates(database: DatabaseSync): void {
         .run(`${CONTROL_STATE_METADATA_PREFIX}%`);
 }
 
+export function readConversationControlCommentIds(
+    database: DatabaseSync,
+): ReadonlySet<string> {
+    const rows = database
+        .prepare("SELECT value FROM conversation_metadata WHERE key LIKE ?")
+        .all(`${CONTROL_STATE_METADATA_PREFIX}%`) as Array<{ value: string }>;
+    const ids = new Set<string>();
+    for (const row of rows) {
+        const state = normalizeConversationControlState(
+            JSON.parse(row.value) as unknown,
+        );
+        for (const id of [
+            state.pendingPushCommentId,
+            state.pendingReplyCommentId,
+            state.pendingResumeCommentId,
+            state.stoppedByCommentId,
+        ]) {
+            if (id !== undefined) ids.add(id);
+        }
+    }
+    return ids;
+}
+
 export function applyQueuedControl(
     state: ConversationControlState,
     record: ContextMessageRecord,

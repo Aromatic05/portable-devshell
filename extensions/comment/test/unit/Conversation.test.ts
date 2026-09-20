@@ -250,6 +250,40 @@ test("ConversationStore retention removes old terminal history but never old pen
     store.close();
 });
 
+test("ConversationStore preserves a delivered Comment while control state still needs it as the reply target", async () => {
+    const root = await createTestTempDirectory("conversation-reply-target-retention");
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+        maxBytes: 1_024,
+        now: () => Date.parse("2026-09-11T00:00:00.000Z"),
+        retentionDays: 30,
+    });
+    store.insertComment({
+        createdAt: "2026-07-01T00:00:00.000Z",
+        ctxId: "ctx-a",
+        id: "reply-target",
+        instance: "alpha",
+        status: "sent",
+        text: "question ".repeat(1_000),
+    });
+
+    store.deliverComments(
+        "ctx-a",
+        "delivery-call",
+        "2026-07-01T00:01:00.000Z",
+    );
+
+    assert.equal(store.comment("ctx-a", "reply-target")?.status, "delivered");
+    assert.equal(
+        store.readControlState("ctx-a").pendingReplyCommentId,
+        "reply-target",
+    );
+    const stats = store.stats();
+    assert.equal(stats.payloadBytes > 1_024, true);
+    store.close();
+});
+
 test("ConversationStore capacity evicts oldest terminal history before protected Comments", async () => {
     const root = await createTestTempDirectory("conversation-capacity");
     const maxBytes = 12_000;
