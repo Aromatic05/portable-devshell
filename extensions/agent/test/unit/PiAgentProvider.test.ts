@@ -8,6 +8,8 @@ import test from "node:test";
 import type {
     AgentProviderHandle,
     AgentProviderStartContext,
+    AgentProviderWebHandle,
+    AgentProviderWebStartContext,
 } from "../../src/builtin/provider/AgentProvider.ts";
 import { AgentProviderRuntimePaths } from "../../src/builtin/provider/AgentProviderRuntimePaths.ts";
 import { parseAgentWorkerTarget } from "../../src/builtin/worker/AgentWorkerTarget.ts";
@@ -26,7 +28,7 @@ import {
 } from "../../src/provider/pi/PiProviderInstaller.ts";
 
 test("Pi provider implementation version is independent from the Pi bootstrap version", () => {
-    assert.equal(PI_PROVIDER_VERSION, "0.1.2");
+    assert.equal(PI_PROVIDER_VERSION, "0.1.3");
     assert.notEqual(PI_PROVIDER_VERSION, PI_BOOTSTRAP_VERSION);
 });
 
@@ -164,6 +166,9 @@ test("Pi provider maps each Agent into the shared managed runtime with its injec
                 starts.push(options);
                 return handle;
             },
+            async startWeb() {
+                throw new Error("Web start is not expected");
+            },
         };
         const provider = new PiAgentProvider({
             installer: {
@@ -193,6 +198,69 @@ test("Pi provider maps each Agent into the shared managed runtime with its injec
         assert.equal(starts[0]?.tools, context.tools);
         assert.match(starts[0]!.localCwd, /agents\/ag-pi-test\/cwd$/u);
         assert.equal(starts[0]?.webBasePath, "/agent/");
+    } finally {
+        await rm(rootDirectory, { force: true, recursive: true });
+    }
+});
+
+test("Pi provider can start its Web hub without creating an Agent session", async () => {
+    const rootDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-web-"));
+    try {
+        const runtime = new AgentProviderRuntimePaths({
+            provider: "pi",
+            rootDirectory,
+            version: PI_PROVIDER_VERSION,
+        });
+        const context: AgentProviderWebStartContext = {
+            processes: {
+                async start() {
+                    throw new Error("unused test process capability");
+                },
+            },
+            runtime,
+            web: { basePath: "/agent/" },
+        };
+        const webStarts: unknown[] = [];
+        const webHandle: AgentProviderWebHandle = {
+            closed: new Promise<void>(() => undefined),
+            async stop() {},
+            upstream: new URL("http://127.0.0.1:43123/"),
+        };
+        const runtimeFactory: PiAgentRuntimeFactory = {
+            async start() {
+                throw new Error("Agent start is not expected");
+            },
+            async startWeb(options) {
+                webStarts.push(options);
+                return webHandle;
+            },
+        };
+        const provider = new PiAgentProvider({
+            installer: {
+                async ensureInstalled() {
+                    return {
+                        agentDirectory: "/managed/state/pi",
+                        entrypoint: "/managed/pi/dist/index.js",
+                        managedInstallRoot: "/managed/pi",
+                        packageRoot: "/managed/pi",
+                        version: PI_BOOTSTRAP_VERSION,
+                    };
+                },
+            },
+            runtimeFactory,
+        });
+
+        assert.equal(await provider.startWeb?.(context), webHandle);
+        assert.deepEqual(webStarts, [
+            {
+                agentDirectory: "/managed/state/pi",
+                entrypoint: "/managed/pi/dist/index.js",
+                managedInstallRoot: "/managed/pi",
+                processes: context.processes,
+                runtimeDirectory: runtime.stateDirectory,
+                webBasePath: "/agent/",
+            },
+        ]);
     } finally {
         await rm(rootDirectory, { force: true, recursive: true });
     }

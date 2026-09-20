@@ -90,7 +90,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         Object.freeze({
             source: Object.freeze({
                 kind: "endpoint" as const,
-                resolve: () => runtime.webUpstream(),
+                resolve: async () => await runtime.webUpstream(),
             }),
         }),
     );

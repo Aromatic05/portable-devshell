@@ -121,6 +121,64 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     assert.equal(host.webEndpoint(), undefined);
 });
 
+test("AgentHost keeps the provider Web hub alive independently from Agent sessions", async () => {
+    let webStarts = 0;
+    let webStops = 0;
+    const provider: AgentProvider = {
+        id: "pi",
+        version: "0.84.4",
+        async start() {
+            return {
+                closed: neverClosed,
+                async prompt() {},
+                async stop() {},
+                web: { upstream: new URL("http://127.0.0.1:43123/") },
+            };
+        },
+        async startWeb(context) {
+            webStarts += 1;
+            assert.equal(context.web.basePath, "/agent/");
+            return {
+                closed: neverClosed,
+                async stop() {
+                    webStops += 1;
+                },
+                upstream: new URL("http://127.0.0.1:43123/"),
+            };
+        },
+    };
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const host = new AgentHost({
+        idFactory: () => "ag-web-lifetime",
+        processes: testProcesses,
+        providers: [provider],
+        runtimeRootDirectory,
+    });
+
+    assert.deepEqual(await host.ensureWebEndpoint("pi"), {
+        basePath: "/agent/",
+        upstream: "http://127.0.0.1:43123/",
+    });
+    assert.equal(webStarts, 1);
+
+    const record = await host.start({
+        provider: "pi",
+        target,
+        tools: toolSession(target),
+    });
+    await host.stop(record.agentId);
+
+    assert.deepEqual(await host.ensureWebEndpoint("pi"), {
+        basePath: "/agent/",
+        upstream: "http://127.0.0.1:43123/",
+    });
+    assert.equal(webStarts, 1);
+    assert.equal(webStops, 0);
+
+    await host.stopAll();
+    assert.equal(webStops, 1);
+});
+
 test("AgentHost waitForIdle blocks until the provider idle boundary resolves", async () => {
     let resolveIdle!: () => void;
     const idle = new Promise<void>((resolve) => {

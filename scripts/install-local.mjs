@@ -35,6 +35,7 @@ import {
     assertRunningControlMatchesApplication,
     isPortableDevshellControlCommand,
 } from "./install-runtime-identity.mjs";
+import { embedBundledPiProviderIntoApplication } from "./package-agent.mjs";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const installStepTotal = 5;
@@ -139,6 +140,7 @@ try {
             deployDirectory,
         ]);
         await materializeApplicationTree(deployDirectory, stagingDirectory);
+        await embedBundledPiProviderIntoApplication(stagingDirectory);
     } finally {
         await rm(deployDirectory, { force: true, recursive: true });
     }

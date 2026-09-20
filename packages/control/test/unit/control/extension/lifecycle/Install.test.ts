@@ -183,6 +183,16 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
     const h = await harness(t);
     const source = await h.source("builtin-skill", { id: "skill" });
 
+    const agentSource = await h.source("builtin-agent", { id: "agent" });
+    await assert.rejects(
+        h.service.install(agentSource),
+        /reserved for a builtin Extension/u,
+    );
+    assert.equal(
+        (await h.service.installBuiltin("agent", agentSource)).id,
+        "agent",
+    );
+
     await assert.rejects(
         h.service.install(source),
         /reserved for a builtin Extension/u,

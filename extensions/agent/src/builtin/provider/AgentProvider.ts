@@ -23,6 +23,17 @@ export interface AgentProviderWebEndpoint {
     upstream: URL;
 }
 
+export interface AgentProviderWebStartContext {
+    processes: ExtensionProcessCapability;
+    runtime: AgentProviderRuntimePaths;
+    web: AgentProviderWebContext;
+}
+
+export interface AgentProviderWebHandle extends AgentProviderWebEndpoint {
+    readonly closed: Promise<void>;
+    stop(): Promise<void>;
+}
+
 export interface AgentProviderHandle {
     readonly closed: Promise<void>;
     readonly web?: AgentProviderWebEndpoint;
@@ -40,4 +51,7 @@ export interface AgentProvider {
     readonly id: string;
     readonly version: string;
     start(context: AgentProviderStartContext): Promise<AgentProviderHandle>;
+    startWeb?(
+        context: AgentProviderWebStartContext,
+    ): Promise<AgentProviderWebHandle>;
 }

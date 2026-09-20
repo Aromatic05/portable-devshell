@@ -8,7 +8,10 @@ import type {
     ExtensionProcessCapability,
 } from "@portable-devshell/extension";
 
-import type { AgentProviderHandle } from "../../builtin/provider/AgentProvider.js";
+import type {
+    AgentProviderHandle,
+    AgentProviderWebHandle,
+} from "../../builtin/provider/AgentProvider.js";
 import type { AgentToolSession } from "../../builtin/provider/AgentToolSession.js";
 import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
 import type {
@@ -20,26 +23,31 @@ import type {
 const PI_OWNER_HEARTBEAT_INTERVAL_MS = 2_000;
 const PI_OWNER_HEARTBEAT_TIMEOUT_MS = 10_000;
 
-export interface PiAgentProcessStartOptions {
-    agentId: string;
+export interface PiAgentProcessWebOptions {
     agentDirectory: string;
     entrypoint: string;
-    localCwd: string;
     managedInstallRoot: string;
     processes: ExtensionProcessCapability;
     runtimeDirectory: string;
+    webBasePath: string;
+}
+
+export interface PiAgentProcessStartOptions extends PiAgentProcessWebOptions {
+    agentId: string;
+    localCwd: string;
     target: AgentWorkerTarget;
     tools: AgentToolSession;
-    webBasePath: string;
 }
 
 export interface PiAgentRuntimeFactory {
     start(options: PiAgentProcessStartOptions): Promise<AgentProviderHandle>;
+    startWeb(options: PiAgentProcessWebOptions): Promise<AgentProviderWebHandle>;
 }
 
 export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
     readonly #childModulePath: string;
     #runtime?: PiSharedProcess;
+    #webHandle?: PiProviderWebHandle;
     #lifecycleTail: Promise<void> = Promise.resolve();
 
     constructor(options: { childModulePath?: string } = {}) {
@@ -51,38 +59,16 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
         options: PiAgentProcessStartOptions,
     ): Promise<AgentProviderHandle> {
         return await this.#exclusive(async () => {
-            let runtime = this.#runtime;
-            if (runtime === undefined) {
-                await mkdir(options.runtimeDirectory, { recursive: true });
-                const managedProcess = await options.processes.start({
-                    args: [
-                        ...childExecArgv(this.#childModulePath),
-                        this.#childModulePath,
-                        String(PI_OWNER_HEARTBEAT_TIMEOUT_MS),
-                    ],
-                    command: process.execPath,
-                    cwd: options.runtimeDirectory,
-                    messages: true,
-                });
-                runtime = new PiSharedProcess(managedProcess, options);
-                try {
-                    await runtime.initialize();
-                } catch (error) {
-                    runtime.terminate();
-                    throw error;
-                }
-                this.#runtime = runtime;
-                void runtime.closed.then(() => {
-                    if (this.#runtime === runtime) this.#runtime = undefined;
-                });
-            } else {
-                runtime.assertCompatible(options);
-            }
+            const runtime = await this.#ensureRuntime(options);
 
             try {
                 await runtime.startAgent(options);
             } catch (error) {
-                if (runtime.agentCount === 0 && this.#runtime === runtime) {
+                if (
+                    runtime.agentCount === 0 &&
+                    this.#webHandle === undefined &&
+                    this.#runtime === runtime
+                ) {
                     this.#runtime = undefined;
                     await runtime.shutdown().catch(() => runtime.terminate());
                 }
@@ -97,6 +83,22 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
         });
     }
 
+    async startWeb(
+        options: PiAgentProcessWebOptions,
+    ): Promise<AgentProviderWebHandle> {
+        return await this.#exclusive(async () => {
+            const runtime = await this.#ensureRuntime(options);
+            if (this.#webHandle !== undefined) return this.#webHandle;
+            let handle!: PiProviderWebHandle;
+            handle = new PiProviderWebHandle(
+                runtime,
+                async () => await this.#stopWeb(runtime, handle),
+            );
+            this.#webHandle = handle;
+            return handle;
+        });
+    }
+
     async #stopAgent(runtime: PiSharedProcess, agentId: string): Promise<void> {
         await this.#exclusive(async () => {
             if (this.#runtime !== runtime) return;
@@ -106,7 +108,7 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
             } catch (error) {
                 failure = error;
             }
-            if (runtime.agentCount === 0) {
+            if (runtime.agentCount === 0 && this.#webHandle === undefined) {
                 this.#runtime = undefined;
                 await runtime.shutdown().catch((error) => {
                     runtime.terminate();
@@ -115,6 +117,59 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
             }
             if (failure !== undefined) throw failure;
         });
+    }
+
+    async #stopWeb(
+        runtime: PiSharedProcess,
+        handle: PiProviderWebHandle,
+    ): Promise<void> {
+        await this.#exclusive(async () => {
+            if (this.#webHandle !== handle) return;
+            this.#webHandle = undefined;
+            if (this.#runtime !== runtime || runtime.agentCount > 0) return;
+            this.#runtime = undefined;
+            try {
+                await runtime.shutdown();
+            } catch (error) {
+                runtime.terminate();
+                throw error;
+            }
+        });
+    }
+
+    async #ensureRuntime(
+        options: PiAgentProcessWebOptions,
+    ): Promise<PiSharedProcess> {
+        let runtime = this.#runtime;
+        if (runtime !== undefined) {
+            runtime.assertCompatible(options);
+            return runtime;
+        }
+
+        await mkdir(options.runtimeDirectory, { recursive: true });
+        const managedProcess = await options.processes.start({
+            args: [
+                ...childExecArgv(this.#childModulePath),
+                this.#childModulePath,
+                String(PI_OWNER_HEARTBEAT_TIMEOUT_MS),
+            ],
+            command: process.execPath,
+            cwd: options.runtimeDirectory,
+            messages: true,
+        });
+        runtime = new PiSharedProcess(managedProcess, options);
+        try {
+            await runtime.initialize();
+        } catch (error) {
+            runtime.terminate();
+            throw error;
+        }
+        this.#runtime = runtime;
+        void runtime.closed.then(() => {
+            if (this.#runtime === runtime) this.#runtime = undefined;
+            if (this.#webHandle?.owns(runtime)) this.#webHandle = undefined;
+        });
+        return runtime;
     }
 
     async #exclusive<T>(action: () => Promise<T>): Promise<T> {
@@ -204,6 +259,40 @@ class PiAgentSessionHandle implements AgentProviderHandle {
     }
 }
 
+class PiProviderWebHandle implements AgentProviderWebHandle {
+    readonly #close: () => void;
+    readonly #runtime: PiSharedProcess;
+    readonly #stopWeb: () => Promise<void>;
+    readonly closed: Promise<void>;
+    #stopped = false;
+
+    constructor(runtime: PiSharedProcess, stopWeb: () => Promise<void>) {
+        this.#runtime = runtime;
+        this.#stopWeb = stopWeb;
+        let close!: () => void;
+        const localClosed = new Promise<void>((resolve) => {
+            close = resolve;
+        });
+        this.#close = close;
+        this.closed = Promise.race([localClosed, runtime.closed]);
+    }
+
+    get upstream(): URL {
+        return new URL(this.#runtime.web.upstream);
+    }
+
+    owns(runtime: PiSharedProcess): boolean {
+        return this.#runtime === runtime;
+    }
+
+    async stop(): Promise<void> {
+        if (this.#stopped) return;
+        await this.#stopWeb();
+        this.#stopped = true;
+        this.#close();
+    }
+}
+
 class PiSharedProcess {
     readonly #child: ExtensionManagedProcess;
     readonly #close: () => void;
@@ -215,7 +304,7 @@ class PiSharedProcess {
         }
     >();
     readonly #identity: Pick<
-        PiAgentProcessStartOptions,
+        PiAgentProcessWebOptions,
         | "agentDirectory"
         | "entrypoint"
         | "managedInstallRoot"
@@ -235,7 +324,7 @@ class PiSharedProcess {
 
     constructor(
         child: ExtensionManagedProcess,
-        options: PiAgentProcessStartOptions,
+        options: PiAgentProcessWebOptions,
     ) {
         let close!: () => void;
         this.closed = new Promise<void>((resolve) => {
@@ -297,7 +386,7 @@ class PiSharedProcess {
         return this.#web;
     }
 
-    assertCompatible(options: PiAgentProcessStartOptions): void {
+    assertCompatible(options: PiAgentProcessWebOptions): void {
         for (const field of [
             "runtimeDirectory",
             "agentDirectory",

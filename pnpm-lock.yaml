@@ -75,7 +75,7 @@ importers:
         version: 1.18.30
       pi-gui-extension:
         specifier: 0.4.1
-        version: 0.4.1(@earendil-works/pi-coding-agent@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2))
+        version: 0.4.1(@earendil-works/pi-coding-agent@0.85.1(zod@4.6.2))
       typebox:
         specifier: 1.3.30
         version: 1.3.30
@@ -140,6 +140,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@portable-devshell/agent-extension':
+        specifier: workspace:*
+        version: file:extensions/agent(hono@4.13.7)(zod@4.6.2)
       '@portable-devshell/artifact-extension':
         specifier: workspace:*
         version: link:../../extensions/artifact
@@ -1087,6 +1090,9 @@ packages:
 
   '@oxc-project/types@0.149.0':
     resolution: {integrity: sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA==}
+
+  '@portable-devshell/agent-extension@file:extensions/agent':
+    resolution: {directory: extensions/agent, type: directory}
 
   '@portable-devshell/comment-extension@file:extensions/comment':
     resolution: {directory: extensions/comment, type: directory}
@@ -3900,6 +3906,28 @@ snapshots:
 
   '@oxc-project/types@0.149.0': {}
 
+  '@portable-devshell/agent-extension@file:extensions/agent(hono@4.13.7)(zod@4.6.2)':
+    dependencies:
+      '@agentclientprotocol/sdk': 1.4.0(zod@4.6.2)
+      '@earendil-works/pi-coding-agent': 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2)
+      '@earendil-works/pi-tui': 0.85.1
+      '@modelcontextprotocol/node': 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.7)
+      '@modelcontextprotocol/server': 2.0.0
+      '@portable-devshell/extension': file:packages/extension
+      '@portable-devshell/shared': file:packages/shared
+      diff: 9.0.0
+      opencode-ai: 1.18.30
+      pi-gui-extension: 0.4.1(@earendil-works/pi-coding-agent@0.85.1(zod@4.6.2))
+      typebox: 1.3.30
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - bufferutil
+      - hono
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
+
   '@portable-devshell/comment-extension@file:extensions/comment':
     dependencies:
       '@portable-devshell/extension': file:packages/extension
@@ -5501,7 +5529,7 @@ snapshots:
 
   pathe@2.0.3: {}
 
-  pi-gui-extension@0.4.1(@earendil-works/pi-coding-agent@0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2)):
+  pi-gui-extension@0.4.1(@earendil-works/pi-coding-agent@0.85.1(zod@4.6.2)):
     dependencies:
       '@earendil-works/pi-coding-agent': 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.6.2))(ws@8.21.3)(zod@4.6.2)
 

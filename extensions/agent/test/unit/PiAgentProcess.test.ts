@@ -100,6 +100,49 @@ test("Pi process factory shares one child across live Agents and stops it only a
     }
 });
 
+test("Pi process Web hub starts without an Agent and shares its child with later Agent sessions", async () => {
+    const runtimeDirectory = await mkdtemp(
+        join(tmpdir(), "devshell-pi-web-hub-"),
+    );
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = {
+        entrypoint: "/managed/pi/dist/index.js",
+        runtimeDirectory,
+        webBasePath: "/web/agent/",
+    };
+
+    try {
+        const web = await factory.startWeb(webOptions(base));
+        assert.equal(web.upstream.toString(), "http://127.0.0.1:43199/");
+
+        const target = parseAgentWorkerTarget("worker-a:/repo/web-hub");
+        const agent = await factory.start(
+            startOptions(base, "ag-web-hub", target),
+        );
+        await agent.stop();
+
+        let entries = await readEntries(runtimeDirectory);
+        assert.equal(new Set(entries.map((entry) => entry.pid)).size, 1);
+        assert.equal(
+            entries.filter((entry) => entry.type === "init").length,
+            1,
+        );
+        assert.equal(
+            entries.some((entry) => entry.type === "shutdown"),
+            false,
+        );
+
+        await web.stop();
+        entries = await readEntries(runtimeDirectory);
+        assert.equal(
+            entries.filter((entry) => entry.type === "shutdown").length,
+            1,
+        );
+    } finally {
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("Pi process forwards child tool calls, cancellation, and close to the parent-held session", async () => {
     const runtimeDirectory = await mkdtemp(
         join(tmpdir(), "devshell-pi-tools-"),
@@ -332,6 +375,19 @@ function startOptions(
         processes: nodeProcessCapability(),
         target,
         tools,
+    };
+}
+
+function webOptions(base: {
+    entrypoint: string;
+    runtimeDirectory: string;
+    webBasePath: string;
+}) {
+    return {
+        ...base,
+        agentDirectory: join(base.runtimeDirectory, "user-pi-state"),
+        managedInstallRoot: join(base.runtimeDirectory, "managed-pi"),
+        processes: nodeProcessCapability(),
     };
 }
 

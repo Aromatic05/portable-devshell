@@ -75,7 +75,7 @@ export async function executeAgentCommand(
         case "web":
             expectLength(argv, 1, "agent web");
             return json({
-                available: runtime.webUpstream() !== undefined,
+                available: (await runtime.webUpstream()) !== undefined,
                 webPath: AGENT_WEB_RELATIVE_PATH,
             });
         case "show": {

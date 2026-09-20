@@ -5,6 +5,7 @@ import type { ExtensionProcessCapability } from "@portable-devshell/extension";
 import type {
     AgentProvider,
     AgentProviderHandle,
+    AgentProviderWebHandle,
 } from "../provider/AgentProvider.js";
 import type { AgentToolSession } from "../provider/AgentToolSession.js";
 import { AgentProviderRuntimePaths } from "../provider/AgentProviderRuntimePaths.js";
@@ -47,6 +48,11 @@ interface AgentHostRuntime {
     tools: AgentToolSession;
 }
 
+interface AgentHostWebRuntime {
+    handle: AgentProviderWebHandle;
+    provider: string;
+}
+
 export class AgentHost {
     readonly #idFactory: () => string;
     readonly #processes: ExtensionProcessCapability;
@@ -55,6 +61,11 @@ export class AgentHost {
     readonly #runtimes = new Map<string, AgentHostRuntime>();
     readonly #startingProviders = new Map<string, string>();
     readonly #webBasePath: string;
+    #web?: AgentHostWebRuntime;
+    #webStarting?: {
+        provider: string;
+        promise: Promise<AgentProviderWebHandle>;
+    };
 
     constructor(options: AgentHostOptions) {
         this.#idFactory = options.idFactory ?? (() => `ag-${randomUUID()}`);
@@ -90,6 +101,9 @@ export class AgentHost {
     }
 
     webEndpoint(): AgentHostWebEndpoint | undefined {
+        if (this.#web !== undefined) {
+            return this.#formatWebEndpoint(this.#web.handle.upstream);
+        }
         const endpoints = [...this.#runtimes.values()]
             .map((runtime) => runtime.handle.web?.upstream.toString())
             .filter((upstream): upstream is string => upstream !== undefined);
@@ -100,10 +114,57 @@ export class AgentHost {
                 "Running Agent providers expose multiple Web endpoints; one /agent hub is required.",
             );
         }
-        return {
-            basePath: `${this.#webBasePath}/`,
-            upstream,
-        };
+        return this.#formatWebEndpoint(new URL(upstream));
+    }
+
+    async ensureWebEndpoint(
+        providerId: string,
+    ): Promise<AgentHostWebEndpoint | undefined> {
+        if (this.#web !== undefined) {
+            if (this.#web.provider !== providerId) {
+                throw new Error(
+                    `Agent Web hub is already owned by provider ${this.#web.provider}.`,
+                );
+            }
+            return this.#formatWebEndpoint(this.#web.handle.upstream);
+        }
+        if (this.#webStarting !== undefined) {
+            if (this.#webStarting.provider !== providerId) {
+                throw new Error(
+                    `Agent Web hub is already starting for provider ${this.#webStarting.provider}.`,
+                );
+            }
+            const handle = await this.#webStarting.promise;
+            return this.#formatWebEndpoint(handle.upstream);
+        }
+
+        const provider = this.#registry.require(providerId);
+        if (provider.startWeb === undefined) return this.webEndpoint();
+        const promise = provider.startWeb({
+            processes: this.#processes,
+            runtime: new AgentProviderRuntimePaths({
+                provider: provider.id,
+                rootDirectory: this.#runtimeRootDirectory,
+                version: provider.version,
+            }),
+            web: { basePath: `${this.#webBasePath}/` },
+        });
+        this.#webStarting = { promise, provider: providerId };
+        try {
+            const handle = await promise;
+            const runtime = { handle, provider: providerId };
+            this.#web = runtime;
+            void handle.closed
+                .then(() => {
+                    if (this.#web === runtime) this.#web = undefined;
+                })
+                .catch(() => undefined);
+            return this.#formatWebEndpoint(handle.upstream);
+        } finally {
+            if (this.#webStarting?.promise === promise) {
+                this.#webStarting = undefined;
+            }
+        }
     }
 
     async prompt(agentId: string, message: string): Promise<void> {
@@ -265,10 +326,19 @@ export class AgentHost {
             if (!this.#runtimes.has(agentId)) continue;
             await this.stop(agentId).catch((error) => failures.push(error));
         }
+        const web = this.#web;
+        if (web !== undefined) {
+            await web.handle.stop().then(
+                () => {
+                    if (this.#web === web) this.#web = undefined;
+                },
+                (error) => failures.push(error),
+            );
+        }
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,
-                "One or more Agents failed to stop cleanly.",
+                "One or more Agent resources failed to stop cleanly.",
             );
         }
     }
@@ -279,6 +349,13 @@ export class AgentHost {
             throw new Error(`Unknown Agent: ${agentId}`);
         }
         return runtime;
+    }
+
+    #formatWebEndpoint(upstream: URL): AgentHostWebEndpoint {
+        return {
+            basePath: `${this.#webBasePath}/`,
+            upstream: upstream.toString(),
+        };
     }
 }
 

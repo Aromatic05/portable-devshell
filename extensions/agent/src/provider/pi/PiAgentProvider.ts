@@ -4,6 +4,8 @@ import type {
     AgentProvider,
     AgentProviderHandle,
     AgentProviderStartContext,
+    AgentProviderWebHandle,
+    AgentProviderWebStartContext,
 } from "../../builtin/provider/AgentProvider.js";
 import {
     PI_BOOTSTRAP_VERSION,
@@ -16,7 +18,7 @@ import {
 } from "./PiAgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
-export const PI_PROVIDER_VERSION = "0.1.2";
+export const PI_PROVIDER_VERSION = "0.1.3";
 
 export interface PiProviderInstallerLike {
     ensureInstalled(
@@ -66,6 +68,22 @@ export class PiAgentProvider implements AgentProvider {
             target: context.target,
             tools: context.tools,
             webBasePath: context.web?.basePath ?? "/agent/",
+        });
+    }
+
+    async startWeb(
+        context: AgentProviderWebStartContext,
+    ): Promise<AgentProviderWebHandle> {
+        const installation = await this.#installer.ensureInstalled(
+            context.runtime,
+        );
+        return await this.#runtimeFactory.startWeb({
+            agentDirectory: installation.agentDirectory,
+            entrypoint: installation.entrypoint,
+            managedInstallRoot: installation.managedInstallRoot,
+            processes: context.processes,
+            runtimeDirectory: context.runtime.stateDirectory,
+            webBasePath: context.web.basePath,
         });
     }
 }

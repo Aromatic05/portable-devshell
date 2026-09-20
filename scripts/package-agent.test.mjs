@@ -15,6 +15,7 @@ import test from "node:test";
 import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
+    embedBundledPiProviderIntoApplication,
     embedBundledProviderArchive,
     pruneProviderRuntimeTree,
     resolveAgentPackageSelection,
@@ -23,6 +24,18 @@ import {
 } from "./package-agent.mjs";
 
 const repoRoot = new URL("../", import.meta.url);
+
+test("application Agent provider embedding is a no-op when Agent is not packaged", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-agent-app-no-agent-"));
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    await writeFile(
+        join(root, "package.json"),
+        JSON.stringify({ name: "fixture", version: "1.0.0" }),
+        "utf8",
+    );
+
+    assert.equal(await embedBundledPiProviderIntoApplication(root), undefined);
+});
 
 test("Agent packaging can emit both artifacts or one release-matrix half", () => {
     assert.deepEqual(resolveAgentPackageSelection([]), {

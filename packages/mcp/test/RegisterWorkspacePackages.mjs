@@ -51,6 +51,10 @@ function installTestWatchdog() {
 
 const workspacePackages = new Map([
     [
+        "@portable-devshell/agent-extension",
+        new URL("../../../extensions/agent/src/index.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/artifact-extension",
         new URL("../../../extensions/artifact/src/index.ts", import.meta.url)
             .href,

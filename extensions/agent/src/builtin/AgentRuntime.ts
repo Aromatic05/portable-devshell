@@ -121,8 +121,9 @@ export class AgentExtensionRuntime {
         return await this.#host.stop(readAgentId(value));
     }
 
-    webUpstream(): URL | undefined {
-        const endpoint = this.#host.webEndpoint();
+    async webUpstream(): Promise<URL | undefined> {
+        const provider = await this.#selectProvider();
+        const endpoint = await this.#host.ensureWebEndpoint(provider);
         return endpoint === undefined ? undefined : new URL(endpoint.upstream);
     }
 
