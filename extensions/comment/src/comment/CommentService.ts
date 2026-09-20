@@ -51,6 +51,9 @@ export class CommentService {
                 this.#instanceName,
                 input,
             ).record;
+            const previousControlState = this.#store.readControlState(
+                record.ctxId,
+            );
             this.#store.insertComment(record);
             try {
                 await this.#appendEvent(
@@ -60,6 +63,10 @@ export class CommentService {
                 return record;
             } catch (error) {
                 await this.#markFailed([record], error);
+                this.#store.writeControlState(
+                    record.ctxId,
+                    previousControlState,
+                );
                 throw error;
             }
         });
@@ -84,7 +91,6 @@ export class CommentService {
               comment: string;
               commentId: string;
               kind: "push";
-              replyCommentId: string;
               toolCallBudget: number;
           }
         | { comment: string; commentId: string; kind: "resume" }
@@ -143,23 +149,15 @@ export class CommentService {
                 state.pushToolCallsRemaining ??
                 CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
             if (remaining <= 0) {
-                const replyCommentId = state.pendingReplyCommentId;
-                if (replyCommentId === undefined) {
+                if (state.pushMessage === undefined) {
                     throw new Error(
-                        "Conversation Push deadline has no pending reply Comment.",
-                    );
-                }
-                const replyComment = this.#store.comment(ctxId, replyCommentId);
-                if (replyComment === undefined) {
-                    throw new Error(
-                        `Conversation pending reply Comment ${replyCommentId} was not found.`,
+                        "Conversation Push deadline has no push message.",
                     );
                 }
                 return {
-                    comment: replyComment.text,
+                    comment: state.pushMessage,
                     commentId: state.pendingPushCommentId,
                     kind: "push",
-                    replyCommentId,
                     toolCallBudget: CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
                 };
             }
@@ -176,6 +174,12 @@ export class CommentService {
         );
     }
 
+    async pendingPushMessage(ctxId: string): Promise<string | undefined> {
+        return await this.#runExclusive(
+            async () => this.#store.readControlState(ctxId).pushMessage,
+        );
+    }
+
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {
         return await this.#runExclusive(
             async () => await this.#failAllPending(reason),
@@ -185,12 +189,9 @@ export class CommentService {
     retire(reason?: string): Promise<void> {
         if (this.#retirement !== undefined) return this.#retirement;
         this.#retired = true;
-        this.#retirement = this.#runExclusive(
-            async () => {
-                if (reason !== undefined) await this.#failAllPending(reason);
-            },
-            true,
-        );
+        this.#retirement = this.#runExclusive(async () => {
+            if (reason !== undefined) await this.#failAllPending(reason);
+        }, true);
         return this.#retirement;
     }
 
@@ -384,13 +385,17 @@ function readCommentListInput(value: JsonValue): ContextMessageListInput {
         value.limit !== undefined &&
         (typeof value.limit !== "number" || !Number.isSafeInteger(value.limit))
     )
-        throw invalidRouteInput("contextMessage.list limit must be an integer.");
+        throw invalidRouteInput(
+            "contextMessage.list limit must be an integer.",
+        );
     if (
         value.maxBytes !== undefined &&
         (typeof value.maxBytes !== "number" ||
             !Number.isSafeInteger(value.maxBytes))
     )
-        throw invalidRouteInput("contextMessage.list maxBytes must be an integer.");
+        throw invalidRouteInput(
+            "contextMessage.list maxBytes must be an integer.",
+        );
     return {
         ...(value.before === undefined ? {} : { before: value.before }),
         ...(value.ctxId === undefined ? {} : { ctxId: value.ctxId }),

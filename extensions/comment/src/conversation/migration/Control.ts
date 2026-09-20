@@ -10,12 +10,9 @@ import {
     normalizeConversationControlState,
     writeConversationControlState,
 } from "../ConversationControl.js";
-import {
-    type ConversationRow,
-    toCommentRecord,
-} from "../store/Query.js";
+import { type ConversationRow, toCommentRecord } from "../store/Query.js";
 
-const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v2";
+const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v3";
 
 export function migrateConversationControlState(database: DatabaseSync): void {
     if (readMetadata(database, CONTROL_STATE_MIGRATION_KEY) === "complete")
@@ -63,6 +60,7 @@ function deriveControlStatesFromHistory(
         if (row.kind === "report") {
             state.pendingReplyCommentId = undefined;
             state.pendingPushCommentId = undefined;
+            state.pushMessage = undefined;
             state.pushToolCallsRemaining = undefined;
             states.set(row.ctxId, state);
             continue;
@@ -75,11 +73,9 @@ function deriveControlStatesFromHistory(
             continue;
         }
         const directive = parseContextMessageDirective(record.text).directive;
+        applyQueuedControl(state, record);
         applyDeliveredControls(state, [record]);
-        if (
-            directive === "push" &&
-            state.pendingPushCommentId === record.id
-        ) {
+        if (directive === "push" && state.pendingPushCommentId === record.id) {
             state.pushToolCallsRemaining = 0;
         }
         states.set(row.ctxId, state);
@@ -99,7 +95,11 @@ function readMetadata(database: DatabaseSync, key: string): string | undefined {
     return row?.value;
 }
 
-function writeMetadata(database: DatabaseSync, key: string, value: string): void {
+function writeMetadata(
+    database: DatabaseSync,
+    key: string,
+    value: string,
+): void {
     database
         .prepare(
             `

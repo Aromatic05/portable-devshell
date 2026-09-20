@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-    toControlErrorBody,
-} from "@portable-devshell/shared";
+import { toControlErrorBody } from "@portable-devshell/shared";
 
 import {
     InstanceRegistry,
@@ -12,7 +10,11 @@ import {
 
 function emptyComment() {
     return {
-        async consumePending(_instance: string, _ctxId: string, callId: string) {
+        async consumePending(
+            _instance: string,
+            _ctxId: string,
+            callId: string,
+        ) {
             return { callId, messages: [] };
         },
         async failPending() {
@@ -22,6 +24,9 @@ function emptyComment() {
             return [];
         },
         async pendingReplyCommentId() {
+            return undefined;
+        },
+        async pendingPushMessage() {
             return undefined;
         },
         async recordReport() {},
@@ -66,10 +71,15 @@ function createTodoReportHarness() {
     let callSequence = 0;
     let failNext = false;
     let pendingReplyCommentId: string | undefined;
+    let pendingPushMessage: string | undefined;
     const entries: Array<Record<string, unknown>> = [];
     const reports: string[] = [];
     const comment = {
-        async consumePending(_instance: string, _ctxId: string, callId: string) {
+        async consumePending(
+            _instance: string,
+            _ctxId: string,
+            callId: string,
+        ) {
             return { callId, messages: [] };
         },
         async failPending() {
@@ -91,6 +101,9 @@ function createTodoReportHarness() {
         },
         async pendingReplyCommentId() {
             return pendingReplyCommentId;
+        },
+        async pendingPushMessage() {
+            return pendingPushMessage;
         },
         async recordReport(
             _instance: string,
@@ -120,6 +133,7 @@ function createTodoReportHarness() {
             ) {
                 pendingReplyCommentId = undefined;
             }
+            pendingPushMessage = undefined;
         },
     };
     const conversation = {
@@ -169,6 +183,9 @@ function createTodoReportHarness() {
         },
         failNextReport() {
             failNext = true;
+        },
+        push(message: string) {
+            pendingPushMessage = message;
         },
         gateway,
         async report(message: string) {
@@ -246,7 +263,10 @@ test("cross-instance audit is recorded by the target worker", async () => {
                     toolName: string,
                     input: unknown,
                     context: unknown,
-                    operation: (callId: string, input: unknown) => Promise<unknown>,
+                    operation: (
+                        callId: string,
+                        input: unknown,
+                    ) => Promise<unknown>,
                 ) {
                     calls.push({ context, input, toolName });
                     return await operation("remote-call", input);
@@ -486,6 +506,18 @@ test("failed reports neither spend a token nor satisfy a Comment obligation", as
     await assert.rejects(harness.report("reply"), /report failed/u);
     await harness.report("reply");
     await assertTodoUseOtherTools(harness.report("autonomous after reply"));
+});
+
+test("a required #push report bypasses the autonomous report bucket and clears only after success", async () => {
+    const harness = createTodoReportHarness();
+    await harness.report("autonomous one");
+    await harness.report("autonomous two");
+    harness.push("#push report progress");
+
+    harness.failNextReport();
+    await assert.rejects(harness.report("required reply"), /report failed/u);
+    await harness.report("required reply");
+    await assertTodoUseOtherTools(harness.report("autonomous after push"));
 });
 
 test("closing an MCP tool session releases worker-owned session state", async () => {

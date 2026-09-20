@@ -57,11 +57,17 @@ export function listConversationRows(
             | undefined;
         if (boundary !== undefined) {
             predicates.push("(created_at < ? OR (created_at = ? AND seq < ?))");
-            parameters.push(boundary.createdAt, boundary.createdAt, boundary.seq);
+            parameters.push(
+                boundary.createdAt,
+                boundary.createdAt,
+                boundary.seq,
+            );
         }
     }
     const limit =
-        input.limit === undefined ? undefined : Math.max(1, Math.trunc(input.limit));
+        input.limit === undefined
+            ? undefined
+            : Math.max(1, Math.trunc(input.limit));
     const rows = database
         .prepare(
             `
@@ -116,38 +122,10 @@ export function pendingCommentRecords(
             ORDER BY created_at ASC, seq ASC
         `,
         )
-        .all(...(ctxId === undefined ? [] : [ctxId])) as unknown as ConversationRow[];
+        .all(
+            ...(ctxId === undefined ? [] : [ctxId]),
+        ) as unknown as ConversationRow[];
     return rows.map((row) => toCommentRecord(row, instance));
-}
-
-export function readCommentRecord(
-    database: DatabaseSync,
-    instance: string,
-    ctxId: string,
-    id: string,
-): ContextMessageRecord | undefined {
-    const row = database
-        .prepare(
-            `
-            SELECT
-                call_id AS callId,
-                created_at AS createdAt,
-                ctx_id AS ctxId,
-                delivered_at AS deliveredAt,
-                error,
-                failed_at AS failedAt,
-                id,
-                kind,
-                seq,
-                status,
-                text
-            FROM conversation_entries
-            WHERE kind = 'comment' AND ctx_id = ? AND id = ?
-            LIMIT 1
-        `,
-        )
-        .get(ctxId, id) as unknown as ConversationRow | undefined;
-    return row === undefined ? undefined : toCommentRecord(row, instance);
 }
 
 export function toConversationEntry(row: ConversationRow): ConversationEntry {
@@ -186,7 +164,10 @@ export function toCommentRecord(
     };
 }
 
-export function applyByteBudget<T>(records: T[], maxBytes: number | undefined): T[] {
+export function applyByteBudget<T>(
+    records: T[],
+    maxBytes: number | undefined,
+): T[] {
     if (maxBytes === undefined) return records;
     const accepted: T[] = [];
     let bytes = 2;

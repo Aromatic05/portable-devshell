@@ -22,6 +22,7 @@ import {
     WorkerBinary,
     WorkerInstanceFactory,
 } from "@portable-devshell/core/testing";
+import { ToolCallBoundarySequence } from "../../../core/src/toolcall/boundary/Sequence.ts";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     commandAvailable,
@@ -540,6 +541,130 @@ import { tmpdir } from "node:os";
                     force: true,
                     recursive: true,
                 });
+            }
+        },
+    );
+
+    test(
+        "MCP review-rejected ToolCalls remain visible in Audit",
+        realWorkerTestOptions(workerBinaryPath),
+        async () => {
+            const instanceName = "aromatic-pc-mcp-review-reject";
+            const homeDirectory = await createTestTempDirectory(
+                "mcp-review-reject-home",
+            );
+            const workspacePath = await createTestTempDirectory(
+                "mcp-review-reject-workspace",
+            );
+            const instance = new WorkerInstanceFactory().create({
+                env: { ...process.env, HOME: homeDirectory },
+                homeDirectory,
+                name: asInstanceName(instanceName),
+                transport: new WorkerTransportDriverLocal({
+                    spawnFunction: nodeSpawn,
+                    workerBinary: new WorkerBinary(workerBinaryPath!),
+                }),
+            });
+            instance.bindToolCallBoundary(async () => ({
+                release() {},
+                sequence: new ToolCallBoundarySequence({
+                    reviews: [
+                        async (input) =>
+                            input.direction === "inbound" &&
+                            input.kind === "call" &&
+                            input.toolName === "bash_run"
+                                ? {
+                                      decision: "reject" as const,
+                                      reason: "blocked by review",
+                                  }
+                                : { decision: "accept" as const },
+                    ],
+                }),
+            }));
+            const host = new McpHost({
+                instances: [
+                    {
+                        auth: { enabled: false, provider: "none" },
+                        name: instanceName,
+                        worker: instance,
+                    },
+                ],
+                listenHost: "127.0.0.1",
+                listenPort: 0,
+            });
+
+            try {
+                await instance.start();
+                await host.start();
+
+                const port = requireTcpPort(host.server.address);
+                const endpoint =
+                    "http://127.0.0.1:" + port + "/" + instanceName + "/mcp";
+                const initialize = await postJson(
+                    endpoint,
+                    await readFixture("mcp-initialize.json"),
+                );
+                const sessionHeaders = {
+                    "mcp-protocol-version": String(
+                        initialize.result?.protocolVersion ?? "",
+                    ),
+                };
+                await postRawJson(
+                    endpoint,
+                    {
+                        jsonrpc: "2.0",
+                        method: "notifications/initialized",
+                    },
+                    sessionHeaders,
+                );
+
+                const ctxId = await createContext(
+                    endpoint,
+                    sessionHeaders,
+                    workspacePath,
+                );
+                const rejected = await postJson(
+                    endpoint,
+                    withToolContext(
+                        await readFixture("mcp-tools-call.json"),
+                        ctxId,
+                    ),
+                    sessionHeaders,
+                );
+                assert.equal(
+                    rejected.error?.data?.code,
+                    errorCodes.coreToolCallRejected,
+                );
+
+                const records = await instance.readToolCalls({ ctxId });
+                const denied = records.find(
+                    (record) =>
+                        record.toolName === "bash_run" &&
+                        record.status === "denied",
+                );
+                assert.ok(denied, JSON.stringify(records));
+                assert.equal(denied.error, errorCodes.coreToolCallRejected);
+                assert.equal(denied.source, "mcp");
+
+                const replay = instance.subscribe(1);
+                assert.equal(replay.kind, "events");
+                assert.equal(
+                    replay.events.some(
+                        (event) =>
+                            event.type === "toolCall.denied" &&
+                            event.data !== undefined &&
+                            typeof event.data === "object" &&
+                            !Array.isArray(event.data) &&
+                            event.data.callId === denied.callId,
+                    ),
+                    true,
+                );
+            } finally {
+                await host.stop();
+                await instance.stop();
+                await instance.close();
+                await rm(homeDirectory, { force: true, recursive: true });
+                await rm(workspacePath, { force: true, recursive: true });
             }
         },
     );

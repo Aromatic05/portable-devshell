@@ -12,6 +12,7 @@ export interface ConversationControlState {
     pendingPushCommentId?: string;
     pendingReplyCommentId?: string;
     pendingResumeCommentId?: string;
+    pushMessage?: string;
     pushToolCallsRemaining?: number;
     stoppedByCommentId?: string;
 }
@@ -84,6 +85,20 @@ export function applyQueuedControl(
     record: ContextMessageRecord,
 ): void {
     const directive = parseContextMessageDirective(record.text).directive;
+    const pushActive = state.pushMessage !== undefined;
+    if (pushActive) {
+        state.pushMessage = `${state.pushMessage}\n\n${record.text}`;
+        state.pushToolCallsRemaining = Math.max(
+            0,
+            (state.pushToolCallsRemaining ?? CONTEXT_MESSAGE_PUSH_TOOL_BUDGET) -
+                1,
+        );
+    } else if (directive === "push") {
+        state.pushMessage = record.text;
+        state.pushToolCallsRemaining = CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
+    }
+    if (directive === "push") state.pendingPushCommentId = record.id;
+
     if (directive === "stop") {
         state.stoppedByCommentId ??= record.id;
         state.pendingResumeCommentId = undefined;
@@ -112,11 +127,6 @@ export function applyDeliveredControls(
                 state.pendingReplyCommentId = record.id;
                 break;
             case "push":
-                if (state.pendingReplyCommentId !== undefined) {
-                    state.pendingPushCommentId = record.id;
-                    state.pushToolCallsRemaining ??=
-                        CONTEXT_MESSAGE_PUSH_TOOL_BUDGET;
-                }
                 break;
             default:
                 state.pendingReplyCommentId = record.id;
@@ -148,6 +158,9 @@ export function normalizeConversationControlState(
             : {}),
         ...(typeof state.pendingResumeCommentId === "string"
             ? { pendingResumeCommentId: state.pendingResumeCommentId }
+            : {}),
+        ...(typeof state.pushMessage === "string"
+            ? { pushMessage: state.pushMessage }
             : {}),
         ...(remaining === undefined
             ? {}

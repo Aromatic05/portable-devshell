@@ -63,6 +63,10 @@ export interface CommentPort {
         instance: string,
         ctxId: string,
     ): Promise<string | undefined>;
+    pendingPushMessage(
+        instance: string,
+        ctxId: string,
+    ): Promise<string | undefined>;
     reviewToolCall(
         instance: string,
         ctxId: string,
@@ -115,21 +119,28 @@ export class CommentExtension {
         preferencesFile: string;
     }) {
         this.#source = options.instances;
-        const preferences = new ConversationPreferenceStore(options.preferencesFile);
+        const preferences = new ConversationPreferenceStore(
+            options.preferencesFile,
+        );
         const comment: CommentPort = {
             consumePending: async (instance, ctxId, callId) =>
-                await this.#require(instance).comment.consumePending(ctxId, callId),
+                await this.#require(instance).comment.consumePending(
+                    ctxId,
+                    callId,
+                ),
             failPending: async (instance, ctxId, reason) =>
-                await this.#require(instance).comment.failPending(ctxId, reason),
+                await this.#require(instance).comment.failPending(
+                    ctxId,
+                    reason,
+                ),
             feedback: (input) => resolveToolCallFeedback(input),
             pendingReplyCommentId: async (instance, ctxId) =>
-                await this.#require(instance).comment.pendingReplyCommentId(ctxId),
-            reviewToolCall: async (
-                instance,
-                ctxId,
-                toolName,
-                requestId,
-            ) =>
+                await this.#require(instance).comment.pendingReplyCommentId(
+                    ctxId,
+                ),
+            pendingPushMessage: async (instance, ctxId) =>
+                await this.#require(instance).comment.pendingPushMessage(ctxId),
+            reviewToolCall: async (instance, ctxId, toolName, requestId) =>
                 await this.#require(instance).comment.reviewToolCall(
                     ctxId,
                     toolName,
@@ -155,15 +166,19 @@ export class CommentExtension {
                     : [
                           createCommentRouteModule({
                               list: async (input) =>
-                                  await this.#require(instance).comment.list(input),
+                                  await this.#require(instance).comment.list(
+                                      input,
+                                  ),
                               queue: async (input) =>
-                                  await this.#require(instance).comment.queue(input),
+                                  await this.#require(instance).comment.queue(
+                                      input,
+                                  ),
                           }),
                           createConversationRouteModule({
                               list: async (input) =>
-                                  await this.#require(instance).conversation.list(
-                                      input,
-                                  ),
+                                  await this.#require(
+                                      instance,
+                                  ).conversation.list(input),
                           }),
                       ];
             },
@@ -177,7 +192,8 @@ export class CommentExtension {
         const state = this.#instances.get(instance);
         if (state === undefined) return;
         state.enabled = false;
-        if (this.#instances.get(instance) === state) this.#instances.delete(instance);
+        if (this.#instances.get(instance) === state)
+            this.#instances.delete(instance);
         await this.#retireState(state, reason);
     }
 
@@ -196,7 +212,10 @@ export class CommentExtension {
             .map((result) => result.reason);
         if (failures.length === 1) throw failures[0];
         if (failures.length > 1)
-            throw new AggregateError(failures, "Comment shutdown was incomplete.");
+            throw new AggregateError(
+                failures,
+                "Comment shutdown was incomplete.",
+            );
     }
 
     #sync(): void {

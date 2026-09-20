@@ -33,9 +33,24 @@ test("Comment review applies model control only to inbound MCP calls with a Cont
     assert.deepEqual(calls, [
         { input: undefined, operation: "comment.reviewToolCall" },
     ]);
-    assert.deepEqual(await review({ ...base, direction: "outbound" }, invocation), { decision: "accept" });
-    assert.deepEqual(await review({ ...base, context: { ...base.context, source: "cli" } }, invocation), { decision: "accept" });
-    assert.deepEqual(await review({ ...base, context: { instance: "demo", source: "mcp" } }, invocation), { decision: "accept" });
+    assert.deepEqual(
+        await review({ ...base, direction: "outbound" }, invocation),
+        { decision: "accept" },
+    );
+    assert.deepEqual(
+        await review(
+            { ...base, context: { ...base.context, source: "cli" } },
+            invocation,
+        ),
+        { decision: "accept" },
+    );
+    assert.deepEqual(
+        await review(
+            { ...base, context: { instance: "demo", source: "mcp" } },
+            invocation,
+        ),
+        { decision: "accept" },
+    );
     assert.equal(calls.length, 1);
 });
 
@@ -46,7 +61,9 @@ test("Comment outbound review returns non-blocking feedback", async () => {
         async requestInterface(operation: string, input?: unknown) {
             calls.push({ input, operation });
             if (operation === "comment.feedback")
-                return ["[bash.nonZeroExit] Exited with code 7; inspect output."];
+                return [
+                    "[bash.nonZeroExit] Exited with code 7; inspect output.",
+                ];
             throw new Error(`unexpected operation ${operation}`);
         },
     };
@@ -63,7 +80,9 @@ test("Comment outbound review returns non-blocking feedback", async () => {
         ),
         {
             decision: "accept",
-            feedback: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
+            feedback: [
+                "[bash.nonZeroExit] Exited with code 7; inspect output.",
+            ],
         },
     );
     assert.deepEqual(calls, [
@@ -74,10 +93,9 @@ test("Comment outbound review returns non-blocking feedback", async () => {
 test("Comment review maps push stop and resume to rejected ToolCalls", async () => {
     const decisions: ExtensionJsonValue[] = [
         {
-            comment: "Explain the original failure",
+            comment: "#push 报告进度",
             commentId: "push-1",
             kind: "push",
-            replyCommentId: "question-1",
             toolCallBudget: 5,
         },
         { comment: "finish this first", commentId: "stop-1", kind: "stop" },
@@ -96,15 +114,14 @@ test("Comment review maps push stop and resume to rejected ToolCalls", async () 
             code: "control.modelReplyRequired",
             details: {
                 commentId: "push-1",
-                replyCommentId: "question-1",
                 toolCallBudget: 5,
             },
         },
         reason: [
             "#push response deadline reached.",
-            "You must reply to the pending user Comment before using more tools.",
-            "Pending user Comment: Explain the original failure",
-            "Call todo_report with a direct response to the Comment above.",
+            "You must reply to the user's #push message before using more tools.",
+            "#push message: #push 报告进度",
+            "Call todo_report with a direct response to the #push message above.",
         ].join("\n\n"),
     });
     assert.deepEqual(await review(base, invocation), {

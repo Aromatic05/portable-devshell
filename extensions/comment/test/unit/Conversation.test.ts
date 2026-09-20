@@ -81,7 +81,7 @@ test("ConversationStore backfills durable control state from pre-metadata histor
         databaseFile,
         `
         DELETE FROM conversation_metadata
-        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v2'
+        WHERE key LIKE 'context-control:v1:%' OR key = 'migration:context-control-v3'
     `,
     );
 
@@ -107,7 +107,7 @@ test("ConversationStore backfills durable control state from pre-metadata histor
     withoutHistory.close();
 });
 
-test("ConversationStore v2 control migration repairs legacy #push reply targets", async () => {
+test("ConversationStore v3 control migration rebuilds push_message from history", async () => {
     const root = await createTestTempDirectory("conversation-control-v2-push");
     const databaseFile = join(root, "conversation.sqlite3");
     const store = new ConversationStore({
@@ -118,28 +118,28 @@ test("ConversationStore v2 control migration repairs legacy #push reply targets"
         createdAt: "2026-09-10T10:00:00.000Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-09-10T10:00:01.000Z",
-        id: "question-1",
+        id: "push-1",
         instance: "alpha",
         status: "delivered",
-        text: "Explain the original failure",
+        text: "#push 报告进度",
     });
     store.insertComment({
         createdAt: "2026-09-10T10:00:02.000Z",
         ctxId: "ctx-a",
         deliveredAt: "2026-09-10T10:00:03.000Z",
-        id: "push-1",
+        id: "follow-up-1",
         instance: "alpha",
         status: "delivered",
-        text: "#push",
+        text: "还要说明阻塞点",
     });
     store.close();
     mutateConversationDatabase(
         databaseFile,
         `
         DELETE FROM conversation_metadata
-        WHERE key = 'migration:context-control-v2';
+        WHERE key = 'migration:context-control-v3';
         INSERT INTO conversation_metadata(key, value)
-        VALUES ('migration:context-control-v1', 'complete')
+        VALUES ('migration:context-control-v2', 'complete')
         ON CONFLICT(key) DO UPDATE SET value = excluded.value;
         INSERT INTO conversation_metadata(key, value)
         VALUES (
@@ -156,7 +156,52 @@ test("ConversationStore v2 control migration repairs legacy #push reply targets"
     });
     assert.deepEqual(migrated.readControlState("ctx-a"), {
         pendingPushCommentId: "push-1",
-        pendingReplyCommentId: "question-1",
+        pendingReplyCommentId: "follow-up-1",
+        pushMessage: "#push 报告进度\n\n还要说明阻塞点",
+        pushToolCallsRemaining: 0,
+    });
+    migrated.close();
+});
+
+test("ConversationStore v3 control migration restores standalone #push", async () => {
+    const root = await createTestTempDirectory(
+        "conversation-control-v3-standalone-push",
+    );
+    const databaseFile = join(root, "conversation.sqlite3");
+    const store = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    store.insertComment({
+        createdAt: "2026-09-20T08:15:17.222Z",
+        ctxId: "ctx-push-only",
+        deliveredAt: "2026-09-20T08:15:17.233Z",
+        id: "push-only",
+        instance: "alpha",
+        status: "delivered",
+        text: "#push 报告进度",
+    });
+    store.close();
+    mutateConversationDatabase(
+        databaseFile,
+        `
+        DELETE FROM conversation_metadata
+        WHERE key = 'migration:context-control-v3';
+        INSERT INTO conversation_metadata(key, value)
+        VALUES ('migration:context-control-v2', 'complete')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+        DELETE FROM conversation_metadata
+        WHERE key = 'context-control:v1:ctx-push-only';
+    `,
+    );
+
+    const migrated = new ConversationStore({
+        filePath: databaseFile,
+        instanceName: "alpha",
+    });
+    assert.deepEqual(migrated.readControlState("ctx-push-only"), {
+        pendingPushCommentId: "push-only",
+        pushMessage: "#push 报告进度",
         pushToolCallsRemaining: 0,
     });
     migrated.close();
@@ -251,7 +296,9 @@ test("ConversationStore retention removes old terminal history but never old pen
 });
 
 test("ConversationStore preserves a delivered Comment while control state still needs it as the reply target", async () => {
-    const root = await createTestTempDirectory("conversation-reply-target-retention");
+    const root = await createTestTempDirectory(
+        "conversation-reply-target-retention",
+    );
     const store = new ConversationStore({
         filePath: join(root, "conversation.sqlite3"),
         instanceName: "alpha",
@@ -268,13 +315,14 @@ test("ConversationStore preserves a delivered Comment while control state still 
         text: "question ".repeat(1_000),
     });
 
-    store.deliverComments(
-        "ctx-a",
-        "delivery-call",
-        "2026-07-01T00:01:00.000Z",
-    );
+    store.deliverComments("ctx-a", "delivery-call", "2026-07-01T00:01:00.000Z");
 
-    assert.equal(store.comment("ctx-a", "reply-target")?.status, "delivered");
+    assert.equal(
+        store
+            .listComments({ ctxId: "ctx-a" })
+            .find((comment) => comment.id === "reply-target")?.status,
+        "delivered",
+    );
     assert.equal(
         store.readControlState("ctx-a").pendingReplyCommentId,
         "reply-target",

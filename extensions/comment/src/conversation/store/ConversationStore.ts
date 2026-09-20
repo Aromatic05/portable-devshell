@@ -28,7 +28,6 @@ import {
     conversationPayloadBytesSql,
     listConversationRows,
     pendingCommentRecords,
-    readCommentRecord,
     readConversationEntryPayloadBytes,
     readConversationPayloadBytes,
     toCommentRecord,
@@ -39,9 +38,7 @@ import {
     openConversationDatabase,
 } from "./Schema.js";
 
-export {
-    defaultConversationStorageLimits,
-} from "./Schema.js";
+export { defaultConversationStorageLimits } from "./Schema.js";
 export type { ConversationControlState } from "../ConversationControl.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -113,7 +110,9 @@ export class ConversationStore {
         const database = this.#open();
         this.#cleanup(database);
         return applyByteBudget(
-            listConversationRows(database, input, undefined).map(toConversationEntry),
+            listConversationRows(database, input, undefined).map(
+                toConversationEntry,
+            ),
             input.maxBytes,
         );
     }
@@ -131,10 +130,6 @@ export class ConversationStore {
 
     pendingComments(ctxId?: string): ContextMessageRecord[] {
         return pendingCommentRecords(this.#open(), this.#instanceName, ctxId);
-    }
-
-    comment(ctxId: string, id: string): ContextMessageRecord | undefined {
-        return readCommentRecord(this.#open(), this.#instanceName, ctxId, id);
     }
 
     insertComment(record: ContextMessageRecord): void {
@@ -160,14 +155,16 @@ export class ConversationStore {
                     record.failedAt ?? null,
                     record.error ?? null,
                 );
-            const state = readConversationControlState(
-                database,
-                record.ctxId,
-            );
-            if (record.status === "delivered")
-                applyDeliveredControls(state, [record]);
-            else if (record.status === "pending" || record.status === "sent")
+            const state = readConversationControlState(database, record.ctxId);
+            if (record.status === "delivered") {
                 applyQueuedControl(state, record);
+                applyDeliveredControls(state, [record]);
+            } else if (
+                record.status === "pending" ||
+                record.status === "sent"
+            ) {
+                applyQueuedControl(state, record);
+            }
             writeConversationControlState(database, record.ctxId, state);
             database.exec("COMMIT");
         } catch (error) {
@@ -221,7 +218,11 @@ export class ConversationStore {
             beforePayloadBytes = pending.reduce(
                 (total, record) =>
                     total +
-                    readConversationEntryPayloadBytes(database, "comment", record.id),
+                    readConversationEntryPayloadBytes(
+                        database,
+                        "comment",
+                        record.id,
+                    ),
                 0,
             );
             const update = database.prepare(`
@@ -242,7 +243,11 @@ export class ConversationStore {
         const afterPayloadBytes = pending.reduce(
             (total, record) =>
                 total +
-                readConversationEntryPayloadBytes(database, "comment", record.id),
+                readConversationEntryPayloadBytes(
+                    database,
+                    "comment",
+                    record.id,
+                ),
             0,
         );
         this.#payloadBytes =
@@ -272,7 +277,8 @@ export class ConversationStore {
         );
         const beforePayloadBytes = [...ids].reduce(
             (total, id) =>
-                total + readConversationEntryPayloadBytes(database, "comment", id),
+                total +
+                readConversationEntryPayloadBytes(database, "comment", id),
             0,
         );
         database.exec("BEGIN IMMEDIATE");
@@ -286,10 +292,7 @@ export class ConversationStore {
             for (const ctxId of new Set(
                 failedRecords.map((record) => record.ctxId),
             )) {
-                const state = readConversationControlState(
-                    database,
-                    ctxId,
-                );
+                const state = readConversationControlState(database, ctxId);
                 if (
                     state.stoppedByCommentId !== undefined &&
                     ids.has(state.stoppedByCommentId)
@@ -311,7 +314,8 @@ export class ConversationStore {
         }
         const afterPayloadBytes = [...ids].reduce(
             (total, id) =>
-                total + readConversationEntryPayloadBytes(database, "comment", id),
+                total +
+                readConversationEntryPayloadBytes(database, "comment", id),
             0,
         );
         this.#payloadBytes =
@@ -348,16 +352,20 @@ export class ConversationStore {
                     input.callId,
                 );
             changes = Number(result.changes);
-            if (input.replyCommentId !== undefined) {
+            if (changes > 0) {
                 const state = readConversationControlState(
                     database,
                     input.ctxId,
                 );
-                if (state.pendingReplyCommentId === input.replyCommentId) {
+                if (
+                    input.replyCommentId !== undefined &&
+                    state.pendingReplyCommentId === input.replyCommentId
+                ) {
                     state.pendingReplyCommentId = undefined;
-                    state.pendingPushCommentId = undefined;
-                    state.pushToolCallsRemaining = undefined;
                 }
+                state.pendingPushCommentId = undefined;
+                state.pushMessage = undefined;
+                state.pushToolCallsRemaining = undefined;
                 writeConversationControlState(database, input.ctxId, state);
             }
             database.exec("COMMIT");
@@ -368,7 +376,11 @@ export class ConversationStore {
         if (changes > 0) {
             this.#payloadBytes =
                 this.#trackedPayloadBytes() +
-                readConversationEntryPayloadBytes(database, "report", input.callId);
+                readConversationEntryPayloadBytes(
+                    database,
+                    "report",
+                    input.callId,
+                );
         }
         this.#cleanup(database, true);
     }
@@ -554,7 +566,6 @@ export class ConversationStore {
         }
         return this.#payloadBytes;
     }
-
 }
 
 function fileSize(path: string): number {

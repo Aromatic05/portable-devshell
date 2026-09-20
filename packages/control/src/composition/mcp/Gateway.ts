@@ -36,6 +36,10 @@ export interface McpCommentPort {
         instance: string,
         ctxId: string,
     ): Promise<string | undefined>;
+    pendingPushMessage(
+        instance: string,
+        ctxId: string,
+    ): Promise<string | undefined>;
 }
 
 export interface McpConversationPort {
@@ -633,10 +637,14 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             await this.beforeTodoToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
             this.#refillTodoReportBucket(state, this.#now());
-            const replyCommentId =
-                await this.#comment.pendingReplyCommentId(instance, ctxId);
+            const [replyCommentId, pushMessage] = await Promise.all([
+                this.#comment.pendingReplyCommentId(instance, ctxId),
+                this.#comment.pendingPushMessage(instance, ctxId),
+            ]);
+            const replyRequired =
+                replyCommentId !== undefined || pushMessage !== undefined;
 
-            if (replyCommentId === undefined) {
+            if (!replyRequired) {
                 if (state.lastReportMessage === message) {
                     this.#recordTodoInvalid(instance, ctxId);
                     throw createError({
@@ -659,7 +667,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 ...(replyCommentId === undefined ? {} : { replyCommentId }),
                 text: message,
             });
-            if (replyCommentId === undefined) state.tokens -= 1;
+            if (!replyRequired) state.tokens -= 1;
             state.lastReportMessage = message;
         });
     }

@@ -3,7 +3,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { CommentExtension } from "@portable-devshell/comment-extension";
-import { McpHost, type McpInstanceGateway } from "@portable-devshell/mcp/testing";
+import {
+    McpHost,
+    type McpInstanceGateway,
+} from "@portable-devshell/mcp/testing";
 import {
     CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
     asInstanceName,
@@ -43,7 +46,10 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
             list: () => [
                 {
                     appendEvent: async () => undefined,
-                    conversationDatabaseFile: join(root, "conversation.sqlite3"),
+                    conversationDatabaseFile: join(
+                        root,
+                        "conversation.sqlite3",
+                    ),
                     enabled: true,
                     key: instanceKey,
                     legacyReports: async () => [],
@@ -60,16 +66,26 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
     );
     let executions = 0;
     const execution = new ToolCallExecution({
-        approval: { async prepare() { return {}; } },
+        approval: {
+            async prepare() {
+                return {};
+            },
+        },
         assertReady() {},
         audit: {
-            createScope(toolName: string, input: JsonValue, context: ToolCallContext) {
+            createScope(
+                toolName: string,
+                input: JsonValue,
+                context: ToolCallContext,
+            ) {
                 return createToolCallScope(toolName, input, context);
             },
             async requested() {},
             async queued() {},
             async denied() {},
-            runningContext() { return {}; },
+            runningContext() {
+                return {};
+            },
             async running() {},
             async completed() {},
             async failed() {},
@@ -130,7 +146,9 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
     });
     assert.equal(initialize.error, undefined, JSON.stringify(initialize));
     const headers = {
-        "mcp-protocol-version": String(initialize.result?.protocolVersion ?? ""),
+        "mcp-protocol-version": String(
+            initialize.result?.protocolVersion ?? "",
+        ),
     };
     await postRaw(
         endpoint,
@@ -168,29 +186,83 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
     assert.equal(allowed.result?.isError, false, JSON.stringify(allowed));
     assert.equal(executions, 1);
 
-    await queueComment(comment, ctxId, "Explain the original failure");
     await queueComment(comment, ctxId, "#push Reply before continuing");
-    const pushDelivered = await callBash(endpoint, headers, ctxId, "push-delivery");
+    const pushDelivered = await callBash(
+        endpoint,
+        headers,
+        ctxId,
+        "push-delivery",
+    );
     assert.equal(pushDelivered.error, undefined, JSON.stringify(pushDelivered));
-    assert.match(JSON.stringify(pushDelivered.result), /Explain the original failure/u);
-    assert.match(JSON.stringify(pushDelivered.result), /#push Reply before continuing/u);
+    assert.match(
+        JSON.stringify(pushDelivered.result),
+        /#push Reply before continuing/u,
+    );
     assert.equal(executions, 2);
 
-    for (let index = 0; index < CONTEXT_MESSAGE_PUSH_TOOL_BUDGET; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
         const withinBudget = await callBash(
             endpoint,
             headers,
             ctxId,
             `push-budget-${index}`,
         );
-        assert.equal(withinBudget.error, undefined, JSON.stringify(withinBudget));
+        assert.equal(
+            withinBudget.error,
+            undefined,
+            JSON.stringify(withinBudget),
+        );
     }
-    assert.equal(executions, 2 + CONTEXT_MESSAGE_PUSH_TOOL_BUDGET);
+    await queueComment(comment, ctxId, "Also include the current blocker");
+    const followUpDelivered = await callBash(
+        endpoint,
+        headers,
+        ctxId,
+        "push-follow-up-delivery",
+    );
+    assert.equal(
+        followUpDelivered.error,
+        undefined,
+        JSON.stringify(followUpDelivered),
+    );
+    assert.match(
+        JSON.stringify(followUpDelivered.result),
+        /Also include the current blocker/u,
+    );
 
-    const exhausted = await callBash(endpoint, headers, ctxId, "push-exhausted");
-    assert.match(JSON.stringify(exhausted.error), /control\.modelReplyRequired/u);
-    assert.match(JSON.stringify(exhausted.error), /Explain the original failure/u);
-    assert.equal(executions, 2 + CONTEXT_MESSAGE_PUSH_TOOL_BUDGET);
+    const exhausted = await callBash(
+        endpoint,
+        headers,
+        ctxId,
+        "push-exhausted",
+    );
+    assert.match(
+        JSON.stringify(exhausted.error),
+        /control\.modelReplyRequired/u,
+    );
+    assert.match(
+        JSON.stringify(exhausted.error),
+        /#push Reply before continuing/u,
+    );
+    assert.match(
+        JSON.stringify(exhausted.error),
+        /Also include the current blocker/u,
+    );
+    assert.equal(executions, 5);
+
+    await comment.conversation.recordReport(instanceName, {
+        callId: "push-report",
+        ctxId,
+        text: "Reported progress and blocker.",
+    });
+    const afterReport = await callBash(
+        endpoint,
+        headers,
+        ctxId,
+        "after-report",
+    );
+    assert.equal(afterReport.error, undefined, JSON.stringify(afterReport));
+    assert.equal(executions, 6);
 });
 
 const instanceKey = {};
@@ -258,8 +330,13 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
             input: JsonValue,
             context: ToolCallContext,
             signal?: AbortSignal,
-            transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            transformResult?: (
+                result: JsonValue,
+                callId: string,
+            ) => Promise<JsonValue>,
+            invocationInput?: (
+                input: JsonValue,
+            ) => Promise<JsonValue> | JsonValue,
             onProgress?: (progress: JsonValue) => void,
             recording: "caller" | "host" = "host",
             onFeedback?: (feedback: readonly string[]) => void,
@@ -285,11 +362,17 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
             return [bashTool];
         },
         async prepareExtensionResource() {
-            return { directory: join(workspace, ".devshell", "extensions", "skill") };
+            return {
+                directory: join(workspace, ".devshell", "extensions", "skill"),
+            };
         },
         async prepareWorkspace(inputWorkspace: string) {
             return {
-                projectMemoryAgentFile: join(inputWorkspace, ".devshell", "AGENT.md"),
+                projectMemoryAgentFile: join(
+                    inputWorkspace,
+                    ".devshell",
+                    "AGENT.md",
+                ),
                 projectMemoryDirectory: join(inputWorkspace, ".devshell"),
                 projectMemoryPresent: false,
                 temporaryDirectory: join(inputWorkspace, ".devshell", "tmp"),
@@ -321,7 +404,11 @@ function createCommentGateway(
             throw new Error("unexpected routed ToolCall");
         },
         async consumeContextMessages(_instance, ctxId, callId) {
-            return await comment.comment.consumePending(instanceName, ctxId, callId);
+            return await comment.comment.consumePending(
+                instanceName,
+                ctxId,
+                callId,
+            );
         },
         environment() {
             return handshake as never;
@@ -346,11 +433,14 @@ async function queueComment(
     ctxId: string,
     text: string,
 ): Promise<void> {
-    const module = comment
-        .routes.instance(instanceName)
+    const module = comment.routes
+        .instance(instanceName)
         .find((candidate) => candidate.name === "contextMessage");
-    const queue = module?.operations.find((operation) => operation.name === "queue");
-    if (queue === undefined) throw new Error("contextMessage.queue is unavailable");
+    const queue = module?.operations.find(
+        (operation) => operation.name === "queue",
+    );
+    if (queue === undefined)
+        throw new Error("contextMessage.queue is unavailable");
     queueSequence += 1;
     await queue.handle(
         {

@@ -32,12 +32,15 @@ test("CommentService merges pending Comments into one call-bound delivery", asyn
     const root = await createTestTempDirectory("context-message");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const createService = () =>
-        createCommentService(root, async (
-            type: Extract<InstanceEventType, `context.message.${string}`>,
-            data: JsonValue,
-        ) => {
-            events.push({ data, type });
-        });
+        createCommentService(
+            root,
+            async (
+                type: Extract<InstanceEventType, `context.message.${string}`>,
+                data: JsonValue,
+            ) => {
+                events.push({ data, type });
+            },
+        );
     const service = createService();
 
     const first = await service.queue({
@@ -134,8 +137,8 @@ test("CommentService merges pending Comments into one call-bound delivery", asyn
 test("CommentService marks a queued message failed when its audit event cannot be recorded", async () => {
     const root = await createTestTempDirectory("context-message-failure");
     const service = createCommentService(root, async (type) => {
-            if (type === "context.message.queued")
-                throw new Error("audit unavailable");
+        if (type === "context.message.queued")
+            throw new Error("audit unavailable");
     });
 
     await assert.rejects(
@@ -145,13 +148,46 @@ test("CommentService marks a queued message failed when its audit event cannot b
     const [record] = await service.list("ctx-a");
     assert.equal(record?.status, "failed");
     assert.equal(record?.error, "audit unavailable");
+    assert.equal(await service.pendingPushMessage("ctx-a"), undefined);
+    assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+        kind: "allow",
+    });
+});
+
+test("CommentService restores the previous push state when a later Comment fails to queue", async () => {
+    const root = await createTestTempDirectory("context-message-push-rollback");
+    let failQueue = false;
+    const service = createCommentService(root, async (type) => {
+        if (failQueue && type === "context.message.queued")
+            throw new Error("audit unavailable");
+    });
+
+    await service.queue({ ctxId: "ctx-a", text: "#push 报告进度" });
+    assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+        kind: "allow",
+    });
+    failQueue = true;
+    await assert.rejects(
+        service.queue({ ctxId: "ctx-a", text: "这条不应该进入 push_message" }),
+        /audit unavailable/u,
+    );
+    assert.equal(await service.pendingPushMessage("ctx-a"), "#push 报告进度");
+    for (let index = 0; index < 4; index += 1) {
+        assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+            kind: "allow",
+        });
+    }
+    assert.equal(
+        (await service.reviewToolCall("ctx-a", "file_read")).kind,
+        "push",
+    );
 });
 
 test("CommentService fails undelivered Comments when their Context is retired", async () => {
     const root = await createTestTempDirectory("context-message-retired");
     const events: Array<{ data: JsonValue; type: InstanceEventType }> = [];
     const service = createCommentService(root, async (type, data) => {
-            events.push({ data, type });
+        events.push({ data, type });
     });
     const first = await service.queue({
         ctxId: "ctx-retired",
@@ -226,11 +262,15 @@ test("CommentService failAllPending retires all undelivered Comments for instanc
 });
 
 test("CommentService retirement permanently fences stale service references", async () => {
-    const root = await createTestTempDirectory("context-message-retirement-fence");
+    const root = await createTestTempDirectory(
+        "context-message-retirement-fence",
+    );
     const service = createCommentService(root);
     await service.queue({ ctxId: "ctx-a", text: "Pending before retirement" });
 
-    await service.retire("Instance alpha was disabled before Comment delivery.");
+    await service.retire(
+        "Instance alpha was disabled before Comment delivery.",
+    );
 
     for (const operation of [
         async () => await service.queue({ ctxId: "ctx-a", text: "late" }),
@@ -246,10 +286,9 @@ test("CommentService retirement permanently fences stale service references", as
         instanceName: "alpha",
     });
     assert.deepEqual(
-        store.listComments({ ctxId: "ctx-a" }).map((comment) => [
-            comment.text,
-            comment.status,
-        ]),
+        store
+            .listComments({ ctxId: "ctx-a" })
+            .map((comment) => [comment.text, comment.status]),
         [["Pending before retirement", "failed"]],
     );
     store.close();
@@ -258,9 +297,9 @@ test("CommentService retirement permanently fences stale service references", as
 test("CommentService delivery event failure never blocks or requeues a completed call", async () => {
     const root = await createTestTempDirectory("context-message-retry");
     const service = createCommentService(root, async (type) => {
-            if (type === "context.message.delivered") {
-                throw new Error("audit temporarily unavailable");
-            }
+        if (type === "context.message.delivered") {
+            throw new Error("audit temporarily unavailable");
+        }
     });
     const queued = await service.queue({
         ctxId: "ctx-a",
@@ -312,11 +351,7 @@ test("CommentService keeps #stop durable and delivers #resume before tools conti
         text: "#resume Continue, but do not delete files",
     });
     assert.deepEqual(
-        await reloaded.reviewToolCall(
-            "ctx-a",
-            "file_read",
-            "request-resume",
-        ),
+        await reloaded.reviewToolCall("ctx-a", "file_read", "request-resume"),
         {
             comment: "#resume Continue, but do not delete files",
             commentId: resume.id,
@@ -362,33 +397,34 @@ test("CommentService delivers queued Stop-era messages through Resume without re
     });
 });
 
-test("CommentService persists the remaining #push budget without replenishing repeated Push", async () => {
+test("CommentService accumulates push_message and decrements ddl for tools and later Comments", async () => {
     const root = await createTestTempDirectory("context-message-push-control");
     const service = createCommentService(root);
-    const question = await service.queue({
-        ctxId: "ctx-a",
-        text: "Explain why the deployment is failing",
-    });
-    await service.consumePending("ctx-a", "question-delivery");
     const firstPush = await service.queue({
         ctxId: "ctx-a",
-        text: "#push Answer this first",
+        text: "#push 报告当前进度",
     });
     await service.consumePending("ctx-a", "delivery-one");
-    assert.equal(await service.pendingReplyCommentId("ctx-a"), question.id);
-    for (let index = 0; index < 4; index += 1) {
-        assert.deepEqual(
-            await service.reviewToolCall("ctx-a", "file_read"),
-            { kind: "allow" },
-        );
+    assert.equal(
+        await service.pendingPushMessage("ctx-a"),
+        "#push 报告当前进度",
+    );
+    for (let index = 0; index < 2; index += 1) {
+        assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+            kind: "allow",
+        });
     }
-    const secondPush = await service.queue({
+    await service.queue({
         ctxId: "ctx-a",
-        text: "#push I am still waiting",
+        text: "还要说明目前的阻塞点",
     });
     await service.consumePending("ctx-a", "delivery-two");
+    const secondPush = await service.queue({
+        ctxId: "ctx-a",
+        text: "#push 以及下一步准备做什么",
+    });
+    await service.consumePending("ctx-a", "delivery-three");
     assert.notEqual(firstPush.id, secondPush.id);
-    assert.equal(await service.pendingReplyCommentId("ctx-a"), question.id);
 
     const reloaded = createCommentService(root);
     assert.deepEqual(await reloaded.reviewToolCall("ctx-a", "file_read"), {
@@ -396,27 +432,38 @@ test("CommentService persists the remaining #push budget without replenishing re
     });
     const blocked = await reloaded.reviewToolCall("ctx-a", "file_read");
     assert.deepEqual(blocked, {
-        comment: "Explain why the deployment is failing",
+        comment:
+            "#push 报告当前进度\n\n还要说明目前的阻塞点\n\n#push 以及下一步准备做什么",
         commentId: secondPush.id,
         kind: "push",
-        replyCommentId: question.id,
         toolCallBudget: 5,
     });
 });
 
-test("CommentService ignores #push when there is no pending user reply", async () => {
-    const root = await createTestTempDirectory("context-message-push-without-reply");
+test("CommentService starts #push at ddl 5", async () => {
+    const root = await createTestTempDirectory(
+        "context-message-push-without-reply",
+    );
     const service = createCommentService(root);
-    await service.queue({ ctxId: "ctx-a", text: "#push" });
+    const push = await service.queue({
+        ctxId: "ctx-a",
+        text: "#push 报告进度",
+    });
     await service.consumePending("ctx-a", "push-only-delivery");
 
     assert.equal(await service.pendingReplyCommentId("ctx-a"), undefined);
-    for (let index = 0; index < 8; index += 1) {
-        assert.deepEqual(
-            await service.reviewToolCall("ctx-a", "file_read"),
-            { kind: "allow" },
-        );
+    assert.equal(await service.pendingPushMessage("ctx-a"), "#push 报告进度");
+    for (let index = 0; index < 5; index += 1) {
+        assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+            kind: "allow",
+        });
     }
+    assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
+        comment: "#push 报告进度",
+        commentId: push.id,
+        kind: "push",
+        toolCallBudget: 5,
+    });
 });
 
 test("CommentState retains all pending messages while bounding terminal history", () => {

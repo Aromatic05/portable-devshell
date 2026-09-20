@@ -10,7 +10,6 @@ export type ExtensionCommentControlDecision =
           readonly comment: string;
           readonly commentId: string;
           readonly kind: "push";
-          readonly replyCommentId: string;
           readonly toolCallBudget: number;
       }
     | {
@@ -27,28 +26,40 @@ export type ExtensionCommentControlDecision =
 export async function readCommentFeedback(
     context: Pick<ToolCallReviewContext, "requestInterface">,
 ): Promise<readonly string[]> {
-    const value = await context.requestInterface(commentFeedbackInterfaceOperation);
+    const value = await context.requestInterface(
+        commentFeedbackInterfaceOperation,
+    );
     if (!Array.isArray(value))
-        throw new TypeError("Comment feedback interface returned invalid feedback.");
+        throw new TypeError(
+            "Comment feedback interface returned invalid feedback.",
+        );
     const feedback = value.filter(
         (entry): entry is string =>
             typeof entry === "string" && entry.length > 0,
     );
     if (feedback.length !== value.length)
-        throw new TypeError("Comment feedback interface returned invalid feedback.");
+        throw new TypeError(
+            "Comment feedback interface returned invalid feedback.",
+        );
     return Object.freeze(feedback);
 }
 
 export async function reviewCommentToolCall(
     context: Pick<ToolCallReviewContext, "requestInterface">,
 ): Promise<ExtensionCommentControlDecision> {
-    const value = await context.requestInterface(commentReviewInterfaceOperation);
+    const value = await context.requestInterface(
+        commentReviewInterfaceOperation,
+    );
     return readDecision(value);
 }
 
-function readDecision(value: ExtensionJsonValue | undefined): ExtensionCommentControlDecision {
+function readDecision(
+    value: ExtensionJsonValue | undefined,
+): ExtensionCommentControlDecision {
     if (!isRecord(value) || typeof value.kind !== "string")
-        throw new TypeError("Comment review interface returned an invalid decision.");
+        throw new TypeError(
+            "Comment review interface returned an invalid decision.",
+        );
     switch (value.kind) {
         case "allow":
             return { kind: "allow" };
@@ -57,11 +68,10 @@ function readDecision(value: ExtensionJsonValue | undefined): ExtensionCommentCo
                 comment: readString(value.comment, "comment"),
                 commentId: readString(value.commentId, "commentId"),
                 kind: "push",
-                replyCommentId: readString(
-                    value.replyCommentId,
-                    "replyCommentId",
+                toolCallBudget: readNumber(
+                    value.toolCallBudget,
+                    "toolCallBudget",
                 ),
-                toolCallBudget: readNumber(value.toolCallBudget, "toolCallBudget"),
             };
         case "resume":
             return {
@@ -93,12 +103,18 @@ function isRecord(
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readString(value: ExtensionJsonValue | undefined, field: string): string {
+function readString(
+    value: ExtensionJsonValue | undefined,
+    field: string,
+): string {
     if (typeof value === "string" && value.length > 0) return value;
     throw new TypeError(`Comment review ${field} must be a non-empty string.`);
 }
 
-function readNumber(value: ExtensionJsonValue | undefined, field: string): number {
+function readNumber(
+    value: ExtensionJsonValue | undefined,
+    field: string,
+): number {
     if (typeof value === "number" && Number.isFinite(value)) return value;
     throw new TypeError(`Comment review ${field} must be a finite number.`);
 }
