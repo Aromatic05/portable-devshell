@@ -101,12 +101,9 @@ export class ControlServer {
 
     async #stop(): Promise<void> {
         const runtime = this.#runtime;
+        await runtime?.stop();
         this.#runtime = undefined;
-        try {
-            await runtime?.stop();
-        } finally {
-            this.#state.reset();
-        }
+        this.#state.reset();
     }
 
     async #runExclusive<T>(factory: () => Promise<T>): Promise<T> {

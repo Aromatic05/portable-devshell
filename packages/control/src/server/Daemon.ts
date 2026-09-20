@@ -58,8 +58,15 @@ export class ControlDaemon {
             await this.#logger.info("control server started");
             writeStartupDiagnostic("control daemon start completed");
         } catch (error) {
-            await this.#server.stop().catch(() => undefined);
-            this.#started = false;
+            try {
+                await this.#server.stop();
+                this.#started = false;
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    "Control daemon startup rollback failed.",
+                );
+            }
             throw error;
         }
     }
@@ -80,9 +87,11 @@ export class ControlDaemon {
         } catch (error) {
             failures.push(error);
         }
-        await this.#logger
-            .info("control server stopped")
-            .catch((error) => failures.push(error));
+        if (!this.#started) {
+            await this.#logger
+                .info("control server stopped")
+                .catch((error) => failures.push(error));
+        }
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,

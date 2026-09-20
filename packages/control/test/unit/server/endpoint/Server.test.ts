@@ -65,6 +65,50 @@ test("concurrent restart then shutdown preserves lifecycle request order", async
     assert.deepEqual(events, ["start-1", "stop-1", "start-2", "stop-2"]);
 });
 
+test("failed stop preserves the runtime owner until a retry succeeds", async (t) => {
+    const xdgRuntimeDir = await createTestTempDirectory("control-server-stop");
+    t.after(async () => {
+        await rm(xdgRuntimeDir, { force: true, recursive: true });
+    });
+    let stopCalls = 0;
+    let creates = 0;
+    const stopFailure = new Error("stop failed");
+    const server = new ControlServer({
+        configStore: {
+            async readOrCreate() {
+                return { marker: "loaded" };
+            },
+        } as never,
+        instanceRegistryBuilder: { build() { return {}; } } as never,
+        runtimeFactory: {
+            async create() {
+                creates += 1;
+                return {
+                    async start() {},
+                    async stop() {
+                        stopCalls += 1;
+                        if (stopCalls === 1) throw stopFailure;
+                    },
+                };
+            },
+        } as never,
+        xdgRuntimeDir,
+    });
+
+    await server.start();
+    await assert.rejects(
+        server.stop(),
+        (error: unknown) => error === stopFailure,
+    );
+    assert.notEqual(server.config, undefined);
+    await server.start();
+    assert.equal(creates, 1);
+
+    await server.stop();
+    assert.equal(server.config, undefined);
+    assert.equal(stopCalls, 2);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
     const deadline = Date.now() + 1_000;
     while (Date.now() < deadline) {

@@ -35,6 +35,7 @@ test("a stopping daemon preserves successor lifecycle state", async () => {
 
 test("a daemon tears down a started server when pid publication fails", async () => {
     let stopCalls = 0;
+    const publicationFailure = new Error("pid write failed");
     const daemon = new ControlDaemon({
         logger: {
             async info() {},
@@ -42,7 +43,7 @@ test("a daemon tears down a started server when pid publication fails", async ()
         } as never,
         pidFile: {
             async write() {
-                throw new Error("pid write failed");
+                throw publicationFailure;
             },
         } as never,
         server: {
@@ -56,9 +57,79 @@ test("a daemon tears down a started server when pid publication fails", async ()
         } as never,
     });
 
-    await assert.rejects(daemon.start(), /pid write failed/u);
+    await assert.rejects(
+        daemon.start(),
+        (error: unknown) => error === publicationFailure,
+    );
 
     assert.equal(stopCalls, 1);
+});
+
+test("a failed daemon rollback preserves state and aggregates rollback failure", async () => {
+    let stopCalls = 0;
+    const publicationFailure = new Error("pid write failed");
+    const rollbackFailure = new Error("rollback failed");
+    const daemon = new ControlDaemon({
+        logger: {
+            async info() {},
+            path: "/tmp/control.log",
+        } as never,
+        pidFile: {
+            async write() {
+                throw publicationFailure;
+            },
+        } as never,
+        server: {
+            async start() {},
+            async stop() {
+                stopCalls += 1;
+                if (stopCalls === 1) throw rollbackFailure;
+            },
+        } as never,
+        socketFile: { async ensureRuntimeDir() {} } as never,
+    });
+
+    await assert.rejects(
+        daemon.start(),
+        (error: unknown) =>
+            error instanceof AggregateError &&
+            error.errors.length === 2 &&
+            error.errors[0] === publicationFailure &&
+            error.errors[1] === rollbackFailure,
+    );
+
+    await daemon.stop();
+    assert.equal(stopCalls, 2);
+});
+
+test("a failed daemon stop never logs that the server stopped", async () => {
+    const logs: string[] = [];
+    const stopFailure = new Error("stop failed");
+    const daemon = new ControlDaemon({
+        logger: {
+            async info(message: string) {
+                logs.push(message);
+            },
+            path: "/tmp/control.log",
+        } as never,
+        pidFile: { async write() {} } as never,
+        server: {
+            async start() {},
+            async stop() {
+                throw stopFailure;
+            },
+        } as never,
+        socketFile: { async ensureRuntimeDir() {} } as never,
+    });
+
+    await daemon.start();
+    await assert.rejects(
+        daemon.stop(),
+        (error: unknown) =>
+            error instanceof AggregateError &&
+            error.errors.includes(stopFailure),
+    );
+    assert.equal(logs.includes("control server stopped"), false);
 });
 
 test("a stop requested during startup runs after startup completes", async () => {
