@@ -95,6 +95,40 @@ test("instance connection references remain bound to the Worker generation they 
     assert.deepEqual(stopped, ["first", "second"]);
 });
 
+test("retiring committed generation references allows the same Context to attach to the replacement", async () => {
+    const worker = () => ({
+        managementMode: "controllerManaged" as const,
+        snapshot() {
+            return { daemonState: "running", ready: true };
+        },
+        async stop() {
+            return { daemonState: "stopped", ready: false };
+        },
+    });
+    const first = worker();
+    const second = worker();
+    const firstDescriptor = {
+        enabled: true,
+        name: "worker-a",
+        worker: first,
+    } as never;
+    const secondDescriptor = {
+        enabled: true,
+        name: "worker-a",
+        worker: second,
+    } as never;
+    const registry = new InstanceRegistry([firstDescriptor]);
+    const connections = new InstanceConnectionService(registry);
+
+    await connections.acquire("worker-a", "ctx:same");
+    await registry.retireGeneration("worker-a", firstDescriptor);
+    registry.add(secondDescriptor);
+    registry.retireConnectionReferences("worker-a", first);
+
+    const replacement = await connections.acquire("worker-a", "ctx:same");
+    assert.equal(replacement.worker, second);
+});
+
 test("instance connection rejects a late acquire after its generation is retired", async () => {
     let ready = false;
     let signalStart!: () => void;

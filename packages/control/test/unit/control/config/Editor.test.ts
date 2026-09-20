@@ -1245,6 +1245,83 @@ test("successful instance rebuild replaces the descriptor then closes the old Wo
     ]);
 });
 
+test("instance rebuild cleanup debt withholds replacement and reconciles before restart admission", async () => {
+    const root = await createTestTempDirectory("instance-rebuild-cleanup-debt");
+    const cleanupDebtFile = join(root, "lifecycle-cleanup.json");
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const oldDescriptor = descriptor({
+        snapshot: stoppedSnapshot,
+    });
+    let replacementClosed = 0;
+    const replacement = descriptor({
+        snapshot: stoppedSnapshot,
+        async close() {
+            replacementClosed += 1;
+        },
+    });
+    const registry = new InstanceRegistry([oldDescriptor]);
+    const service = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(structuredClone(nextConfig));
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceConfigMapper: { map: () => replacement } as never,
+        instanceRegistry: registry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    service.registerInstanceGenerationRetirement(async () => {
+        throw new Error("old generation cleanup failed");
+    });
+
+    const warnings = await captureWarnings(
+        async () =>
+            await service.updateInstanceConfig({
+                instanceName: "demo-local",
+                patch: { tools: { scheduler: { maxRunning: 2 } } },
+            }),
+    );
+
+    assert.equal(writes.length, 1);
+    assert.equal(config.instances[0]?.tools?.scheduler?.maxRunning, 2);
+    assert.equal(registry.get("demo-local"), undefined);
+    assert.equal(replacementClosed, 1);
+    assert.equal(warnings.length, 1);
+
+    const startupDescriptor = descriptor({ snapshot: stoppedSnapshot });
+    const restartedRegistry = new InstanceRegistry([startupDescriptor]);
+    const restarted = new ConfigEditorCoordinator({
+        cleanupDebtFile,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: restartedRegistry,
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+    let replayed = 0;
+    restarted.registerInstanceGenerationRetirement(async () => {
+        replayed += 1;
+        assert.equal(restartedRegistry.get("demo-local"), undefined);
+    });
+
+    await restarted.reconcileCleanupDebt();
+    await restarted.reconcileCleanupDebt();
+    assert.equal(replayed, 1);
+    assert.equal(restartedRegistry.get("demo-local"), startupDescriptor);
+    await rm(root, { force: true, recursive: true });
+});
+
 test("failed rebuild persistence closes the uncommitted replacement descriptor", async () => {
     let config = createConfig();
     let replacementClosed = 0;

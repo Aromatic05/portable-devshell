@@ -198,6 +198,16 @@ export class InstanceRegistry {
         };
     }
 
+    retireConnectionReferences(
+        name: string,
+        worker: InstanceDescriptor["worker"],
+    ): void {
+        const workers = this.#connectionReferences.get(name);
+        workers?.delete(worker);
+        if (workers?.size === 0) this.#connectionReferences.delete(name);
+        this.clearConnectionOwnership(name, worker);
+    }
+
     clearConnectionOwnership(
         name: string,
         worker: InstanceDescriptor["worker"],

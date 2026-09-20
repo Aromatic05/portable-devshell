@@ -86,7 +86,7 @@ interface ConfigEditorCoordinatorOptions {
 
 interface InstanceCleanupDebtRecord {
     instance: ControlConfig["instances"][number];
-    operation: "delete" | "disable";
+    operation: "delete" | "disable" | "rebuild";
     skipRuntimeRetirement?: boolean;
 }
 
@@ -227,7 +227,11 @@ function parseCleanupDebtRecord(value: unknown): InstanceCleanupDebtRecord {
         throw new Error("Invalid lifecycle cleanup record.");
     }
     const record = value as Record<string, unknown>;
-    if (record.operation !== "delete" && record.operation !== "disable") {
+    if (
+        record.operation !== "delete" &&
+        record.operation !== "disable" &&
+        record.operation !== "rebuild"
+    ) {
         throw new Error("Invalid lifecycle cleanup operation.");
     }
     const instance = normalizeConfigInstanceDraft(
@@ -981,6 +985,10 @@ export class ConfigEditorCoordinator {
                 await this.#retireGenerationResources(existing).catch((error) =>
                     failures.push(error),
                 );
+                this.#instanceRegistry.retireConnectionReferences(
+                    descriptor.name,
+                    descriptor.worker,
+                );
                 if (
                     descriptor.worker.managementMode !== "selfManaged" &&
                     descriptor.worker.snapshot().daemonState !== "stopped"
@@ -1030,10 +1038,52 @@ export class ConfigEditorCoordinator {
 
         if (
             rebuildRequired &&
+            existing !== undefined &&
             descriptor !== undefined &&
             preparedDescriptor !== undefined &&
             descriptor !== preparedDescriptor
         ) {
+            let generationCleanupFailed = false;
+            await this.#retireGenerationResources(existing).catch((error) => {
+                generationCleanupFailed = true;
+                failures.push(error);
+            });
+            this.#instanceRegistry.retireConnectionReferences(
+                descriptor.name,
+                descriptor.worker,
+            );
+            if (!generationCleanupFailed) {
+                try {
+                    this.#instanceRegistry.add(preparedDescriptor);
+                    await this.#syncMcpEndpoint(existing.name);
+                } catch (error) {
+                    failures.push(error);
+                    if (
+                        this.#instanceRegistry.get(existing.name) ===
+                        preparedDescriptor
+                    ) {
+                        await this.#instanceRegistry
+                            .retireGeneration(existing.name, preparedDescriptor)
+                            .catch((cleanupError) =>
+                                failures.push(cleanupError),
+                            );
+                        this.#instanceRegistry.retireConnectionReferences(
+                            preparedDescriptor.name,
+                            preparedDescriptor.worker,
+                        );
+                        await this.#syncMcpEndpoint(existing.name).catch(
+                            (cleanupError) => failures.push(cleanupError),
+                        );
+                    }
+                    await closeDescriptorResourcesBestEffort(
+                        preparedDescriptor,
+                    ).catch((cleanupError) => failures.push(cleanupError));
+                }
+            } else {
+                await closeDescriptorResourcesBestEffort(preparedDescriptor).catch(
+                    (cleanupError) => failures.push(cleanupError),
+                );
+            }
             await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
                 failures.push(error),
             );
@@ -1048,15 +1098,27 @@ export class ConfigEditorCoordinator {
         preparedDescriptor: ReturnType<InstanceFactory["map"]> | undefined,
         rebuildRequired: boolean,
     ): Promise<void> {
-        const debt =
+        const debt: InstanceCleanupDebtRecord | undefined =
             existing !== undefined &&
             next !== undefined &&
             existing.enabled &&
             !next.enabled
-                ? ({
+                ? {
                       instance: existing,
                       operation: "disable",
-                  } satisfies InstanceCleanupDebtRecord)
+                  }
+                : existing !== undefined &&
+                    next !== undefined &&
+                    existing.enabled &&
+                    next.enabled &&
+                    rebuildRequired &&
+                    descriptor !== undefined &&
+                    preparedDescriptor !== undefined &&
+                    descriptor !== preparedDescriptor
+                  ? {
+                        instance: existing,
+                        operation: "rebuild",
+                    }
                 : undefined;
         const failures: unknown[] = [];
         let debtPersisted = false;
@@ -1076,11 +1138,13 @@ export class ConfigEditorCoordinator {
             rebuildRequired,
         );
         failures.push(...cleanupFailures);
-        if (
-            debt !== undefined &&
-            debtPersisted &&
-            cleanupFailures.length === 0
-        ) {
+        const cleanupSettled =
+            debt?.operation === "rebuild"
+                ? preparedDescriptor !== undefined &&
+                  this.#instanceRegistry.get(debt.instance.name) ===
+                      preparedDescriptor
+                : cleanupFailures.length === 0;
+        if (debt !== undefined && debtPersisted && cleanupSettled) {
             await this.#cleanupDebts
                 .clear(debt.instance.name)
                 .catch((error) => failures.push(error));
@@ -1118,12 +1182,21 @@ export class ConfigEditorCoordinator {
         await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing).catch(
             (error) => failures.push(error),
         );
+        if (descriptor !== undefined) {
+            this.#instanceRegistry.retireConnectionReferences(
+                descriptor.name,
+                descriptor.worker,
+            );
+        }
         return failures;
     }
 
     async #reconcileCleanupRecord(
         record: InstanceCleanupDebtRecord,
     ): Promise<unknown[]> {
+        if (record.operation === "rebuild") {
+            return await this.#reconcileRebuildCleanup(record);
+        }
         const failures: unknown[] = [];
         const descriptor = this.#instanceConfigMapper.map(record.instance);
         await this.#retireGenerationResources(record.instance).catch((error) =>
@@ -1172,6 +1245,74 @@ export class ConfigEditorCoordinator {
         await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
             failures.push(error),
         );
+        return failures;
+    }
+
+    async #reconcileRebuildCleanup(
+        record: InstanceCleanupDebtRecord,
+    ): Promise<unknown[]> {
+        const failures: unknown[] = [];
+        let candidate = this.#instanceRegistry.get(record.instance.name);
+        if (candidate !== undefined) {
+            try {
+                await this.#instanceRegistry.retireGeneration(
+                    record.instance.name,
+                    candidate,
+                );
+                this.#instanceRegistry.retireConnectionReferences(
+                    candidate.name,
+                    candidate.worker,
+                );
+            } catch (error) {
+                failures.push(error);
+                return failures;
+            }
+        }
+
+        await this.#retireGenerationResources(record.instance).catch((error) =>
+            failures.push(error),
+        );
+        if (failures.length > 0) {
+            if (candidate !== undefined) {
+                await closeDescriptorResourcesBestEffort(candidate).catch((error) =>
+                    failures.push(error),
+                );
+            }
+            return failures;
+        }
+
+        if (candidate === undefined) {
+            const configured = this.#getConfig().instances.find(
+                (instance) =>
+                    instance.name === record.instance.name && instance.enabled,
+            );
+            if (configured !== undefined) {
+                candidate = this.#instanceConfigMapper.map(configured);
+            }
+        }
+        if (candidate === undefined) return failures;
+
+        try {
+            this.#instanceRegistry.add(candidate);
+            await this.#syncMcpEndpoint(record.instance.name);
+        } catch (error) {
+            failures.push(error);
+            if (this.#instanceRegistry.get(record.instance.name) === candidate) {
+                await this.#instanceRegistry
+                    .retireGeneration(record.instance.name, candidate)
+                    .catch((cleanupError) => failures.push(cleanupError));
+                this.#instanceRegistry.retireConnectionReferences(
+                    candidate.name,
+                    candidate.worker,
+                );
+                await this.#syncMcpEndpoint(record.instance.name).catch(
+                    (cleanupError) => failures.push(cleanupError),
+                );
+            }
+            await closeDescriptorResourcesBestEffort(candidate).catch(
+                (cleanupError) => failures.push(cleanupError),
+            );
+        }
         return failures;
     }
 
@@ -1369,8 +1510,6 @@ export class ConfigEditorCoordinator {
                 instance.name,
                 descriptor,
             );
-            await this.#retireGenerationResources(existing);
-            this.#instanceRegistry.add(preparedDescriptor);
             return;
         }
         await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
