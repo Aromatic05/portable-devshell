@@ -402,32 +402,54 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                 );
             }
             let closePromise: Promise<void> | undefined;
+            let toolSessionReleased = false;
+            let connectionReleased = false;
+            let closeCompleted = false;
             let resolveClosed!: () => void;
             const closed = new Promise<void>((resolve) => {
                 resolveClosed = resolve;
             });
-            const close = async () =>
-                await (closePromise ??= (async () => {
-                    this.#sessions.delete(sessionId);
+            const close = async () => {
+                if (closeCompleted) return;
+                if (closePromise !== undefined) return await closePromise;
+                const attempt = (async () => {
                     const failures: unknown[] = [];
-                    try {
-                        await lease.worker
-                            .releaseToolSession(sessionId)
-                            .catch((error) => failures.push(error));
-                        await this.#connections
-                            .release(instance, reference)
-                            .catch((error) => failures.push(error));
-                        if (failures.length === 1) throw failures[0];
-                        if (failures.length > 1) {
-                            throw new AggregateError(
-                                failures,
-                                `Extension Worker session ${sessionId} failed to close cleanly.`,
-                            );
+                    if (!toolSessionReleased) {
+                        try {
+                            await lease.worker
+                                .releaseToolSession(sessionId);
+                            toolSessionReleased = true;
+                        } catch (error) {
+                            failures.push(error);
                         }
-                    } finally {
-                        resolveClosed();
                     }
-                })());
+                    if (!connectionReleased) {
+                        try {
+                            await this.#connections
+                                .release(instance, reference);
+                            connectionReleased = true;
+                        } catch (error) {
+                            failures.push(error);
+                        }
+                    }
+                    if (failures.length === 1) throw failures[0];
+                    if (failures.length > 1) {
+                        throw new AggregateError(
+                            failures,
+                            `Extension Worker session ${sessionId} failed to close cleanly.`,
+                        );
+                    }
+                    closeCompleted = true;
+                    this.#sessions.delete(sessionId);
+                    resolveClosed();
+                })();
+                closePromise = attempt;
+                try {
+                    await attempt;
+                } finally {
+                    if (closePromise === attempt) closePromise = undefined;
+                }
+            };
             const session: ExtensionWorkerSession = {
                 closed,
                 environment,
@@ -510,7 +532,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
     }
 
     async closeAll(): Promise<void> {
-        if (this.#closed) return;
+        if (this.#closed && this.#sessions.size === 0) return;
         this.#closed = true;
         const settled = await Promise.allSettled(
             [...this.#sessions.values()].map(

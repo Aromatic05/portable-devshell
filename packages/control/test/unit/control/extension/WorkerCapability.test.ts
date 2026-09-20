@@ -434,12 +434,15 @@ test("Extension worker closeAll cleans an openSession that finishes after close 
 });
 
 test("Extension worker openSession preserves primary and cleanup failures", async () => {
+    const prepareFailure = new Error("prepare failed");
+    const toolCleanupFailure = new Error("tool cleanup failed");
+    const connectionCleanupFailure = new Error("connection cleanup failed");
     const worker = lifecycleWorker("local", []);
     worker.prepareWorkspace = async () => {
-        throw new Error("prepare failed");
+        throw prepareFailure;
     };
     worker.releaseToolSession = async () => {
-        throw new Error("tool cleanup failed");
+        throw toolCleanupFailure;
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
@@ -452,7 +455,7 @@ test("Extension worker openSession preserves primary and cleanup failures", asyn
                 };
             },
             async release() {
-                throw new Error("connection cleanup failed");
+                throw connectionCleanupFailure;
             },
         },
         extensionId: "example",
@@ -466,15 +469,57 @@ test("Extension worker openSession preserves primary and cleanup failures", asyn
         capability.openSession({ workspace: "/repo" }),
         (error: unknown) =>
             error instanceof AggregateError &&
-            error.errors
-                .map((candidate) =>
-                    candidate instanceof Error
-                        ? candidate.message
-                        : String(candidate),
-                )
-                .join("|") ===
-                "prepare failed|tool cleanup failed|connection cleanup failed",
+            error.errors.length === 3 &&
+            error.errors[0] === prepareFailure &&
+            error.errors[1] === toolCleanupFailure &&
+            error.errors[2] === connectionCleanupFailure,
     );
+});
+
+test("Extension worker closeAll retries fault cleanup failures during retirement", async () => {
+    const releasedToolSessions: string[] = [];
+    const releases: string[] = [];
+    const worker = lifecycleWorker("local", releasedToolSessions);
+    let releaseAttempts = 0;
+    const toolCleanupFailure = new Error("tool cleanup failed");
+    worker.releaseToolSession = async () => {
+        releaseAttempts += 1;
+        if (releaseAttempts <= 2) throw toolCleanupFailure;
+    };
+    const capability = new ExtensionWorkerCapabilityControl({
+        allowed: true,
+        connections: {
+            async acquire() {
+                return {
+                    handle: {} as never,
+                    snapshot: {} as never,
+                    worker: worker as never,
+                };
+            },
+            async release(instance) {
+                releases.push(instance);
+            },
+        },
+        extensionId: "example",
+        generation: "g1",
+        instances: {
+            list: () => [{ enabled: true, name: "local", provider: "local" }],
+        } as never,
+    });
+    await capability.openSession({ workspace: "/repo" });
+
+    await assert.rejects(
+        capability.closeAll(),
+        (error: unknown) => error === toolCleanupFailure,
+    );
+    await assert.rejects(
+        capability.closeAll(),
+        (error: unknown) => error === toolCleanupFailure,
+    );
+    await capability.closeAll();
+
+    assert.equal(releaseAttempts, 3);
+    assert.deepEqual(releases, ["local"]);
 });
 
 test("Extension worker instance retirement fences an older openSession but permits a later epoch", async () => {
