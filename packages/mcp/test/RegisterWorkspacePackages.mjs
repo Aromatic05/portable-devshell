@@ -76,6 +76,38 @@ const workspacePackages = new Map([
         new URL("../../core/src/testing.ts", import.meta.url).href,
     ],
     [
+        "@portable-devshell/extension",
+        new URL("../../extension/src/index.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/artifact",
+        new URL("../../extension/src/domain/artifact.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/cli",
+        new URL("../../extension/src/domain/cli.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/comment",
+        new URL("../../extension/src/domain/comment.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/instance",
+        new URL("../../extension/src/domain/instance.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/secret",
+        new URL("../../extension/src/domain/secret.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/toolcall",
+        new URL("../../extension/src/domain/toolcall.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/web",
+        new URL("../../extension/src/domain/web.ts", import.meta.url).href,
+    ],
+    [
         "@portable-devshell/mcp",
         new URL("../src/index.ts", import.meta.url).href,
     ],
