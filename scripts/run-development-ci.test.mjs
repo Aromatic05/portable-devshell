@@ -119,6 +119,7 @@ test("macOS platform contract retains OS-sensitive package Rust and tmux behavio
     const steps = createPlatformContractCiSteps("darwin");
     const names = steps.map((step) => step.name);
     assert.deepEqual(names, [
+        "Build",
         "Rust workspace tests",
         "Worker tmux contract tests",
         "Prepare test Worker",

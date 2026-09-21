@@ -78,6 +78,7 @@ export function createPlatformContractCiSteps(platform = process.platform) {
     }
     const pnpmStep = createPnpmStepFactory(platform);
     return [
+        pnpmStep("Build", ["build"]),
         {
             args: ["test", "--locked", "--workspace"],
             command: "cargo",
