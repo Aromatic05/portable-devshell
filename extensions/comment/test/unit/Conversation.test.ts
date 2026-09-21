@@ -163,6 +163,67 @@ test("ConversationStore v3 control migration rebuilds push_message from history"
     migrated.close();
 });
 
+test("ConversationStore clears only the #push snapshot acknowledged by a report", async () => {
+    const root = await createTestTempDirectory("conversation-report-push-cas");
+    const store = new ConversationStore({
+        filePath: join(root, "conversation.sqlite3"),
+        instanceName: "alpha",
+    });
+    store.insertComment({
+        createdAt: "2026-09-20T08:15:17.222Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-20T08:15:17.233Z",
+        id: "push-1",
+        instance: "alpha",
+        status: "delivered",
+        text: "#push 报告进度",
+    });
+    const observed = store.readControlState("ctx-a");
+    assert.equal(observed.pendingPushCommentId, "push-1");
+    assert.equal(observed.pushMessage, "#push 报告进度");
+
+    store.insertComment({
+        createdAt: "2026-09-20T08:15:18.222Z",
+        ctxId: "ctx-a",
+        deliveredAt: "2026-09-20T08:15:18.233Z",
+        id: "follow-up-1",
+        instance: "alpha",
+        status: "delivered",
+        text: "还要说明阻塞点",
+    });
+    store.appendReport({
+        callId: "report-old",
+        createdAt: "2026-09-20T08:15:19.000Z",
+        ctxId: "ctx-a",
+        push: {
+            commentId: observed.pendingPushCommentId!,
+            message: observed.pushMessage!,
+        },
+        text: "旧 snapshot 的报告",
+    });
+    assert.deepEqual(store.readControlState("ctx-a"), {
+        pendingPushCommentId: "push-1",
+        pendingReplyCommentId: "follow-up-1",
+        pushMessage: "#push 报告进度\n\n还要说明阻塞点",
+        pushToolCallsRemaining: 4,
+    });
+
+    const current = store.readControlState("ctx-a");
+    store.appendReport({
+        callId: "report-current",
+        createdAt: "2026-09-20T08:15:20.000Z",
+        ctxId: "ctx-a",
+        push: {
+            commentId: current.pendingPushCommentId!,
+            message: current.pushMessage!,
+        },
+        replyCommentId: current.pendingReplyCommentId,
+        text: "当前 snapshot 的报告",
+    });
+    assert.deepEqual(store.readControlState("ctx-a"), {});
+    store.close();
+});
+
 test("ConversationStore v3 control migration restores standalone #push", async () => {
     const root = await createTestTempDirectory(
         "conversation-control-v3-standalone-push",

@@ -260,14 +260,15 @@ test("CommentExtension fences a captured route before committed retirement drain
     );
 
     await assert.rejects(
-        queue.handle(
-            {
-                id: "queue-late",
-                name: "queue",
-                payload: { ctxId: "ctx-alpha", text: "Must never reopen" },
-            },
-            routeContext,
-        ),
+        async () =>
+            await queue.handle(
+                {
+                    id: "queue-late",
+                    name: "queue",
+                    payload: { ctxId: "ctx-alpha", text: "Must never reopen" },
+                },
+                routeContext,
+            ),
         (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,

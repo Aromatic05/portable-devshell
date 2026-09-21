@@ -329,6 +329,7 @@ export class ConversationStore {
         callId: string;
         createdAt: string;
         ctxId: string;
+        push?: { commentId: string; message: string };
         replyCommentId?: string;
         text: string;
     }): void {
@@ -363,9 +364,15 @@ export class ConversationStore {
                 ) {
                     state.pendingReplyCommentId = undefined;
                 }
-                state.pendingPushCommentId = undefined;
-                state.pushMessage = undefined;
-                state.pushToolCallsRemaining = undefined;
+                if (
+                    input.push !== undefined &&
+                    state.pendingPushCommentId === input.push.commentId &&
+                    state.pushMessage === input.push.message
+                ) {
+                    state.pendingPushCommentId = undefined;
+                    state.pushMessage = undefined;
+                    state.pushToolCallsRemaining = undefined;
+                }
                 writeConversationControlState(database, input.ctxId, state);
             }
             database.exec("COMMIT");

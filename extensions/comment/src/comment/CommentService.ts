@@ -167,17 +167,32 @@ export class CommentService {
         });
     }
 
-    async pendingReplyCommentId(ctxId: string): Promise<string | undefined> {
-        return await this.#runExclusive(
-            async () =>
-                this.#store.readControlState(ctxId).pendingReplyCommentId,
-        );
-    }
-
-    async pendingPushMessage(ctxId: string): Promise<string | undefined> {
-        return await this.#runExclusive(
-            async () => this.#store.readControlState(ctxId).pushMessage,
-        );
+    async pendingReport(ctxId: string): Promise<{
+        push?: { commentId: string; message: string };
+        replyCommentId?: string;
+    }> {
+        return await this.#runExclusive(async () => {
+            const state = this.#store.readControlState(ctxId);
+            const hasPushId = state.pendingPushCommentId !== undefined;
+            const hasPushMessage = state.pushMessage !== undefined;
+            if (hasPushId !== hasPushMessage) {
+                throw new Error("Conversation Push state is incomplete.");
+            }
+            const push =
+                state.pendingPushCommentId === undefined ||
+                state.pushMessage === undefined
+                    ? undefined
+                    : {
+                          commentId: state.pendingPushCommentId,
+                          message: state.pushMessage,
+                      };
+            return {
+                ...(push === undefined ? {} : { push }),
+                ...(state.pendingReplyCommentId === undefined
+                    ? {}
+                    : { replyCommentId: state.pendingReplyCommentId }),
+            };
+        });
     }
 
     async failAllPending(reason: string): Promise<ContextMessageRecord[]> {

@@ -18,6 +18,7 @@ import {
 import { createCommentReview } from "../../../../../extensions/comment/src/builtin/CommentReview.ts";
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
 import { ToolCallExecution } from "../../../../../packages/core/src/toolcall/Execution.ts";
+import type { ToolCallBoundaryContext } from "../../../../../packages/core/src/toolcall/boundary/Review.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
 import { ToolCallCommentReview } from "../../../src/control/extension/toolcall/interface/Comment.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
@@ -92,7 +93,8 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
             async failActive() {},
             async nonRunning() {},
         },
-        boundary: async (context) => await binding.acquire(context),
+        boundary: async (context: ToolCallBoundaryContext) =>
+            await binding.acquire(context),
         instanceName,
         log: { async append() {} },
         toolCallScheduler: {
@@ -250,9 +252,11 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
     );
     assert.equal(executions, 5);
 
+    const pendingReport = await comment.comment.pendingReport(instanceName, ctxId);
     await comment.conversation.recordReport(instanceName, {
         callId: "push-report",
         ctxId,
+        ...pendingReport,
         text: "Reported progress and blocker.",
     });
     const afterReport = await callBash(
@@ -403,7 +407,11 @@ function createCommentGateway(
         async callTool() {
             throw new Error("unexpected routed ToolCall");
         },
-        async consumeContextMessages(_instance, ctxId, callId) {
+        async consumeContextMessages(
+            _instance: string,
+            ctxId: string,
+            callId: string,
+        ) {
             return await comment.comment.consumePending(
                 instanceName,
                 ctxId,

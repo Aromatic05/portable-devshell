@@ -186,6 +186,9 @@ function createGateway(
         async connectInstance(instance) {
             return { instance };
         },
+        async releaseInstanceReference(instance, reference) {
+            await overrides.releaseInstanceReference?.(instance, reference);
+        },
         async statusInstance(instance) {
             return { instance };
         },

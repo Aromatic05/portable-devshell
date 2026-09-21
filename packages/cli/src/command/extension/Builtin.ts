@@ -1,4 +1,3 @@
-import { agentExtensionDirectory } from "@portable-devshell/agent-extension";
 import { artifactExtensionDirectory } from "@portable-devshell/artifact-extension";
 import { instanceExtensionDirectory } from "@portable-devshell/instance-extension";
 import { commentExtensionDirectory } from "@portable-devshell/comment-extension";
@@ -14,7 +13,6 @@ export interface CliBuiltinExtensionSource {
 
 export function cliBuiltinExtensionSources(): readonly CliBuiltinExtensionSource[] {
     return Object.freeze([
-        Object.freeze({ id: "agent", path: agentExtensionDirectory() }),
         Object.freeze({ id: "artifact", path: artifactExtensionDirectory() }),
         Object.freeze({ id: "instance", path: instanceExtensionDirectory() }),
         Object.freeze({ id: "comment", path: commentExtensionDirectory() }),

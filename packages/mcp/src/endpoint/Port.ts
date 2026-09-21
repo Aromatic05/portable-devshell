@@ -309,7 +309,7 @@ export interface McpInstanceGateway {
     ): Promise<{ advice: Array<{ code: string; text: string }> }>;
     releaseAlerts(instance: string, workspace: string): Promise<void>;
     connectInstance(instance: string, reference: string): Promise<JsonValue>;
-    releaseInstanceReference?(
+    releaseInstanceReference(
         instance: string,
         reference: string,
     ): Promise<void>;

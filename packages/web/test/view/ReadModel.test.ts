@@ -24,7 +24,12 @@ it("aggregates read-only todos without assigning operational health", () => {
         readModel: {
             ...createInitialControlReadModelState(),
             instances: [
-                { mcpEnabled: true, name: "failed-instance", snapshot },
+                {
+                    enabled: true,
+                    mcpEnabled: true,
+                    name: "failed-instance",
+                    snapshot,
+                },
             ],
             instanceState: {
                 "failed-instance": {

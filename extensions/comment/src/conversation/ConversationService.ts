@@ -42,6 +42,7 @@ export class ConversationService {
         callId: string;
         createdAt?: string;
         ctxId: string;
+        push?: { commentId: string; message: string };
         replyCommentId?: string;
         text: string;
     }): Promise<void> {
@@ -51,6 +52,7 @@ export class ConversationService {
                 callId: input.callId,
                 createdAt: input.createdAt ?? new Date().toISOString(),
                 ctxId: input.ctxId,
+                ...(input.push === undefined ? {} : { push: input.push }),
                 ...(input.replyCommentId === undefined
                     ? {}
                     : { replyCommentId: input.replyCommentId }),

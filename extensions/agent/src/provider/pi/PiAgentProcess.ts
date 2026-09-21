@@ -89,10 +89,9 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
         return await this.#exclusive(async () => {
             const runtime = await this.#ensureRuntime(options);
             if (this.#webHandle !== undefined) return this.#webHandle;
-            let handle!: PiProviderWebHandle;
-            handle = new PiProviderWebHandle(
+            const handle = new PiProviderWebHandle(
                 runtime,
-                async () => await this.#stopWeb(runtime, handle),
+                async (active) => await this.#stopWeb(runtime, active),
             );
             this.#webHandle = handle;
             return handle;
@@ -262,11 +261,14 @@ class PiAgentSessionHandle implements AgentProviderHandle {
 class PiProviderWebHandle implements AgentProviderWebHandle {
     readonly #close: () => void;
     readonly #runtime: PiSharedProcess;
-    readonly #stopWeb: () => Promise<void>;
+    readonly #stopWeb: (handle: PiProviderWebHandle) => Promise<void>;
     readonly closed: Promise<void>;
     #stopped = false;
 
-    constructor(runtime: PiSharedProcess, stopWeb: () => Promise<void>) {
+    constructor(
+        runtime: PiSharedProcess,
+        stopWeb: (handle: PiProviderWebHandle) => Promise<void>,
+    ) {
         this.#runtime = runtime;
         this.#stopWeb = stopWeb;
         let close!: () => void;
@@ -287,7 +289,7 @@ class PiProviderWebHandle implements AgentProviderWebHandle {
 
     async stop(): Promise<void> {
         if (this.#stopped) return;
-        await this.#stopWeb();
+        await this.#stopWeb(this);
         this.#stopped = true;
         this.#close();
     }

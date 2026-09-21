@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { isAbsolute } from "node:path";
 import test from "node:test";
 
-import { agentExtensionDirectory } from "@portable-devshell/agent-extension";
 import { artifactExtensionDirectory } from "@portable-devshell/artifact-extension";
 import { instanceExtensionDirectory } from "@portable-devshell/instance-extension";
 import { commentExtensionDirectory } from "@portable-devshell/comment-extension";
@@ -13,11 +12,10 @@ import { storageExtensionDirectory } from "@portable-devshell/storage-extension"
 
 import { cliBuiltinExtensionSources } from "../../../src/command/extension/Builtin.js";
 
-test("CLI lifecycle injects every builtin Extension source including Agent and MCP", () => {
+test("CLI lifecycle injects every builtin Extension source including MCP", () => {
     const sources = cliBuiltinExtensionSources();
 
     assert.deepEqual(sources, [
-        { id: "agent", path: agentExtensionDirectory() },
         { id: "artifact", path: artifactExtensionDirectory() },
         { id: "instance", path: instanceExtensionDirectory() },
         { id: "comment", path: commentExtensionDirectory() },

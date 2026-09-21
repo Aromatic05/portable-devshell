@@ -920,6 +920,63 @@ test("remote environment attach cleans an unused alert lease and reference when 
     assert.deepEqual(releasedReferences, [`remote-server:${created.ctxId}`]);
 });
 
+test("remote attach persists cleanup intent before acquiring external resources", async () => {
+    const registry = new McpContextRegistry({
+        idFactory: () => "ctx-connect-write-ahead-cleanup",
+    });
+    const created = await registry.create({
+        instance: "main-pc",
+        principal: "local",
+        workspace: "/workspace",
+    });
+    let referenceIntentVisible = false;
+    let alertIntentVisible = false;
+    let referenceReleases = 0;
+    let alertReleases = 0;
+    const gateway = createGateway({
+        async connectInstance(instance, reference) {
+            const pending = await registry.listEnvironmentCleanup(created.ctxId);
+            referenceIntentVisible = pending.some(
+                ({ cleanup }) =>
+                    cleanup.kind === "instance_reference" &&
+                    cleanup.instance === instance,
+            );
+            return { instance, reference };
+        },
+        async readAlerts(_instance, workspace) {
+            const pending = await registry.listEnvironmentCleanup(created.ctxId);
+            alertIntentVisible = pending.some(
+                ({ cleanup }) =>
+                    cleanup.kind === "alerts" && cleanup.workspace === workspace,
+            );
+            return { advice: [] };
+        },
+        async releaseAlerts() {
+            alertReleases += 1;
+        },
+        async releaseInstanceReference() {
+            referenceReleases += 1;
+        },
+    });
+    const remote = new McpContextRemoteEnvironment({
+        contextRegistry: registry,
+        gateway: () => gateway,
+    });
+    const handle = await requireRemoteHandle(
+        registry,
+        created.ctxId,
+        "remote-server",
+    );
+
+    await remote.attach(created.ctxId, handle, "/remote-write-ahead");
+
+    assert.equal(referenceIntentVisible, true);
+    assert.equal(alertIntentVisible, true);
+    assert.equal(referenceReleases, 0);
+    assert.equal(alertReleases, 0);
+    assert.deepEqual(await registry.listEnvironmentCleanup(created.ctxId), []);
+});
+
 test("remote attach persists cleanup debt when pre-commit compensation fails", async () => {
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-connect-cleanup-debt",
@@ -974,23 +1031,27 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
     await assert.rejects(
         remote.attach(created.ctxId, handle, "/remote-retry"),
     );
-    assert.deepEqual(await registry.listEnvironmentCleanup(), [
-        {
-            cleanup: {
-                instance: "remote-server",
-                kind: "alerts",
-                workspace: "/remote-retry",
-            },
-            ctxId: created.ctxId,
-        },
-        {
-            cleanup: {
-                instance: "remote-server",
-                kind: "instance_reference",
-            },
-            ctxId: created.ctxId,
-        },
-    ]);
+    const pendingCleanup = await registry.listEnvironmentCleanup();
+    assert.equal(pendingCleanup.length, 2);
+    assert.equal(
+        pendingCleanup.some(
+            ({ cleanup, ctxId }) =>
+                ctxId === created.ctxId &&
+                cleanup.kind === "alerts" &&
+                cleanup.instance === "remote-server" &&
+                cleanup.workspace === "/remote-retry",
+        ),
+        true,
+    );
+    assert.equal(
+        pendingCleanup.some(
+            ({ cleanup, ctxId }) =>
+                ctxId === created.ctxId &&
+                cleanup.kind === "instance_reference" &&
+                cleanup.instance === "remote-server",
+        ),
+        true,
+    );
 
     await remote.attach(created.ctxId, handle, "/remote-retry");
     assert.equal(alertReleaseAttempts, 2);

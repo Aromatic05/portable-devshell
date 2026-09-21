@@ -79,14 +79,27 @@ export class McpContextEnvironmentCleanupService {
         cleanup: McpContextEnvironmentCleanup,
     ): Promise<void> {
         const gateway = this.#gateway(cleanup.instance);
+        const contexts = await this.#contextRegistry.list();
+        const now = Date.now();
         if (cleanup.kind === "instance_reference") {
+            const attached = contexts.some(
+                (context) =>
+                    context.ctxId === ctxId &&
+                    context.status === "active" &&
+                    Date.parse(context.expiresAt) > now &&
+                    context.environments.some(
+                        (environment) =>
+                            environment.instance === cleanup.instance,
+                    ),
+            );
+            if (attached) return;
             if (gateway === undefined) {
                 throw new Error(
                     "Instance " + cleanup.instance +
                         " is unavailable for Context reference cleanup.",
                 );
             }
-            if (gateway.releaseInstanceReference === undefined) {
+            if (typeof gateway.releaseInstanceReference !== "function") {
                 throw new Error(
                     "Instance " + cleanup.instance +
                         " does not support Context reference cleanup.",
@@ -96,8 +109,7 @@ export class McpContextEnvironmentCleanupService {
             return;
         }
 
-        const now = Date.now();
-        const inUse = (await this.#contextRegistry.list()).some(
+        const inUse = contexts.some(
             (context) =>
                 context.status === "active" &&
                 Date.parse(context.expiresAt) > now &&
@@ -202,11 +214,18 @@ export class McpContextRemoteEnvironment {
         const previous = await this.#environment(ctxId, instance);
         let attached = false;
         let committed = false;
-        let connected = false;
-        let preparedWorkspace: string | undefined;
+        const referenceCleanup: McpContextEnvironmentCleanup | undefined =
+            previous === undefined
+                ? { instance, kind: "instance_reference" }
+                : undefined;
         try {
+            if (referenceCleanup !== undefined) {
+                await this.#contextRegistry.recordEnvironmentCleanup(
+                    ctxId,
+                    referenceCleanup,
+                );
+            }
             const connection = await gateway.connectInstance(instance, ctxId);
-            connected = true;
             signal?.throwIfAborted();
             if (workspace === undefined) {
                 await this.#contextRegistry.attachEnvironment(ctxId, {
@@ -215,6 +234,7 @@ export class McpContextRemoteEnvironment {
                 attached = true;
                 signal?.throwIfAborted();
                 committed = true;
+                await this.#cleanup.reconcile(ctxId);
                 return {
                     ...(isRecord(connection)
                         ? connection
@@ -250,7 +270,11 @@ export class McpContextRemoteEnvironment {
 
             const prepared = await gateway.prepareWorkspace(instance, workspace);
             signal?.throwIfAborted();
-            preparedWorkspace = prepared.workspace;
+            await this.#contextRegistry.recordEnvironmentCleanup(ctxId, {
+                instance,
+                kind: "alerts",
+                workspace: prepared.workspace,
+            });
             const alerts = await gateway.readAlerts(instance, prepared.workspace);
             signal?.throwIfAborted();
             await this.#contextRegistry.attachEnvironment(ctxId, {
@@ -299,42 +323,9 @@ export class McpContextRemoteEnvironment {
                     previous,
                 ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             }
-            const cleanupWorkspace = preparedWorkspace;
-            if (cleanupWorkspace !== undefined) {
-                await this.#releaseAlertsIfUnused(
-                    gateway,
-                    instance,
-                    cleanupWorkspace,
-                ).catch(async (cleanupError) => {
-                    cleanupFailures.push(cleanupError);
-                    await this.#contextRegistry
-                        .recordEnvironmentCleanup(ctxId, {
-                            instance,
-                            kind: "alerts",
-                            workspace: cleanupWorkspace,
-                        })
-                        .catch((debtError) => cleanupFailures.push(debtError));
-                });
-            }
-            if (connected && previous === undefined) {
-                try {
-                    if (gateway.releaseInstanceReference === undefined) {
-                        throw new Error(
-                            "Instance " + instance +
-                                " does not support Context reference cleanup.",
-                        );
-                    }
-                    await gateway.releaseInstanceReference(instance, ctxId);
-                } catch (cleanupError) {
-                    cleanupFailures.push(cleanupError);
-                    await this.#contextRegistry
-                        .recordEnvironmentCleanup(ctxId, {
-                            instance,
-                            kind: "instance_reference",
-                        })
-                        .catch((debtError) => cleanupFailures.push(debtError));
-                }
-            }
+            await this.#cleanup
+                .reconcile(ctxId)
+                .catch((cleanupError) => cleanupFailures.push(cleanupError));
             if (cleanupFailures.length > 0) {
                 throw new AggregateError(
                     [error, ...cleanupFailures],
@@ -421,22 +412,6 @@ export class McpContextRemoteEnvironment {
         );
     }
 
-    async #releaseAlertsIfUnused(
-        gateway: McpInstanceGateway,
-        instance: string,
-        workspace: string,
-    ): Promise<void> {
-        const inUse = (await this.#contextRegistry.list()).some(
-            (context) =>
-                context.status === "active" &&
-                context.environments.some(
-                    (environment) =>
-                        environment.instance === instance &&
-                        environment.workspace === workspace,
-                ),
-        );
-        if (!inUse) await gateway.releaseAlerts(instance, workspace);
-    }
 }
 
 async function waitAbortable<T>(

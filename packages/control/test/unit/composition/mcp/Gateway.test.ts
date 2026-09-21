@@ -23,11 +23,8 @@ function emptyComment() {
         async listConversation() {
             return [];
         },
-        async pendingReplyCommentId() {
-            return undefined;
-        },
-        async pendingPushMessage() {
-            return undefined;
+        async pendingReport() {
+            return {};
         },
         async recordReport() {},
     };
@@ -71,7 +68,9 @@ function createTodoReportHarness() {
     let callSequence = 0;
     let failNext = false;
     let pendingReplyCommentId: string | undefined;
-    let pendingPushMessage: string | undefined;
+    let pendingPush:
+        | { commentId: string; message: string }
+        | undefined;
     const entries: Array<Record<string, unknown>> = [];
     const reports: string[] = [];
     const comment = {
@@ -99,17 +98,20 @@ function createTodoReportHarness() {
                     : filtered.slice(-input.limit)
             ) as never;
         },
-        async pendingReplyCommentId() {
-            return pendingReplyCommentId;
-        },
-        async pendingPushMessage() {
-            return pendingPushMessage;
+        async pendingReport() {
+            return {
+                ...(pendingPush === undefined ? {} : { push: { ...pendingPush } }),
+                ...(pendingReplyCommentId === undefined
+                    ? {}
+                    : { replyCommentId: pendingReplyCommentId }),
+            };
         },
         async recordReport(
             _instance: string,
             input: {
                 callId: string;
                 ctxId: string;
+                push?: { commentId: string; message: string };
                 replyCommentId?: string;
                 text: string;
             },
@@ -133,7 +135,13 @@ function createTodoReportHarness() {
             ) {
                 pendingReplyCommentId = undefined;
             }
-            pendingPushMessage = undefined;
+            if (
+                input.push !== undefined &&
+                pendingPush?.commentId === input.push.commentId &&
+                pendingPush.message === input.push.message
+            ) {
+                pendingPush = undefined;
+            }
         },
     };
     const conversation = {
@@ -185,7 +193,7 @@ function createTodoReportHarness() {
             failNext = true;
         },
         push(message: string) {
-            pendingPushMessage = message;
+            pendingPush = { commentId: `push-${callSequence}`, message };
         },
         gateway,
         async report(message: string) {
@@ -343,11 +351,11 @@ test("todo_report rejects an unchanged autonomous report without spending a toke
     await assertTodoUseOtherTools(harness.report("third"));
 });
 
-test("four todo.invalid failures within two minutes disable Todo for five minutes", async () => {
+test("three todo.invalid failures within two minutes disable Todo for five minutes", async () => {
     const harness = createTodoReportHarness();
 
     await harness.report("same");
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
         await assert.rejects(
             harness.report("same"),
             (error: unknown) =>
@@ -382,7 +390,7 @@ test("todo.invalid failures outside the two-minute window do not accumulate", as
     const harness = createTodoReportHarness();
 
     await harness.report("same");
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
         await assert.rejects(
             harness.report("same"),
             (error: unknown) =>
@@ -442,13 +450,6 @@ test("todo_read and todo_write share a bucket that is independent from todo_repo
     await harness.report("report one");
     await harness.report("report two");
     await assertTodoUseOtherTools(harness.report("report three"));
-    await assertTodoUseOtherTools(
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_read",
-            harness.context,
-        ),
-    );
 
     harness.advance(30_000);
     await harness.gateway.beforeTodoToolCall(

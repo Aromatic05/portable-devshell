@@ -10,7 +10,6 @@ import {
     rename,
     rm,
     stat,
-    writeFile,
 } from "node:fs/promises";
 import {
     basename,

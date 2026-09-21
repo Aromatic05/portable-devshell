@@ -126,6 +126,50 @@ test("host receive active-count bound releases capacity on abort", async (t) => 
     t.after(() => rm(root, { force: true, recursive: true }));
 });
 
+test("host file receive never clobbers a competing no-overwrite commit", async (t) => {
+    const root = await createTestTempDirectory("artifact-host-receive-no-clobber-");
+    const downloadDirectory = join(root, "Download");
+    const store = new ArtifactHostReceiveStore({
+        downloadDirectory,
+        root: join(root, "receives"),
+    });
+    await store.initialize();
+    const descriptor = {
+        mediaType: "application/octet-stream",
+        name: "shared.bin",
+        payloadBlake3:
+            "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+        payloadBytes: 0,
+        type: "file" as const,
+    };
+    const first = await store.begin({
+        descriptor,
+        overwrite: false,
+        targetPath: "./shared.bin",
+        workspace: root,
+    });
+    const second = await store.begin({
+        descriptor,
+        overwrite: false,
+        targetPath: "./shared.bin",
+        workspace: root,
+    });
+
+    const commits = await Promise.allSettled([
+        store.finish(first.receiveId),
+        store.finish(second.receiveId),
+    ]);
+    assert.equal(
+        commits.filter((result) => result.status === "fulfilled").length,
+        1,
+    );
+    assert.equal(
+        commits.filter((result) => result.status === "rejected").length,
+        1,
+    );
+    t.after(() => rm(root, { force: true, recursive: true }));
+});
+
 test("host receive abort is idempotent only when metadata is absent", async (t) => {
     const root = await createTestTempDirectory("artifact-host-receive-abort-");
     const downloadDirectory = join(root, "Download");

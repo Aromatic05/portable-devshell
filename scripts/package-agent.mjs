@@ -192,64 +192,6 @@ export async function packageAgentArtifacts(options = {}) {
     }
 }
 
-export async function embedBundledPiProviderIntoApplication(applicationRoot) {
-    const applicationManifest = JSON.parse(
-        await readFile(resolve(applicationRoot, "package.json"), "utf8"),
-    );
-    if (
-        applicationManifest.dependencies?.[
-            "@portable-devshell/agent-extension"
-        ] === undefined
-    ) {
-        return undefined;
-    }
-    const agentExtensionRoot = resolve(
-        applicationRoot,
-        "node_modules",
-        "@portable-devshell",
-        "agent-extension",
-    );
-    const stagingRoot = await mkdtemp(
-        resolve(repoRoot, ".portable-devshell-agent-builtin-"),
-    );
-    const providerRoot = resolve(stagingRoot, "pi-provider");
-    try {
-        deployWorkspacePackage(
-            "@portable-devshell/agent-extension",
-            providerRoot,
-        );
-        await sanitizeDeployTree(providerRoot);
-        await shapePiProviderTree(providerRoot);
-        await pruneProviderRuntimeTree(providerRoot);
-        await assertNoSymbolicLinks(providerRoot);
-
-        const archiveModule = await import(
-            pathToFileURL(
-                resolve(
-                    repoRoot,
-                    "packages/control/dist/control/artifact/host/storage/Archive.js",
-                ),
-            ).href
-        );
-        const bundledRoot = resolve(
-            agentExtensionRoot,
-            "dist",
-            "builtin",
-            "bundled-providers",
-        );
-        const destination = resolve(bundledRoot, "pi.dsprovider");
-        await mkdir(bundledRoot, { recursive: true });
-        await rm(destination, { force: true });
-        await archiveModule.createArtifactDirectoryArchive(
-            providerRoot,
-            destination,
-        );
-        return destination;
-    } finally {
-        await rm(stagingRoot, { force: true, recursive: true });
-    }
-}
-
 export async function sanitizeDeployTree(root) {
     await removeNodeModulesDeploymentMetadata(root);
     await rm(join(root, "pnpm-lock.yaml"), { force: true });

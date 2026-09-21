@@ -59,14 +59,13 @@ export interface CommentPort {
         reason: string,
     ): Promise<ContextMessageRecord[]>;
     feedback(input: ToolCallReviewInvocation): readonly string[];
-    pendingReplyCommentId(
+    pendingReport(
         instance: string,
         ctxId: string,
-    ): Promise<string | undefined>;
-    pendingPushMessage(
-        instance: string,
-        ctxId: string,
-    ): Promise<string | undefined>;
+    ): Promise<{
+        push?: { commentId: string; message: string };
+        replyCommentId?: string;
+    }>;
     reviewToolCall(
         instance: string,
         ctxId: string,
@@ -86,6 +85,7 @@ export interface ConversationPort {
             callId: string;
             createdAt?: string;
             ctxId: string;
+            push?: { commentId: string; message: string };
             replyCommentId?: string;
             text: string;
         },
@@ -134,12 +134,8 @@ export class CommentExtension {
                     reason,
                 ),
             feedback: (input) => resolveToolCallFeedback(input),
-            pendingReplyCommentId: async (instance, ctxId) =>
-                await this.#require(instance).comment.pendingReplyCommentId(
-                    ctxId,
-                ),
-            pendingPushMessage: async (instance, ctxId) =>
-                await this.#require(instance).comment.pendingPushMessage(ctxId),
+            pendingReport: async (instance, ctxId) =>
+                await this.#require(instance).comment.pendingReport(ctxId),
             reviewToolCall: async (instance, ctxId, toolName, requestId) =>
                 await this.#require(instance).comment.reviewToolCall(
                     ctxId,

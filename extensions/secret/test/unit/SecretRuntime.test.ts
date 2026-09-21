@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
 import { activate } from "../../src/builtin/index.ts";
-import { secretExtensionDirectory } from "../../src/index.ts";
 
 test("Secret Extension declares and activates one toolcall.rewrite binding", async () => {
     const registrations: Array<{ id: string; pointId: string }> = [];
@@ -31,18 +30,4 @@ test("Secret Extension declares and activates one toolcall.rewrite binding", asy
     assert.deepEqual(manifest.extensions?.["toolcall.rewrite"], [
         { id: "secret" },
     ]);
-});
-
-
-test("Secret builtin source is a self-contained 5x5 runtime tree", async () => {
-    assert.deepEqual(
-        (await readdir(secretExtensionDirectory())).sort(),
-        [
-            "command",
-            "devshell-extension.json",
-            "index.ts",
-            "rewrite",
-            "scan",
-        ],
-    );
 });

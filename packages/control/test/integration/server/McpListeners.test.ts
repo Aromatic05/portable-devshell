@@ -560,8 +560,8 @@ function testComment() {
         async failPending() {
             return [];
         },
-        async pendingReplyCommentId() {
-            return undefined;
+        async pendingReport() {
+            return {};
         },
     };
 }

@@ -307,7 +307,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function testComment() {
     return {
-        close() {},
+        async close() {},
         comment: {
             async consumePending(_instance: string, _ctxId: string, callId: string) {
                 return { callId, messages: [] };
@@ -321,8 +321,8 @@ function testComment() {
             feedback() {
                 return [];
             },
-            async pendingReplyCommentId() {
-                return undefined;
+            async pendingReport() {
+                return {};
             },
             async reviewToolCall() {
                 return { kind: "allow" as const };

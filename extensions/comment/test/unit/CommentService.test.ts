@@ -148,7 +148,7 @@ test("CommentService marks a queued message failed when its audit event cannot b
     const [record] = await service.list("ctx-a");
     assert.equal(record?.status, "failed");
     assert.equal(record?.error, "audit unavailable");
-    assert.equal(await service.pendingPushMessage("ctx-a"), undefined);
+    assert.deepEqual(await service.pendingReport("ctx-a"), {});
     assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
         kind: "allow",
     });
@@ -171,7 +171,10 @@ test("CommentService restores the previous push state when a later Comment fails
         service.queue({ ctxId: "ctx-a", text: "这条不应该进入 push_message" }),
         /audit unavailable/u,
     );
-    assert.equal(await service.pendingPushMessage("ctx-a"), "#push 报告进度");
+    assert.equal(
+        (await service.pendingReport("ctx-a")).push?.message,
+        "#push 报告进度",
+    );
     for (let index = 0; index < 4; index += 1) {
         assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
             kind: "allow",
@@ -406,7 +409,7 @@ test("CommentService accumulates push_message and decrements ddl for tools and l
     });
     await service.consumePending("ctx-a", "delivery-one");
     assert.equal(
-        await service.pendingPushMessage("ctx-a"),
+        (await service.pendingReport("ctx-a")).push?.message,
         "#push 报告当前进度",
     );
     for (let index = 0; index < 2; index += 1) {
@@ -451,8 +454,9 @@ test("CommentService starts #push at ddl 5", async () => {
     });
     await service.consumePending("ctx-a", "push-only-delivery");
 
-    assert.equal(await service.pendingReplyCommentId("ctx-a"), undefined);
-    assert.equal(await service.pendingPushMessage("ctx-a"), "#push 报告进度");
+    const pending = await service.pendingReport("ctx-a");
+    assert.equal(pending.replyCommentId, undefined);
+    assert.equal(pending.push?.message, "#push 报告进度");
     for (let index = 0; index < 5; index += 1) {
         assert.deepEqual(await service.reviewToolCall("ctx-a", "file_read"), {
             kind: "allow",

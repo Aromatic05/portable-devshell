@@ -16,7 +16,6 @@ import {
     readPackageBinPath,
     writePortableApplicationManifest,
 } from "./application-layout.mjs";
-import { embedBundledPiProviderIntoApplication } from "./package-agent.mjs";
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -51,7 +50,6 @@ try {
         "--legacy",
         deployDirectory,
     ]);
-    await embedBundledPiProviderIntoApplication(appDirectory);
     await writePortableApplicationManifest(appDirectory, {
         minimumNodeMajor: 24,
         version,

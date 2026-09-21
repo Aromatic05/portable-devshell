@@ -32,14 +32,13 @@ export interface McpCommentPort {
         ctxId: string,
         reason: string,
     ): Promise<ContextMessageRecord[]>;
-    pendingReplyCommentId(
+    pendingReport(
         instance: string,
         ctxId: string,
-    ): Promise<string | undefined>;
-    pendingPushMessage(
-        instance: string,
-        ctxId: string,
-    ): Promise<string | undefined>;
+    ): Promise<{
+        push?: { commentId: string; message: string };
+        replyCommentId?: string;
+    }>;
 }
 
 export interface McpConversationPort {
@@ -53,6 +52,7 @@ export interface McpConversationPort {
             callId: string;
             createdAt?: string;
             ctxId: string;
+            push?: { commentId: string; message: string };
             replyCommentId?: string;
             text: string;
         },
@@ -637,12 +637,9 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             await this.beforeTodoToolCall(instance, "todo_report", context);
             const state = await this.#syncTodoReportPolicy(instance, ctxId);
             this.#refillTodoReportBucket(state, this.#now());
-            const [replyCommentId, pushMessage] = await Promise.all([
-                this.#comment.pendingReplyCommentId(instance, ctxId),
-                this.#comment.pendingPushMessage(instance, ctxId),
-            ]);
+            const pending = await this.#comment.pendingReport(instance, ctxId);
             const replyRequired =
-                replyCommentId !== undefined || pushMessage !== undefined;
+                pending.replyCommentId !== undefined || pending.push !== undefined;
 
             if (!replyRequired) {
                 if (state.lastReportMessage === message) {
@@ -664,7 +661,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             await this.#conversation.recordReport(instance, {
                 callId,
                 ctxId,
-                ...(replyCommentId === undefined ? {} : { replyCommentId }),
+                ...(pending.push === undefined ? {} : { push: pending.push }),
+                ...(pending.replyCommentId === undefined
+                    ? {}
+                    : { replyCommentId: pending.replyCommentId }),
                 text: message,
             });
             if (!replyRequired) state.tokens -= 1;
@@ -772,7 +772,7 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         invalidAt.push(now);
         this.#todoInvalidPolicy.set(
             key,
-            invalidAt.length > TODO_INVALID_LIMIT
+            invalidAt.length >= TODO_INVALID_LIMIT
                 ? {
                       disabledUntil: now + TODO_INVALID_DISABLE_MS,
                       invalidAt: [],

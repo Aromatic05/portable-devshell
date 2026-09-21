@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { InstanceConnectionService } from "../../../../src/control/instance/registry/Connection.ts";
 import { InstanceRegistry } from "../../../../src/control/instance/registry/Registry.ts";
+import type { InstanceDescriptor } from "../../../../src/control/instance/Descriptor.ts";
 
 test("instance connection service shares one managed Worker across MCP and Agent references", async () => {
     let ready = false;
@@ -96,7 +97,7 @@ test("instance connection references remain bound to the Worker generation they 
 });
 
 test("retiring committed generation references allows the same Context to attach to the replacement", async () => {
-    const worker = () => ({
+    const worker = (): InstanceDescriptor["worker"] => ({
         managementMode: "controllerManaged" as const,
         snapshot() {
             return { daemonState: "running", ready: true };
@@ -104,7 +105,7 @@ test("retiring committed generation references allows the same Context to attach
         async stop() {
             return { daemonState: "stopped", ready: false };
         },
-    });
+    }) as InstanceDescriptor["worker"];
     const first = worker();
     const second = worker();
     const firstDescriptor = {

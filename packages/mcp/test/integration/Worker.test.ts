@@ -62,6 +62,14 @@ import { tmpdir } from "node:os";
         };
     }
 
+    function asRecord(
+        value: JsonValue | undefined,
+    ): Record<string, JsonValue> | undefined {
+        return typeof value === "object" && value !== null && !Array.isArray(value)
+            ? value
+            : undefined;
+    }
+
     test(
         "MCP initialize tools/list and tools/call succeed against the frozen worker",
         realWorkerTestOptions(workerBinaryPath),
@@ -631,8 +639,10 @@ import { tmpdir } from "node:os";
                     ),
                     sessionHeaders,
                 );
+                const rejectedError = asRecord(rejected.error);
+                const rejectedData = asRecord(rejectedError?.data);
                 assert.equal(
-                    rejected.error?.data?.code,
+                    rejectedData?.code,
                     errorCodes.coreToolCallRejected,
                 );
 
@@ -652,10 +662,7 @@ import { tmpdir } from "node:os";
                     replay.events.some(
                         (event) =>
                             event.type === "toolCall.denied" &&
-                            event.data !== undefined &&
-                            typeof event.data === "object" &&
-                            !Array.isArray(event.data) &&
-                            event.data.callId === denied.callId,
+                            asRecord(event.data)?.callId === denied.callId,
                     ),
                     true,
                 );

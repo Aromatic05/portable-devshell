@@ -245,6 +245,7 @@ test(
             async connectInstance() {
                 return null;
             },
+            async releaseInstanceReference() {},
             async statusInstance() {
                 return null;
             },

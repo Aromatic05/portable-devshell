@@ -416,8 +416,9 @@ test("AgentProviderRegistry rejects duplicate provider ids", () => {
     );
 });
 
-test("AgentHost removes a stopped runtime and closes tools when provider cleanup fails", async () => {
+test("AgentHost keeps failed cleanup retryable until every resource stops", async () => {
     let toolCloses = 0;
+    let stopAttempts = 0;
     const provider: AgentProvider = {
         id: "pi",
         version: "1",
@@ -426,7 +427,9 @@ test("AgentHost removes a stopped runtime and closes tools when provider cleanup
                 closed: neverClosed,
                 async prompt() {},
                 async stop() {
-                    throw new Error("provider stop failed");
+                    stopAttempts += 1;
+                    if (stopAttempts === 1)
+                        throw new Error("provider stop failed");
                 },
             };
         },
@@ -451,6 +454,55 @@ test("AgentHost removes a stopped runtime and closes tools when provider cleanup
         /provider stop failed/u,
     );
     assert.equal(toolCloses, 1);
+    assert.equal(host.get(record.agentId)?.state, "stopping");
+
+    const stopped = await host.stop(record.agentId);
+    assert.equal(stopped.state, "stopped");
+    assert.equal(stopAttempts, 2);
+    assert.equal(toolCloses, 1);
+    assert.deepEqual(host.list(), []);
+});
+
+test("AgentHost keeps an automatic tool-session shutdown retryable when provider stop fails", async () => {
+    let stopAttempts = 0;
+    const provider: AgentProvider = {
+        id: "pi",
+        version: "1",
+        async start() {
+            return {
+                closed: neverClosed,
+                async prompt() {},
+                async stop() {
+                    stopAttempts += 1;
+                    if (stopAttempts === 1)
+                        throw new Error("automatic provider stop failed");
+                },
+            };
+        },
+    };
+    const target = parseAgentWorkerTarget("worker-a:/repo");
+    const tools = toolSession(target);
+    const host = new AgentHost({
+        idFactory: () => "ag-automatic-cleanup-retry",
+        processes: testProcesses,
+        providers: [provider],
+        runtimeRootDirectory,
+    });
+    const record = await host.start({ provider: "pi", target, tools });
+    const originalWarn = console.warn;
+    console.warn = () => undefined;
+    try {
+        await tools.close();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+        console.warn = originalWarn;
+    }
+
+    assert.equal(stopAttempts, 1);
+    assert.equal(host.get(record.agentId)?.state, "stopping");
+    const stopped = await host.stop(record.agentId);
+    assert.equal(stopped.state, "stopped");
+    assert.equal(stopAttempts, 2);
     assert.deepEqual(host.list(), []);
 });
 

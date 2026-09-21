@@ -43,9 +43,12 @@ export interface AgentHostOptions {
 }
 
 interface AgentHostRuntime {
+    cleanup?: Promise<AgentHostRecord>;
     handle: AgentProviderHandle;
+    providerStopped?: boolean;
     record: AgentHostRecord;
     tools: AgentToolSession;
+    toolsClosed?: boolean;
 }
 
 interface AgentHostWebRuntime {
@@ -154,11 +157,15 @@ export class AgentHost {
             const handle = await promise;
             const runtime = { handle, provider: providerId };
             this.#web = runtime;
-            void handle.closed
-                .then(() => {
+            void handle.closed.then(
+                () => {
                     if (this.#web === runtime) this.#web = undefined;
-                })
-                .catch(() => undefined);
+                },
+                (error) => {
+                    if (this.#web === runtime) this.#web = undefined;
+                    reportBackgroundError(error);
+                },
+            );
             return this.#formatWebEndpoint(handle.upstream);
         } finally {
             if (this.#webStarting?.promise === promise) {
@@ -266,30 +273,28 @@ export class AgentHost {
             state: "running",
             target: { ...options.target },
         };
-        const runtime = { handle, record, tools: options.tools };
+        const runtime: AgentHostRuntime = {
+            handle,
+            record,
+            tools: options.tools,
+        };
         this.#runtimes.set(agentId, runtime);
         void handle.closed
             .then(async () => {
                 if (this.#runtimes.get(agentId) !== runtime) return;
-                runtime.record.state = "stopped";
-                this.#runtimes.delete(agentId);
-                await runtime.tools.close();
+                runtime.providerStopped = true;
+                if (runtime.cleanup !== undefined) return;
+                await this.#stopRuntime(agentId, runtime);
             })
-            .catch(() => undefined);
+            .catch(reportBackgroundError);
         void options.tools.closed
             .then(async () => {
-                if (
-                    this.#runtimes.get(agentId) !== runtime ||
-                    runtime.record.state !== "running"
-                )
-                    return;
-                runtime.record.state = "stopping";
-                await runtime.handle.stop().catch(() => undefined);
                 if (this.#runtimes.get(agentId) !== runtime) return;
-                runtime.record.state = "stopped";
-                this.#runtimes.delete(agentId);
+                runtime.toolsClosed = true;
+                if (runtime.cleanup !== undefined) return;
+                await this.#stopRuntime(agentId, runtime);
             })
-            .catch(() => undefined);
+            .catch(reportBackgroundError);
         return cloneRecord(record);
     }
 
@@ -298,26 +303,7 @@ export class AgentHost {
         if (runtime === undefined) {
             throw new Error(`Unknown Agent: ${agentId}`);
         }
-        runtime.record.state = "stopping";
-        let failure: unknown;
-        try {
-            await runtime.handle.stop();
-        } catch (error) {
-            failure = error;
-        }
-        const toolFailure = await settleCleanup(runtime.tools);
-        runtime.record.state = "stopped";
-        const stopped = cloneRecord(runtime.record);
-        this.#runtimes.delete(agentId);
-        if (failure !== undefined && toolFailure !== undefined) {
-            throw new AggregateError(
-                [failure, toolFailure],
-                `Agent ${agentId} failed to stop cleanly.`,
-            );
-        }
-        if (failure !== undefined) throw failure;
-        if (toolFailure !== undefined) throw toolFailure;
-        return stopped;
+        return await this.#stopRuntime(agentId, runtime);
     }
 
     async stopAll(): Promise<void> {
@@ -340,6 +326,52 @@ export class AgentHost {
                 failures,
                 "One or more Agent resources failed to stop cleanly.",
             );
+        }
+    }
+
+    async #stopRuntime(
+        agentId: string,
+        runtime: AgentHostRuntime,
+    ): Promise<AgentHostRecord> {
+        if (runtime.cleanup !== undefined) return await runtime.cleanup;
+        const cleanup = (async () => {
+            runtime.record.state = "stopping";
+            const failures: unknown[] = [];
+            if (runtime.providerStopped !== true) {
+                try {
+                    await runtime.handle.stop();
+                    runtime.providerStopped = true;
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (runtime.toolsClosed !== true) {
+                try {
+                    await runtime.tools.close();
+                    runtime.toolsClosed = true;
+                } catch (error) {
+                    failures.push(error);
+                }
+            }
+            if (failures.length === 1) throw failures[0];
+            if (failures.length > 1) {
+                throw new AggregateError(
+                    failures,
+                    `Agent ${agentId} failed to stop cleanly.`,
+                );
+            }
+            runtime.record.state = "stopped";
+            const stopped = cloneRecord(runtime.record);
+            if (this.#runtimes.get(agentId) === runtime) {
+                this.#runtimes.delete(agentId);
+            }
+            return stopped;
+        })();
+        runtime.cleanup = cleanup;
+        try {
+            return await cleanup;
+        } finally {
+            if (runtime.cleanup === cleanup) runtime.cleanup = undefined;
         }
     }
 
@@ -383,4 +415,8 @@ async function settleCleanup(
     } catch (error) {
         return error;
     }
+}
+
+function reportBackgroundError(error: unknown): void {
+    console.warn(error instanceof Error ? error : new Error(String(error)));
 }

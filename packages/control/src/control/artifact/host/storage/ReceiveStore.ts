@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import {
     chmod,
+    link,
     lstat,
     mkdir,
     open,
@@ -8,7 +9,6 @@ import {
     readdir,
     rename,
     rm,
-    writeFile,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -342,7 +342,19 @@ export class ArtifactHostReceiveStore {
             ]);
             return;
         }
-        await rename(sourcePath, stored.targetPath);
+        if (!stored.overwrite && stored.descriptor.type === "file") {
+            await link(sourcePath, stored.targetPath).catch((error: unknown) => {
+                if (isAlreadyExists(error)) {
+                    throw artifactError(
+                        "artifact.targetExists",
+                        "Host Download target already exists.",
+                    );
+                }
+                throw error;
+            });
+        } else {
+            await rename(sourcePath, stored.targetPath);
+        }
         await Promise.all([
             syncDirectory(this.#downloadDirectory),
             syncDirectory(this.#temporaryDirectory),
@@ -549,6 +561,10 @@ function artifactError(code: string, message: string) {
 
 function isNotFound(error: unknown): error is NodeJS.ErrnoException {
     return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+function isAlreadyExists(error: unknown): error is NodeJS.ErrnoException {
+    return (error as NodeJS.ErrnoException | undefined)?.code === "EEXIST";
 }
 
 async function pathExists(path: string): Promise<boolean> {
