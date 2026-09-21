@@ -703,10 +703,7 @@ impl TmuxState {
             require_task(&tasks, task_id)?.clone()
         };
         if !task.state.is_active() {
-            return Err(ToolError::new(
-                "tmux.taskNotRunning",
-                format!("task {task_id} is no longer running"),
-            ));
+            return self.closed_task_output(task_id);
         }
         if !force {
             return Err(ToolError::new(
@@ -721,8 +718,11 @@ impl TmuxState {
             .find(|pane| {
                 pane.id == task.pane_id && pane.pane_incarnation_id == task.pane_incarnation_id
             })
-            .cloned()
-            .ok_or_else(|| ToolError::new("tmux.taskNotRunning", "task pane is unavailable"))?;
+            .cloned();
+        let Some(pane) = pane else {
+            self.mark_task_lost(task_id, &task.pane_id)?;
+            return self.closed_task_output(task_id);
+        };
         let pane_lock = self.pane_lock(&pane.id)?;
         let pane_guard = pane_lock.lock().map_err(|_| lock_error("pane operation"))?;
         let current = self
@@ -736,10 +736,7 @@ impl TmuxState {
         let Some(current) = current else {
             drop(pane_guard);
             self.mark_task_lost(task_id, &pane.id)?;
-            return Err(ToolError::new(
-                "tmux.taskNotRunning",
-                "task pane is no longer available",
-            ));
+            return self.closed_task_output(task_id);
         };
         let already_terminal = {
             let mut tasks = self.tasks.lock().map_err(|_| lock_error("tmux tasks"))?;
@@ -756,10 +753,7 @@ impl TmuxState {
             if let Err(error) = self.cleanup_task_pane(task_id, &current) {
                 self.push_pending_warning(cleanup_warning(task_id, Some(&current.id), &error))?;
             }
-            return Err(ToolError::new(
-                "tmux.taskNotRunning",
-                format!("task {task_id} is no longer running"),
-            ));
+            return self.closed_task_output(task_id);
         }
         self.backend.close_pane(&current)?;
         {
@@ -776,6 +770,10 @@ impl TmuxState {
         if let Err(error) = self.cleanup_task_pane(task_id, &current) {
             self.push_pending_warning(cleanup_warning(task_id, Some(&current.id), &error))?;
         }
+        self.closed_task_output(task_id)
+    }
+
+    fn closed_task_output(&self, task_id: &str) -> Result<TmuxCloseOutput, ToolError> {
         Ok(TmuxCloseOutput {
             closed_task_id: Some(task_id.to_string()),
             closed_pane_id: None,

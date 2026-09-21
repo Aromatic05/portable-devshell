@@ -185,7 +185,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),
-        "Manage tmux-owned resource lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task. The main pane cannot be closed.",
+        "Manage tmux-owned resource lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task, and succeeds as a no-op when that task is already terminal. The main pane cannot be closed.",
         ToolCapability::Execute,
         states,
         TmuxState::manage,

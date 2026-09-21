@@ -1224,6 +1224,21 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
     assert_eq!(closed["ok"], true, "{closed}");
     assert_eq!(closed["result"]["closedTaskId"], task, "{closed}");
 
+    let closed_again = call(
+        &env,
+        instance,
+        "3a",
+        "tmux_close",
+        json!({ "task": task }),
+        "ctx-c",
+        "close-terminal-task-again",
+    );
+    assert_eq!(closed_again["ok"], true, "{closed_again}");
+    assert_eq!(
+        closed_again["result"]["closedTaskId"], task,
+        "{closed_again}"
+    );
+
     let after_close = call(
         &env,
         instance,
