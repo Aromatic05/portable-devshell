@@ -1,6 +1,7 @@
 import {
     existsSync,
     mkdirSync,
+    readdirSync,
     readFileSync,
     rmSync,
     writeFileSync,
@@ -44,6 +45,16 @@ export function hasDevTagGateProof(commitSha, proofDirectory) {
     validateCommitSha(commitSha);
     const path = resolve(proofDirectory, commitSha);
     return existsSync(path) && readFileSync(path, "utf8").trim() === commitSha;
+}
+
+export function prepareDevTagGateArtifactDirectory(directory) {
+    if (!existsSync(directory)) return;
+    if (readdirSync(directory).length > 0) {
+        throw new Error(
+            "dev tag push gate requires ci-artifacts to be absent or empty before it runs.",
+        );
+    }
+    rmSync(directory, { force: true, recursive: true });
 }
 
 function gitOutput(args) {
@@ -94,14 +105,12 @@ if (
             const initialCommit = gitOutput(["rev-parse", "HEAD"]);
             const repositoryRoot = gitOutput(["rev-parse", "--show-toplevel"]);
             const ciArtifacts = resolve(repositoryRoot, "ci-artifacts");
-            const ciArtifactsExisted = existsSync(ciArtifacts);
+            prepareDevTagGateArtifactDirectory(ciArtifacts);
             let result;
             try {
                 result = runDevTagGate();
             } finally {
-                if (!ciArtifactsExisted) {
-                    rmSync(ciArtifacts, { force: true, recursive: true });
-                }
+                rmSync(ciArtifacts, { force: true, recursive: true });
             }
             if (!result.ok) {
                 process.exitCode = 1;

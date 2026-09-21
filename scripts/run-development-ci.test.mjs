@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
     hasDevTagGateProof,
+    prepareDevTagGateArtifactDirectory,
     runDevTagGate,
     writeDevTagGateProof,
 } from "./run-dev-tag-gate.mjs";
@@ -236,6 +244,27 @@ test("local dev tag gate rejects hosts that cannot reproduce Linux x64 developme
         () => runDevTagGate({ arch: "arm64", platform: "linux" }),
         /requires a Linux x64 host/u,
     );
+});
+
+test("dev tag gate owns an absent or empty artifact directory without deleting existing files", () => {
+    const root = mkdtempSync(join(tmpdir(), "pds-dev-gate-artifacts-"));
+    const directory = join(root, "ci-artifacts");
+    try {
+        mkdirSync(directory);
+        prepareDevTagGateArtifactDirectory(directory);
+        assert.equal(existsSync(directory), false);
+
+        mkdirSync(directory);
+        const sentinel = join(directory, "keep.txt");
+        writeFileSync(sentinel, "keep\n");
+        assert.throws(
+            () => prepareDevTagGateArtifactDirectory(directory),
+            /absent or empty/u,
+        );
+        assert.equal(readFileSync(sentinel, "utf8"), "keep\n");
+    } finally {
+        rmSync(root, { force: true, recursive: true });
+    }
 });
 
 test("dev tag gate proof is bound to the exact full commit SHA", () => {
