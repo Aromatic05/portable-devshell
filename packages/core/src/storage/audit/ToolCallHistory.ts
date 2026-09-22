@@ -2,6 +2,7 @@ import {
     type InstanceName,
     type JsonValue,
     type ToolCallContext,
+    type ToolCallFailureStage,
     type ToolCallQuery,
     type ToolCallApprovalDecision,
     type ToolCallAssociation,
@@ -41,7 +42,9 @@ interface ActiveToolCall {
 }
 
 interface ToolCallCompletionResult {
+    executionCompleted?: boolean;
     exitCode?: number | null;
+    failureStage?: ToolCallFailureStage;
     output?: JsonValue;
     stderrBytes?: number;
     stdoutBytes?: number;
@@ -334,9 +337,15 @@ export class AuditToolCallHistory {
             ...startedRecord,
             completedAt,
             ...(error === undefined ? {} : { error }),
+            ...(result?.executionCompleted === undefined
+                ? {}
+                : { executionCompleted: result.executionCompleted }),
             ...(result?.exitCode === undefined
                 ? {}
                 : { exitCode: result.exitCode }),
+            ...(result?.failureStage === undefined
+                ? {}
+                : { failureStage: result.failureStage }),
             instance: this.#instanceName,
             ...(result?.output === undefined ? {} : { output: result.output }),
             status,

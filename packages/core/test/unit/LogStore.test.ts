@@ -479,6 +479,41 @@ test("AuditToolCallHistory uses bounded storage reads for unfiltered limited his
     assert.equal(readTailLimit, 200);
 });
 
+test("AuditToolCallHistory persists post-execution failure metadata", async () => {
+    const instanceName = asInstanceName("publication-failure-history");
+    const records: ToolCallRecord[] = [];
+    const history = new AuditToolCallHistory(instanceName, {
+        async append(record) {
+            records.push(record);
+        },
+        async readAll() {
+            return records;
+        },
+    });
+
+    await history.started(
+        "call-publication-failure",
+        "bash_run",
+        "{}",
+        { source: "mcp" },
+        "2026-09-22T00:00:00.000Z",
+    );
+    await history.failed(
+        "call-publication-failure",
+        "core.providerFailed",
+        "2026-09-22T00:00:01.000Z",
+        {
+            executionCompleted: true,
+            failureStage: "outboundBoundary",
+        },
+    );
+
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.status, "failed");
+    assert.equal(records[0]?.executionCompleted, true);
+    assert.equal(records[0]?.failureStage, "outboundBoundary");
+});
+
 test("AuditToolCallHistory keeps active calls when bounded history is already full", async () => {
     const instanceName = asInstanceName("active-first-history");
     const persisted = ["old", "new"].map((callId, index): ToolCallRecord => ({

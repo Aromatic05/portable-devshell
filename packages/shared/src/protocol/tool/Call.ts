@@ -34,6 +34,7 @@ export type ToolCallStatus =
     | "cancelled";
 
 export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
+export type ToolCallFailureStage = "postExecution" | "outboundBoundary";
 
 export interface ToolCallQuery {
     after?: string;
@@ -55,7 +56,9 @@ export interface ToolCallRecord extends ToolCallProvenance {
     completedAt?: string;
     decision?: ToolCallApprovalDecision;
     error?: string;
+    executionCompleted?: boolean;
     exitCode?: number | null;
+    failureStage?: ToolCallFailureStage;
     inputSummary: string;
     input?: JsonValue;
     output?: JsonValue;

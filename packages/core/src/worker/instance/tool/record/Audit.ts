@@ -5,6 +5,7 @@ import {
     type ToolCallApprovalDecision,
     type ToolCallAssociation,
     type ToolCallContext,
+    type ToolCallFailureStage,
     type ToolCallQuery,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -239,21 +240,34 @@ export class WorkerInstanceToolAudit {
         errorCode: string,
         result: CommandResult | undefined,
         appendLogs: () => Promise<void>,
+        failure?: {
+            executionCompleted?: boolean;
+            failureStage?: ToolCallFailureStage;
+        },
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         await appendLogs();
+        const completion =
+            result === undefined && failure === undefined
+                ? undefined
+                : {
+                      ...(failure ?? {}),
+                      ...(result === undefined
+                          ? {}
+                          : {
+                                exitCode: result.exitCode,
+                                output: stripCommandStreams(
+                                    commandResultOutput(result),
+                                ),
+                                stderrBytes: readByteLength(result.stderr),
+                                stdoutBytes: readByteLength(result.stdout),
+                            }),
+                  };
         await this.#toolCallHistory.failed(
             scope.callId,
             errorCode,
             completedAt,
-            result === undefined
-                ? undefined
-                : {
-                      exitCode: result.exitCode,
-                      output: stripCommandStreams(commandResultOutput(result)),
-                      stderrBytes: readByteLength(result.stderr),
-                      stdoutBytes: readByteLength(result.stdout),
-                  },
+            completion,
         );
         await this.#appendEvent(
             "toolCall.failed",
@@ -264,7 +278,9 @@ export class WorkerInstanceToolAudit {
                     ? {}
                     : { decision: approvalState.decision }),
                 errorCode,
+                executionCompleted: failure?.executionCompleted,
                 exitCode: result?.exitCode,
+                failureStage: failure?.failureStage,
                 startedAt: scope.startedAt,
                 status: "failed",
                 stderrBytes:

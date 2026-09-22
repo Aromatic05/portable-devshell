@@ -534,6 +534,81 @@ test("ToolCallExecution serializes asynchronous progress rewrites before complet
     ]);
 });
 
+test("ToolCallExecution records completed execution when outbound result Rewrite fails", async () => {
+    const failures: unknown[] = [];
+    const execution = new ToolCallExecution({
+        approval: { async prepare() { return {}; } },
+        assertReady() {},
+        audit: {
+            createScope(toolName: string, input: unknown, callContext: typeof context) {
+                return createToolCallScope(toolName, input as never, callContext);
+            },
+            async requested() {},
+            async queued() {},
+            runningContext() { return {}; },
+            async running() {},
+            async completed() { assert.fail("must not complete audit"); },
+            async failed(
+                _scope: unknown,
+                _running: unknown,
+                _approval: unknown,
+                _errorCode: string,
+                _result: unknown,
+                _appendLogs: unknown,
+                failure: unknown,
+            ) {
+                failures.push(failure);
+            },
+            async failActive() {},
+            async nonRunning() {},
+        },
+        boundary: async () => ({
+            release() {},
+            sequence: new ToolCallBoundarySequence({
+                rewrites: [async (input) => {
+                    if (
+                        input.direction === "outbound" &&
+                        input.kind === "result"
+                    ) {
+                        throw new Error("masking failed");
+                    }
+                    return input.text;
+                }],
+            }),
+        }),
+        instanceName: asInstanceName("boundary-result-rewrite-failure"),
+        log: { async append() {} },
+        toolCallScheduler: {
+            reserve() {
+                return {
+                    markPendingApproval() {},
+                    release() {},
+                    async run(operation: () => Promise<unknown>) {
+                        return await operation();
+                    },
+                };
+            },
+        },
+        toolInvoker: {
+            async invoke() {
+                return "executor completed";
+            },
+        },
+    } as never);
+
+    await assert.rejects(
+        execution.call("bash_run", {}, context),
+        (error: unknown) =>
+            (error as { code?: string }).code === errorCodes.coreProviderFailed,
+    );
+    assert.deepEqual(failures, [
+        {
+            executionCompleted: true,
+            failureStage: "outboundBoundary",
+        },
+    ]);
+});
+
 test("ToolCallExecution keeps successful result and progress semantics when outbound Review fails", async () => {
     const completed: unknown[] = [];
     const progress: unknown[] = [];

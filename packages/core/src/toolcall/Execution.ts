@@ -8,6 +8,7 @@ import {
     type InstanceName,
     type JsonValue,
     type ToolCallContext,
+    type ToolCallFailureStage,
 } from "@portable-devshell/shared";
 
 import type { WorkerToolInvoker } from "../worker/tool/Invoker.js";
@@ -302,6 +303,8 @@ export class ToolCallExecution {
                 approvalState,
             );
             let toolExecutionSucceeded = false;
+            let executionCompleted = false;
+            let failureStage: ToolCallFailureStage | undefined;
             let progressTail = Promise.resolve();
             let progressFailure: unknown;
             const boundaryProgress =
@@ -341,6 +344,7 @@ export class ToolCallExecution {
                                       );
                                   }
                               } catch {
+                                  failureStage = "outboundBoundary";
                                   progressFailure = outboundBoundaryFailure();
                               }
                           });
@@ -378,11 +382,23 @@ export class ToolCallExecution {
                         canonicalContext,
                     );
                 });
-                const adaptedResult =
-                    transformResult === undefined
-                        ? rawResult
-                        : await transformResult(rawResult, scope.callId);
-                await flushProgress();
+                executionCompleted = true;
+                let adaptedResult: JsonValue;
+                try {
+                    adaptedResult =
+                        transformResult === undefined
+                            ? rawResult
+                            : await transformResult(rawResult, scope.callId);
+                } catch (error) {
+                    failureStage = "postExecution";
+                    throw error;
+                }
+                try {
+                    await flushProgress();
+                } catch (error) {
+                    failureStage = "outboundBoundary";
+                    throw error;
+                }
                 let result: JsonValue;
                 try {
                     result = await boundary.rewrite({
@@ -394,6 +410,7 @@ export class ToolCallExecution {
                         toolName,
                     });
                 } catch {
+                    failureStage = "outboundBoundary";
                     throw outboundBoundaryFailure();
                 }
                 toolExecutionSucceeded = true;
@@ -436,6 +453,15 @@ export class ToolCallExecution {
 
                 await progressTail;
                 const failure = progressFailure ?? error;
+                const auditFailure = () =>
+                    executionCompleted || failureStage !== undefined
+                        ? {
+                              executionCompleted,
+                              ...(failureStage === undefined
+                                  ? {}
+                                  : { failureStage }),
+                          }
+                        : undefined;
                 let outerFailure: ToolCallOuterError;
                 try {
                     outerFailure = await rewriteToolCallError(
@@ -446,6 +472,7 @@ export class ToolCallExecution {
                         toolName,
                     );
                 } catch {
+                    failureStage = "outboundBoundary";
                     const boundaryError = outboundBoundaryFailure();
                     if (hostRecorded) {
                         await this.#audit.failed(
@@ -458,6 +485,7 @@ export class ToolCallExecution {
                             ),
                             undefined,
                             async () => undefined,
+                            auditFailure(),
                         );
                     }
                     throw boundaryError;
@@ -514,6 +542,7 @@ export class ToolCallExecution {
                                 );
                             }
                         },
+                        auditFailure(),
                     );
                 }
                 await deliverOutboundReviewFeedback(
