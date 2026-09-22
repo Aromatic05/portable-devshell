@@ -14,6 +14,8 @@ const encoder = new TextEncoder();
 
 export const FRAME_PROTOCOL_VERSION = 1;
 export const FRAME_MAX_DATA_SIZE = 64 * 1024;
+export const FRAME_MAX_OPEN_METADATA_SIZE = 64 * 1024;
+export const FRAME_MAX_OPEN_SERVICE_SIZE = 256;
 export const TRANSPORT_MAX_FRAME_SIZE = 16 * 1024 * 1024;
 
 export const frameResetCodes = {
@@ -68,32 +70,65 @@ enum FrameType {
 export class PacketBuffer {
     readonly #maxPacketSize: number;
     #buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
+    #end = 0;
+    #start = 0;
 
     constructor(maxPacketSize = TRANSPORT_MAX_FRAME_SIZE) {
         this.#maxPacketSize = maxPacketSize;
     }
 
     get empty(): boolean {
-        return this.#buffer.byteLength === 0;
+        return this.#start === this.#end;
     }
 
     push(chunk: Uint8Array): Uint8Array[] {
         if (chunk.byteLength === 0) return [];
-        this.#buffer = appendBytes(this.#buffer, chunk);
+        this.#append(chunk);
         const packets: Uint8Array[] = [];
-        while (this.#buffer.byteLength >= PACKET_HEADER_SIZE) {
-            const payloadLength = readU32(this.#buffer, 0);
+        while (this.#end - this.#start >= PACKET_HEADER_SIZE) {
+            const payloadLength = readU32(this.#buffer, this.#start);
             assertPacketSize(payloadLength, this.#maxPacketSize);
             const packetLength = PACKET_HEADER_SIZE + payloadLength;
-            if (this.#buffer.byteLength < packetLength) break;
-            packets.push(this.#buffer.slice(PACKET_HEADER_SIZE, packetLength));
-            this.#buffer = this.#buffer.slice(packetLength);
+            if (this.#end - this.#start < packetLength) break;
+            const payloadStart = this.#start + PACKET_HEADER_SIZE;
+            packets.push(
+                this.#buffer.slice(payloadStart, this.#start + packetLength),
+            );
+            this.#start += packetLength;
+        }
+        if (this.#start === this.#end) {
+            this.#buffer = new Uint8Array();
+            this.#start = 0;
+            this.#end = 0;
         }
         return packets;
     }
 
     reset(): void {
         this.#buffer = new Uint8Array();
+        this.#start = 0;
+        this.#end = 0;
+    }
+
+    #append(chunk: Uint8Array): void {
+        const unread = this.#end - this.#start;
+        const required = unread + chunk.byteLength;
+        if (this.#buffer.byteLength < required) {
+            let capacity = Math.max(1024, this.#buffer.byteLength);
+            while (capacity < required) capacity *= 2;
+            const next = new Uint8Array(capacity);
+            if (unread > 0)
+                next.set(this.#buffer.subarray(this.#start, this.#end), 0);
+            this.#buffer = next;
+            this.#start = 0;
+            this.#end = unread;
+        } else if (this.#end + chunk.byteLength > this.#buffer.byteLength) {
+            this.#buffer.copyWithin(0, this.#start, this.#end);
+            this.#start = 0;
+            this.#end = unread;
+        }
+        this.#buffer.set(chunk, this.#end);
+        this.#end += chunk.byteLength;
     }
 }
 
@@ -192,8 +227,18 @@ export function decodeFrame(packet: Uint8Array): Frame {
 function encodeOpen(frame: Extract<Frame, { type: "open" }>): Uint8Array {
     assertPositiveU32(frame.receiveWindow, "OPEN receive window");
     const service = encoder.encode(frame.service);
-    if (service.byteLength === 0 || service.byteLength > UINT16_MAX) {
+    if (
+        service.byteLength === 0 ||
+        service.byteLength > UINT16_MAX ||
+        service.byteLength > FRAME_MAX_OPEN_SERVICE_SIZE
+    ) {
         throw protocolError("OPEN service must be a non-empty UTF-8 name.");
+    }
+    if (frame.metadata.byteLength > FRAME_MAX_OPEN_METADATA_SIZE) {
+        throw protocolError(
+            `OPEN metadata exceeds ${FRAME_MAX_OPEN_METADATA_SIZE} bytes.`,
+            "protocol.frameTooLarge",
+        );
     }
     const payload = new Uint8Array(
         OPEN_FIXED_SIZE + service.byteLength + frame.metadata.byteLength,
@@ -273,6 +318,12 @@ function decodeOpen(streamId: number, payload: Uint8Array): Frame {
     if (serviceLength === 0) {
         throw protocolError("OPEN service must not be empty.");
     }
+    if (serviceLength > FRAME_MAX_OPEN_SERVICE_SIZE) {
+        throw protocolError(
+            `OPEN service exceeds ${FRAME_MAX_OPEN_SERVICE_SIZE} bytes.`,
+            "protocol.frameTooLarge",
+        );
+    }
     const serviceEnd = OPEN_FIXED_SIZE + serviceLength;
     if (serviceEnd > payload.byteLength) {
         throw protocolError("OPEN service length exceeds payload length.");
@@ -281,6 +332,13 @@ function decodeOpen(streamId: number, payload: Uint8Array): Frame {
         payload.subarray(OPEN_FIXED_SIZE, serviceEnd),
         "OPEN service",
     );
+    const metadataLength = payload.byteLength - serviceEnd;
+    if (metadataLength > FRAME_MAX_OPEN_METADATA_SIZE) {
+        throw protocolError(
+            `OPEN metadata exceeds ${FRAME_MAX_OPEN_METADATA_SIZE} bytes.`,
+            "protocol.frameTooLarge",
+        );
+    }
     return {
         type: "open",
         streamId,
@@ -303,17 +361,6 @@ function typeCode(type: Frame["type"]): number {
         case "reset":
             return FrameType.Reset;
     }
-}
-
-function appendBytes(
-    current: Uint8Array<ArrayBufferLike>,
-    next: Uint8Array,
-): Uint8Array<ArrayBuffer> {
-    if (current.byteLength === 0) return Uint8Array.from(next);
-    const combined = new Uint8Array(current.byteLength + next.byteLength);
-    combined.set(current, 0);
-    combined.set(next, current.byteLength);
-    return combined;
 }
 
 function decodeUtf8(bytes: Uint8Array, label: string): string {

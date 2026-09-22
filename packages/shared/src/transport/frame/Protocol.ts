@@ -576,6 +576,8 @@ function normalizeError(error: unknown): Error {
 
 export {
     FRAME_MAX_DATA_SIZE,
+    FRAME_MAX_OPEN_METADATA_SIZE,
+    FRAME_MAX_OPEN_SERVICE_SIZE,
     FRAME_PROTOCOL_VERSION,
     FrameBuffer,
     PacketBuffer,

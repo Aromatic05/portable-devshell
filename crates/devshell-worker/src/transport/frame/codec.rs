@@ -8,6 +8,8 @@ const RESET_CODE_SIZE: usize = 2;
 
 pub const FRAME_PROTOCOL_VERSION: u8 = 1;
 pub const FRAME_MAX_DATA_SIZE: usize = 64 * 1024;
+pub const FRAME_MAX_OPEN_METADATA_SIZE: usize = 64 * 1024;
+pub const FRAME_MAX_OPEN_SERVICE_SIZE: usize = 256;
 pub const TRANSPORT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 pub const RESET_UNSUPPORTED_SERVICE: u16 = 1;
@@ -57,6 +59,7 @@ impl Frame {
 pub struct FrameDecoder {
     buffer: Vec<u8>,
     max_frame_size: usize,
+    start: usize,
 }
 
 impl Default for FrameDecoder {
@@ -70,11 +73,12 @@ impl FrameDecoder {
         Self {
             buffer: Vec::new(),
             max_frame_size,
+            start: 0,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
+        self.start == self.buffer.len()
     }
 
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Frame>, String> {
@@ -83,10 +87,11 @@ impl FrameDecoder {
         }
         let mut frames = Vec::new();
         loop {
-            if self.buffer.len() < PACKET_HEADER_SIZE {
+            let available = self.buffer.len().saturating_sub(self.start);
+            if available < PACKET_HEADER_SIZE {
                 break;
             }
-            let body_len = read_u32(&self.buffer, 0)? as usize;
+            let body_len = read_u32(&self.buffer, self.start)? as usize;
             if body_len > self.max_frame_size {
                 return Err(format!(
                     "Frame payload exceeds {} bytes.",
@@ -96,14 +101,36 @@ impl FrameDecoder {
             let packet_len = PACKET_HEADER_SIZE
                 .checked_add(body_len)
                 .ok_or_else(|| "Frame packet length overflow.".to_string())?;
-            if self.buffer.len() < packet_len {
+            if available < packet_len {
                 break;
             }
-            let packet = self.buffer[..packet_len].to_vec();
-            self.buffer.drain(..packet_len);
-            frames.push(decode_frame(&packet)?);
+            let packet_end = self
+                .start
+                .checked_add(packet_len)
+                .ok_or_else(|| "Frame packet offset overflow.".to_string())?;
+            frames.push(decode_frame(&self.buffer[self.start..packet_end])?);
+            self.start = packet_end;
         }
+        self.compact();
         Ok(frames)
+    }
+
+    fn compact(&mut self) {
+        if self.start == 0 {
+            return;
+        }
+        if self.start == self.buffer.len() {
+            self.buffer.clear();
+            self.start = 0;
+            return;
+        }
+        if self.start < 64 * 1024 && self.start < self.buffer.len() / 2 {
+            return;
+        }
+        let remaining = self.buffer.len() - self.start;
+        self.buffer.copy_within(self.start.., 0);
+        self.buffer.truncate(remaining);
+        self.start = 0;
     }
 }
 
@@ -124,8 +151,13 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, String> {
                 return Err("OPEN receive window must be a positive u32.".to_string());
             }
             let service_bytes = service.as_bytes();
-            if service_bytes.is_empty() {
+            if service_bytes.is_empty() || service_bytes.len() > FRAME_MAX_OPEN_SERVICE_SIZE {
                 return Err("OPEN service must be a non-empty UTF-8 name.".to_string());
+            }
+            if metadata.len() > FRAME_MAX_OPEN_METADATA_SIZE {
+                return Err(format!(
+                    "OPEN metadata exceeds {FRAME_MAX_OPEN_METADATA_SIZE} bytes."
+                ));
             }
             let service_len = u16::try_from(service_bytes.len())
                 .map_err(|_| "OPEN service exceeds u16 length.".to_string())?;
@@ -271,6 +303,11 @@ fn decode_open(stream_id: u32, payload: &[u8]) -> Result<Frame, String> {
     if service_len == 0 {
         return Err("OPEN service must not be empty.".to_string());
     }
+    if service_len > FRAME_MAX_OPEN_SERVICE_SIZE {
+        return Err(format!(
+            "OPEN service exceeds {FRAME_MAX_OPEN_SERVICE_SIZE} bytes."
+        ));
+    }
     let service_end = OPEN_FIXED_SIZE
         .checked_add(service_len)
         .ok_or_else(|| "OPEN service length overflow.".to_string())?;
@@ -279,6 +316,12 @@ fn decode_open(stream_id: u32, payload: &[u8]) -> Result<Frame, String> {
     }
     let service = String::from_utf8(payload[OPEN_FIXED_SIZE..service_end].to_vec())
         .map_err(|_| "OPEN service must be valid UTF-8.".to_string())?;
+    let metadata_len = payload.len() - service_end;
+    if metadata_len > FRAME_MAX_OPEN_METADATA_SIZE {
+        return Err(format!(
+            "OPEN metadata exceeds {FRAME_MAX_OPEN_METADATA_SIZE} bytes."
+        ));
+    }
     Ok(Frame::Open {
         stream_id,
         receive_window,
@@ -362,6 +405,36 @@ mod tests {
     }
 
     #[test]
+    fn open_service_and_metadata_have_independent_size_limits() {
+        assert!(
+            encode_frame(&Frame::Open {
+                stream_id: 1,
+                receive_window: 8,
+                service: "s".repeat(FRAME_MAX_OPEN_SERVICE_SIZE + 1),
+                metadata: Vec::new(),
+            })
+            .is_err()
+        );
+        assert!(
+            encode_frame(&Frame::Open {
+                stream_id: 1,
+                receive_window: 8,
+                service: "test".to_string(),
+                metadata: vec![0; FRAME_MAX_OPEN_METADATA_SIZE + 1],
+            })
+            .is_err()
+        );
+
+        let mut payload =
+            Vec::with_capacity(OPEN_FIXED_SIZE + 1 + FRAME_MAX_OPEN_METADATA_SIZE + 1);
+        payload.extend_from_slice(&8u32.to_be_bytes());
+        payload.extend_from_slice(&1u16.to_be_bytes());
+        payload.push(b'x');
+        payload.extend(std::iter::repeat_n(0, FRAME_MAX_OPEN_METADATA_SIZE + 1));
+        assert!(decode_open(1, &payload).is_err());
+    }
+
+    #[test]
     fn decoder_restores_split_and_coalesced_frames() {
         let first = encode_frame(&Frame::Data {
             stream_id: 1,
@@ -394,6 +467,25 @@ mod tests {
                 Frame::Fin { stream_id: 1 },
             ]
         );
+        assert!(decoder.is_empty());
+    }
+
+    #[test]
+    fn decoder_restores_byte_at_a_time_fragmentation() {
+        let data = (0..4096)
+            .map(|index| (index & 0xff) as u8)
+            .collect::<Vec<_>>();
+        let frame = Frame::Data {
+            stream_id: 9,
+            data: data.clone(),
+        };
+        let encoded = encode_frame(&frame).expect("encode fragmented frame");
+        let mut decoder = FrameDecoder::default();
+        let mut frames = Vec::new();
+        for byte in encoded {
+            frames.extend(decoder.push(&[byte]).expect("decode fragment"));
+        }
+        assert_eq!(frames, vec![frame]);
         assert!(decoder.is_empty());
     }
 }

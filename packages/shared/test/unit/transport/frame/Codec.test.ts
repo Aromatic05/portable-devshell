@@ -3,9 +3,12 @@ import test from "node:test";
 
 import {
     FRAME_MAX_DATA_SIZE,
+    FRAME_MAX_OPEN_METADATA_SIZE,
+    FRAME_MAX_OPEN_SERVICE_SIZE,
     FrameBuffer,
     decodeFrame,
     encodeFrame,
+    encodePacket,
     type Frame,
 } from "@portable-devshell/shared/transport/frame";
 
@@ -80,6 +83,30 @@ test("FrameBuffer restores split and coalesced Frame boundaries", () => {
     ]);
 });
 
+test("FrameBuffer restores a highly fragmented packet without repeated-prefix assumptions", () => {
+    const expected = new Uint8Array(4096);
+    for (let index = 0; index < expected.byteLength; index += 1)
+        expected[index] = index & 0xff;
+    const encoded = encodeFrame({
+        type: "data",
+        streamId: 9,
+        data: expected,
+    });
+    const buffer = new FrameBuffer();
+    const frames: Frame[] = [];
+    for (let index = 0; index < encoded.byteLength; index += 1)
+        frames.push(...buffer.push(encoded.subarray(index, index + 1)));
+
+    assert.deepEqual(frames, [
+        {
+            type: "data",
+            streamId: 9,
+            data: expected,
+        },
+    ]);
+    assert.equal(buffer.empty, true);
+});
+
 test("Frame v1 rejects malformed headers, reserved ids and invalid flow-control fields", () => {
     const data = encodeFrame({
         type: "data",
@@ -131,5 +158,36 @@ test("Frame v1 keeps Service metadata opaque while validating the Service name",
                 service: "",
             }),
         /service/iu,
+    );
+    assert.throws(
+        () =>
+            encodeFrame({
+                ...frame,
+                service: "s".repeat(FRAME_MAX_OPEN_SERVICE_SIZE + 1),
+            }),
+        /service/iu,
+    );
+    assert.throws(
+        () =>
+            encodeFrame({
+                ...frame,
+                metadata: new Uint8Array(FRAME_MAX_OPEN_METADATA_SIZE + 1),
+            }),
+        /metadata|large/iu,
+    );
+
+    const body = new Uint8Array(
+        6 + 6 + 1 + FRAME_MAX_OPEN_METADATA_SIZE + 1,
+    );
+    body[0] = 1;
+    body[1] = 1;
+    const view = new DataView(body.buffer);
+    view.setUint32(2, 9, false);
+    view.setUint32(6, 1024, false);
+    view.setUint16(10, 1, false);
+    body[12] = "x".charCodeAt(0);
+    assert.throws(
+        () => decodeFrame(encodePacket(body)),
+        /metadata|large/iu,
     );
 });
