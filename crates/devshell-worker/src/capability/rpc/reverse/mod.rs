@@ -74,12 +74,10 @@ impl ReverseDispatcher {
         if self.router.is_control_method(&request.method) {
             let response = self.router.dispatch_control(request);
             let encoded = encode_json(&response)?;
-            if response.ok {
-                self.completed
-                    .lock()
-                    .map_err(|_| "reverse request cache lock poisoned".to_string())?
-                    .put(key.clone(), encoded.clone());
-            }
+            self.completed
+                .lock()
+                .map_err(|_| "reverse request cache lock poisoned".to_string())?
+                .put(key.clone(), encoded.clone());
             return Ok(Some(ReversePayloadFrame {
                 opaque_id: Some(key),
                 frame: encoded,
@@ -105,6 +103,10 @@ impl ReverseDispatcher {
                     .remove(&key);
                 let response = RpcResponse::failure(request.id, error);
                 let encoded = encode_json(&response)?;
+                self.completed
+                    .lock()
+                    .map_err(|_| "reverse request cache lock poisoned".to_string())?
+                    .put(key.clone(), encoded.clone());
                 return Ok(Some(ReversePayloadFrame {
                     opaque_id: Some(key),
                     frame: encoded,
@@ -117,17 +119,15 @@ impl ReverseDispatcher {
             let response = dispatcher.router.dispatch_tool(request, permit);
             let encoded =
                 encode_json(&response).expect("serializing a reverse RPC response should not fail");
-            if response.ok
-                && let Ok(mut completed) = dispatcher.completed.lock()
-            {
+            if let Ok(mut completed) = dispatcher.completed.lock() {
                 completed.put(key.clone(), encoded.clone());
             }
             if let Ok(mut in_flight) = dispatcher.in_flight.lock() {
                 // Publish a response only after the request is no longer
-                // in-flight. For successful mutations the completed cache is
-                // populated first, so a replay after observing the response
-                // can be answered from cache. Failed mutations remain
-                // immediately retryable.
+                // in-flight. The terminal response cache is populated first,
+                // so an exact transport replay covered by the bounded
+                // terminal-response cache does not execute the logical request
+                // twice, regardless of whether its outcome succeeded or failed.
                 in_flight.remove(&key);
             }
             let _ = dispatcher.responses.push_back(ReversePayloadFrame {
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn reverse_dispatcher_does_not_cache_failed_mutations() {
+    fn reverse_dispatcher_replays_failed_mutation_without_executing_it_twice() {
         let root = crate::testing::temp_dir();
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).unwrap();
@@ -544,14 +544,14 @@ mod tests {
         assert!(!first.ok);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        assert!(dispatcher.dispatch(&frame).unwrap().is_none());
-        let second = responses
-            .wait_pop(Duration::from_secs(2))
+        let replay = dispatcher
+            .dispatch(&frame)
             .unwrap()
-            .expect("retried mutation response");
-        let second: RpcResponse = decode_json(&second.frame).unwrap();
-        assert!(second.ok);
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+            .expect("cached failed mutation response");
+        let replay: RpcResponse = decode_json(&replay.frame).unwrap();
+        assert!(!replay.ok);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(responses.try_pop().unwrap().is_none());
     }
 
     #[test]
