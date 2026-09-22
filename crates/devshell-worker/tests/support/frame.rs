@@ -101,6 +101,48 @@ impl<R: Read> TransportRpcReader<R> {
         }
     }
 
+    pub fn wait_ready(&mut self) -> io::Result<()> {
+        loop {
+            let Some((frame_type, stream_id, payload)) = read_transport_frame(&mut self.inner)?
+            else {
+                self.finished = true;
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "transport closed before worker.rpc received send credit",
+                ));
+            };
+            if stream_id != RPC_STREAM_ID {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unexpected transport stream {stream_id}"),
+                ));
+            }
+            match frame_type {
+                FRAME_WINDOW => return Ok(()),
+                FRAME_DATA => self.buffered.extend(payload),
+                FRAME_FIN => {
+                    self.finished = true;
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "worker.rpc finished before receiving send credit",
+                    ));
+                }
+                FRAME_RESET => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        decode_reset_message(&payload),
+                    ));
+                }
+                other => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unexpected transport frame type {other}"),
+                    ));
+                }
+            }
+        }
+    }
+
     fn fill(&mut self) -> io::Result<()> {
         while self.buffered.is_empty() && !self.finished {
             let Some((frame_type, stream_id, payload)) = read_transport_frame(&mut self.inner)?

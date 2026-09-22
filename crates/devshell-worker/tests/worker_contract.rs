@@ -1643,6 +1643,7 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
         .unwrap();
     let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
     let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    stdout.wait_ready().unwrap();
 
     #[cfg(unix)]
     let long_command = "sleep 2; printf done";
@@ -1707,6 +1708,7 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
         .unwrap();
     let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
     let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    stdout.wait_ready().unwrap();
     let (frames, received) = mpsc::channel();
     let reader = thread::spawn(move || {
         while let Ok(frame) = try_read_rpc_frame(&mut stdout) {
@@ -1808,6 +1810,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         .unwrap();
     let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
     let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    stdout.wait_ready().unwrap();
 
     #[cfg(unix)]
     let cancel_command = format!(
