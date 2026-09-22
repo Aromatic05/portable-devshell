@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 export function ConfirmationDialog({
     actionLabel,
+    busyLabel,
     busy,
     description,
     disabled = false,
@@ -11,6 +12,7 @@ export function ConfirmationDialog({
     variant = "default",
 }: {
     actionLabel: string;
+    busyLabel?: string;
     busy: boolean;
     description: string;
     disabled?: boolean;
@@ -98,12 +100,13 @@ export function ConfirmationDialog({
                         Cancel
                     </button>
                     <button
+                        aria-busy={busy || undefined}
                         className={destructive ? "danger" : "primary"}
                         disabled={busy || disabled}
                         onClick={onConfirm}
                         ref={confirmRef}
                     >
-                        {busy ? progressLabel : actionLabel}
+                        {busy ? (busyLabel ?? progressLabel) : actionLabel}
                     </button>
                 </div>
             </section>

@@ -25,6 +25,7 @@ export function PageSwitcher({
 }) {
     const [open, setOpen] = useState(false);
     const root = useRef<HTMLDivElement>(null);
+    const activeTrigger = useRef<HTMLButtonElement | null>(null);
     const current =
         pages.find((item) => item.page === active.page) ?? pages[0]!;
 
@@ -39,7 +40,10 @@ export function PageSwitcher({
             }
         };
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Escape") {
+                setOpen(false);
+                queueMicrotask(() => activeTrigger.current?.focus());
+            }
         };
         document.addEventListener("pointerdown", onPointerDown);
         document.addEventListener("keydown", onKeyDown);
@@ -77,11 +81,14 @@ export function PageSwitcher({
             </nav>
             <div className="page-switcher">
                 <button
+                    aria-controls="page-switcher-popover"
                     aria-expanded={open}
-                    aria-haspopup="menu"
                     aria-label={`Switch page, current ${current.label}`}
                     className="page-switcher-trigger"
-                    onClick={() => setOpen((value) => !value)}
+                    onClick={(event) => {
+                        activeTrigger.current = event.currentTarget;
+                        setOpen((value) => !value);
+                    }}
                     type="button"
                 >
                     <span>{current.label}</span>
@@ -89,11 +96,14 @@ export function PageSwitcher({
                 </button>
                 {applications.length === 0 ? null : (
                     <button
+                        aria-controls="page-switcher-popover"
                         aria-expanded={open}
-                        aria-haspopup="menu"
                         aria-label="Open Extension navigation"
                         className="desktop-extension-trigger"
-                        onClick={() => setOpen((value) => !value)}
+                        onClick={(event) => {
+                            activeTrigger.current = event.currentTarget;
+                            setOpen((value) => !value);
+                        }}
                         type="button"
                     >
                         Extensions <span aria-hidden="true">⌄</span>
@@ -104,7 +114,7 @@ export function PageSwitcher({
                 <div
                     aria-label="Pages"
                     className="page-switcher-menu"
-                    role="menu"
+                    id="page-switcher-popover"
                 >
                     <div className="mobile-page-menu">
                         {pages.map((item) => {
@@ -126,7 +136,6 @@ export function PageSwitcher({
                                         setOpen(false);
                                         navigate(pageRoute(item.page));
                                     }}
-                                    role="menuitem"
                                     type="button"
                                 >
                                     <span>{item.label}</span>
@@ -153,7 +162,6 @@ export function PageSwitcher({
                                         application.id,
                                     )}
                                     key={`extension:${application.extensionId}:${application.id}`}
-                                    role="menuitem"
                                 >
                                     {application.title}
                                 </a>

@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -340,6 +341,30 @@ it("shows per-instance artifact activity and confirms revoke and cancel", async 
             "transfer-local-one",
         ),
     );
+});
+
+it("updates artifact share expiry while the page remains open", async () => {
+    vi.useFakeTimers();
+    try {
+        vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
+        const store = localStore("ready");
+        Object.assign(store.state.readModel.artifactShares[0]!, {
+            expiresAtMs: Date.now() + 2_000,
+        });
+        renderInstances(store, "local-one");
+        const activity = screen.getByRole("region", {
+            name: "Artifact activity",
+        });
+        expect(within(activity).getByText(/expires 2s/u)).toBeInTheDocument();
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1_000);
+        });
+
+        expect(within(activity).getByText(/expires 1s/u)).toBeInTheDocument();
+    } finally {
+        vi.useRealTimers();
+    }
 });
 
 it("enables a disabled instance without a confirmation dialog", () => {

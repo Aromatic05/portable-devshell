@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -371,6 +372,41 @@ describe("Audit", () => {
         expect(
             view.container.querySelectorAll(".activity-feed > li"),
         ).toHaveLength(2);
+    });
+
+    it("ages the default active Context window while the Audit page stays open", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
+            const almostStale = new Date(
+                Date.now() - 29 * 60 * 1_000 - 50_000,
+            ).toISOString();
+            const timedState: WebState = {
+                ...state,
+                readModel: {
+                    ...state.readModel,
+                    contexts: state.readModel.contexts.map((context) =>
+                        context.ctxId === "ctx-alpha"
+                            ? { ...context, lastAccessedAt: almostStale }
+                            : context,
+                    ),
+                },
+            };
+            renderAudit({ state: timedState });
+            expect(
+                screen.getByRole("option", { name: /ctx-alpha.*active/u }),
+            ).toBeInTheDocument();
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(20_000);
+            });
+
+            expect(
+                screen.queryByRole("option", { name: /ctx-alpha.*active/u }),
+            ).not.toBeInTheDocument();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("separates Search, quick result filters, and collapsed advanced filters", () => {

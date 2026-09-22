@@ -18,6 +18,7 @@ import { webRouteHref, type WebRoute } from "../../app/Route.js";
 import { Config } from "./Config.js";
 import { Connections } from "./Connections.js";
 import { InstanceCreate } from "./InstancesCreate.js";
+import { useNow } from "../Clock.js";
 
 export function Instances({
     disabled = false,
@@ -613,6 +614,11 @@ export function Instances({
                             ? "Revoke"
                             : "Cancel transfer"
                     }
+                    busyLabel={
+                        artifactConfirmation.kind === "share"
+                            ? "Revoking…"
+                            : "Cancelling transfer…"
+                    }
                     busy={
                         state.operations[
                             artifactConfirmation.kind === "share"
@@ -705,6 +711,7 @@ function ArtifactActivity({
     onRevokeShare(shareId: string): void;
     operations: Record<string, "pending">;
 }) {
+    const now = useNow(1_000);
     return (
         <section aria-label="Artifact activity" className="artifact-activity">
             <div className="artifact-activity-heading">
@@ -730,7 +737,7 @@ function ArtifactActivity({
             {activity.shares.map((share) => {
                 const remainingSeconds = Math.max(
                     0,
-                    Math.ceil((share.expiresAtMs - Date.now()) / 1000),
+                    Math.ceil((share.expiresAtMs - now) / 1000),
                 );
                 return (
                     <article className="artifact-row" key={share.shareId}>

@@ -122,3 +122,23 @@ it("renders a grammatical busy label for Disable", () => {
 
     expect(screen.getByRole("button", { name: "Disabling…" })).toBeDisabled();
 });
+
+it("uses an explicit busy label for multi-word actions", () => {
+    render(
+        <ConfirmationDialog
+            actionLabel="Cancel transfer"
+            busy
+            busyLabel="Cancelling transfer…"
+            description="Cancel transfer?"
+            onCancel={vi.fn()}
+            onConfirm={vi.fn()}
+            variant="destructive"
+        />,
+    );
+
+    const action = screen.getByRole("button", {
+        name: "Cancelling transfer…",
+    });
+    expect(action).toBeDisabled();
+    expect(action).toHaveAttribute("aria-busy", "true");
+});

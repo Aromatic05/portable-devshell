@@ -515,12 +515,12 @@ describe("Messages", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Add message control" }),
         );
-        expect(screen.getByRole("menuitem", { name: /^Push/u })).toBeEnabled();
-        expect(screen.getByRole("menuitem", { name: /^Stop/u })).toBeEnabled();
+        expect(screen.getByRole("button", { name: /^Push/u })).toBeEnabled();
+        expect(screen.getByRole("button", { name: /^Stop/u })).toBeEnabled();
         expect(
-            screen.getByRole("menuitem", { name: /^Resume/u }),
+            screen.getByRole("button", { name: /^Resume/u }),
         ).toBeEnabled();
-        fireEvent.click(screen.getByRole("menuitem", { name: /^Push/u }));
+        fireEvent.click(screen.getByRole("button", { name: /^Push/u }));
         expect(
             within(composer.closest("form")!).getByText("#push"),
         ).toBeVisible();
@@ -552,7 +552,7 @@ describe("Messages", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Add message control" }),
         );
-        fireEvent.click(screen.getByRole("menuitem", { name: /^Stop/u }));
+        fireEvent.click(screen.getByRole("button", { name: /^Stop/u }));
         fireEvent.submit(form);
         await waitFor(() =>
             expect(queueContextMessage).toHaveBeenLastCalledWith(
@@ -564,7 +564,7 @@ describe("Messages", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Add message control" }),
         );
-        fireEvent.click(screen.getByRole("menuitem", { name: /^Resume/u }));
+        fireEvent.click(screen.getByRole("button", { name: /^Resume/u }));
         fireEvent.submit(form);
         await waitFor(() =>
             expect(queueContextMessage).toHaveBeenLastCalledWith(
@@ -716,7 +716,7 @@ describe("Messages", () => {
         );
     });
 
-    it("uses the two-line drawer trigger and closes it when a conversation is selected", () => {
+    it("uses the two-line drawer trigger, closes it on selection, and restores focus", async () => {
         const navigate = vi.fn();
         const view = render(
             <Messages
@@ -730,9 +730,10 @@ describe("Messages", () => {
         expect(
             view.container.querySelector(".messages-sidebar"),
         ).not.toHaveClass("open");
-        fireEvent.click(
-            screen.getByRole("button", { name: "Open conversations" }),
-        );
+        const trigger = screen.getByRole("button", {
+            name: "Open conversations",
+        });
+        fireEvent.click(trigger);
         expect(view.container.querySelector(".messages-sidebar")).toHaveClass(
             "open",
         );
@@ -743,6 +744,7 @@ describe("Messages", () => {
         expect(
             view.container.querySelector(".messages-sidebar"),
         ).not.toHaveClass("open");
+        await waitFor(() => expect(trigger).toHaveFocus());
     });
 
     it("renames a conversation through server preferences and restores it in a new browser", async () => {
@@ -1152,7 +1154,9 @@ describe("Messages", () => {
                 name: /Investigate the first regression/u,
             }),
         ).toHaveTextContent("idle");
-        fireEvent.click(screen.getByRole("button", { name: "Archive idle" }));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Clear idle from Current" }),
+        );
         expect(
             screen.queryByRole("button", {
                 name: /Investigate the first regression/u,
@@ -1229,7 +1233,7 @@ describe("Messages", () => {
         expect(conversation).toHaveTextContent("idle");
     });
 
-    it("closes the message control menu with Escape", () => {
+    it("closes the message control disclosure with Escape and restores focus", async () => {
         render(
             <Messages
                 navigate={vi.fn()}
@@ -1238,16 +1242,18 @@ describe("Messages", () => {
                 store={messageStore()}
             />,
         );
-        fireEvent.click(
-            screen.getByRole("button", { name: "Add message control" }),
-        );
+        const trigger = screen.getByRole("button", {
+            name: "Add message control",
+        });
+        fireEvent.click(trigger);
         expect(
-            screen.getByRole("menu", { name: "Message controls" }),
+            screen.getByLabelText("Message controls"),
         ).toBeInTheDocument();
         fireEvent.keyDown(document, { key: "Escape" });
         expect(
-            screen.queryByRole("menu", { name: "Message controls" }),
+            screen.queryByLabelText("Message controls"),
         ).not.toBeInTheDocument();
+        await waitFor(() => expect(trigger).toHaveFocus());
     });
 
     it("switches the sidebar between active and history conversations", () => {

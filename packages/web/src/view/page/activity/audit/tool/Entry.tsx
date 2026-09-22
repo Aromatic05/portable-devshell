@@ -22,6 +22,7 @@ export function ToolCallEntry({
     disabled = false,
     initiallyOpen = false,
     logs,
+    now = Date.now(),
     onLoadImage,
     onLoadDetail,
     onDecideApproval,
@@ -32,6 +33,7 @@ export function ToolCallEntry({
     disabled?: boolean;
     initiallyOpen?: boolean;
     logs: readonly InstanceLogEntry[];
+    now?: number;
     onLoadImage(imageRef: string): Promise<ArtifactStoredImageResult>;
     onLoadDetail(): Promise<ToolCallRecord | undefined>;
     onDecideApproval(
@@ -88,7 +90,7 @@ export function ToolCallEntry({
                     }}
                 >
                     <time dateTime={call.startedAt} title={call.startedAt}>
-                        {formatRelativeTime(call.startedAt)}
+                        {formatRelativeTime(call.startedAt, now)}
                     </time>
                     <strong>{call.toolName}</strong>
                     <span>

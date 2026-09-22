@@ -11,12 +11,14 @@ export function ContextBatchDisableDialog({
     busy,
     contexts,
     disabled = false,
+    now,
     onClose,
     onDisable,
 }: {
     busy: boolean;
     contexts: readonly McpContextRecord[];
     disabled?: boolean;
+    now: number;
     onClose(): void;
     onDisable(ctxIds: string[]): Promise<boolean>;
 }) {
@@ -30,7 +32,7 @@ export function ContextBatchDisableDialog({
     const thresholdMinutes =
         preset === "custom" ? customMinutes : Number(preset);
     const candidates = useMemo(() => {
-        const cutoff = Date.now() - thresholdMinutes * 60_000;
+        const cutoff = now - thresholdMinutes * 60_000;
         return contexts
             .filter(
                 (context) =>
@@ -40,7 +42,7 @@ export function ContextBatchDisableDialog({
             .sort((left, right) =>
                 left.lastAccessedAt.localeCompare(right.lastAccessedAt),
             );
-    }, [contexts, thresholdMinutes]);
+    }, [contexts, now, thresholdMinutes]);
     const candidateIds = useMemo(
         () => new Set(candidates.map((context) => context.ctxId)),
         [candidates],
@@ -286,6 +288,7 @@ export function ContextBatchDisableDialog({
                                             <small>
                                                 {formatIdle(
                                                     context.lastAccessedAt,
+                                                    now,
                                                 )}
                                             </small>
                                         </td>
@@ -354,10 +357,10 @@ function formatThreshold(minutes: number): string {
     return `${minutes} minutes`;
 }
 
-function formatIdle(lastAccessedAt: string): string {
+function formatIdle(lastAccessedAt: string, now = Date.now()): string {
     const minutes = Math.max(
         0,
-        Math.floor((Date.now() - Date.parse(lastAccessedAt)) / 60_000),
+        Math.floor((now - Date.parse(lastAccessedAt)) / 60_000),
     );
     if (minutes < 60) return `${minutes}m idle`;
     const hours = Math.floor(minutes / 60);

@@ -62,9 +62,14 @@ describe("authenticated application shell", () => {
                 name: "Switch page, current Overview",
             }),
         );
-        const link = await screen.findByRole("menuitem", { name: "Agent" });
+        const link = await screen.findByRole("link", { name: "Agent" });
         expect(link).toHaveAttribute("href", "./extensions/agent/");
         expect(clients.web.applications).toHaveBeenCalledOnce();
+        const trigger = screen.getByRole("button", {
+            name: "Switch page, current Overview",
+        });
+        fireEvent.keyDown(document, { key: "Escape" });
+        await waitFor(() => expect(trigger).toHaveFocus());
     });
 
     it("keeps the default browser session stable across React renders", async () => {
@@ -322,10 +327,9 @@ describe("authenticated application shell", () => {
             }),
         );
         fireEvent.click(
-            within(screen.getByRole("menu", { name: "Pages" })).getByRole(
-                "menuitem",
-                { name: /Instances/ },
-            ),
+            within(screen.getByLabelText("Pages")).getByRole("button", {
+                name: /Instances/,
+            }),
         );
         fireEvent.click(await screen.findByText("demo"));
         const stop = await screen.findByRole("button", { name: "Stop" });
@@ -464,9 +468,9 @@ describe("authenticated application shell", () => {
                 name: "Switch page, current Overview",
             }),
         );
-        const menu = screen.getByRole("menu", { name: "Pages" });
+        const menu = screen.getByLabelText("Pages");
         fireEvent.click(
-            within(menu).getByRole("menuitem", { name: /Instances/ }),
+            within(menu).getByRole("button", { name: /Instances/ }),
         );
         expect(window.location.hash).toBe("#/instances");
         fireEvent.click(await screen.findByText("demo"));

@@ -38,8 +38,11 @@ a:focus-visible {
     outline-offset: 2px;
 }
 button:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.65;
+}
+button[aria-busy="true"] {
+    cursor: wait;
 }
 button.selected,
 button.primary,
@@ -956,10 +959,15 @@ pre {
     background: #121926;
     border-right: 1px solid #34445c;
     transform: translateX(-102%);
-    transition: transform 160ms ease;
+    visibility: hidden;
+    transition:
+        transform 160ms ease,
+        visibility 0s linear 160ms;
 }
 .messages-sidebar.open {
     transform: translateX(0);
+    visibility: visible;
+    transition-delay: 0s;
 }
 .messages-sidebar-heading,
 .messages-thread-heading {
@@ -1485,6 +1493,7 @@ pre {
         border: 1px solid #34445c;
         border-radius: 12px;
         transform: none;
+        visibility: visible;
         transition: none;
     }
     .messages-backdrop,

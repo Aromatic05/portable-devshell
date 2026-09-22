@@ -21,6 +21,7 @@ import {
     type ToolCallFilters as Filters,
 } from "./tool/Model.js";
 import type { WebState, WebStore } from "../../../../state/Store.js";
+import { useNow } from "../../../Clock.js";
 
 const toolCallPageSize = 20;
 const activeContextWindowMs = 30 * 60 * 1_000;
@@ -38,6 +39,7 @@ export function Audit({
     state: WebState;
     store: WebStore;
 }) {
+    const now = useNow();
     const [filters, setFilters] = useState<Filters>(emptyToolCallFilters);
     const [contextStatus, setContextStatus] =
         useState<AuditContextStatusFilter>("active");
@@ -73,7 +75,6 @@ export function Audit({
             ),
         [state.readModel.contexts],
     );
-    const now = Date.now();
     const calls = useMemo(
         () =>
             allCalls.filter((call) =>
@@ -112,11 +113,11 @@ export function Audit({
         return selectToolCalls(
             scopedCalls,
             filters,
-            Date.now(),
+            now,
             toolCallPage * toolCallPageSize,
             toolCallPageSize,
         );
-    }, [filters, route, scopedCalls, toolCallPage]);
+    }, [filters, now, route, scopedCalls, toolCallPage]);
     const active = contextStatus !== "all" || hasActiveToolCallFilters(filters);
     const interactive = state.connection === "online" && !disabled;
     const countText =
@@ -217,6 +218,7 @@ export function Audit({
                     }
                     contexts={state.readModel.contexts}
                     disabled={!interactive}
+                    now={now}
                     onClose={() => setBatchDisableOpen(false)}
                     onDisable={async (ctxIds) =>
                         await store.disableContexts(ctxIds)
@@ -252,6 +254,7 @@ export function Audit({
                             }
                             key={`${call.instance}-${call.callId}`}
                             logs={instanceState[call.instance]?.logs ?? []}
+                            now={now}
                             onLoadImage={store.readArtifactImage}
                             onLoadDetail={async () =>
                                 typeof store.readToolCallDetail === "function"

@@ -185,7 +185,14 @@ export function ConversationSidebar({
         document.addEventListener("keydown", keyDown);
         return () => {
             document.removeEventListener("keydown", keyDown);
-            if (document.activeElement === document.body) previous?.focus();
+            const active = document.activeElement;
+            if (
+                active === document.body ||
+                (active instanceof Node &&
+                    sidebarRef.current?.contains(active) === true)
+            ) {
+                (triggerRef.current ?? previous)?.focus();
+            }
         };
     }, [onClose, open, triggerRef]);
 
@@ -510,7 +517,7 @@ export function ConversationSidebar({
                         onClick={archiveIdle}
                         type="button"
                     >
-                        Archive idle
+                        Clear idle from Current
                     </button>
                 ) : null}
                 {preferenceError === undefined ? null : (

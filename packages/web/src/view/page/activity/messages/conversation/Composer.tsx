@@ -38,6 +38,7 @@ export function ConversationComposer({
         text: string;
     }>();
     const controlMenuRef = useRef<HTMLDivElement>(null);
+    const controlTriggerRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
         if (!controlMenuOpen) return;
@@ -50,7 +51,10 @@ export function ConversationComposer({
             }
         };
         const keyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setControlMenuOpen(false);
+            if (event.key === "Escape") {
+                setControlMenuOpen(false);
+                queueMicrotask(() => controlTriggerRef.current?.focus());
+            }
         };
         document.addEventListener("pointerdown", pointerDown);
         document.addEventListener("keydown", keyDown);
@@ -117,10 +121,11 @@ export function ConversationComposer({
             )}
             <div className="messages-control-picker" ref={controlMenuRef}>
                 <button
+                    aria-controls="messages-control-popover"
                     aria-expanded={controlMenuOpen}
-                    aria-haspopup="menu"
                     aria-label="Add message control"
                     onClick={() => setControlMenuOpen((open) => !open)}
+                    ref={controlTriggerRef}
                     type="button"
                 >
                     +
@@ -129,7 +134,7 @@ export function ConversationComposer({
                     <div
                         aria-label="Message controls"
                         className="messages-control-menu"
-                        role="menu"
+                        id="messages-control-popover"
                     >
                         {messageControlOptions.map((option) => (
                             <button
@@ -138,7 +143,6 @@ export function ConversationComposer({
                                     setMessageDirective(option.directive);
                                     setControlMenuOpen(false);
                                 }}
-                                role="menuitem"
                                 type="button"
                             >
                                 <strong>{option.label}</strong>
