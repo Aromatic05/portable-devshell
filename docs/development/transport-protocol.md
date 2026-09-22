@@ -499,7 +499,12 @@ OPEN -------------------->
 
 Service 建立本身不得阻塞整个 Frame dispatcher。可能执行 DNS/TCP connect、process spawn 或其它阻塞工作的 Service open 必须在有界 opening capacity 内独立推进；当前 Worker 最多同时保留 `32` 个 opening Service。某个 Service 正在建立时，已有 sibling stream 的 DATA / WINDOW / RPC 等必须继续前进。
 
-opener 可以在 Service 尚未接受时发送 RESET 取消 pending OPEN；acceptor 必须把它作为 stream-level cancellation 处理。除 RESET 外，在第一个 WINDOW 接受该 stream 之前发送 DATA / FIN / WINDOW 仍属于协议状态错误。
+opener 可以在 Service 尚未接受时发送：
+
+- `FIN`：表示 opener 的发送方向已经结束；acceptor 必须保存这个 half-close，Service 建立成功后立即把 EOF 交给 Service input。这个顺序对 `artifact.payload` 一类 output-only Service 是必要的，它们可以合法地 `OPEN -> FIN` 后只读取返回数据；
+- `RESET`：取消 pending OPEN；acceptor 必须把它作为 stream-level cancellation 处理。
+
+在第一个 WINDOW 接受该 stream 之前发送 DATA / WINDOW 仍属于协议状态错误。
 
 acceptor 可以在发送第一个 WINDOW 前，使用 OPEN 中获得的 `receiveWindow` 向 opener 发送 Service 输出。
 
@@ -629,6 +634,8 @@ half-close 对以下 Service 是必要语义：
 - 依赖 EOF 表达请求结束的上层 Protocol。
 
 FIN 不消耗 stream credit。
+
+FIN 可以在 remote Service 仍处于 pending OPEN / opening 状态时到达。此时它只关闭 opener 的发送方向，不代表 Service 已接受，也不能绕过第一个 WINDOW；acceptor 必须保留该状态，在 Service 成功建立后立即向其 input 传播 EOF。
 
 ## 11. RESET
 
