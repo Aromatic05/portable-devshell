@@ -171,10 +171,8 @@ impl ReverseFramePayload {
             .lock()
             .map_err(|_| "reverse Frame state lock poisoned".to_string())?
             .has_rpc_pending();
-        if !has_pending {
-            if let Some(output) = self.rpc.try_pop_outbound()? {
-                self.install_rpc(output)?;
-            }
+        if !has_pending && let Some(output) = self.rpc.try_pop_outbound()? {
+            self.install_rpc(output)?;
         }
         self.pop_state_wire()
     }
