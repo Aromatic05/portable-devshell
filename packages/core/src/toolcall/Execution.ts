@@ -34,6 +34,7 @@ import {
     type ToolCallBoundaryProvider,
 } from "./boundary/Sequence.js";
 import type { ToolCallBoundaryContext } from "./boundary/Review.js";
+import { snapshotJson } from "./boundary/Snapshot.js";
 
 interface ToolCallExecutionOptions {
     approval: ToolCallApproval;
@@ -105,11 +106,17 @@ export class ToolCallExecution {
                 await afterReview?.(callId);
                 this.#assertReady();
             },
-            async (innerInput, callId, boundaryProgress, executionSignal) =>
+            async (
+                innerInput,
+                callId,
+                boundaryProgress,
+                executionSignal,
+                executionContext,
+            ) =>
                 await this.#toolInvoker.invoke(
                     toolName,
                     innerInput,
-                    { ...context, operationId: callId },
+                    { ...executionContext, operationId: callId },
                     executionSignal,
                     boundaryProgress,
                 ),
@@ -160,15 +167,22 @@ export class ToolCallExecution {
             callId: string,
             onProgress: ((progress: JsonValue) => void) | undefined,
             signal: AbortSignal | undefined,
+            context: ToolCallContext,
         ) => Promise<JsonValue>,
     ): Promise<JsonValue> {
         throwIfToolCallAborted(signal);
 
-        const scope = this.#audit.createScope(toolName, input, context);
+        const canonicalInput = snapshotJson(input);
+        const canonicalContext = Object.freeze({ ...context });
+        const scope = this.#audit.createScope(
+            toolName,
+            canonicalInput,
+            canonicalContext,
+        );
         const hostRecorded = recording === "host";
         const boundarySignal = signal ?? new AbortController().signal;
         const boundaryContext: ToolCallBoundaryContext = Object.freeze({
-            ...context,
+            ...canonicalContext,
             instance: this.#instanceName,
         });
         if (hostRecorded) await this.#audit.requested(scope);
@@ -189,7 +203,7 @@ export class ToolCallExecution {
                     context: boundaryContext,
                     direction: "inbound",
                     kind: "call",
-                    payload: input,
+                    payload: canonicalInput,
                     signal: boundarySignal,
                     toolName,
                 });
@@ -242,8 +256,8 @@ export class ToolCallExecution {
                     {
                         callId: scope.callId,
                         instanceName: this.#instanceName,
-                        ctxId: context.ctxId,
-                        source: context.source,
+                        ctxId: canonicalContext.ctxId,
+                        source: canonicalContext.source,
                         toolName,
                     },
                     signal,
@@ -348,7 +362,7 @@ export class ToolCallExecution {
                         context: boundaryContext,
                         direction: "inbound",
                         kind: "call",
-                        payload: input,
+                        payload: canonicalInput,
                         signal: boundarySignal,
                         toolName,
                     });
@@ -361,6 +375,7 @@ export class ToolCallExecution {
                         scope.callId,
                         boundaryProgress,
                         signal,
+                        canonicalContext,
                     );
                 });
                 const adaptedResult =

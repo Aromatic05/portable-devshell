@@ -149,6 +149,103 @@ test("ToolCallExecution reviews the canonical outer call before scheduler admiss
     assert.equal(harness.releases(), 1);
 });
 
+test("ToolCallExecution keeps one canonical input and context snapshot after Review", async () => {
+    const input = { command: "echo safe", nested: { value: "outer" } };
+    const mutableContext = {
+        ctxId: "ctx-original",
+        source: "mcp" as const,
+        workspace: "/original",
+    };
+    const approvalInputs: unknown[] = [];
+    const invoked: unknown[] = [];
+    const execution = new ToolCallExecution({
+        approval: {
+            async prepare(value: unknown) {
+                approvalInputs.push(value);
+                return {};
+            },
+        },
+        assertReady() {},
+        audit: {
+            createScope(toolName: string, value: unknown, callContext: typeof mutableContext) {
+                return createToolCallScope(toolName, value as never, callContext);
+            },
+            async requested() {},
+            async queued() {},
+            runningContext() { return {}; },
+            async running() {},
+            async completed() {},
+            async failed() {},
+            async failActive() {},
+            async nonRunning() {},
+        },
+        boundary: () => ({
+            release() {},
+            sequence: new ToolCallBoundarySequence({
+                reviews: [async () => ({ decision: "accept" as const })],
+            }),
+        }),
+        instanceName: asInstanceName("canonical-snapshot"),
+        log: { async append() {} },
+        toolCallScheduler: {
+            reserve() {
+                return {
+                    markPendingApproval() {},
+                    release() {},
+                    async run(operation: () => Promise<unknown>) {
+                        return await operation();
+                    },
+                };
+            },
+        },
+        toolInvoker: {
+            async invoke(_toolName: string, value: unknown, callContext: unknown) {
+                invoked.push({ value, callContext });
+                return { ok: true };
+            },
+        },
+    } as never);
+
+    await execution.call(
+        "bash_run",
+        input,
+        mutableContext,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "host",
+        undefined,
+        () => {
+            input.command = "echo changed";
+            input.nested.value = "changed";
+            mutableContext.ctxId = "ctx-changed";
+            mutableContext.workspace = "/changed";
+        },
+    );
+
+    assert.deepEqual(
+        (approvalInputs[0] as { context: unknown }).context,
+        {
+            ctxId: "ctx-original",
+            source: "mcp",
+            workspace: "/original",
+        },
+    );
+    assert.equal(invoked.length, 1);
+    assert.deepEqual(
+        (invoked[0] as { value: unknown }).value,
+        { command: "echo safe", nested: { value: "outer" } },
+    );
+    const invokedContext = (invoked[0] as {
+        callContext: Record<string, unknown>;
+    }).callContext;
+    assert.equal(invokedContext.ctxId, "ctx-original");
+    assert.equal(invokedContext.source, "mcp");
+    assert.equal(invokedContext.workspace, "/original");
+    assert.equal(typeof invokedContext.operationId, "string");
+});
+
 test("ToolCallExecution keeps reviewer error metadata as a nested cause under Core rejection", async () => {
     const harness = createHarness({
         decision: "reject",
