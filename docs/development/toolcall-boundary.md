@@ -116,6 +116,8 @@ outbound
 
 Boundary 接收到的 ToolCall 首先形成 canonical outer representation。
 
+实现上这个 canonical representation 必须在进入共享 Boundary 生命周期时**只生成一次快照**：`input` 做深拷贝并冻结，`ToolCallContext` 复制并冻结。后续 Review、Approval、Audit、Scheduler identity、inbound Rewrite 和 Worker RPC invocation 都必须引用这份稳定快照，不能再次读取 caller 持有的可变对象。
+
 它包含调用本身需要的稳定外部语义，例如：
 
 ```text
@@ -133,7 +135,7 @@ requestId
 
 Boundary invocation context 另外携带 owning `instance`，用于 host 侧把 review/rewrite 请求路由到正确的 per-instance state。`instance` 是 Boundary context identity，不写回普通 `ToolCallContext`，也不是可被 Rewrite 修改的 payload 字段。
 
-一旦进入 Boundary，同一次调用的 outer representation 不允许被 Review 改写。
+一旦进入 Boundary，同一次调用的 outer representation 不允许被 Review 改写，也不允许 caller 在异步 Review / Approval / queue wait 期间通过原始对象引用改变真正将被执行的调用。
 
 ## 5. Review
 
@@ -494,6 +496,15 @@ error
 否则 secret 可以通过 progress 或 error 绕过 masking。
 
 Audit 不要求持久化每一条 progress，但任何向外发送的 progress 都必须先恢复成 outer representation。
+
+需要区分 **Executor outcome** 和 **outbound publication outcome**。如果 Executor 已经完成，但 `transformResult` 或 outbound Rewrite 之后失败，caller 仍必须得到 non-retryable failure，避免把一个已经可能产生副作用的调用当成可安全重试；同时 Audit 需要保留执行事实：
+
+```text
+executionCompleted = true
+failureStage = postExecution | outboundBoundary
+```
+
+因此 `status = failed` 不等价于“Executor 没有执行成功”。调用方判断是否可重试仍以结构化 error 的 `retryable` 为准，不能只根据 Audit status 推断副作用是否发生。
 
 ## 13. Exactly once
 

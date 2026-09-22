@@ -197,15 +197,15 @@ artifact.receive
 
 断线后由调用者决定是否重新执行操作。
 
-`worker.rpc` 的恢复语义不同，因为它属于 RPC Protocol：Control 的 `WorkerRpcBridge` 保留未完成 request；更高 generation 建立后，通过新的 `worker.rpc` stream 以原 request ID 重放。worker 端 `ReverseRpcPayload` 维护 in-flight request 集合和有界 completed-result cache：
+`worker.rpc` 的恢复语义不同，因为它属于 RPC Protocol：Control 的 `WorkerRpcBridge` 保留未完成 request；更高 generation 建立后，通过新的 `worker.rpc` stream 以原 request identity 重放。worker 端 `ReverseRpcPayload` 维护 in-flight request 集合和有界 terminal-response cache：
 
 - 活动期间相同 request frame 合并；
-- 已成功完成的相同 request 直接返回缓存响应；
+- replay cache 保留期间，已完成的相同 request 直接返回第一次 terminal response，不区分成功或失败；
 - cache key 包含 request ID 与完整请求 digest；
-- failed mutation 不进入成功 cache，因此可以重新尝试；
+- transport replay 不重新进入 Executor；业务层若需要 semantic retry，必须发起新的 logical request；
 - `tool.call.cancel` 仍可在长工具执行期间被并发处理。
 
-这提供的是 **Worker RPC request 级** replay / dedupe，不是 Reverse/Frame raw-byte exactly-once。
+这提供的是**有界 replay horizon 内的 Worker RPC request 级** replay / dedupe，不是 Reverse/Frame raw-byte exactly-once，也不是跨任意历史长度的永久 exactly-once。
 
 ## 当前默认参数
 
@@ -219,7 +219,7 @@ SSE read timeout                      45 秒
 SSE comment heartbeat                 15 秒
 HTTPS POST timeout                    30 秒
 注册/上行 JSON body 上限              1 MiB
-Worker RPC completed-result cache     1024 条
+Worker RPC terminal-response cache    1024 条
 ```
 
 这些是当前实现默认值，不属于 Frame wire-level 兼容性要求。

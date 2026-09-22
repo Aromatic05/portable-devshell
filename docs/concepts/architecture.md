@@ -231,7 +231,7 @@ WSS
   └── fallback: SSE downstream + HTTPS POST upstream
 ```
 
-两种 transport 都归一为一条 Channel，再由 Frame v1 multiplex `worker.rpc`、Artifact、TCP、process 等 Service。generation 属于 Reverse Channel 生命周期；只有 `worker.rpc` Protocol 使用 request replay 与 completed-result cache 在重连后避免同一个副作用请求被重复执行，其它 logical stream 不跨 generation 恢复。
+两种 transport 都归一为一条 Channel，再由 Frame v1 multiplex `worker.rpc`、Artifact、TCP、process 等 Service。generation 属于 Reverse Channel 生命周期；只有 `worker.rpc` Protocol 使用 request replay 与有界 terminal-response cache 在重连后避免同一个逻辑请求被重复执行；成功与失败 terminal response 都参与 exact replay，其它 logical stream 不跨 generation 恢复。
 
 self-managed reverse worker 不由 Control 启动；Control 只接受其连接并管理引用/路由。
 

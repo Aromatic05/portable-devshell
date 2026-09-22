@@ -470,11 +470,13 @@ metadata
 
 - `serviceLength > 0`；
 - service 必须是合法 UTF-8；
+- service name 最大 `256 B`；
+- metadata 最大 `64 KiB`；
 - `receiveWindow > 0`；
 - 同一 `streamId` 只能 OPEN 一次；
 - Frame 层只解析 service name 和 receiveWindow，metadata 原样交给 Service。
 
-第一批内建 Service 可以各自在 Service 层使用 UTF-8 JSON metadata；这不是 Frame wire contract。
+`256 B` / `64 KiB` 是 Frame v1 的实现资源保护上限，不改变 metadata 的 opaque 语义。第一批内建 Service 可以各自在 Service 层使用 UTF-8 JSON metadata，并继续施加更严格的 domain limit；JSON schema 不是 Frame wire contract。
 
 OPEN 后 opener 的发送 credit 初始为 `0`。
 
@@ -494,6 +496,10 @@ Service 建立失败时：
 OPEN -------------------->
      <-------------------- RESET
 ```
+
+Service 建立本身不得阻塞整个 Frame dispatcher。可能执行 DNS/TCP connect、process spawn 或其它阻塞工作的 Service open 必须在有界 opening capacity 内独立推进；当前 Worker 最多同时保留 `32` 个 opening Service。某个 Service 正在建立时，已有 sibling stream 的 DATA / WINDOW / RPC 等必须继续前进。
+
+opener 可以在 Service 尚未接受时发送 RESET 取消 pending OPEN；acceptor 必须把它作为 stream-level cancellation 处理。除 RESET 外，在第一个 WINDOW 接受该 stream 之前发送 DATA / FIN / WINDOW 仍属于协议状态错误。
 
 acceptor 可以在发送第一个 WINDOW 前，使用 OPEN 中获得的 `receiveWindow` 向 opener 发送 Service 输出。
 
@@ -635,6 +641,8 @@ RESET 表示整个 logical stream 异常终止。
 - 关闭对应 Service resource；
 - 删除 stream state；
 - 该 streamId 进入 retired 状态且永不复用；由于 RESET 与反方向在途 Frame 可以交叉，之后晚到的 DATA / WINDOW / FIN / RESET 直接丢弃，不得扩大为 Channel failure。
+
+RESET 也允许用于仍处于 pending OPEN / Service opening 状态的 stream。此时 acceptor 立即退休 Frame stream；若异步 Service open 之后才返回成功，其资源必须被丢弃/关闭，不得重新激活已经 RESET 的 stream。
 
 RESET 不是 half-close，不区分方向。
 
@@ -792,9 +800,11 @@ process.exec
 
 其远端资源状态本身就可能已经失效。
 
-需要 request retry / replay 的 Protocol 自己拥有该语义。Worker RPC 已经在 RPC 层根据 request ID 处理 replay / dedupe；Frame 不 replay raw DATA。
+需要 request retry / replay 的 Protocol 自己拥有该语义。Worker RPC 已经在 RPC 层根据 request identity 处理 replay / dedupe；Frame 不 replay raw DATA。
 
-Reverse Carrier 的 generation / reconnect 和 Worker RPC completed-result cache 已位于对应层级：Carrier 恢复 Channel availability，RPC 恢复逻辑 request；`network.tcp`、`process.exec`、Artifact raw stream 等其它 logical stream 在 Channel 断开后直接失败，不跨 generation 恢复。
+Reverse Carrier 的 generation / reconnect 和 Worker RPC terminal-response cache 已位于对应层级：Carrier 恢复 Channel availability，RPC 恢复逻辑 request；`network.tcp`、`process.exec`、Artifact raw stream 等其它 logical stream 在 Channel 断开后直接失败，不跨 generation 恢复。
+
+Worker RPC 的 **transport replay** 与业务层 **semantic retry** 必须严格区分。一个合法 request 一旦得到 terminal response，不论 `ok = true` 还是 `ok = false`，在 bounded terminal-response cache 的 replay horizon 内，exact replay 都返回第一次 terminal response，不重新进入 Executor。调用方若决定对业务失败重新尝试，必须发起新的 logical request，而不是依赖同一个 request 的 transport replay。
 
 ## 15. Protocol error 边界
 
@@ -908,9 +918,9 @@ Channel
 
 metadata 必须为空。controller-managed Worker 的 Service backend 连接 daemon RPC socket，并把该 socket 的双向 bytes 映射到 logical stream；`WorkerTransportConnection` 上的 RPC consumer 复用一个持久 `worker.rpc` stream。
 
-Frame 和 Provider 不检查 RPC method。RPC request ID、cancel、notification、request replay 和 completed-result dedupe 都属于 Worker RPC Protocol。
+Frame 和 Provider 不检查 RPC method。RPC request ID、cancel、notification、request replay 和 terminal-response dedupe 都属于 Worker RPC Protocol。
 
-Reverse 重连时可以重放未完成的 RPC request，但不是 replay 旧 Frame DATA。新的 generation 建立新的 Frame Channel 和新的 `worker.rpc` stream，再由 RPC 层以原 request ID 重新发送。
+Reverse 重连时可以重放未完成的 RPC request，但不是 replay 旧 Frame DATA。新的 generation 建立新的 Frame Channel 和新的 `worker.rpc` stream，再由 RPC 层以原 request identity 重新发送。若 Worker 已经执行完成但 response 在 carrier 断开前未被 Control 收到，成功和失败两种 terminal response 都由 replay cache 原样返回，避免重复副作用。
 
 ### 16.4 `artifact.payload`
 
