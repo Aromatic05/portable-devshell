@@ -199,6 +199,32 @@ test("FrameProtocol rejects OPEN in the wrong direction and closes the Channel",
     assert.equal(first.closed, true);
 });
 
+test("FrameProtocol allows RESET while a remote OPEN is still pending acceptance", async () => {
+    const left = new MemoryChannel();
+    const right = new MemoryChannel();
+    left.connect(right);
+    right.connect(left);
+    const opener = new FrameProtocol(left, { role: "opener" });
+    const acceptor = new FrameProtocol(right, { role: "acceptor" });
+
+    const local = await opener.open("slow.service", new Uint8Array(), {
+        receiveWindow: 8,
+    });
+    const pending = await acceptor.nextOpen();
+    assert.notEqual(pending, undefined);
+
+    await local.reset(4, "cancel pending open");
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+    assert.equal(local.closed, true);
+    await assert.rejects(
+        pending!.accept({ receiveWindow: 8 }),
+        /closed|reset|unknown/iu,
+    );
+});
+
 test("FrameProtocol enforces a configured active stream bound", async () => {
     const left = new MemoryChannel();
     const right = new MemoryChannel();

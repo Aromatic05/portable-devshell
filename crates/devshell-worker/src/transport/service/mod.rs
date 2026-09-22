@@ -2,7 +2,7 @@ mod artifact;
 mod exec;
 mod tcp;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::{Path, PathBuf};
@@ -28,6 +28,7 @@ use crate::transport::socket::LocalIpcStream;
 const SERVICE_RECEIVE_WINDOW: u32 = 256 * 1024;
 const EVENT_QUEUE_CAPACITY: usize = 64;
 const SERVICE_QUEUE_CAPACITY: usize = 1;
+const MAX_CONCURRENT_SERVICE_OPENINGS: usize = 32;
 const SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Default)]
@@ -77,6 +78,11 @@ impl ServiceConnection {
         metadata: &[u8],
         context: &ServiceContext,
     ) -> Result<Option<Self>, String> {
+        #[cfg(test)]
+        if service == "test.delayed-unsupported" {
+            thread::sleep(Duration::from_millis(500));
+            return Ok(None);
+        }
         match service {
             "artifact.payload" => PayloadService::open(
                 metadata,
@@ -294,11 +300,29 @@ enum ServerEvent {
     ChannelData(Vec<u8>),
     ChannelClosed,
     ChannelFailed(String),
-    InputConsumed { stream_id: u32, byte_len: u32 },
-    InputFinished { stream_id: u32 },
-    ServiceData { stream_id: u32, data: Vec<u8> },
-    OutputFinished { stream_id: u32 },
-    ServiceFailed { stream_id: u32, error: String },
+    ServiceOpened {
+        service: String,
+        stream_id: u32,
+        result: Result<Option<ServiceConnection>, String>,
+    },
+    InputConsumed {
+        stream_id: u32,
+        byte_len: u32,
+    },
+    InputFinished {
+        stream_id: u32,
+    },
+    ServiceData {
+        stream_id: u32,
+        data: Vec<u8>,
+    },
+    OutputFinished {
+        stream_id: u32,
+    },
+    ServiceFailed {
+        stream_id: u32,
+        error: String,
+    },
 }
 
 struct PendingOutput {
@@ -320,23 +344,18 @@ struct ActiveService {
 }
 
 impl ActiveService {
-    fn open(
+    fn attach(
         stream_id: u32,
-        service: &str,
-        metadata: &[u8],
-        context: &ServiceContext,
+        mut connection: ServiceConnection,
         events: SyncSender<ServerEvent>,
-    ) -> Result<Option<Self>, String> {
-        let Some(mut connection) = ServiceConnection::open(service, metadata, context)? else {
-            return Ok(None);
-        };
+    ) -> Result<Self, String> {
         let input = connection.take_input()?;
         let output = connection.take_output()?;
         let (input_tx, input_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
         let (output_ack_tx, output_ack_rx) = mpsc::sync_channel(SERVICE_QUEUE_CAPACITY);
         spawn_service_input(stream_id, input, input_rx, events.clone());
         spawn_service_output(stream_id, output, output_ack_rx, events);
-        Ok(Some(Self {
+        Ok(Self {
             connection,
             input: input_tx,
             output_ack: output_ack_tx,
@@ -347,7 +366,7 @@ impl ActiveService {
             output_eof: false,
             local_fin_sent: false,
             pending_output: None,
-        }))
+        })
     }
 
     fn reset(&mut self) {
@@ -373,6 +392,7 @@ where
     let mut decoder = FrameDecoder::default();
     let mut protocol = FrameProtocol::new(FrameRole::Acceptor);
     let mut services = HashMap::<u32, ActiveService>::new();
+    let mut opening_services = HashSet::<u32>::new();
 
     loop {
         match events_rx.recv_timeout(SERVICE_POLL_INTERVAL) {
@@ -381,6 +401,7 @@ where
                     accept_frame(
                         &mut protocol,
                         &mut services,
+                        &mut opening_services,
                         &events_tx,
                         frame,
                         &context,
@@ -398,6 +419,48 @@ where
             Ok(ServerEvent::ChannelFailed(error)) => {
                 reset_all(&mut services);
                 return Err(error);
+            }
+            Ok(ServerEvent::ServiceOpened {
+                service,
+                stream_id,
+                result,
+            }) => {
+                opening_services.remove(&stream_id);
+                if !protocol.stream_open(stream_id) {
+                    if let Ok(Some(mut connection)) = result {
+                        connection.reset();
+                    }
+                    continue;
+                }
+                match result {
+                    Ok(Some(connection)) => {
+                        match ActiveService::attach(stream_id, connection, events_tx.clone()) {
+                            Ok(active) => {
+                                services.insert(stream_id, active);
+                                let window =
+                                    protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
+                                write_frame(&mut output, &window)?;
+                            }
+                            Err(error) => {
+                                let reset =
+                                    protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
+                                write_frame(&mut output, &reset)?;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        let reset = protocol.reject_open(
+                            stream_id,
+                            RESET_UNSUPPORTED_SERVICE,
+                            format!("Unsupported transport Service {service}."),
+                        )?;
+                        write_frame(&mut output, &reset)?;
+                    }
+                    Err(error) => {
+                        let reset = protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
+                        write_frame(&mut output, &reset)?;
+                    }
+                }
             }
             Ok(ServerEvent::InputConsumed {
                 stream_id,
@@ -514,6 +577,23 @@ where
     });
 }
 
+fn spawn_service_open(
+    stream_id: u32,
+    service: String,
+    metadata: Vec<u8>,
+    context: ServiceContext,
+    events: SyncSender<ServerEvent>,
+) {
+    thread::spawn(move || {
+        let result = ServiceConnection::open(&service, &metadata, &context);
+        let _ = events.send(ServerEvent::ServiceOpened {
+            service,
+            stream_id,
+            result,
+        });
+    });
+}
+
 fn spawn_service_input(
     stream_id: u32,
     mut input: ServiceInput,
@@ -604,6 +684,7 @@ fn spawn_service_output(
 fn accept_frame<W: Write>(
     protocol: &mut FrameProtocol,
     services: &mut HashMap<u32, ActiveService>,
+    opening_services: &mut HashSet<u32>,
     events: &SyncSender<ServerEvent>,
     frame: Frame,
     context: &ServiceContext,
@@ -617,25 +698,25 @@ fn accept_frame<W: Write>(
             stream_id,
             service,
             metadata,
-        }) => match ActiveService::open(stream_id, &service, &metadata, context, events.clone()) {
-            Ok(Some(active)) => {
-                services.insert(stream_id, active);
-                let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
-                write_frame(output, &window)?;
-            }
-            Ok(None) => {
+        }) => {
+            if opening_services.len() >= MAX_CONCURRENT_SERVICE_OPENINGS {
                 let reset = protocol.reject_open(
                     stream_id,
-                    RESET_UNSUPPORTED_SERVICE,
-                    format!("Unsupported transport Service {service}."),
+                    RESET_SERVICE_FAILED,
+                    "Transport Service opening limit reached.".to_string(),
                 )?;
                 write_frame(output, &reset)?;
+            } else {
+                opening_services.insert(stream_id);
+                spawn_service_open(
+                    stream_id,
+                    service,
+                    metadata,
+                    context.clone(),
+                    events.clone(),
+                );
             }
-            Err(error) => {
-                let reset = protocol.reject_open(stream_id, RESET_SERVICE_FAILED, error)?;
-                write_frame(output, &reset)?;
-            }
-        },
+        }
         Some(FrameEvent::Data { stream_id }) => {
             dispatch_input(protocol, services, stream_id)?;
         }
@@ -1111,6 +1192,62 @@ mod tests {
             ServiceConnection::open("process.exec", br#"{"executable":""}"#, &context).is_err()
         );
         assert!(ServiceConnection::open("worker.rpc", b"", &context).is_err());
+    }
+
+    #[test]
+    fn slow_service_open_does_not_block_sibling_open() {
+        let mut protocol = FrameProtocol::new(FrameRole::Acceptor);
+        let mut services = HashMap::<u32, ActiveService>::new();
+        let mut opening_services = HashSet::<u32>::new();
+        let (events_tx, events_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
+        let context = ServiceContext::default();
+        let mut output = Vec::new();
+
+        accept_frame(
+            &mut protocol,
+            &mut services,
+            &mut opening_services,
+            &events_tx,
+            Frame::Open {
+                stream_id: 1,
+                receive_window: 8,
+                service: "test.delayed-unsupported".to_string(),
+                metadata: Vec::new(),
+            },
+            &context,
+            &mut output,
+        )
+        .expect("queue delayed open");
+        accept_frame(
+            &mut protocol,
+            &mut services,
+            &mut opening_services,
+            &events_tx,
+            Frame::Open {
+                stream_id: 2,
+                receive_window: 8,
+                service: "unknown".to_string(),
+                metadata: Vec::new(),
+            },
+            &context,
+            &mut output,
+        )
+        .expect("queue sibling open");
+
+        let first = events_rx
+            .recv_timeout(Duration::from_millis(250))
+            .expect("sibling open should complete while delayed open is blocked");
+        assert!(matches!(
+            first,
+            ServerEvent::ServiceOpened { stream_id: 2, .. }
+        ));
+        let second = events_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("delayed open completion");
+        assert!(matches!(
+            second,
+            ServerEvent::ServiceOpened { stream_id: 1, .. }
+        ));
     }
 
     fn run_frame_service(

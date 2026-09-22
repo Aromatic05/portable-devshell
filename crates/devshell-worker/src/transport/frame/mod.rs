@@ -178,13 +178,26 @@ impl FrameProtocol {
             }
             return Err(format!("Frame references unknown stream {stream_id}."));
         }
+        let accepted = self
+            .streams
+            .get(&stream_id)
+            .expect("stream existence checked above")
+            .accepted;
+        if !accepted {
+            if let Frame::Reset { code, message, .. } = frame {
+                self.streams.remove(&stream_id);
+                return Ok(Some(FrameEvent::Reset {
+                    stream_id,
+                    code,
+                    message,
+                }));
+            }
+            return Err(format!("Frame stream {stream_id} is not accepted yet."));
+        }
         let stream = self
             .streams
             .get_mut(&stream_id)
             .expect("stream existence checked above");
-        if !stream.accepted {
-            return Err(format!("Frame stream {stream_id} is not accepted yet."));
-        }
 
         match frame {
             Frame::Data { data, .. } => {
@@ -274,7 +287,10 @@ impl FrameProtocol {
     }
 
     #[cfg(test)]
-    pub fn read(&mut self, stream_id: u32) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
+    pub fn read(
+        &mut self,
+        stream_id: u32,
+    ) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
         let Some(data) = self.read_data(stream_id)? else {
             return Ok(None);
         };
@@ -468,6 +484,32 @@ mod tests {
         let mut second = FrameProtocol::new(FrameRole::Opener);
         let (_, open) = first.open("test".into(), Vec::new(), 1).unwrap();
         assert!(second.accept_frame(open).is_err());
+    }
+
+    #[test]
+    fn reset_is_allowed_before_remote_open_is_accepted() {
+        let mut opener = FrameProtocol::new(FrameRole::Opener);
+        let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
+        let (stream_id, open) = opener
+            .open("slow.service".to_string(), Vec::new(), 8)
+            .expect("open");
+        assert!(matches!(
+            acceptor.accept_frame(open).expect("accept OPEN"),
+            Some(FrameEvent::Open { .. })
+        ));
+
+        let reset = opener
+            .reset(
+                stream_id,
+                RESET_CANCELLED,
+                "cancel pending open".to_string(),
+            )
+            .expect("reset");
+        assert!(matches!(
+            acceptor.accept_frame(reset).expect("accept RESET"),
+            Some(FrameEvent::Reset { stream_id: id, .. }) if id == stream_id
+        ));
+        assert!(!acceptor.stream_open(stream_id));
     }
 
     #[test]

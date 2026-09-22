@@ -301,6 +301,13 @@ export class FrameProtocol implements FrameStreamHost {
                 `Frame references unknown stream ${frame.streamId}.`,
             );
         }
+        if (!stream.accepted && frame.type === "reset") {
+            const error = new FrameResetError(frame.code, frame.message);
+            this.#streams.delete(stream.id);
+            this.#rejectDataJobs(stream, error);
+            stream.fail(error);
+            return;
+        }
         if (!stream.accepted) {
             throw this.#connectionError(
                 `Frame stream ${frame.streamId} is not accepted yet.`,
