@@ -437,9 +437,17 @@ where
                         match ActiveService::attach(stream_id, connection, events_tx.clone()) {
                             Ok(active) => {
                                 services.insert(stream_id, active);
+                                let remote_finished = protocol.remote_finished(stream_id)?;
                                 let window =
                                     protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
                                 write_frame(&mut output, &window)?;
+                                if remote_finished {
+                                    if let Some(service) = services.get_mut(&stream_id) {
+                                        service.remote_fin = true;
+                                    }
+                                    dispatch_input(&mut protocol, &mut services, stream_id)?;
+                                    cleanup_closed(&protocol, &mut services, stream_id);
+                                }
                             }
                             Err(error) => {
                                 let reset =

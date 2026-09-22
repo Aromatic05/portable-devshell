@@ -187,13 +187,23 @@ impl FrameProtocol {
             .expect("stream existence checked above")
             .accepted;
         if !accepted {
-            if let Frame::Reset { code, message, .. } = frame {
-                self.streams.remove(&stream_id);
-                return Ok(Some(FrameEvent::Reset {
-                    stream_id,
-                    code,
-                    message,
-                }));
+            match frame {
+                Frame::Fin { .. } => {
+                    self.streams
+                        .get_mut(&stream_id)
+                        .expect("stream existence checked above")
+                        .mark_remote_fin()?;
+                    return Ok(Some(FrameEvent::Fin { stream_id }));
+                }
+                Frame::Reset { code, message, .. } => {
+                    self.streams.remove(&stream_id);
+                    return Ok(Some(FrameEvent::Reset {
+                        stream_id,
+                        code,
+                        message,
+                    }));
+                }
+                _ => {}
             }
             return Err(format!("Frame stream {stream_id} is not accepted yet."));
         }
@@ -327,6 +337,13 @@ impl FrameProtocol {
 
     pub fn stream_open(&self, stream_id: u32) -> bool {
         self.streams.contains_key(&stream_id)
+    }
+
+    pub fn remote_finished(&self, stream_id: u32) -> Result<bool, String> {
+        self.streams
+            .get(&stream_id)
+            .map(|stream| stream.remote_fin)
+            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))
     }
 
     fn is_retired_stream_id(&self, stream_id: u32) -> bool {
@@ -510,6 +527,32 @@ mod tests {
             Some(FrameEvent::Reset { stream_id: id, .. }) if id == stream_id
         ));
         assert!(!acceptor.stream_open(stream_id));
+    }
+
+    #[test]
+    fn fin_is_preserved_before_remote_open_is_accepted() {
+        let mut opener = FrameProtocol::new(FrameRole::Opener);
+        let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
+        let (stream_id, open) = opener
+            .open("output.only".to_string(), Vec::new(), 8)
+            .expect("open");
+        acceptor.accept_frame(open).expect("accept OPEN");
+
+        let fin = opener.finish(stream_id).expect("finish before accept");
+        assert!(matches!(
+            acceptor.accept_frame(fin).expect("accept early FIN"),
+            Some(FrameEvent::Fin { stream_id: id }) if id == stream_id
+        ));
+        assert!(
+            acceptor
+                .remote_finished(stream_id)
+                .expect("remote FIN state")
+        );
+
+        let window = acceptor.accept_open(stream_id, 8).expect("accept stream");
+        opener.accept_frame(window).expect("grant credit");
+        assert!(acceptor.remote_finished(stream_id).expect("preserved FIN"));
+        assert!(acceptor.stream_open(stream_id));
     }
 
     #[test]

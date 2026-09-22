@@ -225,6 +225,33 @@ test("FrameProtocol allows RESET while a remote OPEN is still pending acceptance
     );
 });
 
+test("FrameProtocol preserves FIN that arrives while a remote OPEN is still pending acceptance", async () => {
+    const left = new MemoryChannel();
+    const right = new MemoryChannel();
+    left.connect(right);
+    right.connect(left);
+    const opener = new FrameProtocol(left, { role: "opener" });
+    const acceptor = new FrameProtocol(right, { role: "acceptor" });
+
+    const local = await opener.open("output.only", new Uint8Array(), {
+        receiveWindow: 8,
+    });
+    const pending = await acceptor.nextOpen();
+    assert.notEqual(pending, undefined);
+
+    await local.finish();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
+
+    const remote = await pending!.accept({ receiveWindow: 8 });
+    assert.equal(await remote.read(), undefined);
+    await remote.write(Uint8Array.of(9));
+    await remote.finish();
+    assert.deepEqual(await local.read(), Uint8Array.of(9));
+    assert.equal(await local.read(), undefined);
+});
+
 test("FrameProtocol enforces a configured active stream bound", async () => {
     const left = new MemoryChannel();
     const right = new MemoryChannel();
