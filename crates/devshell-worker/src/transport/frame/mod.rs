@@ -287,10 +287,7 @@ impl FrameProtocol {
     }
 
     #[cfg(test)]
-    pub fn read(
-        &mut self,
-        stream_id: u32,
-    ) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
+    pub fn read(&mut self, stream_id: u32) -> Result<Option<(Vec<u8>, Option<Frame>)>, String> {
         let Some(data) = self.read_data(stream_id)? else {
             return Ok(None);
         };
