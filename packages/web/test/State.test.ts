@@ -236,6 +236,23 @@ describe("WebStore", () => {
         store.close();
     });
 
+    it("refreshes only Context state for Message activity", async () => {
+        const clients = fakeClients();
+        clients.context.list = vi.fn(async () => []);
+        clients.conversation.list = vi.fn(async () => []);
+        const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
+
+        await store.load();
+        vi.mocked(clients.context.list).mockClear();
+        vi.mocked(clients.conversation.list).mockClear();
+
+        await store.refreshMessageActivity();
+
+        expect(clients.context.list).toHaveBeenCalledOnce();
+        expect(clients.conversation.list).not.toHaveBeenCalled();
+        store.close();
+    });
+
     it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
         const clients = fakeClients();
         clients.tool.listApprovals = vi.fn(async () => []);

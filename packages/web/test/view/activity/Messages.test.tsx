@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -181,7 +182,10 @@ function twoActiveConversationState(): WebState {
 }
 
 describe("Messages", () => {
-    afterEach(() => localStorage.clear());
+    afterEach(() => {
+        localStorage.clear();
+        vi.useRealTimers();
+    });
 
     it("keeps only sessions active within the last 30 minutes", () => {
         const now = Date.parse("2026-09-02T10:05:00Z");
@@ -1163,6 +1167,66 @@ describe("Messages", () => {
                 name: /Investigate the first regression/u,
             }),
         ).toBeInTheDocument();
+    });
+
+    it("refreshes Context activity and ages Current conversations every 20 seconds", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-09-22T10:00:00.000Z"));
+        const nextState = twoActiveConversationState();
+        const almostIdleAt = new Date(
+            Date.now() - 30 * 60 * 1_000 + 10_000,
+        ).toISOString();
+        const timerState: WebState = {
+            ...nextState,
+            readModel: {
+                ...nextState.readModel,
+                contexts: nextState.readModel.contexts.map((context) =>
+                    context.ctxId === "ctx-first"
+                        ? {
+                              ...context,
+                              createdAt: almostIdleAt,
+                              lastAccessedAt: almostIdleAt,
+                          }
+                        : context,
+                ),
+                instanceState: {
+                    ...nextState.readModel.instanceState,
+                    alpha: {
+                        ...nextState.readModel.instanceState.alpha!,
+                        conversationEntries:
+                            nextState.readModel.instanceState.alpha!.conversationEntries.map(
+                                (entry) =>
+                                    entry.ctxId === "ctx-first"
+                                        ? {
+                                              ...entry,
+                                              createdAt: almostIdleAt,
+                                          }
+                                        : entry,
+                            ),
+                    },
+                },
+            },
+        };
+        const refreshMessageActivity = vi.fn(async () => undefined);
+        render(
+            <Messages
+                navigate={vi.fn()}
+                route={{ page: "messages", view: "contexts" }}
+                state={timerState}
+                store={messageStore({ refreshMessageActivity })}
+            />,
+        );
+        const conversation = screen.getByRole("button", {
+            name: /Investigate the first regression/u,
+        });
+        expect(conversation).toHaveTextContent("active");
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(20_000);
+        });
+
+        expect(refreshMessageActivity).toHaveBeenCalledOnce();
+        expect(conversation).toHaveTextContent("idle");
     });
 
     it("closes the message control menu with Escape", () => {

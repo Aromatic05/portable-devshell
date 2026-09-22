@@ -25,6 +25,8 @@ import {
     type LegacyConversationPreferences,
 } from "./Model.js";
 
+const messageActivityRefreshIntervalMs = 20_000;
+
 export function Messages({
     navigate,
     route,
@@ -37,6 +39,7 @@ export function Messages({
     store: WebStore;
 }) {
     const [drawerOpen, setDrawerOpen] = useState(false);
+    const [clockNow, setClockNow] = useState(() => Date.now());
     const [conversationPreferences, setConversationPreferences] =
         useState<ConversationPreferencesSnapshot>(
             () =>
@@ -59,12 +62,12 @@ export function Messages({
     const preferenceOrderSyncRef = useRef(false);
 
     const activeSessions = useMemo(
-        () => selectWebMessageSessions(state),
-        [state],
+        () => selectWebMessageSessions(state, clockNow),
+        [clockNow, state],
     );
     const inactiveSessions = useMemo(
-        () => selectWebMessageHistorySessions(state),
-        [state],
+        () => selectWebMessageHistorySessions(state, clockNow),
+        [clockNow, state],
     );
     const allBaseSessions = useMemo(
         () => [...activeSessions, ...inactiveSessions],
@@ -89,6 +92,31 @@ export function Messages({
         route.view === "thread"
             ? `${route.instance}\u0000${route.ctxId}`
             : undefined;
+
+    useEffect(() => {
+        let refreshPending = false;
+        const refreshActivity = () => {
+            if (document.visibilityState === "hidden") return;
+            setClockNow(Date.now());
+            if (refreshPending) return;
+            refreshPending = true;
+            void store.refreshMessageActivity().finally(() => {
+                refreshPending = false;
+            });
+        };
+        const timer = window.setInterval(
+            refreshActivity,
+            messageActivityRefreshIntervalMs,
+        );
+        const visibilityChanged = () => {
+            if (document.visibilityState !== "hidden") refreshActivity();
+        };
+        document.addEventListener("visibilitychange", visibilityChanged);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener("visibilitychange", visibilityChanged);
+        };
+    }, [store]);
 
     useEffect(() => {
         setCurrentConversationKeys((current) => {

@@ -252,6 +252,10 @@ export class WebStore {
         );
     }
 
+    async refreshMessageActivity(): Promise<void> {
+        await this.#model.refreshContexts();
+    }
+
     async refreshMessages(): Promise<void> {
         const generation = this.#generation;
         await Promise.all([
