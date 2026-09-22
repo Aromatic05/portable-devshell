@@ -1,4 +1,5 @@
 import type { TuiUiIntent } from "../../state/Interaction.js";
+import { errorMessage } from "@portable-devshell/shared";
 import type { TuiAppStore } from "../../state/store/App.js";
 import {
     topTuiOverlay,
@@ -49,7 +50,7 @@ export class TuiCommandDispatcherOverlay {
                 return await this.#acceptConfirm();
             case "confirm.cancel":
             case "overlay.closeConfirm":
-                return this.#closeOverlay("confirmation");
+                return this.#closeConfirmation();
             case "overlay.openConfirm":
                 this.#openConfirmation(intent);
                 return true;
@@ -109,6 +110,7 @@ export class TuiCommandDispatcherOverlay {
             this.#store.getState().interaction.overlays,
         );
         if (overlay?.kind !== "confirmation") return false;
+        if (overlay.busy === true) return true;
         this.#store.replaceTopOverlay({ ...overlay, selectedAction: button });
         return true;
     }
@@ -120,11 +122,70 @@ export class TuiCommandDispatcherOverlay {
         if (overlay?.kind !== "confirmation") return false;
         if (overlay.selectedAction === "cancel")
             return this.#closeOverlay("confirmation");
+        if (overlay.busy === true) return true;
         const confirmIntent = overlay.confirmIntent;
-        this.#closeOverlay("confirmation");
-        return this.#dispatch === undefined
-            ? false
-            : await this.#dispatch(confirmIntent);
+        if (this.#dispatch === undefined) return false;
+        this.#store.replaceTopOverlay({
+            ...overlay,
+            busy: true,
+            error: undefined,
+        });
+        try {
+            const succeeded = await this.#dispatch(confirmIntent);
+            const actionChangedFocus =
+                this.#focusManager.currentMode() !== "confirm";
+            const current = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
+            if (current?.kind !== "confirmation") return succeeded;
+            if (succeeded) {
+                const closed = actionChangedFocus
+                    ? this.#closeConfirmationWithoutRestore()
+                    : this.#closeOverlay("confirmation");
+                if (confirmationOwnsApprovalDetail(confirmIntent)) {
+                    await this.#dispatch({ type: "approval.back" });
+                }
+                return closed;
+            }
+            this.#store.replaceTopOverlay({
+                ...current,
+                busy: false,
+                error: "Action could not be completed.",
+            });
+            return true;
+        } catch (error) {
+            const current = topTuiOverlay(
+                this.#store.getState().interaction.overlays,
+            );
+            if (current?.kind === "confirmation") {
+                this.#store.replaceTopOverlay({
+                    ...current,
+                    busy: false,
+                    error: errorMessage(error),
+                });
+            }
+            return true;
+        }
+    }
+
+    #closeConfirmation(): boolean {
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
+        if (overlay?.kind !== "confirmation") return false;
+        return overlay.busy === true
+            ? true
+            : this.#closeOverlay("confirmation");
+    }
+
+    #closeConfirmationWithoutRestore(): boolean {
+        const overlay = topTuiOverlay(
+            this.#store.getState().interaction.overlays,
+        );
+        if (overlay?.kind !== "confirmation") return false;
+        this.#store.popOverlay();
+        this.#focusManager.discardRestore();
+        return true;
     }
 
     #openTextDetail(
@@ -182,4 +243,11 @@ export class TuiCommandDispatcherOverlay {
         this.#focusManager.restore();
         return true;
     }
+}
+
+function confirmationOwnsApprovalDetail(intent: TuiUiIntent): boolean {
+    return (
+        intent.type === "approval.decide" ||
+        intent.type === "approval.confirmDeny"
+    );
 }

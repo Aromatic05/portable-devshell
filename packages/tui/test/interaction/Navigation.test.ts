@@ -1507,6 +1507,37 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.deepEqual(deleted, [{ instance: "alpha", taskId: "task-1" }]);
     });
 
+    test("failed destructive actions keep confirmation context and expose the failure", async () => {
+        const harness = createHarness({
+            onTodoDelete: async () => {
+                throw new Error("Delete failed.");
+            },
+        });
+
+        harness.store.setSelectedPage("todo");
+        await openPrimaryRoute(harness, "todo-task:task-1");
+        const summary = expandBox(harness, "todo-summary:task-1");
+        harness.store.setMainFocusId(summary.id);
+        harness.store.setFocusScope("boxDetail");
+        harness.store.setSelectedDetailLine(
+            summary.expandedKey,
+            "todo-summary:task-1:button:delete-project",
+        );
+        await harness.dispatch({ type: "focus.activate" });
+        await harness.dispatch({ button: "confirm", type: "confirm.focus" });
+        await harness.dispatch({ type: "confirm.accept" });
+
+        const overlay = topTuiOverlay(
+            harness.store.getState().interaction.overlays,
+        );
+        assert.equal(overlay?.kind, "confirmation");
+        if (overlay?.kind !== "confirmation")
+            throw new Error("confirmation overlay missing");
+        assert.equal(overlay.busy, false);
+        assert.equal(overlay.error, "Delete failed.");
+        assert.equal(overlay.selectedAction, "confirm");
+    });
+
     test("shifted number shortcuts switch the selected instance without coupling Instances box focus", async () => {
         const harness = createHarness();
 

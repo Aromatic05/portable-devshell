@@ -11,9 +11,11 @@ export type TuiOverlay =
 
 export interface TuiConfirmationOverlay {
     readonly body: string;
+    readonly busy?: boolean;
     readonly cancelLabel: string;
     readonly confirmIntent: TuiUiIntent;
     readonly confirmLabel: string;
+    readonly error?: string;
     readonly kind: "confirmation";
     readonly selectedAction: "cancel" | "confirm";
     readonly title: string;

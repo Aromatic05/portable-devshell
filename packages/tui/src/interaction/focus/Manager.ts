@@ -235,6 +235,10 @@ export class TuiFocusManager {
         return true;
     }
 
+    discardRestore(): boolean {
+        return this.#restoreStack.pop() !== undefined;
+    }
+
     #resolveBoxLineId(boxId: string, mode: TuiMode): string | undefined {
         const expandedKey = this.#context.expandedKeyFor(boxId);
         const storedId =

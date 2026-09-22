@@ -12,6 +12,7 @@ import {
     tuiApprovalActions,
     tuiApprovalActionText,
     tuiApprovalFields,
+    tuiConfirmationBodyText,
 } from "./Presentation.js";
 
 export interface TuiOverlayViewProps {
@@ -29,7 +30,7 @@ export function TuiOverlayView(props: TuiOverlayViewProps) {
         case "confirmation":
             return (
                 <TuiComponentConfirmDialog
-                    body={overlay.body}
+                    body={tuiConfirmationBodyText(overlay)}
                     cancelFocused={overlay.selectedAction === "cancel"}
                     cancelLabel={overlay.cancelLabel}
                     confirmFocused={overlay.selectedAction === "confirm"}

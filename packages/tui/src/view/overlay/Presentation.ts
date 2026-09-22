@@ -53,6 +53,15 @@ export function tuiConfirmationActionText(label: string): string {
     return `[ ${label} ]`;
 }
 
+export function tuiConfirmationBodyText(
+    overlay: TuiConfirmationOverlay,
+): string {
+    if (overlay.error !== undefined) {
+        return `${overlay.body}\nFailed: ${overlay.error}`;
+    }
+    return overlay.busy === true ? `${overlay.body}\nWorking…` : overlay.body;
+}
+
 export function tuiApprovalActionText(action: TuiApprovalAction): string {
     return ` ${action[0]!.toUpperCase()}${action.slice(1)} `;
 }
@@ -66,7 +75,7 @@ export function projectTuiConfirmationActions(
         frame.y +
         1 +
         wrappedRows(overlay.title, innerWidth) +
-        wrappedRows(overlay.body, innerWidth);
+        wrappedRows(tuiConfirmationBodyText(overlay), innerWidth);
     const labels: readonly (readonly [TuiConfirmationAction, string])[] = [
         ["cancel", overlay.cancelLabel],
         ["confirm", overlay.confirmLabel],
