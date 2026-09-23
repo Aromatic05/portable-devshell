@@ -273,6 +273,7 @@ export class McpEndpointHandlerEnvironment {
         let attachedCtxId = record.ctxId;
         let committed = false;
         let preparedWorkspace: string | undefined;
+        let alertCleanupWorkspace: string | undefined;
         try {
             const structuredContent = await callMcpEndpointToolOperation({
                 context,
@@ -294,6 +295,9 @@ export class McpEndpointHandlerEnvironment {
                             workspace,
                             (prepared) => {
                                 preparedWorkspace = prepared;
+                            },
+                            (prepared) => {
+                                alertCleanupWorkspace = prepared;
                             },
                         );
                     if (
@@ -405,12 +409,12 @@ export class McpEndpointHandlerEnvironment {
             if (resolution.created) {
                 await this.#rollbackUndisclosedContext(
                     record.ctxId,
-                    preparedWorkspace ?? workspace,
+                    alertCleanupWorkspace,
                 ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             } else if (committed) {
                 throw error;
-            } else if (preparedWorkspace !== undefined) {
-                const cleanupWorkspace = preparedWorkspace;
+            } else if (alertCleanupWorkspace !== undefined) {
+                const cleanupWorkspace = alertCleanupWorkspace;
                 await this.#releaseAlertsIfUnused(
                     this.#instanceName,
                     cleanupWorkspace,
@@ -608,6 +612,7 @@ export class McpEndpointHandlerEnvironment {
     async #prepareEnvironment(
         workspace: string,
         onPrepared?: (workspace: string) => void,
+        onAlertsAcquiring?: (workspace: string) => void,
     ) {
         const environment = requireMcpEndpointEnvironment(
             this.#worker,
@@ -627,6 +632,7 @@ export class McpEndpointHandlerEnvironment {
             collection: "managed",
             extensionId: "skill",
         });
+        onAlertsAcquiring?.(prepared.workspace);
         const alerts = (await this.#worker.readAlerts(prepared.workspace))
             .advice;
         return {
@@ -639,8 +645,12 @@ export class McpEndpointHandlerEnvironment {
 
     async #rollbackUndisclosedContext(
         ctxId: string,
-        workspace: string,
+        workspace?: string,
     ): Promise<void> {
+        if (workspace === undefined) {
+            await this.#contextRegistry.discard(ctxId);
+            return;
+        }
         const now = Date.now();
         const hasOtherActiveContext = (await this.#contextRegistry.list()).some(
             (context) =>
