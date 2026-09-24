@@ -9,6 +9,7 @@
         "devshell": "./dist/app/Entry.js"
     },
     "dependencies": {
+        "@portable-devshell/access-extension": "workspace:*",
         "@portable-devshell/artifact-extension": "workspace:*",
         "@portable-devshell/comment-extension": "workspace:*",
         "@portable-devshell/control": "workspace:*",

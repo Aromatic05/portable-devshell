@@ -46,6 +46,9 @@
             "@portable-devshell/agent-extension": [
                 "./extensions/agent/src/index.ts"
             ],
+            "@portable-devshell/access-extension": [
+                "./extensions/access/src/index.ts"
+            ],
             "@portable-devshell/artifact-extension": [
                 "./extensions/artifact/src/index.ts"
             ],
