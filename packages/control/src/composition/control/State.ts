@@ -6,16 +6,22 @@ import {
 
 import { ControlConfigStore } from "../../control/config/storage/Store.js";
 import { ControlConfigMutationLock } from "../../control/config/editor/Lock.js";
+import {
+    ConfigRegistry,
+    createCoreConfigRegistry,
+} from "../../control/config/Registry.js";
 import { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { InstanceRegistryFactory } from "../../control/instance/registry/Factory.js";
 
 export interface ControlRuntimeStateOptions {
+    configRegistry?: ConfigRegistry;
     configStore?: ControlConfigStore;
     homeDirectory?: string;
     instanceRegistryFactory?: InstanceRegistryFactory;
 }
 
 export class ControlRuntimeState {
+    readonly configRegistry: ConfigRegistry;
     readonly configStore: ControlConfigStore;
     readonly configMutations = new ControlConfigMutationLock();
     readonly homeDirectory?: string;
@@ -25,7 +31,11 @@ export class ControlRuntimeState {
     #restartControlRequired = false;
 
     constructor(options: ControlRuntimeStateOptions = {}) {
-        this.configStore = options.configStore ?? new ControlConfigStore();
+        this.configRegistry =
+            options.configRegistry ?? createCoreConfigRegistry();
+        this.configStore =
+            options.configStore ??
+            new ControlConfigStore({ registry: this.configRegistry });
         this.homeDirectory = options.homeDirectory;
         this.#instanceRegistryFactory =
             options.instanceRegistryFactory ?? new InstanceRegistryFactory();

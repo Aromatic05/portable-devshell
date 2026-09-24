@@ -33,10 +33,12 @@ import {
     ControlInstanceTomlDocument,
 } from "./TomlDocument.js";
 import { ControlConfigTomlCodec } from "./TomlCodec.js";
+import type { ConfigRegistry } from "../Registry.js";
 
 export interface ControlConfigStoreOptions {
     globalDocument?: ControlGlobalTomlDocument;
     instanceDocument?: ControlInstanceTomlDocument;
+    registry?: ConfigRegistry;
     tomlCodec?: ControlConfigTomlCodec;
     validator?: ControlConfigValidator;
 }
@@ -49,7 +51,8 @@ export class ControlConfigStore {
 
     constructor(options: ControlConfigStoreOptions = {}) {
         this.#globalDocument =
-            options.globalDocument ?? new ControlGlobalTomlDocument();
+            options.globalDocument ??
+            new ControlGlobalTomlDocument(options.registry);
         this.#instanceDocument =
             options.instanceDocument ?? new ControlInstanceTomlDocument();
         this.#tomlCodec = options.tomlCodec ?? new ControlConfigTomlCodec();

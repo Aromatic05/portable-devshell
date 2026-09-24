@@ -145,6 +145,7 @@ export class ControlRuntimeMcp {
             markRestartControlRequired: () =>
                 options.state.markRestartControlRequired(),
             mutationRunner: options.state.configMutations,
+            registry: options.state.configRegistry,
             runtimeApply: {
                 apply: async (previous, next, changes) =>
                     await this.#applyConfig(previous, next, changes),

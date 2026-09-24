@@ -9,9 +9,19 @@ import {
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
 
+import {
+    ConfigRegistry,
+    createCoreConfigRegistry,
+} from "../Registry.js";
 import type { ConfigTomlDocument } from "./TomlCodec.js";
 
 export class ControlGlobalTomlDocument {
+    readonly #registry: ConfigRegistry;
+
+    constructor(registry: ConfigRegistry = createCoreConfigRegistry()) {
+        this.#registry = registry;
+    }
+
     decode(document: ConfigTomlDocument): ConfigGlobalDraft {
         const record = asRecord(document);
         const version = readDocumentVersion(record.version);
@@ -32,6 +42,7 @@ export class ControlGlobalTomlDocument {
             );
         }
         const { version: _version, ...config } = record;
+        assertRegisteredGlobalDomains(config, this.#registry);
         if (version === 1) {
             const mcp = asRecord(config.mcp);
             const legacyAuth =
@@ -159,6 +170,20 @@ export class ControlInstanceTomlDocument {
             workspace: instance.workspace,
         });
     }
+}
+
+function assertRegisteredGlobalDomains(
+    config: Record<string, unknown>,
+    registry: ConfigRegistry,
+): void {
+    const unknown = Object.keys(config).find((key) => !registry.has(key));
+    if (unknown === undefined) return;
+    throw configInputError(
+        "parse",
+        [unknown],
+        "config.field.unknown",
+        "is not supported",
+    );
 }
 
 function readDocumentVersion(value: unknown): number {
