@@ -82,6 +82,10 @@ export function renderCliTopicUsage(
                     "  devshell oauth list",
                     "  devshell oauth approve <approvalId>",
                     "  devshell oauth deny <approvalId>",
+                    "  devshell oauth approval [status]",
+                    "  devshell oauth approval tui",
+                    "  devshell oauth approval token",
+                    "  devshell oauth approval rotate",
                 ].join("\n");
             case "context":
                 return [

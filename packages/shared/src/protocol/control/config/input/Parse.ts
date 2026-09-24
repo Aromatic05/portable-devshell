@@ -280,13 +280,14 @@ export function parseConfigMcpPatch(
             ...path,
             "listenPort",
         ]),
-        oauth2:
-            record.oauth2 === undefined
-                ? undefined
-                : parseGlobalMcpOAuth2Draft(record.oauth2, [
+        ...(record.oauth2 === undefined
+            ? {}
+            : {
+                  oauth2: parseGlobalMcpOAuth2Draft(record.oauth2, [
                       ...path,
                       "oauth2",
                   ]),
+              }),
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"]),
         ),

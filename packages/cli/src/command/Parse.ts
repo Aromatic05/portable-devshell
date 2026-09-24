@@ -47,6 +47,10 @@ export type CliParsedCommand =
       }
     | { kind: "oauth.status" }
     | { kind: "oauth.list" }
+    | { kind: "oauth.approval.status" }
+    | { kind: "oauth.approval.tui" }
+    | { kind: "oauth.approval.token" }
+    | { kind: "oauth.approval.rotate" }
     | { approvalId: string; decision: "approve" | "deny"; kind: "oauth.decide" }
     | { kind: "context.list" }
     | { ctxId?: string; instance: string; kind: "context.messages" }

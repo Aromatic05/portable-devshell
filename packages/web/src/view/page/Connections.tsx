@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { generateOAuth2ApprovalToken } from "@portable-devshell/shared/browser";
 import type {
     ConfigDraft,
     ConfigInstancePatch,
@@ -50,6 +51,7 @@ export function Connections({
         text: string;
     }>();
     const [enrollment, setEnrollment] = useState<string>();
+    const [approvalToken, setApprovalToken] = useState<string>();
     const [confirm, setConfirm] = useState<"revoke" | "rotate">();
     const [restartingControl, setRestartingControl] = useState(false);
 
@@ -70,6 +72,7 @@ export function Connections({
     const pending = state.operations["config:update"] !== undefined;
     const interactive = state.connection === "online" && !disabled && !pending;
     const mcpStatus = state.readModel.mcpStatus;
+    const oauthApproval = globalOAuthApproval(state.readModel.configView);
     const controlRestartRequired =
         state.readModel.configView?.restartControlRequired === true;
 
@@ -82,6 +85,47 @@ export function Connections({
                 </p>
             </section>
         );
+    }
+
+
+    async function updateOAuthApproval(
+        mode: "token" | "tui",
+        rotate = false,
+    ): Promise<void> {
+        const token =
+            mode === "token" && (rotate || !oauthApproval.tokenConfigured)
+                ? generateOAuth2ApprovalToken()
+                : undefined;
+        const succeeded = await store.updateMcpConfig({
+            oauth2:
+                mode === "tui"
+                    ? { approval: "tui" }
+                    : {
+                          approval: "token",
+                          ...(token === undefined ? {} : { token }),
+                      },
+        });
+        if (!succeeded) {
+            setFeedback({
+                kind: "error",
+                text:
+                    store.state.error ??
+                    "OAuth2 approval configuration could not be saved.",
+            });
+            return;
+        }
+        setApprovalToken(token);
+        setFeedback({
+            kind: "success",
+            text:
+                mode === "tui"
+                    ? "OAuth2 approval mode changed to TUI."
+                    : token === undefined
+                      ? "OAuth2 token approval is already configured."
+                      : rotate
+                        ? "OAuth2 approval token rotated."
+                        : "OAuth2 token approval enabled.",
+        });
     }
 
     async function validate(): Promise<boolean> {
@@ -451,7 +495,13 @@ export function Connections({
             </article>
 
             <OAuthSection
+                approval={oauthApproval}
                 approvals={state.readModel.oauthApprovals}
+                interactive={interactive}
+                newToken={approvalToken}
+                onRotate={() => void updateOAuthApproval("token", true)}
+                onUseToken={() => void updateOAuthApproval("token")}
+                onUseTui={() => void updateOAuthApproval("tui")}
                 status={mcpStatus}
             />
 
@@ -535,10 +585,22 @@ export function Connections({
 }
 
 function OAuthSection({
+    approval,
     approvals,
+    interactive,
+    newToken,
+    onRotate,
+    onUseToken,
+    onUseTui,
     status,
 }: {
+    approval: { mode: "token" | "tui"; tokenConfigured: boolean };
     approvals: OAuthApprovalRequest[];
+    interactive: boolean;
+    newToken?: string;
+    onRotate(): void;
+    onUseToken(): void;
+    onUseTui(): void;
     status: WebState["readModel"]["mcpStatus"];
 }) {
     const pending = approvals.filter(
@@ -552,6 +614,39 @@ function OAuthSection({
                 {status?.running === true ? "running" : "stopped"} · pending=
                 {pending.length}
             </p>
+            <dl>
+                <dt>Approval mode</dt>
+                <dd>{approval.mode}</dd>
+                <dt>Approval token</dt>
+                <dd>{approval.tokenConfigured ? "configured" : "not configured"}</dd>
+            </dl>
+            <div className="actions">
+                {approval.mode === "token" ? (
+                    <>
+                        <button disabled={!interactive} onClick={onUseTui} type="button">
+                            Use TUI approval
+                        </button>
+                        <button disabled={!interactive} onClick={onRotate} type="button">
+                            Rotate approval token
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        className="primary"
+                        disabled={!interactive}
+                        onClick={onUseToken}
+                        type="button"
+                    >
+                        Use token approval
+                    </button>
+                )}
+            </div>
+            {newToken === undefined ? null : (
+                <div className="oauth-token-once" role="status">
+                    <p>Save this token now. It will be masked in later configuration reads.</p>
+                    <pre>{newToken}</pre>
+                </div>
+            )}
         </article>
     );
 }
@@ -709,6 +804,18 @@ function connectionDrafts(
         },
         mcp: configMcpPatch(configView?.mcp),
         web: configWebPatch(configView?.web),
+    };
+}
+
+function globalOAuthApproval(
+    configView: Record<string, JsonValue> | undefined,
+): { mode: "token" | "tui"; tokenConfigured: boolean } {
+    const mcp = asRecord(configView?.mcp);
+    const oauth2 = asRecord(mcp?.oauth2);
+    const mode = oauth2?.approval === "token" ? "token" : "tui";
+    return {
+        mode,
+        tokenConfigured: mode === "token" && typeof oauth2?.token === "string",
     };
 }
 

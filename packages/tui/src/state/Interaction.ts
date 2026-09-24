@@ -143,6 +143,11 @@ export type TuiUiIntent =
           decision: "approve" | "deny";
           type: "oauthApproval.decide";
       }
+    | {
+          mode: "token" | "tui";
+          token?: string;
+          type: "oauthApproval.configure";
+      }
     | { type: "approval.back" }
     | { approvalId: string; instance: string; type: "approval.confirmDeny" };
 

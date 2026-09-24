@@ -3711,6 +3711,80 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
         assert.equal(overlay, undefined);
     });
+
+    test("OAuth runtime switches approval mode and exposes a rotated token once", async () => {
+        const updates: Array<Record<string, unknown>> = [];
+        const harness = createHarness({
+            onConfigUpdate: async (value) => {
+                updates.push(value);
+                return {};
+            },
+        });
+        const current = harness.store.getState().readModel.configView!;
+        harness.store.patchControlReadModel({
+            configView: {
+                ...current,
+                mcp: {
+                    ...(current.mcp as Record<string, unknown>),
+                    oauth2: { approval: "tui" },
+                },
+            } as never,
+        });
+        enterConnectionsRoute(harness, "oauth");
+
+        let runtime = expandBox(harness, "oauth-runtime");
+        assert.equal(
+            runtime.expandedLines.some(
+                (line) => line.text === "Approval mode      tui",
+            ),
+            true,
+        );
+        harness.store.setMainFocusId(runtime.id);
+        harness.store.setFocusScope("boxDetail");
+        harness.store.setSelectedDetailLine(
+            runtime.expandedKey,
+            "oauth-runtime:oauth.approval.token",
+        );
+        await harness.dispatch({ type: "focus.activate" });
+
+        assert.equal(updates.length, 1);
+        const first = updates[0] as {
+            mcp?: { oauth2?: { approval?: string; token?: string } };
+        };
+        assert.equal(first.mcp?.oauth2?.approval, "token");
+        assert.match(first.mcp?.oauth2?.token ?? "", /^ds_[0-9a-f]{64}$/u);
+        const overlay = topTuiOverlay(harness.store.getState().interaction.overlays);
+        assert.equal(overlay?.kind, "text-detail");
+        if (overlay?.kind !== "text-detail") throw new Error("token detail missing");
+        assert.match(overlay.body, /^ds_[0-9a-f]{64}/u);
+        await harness.press("", { return: true });
+
+        harness.store.patchControlReadModel({
+            configView: {
+                ...current,
+                mcp: {
+                    ...(current.mcp as Record<string, unknown>),
+                    oauth2: { approval: "token", token: "********" },
+                },
+            } as never,
+        });
+        runtime = expandBox(harness, "oauth-runtime");
+        harness.store.setMainFocusId(runtime.id);
+        harness.store.setFocusScope("boxDetail");
+        harness.store.setSelectedDetailLine(
+            runtime.expandedKey,
+            "oauth-runtime:oauth.approval.rotate",
+        );
+        await harness.dispatch({ type: "focus.activate" });
+        assert.equal(updates.length, 2);
+        const rotated = updates[1] as {
+            mcp?: { oauth2?: { approval?: string; token?: string } };
+        };
+        assert.equal(rotated.mcp?.oauth2?.approval, "token");
+        assert.match(rotated.mcp?.oauth2?.token ?? "", /^ds_[0-9a-f]{64}$/u);
+        assert.notEqual(rotated.mcp?.oauth2?.token, first.mcp?.oauth2?.token);
+    });
+
     test("OAuth panel approves pending registration requests", async () => {
         const harness = createHarness();
         harness.store.patchControlReadModel({

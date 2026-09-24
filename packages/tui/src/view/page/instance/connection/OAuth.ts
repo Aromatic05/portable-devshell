@@ -9,13 +9,35 @@ export function buildOAuthPageBoxes(
     instanceName: string | undefined,
 ): BoxModel[] {
     const status = oauthRuntimeStatus(state);
+    const approval = oauthApprovalConfig(state);
     const statusBox = makeBox(state, "connections", instanceName, {
         detailLines: [
             `Provider           ${status.provider}`,
             `Runtime            ${status.runtime}`,
             `Public base URL    ${status.publicBaseUrl}`,
             `Reason             ${status.reason}`,
+            `Approval mode      ${approval.mode}`,
+            `Approval token     ${approval.tokenConfigured ? "configured" : "not configured"}`,
             `Pending requests   ${state.readModel.oauthApprovals.filter((approval) => approval.status === "pending").length}`,
+            ...(approval.mode === "token"
+                ? [
+                      {
+                          id: "oauth.approval.tui",
+                          text: "[ Use TUI Approval ]",
+                      },
+                      {
+                          id: "oauth.approval.rotate",
+                          text: "[ Rotate Approval Token ]",
+                          tone: "danger" as const,
+                      },
+                  ]
+                : [
+                      {
+                          id: "oauth.approval.token",
+                          text: "[ Use Token Approval ]",
+                          tone: "accent" as const,
+                      },
+                  ]),
         ],
         id: "oauth-runtime",
         status:
@@ -166,4 +188,23 @@ function oauthRuntimeStatus(state: TuiAppState): {
         reason: "ready",
         runtime: "running",
     };
+}
+
+function oauthApprovalConfig(state: TuiAppState): {
+    mode: "token" | "tui";
+    tokenConfigured: boolean;
+} {
+    const mcp = asRecord(state.readModel.configView?.mcp);
+    const oauth2 = asRecord(mcp?.oauth2);
+    const mode = oauth2?.approval === "token" ? "token" : "tui";
+    return {
+        mode,
+        tokenConfigured: mode === "token" && typeof oauth2?.token === "string",
+    };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
 }

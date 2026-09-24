@@ -1,9 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 
 import {
     createError,
     errorCodes,
+    generateOAuth2ApprovalToken,
     type ConfigMcpPatch,
     type ConfigView,
     type InstanceSnapshot,
@@ -130,9 +130,6 @@ async function readConfig(context: CliDispatchContext): Promise<ConfigView> {
     return (await context.clients.config.get()) as unknown as ConfigView;
 }
 
-function generateOAuth2ApprovalToken(): string {
-    return `ds_${randomBytes(32).toString("base64url")}`;
-}
 
 function joinEndpoint(baseUrl: string, path: string): string {
     return `${baseUrl.replace(/\/+$/u, "")}${path}`;

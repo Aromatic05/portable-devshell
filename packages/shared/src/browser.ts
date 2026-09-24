@@ -157,6 +157,7 @@ export type {
     WaitRecord,
     WaitStatus,
 } from "./protocol/instance/task/Wait.js";
+export { generateOAuth2ApprovalToken } from "./protocol/interaction/OAuth.js";
 export type {
     OAuthApprovalDecision,
     OAuthApprovalRequest,

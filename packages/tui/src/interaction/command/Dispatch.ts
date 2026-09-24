@@ -298,6 +298,25 @@ export class TuiCommandDispatcher {
                         : "OAuth approval denied.",
                 );
                 return true;
+            case "oauthApproval.configure":
+                await (this.#options.onConfigUpdate ?? unavailable)({
+                    mcp: {
+                        oauth2:
+                            intent.mode === "tui"
+                                ? { approval: "tui" }
+                                : {
+                                      approval: "token",
+                                      ...(intent.token === undefined
+                                          ? {}
+                                          : { token: intent.token }),
+                                  },
+                    },
+                });
+                this.#store.setScreenStatus(
+                    "connections",
+                    `OAuth2 approval mode changed to ${intent.mode}.`,
+                );
+                return true;
             case "approval.confirmDeny":
                 await this.#options.onApprovalDecision(
                     intent.instance,

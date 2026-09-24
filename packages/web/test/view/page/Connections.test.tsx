@@ -115,6 +115,40 @@ describe("Web Connections", () => {
         expect(rotate).not.toBeInTheDocument();
     });
 
+
+    it("manages OAuth approval mode and rotates a masked token", async () => {
+        const state = connectionState();
+        state.readModel.configView!.mcp.oauth2 = {
+            approval: "token",
+            token: "********",
+        };
+        const updateMcpConfig = vi.fn(async () => true);
+        const store = {
+            state,
+            updateConfig: vi.fn(async () => true),
+            updateMcpConfig,
+            validateConfig: vi.fn(async () => true),
+            restartControl: vi.fn(async () => true),
+        } as unknown as WebStore;
+        render(<Connections disabled={false} state={state} store={store} />);
+
+        const oauth = screen.getByRole("heading", { name: "OAuth runtime" })
+            .parentElement!;
+        expect(within(oauth).getByText("token")).toBeInTheDocument();
+        expect(within(oauth).getByText("configured")).toBeInTheDocument();
+
+        fireEvent.click(
+            within(oauth).getByRole("button", { name: "Rotate approval token" }),
+        );
+        await waitFor(() => expect(updateMcpConfig).toHaveBeenCalledOnce());
+        const patch = updateMcpConfig.mock.calls[0]?.[0];
+        expect(patch?.oauth2?.approval).toBe("token");
+        expect(patch?.oauth2?.token).toMatch(/^ds_[0-9a-f]{64}$/u);
+        await waitFor(() =>
+            expect(within(oauth).getByText(/^ds_[0-9a-f]{64}$/u)).toBeInTheDocument(),
+        );
+    });
+
     it("keeps global connection controls available without any instances", async () => {
         const state = connectionState();
         state.readModel.configView!.instances = [];

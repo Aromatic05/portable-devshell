@@ -1,3 +1,4 @@
+import { generateOAuth2ApprovalToken } from "@portable-devshell/shared";
 import type { TuiAppStore } from "../../../state/store/App.js";
 import type { TuiInteractionProjection } from "../../Projection.js";
 import type { TuiUiIntent } from "../../../state/Interaction.js";
@@ -55,6 +56,39 @@ export class TuiCommandDispatcherDetail {
 
         if (box?.editable === true && selectedLine?.editable === true) {
             return await this.#dispatch({ type: "contextConversation.edit" });
+        }
+
+
+        if (
+            state.ui.selectedPage === "connections" &&
+            actionId === "oauth.approval.tui"
+        ) {
+            return await this.#dispatch({
+                mode: "tui",
+                type: "oauthApproval.configure",
+            });
+        }
+
+        if (
+            state.ui.selectedPage === "connections" &&
+            (actionId === "oauth.approval.token" ||
+                actionId === "oauth.approval.rotate")
+        ) {
+            const token = generateOAuth2ApprovalToken();
+            const configured = await this.#dispatch({
+                mode: "token",
+                token,
+                type: "oauthApproval.configure",
+            });
+            if (!configured) return false;
+            return await this.#dispatch({
+                body: `${token}\n\nSave this token now. It will be masked in later configuration reads.`,
+                title:
+                    actionId === "oauth.approval.rotate"
+                        ? "New OAuth2 Approval Token"
+                        : "OAuth2 Approval Token",
+                type: "textDetail.open",
+            });
         }
 
         if (
