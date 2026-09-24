@@ -1,6 +1,6 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 4,
+    "apiVersion": "4.0.0",
     "id": "agent",
     "name": "portable-devshell Agent",
     "version": "0.1.3",

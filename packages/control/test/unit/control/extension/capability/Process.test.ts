@@ -24,7 +24,7 @@ test("Extension processes capability refuses undeclared access before spawning",
     assert.equal(spawns, 0);
 });
 
-test("Extension managed process owns structured messages, stderr, and exit lifetime", async () => {
+test("Extension managed process owns structured messages, stdout, stderr, and exit lifetime", async () => {
     const capability = new ExtensionProcessCapabilityControl({
         allowed: true,
         extensionId: "example",
@@ -34,6 +34,7 @@ test("Extension managed process owns structured messages, stderr, and exit lifet
         args: [
             "-e",
             [
+                "process.stdout.write('started\\n');",
                 "process.stderr.write('ready\\n');",
                 "process.on('message', (message) => {",
                 "  if (message?.stop) process.exit(0);",
@@ -43,6 +44,12 @@ test("Extension managed process owns structured messages, stderr, and exit lifet
         ],
         command: process.execPath,
         messages: true,
+    });
+    const stdout = new Promise<string>((resolve) => {
+        const remove = managed.onStdout((chunk) => {
+            remove();
+            resolve(chunk);
+        });
     });
     const stderr = new Promise<string>((resolve) => {
         const remove = managed.onStderr((chunk) => {
@@ -58,10 +65,64 @@ test("Extension managed process owns structured messages, stderr, and exit lifet
     });
 
     await managed.send({ hello: "world" });
+    assert.match(await stdout, /started/u);
     assert.match(await stderr, /ready/u);
     assert.deepEqual(await response, { echoed: { hello: "world" } });
     await managed.send({ stop: true });
     assert.deepEqual(await managed.closed, { code: 0 });
+    await capability.closeAll();
+});
+
+test("Extension process start rejects when the executable cannot be spawned", async () => {
+    const capability = new ExtensionProcessCapabilityControl({
+        allowed: true,
+        extensionId: "example",
+        generation: "g1",
+    });
+
+    await assert.rejects(
+        capability.start({ command: `${process.execPath}.missing` }),
+        (error: unknown) =>
+            error instanceof Error &&
+            (error as NodeJS.ErrnoException).code === "ENOENT",
+    );
+    await capability.closeAll();
+});
+
+test("Extension managed process preserves early stdout and stderr until the first observer subscribes", async () => {
+    const capability = new ExtensionProcessCapabilityControl({
+        allowed: true,
+        extensionId: "example",
+        generation: "g1",
+    });
+    const managed = await capability.start({
+        args: [
+            "-e",
+            [
+                "process.stdout.write('early-out\\n');",
+                "process.stderr.write('early-err\\n');",
+                "setInterval(() => {}, 1000);",
+            ].join("\n"),
+        ],
+        command: process.execPath,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    const stdout = new Promise<string>((resolve) => {
+        const remove = managed.onStdout((chunk) => {
+            remove();
+            resolve(chunk);
+        });
+    });
+    const stderr = new Promise<string>((resolve) => {
+        const remove = managed.onStderr((chunk) => {
+            remove();
+            resolve(chunk);
+        });
+    });
+
+    assert.match(await stdout, /early-out/u);
+    assert.match(await stderr, /early-err/u);
+    await managed.terminate();
     await capability.closeAll();
 });
 

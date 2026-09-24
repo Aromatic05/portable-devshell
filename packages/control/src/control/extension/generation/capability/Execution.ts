@@ -75,12 +75,13 @@ export class ExtensionProcessCapabilityControl implements ExtensionProcessCapabi
             },
             serialization: "json",
             stdio: normalized.messages
-                ? ["ignore", "ignore", "pipe", "ipc"]
-                : ["ignore", "ignore", "pipe"],
+                ? ["ignore", "pipe", "pipe", "ipc"]
+                : ["ignore", "pipe", "pipe"],
         });
         const managed = new ManagedExtensionProcess(child, normalized.messages);
         this.#processes.add(managed);
         void managed.closed.finally(() => this.#processes.delete(managed));
+        await managed.started;
         if (this.#closed) {
             await managed.terminate();
             throw new Error(
@@ -117,9 +118,16 @@ class ManagedExtensionProcess implements ExtensionManagedProcess {
         (message: ExtensionJsonValue) => void
     >();
     readonly #stderrListeners = new Set<(chunk: string) => void>();
+    readonly #stdoutListeners = new Set<(chunk: string) => void>();
     readonly closed: Promise<ExtensionProcessExit>;
+    readonly started: Promise<void>;
     #closed = false;
+    #rejectStarted!: (error: unknown) => void;
     #resolveClosed!: (exit: ExtensionProcessExit) => void;
+    #resolveStarted!: () => void;
+    #spawned = false;
+    #stderrObserved = false;
+    #stdoutObserved = false;
     #terminatePromise?: Promise<void>;
 
     constructor(child: ChildProcess, messages: boolean) {
@@ -128,10 +136,12 @@ class ManagedExtensionProcess implements ExtensionManagedProcess {
         this.closed = new Promise<ExtensionProcessExit>((resolve) => {
             this.#resolveClosed = resolve;
         });
-        child.stderr?.setEncoding("utf8");
-        child.stderr?.on("data", (chunk: string) => {
-            for (const listener of this.#stderrListeners) listener(chunk);
+        this.started = new Promise<void>((resolve, reject) => {
+            this.#resolveStarted = resolve;
+            this.#rejectStarted = reject;
         });
+        child.stdout?.setEncoding("utf8");
+        child.stderr?.setEncoding("utf8");
         child.on("message", (value: unknown) => {
             const message = toJsonValue(value);
             if (message === undefined) return;
@@ -142,7 +152,14 @@ class ManagedExtensionProcess implements ExtensionManagedProcess {
                 void this.terminate("SIGTERM").catch(() => undefined);
             }
         });
-        child.once("error", () => this.#settle({}));
+        child.once("spawn", () => {
+            this.#spawned = true;
+            this.#resolveStarted();
+        });
+        child.once("error", (error) => {
+            if (!this.#spawned) this.#rejectStarted(error);
+            this.#settle({});
+        });
         child.once("exit", (code, signal) =>
             this.#settle({
                 ...(code === null ? {} : { code }),
@@ -158,7 +175,24 @@ class ManagedExtensionProcess implements ExtensionManagedProcess {
 
     onStderr(listener: (chunk: string) => void): () => void {
         this.#stderrListeners.add(listener);
+        if (!this.#stderrObserved) {
+            this.#stderrObserved = true;
+            this.#child.stderr?.on("data", (chunk: string) => {
+                for (const candidate of this.#stderrListeners) candidate(chunk);
+            });
+        }
         return () => this.#stderrListeners.delete(listener);
+    }
+
+    onStdout(listener: (chunk: string) => void): () => void {
+        this.#stdoutListeners.add(listener);
+        if (!this.#stdoutObserved) {
+            this.#stdoutObserved = true;
+            this.#child.stdout?.on("data", (chunk: string) => {
+                for (const candidate of this.#stdoutListeners) candidate(chunk);
+            });
+        }
+        return () => this.#stdoutListeners.delete(listener);
     }
 
     async send(message: ExtensionJsonValue): Promise<void> {
@@ -206,6 +240,7 @@ class ManagedExtensionProcess implements ExtensionManagedProcess {
         const settled = Object.freeze({ ...exit });
         this.#messageListeners.clear();
         this.#stderrListeners.clear();
+        this.#stdoutListeners.clear();
         this.#resolveClosed(settled);
     }
 }

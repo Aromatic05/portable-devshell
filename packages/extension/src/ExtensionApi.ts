@@ -22,7 +22,7 @@ export interface ExtensionPointDeclaration {
 }
 
 export interface ExtensionManifest {
-    apiVersion: number;
+    apiVersion: string;
     capabilities: readonly ExtensionCapability[];
     entry: string;
     /** Static declarations keyed by stable domain-owned Extension Point id. */
@@ -182,6 +182,7 @@ export interface ExtensionManagedProcess {
     readonly closed: Promise<ExtensionProcessExit>;
     onMessage(listener: (message: ExtensionJsonValue) => void): () => void;
     onStderr(listener: (chunk: string) => void): () => void;
+    onStdout(listener: (chunk: string) => void): () => void;
     send(message: ExtensionJsonValue): Promise<void>;
     terminate(signal?: string): Promise<void>;
 }

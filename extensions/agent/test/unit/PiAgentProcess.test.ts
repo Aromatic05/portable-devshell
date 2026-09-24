@@ -484,6 +484,9 @@ function nodeProcessCapability(): ExtensionProcessCapability {
                     stderrListeners.add(listener);
                     return () => stderrListeners.delete(listener);
                 },
+                onStdout() {
+                    return () => undefined;
+                },
                 async send(message: ExtensionJsonValue) {
                     if (!child.connected || child.send === undefined) {
                         throw new Error(

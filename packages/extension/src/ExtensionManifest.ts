@@ -5,7 +5,7 @@ import type {
     ExtensionPointDeclaration,
 } from "./ExtensionApi.js";
 
-export const EXTENSION_API_VERSION = 4;
+export const EXTENSION_API_VERSION = "4.1.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
 
 const capabilities = new Set<ExtensionCapability>([
@@ -32,19 +32,14 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         "version",
     ]);
 
-    const schemaVersion = readPositiveInteger(
-        value.schemaVersion,
-        "schemaVersion",
-    );
+    const schemaVersion = readPositiveInteger(value.schemaVersion, "schemaVersion");
     if (schemaVersion !== EXTENSION_MANIFEST_SCHEMA_VERSION) {
         throw new TypeError(
             `Unsupported Extension manifest schemaVersion: ${schemaVersion}.`,
         );
     }
-    const apiVersion = readPositiveInteger(value.apiVersion, "apiVersion");
-    if (apiVersion !== EXTENSION_API_VERSION) {
-        throw new TypeError(`Unsupported Extension apiVersion: ${apiVersion}.`);
-    }
+    const apiVersion = readCompatibilityVersion(value.apiVersion, "apiVersion");
+    assertCompatibleVersion(apiVersion, EXTENSION_API_VERSION, "apiVersion");
     const id = readLocalId(value.id, "id");
     const entry = readString(value.entry, "entry");
     if (
@@ -104,6 +99,65 @@ function readPositiveInteger(value: unknown, field: string): number {
     throw new TypeError(
         `Extension manifest ${field} must be a positive integer.`,
     );
+}
+
+function readCompatibilityVersion(value: unknown, field: string): string {
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
+        return `${value}.0.0`;
+    if (typeof value === "string") {
+        parseSemVer(value, field);
+        return value;
+    }
+    throw new TypeError(
+        `Extension manifest ${field} must be an x.y.z version string.`,
+    );
+}
+
+function assertCompatibleVersion(
+    requested: string,
+    current: string,
+    field: string,
+): void {
+    const requestedVersion = parseSemVer(requested, field);
+    const currentVersion = parseSemVer(current, field);
+    if (
+        requestedVersion.major !== currentVersion.major ||
+        compareSemVer(requestedVersion, currentVersion) > 0
+    ) {
+        throw new TypeError(
+            `Unsupported Extension manifest ${field}: ${requested}. Host supports ${current}.`,
+        );
+    }
+}
+
+interface SemVer {
+    major: number;
+    minor: number;
+    patch: number;
+}
+
+function parseSemVer(value: string, field: string): SemVer {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
+    if (match === null) {
+        throw new TypeError(
+            `Extension manifest ${field} must be an x.y.z version string.`,
+        );
+    }
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    const patch = Number(match[3]);
+    if (![major, minor, patch].every(Number.isSafeInteger)) {
+        throw new TypeError(
+            `Extension manifest ${field} contains an unsafe version component.`,
+        );
+    }
+    return { major, minor, patch };
+}
+
+function compareSemVer(left: SemVer, right: SemVer): number {
+    if (left.major !== right.major) return left.major - right.major;
+    if (left.minor !== right.minor) return left.minor - right.minor;
+    return left.patch - right.patch;
 }
 
 function readString(value: unknown, field: string): string {

@@ -82,12 +82,14 @@ interface SandboxProcessRuntime {
     messageListeners: Set<(message: ExtensionJsonValue) => void>;
     resolveClosed(exit: ExtensionProcessExit): void;
     stderrListeners: Set<(chunk: string) => void>;
+    stdoutListeners: Set<(chunk: string) => void>;
 }
 
 interface PendingProcessEvents {
     exit?: ExtensionProcessExit;
     messages: ExtensionJsonValue[];
     stderr: string[];
+    stdout: string[];
 }
 
 const data = workerData as ExtensionSandboxWorkerData;
@@ -233,6 +235,18 @@ async function acceptHostMessage(
                 return;
             }
             for (const listener of runtime.stderrListeners)
+                listener(message.chunk);
+            return;
+        }
+        case "processStdout": {
+            const runtime = processes.get(message.processId);
+            if (runtime === undefined) {
+                pendingProcessEvent(message.processId).stdout.push(
+                    message.chunk,
+                );
+                return;
+            }
+            for (const listener of runtime.stdoutListeners)
                 listener(message.chunk);
             return;
         }
@@ -589,6 +603,7 @@ function createProcessCapability(): ExtensionProcessCapability {
                 messageListeners: new Set(),
                 resolveClosed,
                 stderrListeners: new Set(),
+                stdoutListeners: new Set(),
             };
             processes.set(opened.processId, runtime);
             const pending = pendingProcessEvents.get(opened.processId);
@@ -603,6 +618,10 @@ function createProcessCapability(): ExtensionProcessCapability {
                 onStderr: (listener) => {
                     runtime.stderrListeners.add(listener);
                     return () => runtime.stderrListeners.delete(listener);
+                },
+                onStdout: (listener) => {
+                    runtime.stdoutListeners.add(listener);
+                    return () => runtime.stdoutListeners.delete(listener);
                 },
                 send: async (message) => {
                     await requestCapability("processes.send", {
@@ -621,7 +640,7 @@ function createProcessCapability(): ExtensionProcessCapability {
             if (pending?.exit !== undefined) {
                 closeProcessRuntime(opened.processId, runtime, pending.exit);
             } else if (pending !== undefined) {
-                queueMicrotask(() => {
+                setImmediate(() => {
                     if (processes.get(opened.processId) !== runtime) return;
                     for (const message of pending.messages) {
                         for (const listener of runtime.messageListeners)
@@ -629,6 +648,10 @@ function createProcessCapability(): ExtensionProcessCapability {
                     }
                     for (const chunk of pending.stderr) {
                         for (const listener of runtime.stderrListeners)
+                            listener(chunk);
+                    }
+                    for (const chunk of pending.stdout) {
+                        for (const listener of runtime.stdoutListeners)
                             listener(chunk);
                     }
                 });
@@ -704,7 +727,7 @@ function createWorkerCapability(
 function pendingProcessEvent(processId: string): PendingProcessEvents {
     let pending = pendingProcessEvents.get(processId);
     if (pending === undefined) {
-        pending = { messages: [], stderr: [] };
+        pending = { messages: [], stderr: [], stdout: [] };
         pendingProcessEvents.set(processId, pending);
     }
     return pending;
@@ -719,6 +742,7 @@ function closeProcessRuntime(
     processes.delete(processId);
     runtime.messageListeners.clear();
     runtime.stderrListeners.clear();
+    runtime.stdoutListeners.clear();
     runtime.resolveClosed(Object.freeze({ ...exit }));
 }
 

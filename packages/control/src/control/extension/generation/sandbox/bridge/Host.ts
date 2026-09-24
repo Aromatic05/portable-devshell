@@ -67,6 +67,7 @@ interface SandboxManagedProcess {
     process: ExtensionManagedProcess;
     removeMessageListener: () => void;
     removeStderrListener: () => void;
+    removeStdoutListener: () => void;
 }
 
 export interface ExtensionSandboxHostOptions {
@@ -642,6 +643,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     removeStderrListener: started.onStderr((chunk) => {
                         this.#send({ chunk, processId, type: "processStderr" });
                     }),
+                    removeStdoutListener: started.onStdout((chunk) => {
+                        this.#send({ chunk, processId, type: "processStdout" });
+                    }),
                 };
                 this.#processes.set(processId, registration);
                 void started.closed
@@ -651,6 +655,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                         this.#processes.delete(processId);
                         registration.removeMessageListener();
                         registration.removeStderrListener();
+                        registration.removeStdoutListener();
                         this.#send({ exit, processId, type: "processClosed" });
                     })
                     .catch(() => undefined);
@@ -917,6 +922,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         for (const registration of this.#processes.values()) {
             registration.removeMessageListener();
             registration.removeStderrListener();
+            registration.removeStdoutListener();
         }
         this.#processes.clear();
     }

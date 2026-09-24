@@ -160,6 +160,33 @@ test("Extension manifest defaults extensions and hostDependencies to empty colle
     assert.deepEqual(parseExtensionManifest(base).hostDependencies, []);
 });
 
+test("Extension manifest accepts same-major compatible API versions and legacy integer API versions", () => {
+    assert.equal(
+        parseExtensionManifest({
+            ...base,
+            apiVersion: "4.0.0",
+            schemaVersion: 1,
+        }).apiVersion,
+        "4.0.0",
+    );
+    assert.equal(
+        parseExtensionManifest({
+            ...base,
+            apiVersion: 4,
+            schemaVersion: 1,
+        }).schemaVersion,
+        1,
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, apiVersion: "4.2.0" }),
+        /apiVersion/u,
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, apiVersion: "5.0.0" }),
+        /apiVersion/u,
+    );
+});
+
 test("Extension manifest rejects unknown fields and unsupported schema versions", () => {
     assert.throws(
         () => parseExtensionManifest({ ...base, extra: true }),

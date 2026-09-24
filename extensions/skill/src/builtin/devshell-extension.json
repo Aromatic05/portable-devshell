@@ -1,6 +1,6 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 4,
+    "apiVersion": "4.0.0",
     "id": "skill",
     "name": "portable-devshell Skill",
     "version": "0.1.0",

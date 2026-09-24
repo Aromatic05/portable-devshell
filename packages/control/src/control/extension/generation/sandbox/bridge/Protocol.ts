@@ -245,6 +245,11 @@ export type ExtensionHostToSandboxMessage =
     | {
           chunk: string;
           processId: string;
+          type: "processStdout";
+      }
+    | {
+          chunk: string;
+          processId: string;
           type: "processStderr";
       }
     | {

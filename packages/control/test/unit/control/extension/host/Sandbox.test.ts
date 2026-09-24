@@ -504,6 +504,56 @@ export function activate(context) {
     assert.deepEqual(processCalls, ["start:managed-test", "terminate:SIGTERM"]);
 });
 
+test("Extension sandbox preserves managed process stdout that arrives before the start result", async (t) => {
+    let resolveClosed!: (exit: ExtensionProcessExit) => void;
+    const closed = new Promise<ExtensionProcessExit>((resolve) => {
+        resolveClosed = resolve;
+    });
+    const processes: ExtensionProcessCapability = {
+        async start(): Promise<ExtensionManagedProcess> {
+            return {
+                closed,
+                onMessage: () => () => undefined,
+                onStderr: () => () => undefined,
+                onStdout(listener) {
+                    listener("early-stdout");
+                    return () => undefined;
+                },
+                async send() {},
+                async terminate() {
+                    resolveClosed({ code: 0 });
+                },
+            };
+        },
+    };
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-process-stdout-race",
+        `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const managed = await context.capabilities.processes.start({ command: "managed-test" });
+        const stdout = await new Promise((resolve) => {
+            const remove = managed.onStdout((chunk) => {
+                remove();
+                resolve(chunk);
+            });
+        });
+        await managed.terminate();
+        return { kind: "text", text: stdout };
+    });
+}
+`,
+        { capabilities: ["processes"], processes },
+    );
+    await sandbox.start();
+
+    assert.equal(
+        await cliText(sandbox, [], "managed-process-stdout-race"),
+        "early-stdout",
+    );
+});
+
 test("Extension sandbox denies nested Workers so resource limits cannot be bypassed", async (t) => {
     const sandbox = await setupSandbox(
         t,
@@ -1014,6 +1064,7 @@ test("Extension sandbox preserves an already-closed managed process across the s
                 closed: Promise.resolve({ code: 7 }),
                 onMessage: () => () => undefined,
                 onStderr: () => () => undefined,
+                onStdout: () => () => undefined,
                 async send() {},
                 async terminate() {},
             };
@@ -1307,6 +1358,7 @@ function fakeProcesses(calls: string[]): ExtensionProcessCapability {
                 closed,
                 onMessage: () => () => undefined,
                 onStderr: () => () => undefined,
+                onStdout: () => () => undefined,
                 async send() {},
                 async terminate(signal = "SIGTERM") {
                     if (terminated) return;

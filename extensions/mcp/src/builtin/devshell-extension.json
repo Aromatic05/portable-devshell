@@ -1,6 +1,6 @@
 {
     "schemaVersion": 1,
-    "apiVersion": 4,
+    "apiVersion": "4.0.0",
     "id": "mcp",
     "name": "portable-devshell MCP Client",
     "version": "0.1.0",
