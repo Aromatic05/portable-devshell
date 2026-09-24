@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { gzipSync } from "node:zlib";
+
+import type {
+    ExtensionManagedProcess,
+    ExtensionProcessCapability,
+    ExtensionProcessStartInput,
+} from "@portable-devshell/extension";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { AccessBinaryManager } from "../../src/builtin/binary/AccessBinaryManager.ts";
@@ -51,6 +57,58 @@ test("AccessBinaryManager downloads a direct cloudflared asset once", async () =
             "https://api.github.com/repos/cloudflare/cloudflared/releases/latest",
             "https://downloads.example/cloudflared",
         ]);
+    } finally {
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
+test("AccessBinaryManager downloads through the managed process capability", async () => {
+    const directory = await createTestTempDirectory("access-binary-managed");
+    const starts: ExtensionProcessStartInput[] = [];
+    const processes: ExtensionProcessCapability = {
+        async start(input) {
+            starts.push(input);
+            const url = input.args?.[1];
+            const output = input.args?.[2];
+            assert.ok(url);
+            assert.ok(output);
+            const bytes = url.includes("api.github.com")
+                ? Buffer.from(
+                      JSON.stringify({
+                          assets: [
+                              {
+                                  browser_download_url:
+                                      "https://downloads.example/cloudflared",
+                                  name: "cloudflared-linux-amd64",
+                              },
+                          ],
+                          tag_name: "2026.9.0",
+                      }),
+                  )
+                : Buffer.from("managed-cloudflared");
+            await writeFile(output, bytes);
+            return managedProcess({ code: 0 });
+        },
+    };
+    const manager = new AccessBinaryManager(directory, {
+        arch: "x64",
+        fetch: (async () => {
+            throw new Error("sandbox fetch must not be used");
+        }) as typeof fetch,
+        platform: "linux",
+        processes,
+    });
+    try {
+        const executable = await manager.resolve("cloudflared");
+        assert.equal((await readFile(executable)).toString(), "managed-cloudflared");
+        assert.equal(starts.length, 2);
+        assert.equal(starts[0]?.command, process.execPath);
+        assert.match(starts[0]?.args?.[0] ?? "", /DownloadWorker\.js$/u);
+        assert.equal(
+            starts[0]?.args?.[1],
+            "https://api.github.com/repos/cloudflare/cloudflared/releases/latest",
+        );
+        assert.equal(starts[1]?.args?.[1], "https://downloads.example/cloudflared");
     } finally {
         await rm(directory, { force: true, recursive: true });
     }
@@ -111,6 +169,17 @@ function bytesResponse(value: Buffer): Response {
         value.byteOffset + value.byteLength,
     ) as ArrayBuffer;
     return new Response(body, { status: 200 });
+}
+
+function managedProcess(exit: { code?: number; signal?: string }): ExtensionManagedProcess {
+    return {
+        closed: Promise.resolve(exit),
+        onMessage: () => () => undefined,
+        onStderr: () => () => undefined,
+        onStdout: () => () => undefined,
+        async send() {},
+        async terminate() {},
+    };
 }
 
 function tarFile(name: string, body: Buffer): Buffer {

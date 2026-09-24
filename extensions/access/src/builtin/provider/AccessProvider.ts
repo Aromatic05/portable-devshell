@@ -20,6 +20,9 @@ export interface AccessProviderOpenInput {
 export interface AccessProviderSession {
     readonly closed: Promise<void>;
     readonly process: ExtensionManagedProcess;
+    onPublicUrlChange?(
+        listener: (publicUrl: string) => void,
+    ): () => void;
     publicUrl(): string | undefined;
     stop(): Promise<void>;
 }

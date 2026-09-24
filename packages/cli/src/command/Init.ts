@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { createInterface } from "node:readline/promises";
 
 import {
     createError,
@@ -121,6 +122,7 @@ export async function executeInit(
         mcpEnabled: config.mcp.enabled,
     };
     context.writeValue(result, renderInitResult(result));
+    if (freshLike && isInteractive(context)) await offerRemoteAccess(context);
     return true;
 }
 
@@ -157,4 +159,46 @@ function renderInitResult(result: CliInitResult): string {
     }
     lines.push("", "Open DevShell", "  devshell tui", "");
     return lines.join("\n");
+}
+
+async function offerRemoteAccess(context: CliDispatchContext): Promise<void> {
+    const readline = createInterface({ input: context.stdin });
+    try {
+        context.stdout.write(
+            [
+                "Remote access?",
+                "1. Cloudflare Tunnel",
+                "2. Not now",
+                "selection [2]: ",
+            ].join("\n"),
+        );
+        const next = await readline[Symbol.asyncIterator]().next();
+        const answer = next.done ? "" : next.value.trim().toLowerCase();
+        if (answer !== "1" && answer !== "cloudflare") return;
+    } finally {
+        readline.close();
+    }
+
+    const result = await context.clients.cli.command("access", ["cloudflare"], {
+        relay: {
+            input: context.stdin,
+            stderr: context.stderr,
+            stdout: context.stdout,
+        },
+        workingDirectory: process.cwd(),
+    });
+    if (result.kind === "text") {
+        const text = result.text ?? "";
+        context.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+    } else {
+        context.writeJson(result.value ?? null);
+    }
+}
+
+function isInteractive(context: CliDispatchContext): boolean {
+    return (
+        context.outputFormat === "text" &&
+        "isTTY" in context.stdin &&
+        context.stdin.isTTY === true
+    );
 }

@@ -42,10 +42,12 @@ export interface AccessEndpointRecord {
 
 interface ActiveEndpoint {
     fingerprint: string;
+    publishedPublicUrl?: string;
     record: AccessEndpointRecord;
     restartAttempt: number;
     session?: AccessProviderSession;
     token: object;
+    unsubscribePublicUrl?: () => void;
 }
 
 export interface AccessRuntimeOptions {
@@ -76,7 +78,9 @@ export class AccessRuntime {
         this.#config = config;
         this.#context = context;
         this.#reconcileDelayMs = options.reconcileDelayMs ?? 100;
-        const binaries = new AccessBinaryManager(context.paths.dataDirectory);
+        const binaries = new AccessBinaryManager(context.paths.dataDirectory, {
+            processes,
+        });
         const providerContext = {
             dataDirectory: context.paths.dataDirectory,
             processes,
@@ -163,6 +167,22 @@ export class AccessRuntime {
         await this.#writeEndpoints(endpoints);
         await this.reconcile();
         return this.get(id) ?? this.#initialRecord(endpoints[index]!);
+    }
+
+    async setPublicUrl(id: string, publicUrl: string): Promise<AccessEndpointRecord> {
+        this.#assertOpen();
+        const endpoints = [...(await this.#readConfig()).endpoints];
+        const index = endpoints.findIndex((endpoint) => endpoint.id === id);
+        if (index === -1) throw new Error(`Access endpoint not found: ${id}.`);
+        const endpoint = parseAccessConfig({
+            endpoints: [
+                endpointToJson({ ...endpoints[index]!, publicUrl } as AccessEndpoint),
+            ],
+        }).endpoints[0]!;
+        endpoints[index] = endpoint;
+        await this.#writeEndpoints(endpoints);
+        await this.reconcile();
+        return this.get(id) ?? this.#initialRecord(endpoint);
     }
 
     async reconcile(): Promise<void> {
@@ -333,6 +353,15 @@ export class AccessRuntime {
                 return;
             }
             active.session = session;
+            active.unsubscribePublicUrl = session.onPublicUrlChange?.((publicUrl) => {
+                void this.#publishPublicUrl(endpoint, active!, token, publicUrl).catch(
+                    (error: unknown) =>
+                        this.#context.logger.warn("Failed to publish Access public URL.", {
+                            endpoint: endpoint.id,
+                            error: toError(error).message,
+                        }),
+                );
+            });
             active.restartAttempt = 0;
             active.record = {
                 ...this.#initialRecord(endpoint),
@@ -342,6 +371,14 @@ export class AccessRuntime {
                     : { publicUrl: session.publicUrl() }),
                 state: "running",
             };
+            const initialPublicUrl = session.publicUrl();
+            if (initialPublicUrl !== undefined)
+                await this.#publishPublicUrl(
+                    endpoint,
+                    active,
+                    token,
+                    initialPublicUrl,
+                );
             void session.closed.then(() => this.#sessionClosed(endpoint.id, token));
         } catch (error) {
             if (active.token !== token || this.#disposed) return;
@@ -360,6 +397,8 @@ export class AccessRuntime {
         if (this.#disposed) return;
         const active = this.#records.get(id);
         if (active === undefined || active.token !== token) return;
+        active.unsubscribePublicUrl?.();
+        active.unsubscribePublicUrl = undefined;
         active.session = undefined;
         active.fingerprint = "";
         active.record = {
@@ -402,6 +441,8 @@ export class AccessRuntime {
 
     async #stopActive(active: ActiveEndpoint): Promise<Error | undefined> {
         active.token = {};
+        active.unsubscribePublicUrl?.();
+        active.unsubscribePublicUrl = undefined;
         const session = active.session;
         if (session === undefined) return undefined;
         try {
@@ -443,6 +484,30 @@ export class AccessRuntime {
         });
     }
 
+    async #publishPublicUrl(
+        endpoint: AccessEndpoint,
+        active: ActiveEndpoint,
+        token: object,
+        publicUrl: string,
+    ): Promise<void> {
+        if (this.#disposed || active.token !== token) return;
+        const path = `${endpoint.target}.publicBaseUrl`;
+        const current = await this.#config.get(path);
+        if (
+            current !== undefined &&
+            current !== active.publishedPublicUrl &&
+            current !== publicUrl &&
+            !isEquivalentLocalBaseUrl(current, active.record.origin)
+        )
+            return;
+        if (current === publicUrl) {
+            active.publishedPublicUrl = publicUrl;
+            return;
+        }
+        await this.#config.update({ [path]: publicUrl });
+        active.publishedPublicUrl = publicUrl;
+    }
+
     #record(active: ActiveEndpoint): AccessEndpointRecord {
         const publicUrl = active.session?.publicUrl() ?? active.record.publicUrl;
         return Object.freeze({
@@ -468,6 +533,48 @@ export class AccessRuntime {
 
 function fingerprint(endpoint: AccessEndpoint, target: string): string {
     return JSON.stringify([endpoint, target]);
+}
+
+function isEquivalentLocalBaseUrl(
+    current: ExtensionJsonValue,
+    origin: string | undefined,
+): boolean {
+    if (typeof current !== "string" || origin === undefined) return false;
+    let left: URL;
+    let right: URL;
+    try {
+        left = new URL(current);
+        right = new URL(origin);
+    } catch {
+        return false;
+    }
+    if (
+        left.protocol !== right.protocol ||
+        effectivePort(left) !== effectivePort(right)
+    )
+        return false;
+    return equivalentLocalHost(left.hostname, right.hostname);
+}
+
+function effectivePort(url: URL): string {
+    if (url.port.length > 0) return url.port;
+    return url.protocol === "https:"
+        ? "443"
+        : url.protocol === "http:"
+          ? "80"
+          : "";
+}
+
+function equivalentLocalHost(left: string, right: string): boolean {
+    if (left === right) return true;
+    const local = new Set([
+        "0.0.0.0",
+        "127.0.0.1",
+        "::",
+        "::1",
+        "localhost",
+    ]);
+    return local.has(left) && local.has(right);
 }
 
 function toError(error: unknown): Error {

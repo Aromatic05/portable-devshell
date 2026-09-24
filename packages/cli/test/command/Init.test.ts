@@ -210,6 +210,73 @@ test("init preserves TUI approval and reuses an existing local instance", async 
     assert.doesNotMatch(renderedText, /ds_[A-Za-z0-9_-]{40,}/u);
 });
 
+test("fresh interactive init offers Cloudflare through the Access native command", async () => {
+    const calls: string[] = [];
+    let view = configView({ enabled: false, instances: [], token: undefined });
+    let output = "";
+    const stdin = Readable.from(["1\n"]) as Readable & { isTTY: boolean };
+    stdin.isTTY = true;
+    const context = {
+        clients: {
+            cli: {
+                async command(commandId: string, args: readonly string[], options: unknown) {
+                    calls.push(`cli:${commandId}:${args.join(" ")}`);
+                    assert.equal(commandId, "access");
+                    assert.deepEqual(args, ["cloudflare"]);
+                    assert.notEqual(options, undefined);
+                    return {
+                        kind: "text",
+                        text: "Cloudflare tunnel configured.\n",
+                    };
+                },
+            },
+            config: {
+                async get() {
+                    return view;
+                },
+                async update() {
+                    view = configView({
+                        enabled: true,
+                        instances: view.instances,
+                        token: "********",
+                    });
+                    return {};
+                },
+            },
+            instance: {
+                async create() {
+                    view = configView({ token: "********" });
+                    return { enabled: true, name: "local-pc" };
+                },
+            },
+            runtime: {
+                async start(instance: string) {
+                    return readySnapshot(instance);
+                },
+            },
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stdin,
+        stderr: { write() {} },
+        stdout: {
+            write(chunk: string) {
+                output += chunk;
+            },
+        },
+        writeJson() {},
+        writeValue(_value: unknown, text: string) {
+            output += text;
+        },
+    } as unknown as CliDispatchContext;
+
+    assert.equal(await executeInit({ kind: "init" }, context), true);
+    assert.deepEqual(calls, ["cli:access:cloudflare"]);
+    assert.match(output, /Remote access\?/u);
+    assert.match(output, /1\. Cloudflare Tunnel/u);
+    assert.match(output, /Cloudflare tunnel configured\./u);
+});
+
 function configView(input?: {
     enabled?: boolean;
     instances?: ConfigView["instances"];

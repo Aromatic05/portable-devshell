@@ -25,7 +25,9 @@ test("Access Extension manifest is eager, process-managed, and declares Config o
     assert.deepEqual(manifest.capabilities, ["processes"]);
     assert.deepEqual(manifest.config?.default, { endpoints: [] });
     assert.equal(manifest.config?.access?.["mcp.listenPort"], "read");
+    assert.equal(manifest.config?.access?.["mcp.publicBaseUrl"], "read-write");
     assert.equal(manifest.config?.access?.["web.listenPort"], "read");
+    assert.equal(manifest.config?.access?.["web.publicBaseUrl"], "read-write");
     assert.deepEqual(Object.keys(manifest.extensions).sort(), [
         "cli.native-commands",
         "web.applications",

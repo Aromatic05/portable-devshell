@@ -72,7 +72,7 @@ function processContext(directory: string) {
     };
 }
 
-test("cloudflared provider targets the local service and discovers a quick tunnel URL", async () => {
+test("cloudflared provider runs a named tunnel token and discovers its published hostname", async () => {
     const directory = await createTestTempDirectory("access-cloudflared");
     try {
         const harness = processContext(directory);
@@ -80,35 +80,83 @@ test("cloudflared provider targets the local service and discovers a quick tunne
             harness.context,
             new AccessBinaryManager(directory),
         );
-        const session = await provider.open({
+        const opening = provider.open({
             endpoint: {
                 binary: "/opt/cloudflared",
                 enabled: true,
-                id: "quick",
+                id: "cloudflare-main",
                 provider: "cloudflared",
                 target: "web",
+                token: "tunnel-token",
             },
             target: { kind: "web", origin: new URL("http://127.0.0.1:9000/") },
         });
-        assert.deepEqual(harness.starts[0], {
-            args: [
-                "tunnel",
-                "--no-autoupdate",
-                "--url",
-                "http://127.0.0.1:9000/",
-            ],
-            command: "/opt/cloudflared",
-        });
+        await waitForProcess(harness);
         harness.processes[0]!.emitStderr(
-            "INF Your quick Tunnel has been created! Visit it at https://random-",
+            "INF Registered tunnel connection connIndex=0\n",
         );
-        harness.processes[0]!.emitStderr("name.trycloudflare.com");
-        assert.equal(session.publicUrl(), "https://random-name.trycloudflare.com");
+        const session = await opening;
+        assert.deepEqual(harness.starts[0], {
+            args: ["tunnel", "--no-autoupdate", "run"],
+            command: "/opt/cloudflared",
+            environment: { TUNNEL_TOKEN: "tunnel-token" },
+        });
+        const observed: string[] = [];
+        session.onPublicUrlChange?.((url) => observed.push(url));
+        harness.processes[0]!.emitStderr(
+            'INF Updated to new configuration config="{\\"ingress\\":[{\\"hostname\\":\\"mcp.example.test\\",\\"service\\":\\"http://localhost:9000\\"},{\\"service\\":\\"http_status:404\\"}]}" ver',
+        );
+        harness.processes[0]!.emitStderr("sion=2\n");
+        assert.equal(session.publicUrl(), "https://mcp.example.test/");
+        assert.deepEqual(observed, ["https://mcp.example.test/"]);
         await session.stop();
     } finally {
         await rm(directory, { force: true, recursive: true });
     }
 });
+
+test("cloudflared provider keeps an explicit public URL instead of auto-detected hostnames", async () => {
+    const directory = await createTestTempDirectory("access-cloudflared-explicit");
+    try {
+        const harness = processContext(directory);
+        const provider = new CloudflaredProvider(
+            harness.context,
+            new AccessBinaryManager(directory),
+        );
+        const opening = provider.open({
+            endpoint: {
+                binary: "/opt/cloudflared",
+                enabled: true,
+                id: "cloudflare-main",
+                provider: "cloudflared",
+                publicUrl: "https://manual.example.test/",
+                target: "mcp",
+                token: "tunnel-token",
+            },
+            target: { kind: "mcp", origin: new URL("http://127.0.0.1:9000/") },
+        });
+        await waitForProcess(harness);
+        harness.processes[0]!.emitStderr(
+            "INF Registered tunnel connection connIndex=0\n",
+        );
+        const session = await opening;
+        harness.processes[0]!.emitStderr(
+            'INF Updated to new configuration config="{\\"ingress\\":[{\\"hostname\\":\\"auto.example.test\\",\\"service\\":\\"http://localhost:9000\\"}]}" version=3\n',
+        );
+        assert.equal(session.publicUrl(), "https://manual.example.test/");
+        await session.stop();
+    } finally {
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
+async function waitForProcess(harness: ReturnType<typeof processContext>): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (harness.processes.length > 0) return;
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.fail("managed process was not started");
+}
 
 test("FRP and SSH providers render the expected reverse forwarding targets", async () => {
     const frp: FrpAccessEndpoint = {

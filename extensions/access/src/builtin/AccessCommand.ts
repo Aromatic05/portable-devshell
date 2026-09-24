@@ -8,6 +8,8 @@ import type { AccessEndpointRecord, AccessRuntime } from "./AccessRuntime.js";
 
 export const ACCESS_USAGE = [
     "Usage:",
+    "  devshell access cloudflare",
+    "  devshell access cloudflare url <https://hostname>",
     "  devshell access list",
     "  devshell access show <id>",
     "  devshell access set '<endpoint-json>'",
@@ -30,6 +32,9 @@ export async function executeAccessCommand(
         return { kind: "text", text: ACCESS_USAGE };
     }
     switch (command) {
+        case "cloudflare":
+            requireLocalOwner(context);
+            return await configureCloudflare(runtime, argv.slice(1), context);
         case "list":
             expectLength(argv, 1, "access list");
             return json(runtime.list().map(recordToJson));
@@ -82,6 +87,96 @@ export async function executeAccessCommand(
         default:
             throw usageError(`Unknown access command: ${command}`);
     }
+}
+
+const cloudflareEndpointId = "cloudflare-mcp";
+
+async function configureCloudflare(
+    runtime: AccessRuntime,
+    argv: readonly string[],
+    context: CliNativeCommandInvocationContext,
+): Promise<CliCommandResult> {
+    if (argv[0] === "url") {
+        expectLength(argv, 2, "access cloudflare url <https://hostname>");
+        const record = await runtime.setPublicUrl(
+            cloudflareEndpointId,
+            required(argv[1], "public URL is required"),
+        );
+        return { kind: "text", text: cloudflareConfiguredText(record) };
+    }
+    expectLength(argv, 0, "access cloudflare");
+    const token = await readSecret(context, "Cloudflare tunnel token");
+    const record = await runtime.upsert({
+        enabled: true,
+        id: cloudflareEndpointId,
+        provider: "cloudflared",
+        target: "mcp",
+        token,
+    });
+    if (record.state !== "running") {
+        throw new Error(
+            `Cloudflare tunnel failed to start${record.error === undefined ? "." : `: ${record.error}`}`,
+        );
+    }
+    return { kind: "text", text: cloudflareConfiguredText(record) };
+}
+
+function cloudflareConfiguredText(record: AccessEndpointRecord): string {
+    const lines = [
+        "Cloudflare tunnel configured.",
+        "",
+        `Service URL: ${record.origin ?? "waiting for the MCP endpoint"}`,
+    ];
+    if (record.publicUrl !== undefined) {
+        lines.push(`Public URL: ${record.publicUrl}`);
+    } else {
+        lines.push(
+            "",
+            "In Cloudflare, add a Published application route:",
+            "  Hostname: <your hostname>",
+            `  Service:  ${record.origin ?? "the Service URL shown above"}`,
+            "",
+            "DevShell will detect the hostname automatically after Cloudflare sends the route configuration.",
+            "If automatic detection is unavailable, run:",
+            "  devshell access cloudflare url https://<your-hostname>",
+        );
+    }
+    return `${lines.join("\n")}\n`;
+}
+
+async function readSecret(
+    context: CliNativeCommandInvocationContext,
+    label: string,
+): Promise<string> {
+    const io = context.io;
+    if (io === undefined)
+        throw usageError(`${label} requires interactive CLI input.`);
+    await io.writeStderr(`${label}: `);
+    await io.requestInput({ raw: true });
+    const bytes: number[] = [];
+    while (true) {
+        context.signal.throwIfAborted();
+        const chunk = await io.readInput();
+        if (chunk === undefined) break;
+        for (const byte of chunk) {
+            if (byte === 3) throw new Error("Input cancelled.");
+            if (byte === 10 || byte === 13) {
+                await io.writeStderr("\n");
+                const value = Buffer.from(bytes).toString("utf8").trim();
+                if (value.length === 0) throw usageError(`${label} is required.`);
+                return value;
+            }
+            if (byte === 8 || byte === 127) {
+                bytes.pop();
+                continue;
+            }
+            bytes.push(byte);
+        }
+    }
+    await io.writeStderr("\n");
+    const value = Buffer.from(bytes).toString("utf8").trim();
+    if (value.length === 0) throw usageError(`${label} is required.`);
+    return value;
 }
 
 function recordToJson(record: AccessEndpointRecord): ExtensionJsonValue {

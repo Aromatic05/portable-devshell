@@ -11,9 +11,10 @@ test("Access Config parses provider-specific endpoints and defaults", () => {
         endpoints: [
             {
                 enabled: true,
-                id: "quick",
+                id: "cloudflare-main",
                 provider: "cloudflared",
                 target: "web",
+                token: "tunnel-token",
             },
             {
                 enabled: true,
@@ -35,6 +36,9 @@ test("Access Config parses provider-specific endpoints and defaults", () => {
         ],
     });
 
+    if (config.endpoints[0]?.provider !== "cloudflared")
+        assert.fail("Cloudflare endpoint expected");
+    assert.equal(config.endpoints[0].token, "tunnel-token");
     assert.equal(config.endpoints[1]?.provider, "frp");
     if (config.endpoints[1]?.provider !== "frp") assert.fail("FRP endpoint expected");
     assert.equal(config.endpoints[1].serverPort, 7000);
@@ -50,10 +54,25 @@ test("Access Config rejects duplicate ids and non-HTTP public URLs", () => {
         id: "same",
         provider: "cloudflared",
         target: "mcp",
+        token: "tunnel-token",
     } as const;
     assert.throws(
         () => parseAccessConfig({ endpoints: [endpoint, endpoint] }),
         /ids must be unique/u,
+    );
+    assert.throws(
+        () =>
+            parseAccessConfig({
+                endpoints: [
+                    {
+                        enabled: true,
+                        id: "missing-token",
+                        provider: "cloudflared",
+                        target: "mcp",
+                    },
+                ],
+            }),
+        /token.*non-empty/u,
     );
     assert.throws(
         () =>

@@ -1,15 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
     access,
     chmod,
     mkdir,
+    readFile,
     rename,
     rm,
     writeFile,
 } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
+
+import type { ExtensionProcessCapability } from "@portable-devshell/extension";
 
 import type { AccessProviderKind } from "../Config.js";
 
@@ -29,20 +34,23 @@ export interface AccessBinaryManagerOptions {
     fetch?: typeof globalThis.fetch;
     platform?: NodeJS.Platform;
     arch?: NodeJS.Architecture;
+    processes?: ExtensionProcessCapability;
 }
 
 export class AccessBinaryManager {
     readonly #arch: NodeJS.Architecture;
     readonly #binDirectory: string;
-    readonly #fetch: typeof globalThis.fetch;
+    readonly #fetch?: typeof globalThis.fetch;
     readonly #platform: NodeJS.Platform;
+    readonly #processes?: ExtensionProcessCapability;
     readonly #resolving = new Map<string, Promise<string>>();
 
     constructor(dataDirectory: string, options: AccessBinaryManagerOptions = {}) {
         this.#arch = options.arch ?? process.arch;
         this.#binDirectory = join(dataDirectory, "bin");
-        this.#fetch = options.fetch ?? globalThis.fetch;
+        this.#fetch = options.fetch;
         this.#platform = options.platform ?? process.platform;
+        this.#processes = options.processes;
     }
 
     async resolve(kind: AccessProviderKind, override?: string): Promise<string> {
@@ -73,17 +81,10 @@ export class AccessBinaryManager {
             kind === "frp"
                 ? selectFrpAsset(release, this.#platform, this.#arch)
                 : selectCloudflaredAsset(release, this.#platform, this.#arch);
-        const response = await this.#fetch(asset.browser_download_url, {
-            headers: { "user-agent": "portable-devshell-access" },
-            redirect: "follow",
-            signal: AbortSignal.timeout(30_000),
-        });
-        if (!response.ok) {
-            throw new Error(
-                `Failed to download ${kind} binary: HTTP ${response.status}.`,
-            );
-        }
-        const downloaded = Buffer.from(await response.arrayBuffer());
+        const downloaded = await this.#download(
+            asset.browser_download_url,
+            `Failed to download ${kind} binary`,
+        );
         const bytes = asset.name.endsWith(".tar.gz") || asset.name.endsWith(".tgz")
             ? await extractExecutableFromTarGz(
                   downloaded,
@@ -102,23 +103,81 @@ export class AccessBinaryManager {
         return executable;
     }
 
-    async #release(repository: string): Promise<GithubRelease> {
-        const response = await this.#fetch(
-            `https://api.github.com/repos/${repository}/releases/latest`,
-            {
+    async #download(url: string, message: string): Promise<Buffer> {
+        if (this.#processes !== undefined)
+            return await this.#downloadWithManagedProcess(url, message);
+        const fetch = this.#fetch ?? globalThis.fetch;
+        let response: Response;
+        try {
+            response = await fetch(url, {
                 headers: {
                     accept: "application/vnd.github+json",
                     "user-agent": "portable-devshell-access",
                 },
-                signal: AbortSignal.timeout(30_000),
-            },
+                redirect: "follow",
+                signal: AbortSignal.timeout(120_000),
+            });
+        } catch (error) {
+            throw new Error(`${message}: ${error instanceof Error ? error.message : String(error)}.`, { cause: error });
+        }
+        if (!response.ok)
+            throw new Error(`${message}: HTTP ${response.status}.`);
+        return Buffer.from(await response.arrayBuffer());
+    }
+
+    async #downloadWithManagedProcess(
+        url: string,
+        message: string,
+    ): Promise<Buffer> {
+        const temporary = join(
+            this.#binDirectory,
+            `.download-${randomUUID()}.tmp`,
         );
-        if (!response.ok) {
-            throw new Error(
-                `Failed to resolve latest ${repository} release: HTTP ${response.status}.`,
+        let stderr = "";
+        const worker = fileURLToPath(
+            new URL("./DownloadWorker.js", import.meta.url),
+        );
+        try {
+            const child = await this.#processes!.start({
+                args: [worker, url, temporary],
+                command: process.execPath,
+            });
+            const removeStderr = child.onStderr((chunk) => {
+                stderr = `${stderr}${chunk}`.slice(-16 * 1024);
+            });
+            let exit;
+            try {
+                exit = await child.closed;
+            } finally {
+                removeStderr();
+            }
+            if (exit.code !== 0) {
+                const detail = stderr.trim();
+                throw new Error(
+                    `${message}: downloader exited with code ${exit.code ?? "unknown"}${detail.length === 0 ? "" : `: ${detail}`}.`,
+                );
+            }
+            return await readFile(temporary);
+        } finally {
+            await rm(temporary, { force: true }).catch(() => undefined);
+        }
+    }
+
+    async #release(repository: string): Promise<GithubRelease> {
+        const url = `https://api.github.com/repos/${repository}/releases/latest`;
+        const bytes = await this.#download(
+            url,
+            `Failed to resolve latest ${repository} release`,
+        );
+        let value: unknown;
+        try {
+            value = JSON.parse(bytes.toString("utf8")) as unknown;
+        } catch (error) {
+            throw new TypeError(
+                `Latest ${repository} release metadata is invalid JSON.`,
+                { cause: error },
             );
         }
-        const value = (await response.json()) as unknown;
         if (!isRecord(value) || typeof value.tag_name !== "string")
             throw new TypeError(`Latest ${repository} release metadata is invalid.`);
         if (!Array.isArray(value.assets))

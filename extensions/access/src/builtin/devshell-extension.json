@@ -12,11 +12,11 @@
             "mcp.enabled": "read",
             "mcp.listenHost": "read",
             "mcp.listenPort": "read",
-            "mcp.publicBaseUrl": "read",
+            "mcp.publicBaseUrl": "read-write",
             "web.enabled": "read",
             "web.listenHost": "read",
             "web.listenPort": "read",
-            "web.publicBaseUrl": "read"
+            "web.publicBaseUrl": "read-write"
         },
         "default": {
             "endpoints": []
@@ -38,9 +38,11 @@
                                     "provider": { "const": "cloudflared" },
                                     "target": { "enum": ["mcp", "web"] },
                                     "binary": { "type": "string", "minLength": 1 },
+                                    "token": { "type": "string", "minLength": 1 },
+                                    "publicUrl": { "type": "string", "minLength": 1 },
                                     "arguments": { "type": "array", "items": { "type": "string" } }
                                 },
-                                "required": ["id", "enabled", "provider", "target"]
+                                "required": ["id", "enabled", "provider", "target", "token"]
                             },
                             {
                                 "type": "object",

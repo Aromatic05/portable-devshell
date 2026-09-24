@@ -54,12 +54,13 @@ class MemoryConfig implements ExtensionConfig {
 class FakeSession implements AccessProviderSession {
     readonly closed: Promise<void>;
     readonly process = {} as never;
-    readonly #url: string;
+    readonly #listeners = new Set<(publicUrl: string) => void>();
+    #url: string | undefined;
     #resolve!: () => void;
     stopFailure?: Error;
     stops = 0;
 
-    constructor(url: string) {
+    constructor(url: string | undefined) {
         this.#url = url;
         this.closed = new Promise((resolve) => {
             this.#resolve = resolve;
@@ -70,8 +71,18 @@ class FakeSession implements AccessProviderSession {
         this.#resolve();
     }
 
-    publicUrl(): string {
+    onPublicUrlChange(listener: (publicUrl: string) => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    publicUrl(): string | undefined {
         return this.#url;
+    }
+
+    setPublicUrl(publicUrl: string): void {
+        this.#url = publicUrl;
+        for (const listener of [...this.#listeners]) listener(publicUrl);
     }
 
     async stop(): Promise<void> {
@@ -90,6 +101,19 @@ class FakeSshProvider implements AccessProvider {
     async open(input: AccessProviderOpenInput): Promise<AccessProviderSession> {
         this.opens.push(input);
         const session = new FakeSession(`https://public-${this.opens.length}.example.test/`);
+        this.sessions.push(session);
+        return session;
+    }
+}
+
+class FakeCloudflaredProvider implements AccessProvider {
+    readonly kind = "cloudflared" as const;
+    readonly opens: AccessProviderOpenInput[] = [];
+    readonly sessions: FakeSession[] = [];
+
+    async open(input: AccessProviderOpenInput): Promise<AccessProviderSession> {
+        this.opens.push(input);
+        const session = new FakeSession(undefined);
         this.sessions.push(session);
         return session;
     }
@@ -220,6 +244,50 @@ test("AccessRuntime waits instead of starting a tunnel when the target endpoint 
     }
 });
 
+test("AccessRuntime publishes a discovered Cloudflare URL without overwriting a later manual URL", async () => {
+    const directory = await createTestTempDirectory("access-runtime-cloudflare-url");
+    const config = new MemoryConfig();
+    await config.update({ "mcp.publicBaseUrl": "http://127.0.0.1:47123" });
+    const provider = new FakeCloudflaredProvider();
+    const runtime = new AccessRuntime(context(directory, config), {
+        providers: [provider],
+        reconcileDelayMs: 60_000,
+    });
+    try {
+        await runtime.upsert({
+            enabled: true,
+            id: "cloudflare-mcp",
+            provider: "cloudflared",
+            target: "mcp",
+            token: "tunnel-token",
+        });
+        assert.equal(
+            config.values.get("mcp.publicBaseUrl"),
+            "http://127.0.0.1:47123",
+        );
+
+        provider.sessions[0]!.setPublicUrl("https://auto.example.test/");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(
+            config.values.get("mcp.publicBaseUrl"),
+            "https://auto.example.test/",
+        );
+
+        await config.update({
+            "mcp.publicBaseUrl": "https://manual.example.test/",
+        });
+        provider.sessions[0]!.setPublicUrl("https://changed.example.test/");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(
+            config.values.get("mcp.publicBaseUrl"),
+            "https://manual.example.test/",
+        );
+    } finally {
+        await runtime.dispose();
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
 test("AccessRuntime never starts a replacement tunnel while the previous session failed to stop", async () => {
     const directory = await createTestTempDirectory("access-runtime-stop-failure");
     const config = new MemoryConfig();
@@ -339,6 +407,59 @@ test("Access CLI restricts mutations to the local owner and exposes runtime stat
             },
         ],
     });
+});
+
+test("Access CLI configures Cloudflare from one interactive tunnel token", async () => {
+    let configured: ExtensionJsonValue | undefined;
+    let rawRequested = false;
+    let stderr = "";
+    const fake = {
+        async upsert(value: ExtensionJsonValue) {
+            configured = value;
+            return {
+                enabled: true,
+                id: "cloudflare-mcp",
+                origin: "http://127.0.0.1:47123/",
+                provider: "cloudflared",
+                state: "running",
+                target: "mcp",
+            };
+        },
+    } as unknown as AccessRuntime;
+    const chunks = [Buffer.from("secret-tunnel-token\r")];
+    const local = {
+        io: {
+            async readInput() {
+                return chunks.shift();
+            },
+            async requestInput(options?: { raw?: boolean }) {
+                rawRequested = options?.raw === true;
+            },
+            async writeStderr(chunk: string) {
+                stderr += chunk;
+            },
+            async writeStdout() {},
+        },
+        localOwner: true,
+        requestId: "local",
+        signal: new AbortController().signal,
+    };
+
+    const result = await executeAccessCommand(fake, ["cloudflare"], local);
+    assert.equal(rawRequested, true);
+    assert.equal(stderr, "Cloudflare tunnel token: \n");
+    assert.deepEqual(configured, {
+        enabled: true,
+        id: "cloudflare-mcp",
+        provider: "cloudflared",
+        target: "mcp",
+        token: "secret-tunnel-token",
+    });
+    assert.equal(result.kind, "text");
+    if (result.kind !== "text") assert.fail("text result expected");
+    assert.match(result.text, /Service URL: http:\/\/127\.0\.0\.1:47123\//u);
+    assert.match(result.text, /Published application route/u);
+    assert.doesNotMatch(result.text, /secret-tunnel-token/u);
 });
 
 test("Access Web endpoint serves status behind the host Web application gateway", async () => {

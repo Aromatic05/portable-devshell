@@ -14,6 +14,8 @@ export interface CloudflaredAccessEndpoint extends AccessEndpointBase {
     readonly arguments?: readonly string[];
     readonly binary?: string;
     readonly provider: "cloudflared";
+    readonly publicUrl?: string;
+    readonly token: string;
 }
 
 export interface FrpAccessEndpoint extends AccessEndpointBase {
@@ -90,7 +92,16 @@ function parseEndpoint(value: unknown, index: number): AccessEndpoint {
             enabled,
             id,
             provider,
+            ...(value.publicUrl === undefined
+                ? {}
+                : {
+                      publicUrl: readHttpUrl(
+                          value.publicUrl,
+                          `endpoints[${index}].publicUrl`,
+                      ),
+                  }),
             target,
+            token: readString(value.token, `endpoints[${index}].token`),
         });
     }
     if (provider === "frp") {
