@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -245,6 +245,39 @@ test("WorkerAssetResolver allows host target to use dev fallback", async (t) => 
     assert.equal(asset.binaryPath, fallbackPath);
     assert.equal(asset.source, "dev");
     assert.equal(asset.searchedPaths.includes(fallbackPath), true);
+});
+
+test("WorkerAssetResolver chooses the newest host dev build across profiles", async (t) => {
+    const fixture = await createResolverFixture();
+    t.after(fixture.cleanup);
+
+    const hostTarget = probeLocalWorkerTarget();
+    const hostBinaryName =
+        hostTarget.os === "windows" ? "devshell-worker.exe" : "devshell-worker";
+    const debugPath = join(
+        fixture.root,
+        "target",
+        hostTarget.rustTarget,
+        "debug",
+        hostBinaryName,
+    );
+    const releasePath = join(
+        fixture.root,
+        "target",
+        hostTarget.rustTarget,
+        "release",
+        hostBinaryName,
+    );
+    await writeExecutable(debugPath, "stale-debug-worker");
+    await writeExecutable(releasePath, "current-release-worker");
+    await utimes(debugPath, 1_000, 1_000);
+    await utimes(releasePath, 2_000, 2_000);
+
+    const asset = await fixture.resolver.resolve(hostTarget);
+
+    assert.equal(asset.binaryPath, releasePath);
+    assert.equal(asset.source, "dev");
+    assert.deepEqual(asset.searchedPaths, [releasePath]);
 });
 
 test("WorkerAssetResolver discovers a host dev worker through pnpm's nested module layout", async (t) => {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, constants, readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import {
     chmod,
     mkdir,
@@ -113,10 +113,14 @@ export class WorkerAssetResolver {
         }
 
         if (hostTargetMatches) {
+            const devCandidates: Array<{
+                binaryPath: string;
+                source: WorkerAsset["source"];
+            }> = [];
             for (const projectRoot of findPortableDevshellProjectRoots(
                 this.#moduleDir,
             )) {
-                yield {
+                devCandidates.push({
                     binaryPath: resolve(
                         projectRoot,
                         "target",
@@ -125,8 +129,8 @@ export class WorkerAssetResolver {
                         workerBinaryFileName(target),
                     ),
                     source: "dev",
-                };
-                yield {
+                });
+                devCandidates.push({
                     binaryPath: resolve(
                         projectRoot,
                         "target",
@@ -135,9 +139,9 @@ export class WorkerAssetResolver {
                         workerBinaryFileName(target),
                     ),
                     source: "dev",
-                };
+                });
                 if (target.os !== "linux") {
-                    yield {
+                    devCandidates.push({
                         binaryPath: resolve(
                             projectRoot,
                             "target",
@@ -145,8 +149,8 @@ export class WorkerAssetResolver {
                             workerBinaryFileName(target),
                         ),
                         source: "dev",
-                    };
-                    yield {
+                    });
+                    devCandidates.push({
                         binaryPath: resolve(
                             projectRoot,
                             "target",
@@ -154,9 +158,15 @@ export class WorkerAssetResolver {
                             workerBinaryFileName(target),
                         ),
                         source: "dev",
-                    };
+                    });
                 }
             }
+            devCandidates.sort(
+                (left, right) =>
+                    readableFileMtimeMs(right.binaryPath) -
+                    readableFileMtimeMs(left.binaryPath),
+            );
+            yield* devCandidates;
         }
 
         const devshellHome = resolveWorkerDevshellHomeDirectory(environment);
@@ -523,6 +533,15 @@ function isReadableFile(path: string): boolean {
         return true;
     } catch {
         return false;
+    }
+}
+
+function readableFileMtimeMs(path: string): number {
+    if (!isReadableFile(path)) return Number.NEGATIVE_INFINITY;
+    try {
+        return statSync(path).mtimeMs;
+    } catch {
+        return Number.NEGATIVE_INFINITY;
     }
 }
 
