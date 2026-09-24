@@ -1,6 +1,7 @@
 import type {
     ExtensionAssetProjectionInput,
     ExtensionCapability,
+    ExtensionConfigChange,
     ExtensionJsonValue,
     ExtensionPaths,
     ExtensionProcessExit,
@@ -42,6 +43,7 @@ const sandboxWeakSetDelete = WeakSet.prototype.delete;
 const sandboxWeakSetHas = WeakSet.prototype.has;
 
 export interface ExtensionSandboxContextData {
+    config?: boolean;
     generation: string;
     id: string;
     paths: ExtensionPaths;
@@ -90,6 +92,8 @@ export type ExtensionSandboxCapabilityOperation =
     | "assets.projectBundle"
     | "assets.removeBundle"
     | "assets.resolveBundle"
+    | "config.get"
+    | "config.update"
     | "instances.create"
     | "instances.createSchema"
     | "instances.delete"
@@ -234,6 +238,10 @@ export type ExtensionHostToSandboxMessage =
           type: "healthPing";
       }
     | {
+          change: ExtensionConfigChange;
+          type: "configChange";
+      }
+    | {
           sessionId: string;
           type: "workerSessionClosed";
       }
@@ -287,6 +295,12 @@ export type SandboxAssetProjectInput = Omit<
 >;
 export type SandboxArtifactShareInput = ExtensionArtifactShareInput;
 export type SandboxArtifactTransferInput = ExtensionArtifactTransferInput;
+export interface SandboxConfigGetInput {
+    path: string;
+}
+export type SandboxConfigUpdateInput = Readonly<
+    Record<string, ExtensionJsonValue>
+>;
 export interface SandboxInstanceNameInput {
     name: string;
 }

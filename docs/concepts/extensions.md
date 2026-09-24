@@ -25,12 +25,12 @@ Capability 不是 contribution，Extension Point 也不是 permission。Transpor
 
 ## Manifest
 
-Manifest 在 activation 前描述静态事实：
+Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion` 使用 `x.y.z`；Host 接受同一 major 内不高于自身版本的 Extension。旧整数 `4` / `1` 作为迁移兼容分别解释为 `4.0.0` / `1.0.0`：
 
 ```json
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.0.0",
+    "apiVersion": "4.1.0",
     "activation": "lazy",
     "id": "example",
     "name": "Example",
@@ -38,6 +38,14 @@ Manifest 在 activation 前描述静态事实：
     "entry": "index.js",
     "hostDependencies": [],
     "capabilities": ["assets", "workers"],
+    "config": {
+        "default": { "enabled": false },
+        "schema": {
+            "type": "object",
+            "properties": { "enabled": { "type": "boolean" } },
+            "required": ["enabled"]
+        }
+    },
     "extensions": {
         "cli.native-commands": [{ "id": "example", "title": "Example" }]
     }
@@ -58,6 +66,10 @@ workers
 `artifacts` 与 `instances` 是 Control-owned management resources：前者提供受控的 share/transfer 管理，后者提供 instance 配置、状态、日志、事件与生命周期操作。它们不暴露 Control 内部 service/registry，也不是 generic RPC capability。
 
 `extensions` 按稳定的 domain-owned Extension Point id 保存静态 declaration。它不授予任何资源权限。
+
+`config` 是可选的静态 Config domain declaration，包含 JSON Schema 与默认 JSON object。它既不是 capability grant，也不是 Extension Point。声明后该 Extension 的 `ExtensionContext` 才会出现 `config`；未声明时 `context.config` 为 `undefined`。Extension-owned Config 值保存在该 Extension 的持久 `stateDirectory` 中，而不是 Control 主 `config.toml`：普通 remove 保留 state，`remove --purge` 才删除。
+
+Config domain 的写 authority 绑定当前 published generation。Candidate validation 可以读取并用候选 schema 验证已有值，但 publication 前不能写；generation 切换后旧 generation 的写入会被拒绝。
 
 Runtime binding 必须与 manifest declaration 严格对应：未声明 registration、重复 registration、声明后没有 binding、未知 point 或不合法的 domain declaration 都会使 candidate activation 失败。
 
@@ -117,6 +129,7 @@ identity
 paths
 logger
 capabilities
+config?
 register(...)
 ```
 

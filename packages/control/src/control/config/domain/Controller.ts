@@ -3,46 +3,43 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { ControlConfigMutationRunner } from "../editor/Lock.js";
 import {
     assertConfigDomainValue,
-    type ConfigDomainOwner,
+    type ConfigDomainDefinition,
     type ConfigRegistry,
+    normalizeConfigDomainDefinition,
     sameConfigOwner,
 } from "../Registry.js";
 import { ConfigDomainStore } from "./Store.js";
 
 export interface ConfigDomainControllerOptions {
-    id: string;
+    definition: ConfigDomainDefinition;
     mutationRunner: ControlConfigMutationRunner;
-    owner: ConfigDomainOwner;
     registry: ConfigRegistry;
     store: ConfigDomainStore;
 }
 
 export class ConfigDomainController {
-    readonly #id: string;
+    readonly #definition: ConfigDomainDefinition;
     readonly #mutationRunner: ControlConfigMutationRunner;
-    readonly #owner: ConfigDomainOwner;
     readonly #registry: ConfigRegistry;
     readonly #store: ConfigDomainStore;
 
     constructor(options: ConfigDomainControllerOptions) {
-        this.#id = options.id;
+        this.#definition = normalizeConfigDomainDefinition(options.definition);
         this.#mutationRunner = options.mutationRunner;
-        this.#owner = Object.freeze({ ...options.owner });
         this.#registry = options.registry;
         this.#store = options.store;
     }
 
     async read(): Promise<Readonly<Record<string, JsonValue>>> {
         return await this.#mutationRunner.runExclusive(async () => {
-            const definition = this.#requireOwnedDefinition();
             const stored = await this.#store.read();
-            const value = stored ?? definition.defaultValue;
+            const value = stored ?? this.#definition.defaultValue;
             if (value === undefined) {
                 throw new Error(
-                    `Config domain ${this.#id} does not define a default value.`,
+                    `Config domain ${this.#definition.id} does not define a default value.`,
                 );
             }
-            assertConfigDomainValue(definition, value);
+            assertConfigDomainValue(this.#definition, value);
             return cloneConfigValue(value);
         });
     }
@@ -50,23 +47,48 @@ export class ConfigDomainController {
     async write(
         value: Readonly<Record<string, JsonValue>>,
     ): Promise<Readonly<Record<string, JsonValue>>> {
+        return (await this.update(() => value)).next;
+    }
+
+    async update(
+        transform: (
+            current: Readonly<Record<string, JsonValue>>,
+        ) => Readonly<Record<string, JsonValue>>,
+    ): Promise<{
+        next: Readonly<Record<string, JsonValue>>;
+        previous: Readonly<Record<string, JsonValue>>;
+    }> {
         return await this.#mutationRunner.runExclusive(async () => {
-            const definition = this.#requireOwnedDefinition();
-            assertConfigDomainValue(definition, value);
-            const cloned = cloneConfigValue(value);
-            await this.#store.write(cloned);
-            return cloneConfigValue(cloned);
+            this.#assertCurrentOwner();
+            const stored = await this.#store.read();
+            const current = stored ?? this.#definition.defaultValue;
+            if (current === undefined) {
+                throw new Error(
+                    `Config domain ${this.#definition.id} does not define a default value.`,
+                );
+            }
+            assertConfigDomainValue(this.#definition, current);
+            const previous = cloneConfigValue(current);
+            const next = cloneConfigValue(transform(previous));
+            assertConfigDomainValue(this.#definition, next);
+            await this.#store.write(next);
+            return {
+                next: cloneConfigValue(next),
+                previous,
+            };
         });
     }
 
-    #requireOwnedDefinition() {
-        const definition = this.#registry.require(this.#id);
-        if (!sameConfigOwner(definition.owner, this.#owner)) {
+    #assertCurrentOwner(): void {
+        const current = this.#registry.get(this.#definition.id);
+        if (
+            current === undefined ||
+            !sameConfigOwner(current.owner, this.#definition.owner)
+        ) {
             throw new Error(
-                `Config domain ${this.#id} ownership changed while this generation was active.`,
+                `Config domain ${this.#definition.id} is not writable by this generation.`,
             );
         }
-        return definition;
     }
 }
 

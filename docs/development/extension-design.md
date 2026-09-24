@@ -218,6 +218,7 @@ Extension Manifest
 ├── entry
 ├── dependencies
 ├── capabilities
+├── config (optional)
 └── extensions
 ```
 
@@ -257,7 +258,26 @@ privileges
 
 `extensions` 这个字段名在实现前仍可做最后一次命名审查，但其**语义位置已经确定**：它描述 Extension Point declarations，不描述 capability。
 
-### 4.3 为什么需要静态 declaration
+### 4.3 `config`
+
+`config` 声明一个由当前 Extension identity 拥有的持久 Config domain。它包含 JSON Schema 和默认 JSON object，但不授予新的 host resource authority，因此不进入 `capabilities`；它也不是 contribution，因此不进入 `extensions`。
+
+```json
+{
+    "config": {
+        "default": { "enabled": false },
+        "schema": {
+            "type": "object",
+            "properties": { "enabled": { "type": "boolean" } },
+            "required": ["enabled"]
+        }
+    }
+}
+```
+
+Control 在静态 catalog publication 时发布 Config domain ownership。Extension state 中的 Config 文件跨普通 remove/reinstall 保留，purge 时随 state 一起删除。Candidate generation 可以读取已有值来验证 schema compatibility；只有当前 published generation 能写，因此 replacement 后旧 generation 无法覆盖新配置。
+
+### 4.4 为什么需要静态 declaration
 
 如果所有 Extension Point 都只能在 `activate()` 后动态发现，则 Control 必须先执行所有 Extension，才能知道：
 
@@ -277,7 +297,7 @@ install/load manifest
 
 这与 VS Code contribution points 和 IntelliJ descriptor-based extensions 的经验一致。
 
-### 4.4 declaration 不是 implementation
+### 4.5 declaration 不是 implementation
 
 Manifest 只存可序列化 metadata。
 

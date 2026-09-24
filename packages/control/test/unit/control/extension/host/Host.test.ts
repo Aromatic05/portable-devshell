@@ -19,6 +19,7 @@ import {
     type ExtensionRegistrySnapshot,
 } from "../../../../../src/control/extension/state/Model.ts";
 import type { ExtensionRegistryPort } from "../../../../../src/control/extension/state/Store.ts";
+import { createCoreConfigRegistry } from "../../../../../src/control/config/Registry.ts";
 
 class MemoryRegistry implements ExtensionRegistryPort {
     beforeWrite?: (snapshot: ExtensionRegistrySnapshot) => Promise<void> | void;
@@ -56,6 +57,23 @@ function manifest(
         name: id,
         schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
         version: generation,
+    };
+}
+
+function configuredManifest(
+    id: string,
+    generation: string,
+): ExtensionManifest {
+    return {
+        ...manifest(id, generation),
+        config: {
+            default: { enabled: false },
+            schema: {
+                properties: { enabled: { type: "boolean" } },
+                required: ["enabled"],
+                type: "object",
+            },
+        },
     };
 }
 
@@ -140,6 +158,44 @@ async function commandText(
         lease.release();
     }
 }
+
+test("Extension host publishes Config domains with the static catalog lifecycle", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: true, selectedGeneration: "a" } },
+        schemaVersion: 1,
+    });
+    const configRegistry = createCoreConfigRegistry();
+    const host = new ExtensionHost({
+        configRegistry,
+        loader: createLoader(
+            async () => {
+                throw new Error("lazy Config catalog must not activate code");
+            },
+            async (id, generation) => configuredManifest(id, generation),
+        ),
+        registry,
+    });
+
+    await host.start();
+    assert.deepEqual(configRegistry.require("example").owner, {
+        extensionId: "example",
+        generation: "a",
+        kind: "extension",
+    });
+
+    await host.disable("example");
+    assert.equal(configRegistry.get("example"), undefined);
+
+    await host.enable("example");
+    assert.deepEqual(configRegistry.require("example").owner, {
+        extensionId: "example",
+        generation: "a",
+        kind: "extension",
+    });
+
+    await host.stop();
+    assert.equal(configRegistry.get("example"), undefined);
+});
 
 test("Extension host swaps atomically while an old in-flight request drains on its original generation", async () => {
     const registry = new MemoryRegistry({

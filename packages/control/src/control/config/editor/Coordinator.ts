@@ -15,6 +15,11 @@ import { HttpEndpointPreflight } from "../../../server/endpoint/Http.js";
 import { InstanceFactory } from "../../instance/create/Factory.js";
 import type { InstanceRegistry } from "../../instance/registry/Registry.js";
 import {
+    diffConfigPaths,
+    parseConfigPath,
+    setConfigPathValue,
+} from "../Path.js";
+import {
     ConfigEngine,
     type ConfigEngineOptions,
 } from "../Engine.js";
@@ -96,6 +101,77 @@ export class ConfigEditorCoordinator {
 
     validateConfigDraft(params: JsonValue | undefined): JsonValue {
         return this.#engine.validateConfigDraft(params);
+    }
+
+    async updateCorePaths(
+        patch: Readonly<Record<string, JsonValue>>,
+    ): Promise<void> {
+        await this.#engine.runExclusive(async () => {
+            const previous = this.#engine.current;
+            const next = structuredClone(previous);
+            const root = next as unknown as Record<string, JsonValue>;
+            for (const [path, value] of Object.entries(patch)) {
+                const parsed = parseConfigPath(path);
+                const definition = this.#engine.requireDomain(parsed.domain);
+                if (definition.owner.kind !== "core") {
+                    throw new TypeError(`Config path ${path} is not owned by Core.`);
+                }
+                const domain = root[parsed.domain];
+                if (
+                    typeof domain !== "object" ||
+                    domain === null ||
+                    Array.isArray(domain)
+                ) {
+                    throw new TypeError(
+                        `Core Config domain ${parsed.domain} is not an object.`,
+                    );
+                }
+                setConfigPathValue(
+                    domain as Record<string, JsonValue>,
+                    parsed.segments,
+                    value,
+                );
+            }
+            const validated = this.#engine.validateConfig(next);
+            const mcpChanged =
+                diffConfigPaths(previous.mcp, validated.mcp, "mcp").length > 0;
+            const webChanged =
+                diffConfigPaths(previous.web, validated.web, "web").length > 0;
+            const controlChanged =
+                diffConfigPaths(previous.control, validated.control, "control")
+                    .length > 0;
+            if (!mcpChanged && !webChanged && !controlChanged) return;
+            if (mcpChanged || webChanged)
+                await this.#engine.preflight(previous, validated);
+            await this.#engine.persist(validated);
+            const hotApplied = await this.#engine.applyRuntimeOrRestore(
+                previous,
+                validated,
+                {
+                    instanceAuth: false,
+                    mcp: mcpChanged,
+                    web: webChanged,
+                },
+            );
+            this.#engine.finalizeApplyResult(
+                previous,
+                validated,
+                [
+                    ...(mcpChanged
+                        ? [
+                              {
+                                  kind: "mcp.endpoint.updated" as const,
+                                  target: "mcp",
+                              },
+                          ]
+                        : []),
+                    ...(webChanged
+                        ? [{ kind: "web.updated" as const, target: "web" }]
+                        : []),
+                ],
+                hotApplied,
+            );
+        });
     }
 
     async updateConfig(params: JsonValue | undefined): Promise<JsonValue> {

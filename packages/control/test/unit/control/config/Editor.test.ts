@@ -10,6 +10,7 @@ import {
     InstanceRegistryFactory,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
+import { ConfigChangeHub } from "../../../../src/control/config/Change.ts";
 import {
     MASKED_CONFIG_TOKEN,
     normalizeConfigInstanceDraft,
@@ -2236,6 +2237,67 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
     await service.deleteInstance({ instanceName: "demo-local" });
     assert.deepEqual(unregistered, ["demo-local", "demo-local"]);
     assert.equal(registry.get("demo-local"), undefined);
+});
+
+test("config editor applies Core path updates transactionally and restores on runtime failure", async () => {
+    let config = createConfig();
+    const writes: ControlConfig[] = [];
+    const runtimeChanges: Array<{
+        mcp: boolean;
+        web: boolean;
+    }> = [];
+    const committed: string[][] = [];
+    const changeHub = new ConfigChangeHub();
+    changeHub.onChange((change) => committed.push([...change.paths]));
+    let failRuntime = false;
+    const service = new ConfigEditorCoordinator({
+        changeHub,
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                writes.push(structuredClone(nextConfig));
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        runtimeApply: {
+            async apply(_previous, _next, changes) {
+                runtimeChanges.push({ mcp: changes.mcp, web: changes.web });
+                if (failRuntime) throw new Error("runtime apply failed");
+                return true;
+            },
+        },
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await service.updateCorePaths({
+        "mcp.publicBaseUrl": "https://public.example.test/mcp",
+    });
+    assert.equal(
+        config.mcp.publicBaseUrl,
+        "https://public.example.test/mcp",
+    );
+    assert.deepEqual(runtimeChanges, [{ mcp: true, web: false }]);
+    assert.deepEqual(committed, [["mcp.publicBaseUrl"]]);
+
+    const previousWebUrl = config.web.publicBaseUrl;
+    failRuntime = true;
+    await assert.rejects(
+        async () =>
+            await service.updateCorePaths({
+                "web.publicBaseUrl": "https://public.example.test/web",
+            }),
+        /runtime apply failed/u,
+    );
+    assert.equal(config.web.publicBaseUrl, previousWebUrl);
+    assert.equal(
+        writes.at(-1)?.web.publicBaseUrl,
+        previousWebUrl,
+        "rollback persists the previous Core Config",
+    );
+    assert.deepEqual(committed, [["mcp.publicBaseUrl"]]);
 });
 
 function createConfig() {

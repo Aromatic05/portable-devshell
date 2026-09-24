@@ -144,6 +144,7 @@ export class ControlRuntimeMcp {
             instanceRegistry: options.state.instances,
             markRestartControlRequired: () =>
                 options.state.markRestartControlRequired(),
+            changeHub: options.state.configChanges,
             mutationRunner: options.state.configMutations,
             registry: options.state.configRegistry,
             runtimeApply: {

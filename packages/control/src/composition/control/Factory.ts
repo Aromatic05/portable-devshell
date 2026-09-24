@@ -15,6 +15,7 @@ import type { ExtensionInstallLimits } from "../../control/extension/install/Pol
 import { ExtensionLoader } from "../../control/extension/generation/discovery/Loader.js";
 import { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import { ExtensionRegistryStore } from "../../control/extension/state/Store.js";
+import { ExtensionConfigControl } from "../../control/extension/config/Control.js";
 import { createControlExtensionPointRegistry } from "../Extension.js";
 import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
@@ -110,6 +111,7 @@ export class ControlRuntimeFactory {
                 state: options.state,
             });
             const extensions = new ExtensionHost({
+                configRegistry: options.state.configRegistry,
                 loader: new ExtensionLoader({
                     artifactFactory: ({ allowed, extensionId }) =>
                         new ExtensionArtifactCapabilityControl({
@@ -130,6 +132,24 @@ export class ControlRuntimeFactory {
                                     extensionId,
                                     input,
                                 ),
+                        }),
+                    configFactory: ({
+                        declaration,
+                        extensionId,
+                        generation,
+                        stateDirectory,
+                    }) =>
+                        new ExtensionConfigControl({
+                            changeHub: options.state.configChanges,
+                            declaration,
+                            extensionId,
+                            generation,
+                            mutationRunner: options.state.configMutations,
+                            readCoreConfig: () => options.state.requireConfig(),
+                            registry: options.state.configRegistry,
+                            stateDirectory,
+                            updateCoreConfig: async (patch) =>
+                                await mcp.configEditor.updateCorePaths(patch),
                         }),
                     instanceFactory: ({ allowed, extensionId }) =>
                         new ExtensionInstanceCapabilityControl({

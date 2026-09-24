@@ -16,6 +16,14 @@ import {
 } from "./generation/discovery/Catalog.js";
 import type { ExtensionPointRegistry } from "./generation/registration/PointRegistry.js";
 import {
+    ConfigRegistry,
+    createCoreConfigRegistry,
+} from "../config/Registry.js";
+import {
+    assertExtensionConfigAccess,
+    extensionConfigDomainDefinition,
+} from "./config/Control.js";
+import {
     cloneExtensionRegistry,
     type ExtensionRegistryEntry,
     type ExtensionRegistrySnapshot,
@@ -36,22 +44,27 @@ interface ExtensionFailure {
 export class ExtensionHost {
     readonly #active = new Map<string, ExtensionGeneration>();
     readonly #catalog: ExtensionCatalog;
+    readonly #configRegistry: ConfigRegistry;
     readonly #failures = new Map<string, ExtensionFailure>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
     readonly #retired = new Map<string, Set<ExtensionGeneration>>();
     readonly #retirementFailures = new Map<string, unknown[]>();
     readonly #retirementPromises = new Set<Promise<void>>();
+    readonly #publishedConfigDomains = new Set<string>();
     #mutationTail: Promise<void> = Promise.resolve();
     #registrySnapshot?: ExtensionRegistrySnapshot;
     #started = false;
     #stopping = false;
 
     constructor(options: {
+        configRegistry?: ConfigRegistry;
         loader: ExtensionGenerationLoader;
         registry: ExtensionRegistryPort;
     }) {
         this.#catalog = new ExtensionCatalog(options.loader.points);
+        this.#configRegistry =
+            options.configRegistry ?? createCoreConfigRegistry();
         this.#loader = options.loader;
         this.#registry = options.registry;
     }
@@ -272,6 +285,11 @@ export class ExtensionHost {
                     generation,
                     candidate.manifest,
                 );
+                this.#assertConfigCanReplace(
+                    id,
+                    generation,
+                    candidate.manifest,
+                );
                 if (candidate.state === "faulted") {
                     throw (
                         candidate.faultError ??
@@ -336,8 +354,13 @@ export class ExtensionHost {
             }
             await this.#registry.write(next);
             this.#registrySnapshot = next;
-            if (enabled) this.#catalog.replace(id, generation, candidate.manifest);
-            else this.#catalog.remove(id);
+            if (enabled) {
+                this.#replaceConfigDomain(id, generation, candidate.manifest);
+                this.#catalog.replace(id, generation, candidate.manifest);
+            } else {
+                this.#removeConfigDomain(id);
+                this.#catalog.remove(id);
+            }
 
             const active = this.#active.get(id);
             if (active !== undefined) {
@@ -414,6 +437,7 @@ export class ExtensionHost {
                 await this.#registry.write(next);
                 this.#registrySnapshot = next;
             }
+            this.#removeConfigDomain(id);
             this.#catalog.remove(id);
             const active = this.#active.get(id);
             if (active !== undefined) {
@@ -464,6 +488,7 @@ export class ExtensionHost {
             delete next.extensions[id];
             await this.#registry.write(next);
             this.#registrySnapshot = next;
+            this.#removeConfigDomain(id);
             this.#catalog.remove(id);
             this.#failures.delete(id);
         });
@@ -511,6 +536,8 @@ export class ExtensionHost {
                 this.#trackRetired(id, generation);
             }
             this.#active.clear();
+            for (const id of [...this.#publishedConfigDomains])
+                this.#removeConfigDomain(id);
         });
         const settled = await Promise.allSettled([...this.#retirementPromises]);
         const failures = uniqueFailures([
@@ -554,6 +581,7 @@ export class ExtensionHost {
             try {
                 manifest = await this.#loader.readManifest(id, generation);
                 this.#catalog.assertCanReplace(id, generation, manifest);
+                this.#assertConfigCanReplace(id, generation, manifest);
             } catch (error) {
                 selectedFailure ??= error;
                 this.#recordFailure(id, generation, error);
@@ -572,6 +600,7 @@ export class ExtensionHost {
                 await this.#registry.write(next);
                 this.#registrySnapshot = next;
             }
+            this.#replaceConfigDomain(id, generation, manifest);
             this.#catalog.replace(id, generation, manifest);
             this.#failures.delete(id);
             return;
@@ -709,6 +738,7 @@ export class ExtensionHost {
     ): Promise<ExtensionManifest> {
         const manifest = await this.#loader.readManifest(id, generation);
         this.#catalog.assertCanReplace(id, generation, manifest);
+        this.#assertConfigCanReplace(id, generation, manifest);
         return manifest;
     }
 
@@ -720,6 +750,11 @@ export class ExtensionHost {
     ): Promise<void> {
         try {
             this.#catalog.assertCanReplace(
+                id,
+                candidate.generation,
+                candidate.manifest,
+            );
+            this.#assertConfigCanReplace(
                 id,
                 candidate.generation,
                 candidate.manifest,
@@ -781,8 +816,63 @@ export class ExtensionHost {
             );
         }
         this.#registrySnapshot = nextRegistry;
+        this.#replaceConfigDomain(
+            id,
+            candidate.generation,
+            candidate.manifest,
+        );
         this.#catalog.replace(id, candidate.generation, candidate.manifest);
         this.#publish(id, candidate);
+    }
+
+    #assertConfigCanReplace(
+        id: string,
+        generation: string,
+        manifest: ExtensionManifest,
+    ): void {
+        if (manifest.config === undefined) return;
+        assertExtensionConfigAccess(id, this.#configRegistry, manifest.config);
+        const definition = extensionConfigDomainDefinition(
+            id,
+            generation,
+            manifest.config,
+        );
+        if (definition !== undefined)
+            this.#configRegistry.assertCanReplace(definition);
+    }
+
+    #replaceConfigDomain(
+        id: string,
+        generation: string,
+        manifest: ExtensionManifest,
+    ): void {
+        if (manifest.config === undefined) {
+            this.#removeConfigDomain(id);
+            return;
+        }
+        assertExtensionConfigAccess(id, this.#configRegistry, manifest.config);
+        const definition = extensionConfigDomainDefinition(
+            id,
+            generation,
+            manifest.config,
+        );
+        if (definition === undefined) {
+            this.#removeConfigDomain(id);
+            return;
+        }
+        this.#configRegistry.replace(definition);
+        this.#publishedConfigDomains.add(id);
+    }
+
+    #removeConfigDomain(id: string): void {
+        const definition = this.#configRegistry.get(id);
+        if (
+            definition?.owner.kind === "extension" &&
+            definition.owner.extensionId === id
+        ) {
+            this.#configRegistry.remove(id, definition.owner);
+        }
+        this.#publishedConfigDomains.delete(id);
     }
 
     #publish(id: string, candidate: ExtensionGeneration): void {

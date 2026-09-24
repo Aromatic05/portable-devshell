@@ -1,5 +1,6 @@
 import type {
     ExtensionCapability,
+    ExtensionConfigAccess,
     ExtensionJsonValue,
     ExtensionManifest,
     ExtensionPointDeclaration,
@@ -20,18 +21,6 @@ const capabilities = new Set<ExtensionCapability>([
 export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (!isRecord(value))
         throw new TypeError("Extension manifest must be an object.");
-    assertOnlyKeys(value, [
-        "activation",
-        "apiVersion",
-        "capabilities",
-        "entry",
-        "extensions",
-        "hostDependencies",
-        "id",
-        "name",
-        "schemaVersion",
-        "version",
-    ]);
 
     const schemaVersion = readCompatibilityVersion(
         value.schemaVersion,
@@ -42,15 +31,30 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         EXTENSION_MANIFEST_SCHEMA_VERSION,
         "schemaVersion",
     );
+    const schema = parseSemVer(schemaVersion, "schemaVersion");
+    const supportsActivation =
+        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
+    const supportsConfig =
+        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
+    assertOnlyKeys(value, [
+        ...(supportsActivation ? ["activation"] : []),
+        "apiVersion",
+        "capabilities",
+        ...(supportsConfig ? ["config"] : []),
+        "entry",
+        "extensions",
+        "hostDependencies",
+        "id",
+        "name",
+        "schemaVersion",
+        "version",
+    ]);
+
     const apiVersion = readCompatibilityVersion(value.apiVersion, "apiVersion");
     assertCompatibleVersion(apiVersion, EXTENSION_API_VERSION, "apiVersion");
-    const activation =
-        compareSemVer(
-            parseSemVer(schemaVersion, "schemaVersion"),
-            parseSemVer("1.1.0", "schemaVersion"),
-        ) < 0 && value.activation === undefined
-            ? "lazy"
-            : readActivationPolicy(value.activation);
+    const activation = supportsActivation
+        ? readActivationPolicy(value.activation)
+        : "lazy";
     const id = readLocalId(value.id, "id");
     const entry = readString(value.entry, "entry");
     if (
@@ -85,6 +89,9 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         activation,
         apiVersion,
         capabilities: parsedCapabilities,
+        ...(supportsConfig && value.config !== undefined
+            ? { config: readConfig(value.config) }
+            : {}),
         entry,
         extensions: readExtensions(value.extensions),
         hostDependencies: readHostDependencies(value.hostDependencies),
@@ -93,6 +100,77 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         schemaVersion,
         version: readString(value.version, "version"),
     };
+}
+
+function readConfig(value: unknown): NonNullable<ExtensionManifest["config"]> {
+    if (!isRecord(value))
+        throw new TypeError("Extension manifest config must be an object.");
+    assertOnlyKeys(value, ["access", "default", "schema"]);
+    const hasDefault = Object.hasOwn(value, "default");
+    const hasSchema = Object.hasOwn(value, "schema");
+    if (hasDefault !== hasSchema) {
+        throw new TypeError(
+            "Extension manifest config.default and config.schema must be declared together.",
+        );
+    }
+    const access = readConfigAccess(value.access);
+    if (!hasDefault && access === undefined) {
+        throw new TypeError(
+            "Extension manifest config must declare an owned schema or access requests.",
+        );
+    }
+    if (!hasDefault) return { access: access! };
+
+    const defaultValue = cloneJsonValue(value.default, "config.default");
+    if (!isRecord(defaultValue)) {
+        throw new TypeError(
+            "Extension manifest config.default must be a JSON object.",
+        );
+    }
+    const schema = cloneJsonValue(value.schema, "config.schema");
+    if (typeof schema !== "boolean" && !isRecord(schema)) {
+        throw new TypeError(
+            "Extension manifest config.schema must be a JSON Schema object or boolean.",
+        );
+    }
+    return {
+        ...(access === undefined ? {} : { access }),
+        default: defaultValue as Record<string, ExtensionJsonValue>,
+        schema: schema as
+            | boolean
+            | Record<string, ExtensionJsonValue>,
+    };
+}
+
+function readConfigAccess(
+    value: unknown,
+): Readonly<Record<string, ExtensionConfigAccess>> | undefined {
+    if (value === undefined) return undefined;
+    if (!isRecord(value))
+        throw new TypeError("Extension manifest config.access must be an object.");
+    const access: Record<string, ExtensionConfigAccess> = {};
+    for (const [path, permission] of Object.entries(value)) {
+        if (!isConfigPath(path)) {
+            throw new TypeError(
+                `Invalid Extension Config access path: ${path}.`,
+            );
+        }
+        if (permission !== "read" && permission !== "read-write") {
+            throw new TypeError(
+                `Extension Config access for ${path} must be read or read-write.`,
+            );
+        }
+        access[path] = permission;
+    }
+    if (Object.keys(access).length === 0)
+        throw new TypeError(
+            "Extension manifest config.access must not be empty.",
+        );
+    return access;
+}
+
+function isConfigPath(value: string): boolean {
+    return /^[a-z][a-z0-9-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)+$/u.test(value);
 }
 
 function readActivationPolicy(
@@ -138,7 +216,7 @@ function assertCompatibleVersion(
         compareSemVer(requestedVersion, currentVersion) > 0
     ) {
         throw new TypeError(
-            `Unsupported Extension manifest ${field}: ${requested}. Host supports ${current}.`,
+            `Unsupported Extension ${field}: ${requested}. Host supports ${current}.`,
         );
     }
 }

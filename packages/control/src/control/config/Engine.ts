@@ -26,6 +26,8 @@ import {
     createCoreConfigRegistry,
     type ConfigDomainDefinition,
 } from "./Registry.js";
+import { ConfigChangeHub } from "./Change.js";
+import { diffConfigPaths } from "./Path.js";
 
 export interface ConfigRuntimeChangeSet {
     instanceAuth: boolean;
@@ -38,6 +40,7 @@ export interface ControlConfigWriter {
 }
 
 export interface ConfigEngineOptions {
+    changeHub?: ConfigChangeHub;
     configStore: ControlConfigWriter;
     getConfig: () => ControlConfig;
     getRestartControlRequired?: () => boolean;
@@ -63,6 +66,7 @@ export interface ConfigEngineOptions {
 }
 
 export class ConfigEngine {
+    readonly #changeHub?: ConfigChangeHub;
     readonly #configStore: ControlConfigWriter;
     readonly #getConfig: () => ControlConfig;
     readonly #getRestartControlRequired: () => boolean;
@@ -78,6 +82,7 @@ export class ConfigEngine {
     readonly #validator: ControlConfigValidator;
 
     constructor(options: ConfigEngineOptions) {
+        this.#changeHub = options.changeHub;
         this.#configStore = options.configStore;
         this.#getConfig = options.getConfig;
         this.#getRestartControlRequired =
@@ -180,6 +185,11 @@ export class ConfigEngine {
             hotApplied,
         );
         if (result.restartControlRequired) this.#markRestartControlRequired();
+        this.#changeHub?.publish([
+            ...diffConfigPaths(previous.control, next.control, "control"),
+            ...diffConfigPaths(previous.mcp, next.mcp, "mcp"),
+            ...diffConfigPaths(previous.web, next.web, "web"),
+        ]);
         return result as unknown as JsonValue;
     }
 

@@ -7,6 +7,28 @@ export type ExtensionJsonValue =
     | ExtensionJsonValue[]
     | { [key: string]: ExtensionJsonValue };
 
+export type ExtensionConfigAccess = "read" | "read-write";
+
+export interface ExtensionConfigDeclaration {
+    readonly access?: Readonly<Record<string, ExtensionConfigAccess>>;
+    readonly default?: Readonly<Record<string, ExtensionJsonValue>>;
+    readonly schema?:
+        | boolean
+        | Readonly<Record<string, ExtensionJsonValue>>;
+}
+
+export interface ExtensionConfigChange {
+    readonly paths: readonly string[];
+}
+
+export interface ExtensionConfig {
+    get(path: string): Promise<ExtensionJsonValue | undefined>;
+    onChange(listener: (change: ExtensionConfigChange) => void): () => void;
+    update(
+        patch: Readonly<Record<string, ExtensionJsonValue>>,
+    ): Promise<void>;
+}
+
 export type ExtensionActivationPolicy = "eager" | "lazy";
 
 /** Host-managed runtime resource categories granted to one Extension generation. */
@@ -27,6 +49,7 @@ export interface ExtensionManifest {
     activation: ExtensionActivationPolicy;
     apiVersion: string;
     capabilities: readonly ExtensionCapability[];
+    config?: ExtensionConfigDeclaration;
     entry: string;
     /** Static declarations keyed by stable domain-owned Extension Point id. */
     extensions: Readonly<Record<string, readonly ExtensionPointDeclaration[]>>;
@@ -236,6 +259,7 @@ export function defineExtensionPoint<
 
 export interface ExtensionContext {
     readonly capabilities: ExtensionCapabilities;
+    readonly config?: ExtensionConfig;
     readonly generation: string;
     readonly id: string;
     readonly logger: ExtensionLogger;

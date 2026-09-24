@@ -6,6 +6,7 @@ import test from "node:test";
 import {
     EXTENSION_API_VERSION,
     EXTENSION_MANIFEST_SCHEMA_VERSION,
+    type ExtensionConfigDeclaration,
     type ExtensionContext,
     type ExtensionPointDeclaration,
     type ExtensionWorkerSession,
@@ -29,6 +30,7 @@ interface LoaderHarness {
     writeGeneration(input?: {
         apiVersion?: number | string;
         capabilities?: string[];
+        config?: ExtensionConfigDeclaration;
         extensions?: Record<string, readonly ExtensionPointDeclaration[]>;
         generation?: string;
         id?: string;
@@ -58,6 +60,7 @@ async function createHarness(): Promise<LoaderHarness> {
                     activation: "lazy",
                     apiVersion: input.apiVersion ?? EXTENSION_API_VERSION,
                     capabilities: input.capabilities ?? [],
+                    ...(input.config === undefined ? {} : { config: input.config }),
                     entry: "extension.mjs",
                     extensions: input.extensions ?? {},
                     id: input.manifestId ?? id,
@@ -147,7 +150,7 @@ test("Extension loader reads and validates a generation manifest without activat
     await assert.rejects(access(harness.paths.stateDirectory(id)));
 });
 
-test("Extension loader returns a ready invisible candidate with narrow immutable v5 context", async (t) => {
+test("Extension loader returns a ready invisible candidate with narrow immutable Extension context", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({
@@ -186,6 +189,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     assert.equal(Object.isFrozen(seenContext?.capabilities), true);
     assert.equal(seenContext?.id, id);
     assert.equal(seenContext?.generation, generation);
+    assert.equal(seenContext?.config, undefined);
     assert.equal(seenContext?.capabilities.assets, undefined);
     assert.equal(seenContext?.capabilities.processes, undefined);
     assert.ok(seenContext?.capabilities.workers);
@@ -226,6 +230,62 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     await assert.rejects(
         access(harness.paths.runtimeDirectory(id, generation)),
     );
+});
+
+test("Extension loader validates declared Config and injects context.config", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const declaration: ExtensionConfigDeclaration = {
+        default: { enabled: false },
+        schema: {
+            properties: { enabled: { type: "boolean" } },
+            required: ["enabled"],
+            type: "object",
+        },
+    };
+    const { id, generation } = await harness.writeGeneration({ config: declaration });
+    const calls: string[] = [];
+    let seenContext: ExtensionContext | undefined;
+    const loader = new ExtensionLoader({
+        configFactory: (input) => {
+            assert.deepEqual(input.declaration, declaration);
+            assert.equal(input.extensionId, id);
+            assert.equal(input.generation, generation);
+            assert.equal(input.stateDirectory, harness.paths.stateDirectory(id));
+            return {
+                close() {
+                    calls.push("close");
+                },
+                async get(path) {
+                    calls.push(`get:${path}`);
+                    return path === `${id}.enabled` ? false : undefined;
+                },
+                onChange() {
+                    return () => undefined;
+                },
+                async update() {},
+                async validate() {
+                    calls.push("validate");
+                },
+            };
+        },
+        importer: async () => ({
+            async activate(context: ExtensionContext) {
+                seenContext = context;
+                assert.equal(await context.config?.get(`${id}.enabled`), false);
+            },
+        }),
+        instances: { list: () => [] } as never,
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+    });
+
+    const candidate = await loader.load(id, generation);
+    assert.equal(candidate.state, "ready");
+    assert.ok(seenContext?.config);
+    assert.deepEqual(calls, ["validate", `get:${id}.enabled`]);
+    await candidate.retire();
+    assert.deepEqual(calls, ["validate", `get:${id}.enabled`, "close"]);
 });
 
 test("Extension loader isolates runtime directories for overlapping loads of the same code generation", async (t) => {

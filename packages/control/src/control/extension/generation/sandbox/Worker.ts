@@ -8,6 +8,8 @@ import type {
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
     ExtensionCapabilities,
+    ExtensionConfig,
+    ExtensionConfigChange,
     ExtensionContext,
     ExtensionJsonValue,
     ExtensionLogger,
@@ -53,6 +55,8 @@ import {
     type SandboxArtifactShareInput,
     type SandboxArtifactTransferInput,
     type SandboxAssetProjectInput,
+    type SandboxConfigGetInput,
+    type SandboxConfigUpdateInput,
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
@@ -94,6 +98,7 @@ interface PendingProcessEvents {
 
 const data = workerData as ExtensionSandboxWorkerData;
 const capabilityRequests = new Map<string, PendingCapabilityRequest>();
+const configListeners = new Set<(change: ExtensionConfigChange) => void>();
 const interfaceRequests = new Map<string, PendingInterfaceRequest>();
 const invocationControllers = new Map<string, AbortController>();
 const registrations = new Map<
@@ -207,6 +212,10 @@ async function acceptHostMessage(
             pending.reject(deserializeSandboxError(message.error));
             return;
         }
+        case "configChange":
+            for (const listener of [...configListeners])
+                listener(message.change);
+            return;
         case "workerSessionClosed": {
             const close = workerSessionClosures.get(message.sessionId);
             if (close === undefined) return;
@@ -344,6 +353,7 @@ function createContext(): ExtensionContext {
     };
     return Object.freeze({
         capabilities,
+        ...(data.context.config ? { config: createConfig() } : {}),
         generation: data.context.generation,
         id: data.context.id,
         logger: createLogger(),
@@ -373,6 +383,28 @@ function createLogger(): ExtensionLogger {
         warn: (message, details) => write("warn", message, details),
     };
     return Object.freeze(logger);
+}
+
+function createConfig(): ExtensionConfig {
+    return Object.freeze({
+        get: async (path: string) =>
+            (await requestCapability("config.get", {
+                path,
+            } satisfies SandboxConfigGetInput)) as
+                | ExtensionJsonValue
+                | undefined,
+        onChange: (listener: (change: ExtensionConfigChange) => void) => {
+            configListeners.add(listener);
+            return () => configListeners.delete(listener);
+        },
+        update: async (
+            patch: Readonly<Record<string, ExtensionJsonValue>>,
+        ) => {
+            await requestCapability("config.update", {
+                ...patch,
+            } satisfies SandboxConfigUpdateInput);
+        },
+    });
 }
 
 function createArtifactCapability(): ExtensionArtifactCapability {

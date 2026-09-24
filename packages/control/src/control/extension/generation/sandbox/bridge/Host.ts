@@ -10,6 +10,7 @@ import {
 import type {
     ExtensionAssetCapability,
     ExtensionCapability,
+    ExtensionConfig,
     ExtensionJsonValue,
     ExtensionLogger,
     ExtensionManagedProcess,
@@ -42,6 +43,8 @@ import {
     type SandboxArtifactShareInput,
     type SandboxArtifactTransferInput,
     type SandboxAssetProjectInput,
+    type SandboxConfigGetInput,
+    type SandboxConfigUpdateInput,
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
@@ -75,6 +78,7 @@ export interface ExtensionSandboxHostOptions {
     assets: ExtensionAssetCapability;
     capabilities: readonly ExtensionCapability[];
     codeDirectory: string;
+    config?: ExtensionConfig;
     context: ExtensionSandboxContextData;
     delegatedWorker: ExtensionWorkerCapability;
     entryUrl: string;
@@ -121,6 +125,7 @@ const WORKER_TERMINATE_WAIT_MS = 1_000;
 export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #artifactCapability: ExtensionArtifactCapability;
     readonly #assets: ExtensionAssetCapability;
+    readonly #config?: ExtensionConfig;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
     readonly #healthCheckTimeoutMs: number;
@@ -146,6 +151,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #worker: Worker;
     readonly #workerCapability: ExtensionWorkerCapability;
     #closing = false;
+    #configUnsubscribe?: () => void;
     #faulted?: Error;
     #healthDeadlineTimer?: NodeJS.Timeout;
     #healthProbeId?: string;
@@ -163,6 +169,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     constructor(options: ExtensionSandboxHostOptions) {
         this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
+        this.#config = options.config;
         this.#delegatedWorkerCapability = options.delegatedWorker;
         this.#externalMemoryLimitBytes =
             positiveMegabytes(
@@ -208,6 +215,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             ((filename, workerOptions) => new Worker(filename, workerOptions));
         const channel = new MessageChannel();
         this.#port = channel.port1;
+        this.#configUnsubscribe = this.#config?.onChange((change) =>
+            this.#send({ change, type: "configChange" }),
+        );
         this.#worker = factory(sandboxWorkerModuleUrl(), {
             env: { ...process.env, ESBUILD_WORKER_THREADS: "0" },
             execArgv: extensionSandboxExecArgv(),
@@ -318,6 +328,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 (error: unknown) => toError(error),
             );
             this.#releaseProcessSubscriptions();
+            this.#releaseConfigSubscription();
             this.#closing = true;
             await this.#terminate();
             if (cleanupFailure !== undefined) throw cleanupFailure;
@@ -348,6 +359,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             (error: unknown) => toError(error),
         );
         this.#releaseProcessSubscriptions();
+        this.#releaseConfigSubscription();
         this.#closing = true;
         await this.#terminate();
         if (failure !== undefined && cleanupFailure !== undefined) {
@@ -541,6 +553,15 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     target: { ...value.target },
                 });
             }
+            case "config.get":
+                return await this.#requireConfig().get(
+                    (input as SandboxConfigGetInput).path,
+                );
+            case "config.update":
+                await this.#requireConfig().update(
+                    input as SandboxConfigUpdateInput,
+                );
+                return undefined;
             case "instances.create":
                 return await this.#instanceCapability.create(
                     (input as SandboxInstanceCreateInput).draft,
@@ -831,6 +852,11 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         };
     }
 
+    #requireConfig(): ExtensionConfig {
+        if (this.#config !== undefined) return this.#config;
+        throw new Error("Extension sandbox Config is unavailable.");
+    }
+
     #requireSession(id: string): ExtensionWorkerSession {
         const session = this.#sessions.get(id);
         if (session !== undefined) return session;
@@ -880,6 +906,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#capabilityControllers.clear();
         this.#invocationInterfaces.clear();
         this.#releaseProcessSubscriptions();
+        this.#releaseConfigSubscription();
         void this.#closeSessions().catch((cleanupError: unknown) => {
             this.#logger.warn(
                 "Extension sandbox Worker sessions did not close cleanly after a fault.",
@@ -893,6 +920,11 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         });
         this.#onFault?.(error);
         void this.#terminate();
+    }
+
+    #releaseConfigSubscription(): void {
+        this.#configUnsubscribe?.();
+        this.#configUnsubscribe = undefined;
     }
 
     async #closeSessions(): Promise<void> {

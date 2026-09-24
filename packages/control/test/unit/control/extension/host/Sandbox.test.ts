@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import type {
     ExtensionAssetCapability,
     ExtensionCapability,
+    ExtensionConfig,
     ExtensionJsonValue,
     ExtensionLogger,
     ExtensionManagedProcess,
@@ -240,6 +241,63 @@ export function activate(context) {
     assert.deepEqual(calls, [
         { input: undefined, operation: "secret.environment" },
     ]);
+});
+
+test("Extension sandbox bridges declared Config get, update, and change delivery", async (t) => {
+    const calls: string[] = [];
+    let current: Readonly<Record<string, ExtensionJsonValue>> = { count: 1 };
+    const listeners = new Set<(change: { paths: readonly string[] }) => void>();
+    const config: ExtensionConfig = {
+        async get(path) {
+            calls.push(`get:${path}`);
+            return path === "example.count" ? current.count : undefined;
+        },
+        onChange(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        async update(patch) {
+            calls.push("update");
+            const count = patch["example.count"];
+            if (typeof count !== "number")
+                throw new TypeError("example.count must be a number");
+            current = { count };
+            for (const listener of [...listeners])
+                listener({ paths: ["example.count"] });
+        },
+    };
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-config",
+        `
+export function activate(context) {
+    if (context.config === undefined) throw new Error("Config missing");
+    let changed = false;
+    context.config.onChange((change) => {
+        if (change.paths.includes("example.count")) changed = true;
+    });
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const current = await context.config.get("example.count");
+        await context.config.update({ "example.count": current + 1 });
+        return {
+            kind: "json",
+            value: {
+                changed,
+                count: await context.config.get("example.count"),
+            },
+        };
+    });
+}
+`,
+        { config },
+    );
+    await sandbox.start();
+
+    assert.deepEqual(await cliJson(sandbox, [], "config"), {
+        changed: true,
+        count: 2,
+    });
+    assert.deepEqual(calls, ["get:example.count", "update", "get:example.count"]);
 });
 
 test("Extension sandbox bridges invocation-scoped CLI I/O", async (t) => {
@@ -1157,6 +1215,7 @@ function createSandbox(options: {
     assets?: ExtensionAssetCapability;
     capabilities?: readonly ExtensionCapability[];
     codeDirectory: string;
+    config?: ExtensionConfig;
     entryPath: string;
     externalMemoryLimitMb?: number;
     hostCallbackTimeoutMs?: number;
@@ -1175,7 +1234,9 @@ function createSandbox(options: {
         assets: options.assets ?? fakeAssets(),
         capabilities: options.capabilities ?? [],
         codeDirectory: options.codeDirectory,
+        ...(options.config === undefined ? {} : { config: options.config }),
         context: {
+            config: options.config !== undefined,
             generation: "g1",
             id: "example",
             paths: {

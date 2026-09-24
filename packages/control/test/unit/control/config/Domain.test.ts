@@ -65,9 +65,8 @@ test("Config domain controller reads defaults, persists atomically, validates wr
     const registry = new ConfigRegistry([definition("gen-a")]);
     const mutationRunner = new ControlConfigMutationLock();
     const controller = new ConfigDomainController({
-        id: "example",
+        definition: definition("gen-a"),
         mutationRunner,
-        owner: definition("gen-a").owner,
         registry,
         store: new ConfigDomainStore(filePath),
     });
@@ -91,15 +90,18 @@ test("Config domain controller reads defaults, persists atomically, validates wr
         );
 
         registry.replace(definition("gen-b"));
+        assert.deepEqual(await controller.read(), {
+            enabled: true,
+            name: "saved",
+        });
         await assert.rejects(
-            async () => await controller.read(),
-            /ownership changed/u,
+            async () => await controller.write({ enabled: false }),
+            /not writable/u,
         );
 
         const replacement = new ConfigDomainController({
-            id: "example",
+            definition: definition("gen-b"),
             mutationRunner,
-            owner: definition("gen-b").owner,
             registry,
             store: new ConfigDomainStore(filePath),
         });

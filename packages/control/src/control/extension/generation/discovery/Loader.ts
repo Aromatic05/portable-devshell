@@ -8,6 +8,7 @@ import {
     parseExtensionManifest,
     type ExtensionContext,
     type ExtensionAssetCapability,
+    type ExtensionConfigDeclaration,
     type ExtensionJsonValue,
     type ExtensionLogger,
     type ExtensionManifest,
@@ -35,6 +36,7 @@ import {
     type ExtensionSandboxHostOptions,
 } from "../sandbox/bridge/Host.js";
 import type { ExtensionSandboxReadyDescriptor } from "../sandbox/bridge/Protocol.js";
+import type { ExtensionConfigRuntime } from "../../config/Control.js";
 
 export interface ExtensionWorkerRuntime extends ExtensionWorkerCapability {
     closeAll(): Promise<void>;
@@ -57,6 +59,12 @@ export interface ExtensionLoaderOptions {
         extensionId: string;
         generation: string;
     }) => ExtensionAssetCapability;
+    configFactory?: (input: {
+        declaration: ExtensionConfigDeclaration;
+        extensionId: string;
+        generation: string;
+        stateDirectory: string;
+    }) => ExtensionConfigRuntime;
     importer?: (url: string) => Promise<unknown>;
     instanceFactory?: (input: {
         allowed: boolean;
@@ -88,6 +96,7 @@ export interface ExtensionLoaderOptions {
 export class ExtensionLoader {
     readonly #artifactFactory?: ExtensionLoaderOptions["artifactFactory"];
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
+    readonly #configFactory?: ExtensionLoaderOptions["configFactory"];
     readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
@@ -109,6 +118,7 @@ export class ExtensionLoader {
     constructor(options: ExtensionLoaderOptions) {
         this.#artifactFactory = options.artifactFactory;
         this.#assetsFactory = options.assetsFactory;
+        this.#configFactory = options.configFactory;
         this.#importer = options.importer;
         this.#hostModuleResolver =
             options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
@@ -151,6 +161,22 @@ export class ExtensionLoader {
             mkdir(runtimeDirectory, { mode: 0o700 }),
             mkdir(stateDirectory, { mode: 0o700, recursive: true }),
         ]);
+
+        const config =
+            manifest.config === undefined
+                ? undefined
+                : this.#configFactory?.({
+                      declaration: manifest.config,
+                      extensionId: id,
+                      generation,
+                      stateDirectory,
+                  });
+        if (manifest.config !== undefined && config === undefined) {
+            throw new Error(
+                `Extension ${id} declares Config but the host does not provide Config support.`,
+            );
+        }
+        await config?.validate();
 
         const assets =
             this.#assetsFactory?.({
@@ -253,6 +279,7 @@ export class ExtensionLoader {
                     ? { workers: worker }
                     : {}),
             }),
+            ...(config === undefined ? {} : { config }),
             generation,
             id,
             logger,
@@ -271,6 +298,7 @@ export class ExtensionLoader {
                 artifacts,
                 assets,
                 codeDirectory,
+                config,
                 context,
                 entryPath,
                 generation,
@@ -302,6 +330,7 @@ export class ExtensionLoader {
                 dispose: async () =>
                     await disposeGeneration(
                         module!,
+                        config,
                         processes,
                         delegatedWorker,
                         worker,
@@ -327,6 +356,11 @@ export class ExtensionLoader {
             await processes
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            try {
+                config?.close();
+            } catch (cleanupError) {
+                cleanupFailures.push(cleanupError);
+            }
             await delegatedWorker
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -394,6 +428,7 @@ export class ExtensionLoader {
         artifacts: ExtensionArtifactCapability;
         assets: ExtensionAssetCapability;
         codeDirectory: string;
+        config?: ExtensionConfigRuntime;
         context: ExtensionContext;
         entryPath: string;
         generation: string;
@@ -413,7 +448,9 @@ export class ExtensionLoader {
             assets: input.assets,
             capabilities: input.manifest.capabilities,
             codeDirectory: input.codeDirectory,
+            config: input.config,
             context: {
+                config: input.config !== undefined,
                 generation: input.generation,
                 id: input.id,
                 paths: input.context.paths,
@@ -425,6 +462,7 @@ export class ExtensionLoader {
             logger: input.logger,
             onFault: (error) => {
                 candidate?.fault(error);
+                input.config?.close();
                 void input.processes.closeAll().catch(() => undefined);
                 void input.delegatedWorker.closeAll().catch(() => undefined);
                 void input.worker.closeAll().catch(() => undefined);
@@ -451,6 +489,7 @@ export class ExtensionLoader {
                 dispose: async () =>
                     await disposeSandboxGeneration(
                         sandbox,
+                        input.config,
                         input.processes,
                         input.delegatedWorker,
                         input.worker,
@@ -477,6 +516,11 @@ export class ExtensionLoader {
             await input.processes
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
+            try {
+                input.config?.close();
+            } catch (cleanupError) {
+                cleanupFailures.push(cleanupError);
+            }
             await input.delegatedWorker
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
@@ -613,6 +657,7 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
 
 async function disposeGeneration(
     module: ExtensionModule,
+    config: ExtensionConfigRuntime | undefined,
     processes: ExtensionProcessRuntime,
     delegatedWorker: ExtensionWorkerRuntime,
     worker: ExtensionWorkerRuntime,
@@ -624,6 +669,11 @@ async function disposeGeneration(
     await Promise.resolve(module.deactivate?.()).catch((error) =>
         failures.push(error),
     );
+    try {
+        config?.close();
+    } catch (error) {
+        failures.push(error);
+    }
     await processes.closeAll().catch((error) => failures.push(error));
     await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));
@@ -645,6 +695,7 @@ async function disposeGeneration(
 
 async function disposeSandboxGeneration(
     sandbox: ExtensionSandboxHost,
+    config: ExtensionConfigRuntime | undefined,
     processes: ExtensionProcessRuntime,
     delegatedWorker: ExtensionWorkerRuntime,
     worker: ExtensionWorkerRuntime,
@@ -653,6 +704,11 @@ async function disposeSandboxGeneration(
 ): Promise<void> {
     const failures: unknown[] = [];
     await sandbox.dispose().catch((error) => failures.push(error));
+    try {
+        config?.close();
+    } catch (error) {
+        failures.push(error);
+    }
     await processes.closeAll().catch((error) => failures.push(error));
     await delegatedWorker.closeAll().catch((error) => failures.push(error));
     await worker.closeAll().catch((error) => failures.push(error));

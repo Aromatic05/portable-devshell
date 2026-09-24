@@ -67,6 +67,76 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
     );
 });
 
+test("Extension manifest parses owned Config schema and declared Core access", () => {
+    const config = {
+        access: { "mcp.publicBaseUrl": "read" },
+        default: { enabled: false },
+        schema: {
+            additionalProperties: false,
+            properties: { enabled: { type: "boolean" } },
+            required: ["enabled"],
+            type: "object",
+        },
+    };
+
+    assert.deepEqual(parseExtensionManifest({ ...base, config }).config, config);
+    assert.deepEqual(
+        parseExtensionManifest({
+            ...base,
+            config: { access: { "mcp.listenPort": "read" } },
+        }).config,
+        { access: { "mcp.listenPort": "read" } },
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { default: false, schema: true },
+            }),
+        /config\.default/u,
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { default: {}, schema: [] },
+            }),
+        /config\.schema/u,
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { default: {}, extra: true, schema: true },
+            }),
+        /Unknown Extension manifest field/u,
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, config: { default: {} } }),
+        /config\.schema/u,
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { access: { mcp: "read" } },
+            }),
+        /access path/u,
+    );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                config: { access: { "mcp.listenPort": "write" } },
+            }),
+        /must be read or read-write/u,
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, config: { access: {} } }),
+        /must not be empty/u,
+    );
+});
+
 test("delegatedWorkers is an independent controlled Worker capability", () => {
     assert.deepEqual(
         parseExtensionManifest({ ...base, capabilities: ["delegatedWorkers"] })
@@ -75,8 +145,7 @@ test("delegatedWorkers is an independent controlled Worker capability", () => {
     );
 });
 
-
-test("Extension manifest uses explicit activation in schema 1.1 and defaults legacy schema 1.0 to lazy", () => {
+test("Extension manifest requires activation in schema 1.1+ and defaults schema 1.0 to lazy", () => {
     assert.equal(
         parseExtensionManifest({ ...base, activation: "eager" }).activation,
         "eager",
@@ -185,18 +254,19 @@ test("Extension manifest defaults extensions and hostDependencies to empty colle
     assert.deepEqual(parseExtensionManifest(base).hostDependencies, []);
 });
 
-test("Extension manifest accepts same-major compatible versions and legacy integer versions", () => {
+test("Extension manifest accepts compatible same-major versions and legacy integers", () => {
     assert.equal(
         parseExtensionManifest({
             ...base,
             apiVersion: "4.0.0",
-            schemaVersion: 1,
+            schemaVersion: "1.1.0",
         }).apiVersion,
         "4.0.0",
     );
+    const { activation: _activation, ...legacyBase } = base;
     assert.equal(
         parseExtensionManifest({
-            ...base,
+            ...legacyBase,
             apiVersion: 4,
             schemaVersion: 1,
         }).schemaVersion,
@@ -210,6 +280,16 @@ test("Extension manifest accepts same-major compatible versions and legacy integ
         () => parseExtensionManifest({ ...base, apiVersion: "5.0.0" }),
         /apiVersion/u,
     );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                schemaVersion: "1.0.0",
+                config: { access: { "mcp.listenPort": "read" } },
+                activation: undefined,
+            }),
+        /Unknown Extension manifest field/u,
+    );
 });
 
 test("Extension manifest rejects unknown fields and unsupported schema versions", () => {
@@ -218,7 +298,11 @@ test("Extension manifest rejects unknown fields and unsupported schema versions"
         /Unknown/u,
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, schemaVersion: "1.2.0" }),
+        () =>
+            parseExtensionManifest({
+                ...base,
+                schemaVersion: "1.2.0",
+            }),
         /schemaVersion/u,
     );
 });

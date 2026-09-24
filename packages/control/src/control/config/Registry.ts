@@ -9,8 +9,11 @@ export type ConfigDomainOwner =
           readonly kind: "extension";
       };
 
+export type ConfigPathPermission = "read" | "read-write";
+
 export interface ConfigDomainDefinition {
     readonly defaultValue?: Readonly<Record<string, JsonValue>>;
+    readonly exports?: Readonly<Record<string, ConfigPathPermission>>;
     readonly id: string;
     readonly owner: ConfigDomainOwner;
     readonly schema?: boolean | Readonly<Record<string, JsonValue>>;
@@ -24,7 +27,7 @@ export class ConfigRegistry {
     }
 
     register(definition: ConfigDomainDefinition): void {
-        const normalized = normalizeDefinition(definition);
+        const normalized = normalizeConfigDomainDefinition(definition);
         const existing = this.#domains.get(definition.id);
         if (existing !== undefined) {
             throw new Error(
@@ -35,7 +38,7 @@ export class ConfigRegistry {
     }
 
     assertCanReplace(definition: ConfigDomainDefinition): void {
-        const normalized = normalizeDefinition(definition);
+        const normalized = normalizeConfigDomainDefinition(definition);
         const existing = this.#domains.get(normalized.id);
         if (
             existing !== undefined &&
@@ -48,7 +51,7 @@ export class ConfigRegistry {
     }
 
     replace(definition: ConfigDomainDefinition): void {
-        const normalized = normalizeDefinition(definition);
+        const normalized = normalizeConfigDomainDefinition(definition);
         const existing = this.#domains.get(normalized.id);
         if (
             existing !== undefined &&
@@ -100,9 +103,34 @@ export class ConfigRegistry {
 
 export function createCoreConfigRegistry(): ConfigRegistry {
     return new ConfigRegistry([
-        { id: "control", owner: { kind: "core" } },
-        { id: "mcp", owner: { kind: "core" } },
-        { id: "web", owner: { kind: "core" } },
+        {
+            exports: {
+                artifactDirectTransfer: "read",
+                logLevel: "read",
+            },
+            id: "control",
+            owner: { kind: "core" },
+        },
+        {
+            exports: {
+                enabled: "read",
+                listenHost: "read",
+                listenPort: "read",
+                publicBaseUrl: "read-write",
+            },
+            id: "mcp",
+            owner: { kind: "core" },
+        },
+        {
+            exports: {
+                enabled: "read",
+                listenHost: "read",
+                listenPort: "read",
+                publicBaseUrl: "read-write",
+            },
+            id: "web",
+            owner: { kind: "core" },
+        },
     ]);
 }
 
@@ -119,7 +147,7 @@ function formatOwner(owner: ConfigDomainOwner): string {
         : `extension:${owner.extensionId}@${owner.generation}`;
 }
 
-function normalizeDefinition(
+export function normalizeConfigDomainDefinition(
     definition: ConfigDomainDefinition,
 ): ConfigDomainDefinition {
     assertDomainId(definition.id);
@@ -134,6 +162,7 @@ function normalizeDefinition(
             );
         }
     }
+    const exportedPaths = normalizeExports(definition.id, definition.exports);
     if (
         (definition.schema === undefined) !==
         (definition.defaultValue === undefined)
@@ -175,12 +204,39 @@ function normalizeDefinition(
         ...(defaultValue === undefined
             ? {}
             : { defaultValue: deepFreezeJsonRecord(defaultValue) }),
+        ...(exportedPaths === undefined ? {} : { exports: exportedPaths }),
         id: definition.id,
         owner: Object.freeze({ ...definition.owner }),
         ...(schema === undefined
             ? {}
             : { schema: deepFreezeJsonSchema(schema) }),
     });
+}
+
+function normalizeExports(
+    id: string,
+    exports: ConfigDomainDefinition["exports"],
+): Readonly<Record<string, ConfigPathPermission>> | undefined {
+    if (exports === undefined) return undefined;
+    const normalized: Record<string, ConfigPathPermission> = {};
+    for (const [path, permission] of Object.entries(exports)) {
+        if (
+            !/^[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z][A-Za-z0-9_-]*)*$/u.test(
+                path,
+            )
+        ) {
+            throw new TypeError(
+                `Config domain ${id} export path ${path} is invalid.`,
+            );
+        }
+        if (permission !== "read" && permission !== "read-write") {
+            throw new TypeError(
+                `Config domain ${id} export ${path} has an invalid permission.`,
+            );
+        }
+        normalized[path] = permission;
+    }
+    return Object.freeze(normalized);
 }
 
 export function assertConfigDomainValue(

@@ -10,6 +10,7 @@ import {
     ConfigRegistry,
     createCoreConfigRegistry,
 } from "../../control/config/Registry.js";
+import { ConfigChangeHub } from "../../control/config/Change.js";
 import { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { InstanceRegistryFactory } from "../../control/instance/registry/Factory.js";
 
@@ -21,6 +22,7 @@ export interface ControlRuntimeStateOptions {
 }
 
 export class ControlRuntimeState {
+    readonly configChanges = new ConfigChangeHub();
     readonly configRegistry: ConfigRegistry;
     readonly configStore: ControlConfigStore;
     readonly configMutations = new ControlConfigMutationLock();
