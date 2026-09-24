@@ -26,6 +26,7 @@ import {
     type ControlConfigMutationRunner,
 } from "../../config/editor/Lock.js";
 import { listInstanceCreateProviders } from "./ProviderCatalog.js";
+import { discoverSshConfigHosts } from "./SshConfig.js";
 
 const containerPresets =
     defaultConfigNormalizeContext.containerPresets satisfies readonly InstanceContainerPresetSchema[];
@@ -50,6 +51,7 @@ const instanceCreateSchema: InstanceCreateSchema = {
     defaultProvider: "local",
     defaultSecurityMode: defaultConfigNormalizeContext.defaultSecurityMode,
     providers: ["local", "ssh", "docker", "podman", "reverse"],
+    sshHosts: [],
 };
 
 interface ControlConfigWriter {
@@ -69,6 +71,7 @@ export interface InstanceCreateCoordinatorOptions {
     mcpEndpointConfigMapper?: McpEndpointFactory;
     mutationRunner?: ControlConfigMutationRunner;
     setConfig: (config: ControlConfig) => void;
+    sshHosts?: () => readonly string[];
     validator?: ControlConfigValidator;
 }
 
@@ -85,6 +88,7 @@ export class InstanceCreateCoordinator {
     readonly #mutationRunner: ControlConfigMutationRunner;
     readonly #platform: NodeJS.Platform;
     readonly #setConfig: (config: ControlConfig) => void;
+    readonly #sshHosts: () => readonly string[];
     readonly #validator: ControlConfigValidator;
 
     constructor(options: InstanceCreateCoordinatorOptions) {
@@ -105,13 +109,21 @@ export class InstanceCreateCoordinator {
             options.mutationRunner ?? new ControlConfigMutationLock();
         this.#platform = options.platform ?? process.platform;
         this.#setConfig = options.setConfig;
+        this.#sshHosts = options.sshHosts ?? discoverSshConfigHosts;
         this.#validator = options.validator ?? new ControlConfigValidator();
     }
 
     getSchema(): InstanceCreateSchema {
+        const providers = listInstanceCreateProviders(this.#platform);
+        const hasLocal = this.#getConfig().instances.some(
+            (instance) => instance.provider === "local",
+        );
         return {
             ...instanceCreateSchema,
-            providers: listInstanceCreateProviders(this.#platform),
+            defaultProvider:
+                hasLocal && providers.includes("ssh") ? "ssh" : "local",
+            providers,
+            sshHosts: this.#sshHosts(),
         };
     }
 

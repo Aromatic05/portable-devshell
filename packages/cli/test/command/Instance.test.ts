@@ -470,25 +470,7 @@ async function runInteractiveCreateFlow(t: {
         installUniqueWindowsTestIdentity("cli-create");
     let controlStopped = false;
     const createInput = () =>
-        Readable.from([
-            "aromatic-pc\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-        ]);
+        Readable.from(["aromatic-pc\n", "\n"]);
     const runCli = async (args: string[], stdin?: NodeJS.ReadableStream) =>
         await new CliMain({
             homeDirectory,
@@ -532,7 +514,7 @@ async function runInteractiveCreateFlow(t: {
 
     assert.equal(await runCli(["instance", "create"], createInput()), 0);
     const createOutput = stdout.flush();
-    assert.match(createOutput, /Summary/u);
+    assert.match(createOutput, /Where should DevShell run\?/u);
     assert.match(createOutput, /instance created: aromatic-pc/u);
     assert.doesNotMatch(createOutput, /worker binary path:/u);
 

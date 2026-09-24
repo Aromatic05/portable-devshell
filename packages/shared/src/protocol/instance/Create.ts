@@ -111,6 +111,7 @@ export interface InstanceCreateSchema {
     defaultMcpEnabled: boolean;
     defaultModelExtensions: readonly string[];
     defaultSecurityMode: ControlSecurityMode;
+    sshHosts?: readonly string[];
 }
 
 export type InstanceCreateDraft = ConfigInstanceDraft;

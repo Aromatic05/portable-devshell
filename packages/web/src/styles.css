@@ -1552,3 +1552,34 @@ pre {
         padding-inline: 0.45rem;
     }
 }
+.provider-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+    gap: 0.65rem;
+}
+.provider-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    min-height: 74px;
+    border: 1px solid #34445c;
+    border-radius: 10px;
+    padding: 0.75rem;
+    cursor: pointer;
+    background: #101722;
+}
+.provider-choice:hover,
+.provider-choice.selected {
+    border-color: #6d85aa;
+    background: #182337;
+}
+.provider-choice input {
+    margin-top: 0.2rem;
+}
+.provider-choice span {
+    display: grid;
+    gap: 0.25rem;
+}
+.provider-choice small {
+    color: #93a4bd;
+}

@@ -1446,19 +1446,6 @@ test("CliMain runs interactive instance create through control rpc", async () =>
         stdin: Readable.from([
             "demo-local\n",
             "\n",
-            "\n",
-            "/tmp/workspace\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
-            "\n",
         ]),
         stderr,
         stdout,
@@ -1467,7 +1454,7 @@ test("CliMain runs interactive instance create through control rpc", async () =>
     assert.equal(await cli.run(["instance", "create"]), 0);
     assert.deepEqual(calls, ["schema", "validate", "create"]);
     const output = stdout.flush();
-    assert.match(output, /Summary\n/u);
+    assert.match(output, /Where should DevShell run\?/u);
     assert.match(output, /instance created: demo-local/u);
     assert.doesNotMatch(output, /worker binary path:/u);
     assert.doesNotMatch(output, /event buffer size:/u);

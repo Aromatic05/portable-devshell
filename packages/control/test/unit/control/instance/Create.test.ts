@@ -191,3 +191,30 @@ test("instance create restores configuration and registry when MCP registration 
     assert.deepEqual(config.instances, []);
     assert.equal(registry.get("demo-local"), undefined);
 });
+
+test("instance create defaults to SSH after a local instance already exists", () => {
+    let config = createDefaultControlConfig();
+    config = {
+        ...config,
+        instances: [
+            normalizeConfigInstanceDraft({
+                name: "local",
+                provider: "local",
+            }),
+        ],
+    };
+    const service = new InstanceCreateCoordinator({
+        configStore: { async write() {} },
+        getConfig: () => config,
+        getMcpHost: () => undefined,
+        instanceRegistry: new InstanceRegistry([]),
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+        sshHosts: () => ["aromatic-server", "build-server"],
+    });
+
+    const schema = service.getSchema();
+    assert.equal(schema.defaultProvider, "ssh");
+    assert.deepEqual(schema.sshHosts, ["aromatic-server", "build-server"]);
+});

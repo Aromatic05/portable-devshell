@@ -222,7 +222,7 @@ it("starts a stopped local instance directly and marks the selected card", () =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-it("creates an instance through schema defaults and server validation", async () => {
+it("creates a local instance from only name and provider", async () => {
     const store = localStore("ready");
     renderInstances(store);
 
@@ -230,28 +230,61 @@ it("creates an instance through schema defaults and server validation", async ()
     const name = await screen.findByRole("textbox", { name: "Name" });
     fireEvent.change(name, { target: { value: "web-created" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
-    await waitFor(() =>
-        expect(store.validateInstanceCreate).toHaveBeenCalledWith(
-            expect.objectContaining({
-                enabled: true,
-                name: "web-created",
-                provider: "local",
-            }),
-        ),
-    );
-
+    expect(screen.queryByRole("button", { name: "Validate" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() =>
-        expect(store.createInstance).toHaveBeenCalledWith(
-            expect.objectContaining({
-                name: "web-created",
-                provider: "local",
-            }),
-        ),
+        expect(store.createInstance).toHaveBeenCalledWith({
+            name: "web-created",
+            provider: "local",
+        }),
     );
+    expect(store.validateInstanceCreate).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent(
         "Instance created successfully.",
+    );
+});
+
+it("defaults creation to SSH and uses discovered OpenSSH hosts", async () => {
+    const store = localStore("ready");
+    vi.mocked(store.getInstanceCreateSchema).mockResolvedValue({
+        container: {
+            defaultMode: "preset",
+            modes: [
+                "preset",
+                "dockerfile",
+                "compose",
+                "existingImage",
+                "existingStoppedContainer",
+            ],
+            presets: [],
+        },
+        defaultEnabled: true,
+        defaultMcpContextMode: "explicit",
+        defaultMcpEnabled: true,
+        defaultModelExtensions: ["instance"],
+        defaultProvider: "ssh",
+        defaultSecurityMode: "disabled",
+        providers: ["local", "ssh", "docker", "podman", "reverse"],
+        sshHosts: ["aromatic-server"],
+    });
+    renderInstances(store);
+
+    fireEvent.click(screen.getByRole("button", { name: "New instance" }));
+    expect(await screen.findByRole("radio", { name: /SSH/u })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: /SSH host/u })).toHaveValue(
+        "aromatic-server",
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+        target: { value: "remote" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+        expect(store.createInstance).toHaveBeenCalledWith({
+            name: "remote",
+            provider: "ssh",
+            ssh: { command: "ssh 'aromatic-server'" },
+        }),
     );
 });
 
