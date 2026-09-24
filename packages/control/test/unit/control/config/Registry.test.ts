@@ -24,7 +24,11 @@ test("Config registry rejects duplicate domain ownership", () => {
         () =>
             registry.register({
                 id: "mcp",
-                owner: { extensionId: "example", kind: "extension" },
+                owner: {
+                    extensionId: "example",
+                    generation: "gen-a",
+                    kind: "extension",
+                },
             }),
         /already registered by core/u,
     );

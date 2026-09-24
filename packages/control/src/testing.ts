@@ -12,6 +12,8 @@ export * from "./control/config/storage/TomlCodec.js";
 export * from "./control/config/storage/TomlDocument.js";
 export * from "./control/config/Validator.js";
 export * from "./control/config/Registry.js";
+export * from "./control/config/domain/Controller.js";
+export * from "./control/config/domain/Store.js";
 export * from "./control/instance/create/Factory.js";
 export * from "./control/instance/create/Coordinator.js";
 export * from "./composition/mcp/Gateway.js";
