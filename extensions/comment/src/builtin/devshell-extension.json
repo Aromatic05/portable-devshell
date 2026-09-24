@@ -1,6 +1,7 @@
 {
-    "schemaVersion": 1,
+    "schemaVersion": "1.1.0",
     "apiVersion": "4.0.0",
+    "activation": "lazy",
     "id": "comment",
     "name": "portable-devshell Comment",
     "version": "0.1.0",

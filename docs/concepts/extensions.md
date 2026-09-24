@@ -29,8 +29,9 @@ Manifest 在 activation 前描述静态事实：
 
 ```json
 {
-    "schemaVersion": 1,
-    "apiVersion": 4,
+    "schemaVersion": "1.1.0",
+    "apiVersion": "4.0.0",
+    "activation": "lazy",
     "id": "example",
     "name": "Example",
     "version": "1.0.0",
@@ -60,11 +61,16 @@ workers
 
 Runtime binding 必须与 manifest declaration 严格对应：未声明 registration、重复 registration、声明后没有 binding、未知 point 或不合法的 domain declaration 都会使 candidate activation 失败。
 
-### Static catalog 与 lazy activation
+`activation` 是明确的 steady-state activation policy：
 
-Control 启动时不会为了发现 Extension Point 而执行所有 Extension code。对每个 enabled Extension，Host 先读取 selected generation 的 manifest，并完成 domain declaration 校验与跨 Extension registration conflict 检查，然后发布静态 catalog。
+- `lazy`：只发布静态 catalog；第一次需要 runtime binding 时才执行 Extension code。
+- `eager`：所有 enabled Extension 的静态 catalog 建立完成后，Host 主动创建 live activation；`enable` 也会立即激活。
 
-此时 Extension 的 runtime record 可以处于：
+### Static catalog 与 activation policy
+
+Control 启动时不会为了发现 Extension Point 而执行 Extension code。对每个 enabled Extension，Host 先读取 selected generation 的 manifest，并完成 domain declaration 校验与跨 Extension registration conflict 检查，然后发布全部静态 catalog。只有这个静态阶段完成后，Host 才会激活声明为 `eager` 的 Extension。
+
+`lazy` Extension 此时的 runtime record 可以处于：
 
 ```text
 state = installed
@@ -87,9 +93,9 @@ CLI/Web request
 
 如果 selected generation 在首次 activation 时失败，Host 可以按 registry 中已经验证过的 last-known-good generation 回退。Host 自身的 registry persistence failure 不会被误判成 candidate failure，也不会因此盲目切换 generation。
 
-Install/update 都保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次验证 runtime；只有验证和 cleanup 都成功后，才提交 selected / last-known-good generation 和静态 catalog。因此安装成功不会留下常驻 sandbox，第一次真实调用仍然是独立的 runtime activation。`devshell extension update <bundle-or-directory>` 是已安装 Extension 更新 generation 的显式用户入口，与 install 复用同一个原子验证/切换事务；重复提交当前已经选择且健康的同一 content generation 是幂等操作。
+Install/update 都保留强验证：新的 immutable generation 会实际执行一次 activation、binding/resource validation，然后立即 retire 这次 validation runtime。`lazy` generation 随后提交 selected / last-known-good generation 和静态 catalog，保持 `installed`，第一次真实调用再创建独立 runtime；enabled `eager` generation 则会再创建一个全新的 steady-state activation，并与 registry/catalog 一起原子发布。Validation runtime 永远不会被直接复用为 steady-state runtime。`devshell extension update <bundle-or-directory>` 是已安装 Extension 更新 generation 的显式用户入口，与 install 复用同一个原子验证/切换事务；重复提交当前已经选择且健康的同一 content generation 是幂等操作。
 
-显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation，但不会改变 Extension 已有的 `enabled` 状态。`enable` 只恢复并校验静态 catalog；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
+显式 `reload` 与 `update` 不同：`reload` 只要求立即重新 activation **当前 selected generation**，不会读取新的 bundle；`update` 会验证、安装并选择新的 generation，但不会改变 Extension 已有的 `enabled` 状态。`enable` 对 `lazy` Extension 只恢复并校验静态 catalog，对 `eager` Extension 还会立即建立 live activation；`disable` 立即撤销静态路由，并让已经存在的 generation leases 按正常 retirement 语义 drain。
 
 `comment` 是当前唯一 lifecycle-protected builtin。Conversation、Comment queue、preferences 与 ToolCall Review 共同组成一个宿主拥有的 Comment 子系统，因此不能只关闭它的 generation registration。公共 lifecycle 会拒绝 `disable comment` 与 `remove comment`；启动安装 builtin 时会把旧版本遗留的 disabled Comment registry 状态恢复为 enabled。其他 builtin 仍可正常 disable，并且 disabled 状态会跨 generation 更新与 Control 重启保持不变。
 
@@ -222,7 +228,7 @@ Extension
     -> Managed Process
 ```
 
-Managed process 可以暴露受控 structured-message channel、stderr、termination 和 `closed` result。Generation fault / retirement 时 Control 会回收仍存活的 managed processes；IPC channel 意外断开也会触发回收。
+Managed process 可以暴露受控 structured-message channel、stdout、stderr、termination 和 `closed` result。`processes.start()` 只有在底层进程成功 spawn 后才 resolve；可执行文件不存在等 spawn failure 会直接 reject。Generation fault / retirement 时 Control 会回收仍存活的 managed processes；IPC channel 意外断开也会触发回收。
 
 Extension sandbox 本身仍拒绝裸 `child_process`，因此 sandbox 被 terminate 后不会留下不受 generation ownership 管理的子进程。
 
@@ -356,7 +362,7 @@ extension.call
 ExtensionActivation contribution object
 ```
 
-不属于 API v4。
+不属于 API 4.x。
 
 ## Host dependencies 与 sandbox
 

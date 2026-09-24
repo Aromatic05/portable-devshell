@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 
@@ -15,6 +16,7 @@ function manifest(
     extensions: ExtensionManifest["extensions"],
 ): ExtensionManifest {
     return {
+        activation: "lazy",
         apiVersion: EXTENSION_API_VERSION,
         capabilities: [],
         entry: "extension.mjs",
@@ -22,7 +24,7 @@ function manifest(
         hostDependencies: [],
         id,
         name: `${id}-${generation}`,
-        schemaVersion: 1,
+        schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
         version: generation,
     };
 }

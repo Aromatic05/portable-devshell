@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
     EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
     type ExtensionContext,
     type ExtensionPointDeclaration,
     type ExtensionWorkerSession,
@@ -26,7 +27,7 @@ interface LoaderHarness {
     paths: ExtensionPathLayout;
     root: string;
     writeGeneration(input?: {
-        apiVersion?: number;
+        apiVersion?: number | string;
         capabilities?: string[];
         extensions?: Record<string, readonly ExtensionPointDeclaration[]>;
         generation?: string;
@@ -54,13 +55,14 @@ async function createHarness(): Promise<LoaderHarness> {
             await writeFile(
                 join(directory, "devshell-extension.json"),
                 `${JSON.stringify({
+                    activation: "lazy",
                     apiVersion: input.apiVersion ?? EXTENSION_API_VERSION,
                     capabilities: input.capabilities ?? [],
                     entry: "extension.mjs",
                     extensions: input.extensions ?? {},
                     id: input.manifestId ?? id,
                     name: "Example",
-                    schemaVersion: 1,
+                    schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
                     version: "1.0.0",
                 })}\n`,
                 "utf8",
@@ -145,7 +147,7 @@ test("Extension loader reads and validates a generation manifest without activat
     await assert.rejects(access(harness.paths.stateDirectory(id)));
 });
 
-test("Extension loader returns a ready invisible candidate with narrow immutable v4 context", async (t) => {
+test("Extension loader returns a ready invisible candidate with narrow immutable v5 context", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({
@@ -279,7 +281,7 @@ test("Extension loader rejects incompatible API without owning the CLI command n
     const harness = await createHarness();
     t.after(harness.cleanup);
     const incompatible = await harness.writeGeneration({
-        apiVersion: EXTENSION_API_VERSION + 1,
+        apiVersion: "4.2.0",
     });
     const cliNamedExtension = await harness.writeGeneration({ id: "status" });
     let imports = 0;

@@ -7,6 +7,8 @@ export type ExtensionJsonValue =
     | ExtensionJsonValue[]
     | { [key: string]: ExtensionJsonValue };
 
+export type ExtensionActivationPolicy = "eager" | "lazy";
+
 /** Host-managed runtime resource categories granted to one Extension generation. */
 export type ExtensionCapability =
     | "artifacts"
@@ -22,6 +24,7 @@ export interface ExtensionPointDeclaration {
 }
 
 export interface ExtensionManifest {
+    activation: ExtensionActivationPolicy;
     apiVersion: string;
     capabilities: readonly ExtensionCapability[];
     entry: string;
@@ -31,7 +34,7 @@ export interface ExtensionManifest {
     hostDependencies: readonly string[];
     id: string;
     name: string;
-    schemaVersion: number;
+    schemaVersion: string;
     version: string;
 }
 

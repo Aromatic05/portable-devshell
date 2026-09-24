@@ -8,6 +8,7 @@ import {
 } from "../../src/index.ts";
 
 const base = {
+    activation: "lazy" as const,
     apiVersion: EXTENSION_API_VERSION,
     capabilities: [] as string[],
     entry: "extension.mjs",
@@ -71,6 +72,30 @@ test("delegatedWorkers is an independent controlled Worker capability", () => {
         parseExtensionManifest({ ...base, capabilities: ["delegatedWorkers"] })
             .capabilities,
         ["delegatedWorkers"],
+    );
+});
+
+
+test("Extension manifest uses explicit activation in schema 1.1 and defaults legacy schema 1.0 to lazy", () => {
+    assert.equal(
+        parseExtensionManifest({ ...base, activation: "eager" }).activation,
+        "eager",
+    );
+    assert.throws(
+        () => parseExtensionManifest({ ...base, activation: "startup" }),
+        /activation/u,
+    );
+    const { activation: _activation, ...withoutActivation } = base;
+    assert.throws(
+        () => parseExtensionManifest(withoutActivation),
+        /activation/u,
+    );
+    assert.equal(
+        parseExtensionManifest({
+            ...withoutActivation,
+            schemaVersion: "1.0.0",
+        }).activation,
+        "lazy",
     );
 });
 
@@ -160,7 +185,7 @@ test("Extension manifest defaults extensions and hostDependencies to empty colle
     assert.deepEqual(parseExtensionManifest(base).hostDependencies, []);
 });
 
-test("Extension manifest accepts same-major compatible API versions and legacy integer API versions", () => {
+test("Extension manifest accepts same-major compatible versions and legacy integer versions", () => {
     assert.equal(
         parseExtensionManifest({
             ...base,
@@ -175,7 +200,7 @@ test("Extension manifest accepts same-major compatible API versions and legacy i
             apiVersion: 4,
             schemaVersion: 1,
         }).schemaVersion,
-        1,
+        "1.0.0",
     );
     assert.throws(
         () => parseExtensionManifest({ ...base, apiVersion: "4.2.0" }),
@@ -193,7 +218,7 @@ test("Extension manifest rejects unknown fields and unsupported schema versions"
         /Unknown/u,
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, schemaVersion: 2 }),
+        () => parseExtensionManifest({ ...base, schemaVersion: "1.2.0" }),
         /schemaVersion/u,
     );
 });

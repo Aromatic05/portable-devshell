@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+import {
+    EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
+} from "@portable-devshell/extension";
 import type { ExtensionManifest } from "@portable-devshell/extension";
 
 import { ExtensionGeneration } from "../../../../../src/control/extension/generation/registration/Generation.ts";
 import { ExtensionRegistrationSet } from "../../../../../src/control/extension/generation/registration/Registration.ts";
 
 const manifest: ExtensionManifest = {
+    activation: "lazy",
     apiVersion: EXTENSION_API_VERSION,
     capabilities: [],
     entry: "extension.mjs",
@@ -15,7 +19,7 @@ const manifest: ExtensionManifest = {
     hostDependencies: [],
     id: "example",
     name: "Example",
-    schemaVersion: 1,
+    schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
     version: "1.0.0",
 };
 

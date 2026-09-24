@@ -4,7 +4,10 @@ import { request } from "node:http";
 import { join } from "node:path";
 import test from "node:test";
 
-import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+import {
+    EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
+} from "@portable-devshell/extension";
 
 import {
     ControlPathHome,
@@ -887,12 +890,13 @@ test("runtime installs builtin Extensions through the normal installer before op
     await writeFile(
         join(source, "devshell-extension.json"),
         `${JSON.stringify({
+            activation: "lazy",
             apiVersion: EXTENSION_API_VERSION,
             capabilities: [],
             entry: "extension.mjs",
             id: "skill",
             name: "Skill builtin",
-            schemaVersion: 1,
+            schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
             version: "1.0.0",
         })}\n`,
         "utf8",

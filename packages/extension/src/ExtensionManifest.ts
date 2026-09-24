@@ -6,7 +6,7 @@ import type {
 } from "./ExtensionApi.js";
 
 export const EXTENSION_API_VERSION = "4.1.0";
-export const EXTENSION_MANIFEST_SCHEMA_VERSION = 1;
+export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
 
 const capabilities = new Set<ExtensionCapability>([
     "artifacts",
@@ -21,6 +21,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (!isRecord(value))
         throw new TypeError("Extension manifest must be an object.");
     assertOnlyKeys(value, [
+        "activation",
         "apiVersion",
         "capabilities",
         "entry",
@@ -32,14 +33,24 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         "version",
     ]);
 
-    const schemaVersion = readPositiveInteger(value.schemaVersion, "schemaVersion");
-    if (schemaVersion !== EXTENSION_MANIFEST_SCHEMA_VERSION) {
-        throw new TypeError(
-            `Unsupported Extension manifest schemaVersion: ${schemaVersion}.`,
-        );
-    }
+    const schemaVersion = readCompatibilityVersion(
+        value.schemaVersion,
+        "schemaVersion",
+    );
+    assertCompatibleVersion(
+        schemaVersion,
+        EXTENSION_MANIFEST_SCHEMA_VERSION,
+        "schemaVersion",
+    );
     const apiVersion = readCompatibilityVersion(value.apiVersion, "apiVersion");
     assertCompatibleVersion(apiVersion, EXTENSION_API_VERSION, "apiVersion");
+    const activation =
+        compareSemVer(
+            parseSemVer(schemaVersion, "schemaVersion"),
+            parseSemVer("1.1.0", "schemaVersion"),
+        ) < 0 && value.activation === undefined
+            ? "lazy"
+            : readActivationPolicy(value.activation);
     const id = readLocalId(value.id, "id");
     const entry = readString(value.entry, "entry");
     if (
@@ -71,6 +82,7 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         );
     }
     return {
+        activation,
         apiVersion,
         capabilities: parsedCapabilities,
         entry,
@@ -83,6 +95,15 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
     };
 }
 
+function readActivationPolicy(
+    value: unknown,
+): ExtensionManifest["activation"] {
+    if (value === "lazy" || value === "eager") return value;
+    throw new TypeError(
+        "Extension manifest activation must be either lazy or eager.",
+    );
+}
+
 function assertOnlyKeys(
     value: Record<string, unknown>,
     allowed: readonly string[],
@@ -91,14 +112,6 @@ function assertOnlyKeys(
     const unknown = Object.keys(value).filter((key) => !allowedSet.has(key));
     if (unknown.length > 0)
         throw new TypeError(`Unknown Extension manifest field: ${unknown[0]}.`);
-}
-
-function readPositiveInteger(value: unknown, field: string): number {
-    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
-        return value;
-    throw new TypeError(
-        `Extension manifest ${field} must be a positive integer.`,
-    );
 }
 
 function readCompatibilityVersion(value: unknown, field: string): string {

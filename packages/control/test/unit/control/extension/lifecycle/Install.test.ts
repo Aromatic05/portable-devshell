@@ -12,7 +12,10 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 
-import { EXTENSION_API_VERSION } from "@portable-devshell/extension";
+import {
+    EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
+} from "@portable-devshell/extension";
 import { errorCodes } from "@portable-devshell/shared";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
@@ -34,6 +37,7 @@ interface Harness {
     source(
         name: string,
         options?: {
+            activation?: "eager" | "lazy";
             body?: string;
             commandId?: string;
             hostDependencies?: string[];
@@ -78,6 +82,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
             await writeFile(
                 join(source, "devshell-extension.json"),
                 `${JSON.stringify({
+                    activation: options.activation ?? "lazy",
                     apiVersion: EXTENSION_API_VERSION,
                     capabilities: [],
                     entry: "extension.mjs",
@@ -91,7 +96,7 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
                         : { hostDependencies: options.hostDependencies }),
                     id,
                     name: options.id === "skill" ? "Skill" : "Example",
-                    schemaVersion: 1,
+                    schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
                     version: options.version ?? "1.0.0",
                 })}\n`,
                 "utf8",
@@ -176,6 +181,35 @@ test("Extension install materializes, validates, and selects an immutable genera
             name.startsWith(".staging-"),
         ),
         false,
+    );
+});
+
+test("Extension install publishes an eager generation as an active steady-state runtime", async (t) => {
+    const h = await harness(t);
+    const source = await h.source("source-eager", { activation: "eager" });
+
+    const installed = await h.service.install(source);
+
+    assert.equal(installed.state, "active");
+    assert.equal(installed.activeGeneration, installed.selectedGeneration);
+    assert.deepEqual(await invokeCliRegistration(h.host, "example", "eager"), {
+        kind: "json",
+        value: { version: "1.0.0" },
+    });
+    assert.equal(
+        (await h.host.list())[0]?.activeGeneration,
+        installed.selectedGeneration,
+    );
+    assert.equal(
+        (
+            await stat(
+                h.paths.generationDirectory(
+                    "example",
+                    installed.selectedGeneration!,
+                ),
+            )
+        ).isDirectory(),
+        true,
     );
 });
 

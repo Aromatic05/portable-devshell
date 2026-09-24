@@ -61,13 +61,25 @@ export class ExtensionHost {
             if (this.#started) return;
             const snapshot = await this.#registry.read();
             this.#registrySnapshot = snapshot;
-            for (const [id, entry] of Object.entries(snapshot.extensions).sort(
+            const entries = Object.entries(snapshot.extensions).sort(
                 ([left], [right]) => left.localeCompare(right),
-            )) {
+            );
+            for (const [id, entry] of entries) {
                 if (!entry.enabled) continue;
                 await this.#catalogEntry(id, entry).catch((error: unknown) => {
                     this.#recordFailure(id, entry.selectedGeneration, error);
                 });
+            }
+            for (const [id, entry] of entries) {
+                if (!entry.enabled) continue;
+                const catalog = this.#catalog.getExtension(id);
+                if (catalog?.manifest.activation !== "eager") continue;
+                await this.#activateCatalogEntry(id, "eager").catch(
+                    (error: unknown) => {
+                    if (!this.#failures.has(id))
+                        this.#recordFailure(id, catalog.generation, error);
+                    },
+                );
             }
             this.#started = true;
         });
@@ -238,7 +250,10 @@ export class ExtensionHost {
         });
     }
 
-    /** Validate one immutable generation, select its catalog, and leave it inactive. */
+    /**
+     * Validate one immutable generation and select its catalog.
+     * Eager enabled generations are activated again as a fresh steady-state runtime.
+     */
     async selectGeneration(id: string, generation: string): Promise<void> {
         await this.#exclusive(async () => {
             this.#assertRunning();
@@ -297,6 +312,28 @@ export class ExtensionHost {
                 lastKnownGoodGeneration: generation,
                 selectedGeneration: generation,
             };
+            if (enabled && candidate.manifest.activation === "eager") {
+                let runtime: ExtensionGeneration;
+                try {
+                    runtime = await this.#loadCandidate(id, generation);
+                } catch (error) {
+                    throw extensionFailure(id, generation, error);
+                }
+                try {
+                    await this.#commitCandidate(id, runtime, snapshot, next);
+                } catch (error) {
+                    if (error instanceof ExtensionCandidatePublicationError) {
+                        throw extensionFailure(
+                            id,
+                            generation,
+                            error.cause ?? error,
+                        );
+                    }
+                    throw error;
+                }
+                this.#failures.delete(id);
+                return;
+            }
             await this.#registry.write(next);
             this.#registrySnapshot = next;
             if (enabled) this.#catalog.replace(id, generation, candidate.manifest);
@@ -357,6 +394,11 @@ export class ExtensionHost {
             const entry = snapshot.extensions[id];
             if (entry === undefined) throw extensionNotFound(id);
             await this.#catalogEntry(id, { ...entry, enabled: true }, true);
+            if (
+                this.#catalog.getExtension(id)?.manifest.activation === "eager"
+            ) {
+                await this.#activateCatalogEntry(id, "eager");
+            }
         });
     }
 
@@ -540,7 +582,10 @@ export class ExtensionHost {
         if (throwOnFailure) throw failure;
     }
 
-    async #activateCatalogEntry(id: string): Promise<void> {
+    async #activateCatalogEntry(
+        id: string,
+        mode: "eager" | "required" = "required",
+    ): Promise<void> {
         const snapshot = this.#requireRegistry();
         const entry = snapshot.extensions[id];
         if (entry === undefined) throw extensionNotFound(id);
@@ -574,7 +619,15 @@ export class ExtensionHost {
         for (const generation of candidates) {
             let candidate: ExtensionGeneration;
             try {
-                await this.#preflightGeneration(id, generation);
+                const manifest = await this.#preflightGeneration(id, generation);
+                if (mode === "eager" && manifest.activation !== "eager") {
+                    await this.#catalogEntry(
+                        id,
+                        { ...entry, selectedGeneration: generation },
+                        true,
+                    );
+                    return;
+                }
                 candidate = await this.#loadCandidate(id, generation);
             } catch (error) {
                 selectedFailure ??= error;
@@ -650,9 +703,13 @@ export class ExtensionHost {
         return candidate;
     }
 
-    async #preflightGeneration(id: string, generation: string): Promise<void> {
+    async #preflightGeneration(
+        id: string,
+        generation: string,
+    ): Promise<ExtensionManifest> {
         const manifest = await this.#loader.readManifest(id, generation);
         this.#catalog.assertCanReplace(id, generation, manifest);
+        return manifest;
     }
 
     async #commitCandidate(

@@ -2,7 +2,7 @@
 
 > 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API v4 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API 4.1.0 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -308,17 +308,18 @@ Capability 是：
 
 因此 capability 名称必须是同一层级的资源类别名词。
 
-当前 API v4 集合：
+当前 API 4.1.0 集合：
 
 ```text
 artifacts
 assets
+delegatedWorkers
 instances
 processes
 workers
 ```
 
-五者都是：
+这些 capability 都是：
 
 > 由宿主管理、由 Extension 获得操作权的一类 runtime resource。
 
@@ -671,7 +672,7 @@ hostPoint === extensionBundledPoint;
 
 ### 8.1 两个独立的 command state
 
-CLI public ABI 不再把人类本地 CLI 与 model-facing command projection 塞进同一个 point。API v4 明确拆成：
+CLI public ABI 不再把人类本地 CLI 与 model-facing command projection 塞进同一个 point。自 API v4 起明确拆成：
 
 ```text
 cli.native-commands
@@ -1143,9 +1144,9 @@ generation fault
 
 Static Extension Point declaration 允许 Control 建立 catalog，而不立即执行 Extension code。
 
-> 实现状态：已落地。Control startup / enable 使用 manifest-backed static catalog；CLI/Web 首次 binding acquisition 按需 activation。Install 会执行一次完整 candidate validation 后立即 retire validation runtime，再提交 selected catalog，因此不会为了安装而长期保持 active generation。
+> 实现状态：已落地。Manifest schema 1.1.0 使用必填的 `activation: "lazy" | "eager"` 描述 steady-state policy。Control startup 先完成所有 enabled Extension 的 manifest-backed static catalog，再激活 `eager` Extension；`lazy` Extension 仍在首次 binding acquisition 时按需 activation。
 
-推荐 activation 模型：
+`lazy` steady-state 模型：
 
 ```text
 Control starts
@@ -1160,35 +1161,42 @@ first bound invocation
     -> invoke
 ```
 
-安装事务采用更强的验证路径，但不改变 steady-state lazy 语义：
+`eager` steady-state 模型：
+
+```text
+Control starts
+    -> read and validate all enabled manifests
+    -> publish all static catalogs
+    -> activate enabled eager generations
+```
+
+安装事务采用更强的验证路径，并保持 validation runtime 与 steady-state runtime 分离：
 
 ```text
 install new immutable generation
     -> static declaration preflight
     -> activate candidate for binding/resource validation
     -> retire validation runtime
-    -> commit selected + last-known-good generation
-    -> publish static catalog
-    -> state = installed
-
-first real invocation
-    -> create a new activation incarnation
-    -> invoke through a generation lease
+    -> lazy:
+         commit selected + last-known-good generation
+         publish static catalog
+         state = installed
+    -> enabled eager:
+         create a fresh activation incarnation
+         atomically commit registry + catalog + active generation
+         state = active
 ```
 
 这样可以同时保证：
 
 - 一个静态 point conflict 在 Extension code 执行前就被拒绝；
 - 一个缺失 binding / 非法 binding resource 在 install 时就被拒绝；
-- 安装成功不会强迫所有 Extension 常驻；
+- `lazy` 安装成功不会强迫 Extension 常驻；
+- `eager` 不复用 validation runtime，而是创建独立的 steady-state activation；
 - hot replacement 后旧 generation 仍可按已有 lease drain；
 - last-known-good 只指向通过完整 candidate validation 的 generation。
 
-并非所有 builtin Extension 都必须 eager activate。
-
-如果某个 Extension 需要后台常驻，则应有明确的 activation policy；不能用一个万能 `onStart` lifecycle hook 暗中实现。
-
-Activation policy 的 manifest 表达方式属于后续设计，不在第一版 point contract 中提前冻结。
+需要后台常驻的 Extension 使用显式 `activation: "eager"`；普通按需 Extension 使用 `activation: "lazy"`。Activation policy 不引入万能 `onStart` lifecycle hook，Extension 的公共生命周期仍只有 `activate()` / 可选 `deactivate()`。
 
 ## 19. Error 与 Fault Boundary
 

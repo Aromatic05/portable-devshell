@@ -3,7 +3,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { ExtensionManifest } from "@portable-devshell/extension";
+import {
+    EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
+    type ExtensionManifest,
+} from "@portable-devshell/extension";
 import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
@@ -13,7 +17,8 @@ import { createTestTempDirectory } from "../../../../../../../test/TestTempDirec
 
 function manifest(): ExtensionManifest {
     return {
-        apiVersion: 4,
+        activation: "lazy",
+        apiVersion: EXTENSION_API_VERSION,
         capabilities: [],
         entry: "extension.mjs",
         extensions: {
@@ -23,7 +28,7 @@ function manifest(): ExtensionManifest {
         hostDependencies: [],
         id: "example",
         name: "Example",
-        schemaVersion: 1,
+        schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
         version: "1.0.0",
     };
 }

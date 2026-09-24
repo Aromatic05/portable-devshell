@@ -52,6 +52,7 @@ test("MCP Extension manifest exposes separate native and model command surfaces 
     );
     assert.equal(manifest.id, "mcp");
     assert.equal(manifest.apiVersion, "4.0.0");
+    assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, []);
     assert.deepEqual(manifest.extensions, {
         "cli.native-commands": [

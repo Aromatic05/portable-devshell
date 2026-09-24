@@ -38,6 +38,7 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "index.ts");
     assert.equal(manifest.apiVersion, "4.0.0");
+    assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
         "assets",
         "delegatedWorkers",

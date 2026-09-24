@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     EXTENSION_API_VERSION,
+    EXTENSION_MANIFEST_SCHEMA_VERSION,
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 
@@ -37,8 +38,13 @@ class MemoryRegistry implements ExtensionRegistryPort {
     }
 }
 
-function manifest(id: string, generation: string): ExtensionManifest {
+function manifest(
+    id: string,
+    generation: string,
+    activation: ExtensionManifest["activation"] = "lazy",
+): ExtensionManifest {
     return {
+        activation,
         apiVersion: EXTENSION_API_VERSION,
         capabilities: [],
         entry: "extension.mjs",
@@ -48,7 +54,7 @@ function manifest(id: string, generation: string): ExtensionManifest {
         hostDependencies: [],
         id,
         name: id,
-        schemaVersion: 1,
+        schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,
         version: generation,
     };
 }
@@ -79,13 +85,14 @@ function generation(
     name: string,
     handler: () => Promise<string> | string,
     disposed: string[],
+    activation: ExtensionManifest["activation"] = "lazy",
 ): ExtensionGeneration {
     return new ExtensionGeneration({
         dispose: async () => {
             disposed.push(name);
         },
         generation: name,
-        manifest: manifest(id, name),
+        manifest: manifest(id, name, activation),
         registrations: new ExtensionRegistrationSet([
             {
                 binding: async () => await handler(),
@@ -415,6 +422,88 @@ test("Extension first-use activation falls back to last-known-good when the sele
     await host.stop();
 });
 
+test("Extension host eagerly activates only generations whose manifest requests eager activation", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            eager: { enabled: true, selectedGeneration: "a" },
+            lazy: { enabled: true, selectedGeneration: "b" },
+        },
+        schemaVersion: 1,
+    });
+    const disposed: string[] = [];
+    const loaded: string[] = [];
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) => {
+                loaded.push(`${id}:${name}`);
+                return generation(
+                    id,
+                    name,
+                    () => `${id}:${name}`,
+                    disposed,
+                    id === "eager" ? "eager" : "lazy",
+                );
+            },
+            async (id, name) =>
+                manifest(id, name, id === "eager" ? "eager" : "lazy"),
+        ),
+        registry,
+    });
+
+    await host.start();
+
+    assert.deepEqual(loaded, ["eager:a"]);
+    const records = await host.list();
+    assert.equal(
+        records.find((record) => record.id === "eager")?.state,
+        "active",
+    );
+    assert.equal(
+        records.find((record) => record.id === "lazy")?.state,
+        "installed",
+    );
+    assert.equal(await commandText(host, "lazy", "lazy-first-use"), "lazy:b");
+    assert.deepEqual(loaded, ["eager:a", "lazy:b"]);
+    await host.stop();
+});
+
+test("Extension eager startup fallback honors a lazy last-known-good activation policy", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            example: {
+                enabled: true,
+                lastKnownGoodGeneration: "good",
+                selectedGeneration: "broken",
+            },
+        },
+        schemaVersion: 1,
+    });
+    const loaded: string[] = [];
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) => {
+                loaded.push(name);
+                if (name === "broken") throw new Error("broken eager runtime");
+                return generation(id, name, () => "good", [], "lazy");
+            },
+            async (id, name) =>
+                manifest(id, name, name === "broken" ? "eager" : "lazy"),
+        ),
+        registry,
+    });
+
+    await host.start();
+
+    assert.deepEqual(loaded, ["broken"]);
+    const installed = (await host.list())[0]!;
+    assert.equal(installed.selectedGeneration, "good");
+    assert.equal(installed.activeGeneration, undefined);
+    assert.equal(installed.state, "installed");
+    assert.equal(await commandText(host, "example", "lazy-lkg"), "good");
+    assert.deepEqual(loaded, ["broken", "good"]);
+    await host.stop();
+});
+
 test("Extension lazy activation does not treat registry persistence failure as a last-known-good candidate failure", async () => {
     const registry = new MemoryRegistry({
         extensions: {
@@ -608,6 +697,34 @@ test("Extension enable validates and publishes the static catalog without activa
     await host.stop();
 });
 
+test("Extension enable immediately activates an eager generation", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: false, selectedGeneration: "a" } },
+        schemaVersion: 1,
+    });
+    const loaded: string[] = [];
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) => {
+                loaded.push(name);
+                return generation(id, name, () => "enabled", [], "eager");
+            },
+            async (id, name) => manifest(id, name, "eager"),
+        ),
+        registry,
+    });
+    await host.start();
+
+    await host.enable("example");
+
+    assert.deepEqual(loaded, ["a"]);
+    assert.equal(registry.value.extensions.example?.enabled, true);
+    assert.equal((await host.list())[0]?.state, "active");
+    assert.equal(await commandText(host, "example", "already-active"), "enabled");
+    assert.deepEqual(loaded, ["a"]);
+    await host.stop();
+});
+
 test("selecting a new generation preserves a disabled Extension state", async () => {
     const registry = new MemoryRegistry({
         extensions: { example: { enabled: false, selectedGeneration: "a" } },
@@ -634,6 +751,39 @@ test("selecting a new generation preserves a disabled Extension state", async ()
         /No Extension registration/u,
     );
     await host.stop();
+});
+
+test("selecting an eager generation retires validation runtime before publishing a fresh steady-state runtime", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {},
+        schemaVersion: 1,
+    });
+    const disposed: string[] = [];
+    let loads = 0;
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) => {
+                loads += 1;
+                return generation(id, name, () => name, disposed, "eager");
+            },
+            async (id, name) => manifest(id, name, "eager"),
+        ),
+        registry,
+    });
+    await host.start();
+
+    await host.selectGeneration("example", "a");
+
+    assert.equal(loads, 2);
+    assert.deepEqual(disposed, ["a"]);
+    const record = (await host.list())[0]!;
+    assert.equal(record.activeGeneration, "a");
+    assert.equal(record.selectedGeneration, "a");
+    assert.equal(record.state, "active");
+    assert.equal(await commandText(host, "example", "steady-state"), "a");
+    assert.equal(loads, 2);
+    await host.stop();
+    assert.deepEqual(disposed, ["a", "a"]);
 });
 
 test("Extension host reports a faulted active generation as failed and rejects new leases", async () => {
