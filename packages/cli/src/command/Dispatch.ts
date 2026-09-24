@@ -11,6 +11,7 @@ import { executeContextMessage } from "./context/Message.js";
 import { executeDebugCommand } from "./context/Debug.js";
 import { executeExtensionCommand } from "./extension/Command.js";
 import { executeInstanceCreate } from "./instance/create/Command.js";
+import { executeInit } from "./Init.js";
 import { executeInstanceLifecycle } from "./instance/lifecycle/Command.js";
 import { executeInstanceLogs } from "./instance/observe/Logs.js";
 import { executeWatchStatus } from "./instance/observe/Status.js";
@@ -75,6 +76,7 @@ export async function dispatchCliCommand(
         return;
     }
     const handlers = [
+        executeInit,
         executeControlLifecycle,
         executeOverviewCommand,
         executeConfigCommand,

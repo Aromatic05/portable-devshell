@@ -297,6 +297,7 @@ const builtinCliCommands = [
     "debug",
     "extension",
     "help",
+    "init",
     "instance",
     "logs",
     "oauth",

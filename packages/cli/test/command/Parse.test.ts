@@ -20,6 +20,12 @@ test("CliParser parses Task 11 command fixture", async () => {
     }
 });
 
+test("CliParser parses init as a built-in first-run command", () => {
+    const parser = new CliParser();
+    assert.deepEqual(parser.parse(["init"]), { kind: "init" });
+    assert.deepEqual(parser.parse(["init", "--help"]), { kind: "help" });
+});
+
 test("CliParser rejects invalid command shapes", () => {
     const parser = new CliParser();
 
