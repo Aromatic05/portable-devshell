@@ -10,6 +10,7 @@ import type {
     ConfigContainerDraft,
     ConfigDraft,
     ConfigGlobalDraft,
+    ConfigGlobalMcpOAuth2Draft,
     ConfigInstanceDraft,
     ConfigInstancePatch,
     ConfigInstanceTargetRequest,
@@ -265,7 +266,7 @@ export function parseConfigMcpPatch(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["enabled", "listenHost", "listenPort", "publicBaseUrl"],
+        ["enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl"],
         path,
     );
 
@@ -279,6 +280,13 @@ export function parseConfigMcpPatch(
             ...path,
             "listenPort",
         ]),
+        oauth2:
+            record.oauth2 === undefined
+                ? undefined
+                : parseGlobalMcpOAuth2Draft(record.oauth2, [
+                      ...path,
+                      "oauth2",
+                  ]),
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"]),
         ),
@@ -523,7 +531,7 @@ function parseGlobalMcpDraft(
     const record = readRecord(value, path);
     assertKnownKeys(
         record,
-        ["enabled", "listenHost", "listenPort", "publicBaseUrl"],
+        ["enabled", "listenHost", "listenPort", "oauth2", "publicBaseUrl"],
         path,
     );
 
@@ -537,10 +545,39 @@ function parseGlobalMcpDraft(
             ...path,
             "listenPort",
         ]),
+        oauth2:
+            record.oauth2 === undefined
+                ? undefined
+                : parseGlobalMcpOAuth2Draft(record.oauth2, [
+                      ...path,
+                      "oauth2",
+                  ]),
         publicBaseUrl: readNullable(record.publicBaseUrl, (entry) =>
             readRequiredTrimmedString(entry, [...path, "publicBaseUrl"]),
         ),
     };
+}
+
+function parseGlobalMcpOAuth2Draft(
+    value: unknown,
+    path: readonly ConfigPathSegment[],
+): ConfigGlobalMcpOAuth2Draft {
+    const record = readRecord(value, path);
+    assertKnownKeys(record, ["approval", "token"], path);
+    const approval =
+        record.approval === undefined
+            ? undefined
+            : readEnum(record.approval, [...path, "approval"], ["token", "tui"]);
+    const token = readOptionalTrimmedString(record.token, [...path, "token"]);
+    if (approval === "tui" && token !== undefined) {
+        throw configInputError(
+            "parse",
+            [...path, "token"],
+            "config.oauth2.approvalTokenUnexpected",
+            "must be omitted when approval=tui",
+        );
+    }
+    return { approval, token };
 }
 
 export function parseMcpAuthDraft(

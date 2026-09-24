@@ -329,6 +329,42 @@ test("global TOML round-trips the independent WebUI enable switch", () => {
     );
 });
 
+test("fresh defaults use token approval while legacy global config keeps TUI approval", () => {
+    assert.deepEqual(createDefaultControlConfig().mcp.oauth2, {
+        approval: "token",
+    });
+    assert.deepEqual(normalizeConfigGlobalDraft({}).mcp.oauth2, {
+        approval: "tui",
+    });
+
+    const token = "o".repeat(48);
+    const config = normalizeConfigGlobalDraft({
+        mcp: {
+            oauth2: { approval: "token", token },
+        },
+    });
+    const encoded = toml.encode(globalDocument.encode(config));
+    assert.match(encoded, /\[mcp\.oauth2\]/u);
+    assert.match(encoded, /approval = "token"/u);
+    assert.match(encoded, new RegExp(`token = "${token}"`, "u"));
+
+    const decoded = normalizeConfigGlobalDraft(
+        globalDocument.decode(toml.decode(encoded)),
+    );
+    assert.deepEqual(decoded.mcp.oauth2, { approval: "token", token });
+});
+
+test("global MCP OAuth2 TUI approval never persists an approval token", () => {
+    const config = normalizeConfigGlobalDraft({
+        mcp: { oauth2: { approval: "tui" } },
+    });
+    const encoded = toml.encode(globalDocument.encode(config));
+
+    assert.match(encoded, /\[mcp\.oauth2\]/u);
+    assert.match(encoded, /approval = "tui"/u);
+    assert.doesNotMatch(encoded, /\[mcp\.oauth2\][\s\S]*token =/u);
+});
+
 test("global TOML keeps direct artifact transfer opt-in", () => {
     assert.equal(
         normalizeConfigGlobalDraft({}).control.artifactDirectTransfer,

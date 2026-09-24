@@ -4,6 +4,10 @@ export interface McpOAuth2Config {
     resourceName: string;
 }
 
+export type McpOAuthApprovalConfig =
+    | { mode: "tui" }
+    | { mode: "token"; token?: string };
+
 export type McpAuthConfig =
     | {
           enabled: false;

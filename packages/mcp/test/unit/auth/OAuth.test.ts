@@ -925,6 +925,7 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
         await approvals.warmup();
         const interaction = new McpOAuthInteraction({
             accountId: "aromatic<admin>",
+            approval: { mode: "tui" },
             approvals,
             basePath: "/devshell",
             provider: () => {
@@ -937,7 +938,9 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
                 accountId: "aromatic<admin>",
                 approvalId: "approval-1",
                 approvalKind: "authorization",
+                approvalMode: "tui",
                 approvalStatus: "pending",
+                approvalTokenConfigured: false,
                 clientName: "Client <script>",
                 promptName: "consent",
                 requestedResources: [
@@ -954,7 +957,10 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
             assert.match(html, /write&lt;all&gt;/u);
             assert.match(html, /\/devshell\/oauth\/approvals\/approval-1/u);
             assert.doesNotMatch(html, /Client <script>/u);
-            assert.match(html, /Waiting for administrator approval/u);
+            assert.match(html, /Connections → OAuth Approvals/u);
+            assert.match(html, /devshell oauth approve approval-1/u);
+            assert.match(html, /Waiting for approval/u);
+            assert.doesNotMatch(html, /<button/u);
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }
@@ -966,6 +972,7 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
         );
         const interaction = new McpOAuthInteraction({
             accountId: "aromatic",
+            approval: { mode: "tui" },
             approvals: new McpOAuthApprovalService(storageDir),
             basePath: "",
             provider: () => {
@@ -978,20 +985,58 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
                 accountId: "aromatic",
                 approvalId: "approval-registration",
                 approvalKind: "registration",
+                approvalMode: "tui",
                 approvalStatus: "approved",
+                approvalTokenConfigured: false,
                 clientName: "ChatGPT",
                 promptName: "login",
                 requestedResources: [],
                 requiredScopes: [],
             });
 
-            assert.match(html, /Administrator approved this request/u);
+            assert.match(html, /Approved\. Continuing/u);
             assert.match(html, /window\.location\.reload\(\)/u);
-            assert.match(
-                html,
-                /fetch\("\/oauth\/approvals\/approval-registration"/u,
-            );
-            assert.doesNotMatch(html, /disabled/u);
+            assert.doesNotMatch(html, /fetch\(/u);
+            assert.doesNotMatch(html, /<button/u);
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("McpOAuthInteraction renders a static approval token form in token mode", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-token-approval-page",
+        );
+        const interaction = new McpOAuthInteraction({
+            accountId: "aromatic",
+            approval: {
+                mode: "token",
+                token: "0123456789abcdef0123456789abcdef",
+            },
+            approvals: new McpOAuthApprovalService(storageDir),
+            basePath: "",
+            provider: () => {
+                throw new Error("provider is not needed for rendering");
+            },
+        });
+
+        try {
+            const html = interaction.renderPage({
+                accountId: "aromatic",
+                approvalId: "approval-token",
+                approvalKind: "authorization",
+                approvalMode: "token",
+                approvalStatus: "pending",
+                approvalTokenConfigured: true,
+                clientName: "ChatGPT",
+                promptName: "consent",
+                requestedResources: [],
+                requiredScopes: ["mcp"],
+            });
+
+            assert.match(html, /name="approvalToken"/u);
+            assert.match(html, />Approve<\/button>/u);
+            assert.doesNotMatch(html, /Connections → OAuth Approvals/u);
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }

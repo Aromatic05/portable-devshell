@@ -162,6 +162,18 @@ function validateGlobalMcp(config: ControlConfig): void {
     if (config.mcp.publicBaseUrl !== undefined) {
         parseUrl(config.mcp.publicBaseUrl, ["mcp", "publicBaseUrl"]);
     }
+    if (
+        config.mcp.oauth2.approval === "token" &&
+        config.mcp.oauth2.token !== undefined &&
+        Buffer.byteLength(config.mcp.oauth2.token, "utf8") < 32
+    ) {
+        throw configInputError(
+            "semantic",
+            ["mcp", "oauth2", "token"],
+            "config.auth.tokenWeak",
+            "must contain at least 32 UTF-8 bytes",
+        );
+    }
 }
 
 function validateWeb(config: ControlConfig): void {

@@ -9,6 +9,7 @@ import type {
     ControlInstanceToolsConfig,
     ControlMcpAuthMode,
     ControlMcpContextMode,
+    ControlMcpOAuth2ApprovalMode,
     ControlProviderKind,
     ControlSecurityMode,
     ControlWebAuthMode,
@@ -97,6 +98,11 @@ export interface ConfigMcpOAuth2Draft {
     resourceName: string;
 }
 
+export interface ConfigGlobalMcpOAuth2Draft {
+    approval?: ControlMcpOAuth2ApprovalMode;
+    token?: string;
+}
+
 export interface ConfigWebOAuth2Draft {
     documentationUrl?: string;
     requiredScopes?: string[];
@@ -117,6 +123,7 @@ export interface ConfigGlobalDraft {
         enabled?: boolean;
         listenHost?: string;
         listenPort?: number;
+        oauth2?: ConfigGlobalMcpOAuth2Draft;
         publicBaseUrl?: string | null;
     };
     web?: {
@@ -173,6 +180,7 @@ export interface ConfigMcpPatch {
     enabled?: boolean;
     listenHost?: string;
     listenPort?: number;
+    oauth2?: ConfigGlobalMcpOAuth2Draft;
     publicBaseUrl?: ConfigNullable<string>;
 }
 

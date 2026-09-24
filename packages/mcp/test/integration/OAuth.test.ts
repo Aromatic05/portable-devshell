@@ -783,6 +783,122 @@ test(
     },
 );
 
+test(
+    "OAuth2 static approval token completes registration and authorization without TUI approval",
+    realWorkerTestOptions(workerBinaryPath),
+    async () => {
+        const proxy = await startLoopbackHttpProxy();
+        const origin = proxy.origin;
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-token-approval",
+        );
+        const workspacePath = await createTestTempDirectory(
+            "mcp-oauth-token-workspace",
+        );
+        const homeDirectory = await createTestTempDirectory(
+            "mcp-oauth-token-home",
+        );
+        const runtimeDirectory = await createTestTempDirectory(
+            "mcp-oauth-token-runtime",
+        );
+        const approvalToken = "approval-" + "x".repeat(40);
+        const instance = createFrozenWorker(
+            "real-oauth-token",
+            homeDirectory,
+            runtimeDirectory,
+            workspacePath,
+        );
+        const host = new McpHost({
+            instances: [
+                {
+                    auth: {
+                        enabled: true,
+                        oauth2: {
+                            requiredScopes: ["mcp"],
+                            resourceName: "oauth-token",
+                        },
+                        provider: "oauth2",
+                    },
+                    name: "real-oauth-token",
+                    worker: instance,
+                },
+            ],
+            listenHost: "127.0.0.1",
+            listenPort: 0,
+            oauthApproval: { mode: "token", token: approvalToken },
+            publicBaseUrl: origin,
+            storageDir,
+        });
+
+        try {
+            await instance.start();
+            await host.start();
+            proxy.setTarget(
+                `http://127.0.0.1:${requireTcpPort(host.server.address)}`,
+            );
+
+            const endpoint = `${origin}/real-oauth-token/mcp`;
+            const provider = new InMemoryOAuthClientProvider();
+            const anonymous = new Client(clientInfo);
+            await assert.rejects(
+                anonymous.connect(
+                    new StreamableHTTPClientTransport(new URL(endpoint), {
+                        authProvider: provider,
+                    }),
+                ),
+                (error: unknown) =>
+                    error instanceof UnauthorizedError ||
+                    /unauthorized/iu.test(String(error)),
+            );
+
+            const scope = "mcp offline_access";
+            assert.equal(
+                await auth(provider, { scope, serverUrl: endpoint }),
+                "REDIRECT",
+            );
+            const callback = await completeAuthorizationWithToken(
+                provider.lastAuthorizationUrl!,
+                provider.redirectUrl,
+                approvalToken,
+            );
+            assert.equal(
+                await auth(provider, {
+                    authorizationCode: callback.code,
+                    iss: callback.iss,
+                    scope,
+                    serverUrl: endpoint,
+                }),
+                "AUTHORIZED",
+            );
+            assert.equal(typeof provider.tokens()?.access_token, "string");
+            assert.equal(typeof provider.tokens()?.refresh_token, "string");
+            assert.deepEqual(
+                (await host.oauthApprovals!.list())
+                    .map((request) => [
+                        request.kind,
+                        request.status,
+                        request.decidedBy,
+                    ])
+                    .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+                [
+                    ["authorization", "approved", "web"],
+                    ["registration", "approved", "web"],
+                ],
+            );
+        } finally {
+            try {
+                await teardownFrozenWorker(host, instance);
+                await rm(storageDir, { force: true, recursive: true });
+                await rm(workspacePath, { force: true, recursive: true });
+                await rm(homeDirectory, { force: true, recursive: true });
+                await rm(runtimeDirectory, { force: true, recursive: true });
+            } finally {
+                await proxy.close();
+            }
+        }
+    },
+);
+
 class InMemoryOAuthClientProvider implements OAuthClientProvider {
     readonly redirectUrl = "http://127.0.0.1:33418/callback";
     readonly clientMetadata: OAuthClientMetadata = {
@@ -963,7 +1079,7 @@ async function completeAuthorizationInBrowser(
 
         if (response.status === 200) {
             const html = await response.text();
-            if (html.includes("Administrator approved this request.")) {
+            if (html.includes("Approved. Continuing")) {
                 method = "POST";
                 continue;
             }
@@ -984,6 +1100,73 @@ async function completeAuthorizationInBrowser(
     }
 
     throw new Error("authorization flow did not complete");
+}
+
+async function completeAuthorizationWithToken(
+    authorizationUrl: URL,
+    redirectUri: string,
+    approvalToken: string,
+): Promise<{ code: string; iss?: string }> {
+    let currentUrl = authorizationUrl.href;
+    let method: "GET" | "POST" = "GET";
+    let cookieHeader = "";
+    let submitToken = false;
+
+    for (let step = 0; step < 12; step += 1) {
+        const response = await fetch(currentUrl, {
+            method,
+            headers: {
+                ...(cookieHeader.length === 0 ? {} : { cookie: cookieHeader }),
+                ...(method === "POST"
+                    ? { "content-type": "application/x-www-form-urlencoded" }
+                    : {}),
+            },
+            body:
+                method === "POST"
+                    ? new URLSearchParams(
+                          submitToken ? { approvalToken } : {},
+                      ).toString()
+                    : undefined,
+            redirect: "manual",
+        });
+        cookieHeader = mergeCookieHeader(cookieHeader, response);
+
+        if (response.status >= 300 && response.status < 400) {
+            const locationHeader = response.headers.get("location");
+            assert.notEqual(locationHeader, null);
+            const nextUrl = new URL(locationHeader!, currentUrl);
+            if (`${nextUrl.origin}${nextUrl.pathname}` === redirectUri) {
+                const code = nextUrl.searchParams.get("code");
+                assert.notEqual(code, null);
+                const iss = nextUrl.searchParams.get("iss") ?? undefined;
+                return { code: code!, ...(iss === undefined ? {} : { iss }) };
+            }
+            currentUrl = nextUrl.href;
+            method = "GET";
+            submitToken = false;
+            continue;
+        }
+
+        if (response.status === 200) {
+            const html = await response.text();
+            if (html.includes('name="approvalToken"')) {
+                method = "POST";
+                submitToken = true;
+                continue;
+            }
+            if (html.includes("Approved. Continuing")) {
+                method = "POST";
+                submitToken = false;
+                continue;
+            }
+        }
+
+        const body = await response.text().catch(() => "");
+        throw new Error(
+            `unexpected token-approval interaction status ${response.status}: ${body.slice(0, 500)}`,
+        );
+    }
+    throw new Error("token approval authorization flow did not complete");
 }
 
 function mergeCookieHeader(existing: string, response: Response): string {

@@ -3,6 +3,7 @@ import {
     McpRuntimeState,
     resolvePortableDevshellApplicationVersion,
     type McpInstanceGateway,
+    type McpOAuthApprovalConfig,
     type McpToolProvenanceRecorder,
 } from "@portable-devshell/mcp";
 import type { ControlConfig } from "@portable-devshell/shared";
@@ -67,6 +68,7 @@ export class McpRuntimeFactory {
                 instances: endpoints,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
+                oauthApproval: toMcpOAuthApprovalConfig(config.mcp.oauth2),
                 publicBaseUrl: config.mcp.publicBaseUrl,
                 serverVersion:
                     this.#serverVersion ??
@@ -87,4 +89,15 @@ export class McpRuntimeFactory {
             options?.runtimeState,
         );
     }
+}
+
+export function toMcpOAuthApprovalConfig(
+    config: ControlConfig["mcp"]["oauth2"],
+): McpOAuthApprovalConfig {
+    return config.approval === "tui"
+        ? { mode: "tui" }
+        : {
+              mode: "token",
+              ...(config.token === undefined ? {} : { token: config.token }),
+          };
 }

@@ -36,6 +36,24 @@ test("instance create validates docker preset drafts into container config", () 
     assert.equal(summary.provider, "docker");
 });
 
+test("instance create defaults MCP authentication to oauth2", () => {
+    const service = createService("linux");
+
+    const summary = service.validateDraft({
+        name: "demo-local",
+        provider: "local",
+    });
+
+    assert.deepEqual(summary.mcp.auth, {
+        mode: "oauth2",
+        oauth2: {
+            documentationUrl: undefined,
+            requiredScopes: ["mcp"],
+            resourceName: "demo-local",
+        },
+    });
+});
+
 test("instance create validates existing stopped container drafts with adoptLifecycle", () => {
     const service = createService("linux");
 

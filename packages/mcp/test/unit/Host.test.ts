@@ -44,12 +44,14 @@ test("McpRuntimeState owns state across replaceable listener hosts", () => {
         oauthConfig,
         "https://controller.example",
         storageDir,
+        { mode: "tui" },
         false,
     );
     const secondOAuth = state.oauthResource(
         oauthConfig,
         "https://controller.example",
         storageDir,
+        { mode: "tui" },
         false,
     );
 

@@ -5,6 +5,7 @@ import type {
     ConfigContainerDraft,
     ConfigDraft,
     ConfigGlobalDraft,
+    ConfigGlobalMcpOAuth2Draft,
     ConfigInstanceDraft,
     ConfigInstanceMcpDraft,
     ConfigInstancePatch,
@@ -31,7 +32,10 @@ import type {
 } from "../model/ControlConfig.js";
 
 export function createDefaultControlConfig(): ControlConfig {
-    return normalizeConfigDraft({ instances: [] });
+    return normalizeConfigDraft({
+        instances: [],
+        mcp: { oauth2: { approval: "token" } },
+    });
 }
 
 export function normalizeConfigDraft(
@@ -64,6 +68,7 @@ export function normalizeConfigGlobalDraft(
             enabled: draft.mcp?.enabled ?? false,
             listenHost: mcpListenHost,
             listenPort: mcpListenPort,
+            oauth2: normalizeGlobalMcpOAuth2(draft.mcp?.oauth2),
             publicBaseUrl: normalizeMcpPublicBaseUrl(
                 draft.mcp?.publicBaseUrl,
                 mcpListenHost,
@@ -288,10 +293,22 @@ export function applyConfigMcpPatch(
     current: ControlGlobalConfig["mcp"],
     patch: ConfigMcpPatch,
 ): ConfigGlobalDraft["mcp"] {
+    const oauth2 =
+        patch.oauth2 === undefined
+            ? current.oauth2
+            : normalizeGlobalMcpOAuth2({
+                  ...patch.oauth2,
+                  token:
+                      patch.oauth2.token === MASKED_CONFIG_TOKEN &&
+                      current.oauth2.approval === "token"
+                          ? current.oauth2.token
+                          : patch.oauth2.token,
+              });
     return {
         enabled: patch.enabled ?? current.enabled,
         listenHost: patch.listenHost ?? current.listenHost,
         listenPort: patch.listenPort ?? current.listenPort,
+        oauth2: toGlobalMcpOAuth2Draft(oauth2),
         publicBaseUrl:
             patch.publicBaseUrl === undefined
                 ? current.publicBaseUrl
@@ -349,7 +366,19 @@ export function toConfigView(
                 },
             };
         }) as unknown as ConfigView["instances"],
-        mcp: { ...config.mcp },
+        mcp: {
+            ...config.mcp,
+            oauth2:
+                config.mcp.oauth2.approval === "token"
+                    ? {
+                          ...config.mcp.oauth2,
+                          token:
+                              config.mcp.oauth2.token === undefined
+                                  ? undefined
+                                  : MASKED_CONFIG_TOKEN,
+                      }
+                    : { ...config.mcp.oauth2 },
+        },
         restartControlRequired,
         web: toWebView(config.web),
     };
@@ -434,6 +463,26 @@ function toInstanceMcpAuthDraft(
             requiredScopes: [...auth.oauth2.requiredScopes],
         },
     };
+}
+
+function normalizeGlobalMcpOAuth2(
+    draft: ConfigGlobalMcpOAuth2Draft | undefined,
+): ControlGlobalConfig["mcp"]["oauth2"] {
+    if (draft === undefined) return { approval: "tui" };
+    const approval = draft.approval ?? "token";
+    if (approval === "tui") return { approval };
+    return { approval, ...(draft.token === undefined ? {} : { token: draft.token }) };
+}
+
+function toGlobalMcpOAuth2Draft(
+    config: ControlGlobalConfig["mcp"]["oauth2"],
+): ConfigGlobalMcpOAuth2Draft {
+    return config.approval === "tui"
+        ? { approval: "tui" }
+        : {
+              approval: "token",
+              ...(config.token === undefined ? {} : { token: config.token }),
+          };
 }
 
 function normalizeWebAuth(

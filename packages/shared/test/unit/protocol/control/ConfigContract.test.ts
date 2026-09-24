@@ -234,6 +234,30 @@ test("top-level MCP rejects auth while instance MCP validates OAuth2 structure",
     );
 });
 
+test("global MCP OAuth2 approval token uses the same minimum secret strength", () => {
+    const weak = normalizeConfigDraft({
+        mcp: { oauth2: { approval: "token", token: "too-short" } },
+    });
+    assertConfigIssue(
+        () => validateConfigSemantics(weak),
+        "semantic",
+        ["mcp", "oauth2", "token"],
+        "config.auth.tokenWeak",
+    );
+
+    assertConfigIssue(
+        () =>
+            parseConfigDraft({
+                mcp: {
+                    oauth2: { approval: "tui", token: "unexpected" },
+                },
+            }),
+        "parse",
+        ["mcp", "oauth2", "token"],
+        "config.oauth2.approvalTokenUnexpected",
+    );
+});
+
 test("instance token auth requires a non-trivial configured secret", () => {
     const token = "0123456789abcdef0123456789abcdef";
     assert.deepEqual(

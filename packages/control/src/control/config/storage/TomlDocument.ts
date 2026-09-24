@@ -69,6 +69,13 @@ export class ControlGlobalTomlDocument {
                 enabled: config.mcp.enabled,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
+                oauth2:
+                    config.mcp.oauth2.approval === "token"
+                        ? compact({
+                              approval: config.mcp.oauth2.approval,
+                              token: config.mcp.oauth2.token,
+                          })
+                        : { approval: config.mcp.oauth2.approval },
                 publicBaseUrl: config.mcp.publicBaseUrl,
             },
             web: {

@@ -506,7 +506,7 @@ async function walkBrowserFlow(
                 method = "GET";
                 continue;
             }
-            if (!html.includes("Administrator approved this request.")) {
+            if (!html.includes("Approved. Continuing…")) {
                 await approvePending(approvals, approvalKind);
             }
             method = "POST";

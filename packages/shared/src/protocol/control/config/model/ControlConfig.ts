@@ -5,6 +5,7 @@ export type ControlProviderKind =
     "docker" | "local" | "podman" | "reverse" | "ssh";
 export type ControlMcpAuthMode = "none" | "oauth2" | "token";
 export type ControlMcpContextMode = "explicit" | "openai-session";
+export type ControlMcpOAuth2ApprovalMode = "token" | "tui";
 export type ControlWebAuthMode = "none" | "oauth2" | "token";
 export type ControlSecurityMode = "disabled" | "workspace";
 
@@ -135,6 +136,10 @@ export interface ControlMcpOAuth2Config {
     resourceName: string;
 }
 
+export type ControlMcpOAuth2ApprovalConfig =
+    | { approval: "tui"; token?: undefined }
+    | { approval: "token"; token?: string };
+
 export type ControlMcpAuthConfig =
     | { mode: "none"; oauth2?: undefined }
     | { mode: "token"; oauth2?: undefined; token: string }
@@ -160,6 +165,7 @@ export interface ControlGlobalConfig {
         enabled: boolean;
         listenHost: string;
         listenPort: number;
+        oauth2: ControlMcpOAuth2ApprovalConfig;
         publicBaseUrl?: string;
     };
     web: {

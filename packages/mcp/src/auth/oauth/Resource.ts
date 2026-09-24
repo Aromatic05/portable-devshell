@@ -1,6 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
-import type { McpOAuth2Config } from "../Config.js";
+import type { McpOAuth2Config, McpOAuthApprovalConfig } from "../Config.js";
 import { McpOAuthApprovalService } from "./interaction/Approval.js";
 import { McpOAuthInteraction } from "./interaction/Interaction.js";
 import {
@@ -11,6 +11,7 @@ import {
 import { McpOAuthRegistrationLimiter } from "./interaction/Registration.js";
 
 export interface McpOAuthProtectedResourceOptions {
+    approval?: McpOAuthApprovalConfig;
     approvals?: McpOAuthApprovalService;
     trustProxy?: boolean;
 }
@@ -38,6 +39,7 @@ export class McpOAuthProtectedResource {
         });
         this.#interaction = new McpOAuthInteraction({
             accountId: this.#runtime.accountId,
+            approval: options.approval ?? { mode: "tui" },
             approvals: this.#approvals,
             basePath: this.#runtime.basePath,
             provider: () => this.#runtime.provider,

@@ -258,7 +258,21 @@ export class InstanceCreateCoordinator {
                     `is not supported on ${this.#platform}`,
                 );
             }
-            return normalizeConfigInstanceDraft(draft);
+            const createDraft =
+                draft.mcp?.auth === undefined
+                    ? {
+                          ...draft,
+                          mcp: {
+                              ...draft.mcp,
+                              auth: "oauth2" as const,
+                              oauth2: {
+                                  requiredScopes: ["mcp"],
+                                  resourceName: draft.name,
+                              },
+                          },
+                      }
+                    : draft;
+            return normalizeConfigInstanceDraft(createDraft);
         });
     }
 

@@ -22,6 +22,7 @@ import {
 import {
     ConfigEngine,
     type ConfigEngineOptions,
+    type ConfigRuntimeChangeSet,
 } from "../Engine.js";
 import { InstanceConfigCoordinator } from "../instance/Coordinator.js";
 
@@ -147,11 +148,11 @@ export class ConfigEditorCoordinator {
             const hotApplied = await this.#engine.applyRuntimeOrRestore(
                 previous,
                 validated,
-                {
+                runtimeChanges(previous, validated, {
                     instanceAuth: false,
                     mcp: mcpChanged,
                     web: webChanged,
-                },
+                }),
             );
             this.#engine.finalizeApplyResult(
                 previous,
@@ -229,18 +230,18 @@ export class ConfigEditorCoordinator {
                 preparedDescriptor,
             );
         }
-        const runtimeChanges = {
+        const runtimeChangeSet = runtimeChanges(currentConfig, nextConfig, {
             instanceAuth: plan?.authChanged ?? false,
             mcp: request.mcp !== undefined,
             web: request.web !== undefined,
-        };
+        });
         const hotApplied =
             plan === undefined
-                ? runtimeChanges.mcp || runtimeChanges.web
+                ? runtimeChangeSet.mcp || runtimeChangeSet.web
                     ? await this.#engine.applyRuntimeOrRestore(
                           currentConfig,
                           nextConfig,
-                          runtimeChanges,
+                          runtimeChangeSet,
                       )
                     : false
                 : await this.#instances.applyPreparedUpdate(
@@ -248,7 +249,7 @@ export class ConfigEditorCoordinator {
                       currentConfig,
                       nextConfig,
                       preparedDescriptor,
-                      runtimeChanges,
+                      runtimeChangeSet,
                   );
         if (plan !== undefined) {
             await this.#instances.cleanupPreparedUpdate(
@@ -310,11 +311,11 @@ export class ConfigEditorCoordinator {
         const hotApplied = await this.#engine.applyRuntimeOrRestore(
             currentConfig,
             nextConfig,
-            {
+            runtimeChanges(currentConfig, nextConfig, {
                 instanceAuth: false,
                 mcp: true,
                 web: false,
-            },
+            }),
         );
         return this.#engine.finalizeApplyResult(
             currentConfig,
@@ -352,11 +353,11 @@ export class ConfigEditorCoordinator {
         const hotApplied = await this.#engine.applyRuntimeOrRestore(
             currentConfig,
             nextConfig,
-            {
+            runtimeChanges(currentConfig, nextConfig, {
                 instanceAuth: false,
                 mcp: false,
                 web: true,
-            },
+            }),
         );
         return this.#engine.finalizeApplyResult(
             currentConfig,
@@ -377,4 +378,19 @@ export class ConfigEditorCoordinator {
     async disableInstance(params: JsonValue | undefined): Promise<JsonValue> {
         return await this.#instances.disableInstance(params);
     }
+}
+
+function runtimeChanges(
+    previous: ControlConfig,
+    next: ControlConfig,
+    changes: ConfigRuntimeChangeSet,
+): ConfigRuntimeChangeSet {
+    if (!changes.mcp || changes.web) return changes;
+    const oauth2Changed =
+        diffConfigPaths(previous.mcp.oauth2, next.mcp.oauth2, "mcp.oauth2")
+            .length > 0;
+    const webUsesOAuth2 = [previous, next].some(
+        (config) => config.web.enabled && config.web.auth.mode === "oauth2",
+    );
+    return oauth2Changed && webUsesOAuth2 ? { ...changes, web: true } : changes;
 }

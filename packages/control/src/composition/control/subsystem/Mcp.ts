@@ -44,6 +44,7 @@ export class ControlRuntimeMcp {
     readonly instanceGateway: McpInstanceGatewayControl;
     readonly toolProvenance: ToolCallProvenanceStore;
     #publicBaseUrl?: string;
+    #oauthApproval: ControlConfig["mcp"]["oauth2"];
     #webHost?: HttpHost;
     #webPublicBaseUrl?: string;
     #webAuth: ControlWebAuthConfig;
@@ -80,6 +81,7 @@ export class ControlRuntimeMcp {
         );
         const config = options.state.requireConfig();
         this.#mcpEnabled = config.mcp.enabled;
+        this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.publicBaseUrl;
         this.#webAuth = config.web.auth;
         this.#webEnabled = config.web.enabled;
@@ -164,6 +166,10 @@ export class ControlRuntimeMcp {
         return this.#host;
     }
 
+    get oauthApproval(): ControlConfig["mcp"]["oauth2"] {
+        return this.#oauthApproval;
+    }
+
     get publicBaseUrl(): string | undefined {
         return this.#publicBaseUrl;
     }
@@ -223,6 +229,7 @@ export class ControlRuntimeMcp {
             throw error;
         }
         this.#host = next;
+        this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.enabled
             ? config.mcp.publicBaseUrl
             : undefined;
@@ -235,6 +242,7 @@ export class ControlRuntimeMcp {
     ): Promise<void> {
         const current = this.#host;
         this.#host = host;
+        this.#oauthApproval = config.mcp.oauth2;
         this.#publicBaseUrl = config.mcp.enabled
             ? config.mcp.publicBaseUrl
             : undefined;

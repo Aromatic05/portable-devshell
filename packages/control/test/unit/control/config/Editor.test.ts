@@ -252,7 +252,12 @@ test("config batch preflight failure leaves every requested scope unchanged", as
 test("config view and validation mask all tokens while updates preserve masked secrets", async () => {
     const strongToken = "a".repeat(48);
     const instanceToken = "instance-" + "b".repeat(48);
+    const oauthApprovalToken = "oauth-approval-" + "c".repeat(48);
     let config = createConfig();
+    config.mcp.oauth2 = {
+        approval: "token",
+        token: oauthApprovalToken,
+    };
     config.web.auth = { mode: "token", token: strongToken };
     config.instances[0]!.mcp.auth = { mode: "token", token: instanceToken };
     const service = new ConfigEditorCoordinator({
@@ -270,8 +275,11 @@ test("config view and validation mask all tokens while updates preserve masked s
 
     const view = service.getConfigView() as {
         instances: Array<Record<string, unknown>>;
+        mcp: { oauth2: { token?: string } };
         web: { auth: string; token?: string };
     };
+    assert.equal(view.mcp.oauth2.token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(view).includes(oauthApprovalToken));
     assert.equal(view.web.auth, "token");
     assert.equal(view.web.token, MASKED_CONFIG_TOKEN);
     assert.ok(!JSON.stringify(view).includes(strongToken));
@@ -290,8 +298,13 @@ test("config view and validation mask all tokens while updates preserve masked s
     };
     const validated = service.validateConfigDraft(
         draft as unknown as JsonValue,
-    ) as { web: { token?: string } };
+    ) as {
+        mcp: { oauth2: { token?: string } };
+        web: { token?: string };
+    };
+    assert.equal(validated.mcp.oauth2.token, MASKED_CONFIG_TOKEN);
     assert.equal(validated.web.token, MASKED_CONFIG_TOKEN);
+    assert.ok(!JSON.stringify(validated).includes(oauthApprovalToken));
     assert.ok(!JSON.stringify(validated).includes(strongToken));
     assert.ok(!JSON.stringify(validated).includes(instanceToken));
 
@@ -308,6 +321,16 @@ test("config view and validation mask all tokens while updates preserve masked s
         patch: { auth: "token", token: MASKED_CONFIG_TOKEN },
     });
     assert.deepEqual(config.web.auth, { mode: "token", token: strongToken });
+
+    await service.updateMcpConfig({
+        patch: {
+            oauth2: { approval: "token", token: MASKED_CONFIG_TOKEN },
+        },
+    });
+    assert.deepEqual(config.mcp.oauth2, {
+        approval: "token",
+        token: oauthApprovalToken,
+    });
 
     await service.updateWebConfig({
         patch: { auth: "token", token: "b".repeat(48) },
@@ -2298,6 +2321,49 @@ test("config editor applies Core path updates transactionally and restores on ru
         "rollback persists the previous Core Config",
     );
     assert.deepEqual(committed, [["mcp.publicBaseUrl"]]);
+});
+
+test("MCP OAuth2 approval changes also invalidate an active Web OAuth2 runtime", async () => {
+    let config = createConfig();
+    config.web = {
+        ...config.web,
+        auth: {
+            mode: "oauth2",
+            oauth2: { requiredScopes: ["web"], resourceName: "web" },
+        },
+        enabled: true,
+    };
+    const changes: Array<{ mcp: boolean; web: boolean }> = [];
+    const service = new ConfigEditorCoordinator({
+        configStore: {
+            async write(nextConfig: ControlConfig) {
+                config = nextConfig;
+            },
+        },
+        getConfig: () => config,
+        instanceRegistry: new InstanceRegistryFactory().build(config),
+        runtimeApply: {
+            async apply(_previous, _next, runtimeChanges) {
+                changes.push({
+                    mcp: runtimeChanges.mcp,
+                    web: runtimeChanges.web,
+                });
+                return true;
+            },
+        },
+        runtimePreflight: { async assertAvailable() {} },
+        setConfig: (nextConfig) => {
+            config = nextConfig;
+        },
+    });
+
+    await service.updateMcpConfig({
+        patch: {
+            oauth2: { approval: "token", token: "o".repeat(48) },
+        },
+    });
+
+    assert.deepEqual(changes, [{ mcp: true, web: true }]);
 });
 
 function createConfig() {

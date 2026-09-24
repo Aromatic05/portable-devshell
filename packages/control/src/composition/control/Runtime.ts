@@ -47,6 +47,7 @@ import {
 import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
 import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
+import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 
 interface ControlRuntimeComment {
     readonly comment: ToolCallCommentPort;
@@ -420,7 +421,10 @@ export class ControlRuntime {
                 providerConfig,
                 new URL(publicBaseUrl).origin,
                 this.#mcp.webOauthDir,
-                { trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl) },
+                {
+                    approval: toMcpOAuthApprovalConfig(this.#mcp.oauthApproval),
+                    trustProxy: isLoopbackPublicBaseUrl(publicBaseUrl),
+                },
             );
 
         return new ControlWebOAuthFlow({

@@ -1,4 +1,8 @@
-export type { McpAuthConfig, McpOAuth2Config } from "./auth/Config.js";
+export type {
+    McpAuthConfig,
+    McpOAuth2Config,
+    McpOAuthApprovalConfig,
+} from "./auth/Config.js";
 export { McpOAuthApprovalService } from "./auth/oauth/interaction/Approval.js";
 export { McpOAuthProtectedResource } from "./auth/oauth/Resource.js";
 export type {

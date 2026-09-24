@@ -219,6 +219,17 @@ export class ConfigEngine {
             draft.web?.token === MASKED_CONFIG_TOKEN && webAuth.mode === "token"
                 ? { ...draft.web, token: webAuth.token }
                 : draft.web;
+        const mcp =
+            draft.mcp?.oauth2?.token === MASKED_CONFIG_TOKEN &&
+            current.mcp.oauth2.approval === "token"
+                ? {
+                      ...draft.mcp,
+                      oauth2: {
+                          ...draft.mcp.oauth2,
+                          token: current.mcp.oauth2.token,
+                      },
+                  }
+                : draft.mcp;
         const instances = draft.instances?.map((instance) => {
             if (instance.mcp?.token !== MASKED_CONFIG_TOKEN) return instance;
             const existing = current.instances.find(
@@ -230,7 +241,7 @@ export class ConfigEngine {
                 mcp: { ...instance.mcp, token: existing.mcp.auth.token },
             };
         });
-        return { ...draft, web, instances };
+        return { ...draft, mcp, web, instances };
     }
 }
 

@@ -5,7 +5,11 @@ import type {
     ToolCallContext,
     ToolDefinition,
 } from "@portable-devshell/shared";
-import type { McpAuthConfig, McpOAuth2Config } from "../auth/Config.js";
+import type {
+    McpAuthConfig,
+    McpOAuth2Config,
+    McpOAuthApprovalConfig,
+} from "../auth/Config.js";
 import { McpContextEnvironmentCleanupService } from "../context/Environment.js";
 import { McpContextRegistry } from "../context/registry/Registry.js";
 import {
@@ -84,6 +88,7 @@ export interface McpHostConfig {
     instances: readonly McpHostInstanceConfig[];
     listenHost: string;
     listenPort: number;
+    oauthApproval?: McpOAuthApprovalConfig;
     publicBaseUrl?: string;
     serverVersion?: string;
     storageDir?: string;
@@ -154,11 +159,13 @@ export class McpRuntimeState {
         config: McpOAuth2Config,
         publicBaseUrl: string,
         storageDir: string,
+        approval: McpOAuthApprovalConfig,
         trustProxy: boolean,
     ): McpOAuthProtectedResource {
         const origin = new URL(publicBaseUrl).origin;
         const key = JSON.stringify({
             documentationUrl: config.documentationUrl ?? null,
+            approval,
             origin,
             requiredScopes: [...config.requiredScopes].sort(),
             resourceName: config.resourceName,
@@ -168,6 +175,7 @@ export class McpRuntimeState {
         let resource = this.#oauthResources.get(key);
         if (resource !== undefined) return resource;
         resource = new McpOAuthProtectedResource(config, origin, storageDir, {
+            approval,
             ...(this.oauthApprovals === undefined
                 ? {}
                 : { approvals: this.oauthApprovals }),
@@ -235,6 +243,7 @@ export class McpHost {
                       configuredOAuth ?? defaultOAuthConfig(),
                       config.publicBaseUrl,
                       config.storageDir,
+                      config.oauthApproval ?? { mode: "tui" },
                       isLoopbackHost(config.listenHost),
                   )
                 : undefined;
