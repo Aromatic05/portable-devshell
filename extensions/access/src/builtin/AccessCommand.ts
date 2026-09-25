@@ -10,6 +10,7 @@ export const ACCESS_USAGE = [
     "Usage:",
     "  devshell access cloudflare",
     "  devshell access cloudflare url <https://hostname>",
+    "  devshell access ssh",
     "  devshell access list",
     "  devshell access show <id>",
     "  devshell access set '<endpoint-json>'",
@@ -35,6 +36,9 @@ export async function executeAccessCommand(
         case "cloudflare":
             requireLocalOwner(context);
             return await configureCloudflare(runtime, argv.slice(1), context);
+        case "ssh":
+            requireLocalOwner(context);
+            return await configureSsh(runtime, argv.slice(1), context);
         case "list":
             expectLength(argv, 1, "access list");
             return json(runtime.list().map(recordToJson));
@@ -90,6 +94,7 @@ export async function executeAccessCommand(
 }
 
 const cloudflareEndpointId = "cloudflare-mcp";
+const sshEndpointId = "ssh-mcp";
 
 async function configureCloudflare(
     runtime: AccessRuntime,
@@ -144,6 +149,46 @@ function cloudflareConfiguredText(record: AccessEndpointRecord): string {
     return `${lines.join("\n")}\n`;
 }
 
+async function configureSsh(
+    runtime: AccessRuntime,
+    argv: readonly string[],
+    context: CliNativeCommandInvocationContext,
+): Promise<CliCommandResult> {
+    expectLength(argv, 0, "access ssh");
+    const host = await readLine(context, "SSH host: ");
+    const user = await readLine(context, "SSH user [current]: ", true);
+    const port = readPort(await readLine(context, "SSH port [22]: ", true), 22);
+    const remoteBindHost =
+        (await readLine(context, "Remote bind host [127.0.0.1]: ", true)) ||
+        "127.0.0.1";
+    const remotePort = readPort(await readLine(context, "Remote MCP port: "));
+    const publicUrl = await readLine(context, "Public MCP URL [optional]: ", true);
+    const record = await runtime.upsert({
+        enabled: true,
+        host,
+        id: sshEndpointId,
+        port,
+        provider: "ssh",
+        ...(publicUrl.length === 0 ? {} : { publicUrl }),
+        remoteBindHost,
+        remotePort,
+        target: "mcp",
+        ...(user.length === 0 ? {} : { user }),
+    });
+    return {
+        kind: "text",
+        text: [
+            "SSH reverse access configured.",
+            "",
+            `Service URL: ${record.origin ?? "waiting for the MCP endpoint"}`,
+            ...(record.publicUrl === undefined
+                ? []
+                : [`Public URL: ${record.publicUrl}`]),
+            "",
+        ].join("\n"),
+    };
+}
+
 async function readSecret(
     context: CliNativeCommandInvocationContext,
     label: string,
@@ -177,6 +222,46 @@ async function readSecret(
     const value = Buffer.from(bytes).toString("utf8").trim();
     if (value.length === 0) throw usageError(`${label} is required.`);
     return value;
+}
+
+async function readLine(
+    context: CliNativeCommandInvocationContext,
+    label: string,
+    optional = false,
+): Promise<string> {
+    const io = context.io;
+    if (io === undefined)
+        throw usageError(`${label.trim()} requires interactive CLI input.`);
+    await io.writeStderr(label);
+    await io.requestInput({ raw: false });
+    const bytes: number[] = [];
+    while (true) {
+        context.signal.throwIfAborted();
+        const chunk = await io.readInput();
+        if (chunk === undefined) break;
+        for (const byte of chunk) {
+            if (byte === 3) throw new Error("Input cancelled.");
+            if (byte === 10 || byte === 13) {
+                const value = Buffer.from(bytes).toString("utf8").trim();
+                if (!optional && value.length === 0)
+                    throw usageError(`${label.trim()} is required.`);
+                return value;
+            }
+            bytes.push(byte);
+        }
+    }
+    const value = Buffer.from(bytes).toString("utf8").trim();
+    if (!optional && value.length === 0)
+        throw usageError(`${label.trim()} is required.`);
+    return value;
+}
+
+function readPort(value: string, fallback?: number): number {
+    if (value.length === 0 && fallback !== undefined) return fallback;
+    const port = Number.parseInt(value, 10);
+    if (!Number.isInteger(port) || port < 1 || port > 65535)
+        throw usageError("Port must be an integer between 1 and 65535.");
+    return port;
 }
 
 function recordToJson(record: AccessEndpointRecord): ExtensionJsonValue {

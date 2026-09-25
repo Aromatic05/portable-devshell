@@ -40,7 +40,14 @@ test("init starts stopped Control before reconciling first-run state through RPC
                 async create(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
-                        mcp: { contextMode: "openai-session" },
+                        mcp: {
+                            auth: "oauth2",
+                            contextMode: "openai-session",
+                            oauth2: {
+                                requiredScopes: ["mcp"],
+                                resourceName: "local-pc",
+                            },
+                        },
                         name: "local-pc",
                         provider: "local",
                     });
@@ -119,7 +126,14 @@ test("init reconciles a running fresh-like Control through RPC without restartin
                 async create(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
-                        mcp: { contextMode: "openai-session" },
+                        mcp: {
+                            auth: "oauth2",
+                            contextMode: "openai-session",
+                            oauth2: {
+                                requiredScopes: ["mcp"],
+                                resourceName: "local-pc",
+                            },
+                        },
                         name: "local-pc",
                         provider: "local",
                     });
@@ -212,15 +226,18 @@ test("init preserves TUI approval and reuses an existing local instance", async 
     assert.doesNotMatch(renderedText, /ds_[A-Za-z0-9_-]{40,}/u);
 });
 
-test("fresh interactive init offers Cloudflare through the Access native command", async () => {
+test("fresh interactive init offers Access choices through the optional Access command", async () => {
     const calls: string[] = [];
     let view = configView({ enabled: false, instances: [], token: undefined });
     let output = "";
-    const stdin = Readable.from(["1\n"]) as Readable & { isTTY: boolean };
+    const stdin = Readable.from(["2\n"]) as Readable & { isTTY: boolean };
     stdin.isTTY = true;
     const context = {
         clients: {
             cli: {
+                async commands() {
+                    return [{ id: "access" }];
+                },
                 async command(commandId: string, args: readonly string[], options: unknown) {
                     calls.push(`cli:${commandId}:${args.join(" ")}`);
                     assert.equal(commandId, "access");
@@ -274,9 +291,69 @@ test("fresh interactive init offers Cloudflare through the Access native command
 
     assert.equal(await executeInit({ kind: "init" }, context), true);
     assert.deepEqual(calls, ["cli:access:cloudflare"]);
-    assert.match(output, /Remote access\?/u);
-    assert.match(output, /1\. Cloudflare Tunnel/u);
+    assert.match(output, /MCP access/u);
+    assert.match(output, /1\. Already public/u);
+    assert.match(output, /2\. Cloudflare Tunnel/u);
+    assert.match(output, /3\. SSH reverse/u);
     assert.match(output, /Cloudflare tunnel configured\./u);
+});
+
+test("fresh interactive init silently skips Access when the Access command is absent", async () => {
+    let view = configView({ enabled: false, instances: [], token: undefined });
+    let output = "";
+    const stdin = Readable.from([]) as Readable & { isTTY: boolean };
+    stdin.isTTY = true;
+    const context = {
+        clients: {
+            cli: {
+                async commands() {
+                    return [];
+                },
+                async command() {
+                    throw new Error("Access must not be invoked");
+                },
+            },
+            config: {
+                async get() {
+                    return view;
+                },
+                async update() {
+                    view = configView({
+                        enabled: true,
+                        instances: view.instances,
+                        token: "********",
+                    });
+                    return {};
+                },
+            },
+            instance: {
+                async create() {
+                    view = configView({ token: "********" });
+                    return { enabled: true, name: "local-pc" };
+                },
+            },
+            runtime: {
+                async start(instance: string) {
+                    return readySnapshot(instance);
+                },
+            },
+        },
+        controlNegotiated: true,
+        outputFormat: "text",
+        stdin,
+        stderr: { write() {} },
+        stdout: {
+            write(chunk: string) {
+                output += chunk;
+            },
+        },
+        writeValue(_value: unknown, text: string) {
+            output += text;
+        },
+    } as unknown as CliDispatchContext;
+
+    assert.equal(await executeInit({ kind: "init" }, context), true);
+    assert.doesNotMatch(output, /MCP access/u);
 });
 
 function configView(input?: {

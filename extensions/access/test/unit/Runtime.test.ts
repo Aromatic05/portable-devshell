@@ -462,6 +462,68 @@ test("Access CLI configures Cloudflare from one interactive tunnel token", async
     assert.doesNotMatch(result.text, /secret-tunnel-token/u);
 });
 
+test("Access CLI configures SSH reverse interactively", async () => {
+    let configured: ExtensionJsonValue | undefined;
+    let stderr = "";
+    const fake = {
+        async upsert(value: ExtensionJsonValue) {
+            configured = value;
+            return {
+                enabled: true,
+                id: "ssh-mcp",
+                origin: "http://127.0.0.1:47123/",
+                provider: "ssh",
+                publicUrl: "https://mcp.example.test/",
+                state: "running",
+                target: "mcp",
+            };
+        },
+    } as unknown as AccessRuntime;
+    const chunks = [
+        Buffer.from("gateway.example.test\r"),
+        Buffer.from("aromatic\r"),
+        Buffer.from("\r"),
+        Buffer.from("\r"),
+        Buffer.from("17890\r"),
+        Buffer.from("https://mcp.example.test\r"),
+    ];
+    const local = {
+        io: {
+            async readInput() {
+                return chunks.shift();
+            },
+            async requestInput() {},
+            async writeStderr(chunk: string) {
+                stderr += chunk;
+            },
+            async writeStdout() {},
+        },
+        localOwner: true,
+        requestId: "local",
+        signal: new AbortController().signal,
+    };
+
+    const result = await executeAccessCommand(fake, ["ssh"], local);
+    assert.deepEqual(configured, {
+        enabled: true,
+        host: "gateway.example.test",
+        id: "ssh-mcp",
+        port: 22,
+        provider: "ssh",
+        publicUrl: "https://mcp.example.test",
+        remoteBindHost: "127.0.0.1",
+        remotePort: 17890,
+        target: "mcp",
+        user: "aromatic",
+    });
+    assert.match(stderr, /SSH host:/u);
+    assert.match(stderr, /Remote MCP port:/u);
+    assert.equal(result.kind, "text");
+    if (result.kind !== "text") assert.fail("text result expected");
+    assert.match(result.text, /SSH reverse access configured\./u);
+    assert.match(result.text, /https:\/\/mcp\.example\.test\//u);
+});
+
 test("Access Web endpoint serves status behind the host Web application gateway", async () => {
     const directory = await createTestTempDirectory("access-web");
     const config = new MemoryConfig();

@@ -84,7 +84,14 @@ export async function executeInit(
             });
         }
         await context.clients.instance.create({
-            mcp: { contextMode: "openai-session" },
+            mcp: {
+                auth: "oauth2",
+                contextMode: "openai-session",
+                oauth2: {
+                    requiredScopes: ["mcp"],
+                    resourceName: defaultInitialInstanceName,
+                },
+            },
             name: defaultInitialInstanceName,
             provider: "local",
         });
@@ -123,7 +130,8 @@ export async function executeInit(
         mcpEnabled: config.mcp.enabled,
     };
     context.writeValue(result, renderInitResult(result));
-    if (freshLike && isInteractive(context)) await offerRemoteAccess(context);
+    if (freshLike && isInteractive(context) && (await hasAccessCommand(context)))
+        await offerRemoteAccess(context);
     return true;
 }
 
@@ -161,23 +169,46 @@ function renderInitResult(result: CliInitResult): string {
 
 async function offerRemoteAccess(context: CliDispatchContext): Promise<void> {
     const readline = createInterface({ input: context.stdin });
+    let answer = "";
     try {
         context.stdout.write(
             [
-                "Remote access?",
-                "1. Cloudflare Tunnel",
-                "2. Not now",
-                "selection [2]: ",
+                "MCP access",
+                "1. Already public",
+                "2. Cloudflare Tunnel",
+                "3. SSH reverse",
+                "4. Configure later",
+                "selection [4]: ",
             ].join("\n"),
         );
         const next = await readline[Symbol.asyncIterator]().next();
-        const answer = next.done ? "" : next.value.trim().toLowerCase();
-        if (answer !== "1" && answer !== "cloudflare") return;
+        answer = next.done ? "" : next.value.trim().toLowerCase();
     } finally {
         readline.close();
     }
 
-    const result = await context.clients.cli.command("access", ["cloudflare"], {
+    if (answer === "" || answer === "4" || answer === "later") return;
+    if (answer === "1" || answer === "public") {
+        const publicUrl = await readInitLine(context, "Public MCP URL: ");
+        if (publicUrl.length === 0) return;
+        await context.clients.config.update({ mcp: { publicBaseUrl: publicUrl } });
+        context.stdout.write(`MCP public URL configured: ${publicUrl}\n`);
+        return;
+    }
+    if (answer === "2" || answer === "cloudflare") {
+        await runAccessCommand(context, ["cloudflare"]);
+        return;
+    }
+    if (answer === "3" || answer === "ssh") {
+        await runAccessCommand(context, ["ssh"]);
+    }
+}
+
+async function runAccessCommand(
+    context: CliDispatchContext,
+    args: readonly string[],
+): Promise<void> {
+    const result = await context.clients.cli.command("access", args, {
         relay: {
             input: context.stdin,
             stderr: context.stderr,
@@ -190,6 +221,30 @@ async function offerRemoteAccess(context: CliDispatchContext): Promise<void> {
         context.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
     } else {
         context.writeJson(result.value ?? null);
+    }
+}
+
+async function hasAccessCommand(context: CliDispatchContext): Promise<boolean> {
+    try {
+        return (await context.clients.cli.commands()).some(
+            (command) => command.id === "access",
+        );
+    } catch {
+        return false;
+    }
+}
+
+async function readInitLine(
+    context: CliDispatchContext,
+    prompt: string,
+): Promise<string> {
+    const readline = createInterface({ input: context.stdin });
+    try {
+        context.stdout.write(prompt);
+        const next = await readline[Symbol.asyncIterator]().next();
+        return next.done ? "" : next.value.trim();
+    } finally {
+        readline.close();
     }
 }
 
