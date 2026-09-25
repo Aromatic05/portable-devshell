@@ -126,7 +126,7 @@ export function normalizeConfigInstanceDraft(
         },
         tools: cloneTools(draft.tools),
         workspace: {
-            enabled: draft.workspace?.enabled ?? true,
+            enabled: draft.workspace?.enabled ?? false,
         },
     };
 

@@ -83,12 +83,13 @@ export class TuiCommandDispatcherEditor {
                         mcp: {
                             auth: "none",
                             contextMode:
-                                schema.defaultMcpContextMode ?? "explicit",
+                                schema.defaultMcpContextMode ?? "openai-session",
                             enabled: schema.defaultMcpEnabled,
                         },
                         name: "",
                         provider: schema.defaultProvider,
                         security: { mode: schema.defaultSecurityMode },
+                        workspace: { enabled: false },
                     },
                     false,
                 );
@@ -792,13 +793,14 @@ export class TuiCommandDispatcherEditor {
                     },
                     mcp: {
                         auth: "none",
-                        contextMode: "explicit",
+                        contextMode: "openai-session",
                         enabled: true,
                         path: `/${instanceName}/mcp`,
                     },
                     name: instanceName,
                     provider: "local",
                     security: { mode: "disabled" },
+                    workspace: { enabled: false },
                 },
             ),
         );

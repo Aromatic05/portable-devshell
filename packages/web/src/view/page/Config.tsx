@@ -365,7 +365,7 @@ export function Config({
                                     value={stringValue(
                                         parsed.value,
                                         "mcp.contextMode",
-                                        "explicit",
+                                        "openai-session",
                                     )}
                                 >
                                     <option value="explicit">explicit</option>
@@ -388,7 +388,7 @@ export function Config({
                                 checked={booleanValue(
                                     parsed.value,
                                     "workspace.enabled",
-                                    true,
+                                    false,
                                 )}
                                 disabled={
                                     !interactive || parsed.value === undefined

@@ -112,13 +112,13 @@ test("instance MCP context mode defaults to openai-session and accepts explicit"
     );
 });
 
-test("Workspace switch defaults enabled without restoring persistent workspace path authority", () => {
+test("Workspace switch defaults disabled without restoring persistent workspace path authority", () => {
     const instance = normalizeConfigInstanceDraft({
         name: "local-one",
         provider: "local",
     });
 
-    assert.deepEqual(instance.workspace, { enabled: true });
+    assert.deepEqual(instance.workspace, { enabled: false });
     const parsed = parseConfigDraft({
         instances: [
             {

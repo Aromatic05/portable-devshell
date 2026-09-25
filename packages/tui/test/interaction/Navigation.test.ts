@@ -2659,7 +2659,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         const createMode = wizard.expandedLines.find((line) =>
             line.id?.includes(":field:mcp.contextMode"),
         );
-        assert.equal(createMode?.editableValue?.value, "explicit");
+        assert.equal(createMode?.editableValue?.value, "openai-session");
         assert.ok(createMode?.id);
         harness.store.setSelectedDetailLine(wizard.expandedKey, createMode.id);
         await harness.dispatch({
@@ -2669,7 +2669,7 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         let draft = harness.store.getState().ui.formDrafts.create as {
             mcp?: { contextMode?: string };
         };
-        assert.equal(draft.mcp?.contextMode, "openai-session");
+        assert.equal(draft.mcp?.contextMode, "explicit");
 
         harness.store.setSelectedPage("config");
         openEditorForBox(harness, "config", "mcp");

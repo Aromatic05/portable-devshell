@@ -791,7 +791,9 @@ function connectionDrafts(
             contextMode:
                 mcp?.contextMode === "openai-session"
                     ? "openai-session"
-                    : "explicit",
+                    : mcp?.contextMode === "explicit"
+                      ? "explicit"
+                      : "openai-session",
             enabled: mcp?.enabled !== false,
             oauth2: oauthDraft(mcp?.oauth2),
             path:

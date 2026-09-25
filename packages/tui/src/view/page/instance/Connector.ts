@@ -534,11 +534,12 @@ function selectedInstanceDraft(
             },
             mcp: {
                 auth: "none",
-                contextMode: "explicit",
+                contextMode: "openai-session",
                 enabled: true,
                 path: `/${instanceName}/mcp`,
             },
             name: instanceName,
+            workspace: { enabled: false },
         }
     );
 }

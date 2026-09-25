@@ -140,7 +140,7 @@ export function buildConfigPageBoxes(
                         "context",
                         stringValue(
                             readPath(draft, "mcp.contextMode"),
-                            "explicit",
+                            "openai-session",
                         ),
                     ],
                 ),
@@ -168,7 +168,7 @@ export function buildConfigPageBoxes(
             summaryLines: [
                 compactSummary([
                     "enabled",
-                    stringValue(readPath(draft, "workspace.enabled"), "true"),
+                    stringValue(readPath(draft, "workspace.enabled"), "false"),
                 ]),
             ],
             title: "Workspace",
@@ -644,14 +644,14 @@ function instanceDraft(
               },
               mcp: {
                   auth: "none",
-                  contextMode: "explicit",
+                  contextMode: "openai-session",
                   enabled: true,
                   path: `/${instanceName}/mcp`,
               },
               name: instanceName,
               provider: "local",
               security: { mode: "disabled" },
-              workspace: { enabled: true },
+              workspace: { enabled: false },
           }
         : toTuiInstanceEditorRecord(record);
 }

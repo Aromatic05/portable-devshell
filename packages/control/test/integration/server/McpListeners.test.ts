@@ -157,6 +157,7 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     let config = createIndependentConfig();
     config.instances = [
         normalizeConfigInstanceDraft({
+            mcp: { contextMode: "explicit" },
             name: "demo-local",
             provider: "local",
         }),

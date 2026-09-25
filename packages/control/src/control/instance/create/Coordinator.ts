@@ -43,7 +43,7 @@ const instanceCreateSchema: InstanceCreateSchema = {
         ],
         presets: containerPresets,
     },
-    defaultMcpContextMode: "explicit",
+    defaultMcpContextMode: "openai-session",
     defaultModelExtensions:
         defaultConfigNormalizeContext.defaultModelExtensions,
     defaultEnabled: defaultConfigNormalizeContext.defaultEnabled,
