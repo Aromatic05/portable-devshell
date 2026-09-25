@@ -16,6 +16,7 @@ import {
     type FrameStream,
 } from "@portable-devshell/shared/transport/frame";
 import {
+    WORKER_LEGACY_PROTOCOL_VERSION,
     WorkerTransportDriverLocal,
     WorkerBinary,
     WORKER_PROTOCOL_VERSION,
@@ -60,8 +61,12 @@ test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple cal
 
     const ping = await protocolClient.ping();
     const handshake = await protocolClient.handshake({
-        minProtocolVersion: WORKER_PROTOCOL_VERSION,
-        maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+        minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+        protocolRange: {
+            min: WORKER_PROTOCOL_VERSION,
+            max: WORKER_PROTOCOL_VERSION,
+        },
         clientName: "portable-devshell",
         clientVersion: "0.1.0",
     });
@@ -77,6 +82,34 @@ test("WorkerRpcBridge reuses one worker.rpc transport stream across multiple cal
         "worker.handshake",
         "tools.list",
     ]);
+    bridge.close();
+});
+
+test("WorkerProtocolClient normalizes the legacy Worker 7 handshake", async () => {
+    const harness = createRpcHarness({
+        handshakeProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+    });
+    const bridge = createTransportRpcBridge(harness.transport, {
+        instanceName: "task-4-legacy-worker",
+    });
+    const protocolClient = new WorkerProtocolClient(new WorkerRpcClient(bridge));
+
+    const handshake = await protocolClient.handshake({
+        minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+        maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+        protocolRange: {
+            min: WORKER_PROTOCOL_VERSION,
+            max: WORKER_PROTOCOL_VERSION,
+        },
+        clientName: "portable-devshell",
+        clientVersion: "0.7.6",
+    });
+
+    assert.equal(handshake.protocolVersion, WORKER_PROTOCOL_VERSION);
+    assert.equal(
+        handshake.legacyProtocolVersion,
+        WORKER_LEGACY_PROTOCOL_VERSION,
+    );
     bridge.close();
 });
 
@@ -437,8 +470,12 @@ test(
 
         const ping = await protocolClient.ping();
         const handshake = await protocolClient.handshake({
-            minProtocolVersion: WORKER_PROTOCOL_VERSION,
-            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            protocolRange: {
+                min: WORKER_PROTOCOL_VERSION,
+                max: WORKER_PROTOCOL_VERSION,
+            },
             clientName: "portable-devshell",
             clientVersion: "0.1.0",
         });
@@ -498,8 +535,12 @@ test(
         const rpcClient = new WorkerRpcClient(bridge);
         const protocolClient = new WorkerProtocolClient(rpcClient);
         await protocolClient.handshake({
-            minProtocolVersion: WORKER_PROTOCOL_VERSION,
-            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            protocolRange: {
+                min: WORKER_PROTOCOL_VERSION,
+                max: WORKER_PROTOCOL_VERSION,
+            },
             clientName: "portable-devshell",
             clientVersion: "0.1.0",
         });
@@ -592,8 +633,12 @@ test(
         const rpcClient = new WorkerRpcClient(bridge);
         const protocolClient = new WorkerProtocolClient(rpcClient);
         await protocolClient.handshake({
-            minProtocolVersion: WORKER_PROTOCOL_VERSION,
-            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
+            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            protocolRange: {
+                min: WORKER_PROTOCOL_VERSION,
+                max: WORKER_PROTOCOL_VERSION,
+            },
             clientName: "portable-devshell",
             clientVersion: "0.1.0",
         });
@@ -643,7 +688,10 @@ test(
     },
 );
 
-function createRpcHarness(options?: { slowMethods?: Set<string> }): {
+function createRpcHarness(options?: {
+    handshakeProtocolVersion?: number | string;
+    slowMethods?: Set<string>;
+}): {
     transport: WorkerTransport;
     connectionCount: number;
     requestMethods: string[];
@@ -771,6 +819,7 @@ function createRpcHarness(options?: { slowMethods?: Set<string> }): {
                             createResponse(
                                 frame.method,
                                 frame.id,
+                                options?.handshakeProtocolVersion,
                             ) as unknown as JsonValue,
                         ),
                     ),
@@ -851,7 +900,11 @@ function isRequestFrame(value: unknown): value is {
     );
 }
 
-function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
+function createResponse(
+    method: string,
+    id: string,
+    handshakeProtocolVersion: number | string = WORKER_PROTOCOL_VERSION,
+): WorkerRpcResponseEnvelope {
     if (method === "worker.ping") {
         return {
             type: "response",
@@ -870,7 +923,7 @@ function createResponse(method: string, id: string): WorkerRpcResponseEnvelope {
                 instance: "task-4-bridge",
                 workspace: "/tmp/workspace",
                 workerVersion: "0.1.0",
-                protocolVersion: WORKER_PROTOCOL_VERSION,
+                protocolVersion: handshakeProtocolVersion,
                 platform: { os: "linux", arch: "x64" },
                 capabilities: { tools: true, streaming: false, cancel: true },
             },

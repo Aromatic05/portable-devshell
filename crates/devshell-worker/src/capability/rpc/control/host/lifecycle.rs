@@ -3,7 +3,7 @@ pub mod handshake {
 
     use serde_json::json;
 
-    use crate::capability::rpc::codec::PROTOCOL_VERSION;
+    use crate::capability::rpc::codec::{LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION};
     use crate::capability::rpc::error::RpcError;
     use crate::capability::rpc::path::protocol_path;
     use crate::capability::rpc::router::{ControlHandler, control_handler};
@@ -15,28 +15,45 @@ pub mod handshake {
 
     pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
         control_handler(move |request| {
-            let min_protocol_version = request
-                .params
-                .get("minProtocolVersion")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing minProtocolVersion"))?;
-            let max_protocol_version = request
-                .params
-                .get("maxProtocolVersion")
-                .and_then(serde_json::Value::as_u64)
-                .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing maxProtocolVersion"))?;
+            let protocol_range = request.params.get("protocolRange");
+            let compatible = if let Some(protocol_range) = protocol_range {
+                let min = protocol_range
+                    .get("min")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing protocolRange.min"))?;
+                let max = protocol_range
+                    .get("max")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing protocolRange.max"))?;
+                let current = parse_protocol_version(PROTOCOL_VERSION)?;
+                let min_version = parse_protocol_version(min)?;
+                let max_version = parse_protocol_version(max)?;
+                min_version <= current && current <= max_version
+            } else {
+                let min = request
+                    .params
+                    .get("minProtocolVersion")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing minProtocolVersion"))?;
+                let max = request
+                    .params
+                    .get("maxProtocolVersion")
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing maxProtocolVersion"))?;
+                min <= LEGACY_PROTOCOL_VERSION as u64 && LEGACY_PROTOCOL_VERSION as u64 <= max
+            };
 
-            if PROTOCOL_VERSION as u64 > max_protocol_version
-                || (PROTOCOL_VERSION as u64) < min_protocol_version
-            {
+            if !compatible {
                 return Err(RpcError::new(
                     "worker.protocolVersionUnsupported",
                     "Worker protocol version is not supported by the client.",
                 )
                 .with_details(json!({
                     "workerProtocolVersion": PROTOCOL_VERSION,
-                    "minProtocolVersion": min_protocol_version,
-                    "maxProtocolVersion": max_protocol_version
+                    "legacyProtocolVersion": LEGACY_PROTOCOL_VERSION,
+                    "protocolRange": protocol_range,
+                    "minProtocolVersion": request.params.get("minProtocolVersion"),
+                    "maxProtocolVersion": request.params.get("maxProtocolVersion")
                 })));
             }
 
@@ -50,6 +67,7 @@ pub mod handshake {
                 "workerVersion": env!("CARGO_PKG_VERSION"),
                 "workerSha256": runtime.worker_sha256,
                 "protocolVersion": PROTOCOL_VERSION,
+                "legacyProtocolVersion": LEGACY_PROTOCOL_VERSION,
                 "platform": {
                     "os": runtime.platform.os,
                     "arch": runtime.platform.arch,
@@ -70,6 +88,29 @@ pub mod handshake {
             }))
         })
     }
+
+    fn parse_protocol_version(version: &str) -> Result<(u64, u64, u64), RpcError> {
+        let mut parts = version.split('.');
+        let major = parse_protocol_part(parts.next(), version)?;
+        let minor = parse_protocol_part(parts.next(), version)?;
+        let patch = parse_protocol_part(parts.next(), version)?;
+        if parts.next().is_some() {
+            return Err(invalid_protocol_version(version));
+        }
+        Ok((major, minor, patch))
+    }
+
+    fn parse_protocol_part(part: Option<&str>, version: &str) -> Result<u64, RpcError> {
+        part.and_then(|value| value.parse::<u64>().ok())
+            .ok_or_else(|| invalid_protocol_version(version))
+    }
+
+    fn invalid_protocol_version(version: &str) -> RpcError {
+        RpcError::new(
+            "rpc.invalidParams",
+            format!("invalid protocol version {version}; expected x.y.z"),
+        )
+    }
 }
 
 pub mod ping {
@@ -89,7 +130,7 @@ pub mod status {
 
     use serde_json::json;
 
-    use crate::capability::rpc::codec::PROTOCOL_VERSION;
+    use crate::capability::rpc::codec::{LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION};
     use crate::capability::rpc::router::{ControlHandler, control_handler};
     use crate::daemon::process::WorkerRuntimeContext;
 
@@ -98,6 +139,7 @@ pub mod status {
             Ok(json!({
                 "instance": runtime.instance.as_str(),
                 "protocolVersion": PROTOCOL_VERSION,
+                "legacyProtocolVersion": LEGACY_PROTOCOL_VERSION,
                 "workerVersion": env!("CARGO_PKG_VERSION"),
                 "workerSha256": runtime.worker_sha256,
                 "securityMode": match runtime.security_mode {

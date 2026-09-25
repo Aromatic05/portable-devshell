@@ -56,7 +56,7 @@ export interface OperationalOverviewWorker {
             version: string;
         };
     };
-    protocolVersion: number;
+    protocolVersion: string;
     version: string;
 }
 

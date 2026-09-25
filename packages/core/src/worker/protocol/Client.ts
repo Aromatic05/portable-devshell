@@ -6,11 +6,18 @@ import type {
 
 import { WorkerRpcClient } from "./rpc/Client.js";
 
-export const WORKER_PROTOCOL_VERSION = 7;
+export const WORKER_PROTOCOL_VERSION = "1.0.0";
+export const WORKER_LEGACY_PROTOCOL_VERSION = 7;
+
+export interface WorkerProtocolRange {
+    min: string;
+    max: string;
+}
 
 export interface WorkerHandshakeParams {
     minProtocolVersion: number;
     maxProtocolVersion: number;
+    protocolRange: WorkerProtocolRange;
     clientName: string;
     clientVersion: string;
 }
@@ -45,7 +52,8 @@ export interface WorkerHandshakeResult {
     instance: string;
     workerVersion: string;
     workerSha256?: string;
-    protocolVersion: number;
+    protocolVersion: string;
+    legacyProtocolVersion?: number;
     platform: {
         os: string;
         arch: string;
@@ -197,12 +205,32 @@ export class WorkerProtocolClient {
     async handshake(
         params: WorkerHandshakeParams,
     ): Promise<WorkerHandshakeResult> {
-        return asObjectResult<WorkerHandshakeResult>(
+        const result = asObjectResult<
+            Omit<WorkerHandshakeResult, "protocolVersion"> & {
+                protocolVersion: string | number;
+            }
+        >(
             await this.#rpcClient.request(
                 "worker.handshake",
                 params as unknown as JsonValue,
             ),
         );
+        if (result.protocolVersion === WORKER_LEGACY_PROTOCOL_VERSION) {
+            return {
+                ...result,
+                legacyProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+                protocolVersion: WORKER_PROTOCOL_VERSION,
+            };
+        }
+        if (typeof result.protocolVersion !== "string") {
+            throw new TypeError(
+                `Unsupported Worker protocol version ${String(result.protocolVersion)}.`,
+            );
+        }
+        return {
+            ...result,
+            protocolVersion: result.protocolVersion,
+        };
     }
 
     async listTools(): Promise<WorkerToolsListResult> {

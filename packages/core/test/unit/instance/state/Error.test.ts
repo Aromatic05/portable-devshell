@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     InstanceStateMachine,
+    WORKER_LEGACY_PROTOCOL_VERSION,
     WorkerInstance,
     WORKER_PROTOCOL_VERSION,
 } from "@portable-devshell/core/testing";
@@ -224,8 +225,12 @@ function createInstance(
             handshake: {
                 clientName: "portable-devshell",
                 clientVersion: "0.1.0",
-                maxProtocolVersion: WORKER_PROTOCOL_VERSION,
-                minProtocolVersion: WORKER_PROTOCOL_VERSION,
+                maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+                minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+                protocolRange: {
+                    min: WORKER_PROTOCOL_VERSION,
+                    max: WORKER_PROTOCOL_VERSION,
+                },
             },
             name: asInstanceName("demo-local"),
         } as never,

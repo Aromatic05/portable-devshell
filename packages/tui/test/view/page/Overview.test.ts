@@ -101,7 +101,7 @@ import {
                             version: "5.3",
                         },
                     },
-                    protocolVersion: 2,
+                    protocolVersion: "1.0.0",
                     version: "0.4.10",
                 },
             },

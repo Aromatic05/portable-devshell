@@ -141,6 +141,7 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
             "params": {
                 "minProtocolVersion": 7,
                 "maxProtocolVersion": 7,
+                "protocolRange": { "min": "0.9.0", "max": "1.2.0" },
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
@@ -148,7 +149,8 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
     );
     assert_eq!(handshake["type"], "response");
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 7);
+    assert_eq!(handshake["result"]["protocolVersion"], "1.0.0");
+    assert_eq!(handshake["result"]["legacyProtocolVersion"], 7);
     assert_eq!(
         handshake["result"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
@@ -501,8 +503,9 @@ fn handshake_rejects_unsupported_protocol_versions() {
             "id": "4",
             "method": "worker.handshake",
             "params": {
-                "minProtocolVersion": 2,
-                "maxProtocolVersion": 2
+                "minProtocolVersion": 7,
+                "maxProtocolVersion": 7,
+                "protocolRange": { "min": "1.1.0", "max": "2.0.0" }
             }
         }),
     );
@@ -512,7 +515,41 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], 7);
+    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], "1.0.0");
+    assert_eq!(handshake["error"]["details"]["legacyProtocolVersion"], 7);
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn handshake_accepts_legacy_protocol_7_client() {
+    let env = TestEnv::new();
+    let instance = "legacy-control";
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    let handshake = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "legacy-handshake",
+            "method": "worker.handshake",
+            "params": {
+                "minProtocolVersion": 7,
+                "maxProtocolVersion": 7,
+                "clientName": "portable-devshell",
+                "clientVersion": "0.7.6"
+            }
+        }),
+    );
+
+    assert_eq!(handshake["ok"], true);
+    assert_eq!(handshake["result"]["protocolVersion"], "1.0.0");
+    assert_eq!(handshake["result"]["legacyProtocolVersion"], 7);
 
     env.json_command(&["stop", "--instance", instance]);
 }
