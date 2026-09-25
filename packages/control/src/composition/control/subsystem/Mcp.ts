@@ -398,8 +398,6 @@ export class ControlRuntimeMcp {
         if (
             changes.mcp &&
             !changes.web &&
-            previous.mcp.enabled &&
-            next.mcp.enabled &&
             endpointIsIndependent(
                 previous.mcp,
                 previous.web,

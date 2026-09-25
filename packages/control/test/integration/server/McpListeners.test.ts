@@ -206,6 +206,49 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     assert.equal(result.restartControlRequired, false);
 });
 
+test("enabling MCP hot-applies the listener without requiring Control restart", async (t) => {
+    const homeDirectory = await createTestTempDirectory("runtime-mcp-enable");
+    let config = createDefaultControlConfig();
+    config.mcp.listenPort = 0;
+    config.web.enabled = false;
+    let mcpApplyCalls = 0;
+    const state = new ControlRuntimeState({
+        configStore: {
+            async readOrCreate() {
+                return config;
+            },
+            async write(next: ControlConfig) {
+                config = next;
+            },
+        } as never,
+        homeDirectory,
+    });
+    await state.load();
+    const runtime = new ControlRuntimeMcp({
+        comment: testComment(),
+        conversation: testConversation(),
+        artifact: { service: {}, installHttpRoute() {} } as never,
+        controlPaths: new ControlPathHome(homeDirectory),
+        state,
+    });
+    runtime.setMcpConfigApplier(async () => {
+        mcpApplyCalls += 1;
+    });
+    t.after(async () => {
+        await cleanupInOrder(
+            () => runtime.stop(),
+            () => rm(homeDirectory, { force: true, recursive: true }),
+        );
+    });
+
+    const result = (await runtime.configEditor.updateMcpConfig({
+        patch: { enabled: true },
+    })) as { restartControlRequired: boolean };
+
+    assert.equal(mcpApplyCalls, 1);
+    assert.equal(result.restartControlRequired, false);
+});
+
 test("MCP migration starts a different listener before retiring the previous listener", async (t) => {
     const homeDirectory = await createTestTempDirectory("runtime-mcp-order");
     const previous = createConfig(17890, 17891);
