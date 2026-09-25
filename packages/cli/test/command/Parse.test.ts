@@ -26,6 +26,13 @@ test("CliParser parses init as a built-in first-run command", () => {
     assert.deepEqual(parser.parse(["init", "--help"]), { kind: "help" });
 });
 
+test("CliParser parses migrate as a local built-in command", () => {
+    const parser = new CliParser();
+    assert.deepEqual(parser.parse(["migrate"]), { kind: "migrate" });
+    assert.deepEqual(parser.parse(["migrate", "--help"]), { kind: "help" });
+    assert.throws(() => parser.parse(["migrate", "extra"]));
+});
+
 test("CliParser rejects invalid command shapes", () => {
     const parser = new CliParser();
 

@@ -33,6 +33,7 @@ export interface CliDispatchContext {
     stderr: { write(chunk: string): void };
     stdout: { write(chunk: string): void };
     lifecycle(): Promise<CliLifecycleManagerLike>;
+    migrate(): Promise<{ changed: boolean; domains: readonly string[] }>;
     negotiate(): Promise<void>;
     readJson(source: string, label: string): Promise<JsonValue>;
     requireStreamingOutput(label: string): void;
@@ -65,6 +66,16 @@ export async function dispatchCliCommand(
     }
     if (command.kind === "tui") {
         await context.startTui();
+        return;
+    }
+    if (command.kind === "migrate") {
+        const result = await context.migrate();
+        context.writeValue(
+            result,
+            result.changed
+                ? `Migrated: ${result.domains.join(", ")}\n`
+                : "No migration required.\n",
+        );
         return;
     }
     if (command.kind === "instance.help") {

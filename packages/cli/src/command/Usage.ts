@@ -15,6 +15,7 @@ export function renderCliUsage(
         "",
         "Commands:",
         "  init                           Initialize a local DevShell",
+        "  migrate                        Migrate persistent DevShell state",
         "  status                         Show Control status (default)",
         "  start                          Start Control",
         "  restart                        Restart Control and restore running instances",

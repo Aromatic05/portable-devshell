@@ -110,7 +110,7 @@ test("instance TOML preserves Workspace feature enablement", () => {
     );
 });
 
-test("version 1 global MCP auth migrates to each enabled namespace and writes version 2", async () => {
+test("version 1 global MCP auth normalizes on read and migrates explicitly to version 2", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
     const token = "0123456789abcdef0123456789abcdef";
 
@@ -145,6 +145,10 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
             mode: "token",
             token,
         });
+        assert.match(await readFile(paths.configFile, "utf8"), /^version = 1$/mu);
+        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
+            changed: true,
+        });
         const global = await readFile(paths.configFile, "utf8");
         const instance = await readFile(
             paths.instanceConfigFile("demo-local"),
@@ -153,12 +157,15 @@ test("version 1 global MCP auth migrates to each enabled namespace and writes ve
         assert.match(global, /^version = 2$/mu);
         assert.doesNotMatch(global, /\[mcp\.auth\]/u);
         assert.match(instance, /auth = "token"/u);
+        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
+            changed: false,
+        });
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
 });
 
-test("version 2 instance documents migrate to version 4 without workspace or MCP tool policy", async () => {
+test("version 2 instance documents normalize on read and migrate explicitly to version 4", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -224,6 +231,13 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
             )?.extensions.model,
             ["artifact", "instance", "mcp", "secret", "skill"],
         );
+        assert.match(
+            await readFile(paths.instanceConfigFile("legacy-default"), "utf8"),
+            /^version = 2$/mu,
+        );
+        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
+            changed: true,
+        });
         const migratedDefault = await readFile(
             paths.instanceConfigFile("legacy-default"),
             "utf8",
@@ -253,7 +267,7 @@ test("version 2 instance documents migrate to version 4 without workspace or MCP
     }
 });
 
-test("version 3 MCP tool policy is retired into the version 4 model Extension allowlist", async () => {
+test("version 3 MCP tool policy normalizes on read and migrates explicitly to version 4", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
     try {
@@ -295,6 +309,14 @@ test("version 3 MCP tool policy is retired into the version 4 model Extension al
             "secret",
             "skill",
         ]);
+
+        assert.match(
+            await readFile(paths.instanceConfigFile("canonical-groups"), "utf8"),
+            /^version = 3$/mu,
+        );
+        assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
+            changed: true,
+        });
 
         const source = await readFile(
             paths.instanceConfigFile("canonical-groups"),

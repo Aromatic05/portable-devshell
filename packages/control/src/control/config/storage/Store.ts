@@ -43,6 +43,10 @@ export interface ControlConfigStoreOptions {
     validator?: ControlConfigValidator;
 }
 
+export interface ControlConfigMigrationResult {
+    changed: boolean;
+}
+
 export class ControlConfigStore {
     readonly #globalDocument: ControlGlobalTomlDocument;
     readonly #instanceDocument: ControlInstanceTomlDocument;
@@ -60,10 +64,31 @@ export class ControlConfigStore {
     }
 
     async readOrCreate(homeDirectory?: string): Promise<ControlConfig> {
+        const loaded = await this.#read(homeDirectory);
+        if (loaded.config !== undefined) return loaded.config;
+
+        const config = this.#validator.validate(createDefaultControlConfig());
+        await this.write(config, homeDirectory);
+        return config;
+    }
+
+    async migrate(homeDirectory?: string): Promise<ControlConfigMigrationResult> {
+        const loaded = await this.#read(homeDirectory);
+        if (loaded.config === undefined || !loaded.migrated)
+            return { changed: false };
+        await this.write(loaded.config, homeDirectory);
+        return { changed: true };
+    }
+
+    async #read(homeDirectory?: string): Promise<{
+        config?: ControlConfig;
+        migrated: boolean;
+    }> {
         const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
         let globalConfig: ControlGlobalConfig | undefined;
         let legacyMcpAuth: ConfigMcpAuthDraft | undefined;
+        let globalMigrated = false;
 
         try {
             const source = await readFile(paths.configFile, "utf8");
@@ -71,30 +96,27 @@ export class ControlConfigStore {
             const draft = this.#globalDocument.decode(
                 this.#tomlCodec.decode(source),
             );
-            legacyMcpAuth = (draft as ConfigGlobalDraftWithLegacyAuth)
-                .legacyMcpAuth;
+            const migration = draft as ConfigGlobalDraftWithMigration;
+            legacyMcpAuth = migration.legacyMcpAuth;
+            globalMigrated = migration.migratedFromVersion !== undefined;
             globalConfig = normalizeConfigGlobalDraft(draft);
         } catch (error) {
             if (!isFileMissingError(error))
                 throw attachConfigFile(error, paths.configFile);
         }
 
-        if (globalConfig === undefined) {
-            const config = this.#validator.validate(
-                createDefaultControlConfig(),
-            );
-            await this.write(config, homeDirectory);
-            return config;
-        }
+        if (globalConfig === undefined)
+            return { config: undefined, migrated: false };
 
         const loadedInstances = await this.#readInstances(paths, legacyMcpAuth);
         const config = this.#validator.validate({
             ...globalConfig,
             instances: loadedInstances.instances,
         });
-        if (legacyMcpAuth !== undefined || loadedInstances.migrated)
-            await this.write(config, homeDirectory);
-        return config;
+        return {
+            config,
+            migrated: globalMigrated || loadedInstances.migrated,
+        };
     }
 
     async write(config: ControlConfig, homeDirectory?: string): Promise<void> {
@@ -186,6 +208,7 @@ export class ControlConfigStore {
                             ? draft.mcp
                             : {
                                   ...draft.mcp,
+                                  contextMode: "explicit",
                                   ...toLegacyInstanceAuth(legacyMcpAuth),
                               },
                 });
@@ -437,8 +460,9 @@ async function syncDirectory(directory: string): Promise<void> {
     }
 }
 
-interface ConfigGlobalDraftWithLegacyAuth {
+interface ConfigGlobalDraftWithMigration {
     legacyMcpAuth?: ConfigMcpAuthDraft;
+    migratedFromVersion?: 1;
 }
 
 function toLegacyInstanceAuth(auth: ConfigMcpAuthDraft) {

@@ -52,7 +52,7 @@ export class ControlGlobalTomlDocument {
             const { auth: _auth, ...mcpWithoutAuth } = mcp;
             return Object.assign(
                 parseConfigGlobalDraft({ ...config, mcp: mcpWithoutAuth }),
-                { legacyMcpAuth: legacyAuth },
+                { legacyMcpAuth: legacyAuth, migratedFromVersion: 1 as const },
             );
         }
         return parseConfigGlobalDraft(config);
@@ -138,7 +138,10 @@ export class ControlInstanceTomlDocument {
         );
         return version === 4
             ? draft
-            : Object.assign(draft, { migratedFromVersion: version as 2 | 3 });
+            : Object.assign(draft, {
+                  migratedFromVersion: version as 2 | 3,
+                  workspace: { enabled: true },
+              });
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {

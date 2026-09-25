@@ -17,6 +17,7 @@ export type CliParsedCommand =
     | { kind: "version" }
     | { kind: "overview" }
     | { kind: "init" }
+    | { kind: "migrate" }
     | { kind: "config.get" }
     | { draftSource: string; kind: "config.validate" }
     | {
@@ -136,6 +137,8 @@ export class CliParser {
                 return expectNoExtra(argv, { kind: "overview" });
             case "init":
                 return expectNoExtra(argv, { kind: "init" });
+            case "migrate":
+                return expectNoExtra(argv, { kind: "migrate" });
             case "config":
                 return parseConfigCommand(argv.slice(1));
             case "approval":
@@ -206,6 +209,7 @@ function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
         case "logs":
         case "overview":
         case "init":
+        case "migrate":
         case "tui":
             return { kind: "help" };
         default:

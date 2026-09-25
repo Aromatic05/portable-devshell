@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { migrateControlState } from "@portable-devshell/control";
 import type { JsonValue } from "@portable-devshell/shared";
 import { CliParser, type CliParsedCommand } from "../command/Parse.js";
 import {
@@ -97,6 +98,12 @@ export class CliMain {
                 stderr: this.#stderr,
                 stdout: this.#stdout,
                 lifecycle: async () => await this.#lifecycle(),
+                migrate: async () =>
+                    await migrateControlState({
+                        ...(this.#homeDirectory === undefined
+                            ? {}
+                            : { homeDirectory: this.#homeDirectory }),
+                    }),
                 negotiate: async () => await negotiateCliControl(this.#clients),
                 readJson: async (source, label) =>
                     await readCliJsonSource(source, label, this.#stdin),
@@ -154,6 +161,12 @@ export class CliMain {
     ): Promise<{ command: CliParsedCommand; controlNegotiated: boolean }> {
         const commandId = argv[0];
         if (commandId === undefined || !/^[a-z][a-z0-9-]*$/u.test(commandId)) {
+            return {
+                command: this.#parser.parse(argv),
+                controlNegotiated: false,
+            };
+        }
+        if ((localCliCommands as readonly string[]).includes(commandId)) {
             return {
                 command: this.#parser.parse(argv),
                 controlNegotiated: false,
@@ -300,6 +313,7 @@ const builtinCliCommands = [
     "init",
     "instance",
     "logs",
+    "migrate",
     "oauth",
     "overview",
     "restart",
@@ -311,6 +325,8 @@ const builtinCliCommands = [
     "tui",
     "watch",
 ] as const;
+
+const localCliCommands = ["migrate"] as const;
 
 function suggestCliCommand(
     command: string,

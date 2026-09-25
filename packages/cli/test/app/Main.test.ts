@@ -28,6 +28,41 @@ test("CliMain prints the application version without contacting Control", async 
     assert.equal(closeCalls, 1);
 });
 
+test("CliMain runs migrate locally without contacting or creating Control state", async () => {
+    const homeDirectory = await mkdtemp(join(tmpdir(), "devshell-migrate-"));
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    let closeCalls = 0;
+    let helloCalls = 0;
+    try {
+        const cli = new CliMain({
+            createCliClients: () =>
+                ({
+                    close() {
+                        closeCalls += 1;
+                    },
+                    service: {
+                        async hello() {
+                            helloCalls += 1;
+                            throw new Error("migrate must not contact Control");
+                        },
+                    },
+                }) as never,
+            homeDirectory,
+            stderr,
+            stdout,
+        });
+
+        assert.equal(await cli.run(["migrate"]), 0);
+        assert.equal(stdout.flush(), "No migration required.\n");
+        assert.equal(stderr.flush(), "");
+        assert.equal(helloCalls, 0);
+        assert.equal(closeCalls, 1);
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("CliMain handles control lifecycle commands and exit code mapping", async () => {
     const stdout = createBuffer();
     const stderr = createBuffer();
