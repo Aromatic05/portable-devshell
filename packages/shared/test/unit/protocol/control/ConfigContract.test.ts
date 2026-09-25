@@ -81,34 +81,34 @@ test("config parser trims values and preserves explicit patch removals", () => {
     });
 });
 
-test("instance MCP context mode defaults to explicit and accepts openai-session", () => {
-    const explicit = normalizeConfigInstanceDraft({
-        name: "explicit",
+test("instance MCP context mode defaults to openai-session and accepts explicit", () => {
+    const defaulted = normalizeConfigInstanceDraft({
+        name: "defaulted",
         provider: "local",
     });
-    assert.equal(explicit.mcp.contextMode, "explicit");
+    assert.equal(defaulted.mcp.contextMode, "openai-session");
 
     const parsed = parseConfigDraft({
         instances: [
             {
-                mcp: { contextMode: "openai-session" },
-                name: "chatgpt",
+                mcp: { contextMode: "explicit" },
+                name: "explicit",
                 provider: "local",
             },
         ],
     });
-    assert.equal(parsed.instances?.[0]?.mcp?.contextMode, "openai-session");
+    assert.equal(parsed.instances?.[0]?.mcp?.contextMode, "explicit");
     assert.equal(
         normalizeConfigDraft(parsed).instances[0]?.mcp.contextMode,
-        "openai-session",
+        "explicit",
     );
 
-    const patched = applyConfigInstancePatch(explicit, {
-        mcp: { contextMode: "openai-session" },
+    const patched = applyConfigInstancePatch(defaulted, {
+        mcp: { contextMode: "explicit" },
     });
     assert.equal(
         normalizeConfigInstanceDraft(patched).mcp.contextMode,
-        "openai-session",
+        "explicit",
     );
 });
 
@@ -264,7 +264,7 @@ test("instance token auth requires a non-trivial configured secret", () => {
         normalizeConfigDraft({
             instances: [
                 {
-                    mcp: { auth: "token", token },
+                    mcp: { auth: "token", contextMode: "explicit", token },
                     name: "local-one",
                     provider: "local",
                 },
@@ -276,7 +276,11 @@ test("instance token auth requires a non-trivial configured secret", () => {
     const weak = normalizeConfigDraft({
         instances: [
             {
-                mcp: { auth: "token", token: "too-short" },
+                mcp: {
+                    auth: "token",
+                    contextMode: "explicit",
+                    token: "too-short",
+                },
                 name: "local-one",
                 provider: "local",
             },

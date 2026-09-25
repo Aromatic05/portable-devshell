@@ -84,6 +84,7 @@ export async function executeInit(
             });
         }
         await context.clients.instance.create({
+            mcp: { contextMode: "openai-session" },
             name: defaultInitialInstanceName,
             provider: "local",
         });

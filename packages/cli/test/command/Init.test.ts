@@ -40,6 +40,7 @@ test("init starts stopped Control before reconciling first-run state through RPC
                 async create(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
+                        mcp: { contextMode: "openai-session" },
                         name: "local-pc",
                         provider: "local",
                     });
@@ -118,6 +119,7 @@ test("init reconciles a running fresh-like Control through RPC without restartin
                 async create(draft: unknown) {
                     calls.push("instance.create");
                     assert.deepEqual(draft, {
+                        mcp: { contextMode: "openai-session" },
                         name: "local-pc",
                         provider: "local",
                     });

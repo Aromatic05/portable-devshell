@@ -116,7 +116,7 @@ export function normalizeConfigInstanceDraft(
         logs: cloneOptionalRecord(draft.logs),
         mcp: {
             auth: normalizeInstanceMcpAuth(draft.mcp),
-            contextMode: draft.mcp?.contextMode ?? "explicit",
+            contextMode: draft.mcp?.contextMode ?? "openai-session",
             enabled: draft.mcp?.enabled ?? context.defaultMcpEnabled,
             path: expectedMcpPath,
         },
