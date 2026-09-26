@@ -121,7 +121,7 @@ contextMode = "openai-session"
 
 这样 model-facing tool schema 不需要携带 portable-devshell 内部 `ctxId`。Host metadata 只作为 external binding；Todo、Wait、Workspace 等服务端状态仍由内部 Context 管理。
 
-如果使用通用 client 或 Host 不提供稳定 binding，保持默认：
+fresh instance 默认使用 `openai-session`。如果使用通用 client 或 Host 不提供稳定 session binding，需要显式切换为：
 
 ```toml
 contextMode = "explicit"
@@ -151,12 +151,12 @@ devshell instance logs demo-local
 
 1. global `mcp.enabled = true`；
 2. instance `[mcp].enabled = true`；
-3. tool group 已启用；
-4. capability 已授予；
-5. OAuth registration/authorization 已批准；
-6. Host 是否使用了旧的冻结 tool snapshot；
-7. `contextMode` 是否与 Host 能力匹配；
-8. remote Host 到 endpoint 的 HTTPS/tunnel 链路是否真实可达。
+3. OAuth registration/authorization 已批准；
+4. Host 是否使用了旧的冻结 tool snapshot；
+5. `contextMode` 是否与 Host 能力匹配；
+6. remote Host 到 endpoint 的 HTTPS/tunnel 链路是否真实可达。
+
+MCP `tools/list` 使用固定 runtime catalog，不再由 instance group/capability policy 控制。如果缺少的是 `bash_run` / `tmux_run` 中的 model-facing `devshell <extension>` command，再检查该 instance 的 `[extensions].model` allowlist；它与 MCP tool catalog 是两条独立边界。
 
 ## 长工具调用
 

@@ -54,11 +54,12 @@ Web  18791
 Testspace instance 故意启用较宽的开发策略：
 
 ```text
-MCP auth        none
-approval        allow
-security.mode   workspace
-groups          file,bash,artifact,tmux,todo,workspace,instance
-capabilities    read,write,execute,manage
+MCP auth          none
+contextMode       openai-session
+approval          allow
+security.mode     workspace
+extensions.model  artifact,instance,mcp,secret,skill
+MCP tools         fixed runtime catalog
 ```
 
 这是隔离测试环境，不是生产配置模板。

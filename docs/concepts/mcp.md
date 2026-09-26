@@ -45,12 +45,14 @@ provider = "local"
 [mcp]
 enabled = true
 auth = "none"
-contextMode = "explicit"
+contextMode = "openai-session"
 path = "/demo-local/mcp"
 
 [extensions]
-model = ["instance"]
+model = ["artifact", "instance", "mcp", "secret", "skill"]
 ```
+
+这是 version 4 fresh defaults 对 Context selector / model Extension ACL 的示例；需要模型显式携带 `ctxId` 的通用 Host 应改用 `contextMode = "explicit"`。MCP `tools/list` 本身使用固定 runtime catalog，不受 `[extensions].model` 影响。
 
 `path` 由 instance 名生成，当前契约固定为 `/<instance>/mcp`。
 

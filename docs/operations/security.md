@@ -6,7 +6,7 @@ portable-devshell 不把安全边界压缩成一个“safe mode”。权限来�
 OS user / Control socket
 provider identity
 MCP/Web auth
-tool group + capability
+fixed MCP tool surface / model Extension allowlist
 workspace security mode
 approval policy
 Context / app capability
@@ -67,7 +67,7 @@ Approval record 包含 `callId`、tool、source、input summary、risk level、C
 OAuth registration/authorization 只决定某个 MCP client 是否获得 access token；拿到 token 后实际 tool call 仍要经过：
 
 ```text
-Worker tool capability / namespace constraints
+Worker tool namespace / tool-specific constraints
 workspace/path security
 approval policy
 ```
@@ -87,7 +87,7 @@ workspace
 
 `workspace` 让支持该模式的 worker/path 操作受当前显式 workspace authority 限制。它与 Approval 不同：workspace security 是可执行范围，Approval 是是否允许当前调用继续。
 
-`disabled` 不代表“忽略所有安全检查”；工具自身的类型、路径、symlink、capability、auth 等检查仍然存在。
+`disabled` 不代表“忽略所有安全检查”；工具自身的类型、路径、symlink、namespace、auth 等检查仍然存在。
 
 ## Secret 扫描
 
