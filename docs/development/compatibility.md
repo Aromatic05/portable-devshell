@@ -16,6 +16,22 @@ DevShell release        0.7.y
 
 这些版本只在对应 contract 发生变化时推进，不随 DevShell release 同步 bump。
 
+### 0.7.6 当前状态
+
+`0.7.x` 仍处于 contract 发现与冻结阶段，因此不能把目标态写成已经完成的现状。当前实现是：
+
+| Surface | 0.7.6 representation | 状态 |
+| --- | --- | --- |
+| DevShell release | `0.7.y` | 当前产品版本规则 |
+| Control Protocol | integer generation/range | 尚未迁移为 `x.y.z` |
+| Worker Protocol | `x.y.z` range，当前 `1.0.0`；保留 legacy Worker 7 adapter | 已使用语义版本协商 |
+| Frame Protocol | integer Frame v1 | 尚未迁移为 `x.y.z` range |
+| Extension API | `x.y.z`，当前 `4.1.0` | 已使用语义版本 |
+| Extension Schema | `x.y.z`，当前 `1.1.0` | 已使用语义版本 |
+| Persistent Schema | domain-owned integer/schema version | 由各 domain 自己迁移 |
+
+Control / Frame 的语义版本化属于后续 `0.7.x` freeze 工作，不是 `0.7.6` 已经提供的兼容承诺。
+
 ## Release interval version rule
 
 任何一个 version field 在相邻两次 release 之间最多改变一次。
@@ -36,7 +52,7 @@ release N+1
 
 ## Protocol version
 
-Control Protocol、Worker Protocol 与 Frame Protocol 是独立协议，不共享一个总版本号。协议版本使用 `x.y.z`：
+Control Protocol、Worker Protocol 与 Frame Protocol 是独立协议，不共享一个总版本号。冻结后的目标协议版本统一使用 `x.y.z`：
 
 ```text
 x    incompatible protocol generation
@@ -44,9 +60,11 @@ y    backward-compatible protocol capability
 z    compatible correction or clarification
 ```
 
-连接双方必须显式声明自己可接受的协议范围，并选择共同支持的最高版本。版本协商只决定 contract generation；具体可选能力仍通过 capability negotiation 表达，不能通过猜测 peer 的产品版本来开启功能。
+已经迁移到语义版本的协议，连接双方必须显式声明自己可接受的协议范围，并选择共同支持的最高版本。版本协商只决定 contract generation；具体可选能力仍通过 capability negotiation 表达，不能通过猜测 peer 的产品版本来开启功能。
 
 同一 major 不代表任意版本天然兼容。只有落在双方声明的 supported range 内才允许建立连接。没有共同版本时必须在握手阶段失败，不能降级到未声明的兼容路径。
+
+`0.7.6` 中这套规则已经用于 Worker Protocol；Worker client 还会验证 Worker 返回的 negotiated version 是合法 `x.y.z` 且确实落在自己声明的 range 内。Control Protocol 与 Frame Protocol 仍使用各自现有的 integer generation contract，在完成后续迁移前不应把它们描述成已经具备上述 `x.y.z` range negotiation。
 
 ## Extension version
 
@@ -87,7 +105,7 @@ resolve target release
     -> commit or rollback
 ```
 
-Compatibility preflight 至少检查：
+完整 freeze 目标中的 Compatibility preflight 至少检查：
 
 ```text
 Control / Worker protocol range
@@ -96,6 +114,10 @@ installed Extension API / schema compatibility
 Extension host dependency ranges
 rollback feasibility
 ```
+
+`0.7.6` 的 `devshell update` preflight 当前已经检查 persistent config migration requirement、已安装 Extension generation 的 manifest/API/schema compatibility，以及 Extension `hostDependencies`。Release installer transaction 另外负责 artifact validation、backup、candidate install/start validation 和失败 rollback。
+
+Control / Worker protocol range 的安装前 compatibility 判断，以及把 rollback feasibility 本身纳入显式 preflight result，仍是后续 `0.7.x` 工作。当前实现不能因为 installer 最终具有 rollback，就在文档中声称 preflight 已经完成这两项检查。
 
 `devshell migrate` 与 `devshell update` 在实现上分离，在默认升级流程中组合。这样 migration 可以独立用于恢复、离线迁移和手工安装，而 update 不需要拥有第二套 migration 规则。
 

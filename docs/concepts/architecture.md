@@ -1,6 +1,6 @@
 # 系统架构
 
-这份文档描述当前 `0.6.x` 代码和运行时边界，不保留已经被替换的早期方案。
+这份文档描述当前 `0.7.x` 代码和运行时边界，不保留已经被替换的早期方案。
 
 ## 总体结构
 
@@ -258,7 +258,7 @@ Windows      \\.\pipe\portable-devshell-control-<user>
 
 ## 设计原则
 
-当前 0.6.x 架构可以归纳为：
+当前 0.7.x 架构可以归纳为：
 
 1. **Control owns lifecycle; Worker owns execution.**
 2. **Context owns Agent continuity; transport does not.**

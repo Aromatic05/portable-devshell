@@ -1,6 +1,6 @@
 # portable-devshell 文档
 
-这套文档描述当前 `0.6.x` 代码与运行模型。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
+这套文档描述当前 `0.7.x` 代码与运行模型。历史提交中的旧工具名、旧 Workspace 生命周期、旧 MCP session 假设和旧 tmux handoff 时长不作为现行契约。
 
 ## 从这里开始
 

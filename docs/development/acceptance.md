@@ -92,7 +92,7 @@ Windows runner 当前只证明 JS 应用、原生 Worker 和最终应用包的�
 
 只有全部目标成功后才发布 GitHub Release。发布完成后 workflow 会在默认分支推进到下一个开发版本。
 
-## 最终 0.6.x 配置契约
+## 0.7.x 配置契约
 
 发布前文档与测试应统一确认：
 
@@ -115,7 +115,7 @@ instance version 4 中：
 
 ## MCP / Context / Workspace 门禁
 
-0.6.x 最终版至少应证明：
+0.7.x release gate 至少应证明：
 
 1. `explicit` Context 可以通过 `environ_info` bootstrap 并继续普通工具调用；
 2. `openai-session` 不把内部 `ctxId` 暴露到 model-facing schema；

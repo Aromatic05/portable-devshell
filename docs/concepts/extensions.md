@@ -2,7 +2,7 @@
 
 portable-devshell 的 Extension 运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
 
-当前 public Extension API version 为 `4`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
+当前 public Extension API version 为 `4.1.0`，manifest schema version 为 `1.1.0`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
 
 ## 核心模型
 
