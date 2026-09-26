@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+    WORKER_PROTOCOL_VERSION,
     WorkerInstanceFactory,
     WorkerTransportConnection,
     decodeWorkerRpcMessage,
@@ -510,7 +511,7 @@ function responseFor(method: string): JsonValue {
                 capabilities: { cancel: true, streaming: false, tools: true },
                 instance: "reverse-test",
                 platform: { arch: "x64", os: "test" },
-                protocolVersion: 2,
+                protocolVersion: WORKER_PROTOCOL_VERSION,
                 workerVersion: "test",
                 workspace: "/workspace",
             };
