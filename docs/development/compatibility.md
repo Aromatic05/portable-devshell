@@ -90,6 +90,20 @@ Migration 应直接把仍受支持的旧 schema 转换到 current schema；不�
 
 当 schema 早于当前 binary 的 minimum readable schema 时，必须明确拒绝并报告缺失的 migration path。
 
+### Migration code ownership
+
+Control 的 persistent migration 实现统一放在 `packages/control/src/migration/`：
+
+```text
+Control.ts    migrate / update preflight 编排
+Config.ts     global / instance legacy config migration
+Wait.ts       legacy Wait state migration
+```
+
+普通 storage、document codec、domain state 只能负责 current schema 与调用 migration entry；不能继续内嵌旧版本字段转换、legacy metadata 或一次性兼容修补。Extension 自己拥有的 persistent schema migration 则放在该 Extension 自己的 `migration/` 目录，不上收进 Control。
+
+维护旧 schema 时按 migration window 管理，而不是永久累积 compatibility code。提高 minimum readable schema 后，应在同一变更中删除对应 migration implementation 与旧版本行为测试，并同步移除 decoder 对该旧版本的 admission。这样历史兼容代码可以按支持窗口直接审计和删除，而不会散落在 Store / State / runtime 主路径中。
+
 ## Update lifecycle
 
 `devshell update` 是现有 release installation transaction 的产品入口，不建立第二套 installer。标准升级流程为：
