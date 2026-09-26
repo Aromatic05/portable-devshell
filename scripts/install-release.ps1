@@ -63,8 +63,8 @@ function Invoke-CandidatePreflight([string]$ApplicationDirectory, [string]$HomeD
     $controlModule = Join-Path $ApplicationDirectory "node_modules\@portable-devshell\control\dist\migration\Control.js"
     $script = @'
 import { pathToFileURL } from "node:url";
-const controlModule = process.argv[1];
-const homeDirectory = process.argv[2];
+const controlModule = process.argv[2];
+const homeDirectory = process.argv[3];
 const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
 const result = await preflightControlUpdate({ environment: process.env, homeDirectory });
 process.stdout.write(JSON.stringify(result));
