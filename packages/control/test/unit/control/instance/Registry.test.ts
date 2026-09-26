@@ -55,7 +55,7 @@ test("mcp endpoint path is generated and wiring only builds host configuration",
     assert.equal(descriptor.mcpPath, "/demo-local/mcp");
     assert.deepEqual(new McpEndpointFactory().map(descriptor), {
         auth: { enabled: false, provider: "none" },
-        contextMode: "explicit",
+        contextMode: "openai-session",
         name: "demo-local",
         path: "/demo-local/mcp",
         worker: descriptor.worker,

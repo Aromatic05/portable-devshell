@@ -87,6 +87,7 @@ test("instance create validation summary never returns secret values", () => {
         env: { API_TOKEN: "instance-secret" },
         mcp: {
             auth: "token",
+            contextMode: "explicit",
             enabled: true,
             token: "mcp-secret-" + "x".repeat(32),
         },
