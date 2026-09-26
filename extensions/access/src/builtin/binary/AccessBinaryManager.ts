@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
     access,
@@ -20,14 +20,11 @@ import type { AccessProviderKind } from "../Config.js";
 
 const gunzipAsync = promisify(gunzip);
 
-interface ReleaseAsset {
-    browser_download_url: string;
-    name: string;
-}
-
-interface GithubRelease {
-    assets: ReleaseAsset[];
-    tag_name: string;
+export interface AccessManagedBinaryAsset {
+    archive: "raw" | "tar.gz";
+    sha256: string;
+    url: string;
+    version: string;
 }
 
 export interface AccessBinaryManagerOptions {
@@ -35,6 +32,11 @@ export interface AccessBinaryManagerOptions {
     platform?: NodeJS.Platform;
     arch?: NodeJS.Architecture;
     processes?: ExtensionProcessCapability;
+    resolveManagedAsset?: (
+        kind: "cloudflared" | "frp",
+        platform: NodeJS.Platform,
+        arch: NodeJS.Architecture,
+    ) => AccessManagedBinaryAsset;
 }
 
 export class AccessBinaryManager {
@@ -43,6 +45,9 @@ export class AccessBinaryManager {
     readonly #fetch?: typeof globalThis.fetch;
     readonly #platform: NodeJS.Platform;
     readonly #processes?: ExtensionProcessCapability;
+    readonly #resolveManagedAsset: NonNullable<
+        AccessBinaryManagerOptions["resolveManagedAsset"]
+    >;
     readonly #resolving = new Map<string, Promise<string>>();
 
     constructor(dataDirectory: string, options: AccessBinaryManagerOptions = {}) {
@@ -51,6 +56,8 @@ export class AccessBinaryManager {
         this.#fetch = options.fetch;
         this.#platform = options.platform ?? process.platform;
         this.#processes = options.processes;
+        this.#resolveManagedAsset =
+            options.resolveManagedAsset ?? resolvePinnedManagedAsset;
     }
 
     async resolve(kind: AccessProviderKind, override?: string): Promise<string> {
@@ -68,30 +75,31 @@ export class AccessBinaryManager {
 
     async #resolveManaged(kind: "cloudflared" | "frp"): Promise<string> {
         await mkdir(this.#binDirectory, { mode: 0o700, recursive: true });
+        const asset = this.#resolveManagedAsset(
+            kind,
+            this.#platform,
+            this.#arch,
+        );
+        assertManagedBinaryVersion(asset.version);
+        const executableName = kind === "frp" ? "frpc" : "cloudflared";
         const executable = join(
             this.#binDirectory,
-            `${kind === "frp" ? "frpc" : "cloudflared"}${this.#platform === "win32" ? ".exe" : ""}`,
+            `${executableName}-${asset.version}${this.#platform === "win32" ? ".exe" : ""}`,
         );
         if (await isExecutable(executable, this.#platform)) return executable;
 
-        const release = await this.#release(
-            kind === "frp" ? "fatedier/frp" : "cloudflare/cloudflared",
-        );
-        const asset =
-            kind === "frp"
-                ? selectFrpAsset(release, this.#platform, this.#arch)
-                : selectCloudflaredAsset(release, this.#platform, this.#arch);
         const downloaded = await this.#download(
-            asset.browser_download_url,
+            asset.url,
             `Failed to download ${kind} binary`,
         );
-        const bytes = asset.name.endsWith(".tar.gz") || asset.name.endsWith(".tgz")
+        verifySha256(downloaded, asset.sha256, `${kind} ${asset.version}`);
+        const bytes = asset.archive === "tar.gz"
             ? await extractExecutableFromTarGz(
                   downloaded,
-                  kind === "frp" ? "frpc" : "cloudflared",
+                  executableName,
               )
             : downloaded;
-        const temporary = `${executable}.${process.pid}.tmp`;
+        const temporary = `${executable}.${randomUUID()}.tmp`;
         await writeFile(temporary, bytes, { mode: 0o700 });
         try {
             if (this.#platform !== "win32") await chmod(temporary, 0o700);
@@ -163,81 +171,101 @@ export class AccessBinaryManager {
         }
     }
 
-    async #release(repository: string): Promise<GithubRelease> {
-        const url = `https://api.github.com/repos/${repository}/releases/latest`;
-        const bytes = await this.#download(
-            url,
-            `Failed to resolve latest ${repository} release`,
-        );
-        let value: unknown;
-        try {
-            value = JSON.parse(bytes.toString("utf8")) as unknown;
-        } catch (error) {
-            throw new TypeError(
-                `Latest ${repository} release metadata is invalid JSON.`,
-                { cause: error },
-            );
-        }
-        if (!isRecord(value) || typeof value.tag_name !== "string")
-            throw new TypeError(`Latest ${repository} release metadata is invalid.`);
-        if (!Array.isArray(value.assets))
-            throw new TypeError(`Latest ${repository} release has no assets.`);
-        const assets = value.assets.map((entry) => {
-            if (
-                !isRecord(entry) ||
-                typeof entry.name !== "string" ||
-                typeof entry.browser_download_url !== "string"
-            ) {
-                throw new TypeError(
-                    `Latest ${repository} release contains an invalid asset.`,
-                );
-            }
-            return {
-                browser_download_url: entry.browser_download_url,
-                name: entry.name,
-            };
-        });
-        return { assets, tag_name: value.tag_name };
+}
+
+function resolvePinnedManagedAsset(
+    kind: "cloudflared" | "frp",
+    platform: NodeJS.Platform,
+    arch: NodeJS.Architecture,
+): AccessManagedBinaryAsset {
+    const target = platformArch(platform, arch);
+    const targetKey = `${target.os}-${target.arch}`;
+    const pin = kind === "cloudflared" ? CLOUDFLARED_PIN : FRP_PIN;
+    const asset = pin.assets[targetKey];
+    if (asset !== undefined) {
+        return {
+            archive: asset.archive,
+            sha256: asset.sha256,
+            url: `https://github.com/${pin.repository}/releases/download/${pin.tag}/${asset.name}`,
+            version: pin.version,
+        };
     }
-}
-
-function selectCloudflaredAsset(
-    release: GithubRelease,
-    platform: NodeJS.Platform,
-    arch: NodeJS.Architecture,
-): ReleaseAsset {
-    const target = platformArch(platform, arch);
-    const prefix = `cloudflared-${target.os}-${target.arch}`;
-    const candidates = release.assets.filter((asset) => asset.name.startsWith(prefix));
-    const preferred = candidates.find((asset) => {
-        if (platform === "linux") return asset.name === prefix;
-        if (platform === "win32") return asset.name === `${prefix}.exe`;
-        return asset.name === `${prefix}.tgz` || asset.name === `${prefix}.tar.gz`;
-    });
-    if (preferred !== undefined) return preferred;
-    const archive = candidates.find(
-        (asset) => asset.name.endsWith(".tgz") || asset.name.endsWith(".tar.gz"),
-    );
-    if (archive !== undefined) return archive;
     throw new Error(
-        `cloudflared release ${release.tag_name} has no asset for ${platform}/${arch}.`,
+        `Access managed ${kind} ${pin.version} does not support ${platform}/${arch}.`,
     );
 }
 
-function selectFrpAsset(
-    release: GithubRelease,
-    platform: NodeJS.Platform,
-    arch: NodeJS.Architecture,
-): ReleaseAsset {
-    const target = platformArch(platform, arch);
-    const version = release.tag_name.replace(/^v/u, "");
-    const expected = `frp_${version}_${target.os}_${target.arch}.tar.gz`;
-    const asset = release.assets.find((candidate) => candidate.name === expected);
-    if (asset !== undefined) return asset;
-    throw new Error(
-        `FRP release ${release.tag_name} has no asset for ${platform}/${arch}.`,
-    );
+type PinnedAsset = Pick<AccessManagedBinaryAsset, "archive" | "sha256"> & {
+    name: string;
+};
+
+interface ManagedBinaryPin {
+    assets: Readonly<Record<string, PinnedAsset>>;
+    repository: string;
+    tag: string;
+    version: string;
 }
+
+const CLOUDFLARED_PIN: ManagedBinaryPin = {
+    assets: {
+        "darwin-amd64": {
+            archive: "tar.gz",
+            name: "cloudflared-darwin-amd64.tgz",
+            sha256: "d1155d0837487f261183b15c1eab6c4ebcad9dc49b94675f1524c3564cea3977",
+        },
+        "darwin-arm64": {
+            archive: "tar.gz",
+            name: "cloudflared-darwin-arm64.tgz",
+            sha256: "587c2cfb1c230fe36c7fa7727da78be459dae028cabe8c001291999350f07095",
+        },
+        "linux-amd64": {
+            archive: "raw",
+            name: "cloudflared-linux-amd64",
+            sha256: "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2",
+        },
+        "linux-arm64": {
+            archive: "raw",
+            name: "cloudflared-linux-arm64",
+            sha256: "aaeb2d7d0da3614634c7e03ab13487a1522c2e79165ed2929cfe23d5e95b326d",
+        },
+        "windows-amd64": {
+            archive: "raw",
+            name: "cloudflared-windows-amd64.exe",
+            sha256: "f096265ec2fcbe9bb6e2d64268db167ced3fcbb83d894bdb9e2fcdb26f2ea7e2",
+        },
+    },
+    repository: "cloudflare/cloudflared",
+    tag: "2026.9.3",
+    version: "2026.9.3",
+};
+
+const FRP_PIN: ManagedBinaryPin = {
+    assets: {
+        "darwin-amd64": {
+            archive: "tar.gz",
+            name: "frp_0.71.0_darwin_amd64.tar.gz",
+            sha256: "1b1b4e2f1836e21e8733f1dddaacd4ed9ae67d7dbee39046b9d7b7eda6253637",
+        },
+        "darwin-arm64": {
+            archive: "tar.gz",
+            name: "frp_0.71.0_darwin_arm64.tar.gz",
+            sha256: "45be02b186860d375ed49a8941ae9569628a54bf14e67fc36b29c98c99dabcc6",
+        },
+        "linux-amd64": {
+            archive: "tar.gz",
+            name: "frp_0.71.0_linux_amd64.tar.gz",
+            sha256: "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716",
+        },
+        "linux-arm64": {
+            archive: "tar.gz",
+            name: "frp_0.71.0_linux_arm64.tar.gz",
+            sha256: "f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266",
+        },
+    },
+    repository: "fatedier/frp",
+    tag: "v0.71.0",
+    version: "0.71.0",
+};
 
 function platformArch(
     platform: NodeJS.Platform,
@@ -256,6 +284,24 @@ function platformArch(
         throw new Error(`Access binary download does not support ${platform}/${arch}.`);
     }
     return { arch: normalizedArch, os };
+}
+
+function assertManagedBinaryVersion(version: string): void {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(version)) {
+        throw new TypeError("Access managed binary version is invalid.");
+    }
+}
+
+function verifySha256(bytes: Buffer, expected: string, label: string): void {
+    if (!/^[a-f0-9]{64}$/u.test(expected)) {
+        throw new TypeError(`${label} has an invalid SHA-256 pin.`);
+    }
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expected) {
+        throw new Error(
+            `${label} integrity check failed: expected sha256:${expected}, received sha256:${actual}.`,
+        );
+    }
 }
 
 async function isExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
@@ -299,8 +345,4 @@ function readTarString(buffer: Buffer, offset: number, length: number): string {
     const end = buffer.indexOf(0, offset);
     const bounded = end === -1 || end > offset + length ? offset + length : end;
     return buffer.subarray(offset, bounded).toString("utf8").trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import test from "node:test";
@@ -33,30 +34,49 @@ test("AccessBinaryManager honors explicit binaries without network access", asyn
 test("AccessBinaryManager downloads a direct cloudflared asset once", async () => {
     const directory = await createTestTempDirectory("access-binary-cloudflared");
     const requests: string[] = [];
+    const url = "https://downloads.example/cloudflared";
+    const bytes = Buffer.from("cloudflared-binary");
     const manager = new AccessBinaryManager(directory, {
         arch: "x64",
         fetch: fakeFetch(requests, {
-            "https://api.github.com/repos/cloudflare/cloudflared/releases/latest": jsonResponse({
-                assets: [
-                    {
-                        browser_download_url: "https://downloads.example/cloudflared",
-                        name: "cloudflared-linux-amd64",
-                    },
-                ],
-                tag_name: "2026.9.0",
-            }),
-            "https://downloads.example/cloudflared": bytesResponse(Buffer.from("cloudflared-binary")),
+            [url]: bytesResponse(bytes),
         }),
         platform: "linux",
+        resolveManagedAsset: () => ({
+            archive: "raw",
+            sha256: sha256(bytes),
+            url,
+            version: "2026.9.3",
+        }),
     });
     try {
         const first = await manager.resolve("cloudflared");
         assert.equal((await readFile(first)).toString(), "cloudflared-binary");
         assert.equal(await manager.resolve("cloudflared"), first);
-        assert.deepEqual(requests, [
-            "https://api.github.com/repos/cloudflare/cloudflared/releases/latest",
-            "https://downloads.example/cloudflared",
-        ]);
+        assert.deepEqual(requests, [url]);
+    } finally {
+        await rm(directory, { force: true, recursive: true });
+    }
+});
+
+test("AccessBinaryManager rejects a modified pinned cloudflared asset", async () => {
+    const directory = await createTestTempDirectory("access-binary-integrity");
+    const requests: string[] = [];
+    const url =
+        "https://github.com/cloudflare/cloudflared/releases/download/2026.9.3/cloudflared-linux-amd64";
+    const manager = new AccessBinaryManager(directory, {
+        arch: "x64",
+        fetch: fakeFetch(requests, {
+            [url]: bytesResponse(Buffer.from("modified-cloudflared")),
+        }),
+        platform: "linux",
+    });
+    try {
+        await assert.rejects(
+            manager.resolve("cloudflared"),
+            /integrity check failed/u,
+        );
+        assert.deepEqual(requests, [url]);
     } finally {
         await rm(directory, { force: true, recursive: true });
     }
@@ -65,27 +85,13 @@ test("AccessBinaryManager downloads a direct cloudflared asset once", async () =
 test("AccessBinaryManager downloads through the managed process capability", async () => {
     const directory = await createTestTempDirectory("access-binary-managed");
     const starts: ExtensionProcessStartInput[] = [];
+    const url = "https://downloads.example/cloudflared";
+    const bytes = Buffer.from("managed-cloudflared");
     const processes: ExtensionProcessCapability = {
         async start(input) {
             starts.push(input);
-            const url = input.args?.[1];
             const output = input.args?.[2];
-            assert.ok(url);
             assert.ok(output);
-            const bytes = url.includes("api.github.com")
-                ? Buffer.from(
-                      JSON.stringify({
-                          assets: [
-                              {
-                                  browser_download_url:
-                                      "https://downloads.example/cloudflared",
-                                  name: "cloudflared-linux-amd64",
-                              },
-                          ],
-                          tag_name: "2026.9.0",
-                      }),
-                  )
-                : Buffer.from("managed-cloudflared");
             await writeFile(output, bytes);
             return managedProcess({ code: 0 });
         },
@@ -97,43 +103,43 @@ test("AccessBinaryManager downloads through the managed process capability", asy
         }) as typeof fetch,
         platform: "linux",
         processes,
+        resolveManagedAsset: () => ({
+            archive: "raw",
+            sha256: sha256(bytes),
+            url,
+            version: "2026.9.3",
+        }),
     });
     try {
         const executable = await manager.resolve("cloudflared");
         assert.equal((await readFile(executable)).toString(), "managed-cloudflared");
-        assert.equal(starts.length, 2);
+        assert.equal(starts.length, 1);
         assert.equal(starts[0]?.command, process.execPath);
         assert.match(starts[0]?.args?.[0] ?? "", /DownloadWorker\.js$/u);
-        assert.equal(
-            starts[0]?.args?.[1],
-            "https://api.github.com/repos/cloudflare/cloudflared/releases/latest",
-        );
-        assert.equal(starts[1]?.args?.[1], "https://downloads.example/cloudflared");
+        assert.equal(starts[0]?.args?.[1], url);
     } finally {
         await rm(directory, { force: true, recursive: true });
     }
 });
 
-test("AccessBinaryManager extracts frpc from the latest FRP tarball", async () => {
+test("AccessBinaryManager verifies and extracts frpc from a pinned FRP tarball", async () => {
     const directory = await createTestTempDirectory("access-binary-frp");
     const archive = gzipSync(
-        tarFile("frp_0.65.0_linux_amd64/frpc", Buffer.from("frpc-binary")),
+        tarFile("frp_0.71.0_linux_amd64/frpc", Buffer.from("frpc-binary")),
     );
+    const url = "https://downloads.example/frp.tar.gz";
     const manager = new AccessBinaryManager(directory, {
         arch: "x64",
         fetch: fakeFetch([], {
-            "https://api.github.com/repos/fatedier/frp/releases/latest": jsonResponse({
-                assets: [
-                    {
-                        browser_download_url: "https://downloads.example/frp.tar.gz",
-                        name: "frp_0.65.0_linux_amd64.tar.gz",
-                    },
-                ],
-                tag_name: "v0.65.0",
-            }),
-            "https://downloads.example/frp.tar.gz": bytesResponse(archive),
+            [url]: bytesResponse(archive),
         }),
         platform: "linux",
+        resolveManagedAsset: () => ({
+            archive: "tar.gz",
+            sha256: sha256(archive),
+            url,
+            version: "0.71.0",
+        }),
     });
     try {
         const executable = await manager.resolve("frp");
@@ -156,19 +162,16 @@ function fakeFetch(
     }) as typeof fetch;
 }
 
-function jsonResponse(value: unknown): Response {
-    return new Response(JSON.stringify(value), {
-        headers: { "content-type": "application/json" },
-        status: 200,
-    });
-}
-
 function bytesResponse(value: Buffer): Response {
     const body = value.buffer.slice(
         value.byteOffset,
         value.byteOffset + value.byteLength,
     ) as ArrayBuffer;
     return new Response(body, { status: 200 });
+}
+
+function sha256(value: Buffer): string {
+    return createHash("sha256").update(value).digest("hex");
 }
 
 function managedProcess(exit: { code?: number; signal?: string }): ExtensionManagedProcess {
