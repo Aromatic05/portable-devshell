@@ -104,6 +104,31 @@ Wait.ts       legacy Wait state migration
 
 维护旧 schema 时按 migration window 管理，而不是永久累积 compatibility code。提高 minimum readable schema 后，应在同一变更中删除对应 migration implementation 与旧版本行为测试，并同步移除 decoder 对该旧版本的 admission。这样历史兼容代码可以按支持窗口直接审计和删除，而不会散落在 Store / State / runtime 主路径中。
 
+## Compatibility expiry
+
+仍然存在的历史兼容实现必须在其逻辑 owner 处标记维护期限：
+
+```text
+@compat <stable-slug>
+@removeAt x.y.z
+```
+
+TypeScript/JavaScript 使用普通 source comment/JSDoc，Rust 使用 `//`，shell/PowerShell 使用 `#`。一个逻辑兼容面只要求 owner annotation，不要求每个调用点重复标记；跨语言拥有独立实现时可以重复使用同一个 `@compat` slug。
+
+`@removeAt` 是 maintenance review gate，不是 persistent schema 或 public protocol 的 compatibility contract。当当前 DevShell version **大于或等于** `@removeAt` 时，`scripts/check-compat-expiry.mjs` 必须失败。到期时只能做两件事：删除兼容实现和对应旧行为测试，或者经过显式 compatibility review 后把 deadline 移到新的确定 release；不能为了过 CI 删除 annotation 而保留实现。
+
+当前入口：
+
+```text
+pnpm compat:check    fail on expired/invalid annotations
+pnpm compat:list     list the current compatibility debt
+pnpm version:check   product version gate + compatibility expiry gate
+```
+
+Compatibility expiry 同时进入 development CI、final acceptance 与 release gate。`dist/`、`target/`、`node_modules/` 等生成物不参与扫描，避免编译产物复制 source comments 后产生重复债务记录。
+
+对于 persistent migration，是否还能读取旧数据仍由 `minimum readable schema` 决定；`@removeAt` 只保证某个 release 会强制重新审查这段 migration 是否还应该存在。对于外部协议兼容（例如 OAuth client 行为）也可以使用 `@removeAt` 作为 review gate，即使 review 结论最终是继续支持并移动 deadline。
+
 ## Update lifecycle
 
 `devshell update` 是现有 release installation transaction 的产品入口，不建立第二套 installer。标准升级流程为：
