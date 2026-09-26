@@ -1,4 +1,4 @@
-# 通过 FRP 或 Cloudflare Tunnel 暴露 ChatGPT MCP endpoint
+# MCP 公网接入：Access、FRP 与 Cloudflare Tunnel
 
 这份文档只讨论“自己提供公网 HTTPS endpoint”的部署方式。ChatGPT 也可以在支持的组织/产品环境中通过 OpenAI Secure MCP Tunnel 连接 private/on-prem MCP server；如果已经使用 Secure MCP Tunnel，就不需要照本文额外暴露公网入口。
 
@@ -8,7 +8,42 @@
 https://<public-host>/<instance>/mcp
 ```
 
-本指南提供两种部署方式：
+`0.7.6` 起，builtin Access Extension 是本机公网接入的优先入口；需要自定义基础设施时，仍可以使用后面的手工 FRP / Cloudflare 部署。
+
+## 推荐：Access Extension
+
+fresh 安装执行 `devshell init` 时，如果 Access Extension 可用，会直接提供：已经有公网入口、Cloudflare Tunnel、SSH reverse、稍后配置四种选择。已经完成初始化的安装可以单独使用：
+
+```bash
+devshell access cloudflare
+devshell access ssh
+devshell access list
+devshell access show <id>
+devshell access reload
+```
+
+`devshell access cloudflare` 交互读取 Cloudflare tunnel token，启动受 Access 管理的 `cloudflared`，并显示 Control MCP service URL。支持的平台上，Access 下载的 managed `cloudflared` / `frpc` 使用随 DevShell 固定的上游版本与 SHA-256 校验，不在运行时追随 GitHub latest。Cloudflare Published application route 建好后，Access 会尽量自动发现 public hostname；必要时可以显式指定：
+
+```bash
+devshell access cloudflare url https://dev.example.com
+```
+
+`devshell access ssh` 会交互配置 SSH host/user/port、remote bind address/port 和可选 public URL。更底层的 endpoint 管理入口是：
+
+```bash
+devshell access set '<endpoint-json>'
+devshell access enable <id>
+devshell access disable <id>
+devshell access remove <id>
+```
+
+这些 mutation 只允许 local-owner CLI 调用。`devshell access web` 只返回 Access Web application 的入口；`0.7.6` 中该页面是 status/observation surface，不是完整管理页面。TUI 也暂不注入 Access 管理面；通用 Extension management UI contract 留到后续版本完成，见 [Extension ABI](../concepts/extensions.md)。
+
+Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、Tool Approval 或外部 HTTPS/DNS 配置。公开 endpoint 仍应使用 OAuth2，并确认最终 public URL 与 reverse proxy / tunnel 实际地址一致。
+
+## 手工部署
+
+手工部分提供两种典型方式：
 
 | 方式              | 适用场景                                        | TLS 终止位置 |
 | ----------------- | ----------------------------------------------- | ------------ |
