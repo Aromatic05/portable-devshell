@@ -345,6 +345,14 @@ Web application 的 HTTP/WebSocket failure 也由 Web host 翻译，而不是把
 
 CLI/Web discovery 都是各自 domain 的 read surface，不存在 public `extension.catalog`、generic contribution listing 或 runtime binding introspection API。
 
+#### TODO: Extension management UI
+
+`0.7.6` 不扩张 `web.applications` 来解决 Extension 的通用管理 UI。当前 ABI 只能让 Extension 提供独立 Web application source，还没有稳定的 contract 让 Extension 向 portable-devshell 主 WebUI / TUI 注入 management state、actions 与 presentation。
+
+因此当前 Access 明确采用 CLI-first management：CLI 负责 endpoint 的创建、修改、启停、删除与 reload；内置 Web application 只作为 observation surface，不视为完整管理页面；TUI 暂不提供 Access management surface。Access 自己的 Web backend 也不构成已冻结的 public Extension UI API。
+
+后续版本需要先从多个 Extension 的真实需求中归纳通用 management UI contract，再决定由 Extension 提供完整 application、声明 host-rendered management model，或两者组合。不能为了 Access 单独引入 Host Web/TUI 私有入口并把特例固化为 public ABI。
+
 ## Generation ownership
 
 Generation 是 runtime ownership root。正常 retirement 的顺序概念上是：
