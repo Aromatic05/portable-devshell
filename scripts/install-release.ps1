@@ -69,9 +69,15 @@ const { preflightControlUpdate } = await import(pathToFileURL(controlModule).hre
 const result = await preflightControlUpdate({ environment: process.env, homeDirectory });
 process.stdout.write(JSON.stringify(result));
 '@
-    $output = & node --input-type=module -e $script $controlModule $HomeDirectory
-    if ($LASTEXITCODE -ne 0) { throw "候选版本 compatibility preflight 失败。" }
-    return ($output | ConvertFrom-Json)
+    $scriptPath = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-preflight-" + [Guid]::NewGuid().ToString("N") + ".mjs")
+    try {
+        [IO.File]::WriteAllText($scriptPath, $script, [Text.UTF8Encoding]::new($false))
+        $output = & node $scriptPath $controlModule $HomeDirectory
+        if ($LASTEXITCODE -ne 0) { throw "候选版本 compatibility preflight 失败。" }
+        return ($output | ConvertFrom-Json)
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $scriptPath
+    }
 }
 
 function Assert-CliStarts([string]$CliPath, [string]$FailureLabel, [bool]$CommandWrapper = $false) {
