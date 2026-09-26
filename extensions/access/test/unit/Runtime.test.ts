@@ -322,7 +322,7 @@ test("AccessRuntime never starts a replacement tunnel while the previous session
 });
 
 test("AccessRuntime keeps the earliest retry deadline across endpoints", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
     const directory = await createTestTempDirectory("access-runtime-retry-deadline");
     const config = new MemoryConfig();
     await config.update({
@@ -360,6 +360,13 @@ test("AccessRuntime keeps the earliest retry deadline across endpoints", async (
             provider.sessions.get("fast-recovery")?.length,
             2,
             "the 1s retry must preempt the existing 30s retry deadline",
+        );
+        assert.equal(
+            provider.opens.filter(
+                (input) => input.endpoint.id === "slow-failure",
+            ).length,
+            6,
+            "the fast endpoint retry must not bypass the slow endpoint backoff",
         );
     } finally {
         await runtime.dispose();

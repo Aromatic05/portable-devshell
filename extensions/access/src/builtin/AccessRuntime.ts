@@ -45,6 +45,7 @@ interface ActiveEndpoint {
     publishedPublicUrl?: string;
     record: AccessEndpointRecord;
     restartAttempt: number;
+    retryAt?: number;
     session?: AccessProviderSession;
     token: object;
     unsubscribePublicUrl?: () => void;
@@ -131,6 +132,7 @@ export class AccessRuntime {
         for (const active of this.#records.values()) {
             active.fingerprint = "";
             active.restartAttempt = 0;
+            active.retryAt = undefined;
         }
         await this.reconcile();
     }
@@ -192,9 +194,13 @@ export class AccessRuntime {
             this.#reconcileTimer = undefined;
             this.#reconcileDeadline = undefined;
         }
+        await this.#queueReconcile(true);
+    }
+
+    async #queueReconcile(forceRetries: boolean): Promise<void> {
         const operation = this.#reconcilePromise.then(
-            async () => await this.#reconcileOnce(),
-            async () => await this.#reconcileOnce(),
+            async () => await this.#reconcileOnce(forceRetries),
+            async () => await this.#reconcileOnce(forceRetries),
         );
         this.#reconcilePromise = operation.catch((error: unknown) => {
             this.#context.logger.error("Access reconcile failed.", {
@@ -233,12 +239,13 @@ export class AccessRuntime {
             throw new AggregateError(failures, "Access Extension cleanup was incomplete.");
     }
 
-    async #reconcileOnce(): Promise<void> {
+    async #reconcileOnce(forceRetries: boolean): Promise<void> {
         if (this.#disposed) return;
         const config = await this.#readConfig();
         const desired = new Map(config.endpoints.map((endpoint) => [endpoint.id, endpoint]));
         for (const [id, active] of [...this.#records]) {
             if (desired.has(id)) continue;
+            if (this.#deferRetry(active, forceRetries)) continue;
             const stopFailure = await this.#stopActive(active);
             if (stopFailure !== undefined) {
                 active.fingerprint = "";
@@ -253,10 +260,14 @@ export class AccessRuntime {
             }
             this.#records.delete(id);
         }
-        for (const endpoint of config.endpoints) await this.#reconcileEndpoint(endpoint);
+        for (const endpoint of config.endpoints)
+            await this.#reconcileEndpoint(endpoint, forceRetries);
     }
 
-    async #reconcileEndpoint(endpoint: AccessEndpoint): Promise<void> {
+    async #reconcileEndpoint(
+        endpoint: AccessEndpoint,
+        forceRetries: boolean,
+    ): Promise<void> {
         let active = this.#records.get(endpoint.id);
         if (active === undefined) {
             active = {
@@ -268,6 +279,11 @@ export class AccessRuntime {
             this.#records.set(endpoint.id, active);
         }
         if (!endpoint.enabled) {
+            if (
+                !active.record.enabled &&
+                this.#deferRetry(active, forceRetries)
+            )
+                return;
             const stopFailure = await this.#stopActive(active);
             if (stopFailure !== undefined) {
                 this.#recordStopFailure(active, endpoint, stopFailure);
@@ -275,6 +291,7 @@ export class AccessRuntime {
             }
             active.fingerprint = fingerprint(endpoint, "disabled");
             active.restartAttempt = 0;
+            active.retryAt = undefined;
             active.record = this.#initialRecord(endpoint);
             return;
         }
@@ -305,6 +322,7 @@ export class AccessRuntime {
             }
             active.fingerprint = fingerprint(endpoint, resolved.reason);
             active.restartAttempt = 0;
+            active.retryAt = undefined;
             active.record = {
                 ...this.#initialRecord(endpoint),
                 error: resolved.reason,
@@ -327,6 +345,16 @@ export class AccessRuntime {
             };
             return;
         }
+        if (
+            active.session === undefined &&
+            active.fingerprint === nextFingerprint &&
+            this.#deferRetry(active, forceRetries)
+        )
+            return;
+        if (active.fingerprint !== nextFingerprint) {
+            active.restartAttempt = 0;
+            active.retryAt = undefined;
+        }
         const stopFailure = await this.#stopActive(active);
         if (stopFailure !== undefined) {
             this.#recordStopFailure(active, endpoint, stopFailure);
@@ -340,6 +368,7 @@ export class AccessRuntime {
         };
         const token = {};
         active.token = token;
+        active.retryAt = undefined;
         try {
             const provider = this.#providers.get(endpoint.provider);
             if (provider === undefined)
@@ -363,6 +392,7 @@ export class AccessRuntime {
                 );
             });
             active.restartAttempt = 0;
+            active.retryAt = undefined;
             active.record = {
                 ...this.#initialRecord(endpoint),
                 origin: resolved.target.origin.href,
@@ -400,7 +430,6 @@ export class AccessRuntime {
         active.unsubscribePublicUrl?.();
         active.unsubscribePublicUrl = undefined;
         active.session = undefined;
-        active.fingerprint = "";
         active.record = {
             ...active.record,
             error: "Tunnel process exited.",
@@ -412,7 +441,16 @@ export class AccessRuntime {
     #scheduleRetry(active: ActiveEndpoint): void {
         active.restartAttempt += 1;
         const delay = Math.min(30_000, 1_000 * 2 ** Math.min(5, active.restartAttempt - 1));
+        active.retryAt = Date.now() + delay;
         this.#scheduleReconcile(delay);
+    }
+
+    #deferRetry(active: ActiveEndpoint, forceRetries: boolean): boolean {
+        if (forceRetries || active.retryAt === undefined) return false;
+        const delay = active.retryAt - Date.now();
+        if (delay <= 0) return false;
+        this.#scheduleReconcile(delay);
+        return true;
     }
 
     #scheduleReconcile(delay: number): void {
@@ -430,7 +468,7 @@ export class AccessRuntime {
         this.#reconcileTimer = setTimeout(() => {
             this.#reconcileTimer = undefined;
             this.#reconcileDeadline = undefined;
-            void this.reconcile().catch((error: unknown) =>
+            void this.#queueReconcile(false).catch((error: unknown) =>
                 this.#context.logger.error("Access reconcile failed.", {
                     error: toError(error).message,
                 }),
