@@ -16,6 +16,24 @@ DevShell release        0.7.y
 
 这些版本只在对应 contract 发生变化时推进，不随 DevShell release 同步 bump。
 
+## Release interval version rule
+
+任何一个 version field 在相邻两次 release 之间最多改变一次。
+
+如果一个尚未 release 的 contract version 已经在当前 interval 中完成了唯一一次改变，后续属于同一 release 的 contract 收敛继续落在这个尚未发布的版本内，不能再次 bump。只有下一次 release 之后，才重新获得一次 version change 的机会。
+
+因此版本演进遵循：
+
+```text
+release N
+    -> version field may change once
+    -> continue refining that unreleased contract without another bump
+release N+1
+    -> version field may change once again
+```
+
+这个规则适用于 DevShell release version、各 Protocol version、Extension API/schema version 和其他独立 version field。不能因为开发过程中又发现一个 contract change，就在同一个 release interval 内连续推进多个版本号。
+
 ## Protocol version
 
 Control Protocol、Worker Protocol 与 Frame Protocol 是独立协议，不共享一个总版本号。协议版本使用 `x.y.z`：
