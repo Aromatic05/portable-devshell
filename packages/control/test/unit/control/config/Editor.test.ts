@@ -101,7 +101,11 @@ test("config editor returns each patch apply summary to the initiating request",
     const authResult = (await service.updateInstanceConfig({
         instanceName: "demo-local",
         patch: {
-            mcp: { auth: "token", token: "0123456789abcdef0123456789abcdef" },
+            mcp: {
+                auth: "token",
+                contextMode: "explicit",
+                token: "0123456789abcdef0123456789abcdef",
+            },
         },
     })) as {
         appliedChanges: Array<{ kind: string; target: string }>;
@@ -260,6 +264,7 @@ test("config view and validation mask all tokens while updates preserve masked s
     };
     config.web.auth = { mode: "token", token: strongToken };
     config.instances[0]!.mcp.auth = { mode: "token", token: instanceToken };
+    config.instances[0]!.mcp.contextMode = "explicit";
     const service = new ConfigEditorCoordinator({
         configStore: {
             async write(nextConfig: ControlConfig) {
@@ -2106,6 +2111,8 @@ test("config editor rejects delete and rebuild patches while an instance is runn
 
 test("config editor hot-applies model Extension ACL and MCP context changes without restarting control", async () => {
     let config = createConfig();
+    config.instances[0]!.mcp.contextMode = "explicit";
+    config.instances[0]!.workspace.enabled = true;
     const registry = new InstanceRegistry([
         descriptor(
             {
