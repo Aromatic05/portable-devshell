@@ -39,7 +39,7 @@ export interface CommentExtensionInstance {
     key: object;
     /**
      * @compat comment-legacy-migration-inputs
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     legacyContextMessagesFile?: string;
     legacyReports?: () => Promise<ToolCallRecord[]>;

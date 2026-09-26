@@ -766,7 +766,7 @@ function normalizeStepStatus(value: unknown): GoalStepStatus {
 
 /**
  * @compat goal-v1-normalization
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 function normalizeStoredGoal(value: unknown): GoalRecord {
     if (!isRecord(value)) throw new Error("goal state must be an object");

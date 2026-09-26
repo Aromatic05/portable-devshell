@@ -83,7 +83,7 @@ const paths = {
     ),
     /**
      * @compat testspace-runtime-directory
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     legacyRuntime: join(root, "runtime"),
     reverseDevshellHome: join(root, "reverse-home", ".devshell"),

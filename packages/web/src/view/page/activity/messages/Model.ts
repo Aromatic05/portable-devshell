@@ -321,7 +321,7 @@ export function workspacePreferenceKey(
 
 /**
  * @compat web-conversation-preferences-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function readLegacyConversationPreferences():
     LegacyConversationPreferences | undefined {

@@ -103,7 +103,7 @@ export class McpToolCatalogInteraction {
                 properties: {
                     /**
                      * @compat workspace-goal-finish
-                     * @removeAt 1.0.0
+                     * @removeAt 0.7.10
                      */
                     action: {
                         enum: [
@@ -145,7 +145,7 @@ export class McpToolCatalogInteraction {
         },
         /**
          * @compat workspace-open-entrypoint
-         * @removeAt 1.0.0
+         * @removeAt 0.7.10
          */
         {
             _meta: {
@@ -171,7 +171,7 @@ export class McpToolCatalogInteraction {
         },
         /**
          * @compat workspace-app-mcp-fallback
-         * @removeAt 1.0.0
+         * @removeAt 0.7.10
          */
         {
             _meta: appOnlyMeta,

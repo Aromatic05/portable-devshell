@@ -13,7 +13,7 @@ export interface LegacyReportMigrationStore {
 
 /**
  * @compat todo-report-audit-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export async function migrateLegacyReports(
     store: LegacyReportMigrationStore,

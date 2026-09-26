@@ -52,7 +52,7 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
     const view = new URLSearchParams(query).get("view");
     /**
      * @compat web-legacy-routes
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     if (page === "activity") return pageRoute("audit");
     if (page === "approvals") return pageRoute("audit");

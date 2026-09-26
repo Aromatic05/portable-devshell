@@ -20,7 +20,7 @@ import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
 
 /**
  * @compat mcp-workspace-app-v0615
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export class McpWorkspaceLegacyV0615 {
     constructor(

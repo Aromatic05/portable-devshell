@@ -10,13 +10,13 @@ export class InstancePaths {
     readonly conversationDatabaseFile: string;
     /**
      * @compat comment-json-v1-path
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     readonly contextMessagesFile: string;
     readonly goalsFile: string;
     /**
      * @compat audit-jsonl-v1
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     readonly legacyApprovalsFile: string;
     readonly legacyEventsFile: string;

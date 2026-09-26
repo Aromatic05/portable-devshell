@@ -16,7 +16,7 @@ const CONTROL_STATE_MIGRATION_KEY = "migration:context-control-v3";
 
 /**
  * @compat comment-control-v3
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function migrateConversationControlState(database: DatabaseSync): void {
     if (readMetadata(database, CONTROL_STATE_MIGRATION_KEY) === "complete")

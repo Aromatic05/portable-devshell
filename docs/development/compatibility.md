@@ -115,7 +115,9 @@ Wait.ts       legacy Wait state migration
 
 TypeScript/JavaScript 使用普通 source comment/JSDoc，Rust 使用 `//`，shell/PowerShell 使用 `#`。一个逻辑兼容面只要求 owner annotation，不要求每个调用点重复标记；跨语言拥有独立实现时可以重复使用同一个 `@compat` slug。
 
-`@removeAt` 是 maintenance review gate，不是 persistent schema 或 public protocol 的 compatibility contract。当当前 DevShell version **大于或等于** `@removeAt` 时，`scripts/check-compat-expiry.mjs` 必须失败。到期时只能做两件事：删除兼容实现和对应旧行为测试，或者经过显式 compatibility review 后把 deadline 移到新的确定 release；不能为了过 CI 删除 annotation 而保留实现。
+`@removeAt` 是 maintenance deadline，不是 persistent schema 或 public protocol 的 compatibility contract。当当前 DevShell version **大于或等于** `@removeAt` 时，`scripts/check-compat-expiry.mjs` 必须失败。
+
+当前已经识别出的 compatibility debt 统一以 **`0.7.10`** 为硬截止；checker 同时拒绝任何晚于 `0.7.10` 的 `@removeAt`。Deadline 可以提前，但不能向后移动。到期前必须真正解决：删除临时兼容实现与对应旧行为测试，或者在确认它本来就应该长期支持时把该行为正式纳入稳定 contract，并去掉“临时兼容”语义。不能通过改成 `0.7.11`、`1.0.0` 或其他更晚版本绕过门禁。
 
 当前入口：
 
@@ -127,7 +129,7 @@ pnpm version:check   product version gate + compatibility expiry gate
 
 Compatibility expiry 同时进入 development CI、final acceptance 与 release gate。`dist/`、`target/`、`node_modules/` 等生成物不参与扫描，避免编译产物复制 source comments 后产生重复债务记录。
 
-对于 persistent migration，是否还能读取旧数据仍由 `minimum readable schema` 决定；`@removeAt` 只保证某个 release 会强制重新审查这段 migration 是否还应该存在。对于外部协议兼容（例如 OAuth client 行为）也可以使用 `@removeAt` 作为 review gate，即使 review 结论最终是继续支持并移动 deadline。
+对于 persistent migration，是否还能读取旧数据仍由 `minimum readable schema` 决定；`@removeAt` 约束的是旧 migration implementation 必须在 deadline 前完成生命周期处理。对于外部协议兼容也是一样：如果审查后决定长期支持，应在 deadline 前把它正式化为 contract，而不是延期 compatibility debt。
 
 ## Update lifecycle
 

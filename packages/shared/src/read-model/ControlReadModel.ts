@@ -709,7 +709,7 @@ export class ControlReadModel {
                 }
                 /**
                  * @compat conversation-read-model-fallback
-                 * @removeAt 1.0.0
+                 * @removeAt 0.7.10
                  */
                 const [contextMessages, reportCalls] = await Promise.all([
                     this.#clients.contextMessage

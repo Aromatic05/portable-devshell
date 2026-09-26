@@ -116,7 +116,7 @@ async function inspectExistingCommand(
     if (metadata === undefined) return "absent";
     /**
      * @compat agent-core-pi-launcher
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     if (metadata.isSymbolicLink()) {
         const target = await readlink(path);

@@ -7,6 +7,7 @@ import { compareVersions, parseVersion } from "./version-state.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = fileURLToPath(new URL("../", import.meta.url));
+export const CURRENT_COMPATIBILITY_DEBT_DEADLINE = "0.7.10";
 const sourceExtensions = new Set([
     ".cjs",
     ".cts",
@@ -83,6 +84,18 @@ export async function checkCompatibilityExpiry(options = {}) {
         issues.push(...parsed.issues);
     }
     for (const annotation of annotations) {
+        if (
+            compareVersions(
+                annotation.removeAt,
+                CURRENT_COMPATIBILITY_DEBT_DEADLINE,
+            ) > 0
+        ) {
+            issues.push({
+                ...annotation,
+                deadline: CURRENT_COMPATIBILITY_DEBT_DEADLINE,
+                kind: "deadline-after-policy",
+            });
+        }
         if (compareVersions(currentVersion, annotation.removeAt) >= 0) {
             issues.push({
                 ...annotation,
@@ -122,6 +135,20 @@ export async function listCompatibilityExpiry(options = {}) {
             })),
         );
         issues.push(...parsed.issues);
+    }
+    for (const annotation of annotations) {
+        if (
+            compareVersions(
+                annotation.removeAt,
+                CURRENT_COMPATIBILITY_DEBT_DEADLINE,
+            ) > 0
+        ) {
+            issues.push({
+                ...annotation,
+                deadline: CURRENT_COMPATIBILITY_DEBT_DEADLINE,
+                kind: "deadline-after-policy",
+            });
+        }
     }
     annotations.sort(compareAnnotationLocation);
     issues.sort(compareIssueLocation);
@@ -223,6 +250,9 @@ function formatIssue(issue) {
     }
     if (issue.kind === "invalid-version") {
         return `${location} ${issue.compat} has invalid @removeAt ${issue.removeAt}`;
+    }
+    if (issue.kind === "deadline-after-policy") {
+        return `${location} ${issue.compat} moves @removeAt to ${issue.removeAt}, past the fixed compatibility debt deadline ${issue.deadline}`;
     }
     return `${location} compatibility comment must contain exactly one @compat and one @removeAt`;
 }

@@ -259,7 +259,7 @@ function restoreLeaseMap(
 
 /**
  * @compat workspace-app-lease-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 function parseDocument(value: unknown): WorkspaceAppLeaseDocument | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))

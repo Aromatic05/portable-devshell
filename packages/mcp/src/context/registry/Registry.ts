@@ -1446,7 +1446,7 @@ export class McpContextRegistry {
         } catch {
             /**
              * @compat mcp-context-execution-sidecar-fallback
-             * @removeAt 1.0.0
+             * @removeAt 0.7.10
              */
             // The main Context document remains a durable compatibility fallback.
         }
@@ -1755,7 +1755,7 @@ function isDocument(value: unknown): value is McpContextDocument {
 
 /**
  * @compat mcp-context-v1-fields
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {

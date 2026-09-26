@@ -13,7 +13,7 @@ const LEGACY_COMMENT_MIGRATION_KEY = "migration:context-messages-json-v1";
 
 /**
  * @compat comment-json-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function migrateLegacyComments(
     database: DatabaseSync,

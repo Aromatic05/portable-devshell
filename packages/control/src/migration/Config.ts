@@ -22,7 +22,7 @@ export interface ConfigInstanceMigrationResult {
 
 /**
  * @compat config-global-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function migrateGlobalConfigV1(
     config: Record<string, unknown>,
@@ -41,7 +41,7 @@ export function migrateGlobalConfigV1(
 
 /**
  * @compat config-instance-v2-v3
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function migrateInstanceConfigV2OrV3(
     config: Record<string, unknown>,

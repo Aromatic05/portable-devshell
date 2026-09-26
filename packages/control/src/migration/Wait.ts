@@ -4,7 +4,7 @@ import type { WaitDocument } from "../instance/workflow/wait/State.js";
 
 /**
  * @compat wait-delivered-recovery
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function migrateWaitDocument(document: WaitDocument): WaitDocument {
     return {

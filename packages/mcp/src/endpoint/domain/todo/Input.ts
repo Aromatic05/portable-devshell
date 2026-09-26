@@ -23,7 +23,7 @@ export function readTodoReportMessage(input: JsonValue): string {
 
 /**
  * @compat todo-title-selector
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function readTodoInput(input: JsonValue): TodoReadInput | undefined {
     if (typeof input !== "object" || input === null || Array.isArray(input))

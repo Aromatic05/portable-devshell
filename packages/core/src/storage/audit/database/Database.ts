@@ -466,7 +466,7 @@ export class AuditDatabase {
 
     /**
      * @compat audit-jsonl-v1
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     migrateLegacy<TRecord>(
         collection: AuditRecordCollection,
@@ -660,7 +660,7 @@ export class AuditDatabase {
 
     /**
      * @compat audit-schema-v1
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     #upgradeSchema(userVersion: number): void {
         const columns = new Set(

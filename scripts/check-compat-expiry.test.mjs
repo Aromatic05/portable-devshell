@@ -28,7 +28,7 @@ test("compat annotations remain valid before their removal release", async () =>
     const source = [
         "/**",
         " * @compat worker-protocol-7",
-        " * @removeAt 0.8.0",
+        " * @removeAt 0.7.9",
         " */",
         "export const legacy = 7;",
     ].join("\n");
@@ -43,7 +43,7 @@ test("compat annotations remain valid before their removal release", async () =>
                 compat: "worker-protocol-7",
                 line: 1,
                 path: "src/legacy.ts",
-                removeAt: "0.8.0",
+                removeAt: "0.7.9",
             },
         ]);
     } finally {
@@ -52,10 +52,10 @@ test("compat annotations remain valid before their removal release", async () =>
 });
 
 test("compat annotations expire at the declared release boundary", async () => {
-    const root = await createFixture("0.8.0", {
+    const root = await createFixture("0.7.10", {
         "src/legacy.rs": [
             "// @compat worker-protocol-7",
-            "// @removeAt 0.8.0",
+            "// @removeAt 0.7.10",
             "const LEGACY: u32 = 7;",
         ].join("\n"),
     });
@@ -71,12 +71,47 @@ test("compat annotations expire at the declared release boundary", async () => {
                 assert.equal(error.issues.length, 1);
                 assert.deepEqual(error.issues[0], {
                     compat: "worker-protocol-7",
-                    currentVersion: "0.8.0",
+                    currentVersion: "0.7.10",
                     kind: "expired",
                     line: 1,
                     path: "src/legacy.rs",
-                    removeAt: "0.8.0",
+                    removeAt: "0.7.10",
                 });
+                return true;
+            },
+        );
+    } finally {
+        await rm(root, { force: true, recursive: true });
+    }
+});
+
+test("compatibility debt deadlines cannot move past 0.7.10", async () => {
+    const root = await createFixture("0.7.6", {
+        "src/legacy.ts": [
+            "// @compat deferred-debt",
+            "// @removeAt 0.7.11",
+            "export const legacy = true;",
+        ].join("\n"),
+    });
+    try {
+        await assert.rejects(
+            () =>
+                checkCompatibilityExpiry({
+                    files: ["src/legacy.ts"],
+                    root,
+                }),
+            (error) => {
+                assert.equal(error instanceof CompatibilityExpiryError, true);
+                assert.deepEqual(error.issues, [
+                    {
+                        compat: "deferred-debt",
+                        deadline: "0.7.10",
+                        kind: "deadline-after-policy",
+                        line: 1,
+                        path: "src/legacy.ts",
+                        removeAt: "0.7.11",
+                    },
+                ]);
                 return true;
             },
         );

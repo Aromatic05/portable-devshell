@@ -75,7 +75,7 @@ export async function assertTestspaceRootOwned(repositoryRoot, root) {
 
     /**
      * @compat testspace-default-root
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     const legacyDefaultRoot = resolve(resolvedRepository, ".testspace");
     if (resolvedRoot !== legacyDefaultRoot) {

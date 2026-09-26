@@ -20,7 +20,7 @@ const capabilities = new Set<ExtensionCapability>([
 
 /**
  * @compat extension-manifest-schema-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (!isRecord(value))
@@ -203,7 +203,7 @@ function assertOnlyKeys(
 
 /**
  * @compat extension-manifest-integer-version
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 function readCompatibilityVersion(value: unknown, field: string): string {
     if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)

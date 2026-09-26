@@ -214,7 +214,7 @@ assert_running_control_matches_application() {
     fi
     command_line=$(ps -p "$runtime_control_pid" -o command= 2>/dev/null || true)
     # @compat control-daemon-entrypoint
-    # @removeAt 1.0.0
+    # @removeAt 0.7.10
     if ! node - "$application_directory" "$command_line" <<'NODE'
 const path = require("path");
 const root = path.resolve(process.argv[2]).replaceAll("\\", "/").replace(/\/+$/u, "");
@@ -324,7 +324,7 @@ stop_installed_control() {
 
     command_line=$(ps -p "$control_pid" -o command= 2>/dev/null || true)
     # @compat control-daemon-entrypoint
-    # @removeAt 1.0.0
+    # @removeAt 0.7.10
     case "$command_line" in
         *node_modules/@portable-devshell/control/dist/server/Daemon.js*|*node_modules/@portable-devshell/control/dist/server/ControlDaemon.js*) ;;
         *) echo "拒绝终止 PID ${control_pid}：PID 文件指向的进程不是可验证的 portable-devshell Control daemon。" >&2; return 1 ;;

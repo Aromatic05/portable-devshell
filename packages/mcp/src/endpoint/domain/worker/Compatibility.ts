@@ -24,7 +24,7 @@ export type McpLegacyToolCompatibility =
 
 /**
  * @compat mcp-stale-tool-surface
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 const legacyTools: Readonly<Record<string, McpLegacyToolCompatibility>> = {
     ask_question: {

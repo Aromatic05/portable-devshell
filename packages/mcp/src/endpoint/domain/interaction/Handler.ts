@@ -597,7 +597,7 @@ export class McpEndpointHandlerInteraction {
                 wait.goalProgressAt !== goal.lastProgressAt;
             /**
              * @compat wait-goal-revision-association
-             * @removeAt 1.0.0
+             * @removeAt 0.7.10
              */
             const staleLegacyRevision =
                 wait.goalStepId === undefined &&

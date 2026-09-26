@@ -8,7 +8,7 @@ export const workspaceAppStableResourceUri =
     "ui://portable-devshell/workspace/v1.html";
 /**
  * @compat workspace-app-resource-uris
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  */
 export const workspaceAppLegacyResourceUris: readonly string[] = [
     "ui://portable-devshell/workspace-651c9d0f1042c493.html",
@@ -54,7 +54,7 @@ export const workspaceAppVersion = resolvePortableDevshellApplicationVersion();
 
 /**
  * @compat workspace-app-widget-state-v1
- * @removeAt 1.0.0
+ * @removeAt 0.7.10
  * The embedded app still promotes the old top-level widget hint into privateContent.
  */
 export const workspaceAppHtml = String.raw`<!doctype html>

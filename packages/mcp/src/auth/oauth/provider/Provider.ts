@@ -143,7 +143,7 @@ export class McpOAuthProviderRuntime {
         await this.#storageSecurity.secureStorage(this.#storageDir);
         /**
          * @compat mcp-oauth-dcr
-         * @removeAt 1.0.0
+         * @removeAt 0.7.10
          */
         const dynamicClientRequiredScopes = () => [
             ...new Set([

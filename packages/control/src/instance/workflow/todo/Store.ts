@@ -203,7 +203,7 @@ export class TodoState {
 
     /**
      * @compat todo-v1-v3
-     * @removeAt 1.0.0
+     * @removeAt 0.7.10
      */
     normalizeDocument(value: unknown): TodoDocument {
         if (!isRecord(value) || !Array.isArray(value.archived)) {
