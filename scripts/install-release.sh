@@ -105,6 +105,28 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 NODE
 }
 
+preflight_candidate() {
+    app_directory=$1
+    home_directory=$2
+    node --input-type=module - "$app_directory" "$home_directory" <<'NODE'
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const appDirectory = process.argv[2];
+const homeDirectory = process.argv[3];
+const controlModule = resolve(
+    appDirectory,
+    "node_modules/@portable-devshell/control/dist/index.js",
+);
+const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
+const result = await preflightControlUpdate({
+    environment: process.env,
+    homeDirectory,
+});
+process.stdout.write(JSON.stringify(result));
+NODE
+}
+
 smoke_cli() {
     cli=$1
     failure_label=$2
@@ -524,6 +546,7 @@ if [ ! -f "$manifest" ]; then
 fi
 
 version=$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(typeof value.version!=="string"||!value.version) process.exit(1); process.stdout.write(value.version)' "$manifest")
+candidate_preflight=$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(value.updatePreflight === true ? "1" : "0")' "$manifest")
 if [ -n "$explicit_release_base" ]; then
     worker_release_directory=$release_base
 else
@@ -540,6 +563,7 @@ worker_bin_directory="$devshell_home/bin"
 worker_backup_directory="$devshell_home/.install-worker-backup-$$"
 application_transaction_active=0
 worker_transaction_active=0
+migration_committed=0
 runtime_restore_control=0
 runtime_control_pid=
 runtime_restore_instances="$temporary/runtime-restore-instances"
@@ -597,6 +621,19 @@ if ! smoke_cli "$staging_cli" "安装前验证失败"; then
     exit 1
 fi
 detail "CLI 入口和运行时依赖验证通过"
+migration_required=0
+if [ "$candidate_preflight" -eq 1 ]; then
+    if ! preflight_json=$(preflight_candidate "$staging_directory" "$home"); then
+        echo "候选版本 compatibility preflight 失败；安装在停机前取消。" >&2
+        exit 1
+    fi
+    migration_required=$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.migration?.required ? "1" : "0")' "$preflight_json")
+    checked_extensions=$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.extensions?.checkedGenerations ?? 0))' "$preflight_json")
+    detail "Compatibility preflight 通过：检查 Extension generation ${checked_extensions} 个"
+    if [ "$migration_required" -eq 1 ]; then
+        detail "候选版本需要 persistent migration"
+    fi
+fi
 
 step "停止旧版本并切换安装"
 current_cli=
@@ -675,15 +712,36 @@ if ! smoke_cli "$command_link" "安装结果验证失败"; then
     rollback_installation
     exit 1
 fi
+if [ "$migration_required" -eq 1 ]; then
+    detail "执行候选版本 persistent migration"
+    if ! node "$command_link" migrate >/dev/null; then
+        echo "候选版本 migration 失败，正在恢复原安装。" >&2
+        rollback_installation
+        exit 1
+    fi
+    migration_committed=1
+    application_transaction_active=0
+    worker_transaction_active=0
+    runtime_was_stopped=0
+    detail "Persistent migration 已提交；后续失败将禁止自动降级"
+fi
 if [ "$runtime_restore_control" -eq 1 ]; then
     candidate_control_restore_attempted=1
 fi
 if ! restore_installed_control "$command_link"; then
-    echo "候选 Control 无法恢复真实运行态，正在恢复原安装。" >&2
+    if [ "$migration_committed" -eq 1 ]; then
+        stop_installed_control "$command_link" >/dev/null 2>&1 || true
+        echo "候选 Control 无法恢复真实运行态；persistent migration 已提交，禁止自动降级。" >&2
+        echo "恢复材料已保留：$backup_directory $worker_backup_directory" >&2
+    else
+        echo "候选 Control 无法恢复真实运行态，正在恢复原安装。" >&2
+    fi
     exit 1
 fi
-application_transaction_active=0
-worker_transaction_active=0
+if [ "$migration_committed" -eq 0 ]; then
+    application_transaction_active=0
+    worker_transaction_active=0
+fi
 detail "已安装命令可以正常启动"
 runtime_was_stopped=0
 if ! restore_installed_instances "$command_link"; then

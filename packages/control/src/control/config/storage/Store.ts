@@ -80,6 +80,13 @@ export class ControlConfigStore {
         return { changed: true };
     }
 
+    async inspectMigration(
+        homeDirectory?: string,
+    ): Promise<ControlConfigMigrationResult> {
+        const loaded = await this.#read(homeDirectory);
+        return { changed: loaded.config !== undefined && loaded.migrated };
+    }
+
     async #read(homeDirectory?: string): Promise<{
         config?: ControlConfig;
         migrated: boolean;

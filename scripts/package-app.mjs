@@ -60,7 +60,11 @@ try {
     await chmod(cli.absolutePath, 0o755);
     await writeFile(
         resolve(appDirectory, "portable-devshell-install.json"),
-        `${JSON.stringify({ minimumNodeMajor: 24, version }, null, 2)}\n`,
+        `${JSON.stringify(
+            { minimumNodeMajor: 24, updatePreflight: true, version },
+            null,
+            2,
+        )}\n`,
         "utf8",
     );
 

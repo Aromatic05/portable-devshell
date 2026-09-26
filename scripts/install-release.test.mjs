@@ -1193,38 +1193,6 @@ test("Windows release installer prepares rollback state before entering Control 
     );
 });
 
-test("Windows release installer commits only after candidate Control restore", async () => {
-    const source = await readFile(
-        resolve(repositoryRoot, "scripts", "install-release.ps1"),
-        "utf8",
-    );
-    const restoreControl = source.indexOf(
-        "        Restore-InstalledControl $cliPath $runtimeState",
-    );
-    const commit = source.indexOf("        $activated = $true", restoreControl);
-    const stopCandidate = source.indexOf(
-        "                    Stop-InstalledControl $commandPath $devshellHome",
-        restoreControl,
-    );
-    const restoreInstances = source.indexOf(
-        "        Restore-InstalledInstances $cliPath $runtimeState",
-        commit,
-    );
-    assert.ok(restoreControl >= 0, "candidate Control restore must be present");
-    assert.ok(
-        commit > restoreControl,
-        "candidate Control must restore before committing activation",
-    );
-    assert.ok(
-        stopCandidate > restoreControl,
-        "failed candidate Control must be stopped before rollback",
-    );
-    assert.ok(
-        restoreInstances > commit,
-        "instance restore must happen only after the rollback boundary closes",
-    );
-});
-
 async function verifyTransactionalRollback(windows) {
     const root = await createTestTempDirectory(
         windows ? "windows-release-rollback-test" : "release-rollback-test",

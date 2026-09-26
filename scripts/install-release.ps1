@@ -59,6 +59,21 @@ function Set-InstallMetadata([string]$ManifestPath, [string]$WorkerReleaseDirect
     [IO.File]::WriteAllText($ManifestPath, "$json`n", [Text.UTF8Encoding]::new($false))
 }
 
+function Invoke-CandidatePreflight([string]$ApplicationDirectory, [string]$HomeDirectory) {
+    $controlModule = Join-Path $ApplicationDirectory "node_modules\@portable-devshell\control\dist\index.js"
+    $script = @'
+import { pathToFileURL } from "node:url";
+const controlModule = process.argv[1];
+const homeDirectory = process.argv[2];
+const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
+const result = await preflightControlUpdate({ environment: process.env, homeDirectory });
+process.stdout.write(JSON.stringify(result));
+'@
+    $output = & node --input-type=module -e $script $controlModule $HomeDirectory
+    if ($LASTEXITCODE -ne 0) { throw "候选版本 compatibility preflight 失败。" }
+    return ($output | ConvertFrom-Json)
+}
+
 function Assert-CliStarts([string]$CliPath, [string]$FailureLabel, [bool]$CommandWrapper = $false) {
     $smokeRoot = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-smoke-" + [Guid]::NewGuid().ToString("N"))
     $names = @("HOME", "USERPROFILE", "LOCALAPPDATA", "PORTABLE_DEVSHELL_HOME", "XDG_RUNTIME_DIR")
@@ -426,6 +441,7 @@ try {
     $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
     $version = [string]$manifest.version
     if ([string]::IsNullOrWhiteSpace($version)) { throw "应用包版本无效。" }
+    $candidatePreflight = ($manifest.PSObject.Properties.Name -contains "updatePreflight") -and [bool]$manifest.updatePreflight
     $explicitReleaseBase = [Environment]::GetEnvironmentVariable("PORTABLE_DEVSHELL_RELEASE_BASE_URL")
     $workerReleaseDirectory = if (-not [string]::IsNullOrWhiteSpace($explicitReleaseBase)) {
         $releaseBase
@@ -455,6 +471,13 @@ try {
     }
     Assert-CliStarts $stagingCli "安装前验证失败"
     Write-InstallDetail "CLI 入口和运行时依赖验证通过"
+    $migrationRequired = $false
+    if ($candidatePreflight) {
+        $preflight = Invoke-CandidatePreflight $stagingDirectory $home
+        $migrationRequired = [bool]$preflight.migration.required
+        Write-InstallDetail "Compatibility preflight 通过：检查 Extension generation $($preflight.extensions.checkedGenerations) 个"
+        if ($migrationRequired) { Write-InstallDetail "候选版本需要 persistent migration" }
+    }
 
     Write-InstallStep "停止旧版本并切换安装"
     $currentCli = ""
@@ -492,6 +515,7 @@ try {
     Backup-WorkerAliases $targets $devshellHome $workerBackupDirectory
     $runtimeWasStopped = [bool]$runtimeState.ControlRunning
     $candidateControlRestoreAttempted = $false
+    $migrationCommitted = $false
     $activated = $false
     try {
         Stop-InstalledControl $currentCli $devshellHome
@@ -511,9 +535,26 @@ try {
 
         Write-InstallStep "验证安装结果"
         Assert-CliStarts $commandPath "安装结果验证失败" $true
+        if ($migrationRequired) {
+            Write-InstallDetail "执行候选版本 persistent migration"
+            & node $cliPath migrate | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "候选版本 migration 失败。" }
+            $migrationCommitted = $true
+            $activated = $true
+            $runtimeWasStopped = $false
+            Write-InstallDetail "Persistent migration 已提交；后续失败将禁止自动降级"
+        }
         $candidateControlRestoreAttempted = [bool]$runtimeState.ControlRunning
-        Restore-InstalledControl $cliPath $runtimeState
-        $activated = $true
+        try {
+            Restore-InstalledControl $cliPath $runtimeState
+        } catch {
+            if ($migrationCommitted) {
+                try { Stop-InstalledControl $commandPath $devshellHome } catch {}
+                throw "候选 Control 无法恢复真实运行态；persistent migration 已提交，禁止自动降级。恢复材料已保留在 $installRoot。 $($_.Exception.Message)"
+            }
+            throw
+        }
+        if (-not $migrationCommitted) { $activated = $true }
     } finally {
         if (-not $activated) {
             if ($candidateControlRestoreAttempted) {

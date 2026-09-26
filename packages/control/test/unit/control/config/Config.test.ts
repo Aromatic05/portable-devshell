@@ -146,6 +146,10 @@ test("version 1 global MCP auth normalizes on read and migrates explicitly to ve
             token,
         });
         assert.match(await readFile(paths.configFile, "utf8"), /^version = 1$/mu);
+        assert.deepEqual(
+            await new ControlConfigStore().inspectMigration(homeDirectory),
+            { changed: true },
+        );
         assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
             changed: true,
         });
@@ -160,6 +164,10 @@ test("version 1 global MCP auth normalizes on read and migrates explicitly to ve
         assert.deepEqual(await new ControlConfigStore().migrate(homeDirectory), {
             changed: false,
         });
+        assert.deepEqual(
+            await new ControlConfigStore().inspectMigration(homeDirectory),
+            { changed: false },
+        );
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
     }
