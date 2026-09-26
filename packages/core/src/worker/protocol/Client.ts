@@ -227,6 +227,10 @@ export class WorkerProtocolClient {
                 `Unsupported Worker protocol version ${String(result.protocolVersion)}.`,
             );
         }
+        assertNegotiatedWorkerProtocolVersion(
+            result.protocolVersion,
+            params.protocolRange,
+        );
         return {
             ...result,
             protocolVersion: result.protocolVersion,
@@ -406,4 +410,55 @@ export class WorkerProtocolClient {
 
 function asObjectResult<T>(value: JsonValue): T {
     return value as T;
+}
+
+interface WorkerProtocolSemVer {
+    major: number;
+    minor: number;
+    patch: number;
+}
+
+function assertNegotiatedWorkerProtocolVersion(
+    version: string,
+    range: WorkerProtocolRange,
+): void {
+    const selected = parseWorkerProtocolSemVer(version);
+    const minimum = parseWorkerProtocolSemVer(range.min);
+    const maximum = parseWorkerProtocolSemVer(range.max);
+    if (compareWorkerProtocolSemVer(minimum, maximum) > 0) {
+        throw new TypeError(
+            `Invalid Worker protocol range ${range.min}..${range.max}.`,
+        );
+    }
+    if (
+        compareWorkerProtocolSemVer(selected, minimum) < 0 ||
+        compareWorkerProtocolSemVer(selected, maximum) > 0
+    ) {
+        throw new TypeError(
+            `Worker protocol version ${version} is outside requested range ${range.min}..${range.max}.`,
+        );
+    }
+}
+
+function parseWorkerProtocolSemVer(value: string): WorkerProtocolSemVer {
+    const match =
+        /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
+    if (match === null)
+        throw new TypeError(`Invalid Worker protocol version ${value}.`);
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    const patch = Number(match[3]);
+    if (![major, minor, patch].every(Number.isSafeInteger))
+        throw new TypeError(`Invalid Worker protocol version ${value}.`);
+    return { major, minor, patch };
+}
+
+function compareWorkerProtocolSemVer(
+    left: WorkerProtocolSemVer,
+    right: WorkerProtocolSemVer,
+): number {
+    if (left.major !== right.major) return left.major < right.major ? -1 : 1;
+    if (left.minor !== right.minor) return left.minor < right.minor ? -1 : 1;
+    if (left.patch !== right.patch) return left.patch < right.patch ? -1 : 1;
+    return 0;
 }

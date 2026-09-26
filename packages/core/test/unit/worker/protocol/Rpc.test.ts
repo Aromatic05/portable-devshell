@@ -113,6 +113,33 @@ test("WorkerProtocolClient normalizes the legacy Worker 7 handshake", async () =
     bridge.close();
 });
 
+test("WorkerProtocolClient rejects invalid negotiated Worker protocol versions", async () => {
+    for (const protocolVersion of ["not-a-version", "1.1.0"]) {
+        const harness = createRpcHarness({ handshakeProtocolVersion: protocolVersion });
+        const bridge = createTransportRpcBridge(harness.transport, {
+            instanceName: "task-4-invalid-worker-version",
+        });
+        const protocolClient = new WorkerProtocolClient(new WorkerRpcClient(bridge));
+        try {
+            await assert.rejects(
+                protocolClient.handshake({
+                    minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+                    maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+                    protocolRange: {
+                        min: WORKER_PROTOCOL_VERSION,
+                        max: WORKER_PROTOCOL_VERSION,
+                    },
+                    clientName: "portable-devshell",
+                    clientVersion: "0.7.6",
+                }),
+                (error: unknown) => error instanceof TypeError,
+            );
+        } finally {
+            bridge.close();
+        }
+    }
+});
+
 test("WorkerProtocolClient routes artifact control lifecycle through internal RPC methods", async () => {
     const harness = createRpcHarness();
     const bridge = createTransportRpcBridge(harness.transport, {
