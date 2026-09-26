@@ -85,7 +85,7 @@ export interface ExtensionSandboxHostOptions {
     externalMemoryLimitMb?: number;
     healthCheckIntervalMs?: number;
     healthCheckTimeoutMs?: number;
-    hostDependencies?: readonly string[];
+    hostDependencies?: Readonly<Record<string, string>>;
     hostCallbackTimeoutMs?: number;
     initializationTimeoutMs?: number;
     invocationAbortGraceMs?: number;
@@ -208,7 +208,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             codeDirectory: options.codeDirectory,
             context: options.context,
             entryUrl: options.entryUrl,
-            hostDependencies: [...(options.hostDependencies ?? [])],
+            hostDependencies: { ...(options.hostDependencies ?? {}) },
         };
         const factory =
             options.workerFactory ??

@@ -53,8 +53,8 @@ export interface ExtensionManifest {
     entry: string;
     /** Static declarations keyed by stable domain-owned Extension Point id. */
     extensions: Readonly<Record<string, readonly ExtensionPointDeclaration[]>>;
-    /** Bare package roots explicitly accepted from the host's shared dependency tree. */
-    hostDependencies: readonly string[];
+    /** Bare package roots and compatible versions accepted from the host's shared dependency tree. */
+    hostDependencies: Readonly<Record<string, string>>;
     id: string;
     name: string;
     schemaVersion: string;

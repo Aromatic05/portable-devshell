@@ -5,6 +5,7 @@ import {
     EXTENSION_API_VERSION,
     EXTENSION_MANIFEST_SCHEMA_VERSION,
     parseExtensionManifest,
+    satisfiesExtensionVersionRange,
 } from "../../src/index.ts";
 
 const base = {
@@ -40,7 +41,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
                 ],
                 "web.applications": [{ id: "example", title: "Example" }],
             },
-            hostDependencies: ["@modelcontextprotocol/client"],
+            hostDependencies: { "@modelcontextprotocol/client": "^2.0.0" },
         }),
         {
             ...base,
@@ -62,7 +63,7 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
                 ],
                 "web.applications": [{ id: "example", title: "Example" }],
             },
-            hostDependencies: ["@modelcontextprotocol/client"],
+            hostDependencies: { "@modelcontextprotocol/client": "^2.0.0" },
         },
     );
 });
@@ -251,7 +252,7 @@ test("Extension manifest validates Extension Point identities and declaration-lo
 
 test("Extension manifest defaults extensions and hostDependencies to empty collections", () => {
     assert.deepEqual(parseExtensionManifest(base).extensions, {});
-    assert.deepEqual(parseExtensionManifest(base).hostDependencies, []);
+    assert.deepEqual(parseExtensionManifest(base).hostDependencies, {});
 });
 
 test("Extension manifest accepts compatible same-major versions and legacy integers", () => {
@@ -264,6 +265,15 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
         "4.0.0",
     );
     const { activation: _activation, ...legacyBase } = base;
+    assert.deepEqual(
+        parseExtensionManifest({
+            ...legacyBase,
+            apiVersion: 4,
+            hostDependencies: ["@modelcontextprotocol/client"],
+            schemaVersion: 1,
+        }).hostDependencies,
+        { "@modelcontextprotocol/client": "*" },
+    );
     assert.equal(
         parseExtensionManifest({
             ...legacyBase,
@@ -307,12 +317,12 @@ test("Extension manifest rejects unknown fields and unsupported schema versions"
     );
 });
 
-test("Extension manifest validates host dependency package roots", () => {
+test("Extension manifest validates host dependency package roots and version ranges", () => {
     assert.throws(
         () =>
             parseExtensionManifest({
                 ...base,
-                hostDependencies: ["@portable-devshell/control"],
+                hostDependencies: { "@portable-devshell/control": "*" },
             }),
         /internal packages/u,
     );
@@ -320,7 +330,7 @@ test("Extension manifest validates host dependency package roots", () => {
         () =>
             parseExtensionManifest({
                 ...base,
-                hostDependencies: ["smol-toml/parser"],
+                hostDependencies: { "smol-toml/parser": "*" },
             }),
         /host dependency/u,
     );
@@ -328,8 +338,30 @@ test("Extension manifest validates host dependency package roots", () => {
         () =>
             parseExtensionManifest({
                 ...base,
-                hostDependencies: ["smol-toml", "smol-toml"],
+                hostDependencies: { "smol-toml": ">=1.0.0" },
             }),
-        /duplicates/u,
+        /version range/u,
     );
+    assert.throws(
+        () =>
+            parseExtensionManifest({
+                ...base,
+                hostDependencies: ["smol-toml"],
+            }),
+        /map package roots to version ranges/u,
+    );
+});
+
+test("Extension host dependency ranges use the frozen exact caret and tilde rules", () => {
+    assert.equal(satisfiesExtensionVersionRange("2.0.0", "*"), true);
+    assert.equal(satisfiesExtensionVersionRange("2.0.0", "2.0.0"), true);
+    assert.equal(satisfiesExtensionVersionRange("2.0.1", "2.0.0"), false);
+    assert.equal(satisfiesExtensionVersionRange("2.8.0", "^2.0.0"), true);
+    assert.equal(satisfiesExtensionVersionRange("3.0.0", "^2.0.0"), false);
+    assert.equal(satisfiesExtensionVersionRange("2.0.9", "~2.0.0"), true);
+    assert.equal(satisfiesExtensionVersionRange("2.1.0", "~2.0.0"), false);
+    assert.equal(satisfiesExtensionVersionRange("0.4.9", "^0.4.0"), true);
+    assert.equal(satisfiesExtensionVersionRange("0.5.0", "^0.4.0"), false);
+    assert.equal(satisfiesExtensionVersionRange("0.0.4", "^0.0.4"), true);
+    assert.equal(satisfiesExtensionVersionRange("0.0.5", "^0.0.4"), false);
 });

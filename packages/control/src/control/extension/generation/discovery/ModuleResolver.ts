@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
 import { createRequire, registerHooks, type ModuleHooks } from "node:module";
-import { isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { satisfiesExtensionVersionRange } from "@portable-devshell/extension";
 
 const PUBLIC_EXTENSION_SDK_PACKAGE = "@portable-devshell/extension";
 
@@ -14,7 +17,7 @@ export interface ExtensionHostModuleResolverOptions {
 
 interface ExtensionHostModuleRoot {
     count: number;
-    hostDependencies: Set<string>;
+    hostDependencies: Map<string, string>;
 }
 
 /**
@@ -118,19 +121,35 @@ export class ExtensionHostModuleResolver {
 
     register(
         codeDirectory: string,
-        hostDependencies: readonly string[] = [],
+        hostDependencies: Readonly<Record<string, string>> = {},
     ): ExtensionHostModuleLease {
+        for (const [dependency, range] of Object.entries(hostDependencies)) {
+            const version = this.#hostPackageVersion(dependency);
+            if (!satisfiesExtensionVersionRange(version, range)) {
+                throw new Error(
+                    `Extension host dependency ${dependency} requires ${range}, but host provides ${version}.`,
+                );
+            }
+        }
         const root = resolve(codeDirectory);
         const existing = this.#roots.get(root);
         if (existing === undefined) {
             this.#roots.set(root, {
                 count: 1,
-                hostDependencies: new Set(hostDependencies),
+                hostDependencies: new Map(Object.entries(hostDependencies)),
             });
         } else {
+            for (const [dependency, range] of Object.entries(hostDependencies)) {
+                const registeredRange = existing.hostDependencies.get(dependency);
+                if (registeredRange !== undefined && registeredRange !== range) {
+                    throw new Error(
+                        `Extension generation registered conflicting host dependency ranges for ${dependency}: ${registeredRange} and ${range}.`,
+                    );
+                }
+            }
             existing.count += 1;
-            for (const dependency of hostDependencies)
-                existing.hostDependencies.add(dependency);
+            for (const [dependency, range] of Object.entries(hostDependencies))
+                existing.hostDependencies.set(dependency, range);
         }
         let released = false;
         return {
@@ -171,6 +190,39 @@ export class ExtensionHostModuleResolver {
             }
         }
         return undefined;
+    }
+
+    #hostPackageVersion(packageName: string): string {
+        let current: string;
+        try {
+            current = dirname(this.#hostRequire.resolve(packageName));
+        } catch {
+            throw new Error(
+                `Extension host dependency ${packageName} is not available from the host.`,
+            );
+        }
+        for (;;) {
+            const packageJsonPath = join(current, "package.json");
+            try {
+                const manifest = JSON.parse(
+                    readFileSync(packageJsonPath, "utf8"),
+                ) as { name?: unknown; version?: unknown };
+                if (
+                    manifest.name === packageName &&
+                    typeof manifest.version === "string"
+                ) {
+                    return manifest.version;
+                }
+            } catch {
+                // Continue towards the filesystem root until the owning package is found.
+            }
+            const parent = dirname(current);
+            if (parent === current) break;
+            current = parent;
+        }
+        throw new Error(
+            `Extension host dependency ${packageName} has no readable package version.`,
+        );
     }
 }
 

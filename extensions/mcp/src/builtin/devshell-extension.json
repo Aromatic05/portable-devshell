@@ -6,7 +6,9 @@
     "name": "portable-devshell MCP Client",
     "version": "0.1.0",
     "entry": "index.ts",
-    "hostDependencies": ["@modelcontextprotocol/client"],
+    "hostDependencies": {
+        "@modelcontextprotocol/client": "^2.0.0"
+    },
     "capabilities": [],
     "extensions": {
         "cli.native-commands": [

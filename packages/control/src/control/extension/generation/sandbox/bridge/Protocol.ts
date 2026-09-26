@@ -55,7 +55,7 @@ export interface ExtensionSandboxWorkerData {
     codeDirectory: string;
     context: ExtensionSandboxContextData;
     entryUrl: string;
-    hostDependencies: readonly string[];
+    hostDependencies: Readonly<Record<string, string>>;
 }
 
 export interface ExtensionSandboxRegistrationDescriptor {

@@ -25,7 +25,7 @@ function manifest(): ExtensionManifest {
             "cli.native-commands": [{ id: "example", title: "Example" }],
             "web.applications": [{ id: "example", title: "Example" }],
         },
-        hostDependencies: [],
+        hostDependencies: {},
         id: "example",
         name: "Example",
         schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,

@@ -52,7 +52,7 @@ function manifest(
         extensions: {
             "cli.native-commands": [{ id, title: id }],
         },
-        hostDependencies: [],
+        hostDependencies: {},
         id,
         name: id,
         schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,

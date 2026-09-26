@@ -40,7 +40,7 @@ interface Harness {
             activation?: "eager" | "lazy";
             body?: string;
             commandId?: string;
-            hostDependencies?: string[];
+            hostDependencies?: Readonly<Record<string, string>>;
             id?: string;
             version?: string;
         },
@@ -430,7 +430,7 @@ test("builtin Extension generation resolves host runtime dependencies without co
             "}",
             "",
         ].join("\n"),
-        hostDependencies: ["@modelcontextprotocol/client"],
+        hostDependencies: { "@modelcontextprotocol/client": "^2.0.0" },
         id: "mcp",
     });
 

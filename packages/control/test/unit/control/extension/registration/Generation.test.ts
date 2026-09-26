@@ -16,7 +16,7 @@ const manifest: ExtensionManifest = {
     capabilities: [],
     entry: "extension.mjs",
     extensions: {},
-    hostDependencies: [],
+    hostDependencies: {},
     id: "example",
     name: "Example",
     schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,

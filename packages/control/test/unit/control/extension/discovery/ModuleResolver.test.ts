@@ -42,10 +42,10 @@ test("Extension host module resolver falls back to shared application dependenci
         await rm(root, { force: true, recursive: true });
     });
 
-    const lease = resolver.register(generation, [
-        "@modelcontextprotocol/client",
-        "@portable-devshell/control",
-    ]);
+    const lease = resolver.register(generation, {
+        "@modelcontextprotocol/client": "^2.0.0",
+        "@portable-devshell/control": "*",
+    });
     const loaded = await import(
         `${pathToFileURL(join(generation, "one.mjs")).href}?registered=1`
     );
@@ -76,5 +76,24 @@ test("Extension host module resolver falls back to shared application dependenci
         (error: unknown) =>
             error instanceof Error &&
             error.message.includes("@modelcontextprotocol/client"),
+    );
+});
+
+test("Extension host module resolver rejects an incompatible shared dependency version", async (t) => {
+    const root = await createTestTempDirectory("extension-host-version");
+    const generation = join(root, "generation");
+    await mkdir(generation, { recursive: true });
+    const resolver = new ExtensionHostModuleResolver(import.meta.url);
+    t.after(async () => {
+        resolver.dispose();
+        await rm(root, { force: true, recursive: true });
+    });
+
+    assert.throws(
+        () =>
+            resolver.register(generation, {
+                "@modelcontextprotocol/client": "^3.0.0",
+            }),
+        /requires \^3\.0\.0, but host provides 2\.0\.0/u,
     );
 });

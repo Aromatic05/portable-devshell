@@ -21,7 +21,7 @@ function manifest(
         capabilities: [],
         entry: "extension.mjs",
         extensions,
-        hostDependencies: [],
+        hostDependencies: {},
         id,
         name: `${id}-${generation}`,
         schemaVersion: EXTENSION_MANIFEST_SCHEMA_VERSION,

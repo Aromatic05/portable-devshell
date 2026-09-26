@@ -36,6 +36,8 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
         compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
     const supportsConfig =
         compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
+    const supportsHostDependencyRanges =
+        compareSemVer(schema, parseSemVer("1.1.0", "schemaVersion")) >= 0;
     assertOnlyKeys(value, [
         ...(supportsActivation ? ["activation"] : []),
         "apiVersion",
@@ -94,7 +96,10 @@ export function parseExtensionManifest(value: unknown): ExtensionManifest {
             : {}),
         entry,
         extensions: readExtensions(value.extensions),
-        hostDependencies: readHostDependencies(value.hostDependencies),
+        hostDependencies: readHostDependencies(
+            value.hostDependencies,
+            supportsHostDependencyRanges,
+        ),
         id,
         name: readString(value.name, "name"),
         schemaVersion,
@@ -342,33 +347,97 @@ function cloneJsonValue(value: unknown, field: string): ExtensionJsonValue {
     throw new TypeError(`Extension manifest ${field} must be JSON-compatible.`);
 }
 
-function readHostDependencies(value: unknown): string[] {
-    if (value === undefined) return [];
-    if (!Array.isArray(value))
-        throw new TypeError("Extension hostDependencies must be an array.");
-    const dependencies = value.map((candidate) => {
-        if (
-            typeof candidate !== "string" ||
-            candidate.trim() !== candidate ||
-            !isPackageRoot(candidate)
-        ) {
-            throw new TypeError(
-                `Invalid Extension host dependency: ${String(candidate)}.`,
-            );
+function readHostDependencies(
+    value: unknown,
+    supportsRanges: boolean,
+): Readonly<Record<string, string>> {
+    if (value === undefined) return {};
+    if (!supportsRanges) {
+        if (!Array.isArray(value))
+            throw new TypeError("Extension hostDependencies must be an array.");
+        const dependencies: Record<string, string> = {};
+        for (const candidate of value) {
+            const dependency = readHostDependencyPackage(candidate);
+            if (Object.hasOwn(dependencies, dependency)) {
+                throw new TypeError(
+                    "Extension hostDependencies must not contain duplicates.",
+                );
+            }
+            dependencies[dependency] = "*";
         }
-        if (candidate.startsWith("@portable-devshell/")) {
-            throw new TypeError(
-                "Extension hostDependencies must not expose portable-devshell internal packages.",
-            );
-        }
-        return candidate;
-    });
-    if (new Set(dependencies).size !== dependencies.length) {
+        return dependencies;
+    }
+    if (!isRecord(value) || Array.isArray(value)) {
         throw new TypeError(
-            "Extension hostDependencies must not contain duplicates.",
+            "Extension hostDependencies must map package roots to version ranges.",
         );
     }
+    const dependencies: Record<string, string> = {};
+    for (const [candidate, range] of Object.entries(value)) {
+        const dependency = readHostDependencyPackage(candidate);
+        dependencies[dependency] = readHostDependencyRange(range, dependency);
+    }
     return dependencies;
+}
+
+function readHostDependencyPackage(value: unknown): string {
+    if (
+        typeof value !== "string" ||
+        value.trim() !== value ||
+        !isPackageRoot(value)
+    ) {
+        throw new TypeError(
+            `Invalid Extension host dependency: ${String(value)}.`,
+        );
+    }
+    if (value.startsWith("@portable-devshell/")) {
+        throw new TypeError(
+            "Extension hostDependencies must not expose portable-devshell internal packages.",
+        );
+    }
+    return value;
+}
+
+function readHostDependencyRange(value: unknown, dependency: string): string {
+    if (typeof value !== "string" || !isExtensionVersionRange(value)) {
+        throw new TypeError(
+            `Invalid Extension host dependency version range for ${dependency}: ${String(value)}.`,
+        );
+    }
+    return value;
+}
+
+export function satisfiesExtensionVersionRange(
+    version: string,
+    range: string,
+): boolean {
+    const current = parseSemVer(version, "host dependency version");
+    if (range === "*") return true;
+    const operator = range[0] === "^" || range[0] === "~" ? range[0] : "=";
+    const requested = parseSemVer(
+        operator === "=" ? range : range.slice(1),
+        "host dependency version range",
+    );
+    if (compareSemVer(current, requested) < 0) return false;
+    if (operator === "=") return compareSemVer(current, requested) === 0;
+    if (operator === "~")
+        return current.major === requested.major && current.minor === requested.minor;
+    if (requested.major > 0) return current.major === requested.major;
+    if (requested.minor > 0)
+        return current.major === 0 && current.minor === requested.minor;
+    return (
+        current.major === 0 &&
+        current.minor === 0 &&
+        current.patch === requested.patch
+    );
+}
+
+function isExtensionVersionRange(value: string): boolean {
+    if (value === "*") return true;
+    const candidate = value.startsWith("^") || value.startsWith("~")
+        ? value.slice(1)
+        : value;
+    return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(candidate);
 }
 
 function isPackageRoot(value: string): boolean {
