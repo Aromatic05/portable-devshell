@@ -272,7 +272,6 @@ export class McpEndpointHandlerEnvironment {
         };
         let attachedCtxId = record.ctxId;
         let committed = false;
-        let preparedWorkspace: string | undefined;
         let alertCleanupWorkspace: string | undefined;
         try {
             const structuredContent = await callMcpEndpointToolOperation({
@@ -293,9 +292,6 @@ export class McpEndpointHandlerEnvironment {
                     const { alerts, environment, prepared, skillsDirectory } =
                         await this.#prepareEnvironment(
                             workspace,
-                            (prepared) => {
-                                preparedWorkspace = prepared;
-                            },
                             (prepared) => {
                                 alertCleanupWorkspace = prepared;
                             },
@@ -611,7 +607,6 @@ export class McpEndpointHandlerEnvironment {
 
     async #prepareEnvironment(
         workspace: string,
-        onPrepared?: (workspace: string) => void,
         onAlertsAcquiring?: (workspace: string) => void,
     ) {
         const environment = requireMcpEndpointEnvironment(
@@ -627,7 +622,6 @@ export class McpEndpointHandlerEnvironment {
             throw extensionResourcePreparationUnavailable(this.#instanceName);
         }
         const prepared = await prepareWorkspace.call(this.#worker, workspace);
-        onPrepared?.(prepared.workspace);
         const skills = await prepareExtensionResource.call(this.#worker, {
             collection: "managed",
             extensionId: "skill",

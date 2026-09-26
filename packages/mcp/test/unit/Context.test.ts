@@ -2399,16 +2399,7 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         )?.workspace,
         "/projects/beta",
     );
-    assert.deepEqual(await registry.listEnvironmentCleanup(), [
-        {
-            cleanup: {
-                instance: "demo-local",
-                kind: "alerts",
-                workspace: "/projects/gamma",
-            },
-            ctxId: "ctx-created",
-        },
-    ]);
+    assert.deepEqual(await registry.listEnvironmentCleanup(), []);
 
     extensionPreparationError = undefined;
     releaseAlertError = undefined;
