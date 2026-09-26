@@ -103,11 +103,8 @@ let currentStage = "initialization";
 let controlStarted = false;
 let instanceStarted = false;
 try {
-    stage("start control");
-    runCli(["start"]);
-    controlStarted = true;
-
     stage("migrate legacy instance config");
+    runCli(["migrate"]);
     const migratedInstanceConfig = await readFile(
         resolve(devshellHome, "control", "instances", `${instance}.toml`),
         "utf8",
@@ -139,6 +136,10 @@ try {
             );
         }
     }
+
+    stage("start control");
+    runCli(["start"]);
+    controlStarted = true;
 
     stage("control status");
     runCli(["status"]);
