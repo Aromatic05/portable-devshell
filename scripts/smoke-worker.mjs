@@ -8,7 +8,10 @@ import {
     WorkerTransportConnection,
     WorkerTransportDriverLocal,
 } from "../packages/core/dist/testing.js";
-import { WORKER_PROTOCOL_VERSION } from "../packages/core/dist/worker/protocol/Client.js";
+import {
+    WORKER_LEGACY_PROTOCOL_VERSION,
+    WORKER_PROTOCOL_VERSION,
+} from "../packages/core/dist/worker/protocol/Client.js";
 import { createTestTempDirectory } from "../test/TestTempDirectory.mjs";
 
 const workerArgument = process.argv[2];
@@ -55,8 +58,12 @@ try {
         const handshake = await rpc.request("worker.handshake", {
             clientName: "portable-devshell-smoke",
             clientVersion: "0.0.0",
-            maxProtocolVersion: WORKER_PROTOCOL_VERSION,
-            minProtocolVersion: WORKER_PROTOCOL_VERSION,
+            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
+            protocolRange: {
+                max: WORKER_PROTOCOL_VERSION,
+                min: WORKER_PROTOCOL_VERSION,
+            },
         });
         stage("tools.list");
         const tools = await rpc.request("tools.list", {});
