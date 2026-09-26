@@ -60,7 +60,7 @@ function Set-InstallMetadata([string]$ManifestPath, [string]$WorkerReleaseDirect
 }
 
 function Invoke-CandidatePreflight([string]$ApplicationDirectory, [string]$HomeDirectory) {
-    $controlModule = Join-Path $ApplicationDirectory "node_modules\@portable-devshell\control\dist\index.js"
+    $controlModule = Join-Path $ApplicationDirectory "node_modules\@portable-devshell\control\dist\migration\Control.js"
     $script = @'
 import { pathToFileURL } from "node:url";
 const controlModule = process.argv[1];

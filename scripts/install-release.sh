@@ -116,7 +116,7 @@ const appDirectory = process.argv[2];
 const homeDirectory = process.argv[3];
 const controlModule = resolve(
     appDirectory,
-    "node_modules/@portable-devshell/control/dist/index.js",
+    "node_modules/@portable-devshell/control/dist/migration/Control.js",
 );
 const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
 const result = await preflightControlUpdate({
