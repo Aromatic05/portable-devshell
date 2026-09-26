@@ -18,6 +18,7 @@ export type CliParsedCommand =
     | { kind: "overview" }
     | { kind: "init" }
     | { kind: "migrate" }
+    | { kind: "update"; version?: string }
     | { kind: "config.get" }
     | { draftSource: string; kind: "config.validate" }
     | {
@@ -139,6 +140,8 @@ export class CliParser {
                 return expectNoExtra(argv, { kind: "init" });
             case "migrate":
                 return expectNoExtra(argv, { kind: "migrate" });
+            case "update":
+                return parseUpdateCommand(argv);
             case "config":
                 return parseConfigCommand(argv.slice(1));
             case "approval":
@@ -210,12 +213,31 @@ function trailingHelp(argv: readonly string[]): CliParsedCommand | undefined {
         case "overview":
         case "init":
         case "migrate":
+        case "update":
         case "tui":
             return { kind: "help" };
         default:
             return undefined;
     }
 }
+
+function parseUpdateCommand(argv: readonly string[]): CliParsedCommand {
+    if (argv.length === 1 || argv[1] === "latest") {
+        if (argv.length > 2)
+            throw CliRenderError.usage("Unexpected arguments for update");
+        return { kind: "update" };
+    }
+    if (argv.length !== 2)
+        throw CliRenderError.usage("Usage: devshell update [version]");
+    const version = argv[1]!;
+    if (!/^v?(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.test(version)) {
+        throw CliRenderError.usage(
+            "update version must be an x.y.z release version",
+        );
+    }
+    return { kind: "update", version };
+}
+
 function expectNoExtra<T extends CliParsedCommand>(
     argv: readonly string[],
     value: T,

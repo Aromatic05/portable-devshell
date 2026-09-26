@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { CliMain } from "../../src/app/Main.js";
 
@@ -60,6 +62,99 @@ test("CliMain runs migrate locally without contacting or creating Control state"
         assert.equal(closeCalls, 1);
     } finally {
         await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("CliMain runs update locally without contacting Control", async () => {
+    const stdout = createBuffer();
+    const stderr = createBuffer();
+    const versions: Array<string | undefined> = [];
+    let helloCalls = 0;
+    let closeCalls = 0;
+    const cli = new CliMain({
+        createCliClients: () =>
+            ({
+                close() {
+                    closeCalls += 1;
+                },
+                service: {
+                    async hello() {
+                        helloCalls += 1;
+                        throw new Error("update must not contact Control");
+                    },
+                },
+            }) as never,
+        runUpdate: async (version) => {
+            versions.push(version);
+        },
+        stderr,
+        stdout,
+    });
+
+    assert.equal(await cli.run(["update", "0.7.7"]), 0);
+    assert.deepEqual(versions, ["0.7.7"]);
+    assert.equal(helloCalls, 0);
+    assert.equal(closeCalls, 1);
+    assert.equal(stdout.flush(), "");
+    assert.equal(stderr.flush(), "");
+});
+
+test("CliMain self-update verifies and executes one pinned local release installer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "devshell-update-"));
+    const release = join(root, "release");
+    const marker = join(root, "marker.txt");
+    const installerName =
+        process.platform === "win32"
+            ? "install-release.ps1"
+            : "install-release.sh";
+    const installer = join(release, installerName);
+    const releaseBase = pathToFileURL(release).href;
+    const previousBase = process.env.PORTABLE_DEVSHELL_RELEASE_BASE_URL;
+    const previousMarker = process.env.UPDATE_MARKER;
+    try {
+        await mkdir(release, { recursive: true });
+        const source =
+            process.platform === "win32"
+                ? 'Set-Content -NoNewline -LiteralPath $env:UPDATE_MARKER -Value $env:PORTABLE_DEVSHELL_RELEASE_BASE_URL\r\n'
+                : '#!/bin/sh\nprintf \'%s\' "$PORTABLE_DEVSHELL_RELEASE_BASE_URL" > "$UPDATE_MARKER"\n';
+        await writeFile(installer, source, "utf8");
+        const sha256 = createHash("sha256").update(source).digest("hex");
+        await writeFile(
+            `${installer}.sha256`,
+            `${sha256}  ${installerName}\n`,
+            "utf8",
+        );
+        process.env.PORTABLE_DEVSHELL_RELEASE_BASE_URL = releaseBase;
+        process.env.UPDATE_MARKER = marker;
+
+        const cli = new CliMain({
+            createCliClients: () => ({ close() {} }) as never,
+            stderr: createBuffer(),
+            stdout: createBuffer(),
+        });
+        assert.equal(await cli.run(["update"]), 0);
+        assert.equal(await readFile(marker, "utf8"), releaseBase);
+
+        await writeFile(
+            `${installer}.sha256`,
+            `${"0".repeat(64)}  ${installerName}\n`,
+            "utf8",
+        );
+        const stderr = createBuffer();
+        const rejected = new CliMain({
+            createCliClients: () => ({ close() {} }) as never,
+            stderr,
+            stdout: createBuffer(),
+        });
+        assert.notEqual(await rejected.run(["update"]), 0);
+        assert.match(stderr.flush(), /SHA-256 verification failed/u);
+    } finally {
+        if (previousBase === undefined)
+            delete process.env.PORTABLE_DEVSHELL_RELEASE_BASE_URL;
+        else process.env.PORTABLE_DEVSHELL_RELEASE_BASE_URL = previousBase;
+        if (previousMarker === undefined) delete process.env.UPDATE_MARKER;
+        else process.env.UPDATE_MARKER = previousMarker;
+        await rm(root, { force: true, recursive: true });
     }
 });
 

@@ -1,5 +1,6 @@
 import type { CliClients } from "../transport/Client.js";
 import type { JsonValue } from "@portable-devshell/shared";
+import { CliRenderError } from "../app/Failure.js";
 import { negotiateCliControl } from "../transport/Client.js";
 import type { CliLifecycleManagerLike } from "./control/service/Lifecycle.js";
 import { executeControlLifecycle } from "./control/service/Lifecycle.js";
@@ -39,6 +40,7 @@ export interface CliDispatchContext {
     requireStreamingOutput(label: string): void;
     rootUsage(): Promise<string>;
     startTui(): Promise<void>;
+    update(version?: string): Promise<void>;
     version(): string;
     writeJson(value: unknown): void;
     writeRecords(values: readonly unknown[], text: string): void;
@@ -76,6 +78,12 @@ export async function dispatchCliCommand(
                 ? `Migrated: ${result.domains.join(", ")}\n`
                 : "No migration required.\n",
         );
+        return;
+    }
+    if (command.kind === "update") {
+        if (context.outputFormat !== "text")
+            throw CliRenderError.usage("update supports only text output");
+        await context.update(command.version);
         return;
     }
     if (command.kind === "instance.help") {

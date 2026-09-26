@@ -33,6 +33,23 @@ test("CliParser parses migrate as a local built-in command", () => {
     assert.throws(() => parser.parse(["migrate", "extra"]));
 });
 
+test("CliParser parses update with an optional release version", () => {
+    const parser = new CliParser();
+    assert.deepEqual(parser.parse(["update"]), { kind: "update" });
+    assert.deepEqual(parser.parse(["update", "latest"]), { kind: "update" });
+    assert.deepEqual(parser.parse(["update", "0.7.7"]), {
+        kind: "update",
+        version: "0.7.7",
+    });
+    assert.deepEqual(parser.parse(["update", "v1.0.0"]), {
+        kind: "update",
+        version: "v1.0.0",
+    });
+    assert.deepEqual(parser.parse(["update", "--help"]), { kind: "help" });
+    assert.throws(() => parser.parse(["update", "0.7"]));
+    assert.throws(() => parser.parse(["update", "0.7.7", "extra"]));
+});
+
 test("CliParser rejects invalid command shapes", () => {
     const parser = new CliParser();
 

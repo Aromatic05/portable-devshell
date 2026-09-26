@@ -1,5 +1,8 @@
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +37,7 @@ export interface CliMainOptions {
     createLifecycleManager?: () => Promise<CliLifecycleManagerLike>;
     followEventLimit?: number;
     homeDirectory?: string;
+    runUpdate?: (version?: string) => Promise<void>;
     runTui?: () => Promise<void>;
     stdin?: NodeJS.ReadableStream;
     stderr?: { write(chunk: string): void };
@@ -49,6 +53,7 @@ export class CliMain {
     readonly #exitMapper = new CliExitMapper();
     readonly #followEventLimit?: number;
     readonly #parser = new CliParser();
+    readonly #runUpdate?: (version?: string) => Promise<void>;
     readonly #runTui?: () => Promise<void>;
     readonly #stdin: NodeJS.ReadableStream;
     readonly #stderr: { write(chunk: string): void };
@@ -61,6 +66,7 @@ export class CliMain {
         this.#controlUrl = options.controlUrl;
         this.#createLifecycleManager = options.createLifecycleManager;
         this.#followEventLimit = options.followEventLimit;
+        this.#runUpdate = options.runUpdate;
         this.#runTui = options.runTui;
         this.#stdin = options.stdin ?? process.stdin;
         this.#stderr = options.stderr ?? process.stderr;
@@ -116,6 +122,7 @@ export class CliMain {
                 rootUsage: async () =>
                     await this.#rootUsage(resolved.controlNegotiated),
                 startTui: async () => await this.#startTui(),
+                update: async (version) => await this.#update(version),
                 version: () => resolvePortableDevshellApplicationVersion(),
                 writeJson: (value) => {
                     if (outputFormat === "jsonl" && Array.isArray(value)) {
@@ -243,6 +250,14 @@ export class CliMain {
         }
     }
 
+    async #update(version?: string): Promise<void> {
+        if (this.#runUpdate !== undefined) {
+            await this.#runUpdate(version);
+            return;
+        }
+        await runSelfUpdate(version);
+    }
+
     async #startTui(): Promise<void> {
         if (this.#runTui !== undefined) {
             await this.#runTui();
@@ -323,10 +338,11 @@ const builtinCliCommands = [
     "todo",
     "tool",
     "tui",
+    "update",
     "watch",
 ] as const;
 
-const localCliCommands = ["migrate"] as const;
+const localCliCommands = ["migrate", "update"] as const;
 
 function suggestCliCommand(
     command: string,
@@ -461,4 +477,173 @@ function resolvePortableDevshellApplicationVersion(
     throw new Error(
         "Cannot locate portable-devshell application package manifest.",
     );
+}
+
+const defaultReleaseRepository = "Aromatic05/portable-devshell";
+const maxUpdateRedirects = 8;
+
+async function runSelfUpdate(
+    version?: string,
+    environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+    const installerName =
+        process.platform === "win32"
+            ? "install-release.ps1"
+            : process.platform === "linux" || process.platform === "darwin"
+              ? "install-release.sh"
+              : undefined;
+    if (installerName === undefined)
+        throw new Error(`Self-update is not supported on ${process.platform}.`);
+
+    const explicitBase = nonEmpty(environment.PORTABLE_DEVSHELL_RELEASE_BASE_URL);
+    const initialBase =
+        explicitBase ?? releaseBaseForVersion(version, environment);
+    const installer = await readUpdateAsset(
+        releaseAssetUrl(initialBase, installerName),
+        installerName,
+    );
+    const releaseBase =
+        explicitBase ??
+        (version === undefined
+            ? installer.pinnedReleaseBase
+            : releaseBaseForVersion(version, environment));
+    if (releaseBase === undefined) {
+        throw new Error(
+            "Cannot pin the latest release before running the installer.",
+        );
+    }
+
+    const checksum = await readUpdateAsset(
+        releaseAssetUrl(releaseBase, `${installerName}.sha256`),
+        `${installerName}.sha256`,
+    );
+    verifyUpdateInstaller(installer.bytes, checksum.bytes, installerName);
+
+    const temporary = await mkdtemp(join(tmpdir(), "portable-devshell-update-"));
+    const installerPath = join(temporary, installerName);
+    try {
+        await writeFile(installerPath, installer.bytes, { mode: 0o600 });
+        const command = process.platform === "win32" ? "powershell.exe" : "sh";
+        const args =
+            process.platform === "win32"
+                ? [
+                      "-NoProfile",
+                      "-NonInteractive",
+                      "-ExecutionPolicy",
+                      "Bypass",
+                      "-File",
+                      installerPath,
+                  ]
+                : [installerPath];
+        const result = spawnSync(command, args, {
+            env: {
+                ...environment,
+                PORTABLE_DEVSHELL_RELEASE_BASE_URL: releaseBase,
+            },
+            stdio: "inherit",
+        });
+        if (result.error !== undefined) throw result.error;
+        if (result.status !== 0) {
+            throw new Error(
+                `DevShell release installer failed with exit code ${result.status ?? "unknown"}.`,
+            );
+        }
+    } finally {
+        await rm(temporary, { force: true, recursive: true });
+    }
+}
+
+function releaseBaseForVersion(
+    version: string | undefined,
+    environment: NodeJS.ProcessEnv,
+): string {
+    const repository =
+        nonEmpty(environment.PORTABLE_DEVSHELL_RELEASE_REPOSITORY) ??
+        defaultReleaseRepository;
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository))
+        throw new Error(`Invalid release repository: ${repository}.`);
+    if (version === undefined)
+        return `https://github.com/${repository}/releases/latest/download/`;
+    const tag = version.startsWith("v") ? version : `v${version}`;
+    return `https://github.com/${repository}/releases/download/${tag}/`;
+}
+
+function releaseAssetUrl(base: string, assetName: string): string {
+    return new URL(assetName, base.endsWith("/") ? base : `${base}/`).href;
+}
+
+async function readUpdateAsset(
+    source: string,
+    assetName: string,
+): Promise<{
+    bytes: Buffer;
+    pinnedReleaseBase?: string;
+}> {
+    let current = new URL(source);
+    let pinnedReleaseBase = pinnedReleaseBaseFromAsset(current, assetName);
+    for (let redirects = 0; redirects <= maxUpdateRedirects; redirects += 1) {
+        if (current.protocol === "file:") {
+            return {
+                bytes: await readFile(fileURLToPath(current)),
+                ...(pinnedReleaseBase === undefined ? {} : { pinnedReleaseBase }),
+            };
+        }
+        if (current.protocol !== "https:" && current.protocol !== "http:")
+            throw new Error(`Unsupported update URL protocol: ${current.protocol}`);
+
+        const response = await fetch(current, { redirect: "manual" });
+        if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get("location");
+            if (location === null)
+                throw new Error(`Update redirect from ${current.href} has no location.`);
+            await response.body?.cancel();
+            current = new URL(location, current);
+            pinnedReleaseBase ??= pinnedReleaseBaseFromAsset(current, assetName);
+            continue;
+        }
+        if (!response.ok) {
+            throw new Error(
+                `Failed to download ${assetName}: HTTP ${response.status}.`,
+            );
+        }
+        return {
+            bytes: Buffer.from(await response.arrayBuffer()),
+            ...(pinnedReleaseBase === undefined ? {} : { pinnedReleaseBase }),
+        };
+    }
+    throw new Error(`Too many redirects while downloading ${assetName}.`);
+}
+
+function pinnedReleaseBaseFromAsset(
+    url: URL,
+    assetName: string,
+): string | undefined {
+    if (
+        url.protocol !== "https:" ||
+        url.hostname !== "github.com" ||
+        !url.pathname.includes("/releases/download/") ||
+        !url.pathname.endsWith(`/${assetName}`)
+    )
+        return undefined;
+    return new URL(".", url).href;
+}
+
+function verifyUpdateInstaller(
+    installer: Buffer,
+    checksum: Buffer,
+    installerName: string,
+): void {
+    const expected = checksum.toString("utf8").trim().split(/\s+/u)[0]?.toLowerCase();
+    if (expected === undefined || !/^[0-9a-f]{64}$/u.test(expected))
+        throw new Error(`Invalid SHA-256 file for ${installerName}.`);
+    const actual = createHash("sha256").update(installer).digest("hex");
+    if (actual !== expected)
+        throw new Error(`SHA-256 verification failed for ${installerName}.`);
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+    const normalized = value?.trim();
+    return normalized === undefined || normalized.length === 0
+        ? undefined
+        : normalized;
 }
