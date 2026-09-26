@@ -16,34 +16,50 @@ pub mod handshake {
     pub fn handler(config: WorkerConfig, runtime: WorkerRuntimeContext) -> Arc<dyn ControlHandler> {
         control_handler(move |request| {
             let protocol_range = request.params.get("protocolRange");
-            let compatible = if let Some(protocol_range) = protocol_range {
+            let negotiated_protocol_version = if let Some(protocol_range) = protocol_range {
                 let min = protocol_range
                     .get("min")
                     .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing protocolRange.min"))?;
+                    .ok_or_else(|| {
+                        RpcError::new("rpc.invalidParams", "missing protocolRange.min")
+                    })?;
                 let max = protocol_range
                     .get("max")
                     .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing protocolRange.max"))?;
+                    .ok_or_else(|| {
+                        RpcError::new("rpc.invalidParams", "missing protocolRange.max")
+                    })?;
                 let current = parse_protocol_version(PROTOCOL_VERSION)?;
                 let min_version = parse_protocol_version(min)?;
                 let max_version = parse_protocol_version(max)?;
-                min_version <= current && current <= max_version
+                if min_version <= current && current <= max_version {
+                    json!(PROTOCOL_VERSION)
+                } else {
+                    serde_json::Value::Null
+                }
             } else {
                 let min = request
                     .params
                     .get("minProtocolVersion")
                     .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing minProtocolVersion"))?;
+                    .ok_or_else(|| {
+                        RpcError::new("rpc.invalidParams", "missing minProtocolVersion")
+                    })?;
                 let max = request
                     .params
                     .get("maxProtocolVersion")
                     .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| RpcError::new("rpc.invalidParams", "missing maxProtocolVersion"))?;
-                min <= LEGACY_PROTOCOL_VERSION as u64 && LEGACY_PROTOCOL_VERSION as u64 <= max
+                    .ok_or_else(|| {
+                        RpcError::new("rpc.invalidParams", "missing maxProtocolVersion")
+                    })?;
+                if min <= LEGACY_PROTOCOL_VERSION as u64 && LEGACY_PROTOCOL_VERSION as u64 <= max {
+                    json!(LEGACY_PROTOCOL_VERSION)
+                } else {
+                    serde_json::Value::Null
+                }
             };
 
-            if !compatible {
+            if negotiated_protocol_version.is_null() {
                 return Err(RpcError::new(
                     "worker.protocolVersionUnsupported",
                     "Worker protocol version is not supported by the client.",
@@ -66,7 +82,7 @@ pub mod handshake {
                 "instance": config.instance,
                 "workerVersion": env!("CARGO_PKG_VERSION"),
                 "workerSha256": runtime.worker_sha256,
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": negotiated_protocol_version,
                 "legacyProtocolVersion": LEGACY_PROTOCOL_VERSION,
                 "platform": {
                     "os": runtime.platform.os,

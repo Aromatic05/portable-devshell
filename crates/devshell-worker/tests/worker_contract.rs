@@ -515,7 +515,10 @@ fn handshake_rejects_unsupported_protocol_versions() {
         "worker.protocolVersionUnsupported"
     );
     assert_eq!(handshake["error"]["retryable"], false);
-    assert_eq!(handshake["error"]["details"]["workerProtocolVersion"], "1.0.0");
+    assert_eq!(
+        handshake["error"]["details"]["workerProtocolVersion"],
+        "1.0.0"
+    );
     assert_eq!(handshake["error"]["details"]["legacyProtocolVersion"], 7);
 
     env.json_command(&["stop", "--instance", instance]);
@@ -542,13 +545,13 @@ fn handshake_accepts_legacy_protocol_7_client() {
                 "minProtocolVersion": 7,
                 "maxProtocolVersion": 7,
                 "clientName": "portable-devshell",
-                "clientVersion": "0.7.6"
+                "clientVersion": "0.7.5"
             }
         }),
     );
 
     assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], "1.0.0");
+    assert_eq!(handshake["result"]["protocolVersion"], 7);
     assert_eq!(handshake["result"]["legacyProtocolVersion"], 7);
 
     env.json_command(&["stop", "--instance", instance]);
