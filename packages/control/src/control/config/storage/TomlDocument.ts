@@ -140,6 +140,10 @@ export class ControlInstanceTomlDocument {
             ? draft
             : Object.assign(draft, {
                   migratedFromVersion: version as 2 | 3,
+                  mcp: {
+                      ...draft.mcp,
+                      contextMode: draft.mcp?.contextMode ?? "explicit",
+                  },
                   workspace: { enabled: true },
               });
     }

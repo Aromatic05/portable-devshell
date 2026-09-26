@@ -173,6 +173,48 @@ test("version 1 global MCP auth normalizes on read and migrates explicitly to ve
     }
 });
 
+test("legacy instance migration keeps explicit MCP context mode without legacy global auth", async () => {
+    const homeDirectory = await createTestTempDirectory("control-home");
+
+    try {
+        const paths = new ControlPathHome(homeDirectory);
+        await writeFileWithParents(
+            paths.configFile,
+            toml.encode(
+                globalDocument.encode(
+                    normalizeConfigGlobalDraft({ mcp: { enabled: true } }),
+                ),
+            ),
+        );
+        await writeFileWithParents(
+            paths.instanceConfigFile("legacy-no-auth"),
+            toml.encode({
+                enabled: true,
+                mcp: { enabled: true },
+                name: "legacy-no-auth",
+                provider: "local",
+                version: 3,
+            }),
+        );
+
+        const store = new ControlConfigStore();
+        const config = await store.readOrCreate(homeDirectory);
+        assert.equal(config.instances[0]?.mcp.contextMode, "explicit");
+
+        assert.deepEqual(await store.migrate(homeDirectory), {
+            changed: true,
+        });
+        const source = await readFile(
+            paths.instanceConfigFile("legacy-no-auth"),
+            "utf8",
+        );
+        assert.match(source, /^version = 4$/mu);
+        assert.match(source, /contextMode = "explicit"/u);
+    } finally {
+        await rm(homeDirectory, { force: true, recursive: true });
+    }
+});
+
 test("version 2 instance documents normalize on read and migrate explicitly to version 4", async () => {
     const homeDirectory = await createTestTempDirectory("control-home");
 
@@ -239,6 +281,18 @@ test("version 2 instance documents normalize on read and migrate explicitly to v
             )?.extensions.model,
             ["artifact", "instance", "mcp", "secret", "skill"],
         );
+        assert.equal(
+            config.instances.find(
+                (instance) => instance.name === "legacy-default",
+            )?.mcp.contextMode,
+            "explicit",
+        );
+        assert.equal(
+            config.instances.find(
+                (instance) => instance.name === "custom-policy",
+            )?.mcp.contextMode,
+            "explicit",
+        );
         assert.match(
             await readFile(paths.instanceConfigFile("legacy-default"), "utf8"),
             /^version = 2$/mu,
@@ -262,6 +316,7 @@ test("version 2 instance documents normalize on read and migrate explicitly to v
                 source,
                 /\[mcp\.tools\]|groups\s*=|capabilities\s*=/u,
             );
+            assert.match(source, /contextMode = "explicit"/u);
             assert.match(source, /\[extensions\]/u);
             assert.match(
                 source,
@@ -317,6 +372,7 @@ test("version 3 MCP tool policy normalizes on read and migrates explicitly to ve
             "secret",
             "skill",
         ]);
+        assert.equal(config.instances[0]?.mcp.contextMode, "explicit");
 
         assert.match(
             await readFile(paths.instanceConfigFile("canonical-groups"), "utf8"),
@@ -331,6 +387,7 @@ test("version 3 MCP tool policy normalizes on read and migrates explicitly to ve
             "utf8",
         );
         assert.match(source, /^version = 4$/mu);
+        assert.match(source, /contextMode = "explicit"/u);
         assert.match(source, /\[extensions\]/u);
         assert.match(
             source,
