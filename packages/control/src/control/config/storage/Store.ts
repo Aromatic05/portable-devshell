@@ -19,13 +19,16 @@ import {
     errorCodes,
     formatConfigPath,
     normalizeConfigGlobalDraft,
-    normalizeConfigInstanceDraft,
-    type ConfigInstanceDraft,
-    type ConfigMcpAuthDraft,
     type ControlConfig,
     type ControlGlobalConfig,
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
+
+import {
+    type ConfigGlobalMigrationState,
+    inspectGlobalConfigMigration,
+    normalizeMigratedInstanceConfig,
+} from "../../../migration/Config.js";
 
 import { ControlConfigValidator } from "../Validator.js";
 import {
@@ -94,8 +97,7 @@ export class ControlConfigStore {
         const paths = new ControlPathHome(homeDirectory);
         await recoverConfigTransaction(paths);
         let globalConfig: ControlGlobalConfig | undefined;
-        let legacyMcpAuth: ConfigMcpAuthDraft | undefined;
-        let globalMigrated = false;
+        let configMigration: ConfigGlobalMigrationState = { required: false };
 
         try {
             const source = await readFile(paths.configFile, "utf8");
@@ -103,9 +105,7 @@ export class ControlConfigStore {
             const draft = this.#globalDocument.decode(
                 this.#tomlCodec.decode(source),
             );
-            const migration = draft as ConfigGlobalDraftWithMigration;
-            legacyMcpAuth = migration.legacyMcpAuth;
-            globalMigrated = migration.migratedFromVersion !== undefined;
+            configMigration = inspectGlobalConfigMigration(draft);
             globalConfig = normalizeConfigGlobalDraft(draft);
         } catch (error) {
             if (!isFileMissingError(error))
@@ -115,14 +115,14 @@ export class ControlConfigStore {
         if (globalConfig === undefined)
             return { config: undefined, migrated: false };
 
-        const loadedInstances = await this.#readInstances(paths, legacyMcpAuth);
+        const loadedInstances = await this.#readInstances(paths, configMigration);
         const config = this.#validator.validate({
             ...globalConfig,
             instances: loadedInstances.instances,
         });
         return {
             config,
-            migrated: globalMigrated || loadedInstances.migrated,
+            migrated: configMigration.required || loadedInstances.migrated,
         };
     }
 
@@ -171,7 +171,7 @@ export class ControlConfigStore {
 
     async #readInstances(
         paths: ControlPathHome,
-        legacyMcpAuth?: ConfigMcpAuthDraft,
+        configMigration: ConfigGlobalMigrationState,
     ): Promise<{ instances: ControlInstanceConfig[]; migrated: boolean }> {
         let entries: Array<{ isFile(): boolean; name: string }>;
         try {
@@ -206,21 +206,13 @@ export class ControlConfigStore {
                 await secureFile(filePath);
                 const draft = this.#instanceDocument.decode(
                     this.#tomlCodec.decode(source),
-                ) as ConfigInstanceDraftWithMigration;
-                const normalized = normalizeConfigInstanceDraft({
-                    ...draft,
-                    mcp:
-                        draft.mcp?.enabled === false ||
-                        legacyMcpAuth === undefined
-                            ? draft.mcp
-                            : {
-                                  ...draft.mcp,
-                                  contextMode: "explicit",
-                                  ...toLegacyInstanceAuth(legacyMcpAuth),
-                              },
-                });
-                migrated ||= draft.migratedFromVersion !== undefined;
-                instances.push(normalized);
+                );
+                const migration = normalizeMigratedInstanceConfig(
+                    draft,
+                    configMigration,
+                );
+                migrated ||= migration.required;
+                instances.push(migration.config);
             } catch (error) {
                 throw attachConfigFile(error, filePath);
             }
@@ -242,10 +234,6 @@ export class ControlConfigStore {
         }
     }
 }
-
-type ConfigInstanceDraftWithMigration = ConfigInstanceDraft & {
-    migratedFromVersion?: 2 | 3;
-};
 
 interface ConfigTransactionManifest {
     existingGlobal: boolean;
@@ -465,18 +453,6 @@ async function syncDirectory(directory: string): Promise<void> {
     } finally {
         await handle.close();
     }
-}
-
-interface ConfigGlobalDraftWithMigration {
-    legacyMcpAuth?: ConfigMcpAuthDraft;
-    migratedFromVersion?: 1;
-}
-
-function toLegacyInstanceAuth(auth: ConfigMcpAuthDraft) {
-    if (auth.mode === "none") return { auth: "none" as const };
-    if (auth.mode === "token")
-        return { auth: "token" as const, token: auth.token };
-    return { auth: "oauth2" as const, oauth2: auth.oauth2 };
 }
 
 async function atomicWriteFile(

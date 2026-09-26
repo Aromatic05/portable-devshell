@@ -8,7 +8,7 @@ import {
     EXTENSION_MANIFEST_SCHEMA_VERSION,
 } from "@portable-devshell/extension";
 
-import { preflightControlUpdate } from "../../../../../src/Migration.ts";
+import { preflightControlUpdate } from "../../../../../src/migration/Control.ts";
 import { ExtensionPathLayout } from "../../../../../src/control/extension/state/Layout.ts";
 import { ExtensionRegistryStore } from "../../../../../src/control/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";

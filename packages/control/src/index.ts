@@ -6,6 +6,6 @@ export {
     type ControlMigrationResult,
     type ControlUpdatePreflightOptions,
     type ControlUpdatePreflightResult,
-} from "./Migration.js";
+} from "./migration/Control.js";
 export { ControlDaemon, controlDaemonModulePath } from "./server/Daemon.js";
 export type { ControlDaemonOptions } from "./server/Daemon.js";

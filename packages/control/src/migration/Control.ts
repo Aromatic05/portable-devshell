@@ -2,10 +2,10 @@ import { readFile } from "node:fs/promises";
 
 import { parseExtensionManifest } from "@portable-devshell/extension";
 
-import { ControlConfigStore } from "./control/config/storage/Store.js";
-import { ExtensionHostModuleResolver } from "./control/extension/generation/discovery/ModuleResolver.js";
-import { ExtensionPathLayout } from "./control/extension/state/Layout.js";
-import { ExtensionRegistryStore } from "./control/extension/state/Store.js";
+import { ControlConfigStore } from "../control/config/storage/Store.js";
+import { ExtensionHostModuleResolver } from "../control/extension/generation/discovery/ModuleResolver.js";
+import { ExtensionPathLayout } from "../control/extension/state/Layout.js";
+import { ExtensionRegistryStore } from "../control/extension/state/Store.js";
 
 export interface ControlMigrationResult {
     changed: boolean;

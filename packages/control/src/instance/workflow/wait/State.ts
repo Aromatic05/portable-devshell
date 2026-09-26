@@ -8,6 +8,8 @@ import type {
     WaitStatus,
 } from "@portable-devshell/shared";
 
+import { migrateWaitDocument } from "../../../migration/Wait.js";
+
 const MAX_TERMINAL_WAITS = 1_000;
 const RECOVERY_CLAIM_TTL_MS = 5 * 60_000;
 
@@ -49,10 +51,7 @@ export class WaitState {
     }
 
     migrateLoadedDocument(document: WaitDocument): WaitDocument {
-        return this.compact({
-            ...document,
-            waits: document.waits.map(migrateDeliveredRecovery),
-        });
+        return this.compact(migrateWaitDocument(document));
     }
 
     create(document: WaitDocument, input: WaitCreateInput): WaitTransition {
@@ -702,24 +701,6 @@ function normalizeRecord(value: unknown): WaitRecord {
 
 function isTerminal(status: WaitStatus): boolean {
     return status === "consumed" || status === "cancelled";
-}
-
-function migrateDeliveredRecovery(record: WaitRecord): WaitRecord {
-    if (
-        record.status !== "resolved" ||
-        record.recoveryMessageSentAt === undefined
-    )
-        return record;
-    const {
-        recoveryClaimedAt: _claimedAt,
-        recoveryClaimId: _claimId,
-        ...rest
-    } = record;
-    return {
-        ...rest,
-        consumedAt: record.consumedAt ?? record.recoveryMessageSentAt,
-        status: "consumed",
-    };
 }
 
 function blocksTmuxWaitCreation(record: WaitRecord): boolean {

@@ -1,6 +1,5 @@
 import {
     configInputError,
-    parseMcpAuthDraft,
     parseConfigGlobalDraft,
     parseConfigInstanceDraft,
     type ConfigGlobalDraft,
@@ -8,6 +7,11 @@ import {
     type ControlGlobalConfig,
     type ControlInstanceConfig,
 } from "@portable-devshell/shared";
+
+import {
+    migrateGlobalConfigV1,
+    migrateInstanceConfigV2OrV3,
+} from "../../../migration/Config.js";
 
 import {
     ConfigRegistry,
@@ -43,18 +47,7 @@ export class ControlGlobalTomlDocument {
         }
         const { version: _version, ...config } = record;
         assertRegisteredGlobalDomains(config, this.#registry);
-        if (version === 1) {
-            const mcp = asRecord(config.mcp);
-            const legacyAuth =
-                mcp.auth === undefined
-                    ? undefined
-                    : parseMcpAuthDraft(mcp.auth, ["mcp", "auth"]);
-            const { auth: _auth, ...mcpWithoutAuth } = mcp;
-            return Object.assign(
-                parseConfigGlobalDraft({ ...config, mcp: mcpWithoutAuth }),
-                { legacyMcpAuth: legacyAuth, migratedFromVersion: 1 as const },
-            );
-        }
+        if (version === 1) return migrateGlobalConfigV1(config);
         return parseConfigGlobalDraft(config);
     }
 
@@ -125,27 +118,9 @@ export class ControlInstanceTomlDocument {
             );
         }
         const { version: _version, ...versionless } = record;
-        const config =
-            version === 4
-                ? versionless
-                : (() => {
-                      const { workspace: _legacyWorkspace, ...legacy } =
-                          versionless;
-                      return legacy;
-                  })();
-        const draft = parseConfigInstanceDraft(
-            version === 4 ? config : stripLegacyMcpTools(config),
-        );
         return version === 4
-            ? draft
-            : Object.assign(draft, {
-                  migratedFromVersion: version as 2 | 3,
-                  mcp: {
-                      ...draft.mcp,
-                      contextMode: draft.mcp?.contextMode ?? "explicit",
-                  },
-                  workspace: { enabled: true },
-              });
+            ? parseConfigInstanceDraft(versionless)
+            : migrateInstanceConfigV2OrV3(versionless, version);
     }
 
     encode(instance: ControlInstanceConfig): ConfigTomlDocument {
@@ -225,15 +200,6 @@ function rejectLegacyField(
             message,
         );
     }
-}
-
-function stripLegacyMcpTools(
-    config: Record<string, unknown>,
-): Record<string, unknown> {
-    if (config.mcp === undefined) return config;
-    const mcp = asRecord(config.mcp);
-    const { tools: _legacyTools, ...mcpWithoutTools } = mcp;
-    return { ...config, mcp: mcpWithoutTools };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
