@@ -257,6 +257,10 @@ function restoreLeaseMap(
         leases.set(key, { ...lease, tokenHashes: [...lease.tokenHashes] });
 }
 
+/**
+ * @compat workspace-app-lease-v1
+ * @removeAt 1.0.0
+ */
 function parseDocument(value: unknown): WorkspaceAppLeaseDocument | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return undefined;

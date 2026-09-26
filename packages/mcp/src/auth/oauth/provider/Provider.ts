@@ -141,6 +141,10 @@ export class McpOAuthProviderRuntime {
         await this.#approvals.warmup();
         const jwks = await readOrCreateJwks(this.#storageDir);
         await this.#storageSecurity.secureStorage(this.#storageDir);
+        /**
+         * @compat mcp-oauth-dcr
+         * @removeAt 1.0.0
+         */
         const dynamicClientRequiredScopes = () => [
             ...new Set([
                 ...DYNAMIC_CLIENT_REQUIRED_SCOPES,

@@ -188,6 +188,8 @@ function Stop-InstalledControl([string]$CurrentCli, [string]$DevshellHome) {
     $commandLine = if ($null -eq $processInfo) { "" } else { [string]$processInfo.CommandLine }
     $normalized = $commandLine.Replace('\', '/')
     $daemonEntry = "/node_modules/@portable-devshell/control/dist/server/Daemon.js"
+    # @compat control-daemon-entrypoint
+    # @removeAt 1.0.0
     $legacyDaemonEntry = "/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js"
     if (-not $normalized.Contains($daemonEntry) -and -not $normalized.Contains($legacyDaemonEntry)) {
         throw "拒绝终止 PID ${controlProcessId}：PID 文件指向的进程不是可验证的 portable-devshell Control daemon。"
@@ -267,6 +269,8 @@ function Assert-RunningControlMatchesApplication([string]$ApplicationDirectory, 
     $root = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\').Replace('\', '/')
     $normalized = $commandLine.Replace('\', '/')
     $daemonEntry = "$root/node_modules/@portable-devshell/control/dist/server/Daemon.js"
+    # @compat control-daemon-entrypoint
+    # @removeAt 1.0.0
     $legacyDaemonEntry = "$root/node_modules/@portable-devshell/control/dist/server/ControlDaemon.js"
     if (-not $normalized.Contains($daemonEntry) -and -not $normalized.Contains($legacyDaemonEntry)) {
         throw "正在运行的 Control PID $($RuntimeState.Pid) 不属于当前激活的 application generation；安装在停机前取消。"

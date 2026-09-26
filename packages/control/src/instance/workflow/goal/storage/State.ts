@@ -764,6 +764,10 @@ function normalizeStepStatus(value: unknown): GoalStepStatus {
     );
 }
 
+/**
+ * @compat goal-v1-normalization
+ * @removeAt 1.0.0
+ */
 function normalizeStoredGoal(value: unknown): GoalRecord {
     if (!isRecord(value)) throw new Error("goal state must be an object");
     const steps = normalizeSteps(value.steps as GoalStepInput[], true);

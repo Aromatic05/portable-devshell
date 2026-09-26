@@ -81,6 +81,10 @@ const paths = {
         "control",
         "instances",
     ),
+    /**
+     * @compat testspace-runtime-directory
+     * @removeAt 1.0.0
+     */
     legacyRuntime: join(root, "runtime"),
     reverseDevshellHome: join(root, "reverse-home", ".devshell"),
     reverseConnectorHealth: join(root, "reverse-connector-health.json"),

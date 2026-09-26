@@ -11,6 +11,10 @@ import { CommentState } from "../../comment/CommentState.js";
 
 const LEGACY_COMMENT_MIGRATION_KEY = "migration:context-messages-json-v1";
 
+/**
+ * @compat comment-json-v1
+ * @removeAt 1.0.0
+ */
 export function migrateLegacyComments(
     database: DatabaseSync,
     legacyFilePath: string | undefined,

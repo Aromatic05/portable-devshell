@@ -64,6 +64,8 @@ enum FrameType {
 }
 
 /**
+ * @compat packet-buffer-pre-frame-v1
+ * @removeAt 1.0.0
  * Generic length-prefixed packet decoder retained for protocols that have not
  * migrated to Frame v1 yet. The packet body has no Frame semantics.
  */

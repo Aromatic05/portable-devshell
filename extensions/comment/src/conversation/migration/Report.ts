@@ -11,6 +11,10 @@ export interface LegacyReportMigrationStore {
     isLegacyReportMigrationComplete(): boolean;
 }
 
+/**
+ * @compat todo-report-audit-v1
+ * @removeAt 1.0.0
+ */
 export async function migrateLegacyReports(
     store: LegacyReportMigrationStore,
     load: (() => Promise<ToolCallRecord[]>) | undefined,

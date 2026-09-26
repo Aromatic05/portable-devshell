@@ -319,6 +319,10 @@ export function workspacePreferenceKey(
     return session.workspace ?? `\u0000${session.instance}`;
 }
 
+/**
+ * @compat web-conversation-preferences-v1
+ * @removeAt 1.0.0
+ */
 export function readLegacyConversationPreferences():
     LegacyConversationPreferences | undefined {
     if (typeof window === "undefined") return undefined;

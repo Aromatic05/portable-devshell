@@ -36,9 +36,6 @@ import {
     waitForMcpEndpointAbortable,
 } from "./Support.js";
 import {
-    adaptMcpLegacyFileToolInput,
-    adaptMcpLegacyFileToolResult,
-    adaptMcpLegacyTmuxToolInput,
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool,
 } from "../domain/worker/Compatibility.js";
@@ -212,7 +209,6 @@ export class McpEndpointDispatch {
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const requestedToolName = toolName;
-        const requestedInput = input;
         const compatibility = resolveMcpLegacyTool(toolName);
         if (compatibility?.kind === "tombstone") {
             return mcpLegacyToolTombstone(toolName, compatibility);
@@ -223,17 +219,9 @@ export class McpEndpointDispatch {
                 : undefined;
         if (
             compatibility?.kind === "alias" ||
-            compatibility?.kind === "file-v07-alias" ||
-            compatibility?.kind === "tmux-v07-alias" ||
             compatibility?.kind === "workspace-app-v0615"
         ) {
             toolName = compatibility.replacement;
-        }
-        if (compatibility?.kind === "file-v07-alias") {
-            input = adaptMcpLegacyFileToolInput(requestedToolName, input);
-        }
-        if (compatibility?.kind === "tmux-v07-alias") {
-            input = adaptMcpLegacyTmuxToolInput(compatibility, input);
         }
         const snapshot = this.#catalog.snapshot();
         const known = snapshot.merged.find(
@@ -544,13 +532,7 @@ export class McpEndpointDispatch {
                         callId,
                         routed.instance,
                     );
-                    return compatibility?.kind === "file-v07-alias"
-                        ? adaptMcpLegacyFileToolResult(
-                              requestedToolName,
-                              withComments,
-                              requestedInput,
-                          )
-                        : withComments;
+                    return withComments;
                 },
                 onFeedback,
                 afterReview,

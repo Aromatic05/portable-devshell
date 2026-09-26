@@ -20,6 +20,10 @@ export interface ConfigInstanceMigrationResult {
     required: boolean;
 }
 
+/**
+ * @compat config-global-v1
+ * @removeAt 1.0.0
+ */
 export function migrateGlobalConfigV1(
     config: Record<string, unknown>,
 ): ConfigGlobalDraft {
@@ -35,6 +39,10 @@ export function migrateGlobalConfigV1(
     );
 }
 
+/**
+ * @compat config-instance-v2-v3
+ * @removeAt 1.0.0
+ */
 export function migrateInstanceConfigV2OrV3(
     config: Record<string, unknown>,
     version: 2 | 3,

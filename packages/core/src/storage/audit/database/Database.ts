@@ -464,6 +464,10 @@ export class AuditDatabase {
         return value === undefined ? 0 : Number(value);
     }
 
+    /**
+     * @compat audit-jsonl-v1
+     * @removeAt 1.0.0
+     */
     migrateLegacy<TRecord>(
         collection: AuditRecordCollection,
         options: AuditStoreOptions<TRecord>,
@@ -654,6 +658,10 @@ export class AuditDatabase {
         }
     }
 
+    /**
+     * @compat audit-schema-v1
+     * @removeAt 1.0.0
+     */
     #upgradeSchema(userVersion: number): void {
         const columns = new Set(
             (

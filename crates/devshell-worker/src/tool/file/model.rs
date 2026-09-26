@@ -72,6 +72,8 @@ pub struct FileReadBatchInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
+// @compat file-read-single-wire
+// @removeAt 1.0.0
 pub enum FileReadInput {
     Batch(FileReadBatchInput),
     Legacy(FileReadRequest),

@@ -33,7 +33,7 @@ jobs:
               run: |
                   rustup toolchain install stable --profile minimal
                   rustup default stable
-            - run: node ./scripts/version-state.mjs check-development
+            - run: node ./scripts/version-state.mjs check-development && node ./scripts/check-compat-expiry.mjs
             - run: pnpm install --frozen-lockfile
             - name: 安装 Web 验收 Chromium
               shell: bash
@@ -65,7 +65,7 @@ jobs:
               run: |
                   rustup toolchain install stable --profile minimal
                   rustup default stable
-            - run: node ./scripts/version-state.mjs check-development
+            - run: node ./scripts/version-state.mjs check-development && node ./scripts/check-compat-expiry.mjs
             - run: pnpm install --frozen-lockfile
             - name: 运行 macOS 平台行为门禁
               run: node ./scripts/run-development-ci.mjs --platform-contract
@@ -128,7 +128,7 @@ jobs:
             - name: 安装 cargo-zigbuild
               if: runner.os == 'Linux'
               run: cargo install --locked cargo-zigbuild --version 0.23.0
-            - run: node ./scripts/version-state.mjs check-development
+            - run: node ./scripts/version-state.mjs check-development && node ./scripts/check-compat-expiry.mjs
             - run: pnpm install --frozen-lockfile
             - name: 安装 Web 验收 Chromium
               if: matrix.target == 'linux-x64'

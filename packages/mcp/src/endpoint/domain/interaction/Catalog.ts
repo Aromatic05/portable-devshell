@@ -101,6 +101,10 @@ export class McpToolCatalogInteraction {
             inputSchema: {
                 additionalProperties: false,
                 properties: {
+                    /**
+                     * @compat workspace-goal-finish
+                     * @removeAt 1.0.0
+                     */
                     action: {
                         enum: [
                             "start",
@@ -139,6 +143,10 @@ export class McpToolCatalogInteraction {
             outputSchema: workspaceGoalResultOutputSchema,
             requiredCapabilities: [],
         },
+        /**
+         * @compat workspace-open-entrypoint
+         * @removeAt 1.0.0
+         */
         {
             _meta: {
                 ui: {
@@ -161,6 +169,10 @@ export class McpToolCatalogInteraction {
             outputSchema: workspaceOpenOutputSchema,
             requiredCapabilities: [],
         },
+        /**
+         * @compat workspace-app-mcp-fallback
+         * @removeAt 1.0.0
+         */
         {
             _meta: appOnlyMeta,
             description:

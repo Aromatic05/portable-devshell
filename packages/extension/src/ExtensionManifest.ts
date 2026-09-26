@@ -18,6 +18,10 @@ const capabilities = new Set<ExtensionCapability>([
     "workers",
 ]);
 
+/**
+ * @compat extension-manifest-schema-v1
+ * @removeAt 1.0.0
+ */
 export function parseExtensionManifest(value: unknown): ExtensionManifest {
     if (!isRecord(value))
         throw new TypeError("Extension manifest must be an object.");
@@ -197,6 +201,10 @@ function assertOnlyKeys(
         throw new TypeError(`Unknown Extension manifest field: ${unknown[0]}.`);
 }
 
+/**
+ * @compat extension-manifest-integer-version
+ * @removeAt 1.0.0
+ */
 function readCompatibilityVersion(value: unknown, field: string): string {
     if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
         return `${value}.0.0`;

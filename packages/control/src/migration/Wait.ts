@@ -2,6 +2,10 @@ import type { WaitRecord } from "@portable-devshell/shared";
 
 import type { WaitDocument } from "../instance/workflow/wait/State.js";
 
+/**
+ * @compat wait-delivered-recovery
+ * @removeAt 1.0.0
+ */
 export function migrateWaitDocument(document: WaitDocument): WaitDocument {
     return {
         ...document,

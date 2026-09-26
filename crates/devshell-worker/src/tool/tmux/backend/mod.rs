@@ -1088,6 +1088,8 @@ fn workspace_storage(
         workspace,
         workspace_key,
     );
+    // @compat tmux-unscoped-workspace
+    // @removeAt 1.0.0
     let legacy_marker = tmux_root.join("legacy-workspace.json");
     if let Some(claimed_key) = read_legacy_workspace_key(&legacy_marker)? {
         return if claimed_key == workspace_key {

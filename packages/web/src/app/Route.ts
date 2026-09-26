@@ -50,6 +50,10 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
     const segments = path.split("/").filter(Boolean).map(decodeSegment);
     const [page, first, second, third, fourth] = segments;
     const view = new URLSearchParams(query).get("view");
+    /**
+     * @compat web-legacy-routes
+     * @removeAt 1.0.0
+     */
     if (page === "activity") return pageRoute("audit");
     if (page === "approvals") return pageRoute("audit");
     if (page === "config") {

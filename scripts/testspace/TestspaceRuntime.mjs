@@ -73,6 +73,10 @@ export async function assertTestspaceRootOwned(repositoryRoot, root) {
     const resolvedRoot = resolve(root);
     if (!existsSync(resolvedRoot)) return false;
 
+    /**
+     * @compat testspace-default-root
+     * @removeAt 1.0.0
+     */
     const legacyDefaultRoot = resolve(resolvedRepository, ".testspace");
     if (resolvedRoot !== legacyDefaultRoot) {
         const marker = await readTestspaceOwner(resolvedRoot);

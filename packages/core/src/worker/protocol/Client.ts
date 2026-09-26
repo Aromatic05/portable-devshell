@@ -7,6 +7,10 @@ import type {
 import { WorkerRpcClient } from "./rpc/Client.js";
 
 export const WORKER_PROTOCOL_VERSION = "1.0.0";
+/**
+ * @compat worker-protocol-7
+ * @removeAt 1.0.0
+ */
 export const WORKER_LEGACY_PROTOCOL_VERSION = 7;
 
 export interface WorkerProtocolRange {

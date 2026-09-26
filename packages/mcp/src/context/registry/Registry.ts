@@ -1444,6 +1444,10 @@ export class McpContextRegistry {
             this.#executionStore.write(record.ctxId, executionRecord(record));
             this.#executionHydrated.add(record.ctxId);
         } catch {
+            /**
+             * @compat mcp-context-execution-sidecar-fallback
+             * @removeAt 1.0.0
+             */
             // The main Context document remains a durable compatibility fallback.
         }
     }
@@ -1749,6 +1753,10 @@ function isDocument(value: unknown): value is McpContextDocument {
     );
 }
 
+/**
+ * @compat mcp-context-v1-fields
+ * @removeAt 1.0.0
+ */
 function parseRecord(value: unknown): McpContextStoredRecord | undefined {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
         return undefined;

@@ -201,6 +201,10 @@ export class TodoState {
         return { active: [], archived: [], version: 4 };
     }
 
+    /**
+     * @compat todo-v1-v3
+     * @removeAt 1.0.0
+     */
     normalizeDocument(value: unknown): TodoDocument {
         if (!isRecord(value) || !Array.isArray(value.archived)) {
             throw new Error(

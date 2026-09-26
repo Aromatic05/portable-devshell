@@ -72,6 +72,7 @@ test("common CI owns source correctness without rebuilding release assets", () =
     const steps = createCommonCiSteps("linux");
     const names = steps.map((step) => step.name);
     assert.deepEqual(names, [
+        "Compatibility expiry",
         "Script tests",
         "Lint",
         "Build",

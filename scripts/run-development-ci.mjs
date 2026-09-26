@@ -54,6 +54,11 @@ function createPnpmStepFactory(platform) {
 export function createCommonCiSteps(platform = process.platform) {
     const pnpmStep = createPnpmStepFactory(platform);
     return [
+        {
+            args: ["scripts/check-compat-expiry.mjs"],
+            command: process.execPath,
+            name: "Compatibility expiry",
+        },
         pnpmStep("Script tests", ["test:scripts"]),
         pnpmStep("Lint", ["lint"]),
         pnpmStep("Build", ["build"]),
@@ -235,6 +240,11 @@ export function createDevelopmentCiSteps(target, platform = process.platform) {
     if (platform === "win32") {
         const pnpmStep = createPnpmStepFactory(platform);
         return [
+            {
+                args: ["scripts/check-compat-expiry.mjs"],
+                command: process.execPath,
+                name: "Compatibility expiry",
+            },
             pnpmStep("Lint", ["lint"]),
             pnpmStep("Typecheck", ["typecheck"]),
             ...targetSteps,

@@ -51,6 +51,10 @@ export class McpEndpointBinding {
         this.#worker = worker;
         this.#workspaceResourceMeta =
             workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
+        /**
+         * @compat mcp-stateless-transport
+         * @removeAt 1.0.0
+         */
         this.#handler = createMcpHandler(() => this.#createServer(), {
             keepAliveMs: 15_000,
             legacy: "stateless",

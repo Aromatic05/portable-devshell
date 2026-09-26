@@ -78,6 +78,13 @@ export function runFinalAcceptance() {
     const state = { env: { ...process.env } };
     const steps = [
         {
+            name: "Compatibility expiry",
+            run: () =>
+                runCommand(process.execPath, ["scripts/check-compat-expiry.mjs"], {
+                    inherit: true,
+                }),
+        },
+        {
             name: "Build packages",
             run: () => runCommand("pnpm", ["build"], { inherit: true }),
         },

@@ -21,6 +21,10 @@ export function readTodoReportMessage(input: JsonValue): string {
     return message;
 }
 
+/**
+ * @compat todo-title-selector
+ * @removeAt 1.0.0
+ */
 export function readTodoInput(input: JsonValue): TodoReadInput | undefined {
     if (typeof input !== "object" || input === null || Array.isArray(input))
         throw new Error("todo_read requires an object input.");

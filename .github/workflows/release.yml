@@ -34,7 +34,7 @@ jobs:
                     exit 1
                   fi
             - name: 验证 Release tag 与项目版本
-              run: node ./scripts/version-state.mjs check-release "$GITHUB_REF_NAME"
+              run: node ./scripts/version-state.mjs check-release "$GITHUB_REF_NAME" && node ./scripts/check-compat-expiry.mjs
             - name: 拒绝重建已发布 tag
               env:
                   GITHUB_TOKEN: ${{ github.token }}
@@ -225,6 +225,7 @@ jobs:
                     exit 0
                   fi
                   node ./scripts/version-state.mjs check-development
+                  node ./scripts/check-compat-expiry.mjs
                   next_version=$(node -p 'require("./package.json").version')
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

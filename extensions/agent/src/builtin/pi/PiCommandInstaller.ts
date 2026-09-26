@@ -114,6 +114,10 @@ async function inspectExistingCommand(
         throw error;
     });
     if (metadata === undefined) return "absent";
+    /**
+     * @compat agent-core-pi-launcher
+     * @removeAt 1.0.0
+     */
     if (metadata.isSymbolicLink()) {
         const target = await readlink(path);
         return isLegacyCorePiLauncher(target) ? "owned" : "foreign";

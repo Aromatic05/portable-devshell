@@ -1168,6 +1168,8 @@ fn context_snapshot(
     }
 }
 
+// @compat file-edit-apply-patch-aliases
+// @removeAt 1.0.0
 fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
     let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
     let lines = normalized.split('\n').collect::<Vec<_>>();

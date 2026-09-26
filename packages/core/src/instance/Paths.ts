@@ -8,8 +8,16 @@ export class InstancePaths {
     readonly instanceRootDir: string;
     readonly controlWorkerDir: string;
     readonly conversationDatabaseFile: string;
+    /**
+     * @compat comment-json-v1-path
+     * @removeAt 1.0.0
+     */
     readonly contextMessagesFile: string;
     readonly goalsFile: string;
+    /**
+     * @compat audit-jsonl-v1
+     * @removeAt 1.0.0
+     */
     readonly legacyApprovalsFile: string;
     readonly legacyEventsFile: string;
     readonly legacyLogsFile: string;

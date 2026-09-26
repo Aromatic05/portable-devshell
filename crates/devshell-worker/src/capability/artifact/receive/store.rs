@@ -530,6 +530,8 @@ impl ArtifactReceiveStore {
                     ));
                 }
             },
+            // @compat artifact-receive-recovery-v1
+            // @removeAt 1.0.0
             (None, None)
                 if metadata.phase != ArtifactReceivePhase::Committing
                     && metadata.backup_path.is_none()

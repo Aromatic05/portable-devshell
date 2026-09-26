@@ -18,6 +18,10 @@ import {
 } from "../../endpoint/Port.js";
 import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
 
+/**
+ * @compat mcp-workspace-app-v0615
+ * @removeAt 1.0.0
+ */
 export class McpWorkspaceLegacyV0615 {
     constructor(
         private readonly options: {

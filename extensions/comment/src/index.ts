@@ -37,6 +37,10 @@ export interface CommentExtensionInstance {
     conversationDatabaseFile: string;
     enabled: boolean;
     key: object;
+    /**
+     * @compat comment-legacy-migration-inputs
+     * @removeAt 1.0.0
+     */
     legacyContextMessagesFile?: string;
     legacyReports?: () => Promise<ToolCallRecord[]>;
     name: string;

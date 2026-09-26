@@ -707,6 +707,10 @@ export class ControlReadModel {
                 } catch (error) {
                     if (!methodNotFound(error)) throw error;
                 }
+                /**
+                 * @compat conversation-read-model-fallback
+                 * @removeAt 1.0.0
+                 */
                 const [contextMessages, reportCalls] = await Promise.all([
                     this.#clients.contextMessage
                         .list(instance, {

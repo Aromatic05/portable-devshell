@@ -7,6 +7,8 @@ use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
 
 pub const PROTOCOL_VERSION: &str = "1.0.0";
+// @compat worker-protocol-7
+// @removeAt 1.0.0
 pub const LEGACY_PROTOCOL_VERSION: u32 = 7;
 pub const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
