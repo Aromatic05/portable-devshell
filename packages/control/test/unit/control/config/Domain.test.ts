@@ -9,6 +9,7 @@ import {
     ConfigRegistry,
     ControlConfigMutationLock,
 } from "../../../../src/testing.ts";
+import { setConfigPathValue } from "../../../../src/control/config/Path.ts";
 import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
 
 const schema = {
@@ -57,6 +58,17 @@ test("Config registry validates schema defaults and replaces one Extension owner
             }),
         /defaultValue does not match/u,
     );
+});
+
+test("Config path writes never traverse inherited objects", () => {
+    const inherited = { nested: { polluted: false } };
+    const root = Object.create(inherited) as Record<string, never>;
+
+    setConfigPathValue(root, ["nested", "polluted"], true);
+
+    assert.equal(inherited.nested.polluted, false);
+    assert.deepEqual(root.nested, { polluted: true });
+    assert.equal(Object.hasOwn(root, "nested"), true);
 });
 
 test("Config domain controller reads defaults, persists atomically, validates writes, and fences stale generations", async () => {

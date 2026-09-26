@@ -57,7 +57,9 @@ export function setConfigPathValue(
         throw new TypeError("Config path must include a field segment.");
     let current = root;
     for (const segment of segments.slice(0, -1)) {
-        const existing = current[segment];
+        const existing = Object.hasOwn(current, segment)
+            ? current[segment]
+            : undefined;
         if (
             typeof existing !== "object" ||
             existing === null ||
