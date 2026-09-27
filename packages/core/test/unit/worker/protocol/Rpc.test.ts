@@ -665,6 +665,11 @@ test(
             bridge.close();
             connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
+            const retired = await transport.runWorkerCommand("retire", {
+                env,
+                instanceName,
+            });
+            assert.equal(retired.exitCode, 0);
             await rm(homeDirectory, { recursive: true, force: true });
             await rm(runtimeDirectory, { recursive: true, force: true });
         });
@@ -681,12 +686,15 @@ test(
             clientVersion: "0.1.0",
         });
         const progress: JsonValue[] = [];
+        const tmuxProgressCommand =
+            process.platform === "win32"
+                ? "Write-Output one; Start-Sleep -Milliseconds 200; Write-Output two; Start-Sleep -Milliseconds 200; Write-Output three"
+                : "printf 'one\\n'; sleep 0.2; printf 'two\\n'; sleep 0.2; printf 'three\\n'";
 
         const result = (await rpcClient.request(
             "tmux_run",
             {
-                command:
-                    "printf 'one\\n'; sleep 0.2; printf 'two\\n'; sleep 0.2; printf 'three\\n'",
+                command: tmuxProgressCommand,
                 line: 80,
                 timeout: 5_000,
                 wait: "block",
