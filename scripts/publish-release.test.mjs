@@ -60,7 +60,7 @@ test("release preflight fails closed when GitHub cannot determine tag publicatio
     );
 });
 
-test("release assets require a native Agent Extension and every Agent provider for each target", () => {
+test("Core release assets contain only application and Worker platform artifacts", () => {
     const names = expectedReleaseAssetNames();
     for (const target of [
         "linux-x64",
@@ -70,23 +70,21 @@ test("release assets require a native Agent Extension and every Agent provider f
         "windows-x64",
         "windows-arm64",
     ]) {
-        const extension = `portable-devshell-agent-${target}.dsext`;
-        assert.equal(names.includes(extension), true, extension);
+        const application = `portable-devshell-app-${target}.tar.gz`;
+        const worker = target.startsWith("windows-")
+            ? `devshell-worker-${target}.exe`
+            : `devshell-worker-${target}`;
+        assert.equal(names.includes(application), true, application);
         assert.equal(
-            names.includes(`${extension}.sha256`),
+            names.includes(`${application}.sha256`),
             true,
-            `${extension}.sha256`,
+            `${application}.sha256`,
         );
-        for (const providerId of ["pi", "opencode"]) {
-            const provider = `portable-devshell-agent-provider-${providerId}-${target}.dsprovider`;
-            assert.equal(names.includes(provider), true, provider);
-            assert.equal(
-                names.includes(`${provider}.sha256`),
-                true,
-                `${provider}.sha256`,
-            );
-        }
+        assert.equal(names.includes(worker), true, worker);
+        assert.equal(names.includes(`${worker}.sha256`), true, `${worker}.sha256`);
     }
+    assert.equal(names.some((name) => name.endsWith(".dsext")), false);
+    assert.equal(names.some((name) => name.endsWith(".dsprovider")), false);
 });
 
 async function createReleaseAssets() {

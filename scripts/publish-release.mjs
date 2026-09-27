@@ -19,22 +19,15 @@ export function expectedReleaseAssetNames() {
     const assets = [];
     for (const target of TARGETS) {
         const application = `portable-devshell-app-${target}.tar.gz`;
-        const agentExtension = `portable-devshell-agent-${target}.dsext`;
         const worker = target.startsWith("windows-")
             ? `devshell-worker-${target}.exe`
             : `devshell-worker-${target}`;
         assets.push(
             application,
             `${application}.sha256`,
-            agentExtension,
-            `${agentExtension}.sha256`,
             worker,
             `${worker}.sha256`,
         );
-        for (const providerId of ["pi", "opencode"]) {
-            const provider = `portable-devshell-agent-provider-${providerId}-${target}.dsprovider`;
-            assets.push(provider, `${provider}.sha256`);
-        }
     }
     assets.push(
         "install-release.sh",

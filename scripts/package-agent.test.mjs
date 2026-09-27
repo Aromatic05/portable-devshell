@@ -15,39 +15,13 @@ import test from "node:test";
 import {
     assertNoSymbolicLinks,
     assertThinAgentExtensionTree,
-    embedBundledProviderArchive,
-    pruneProviderRuntimeTree,
-    resolveAgentPackageSelection,
     sanitizeDeployTree,
     shapeThinAgentExtensionTree,
 } from "./package-agent.mjs";
 
 const repoRoot = new URL("../", import.meta.url);
 
-test("Agent packaging can emit both artifacts or one release-matrix half", () => {
-    assert.deepEqual(resolveAgentPackageSelection([]), {
-        includeExtension: true,
-        includeProvider: true,
-    });
-    assert.deepEqual(resolveAgentPackageSelection(["--provider-only"]), {
-        includeExtension: false,
-        includeProvider: true,
-    });
-    assert.deepEqual(resolveAgentPackageSelection(["--extension-only"]), {
-        includeExtension: true,
-        includeProvider: false,
-    });
-    assert.throws(
-        () =>
-            resolveAgentPackageSelection([
-                "--provider-only",
-                "--extension-only",
-            ]),
-        /mutually exclusive/u,
-    );
-});
-
-test("Agent Extension source package owns the Pi provider without separate Agent workspace packages", async () => {
+test("Agent Extension source package owns provider adapters without separate Agent workspace packages", async () => {
     const agentExtension = JSON.parse(
         await readFile(
             new URL("extensions/agent/package.json", repoRoot),
@@ -72,7 +46,7 @@ test("Agent Extension source package owns the Pi provider without separate Agent
     );
 });
 
-test("thin Agent Extension payload guard rejects private node_modules", async (t) => {
+test("thin Agent Extension payload guard rejects private node_modules and bundled Provider artifacts", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "devshell-agent-thin-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
     await mkdir(join(root, "node_modules", "@portable-devshell", "extension"), {
@@ -82,9 +56,20 @@ test("thin Agent Extension payload guard rejects private node_modules", async (t
         () => assertThinAgentExtensionTree(root),
         /must not contain private node_modules/u,
     );
+    await rm(join(root, "node_modules"), { force: true, recursive: true });
+    await mkdir(join(root, "bundled-providers"), { recursive: true });
+    await writeFile(
+        join(root, "bundled-providers", "pi.dsprovider"),
+        "legacy\n",
+        "utf8",
+    );
+    await assert.rejects(
+        () => assertThinAgentExtensionTree(root),
+        /must not contain bundled Provider artifacts/u,
+    );
 });
 
-test("thin Agent Extension shaping removes the internal Pi subtree and provider dependencies", async (t) => {
+test("thin Agent Extension shaping keeps provider adapter code and removes deployment dependencies", async (t) => {
     const root = await mkdtemp(join(tmpdir(), "devshell-agent-shape-"));
     t.after(async () => await rm(root, { force: true, recursive: true }));
     await mkdir(join(root, "dist", "provider", "pi"), { recursive: true });
@@ -110,9 +95,6 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     await mkdir(join(root, "node_modules", "@portable-devshell", "extension"), {
         recursive: true,
     });
-    await mkdir(join(root, "node_modules", "@portable-devshell", "shared"), {
-        recursive: true,
-    });
     await mkdir(
         join(root, "node_modules", "@earendil-works", "pi-coding-agent"),
         { recursive: true },
@@ -126,6 +108,10 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
     await shapeThinAgentExtensionTree(root);
     await assertThinAgentExtensionTree(root);
     await assert.rejects(() => lstat(join(root, "node_modules")), /ENOENT/u);
+    assert.equal(
+        await readFile(join(root, "dist", "provider", "pi", "index.js"), "utf8"),
+        "export {};\n",
+    );
     const manifest = JSON.parse(
         await readFile(join(root, "package.json"), "utf8"),
     );
@@ -137,53 +123,6 @@ test("thin Agent Extension shaping removes the internal Pi subtree and provider 
         await readFile(join(root, "devshell-extension.json"), "utf8"),
     );
     assert.equal(extensionManifest.entry, "dist/builtin/index.js");
-    assert.equal(extensionManifest.bundledAssets, undefined);
-});
-
-test("Agent Extension embeds a provider as one opaque dsprovider without merging its dependencies", async (t) => {
-    const root = await mkdtemp(join(tmpdir(), "devshell-agent-bundled-"));
-    t.after(async () => await rm(root, { force: true, recursive: true }));
-    const extension = join(root, "extension");
-    const provider = join(root, "provider");
-    await mkdir(join(extension, "dist", "builtin"), { recursive: true });
-    await mkdir(join(provider, "node_modules", "runtime"), { recursive: true });
-    await writeFile(
-        join(provider, "devshell-agent-provider.json"),
-        "{}\n",
-        "utf8",
-    );
-    await writeFile(
-        join(provider, "node_modules", "runtime", "index.js"),
-        "export {};\n",
-        "utf8",
-    );
-
-    await embedBundledProviderArchive(
-        extension,
-        provider,
-        "pi",
-        async (source, destination) => {
-            assert.equal(source, provider);
-            await writeFile(destination, "provider archive\n", "utf8");
-        },
-    );
-
-    await assertThinAgentExtensionTree(extension);
-    assert.equal(
-        await readFile(
-            join(extension, "bundled-providers", "pi.dsprovider"),
-            "utf8",
-        ),
-        "provider archive\n",
-    );
-    await assert.rejects(
-        () => lstat(join(extension, "node_modules")),
-        /ENOENT/u,
-    );
-    await assert.rejects(
-        () => lstat(join(extension, "bundled-providers", "pi")),
-        /ENOENT/u,
-    );
 });
 
 test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guard remains strict", async (t) => {
@@ -209,32 +148,4 @@ test("Agent artifact sanitizer removes pnpm deployment metadata and symlink guar
 
     await symlink(join(root, "plain"), join(root, "link"));
     await assert.rejects(() => assertNoSymbolicLinks(root), /symbolic link/u);
-});
-
-test("Pi provider runtime pruning removes type, map, and test payloads while preserving executable sources", async (t) => {
-    const root = await mkdtemp(
-        join(tmpdir(), "devshell-agent-provider-prune-"),
-    );
-    t.after(async () => await rm(root, { force: true, recursive: true }));
-    const pkg = join(root, "node_modules", "plugin");
-    await mkdir(join(pkg, "tests"), { recursive: true });
-    await writeFile(join(pkg, "index.js"), "export {};\n", "utf8");
-    await writeFile(join(pkg, "extension.ts"), "export {};\n", "utf8");
-    await writeFile(join(pkg, "index.d.ts"), "export {};\n", "utf8");
-    await writeFile(join(pkg, "index.js.map"), "{}\n", "utf8");
-    await writeFile(join(pkg, "tests", "fixture.js"), "export {};\n", "utf8");
-
-    await pruneProviderRuntimeTree(root);
-
-    assert.equal(
-        (await readFile(join(pkg, "index.js"), "utf8")).length > 0,
-        true,
-    );
-    assert.equal(
-        (await readFile(join(pkg, "extension.ts"), "utf8")).length > 0,
-        true,
-    );
-    await assert.rejects(() => lstat(join(pkg, "index.d.ts")), /ENOENT/u);
-    await assert.rejects(() => lstat(join(pkg, "index.js.map")), /ENOENT/u);
-    await assert.rejects(() => lstat(join(pkg, "tests")), /ENOENT/u);
 });

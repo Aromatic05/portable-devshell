@@ -152,14 +152,6 @@ export function createTargetCiSteps(target, platform = process.platform) {
                 "--output-dir",
                 "./ci-artifacts",
             ]),
-            pnpmStep("Package Agent artifacts", [
-                "package:agent",
-                "--",
-                "--target",
-                target,
-                "--output-dir",
-                "./ci-artifacts",
-            ]),
             pnpmStep("Application package smoke", [
                 "smoke:package",
                 "--",
@@ -195,14 +187,6 @@ export function createTargetCiSteps(target, platform = process.platform) {
             "--output-dir",
             "./ci-artifacts",
         ]),
-        pnpmStep("Package Agent artifacts", [
-            "package:agent",
-            "--",
-            "--target",
-            target,
-            "--output-dir",
-            "./ci-artifacts",
-        ]),
         pnpmStep("Application package smoke", [
             "smoke:package",
             "--",
@@ -212,21 +196,6 @@ export function createTargetCiSteps(target, platform = process.platform) {
             "smoke:install-release",
             "--",
             application,
-        ]),
-        pnpmStep("Agent package smoke", [
-            "smoke:agent-package",
-            "--",
-            application,
-            pathJoin("ci-artifacts", `portable-devshell-agent-${target}.dsext`),
-            pathJoin(
-                "ci-artifacts",
-                `portable-devshell-agent-provider-pi-${target}.dsprovider`,
-            ),
-            pathJoin(
-                "ci-artifacts",
-                `portable-devshell-agent-provider-opencode-${target}.dsprovider`,
-            ),
-            worker,
         ]),
     );
 

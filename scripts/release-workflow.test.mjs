@@ -32,20 +32,15 @@ test("release asset jobs install the frozen dependency graph before building", a
     );
 });
 
-test("release matrix emits a native Agent Extension and both Agent providers per target", async () => {
+test("release matrix does not package Agent Extension or Provider artifacts", async () => {
     const workflow = await readReleaseWorkflow();
     const buildStart = workflow.indexOf("    build-worker:\n");
     const publishStart = workflow.indexOf("    publish:\n", buildStart);
     const buildJob = workflow.slice(buildStart, publishStart);
-    assert.match(
-        buildJob,
-        /pnpm package:agent -- --target "\$\{\{ matrix\.target \}\}" --output-dir \.\/release-assets/u,
-    );
-    assert.doesNotMatch(buildJob, /package:agent[^\n]*--provider-only/u);
-    assert.match(
-        buildJob,
-        /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm smoke:agent-package -- \.\/release-assets\/portable-devshell-app-linux-x64\.tar\.gz \.\/release-assets\/portable-devshell-agent-linux-x64\.dsext \.\/release-assets\/portable-devshell-agent-provider-pi-linux-x64\.dsprovider \.\/release-assets\/portable-devshell-agent-provider-opencode-linux-x64\.dsprovider/u,
-    );
+    assert.doesNotMatch(buildJob, /package:agent/u);
+    assert.doesNotMatch(buildJob, /smoke:agent-package/u);
+    assert.doesNotMatch(buildJob, /\.dsext/u);
+    assert.doesNotMatch(buildJob, /\.dsprovider/u);
 });
 
 test("release Windows x64 job runs installer contracts and the real release smoke", async () => {

@@ -130,10 +130,8 @@ test("Unix target CI proves the native deliverable without rerunning common corr
         "Reverse worker PTY smoke",
         "Client and local instance smoke",
         "Package native application",
-        "Package Agent artifacts",
         "Application package smoke",
         "Unix release installer smoke",
-        "Agent package smoke",
     ]);
     for (const commonOnly of [
         "Lint",
@@ -165,16 +163,10 @@ test("Linux x64 target CI runs final integration without repeating unit gates", 
     const steps = createTargetCiSteps("linux-x64", "linux");
     const names = steps.map((step) => step.name);
     assert.equal(names.at(-1), "Final integration");
-    assert.equal(names.at(-2), "Agent package smoke");
+    assert.equal(names.at(-2), "Unix release installer smoke");
     assert.equal(names.includes("Final acceptance"), false);
-    const agentSmoke = steps.at(-2);
-    assert.deepEqual(agentSmoke.args.slice(-5), [
-        "ci-artifacts/portable-devshell-app-linux-x64.tar.gz",
-        "ci-artifacts/portable-devshell-agent-linux-x64.dsext",
-        "ci-artifacts/portable-devshell-agent-provider-pi-linux-x64.dsprovider",
-        "ci-artifacts/portable-devshell-agent-provider-opencode-linux-x64.dsprovider",
-        "ci-artifacts/devshell-worker-linux-x64",
-    ]);
+    assert.equal(names.includes("Package Agent artifacts"), false);
+    assert.equal(names.includes("Agent package smoke"), false);
     const integration = steps.at(-1);
     assert.equal(integration.command, "bash");
     assert.deepEqual(integration.args.slice(0, 1), ["-lc"]);
@@ -205,7 +197,6 @@ test("Windows x64 target CI includes installer contract and real release smoke",
             "Reverse worker PTY smoke",
             "Client and local instance smoke",
             "Package native application",
-            "Package Agent artifacts",
             "Application package smoke",
             "Windows installer contract tests",
             "Windows release installer smoke",
