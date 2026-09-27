@@ -86,13 +86,14 @@ export function Application({
                                 : "Reconnect"}
                         </button>
                     )}
-                    <button
-                        disabled={busy !== undefined}
-                        onClick={() => void onLogout()}
-                    >
-                        {busy === "logout" ? "Logging out…" : "Log out"}
-                    </button>
                 </div>
+                <button
+                    className="header-logout"
+                    disabled={busy !== undefined}
+                    onClick={() => void onLogout()}
+                >
+                    {busy === "logout" ? "Logging out…" : "Log out"}
+                </button>
             </header>
             <main className={`page page-${route.page}`}>
                 <PartialFailures failures={webFailures(state.readModel)} />

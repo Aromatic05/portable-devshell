@@ -207,6 +207,11 @@ h4 {
 .connection.offline {
     background: #7f2837;
 }
+.header-logout {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0.3rem 0.55rem;
+}
 .error {
     color: #ffb4bd;
 }
@@ -1604,6 +1609,10 @@ pre {
     }
     .connection button {
         padding-inline: 0.45rem;
+    }
+    .header-logout {
+        padding-inline: 0.45rem;
+        font-size: 0.78rem;
     }
 }
 .provider-choice-grid {
