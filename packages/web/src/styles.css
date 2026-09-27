@@ -1669,3 +1669,11 @@ pre {
 .provider-choice small {
     color: #93a4bd;
 }
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
