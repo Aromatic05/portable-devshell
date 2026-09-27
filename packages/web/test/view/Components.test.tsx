@@ -49,6 +49,7 @@ describe("ConfirmationDialog", () => {
 
     it("treats permanent deletion as destructive and keeps Cancel available when confirmation is disabled", () => {
         const cancel = vi.fn();
+        const confirm = vi.fn();
         render(
             <ConfirmationDialog
                 actionLabel="Delete"
@@ -56,29 +57,35 @@ describe("ConfirmationDialog", () => {
                 description="Delete project?"
                 disabled
                 onCancel={cancel}
-                onConfirm={vi.fn()}
+                onConfirm={confirm}
                 variant="destructive"
             />,
         );
 
         const cancelButton = screen.getByRole("button", { name: "Cancel" });
+        const deleteButton = screen.getByRole("button", { name: "Delete" });
         expect(cancelButton).toHaveFocus();
         expect(cancelButton).toBeEnabled();
-        expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+        expect(deleteButton).toHaveAttribute("aria-disabled", "true");
+        expect(deleteButton).toBeEnabled();
+        fireEvent.click(deleteButton);
+        expect(confirm).not.toHaveBeenCalled();
         fireEvent.click(cancelButton);
         expect(cancel).toHaveBeenCalledOnce();
     });
 });
 
-it("keeps focus inside the dialog while an operation is busy", () => {
+it("keeps both controls focusable while busy and blocks Escape and activation", () => {
+    const cancel = vi.fn();
+    const confirm = vi.fn();
     const view = render(
         <>
             <ConfirmationDialog
                 actionLabel="Stop"
                 busy={false}
                 description="Stop demo?"
-                onCancel={vi.fn()}
-                onConfirm={vi.fn()}
+                onCancel={cancel}
+                onConfirm={confirm}
                 variant="destructive"
             />
             <button>Background action</button>
@@ -90,37 +97,76 @@ it("keeps focus inside the dialog while an operation is busy", () => {
                 actionLabel="Stop"
                 busy
                 description="Stop demo?"
-                onCancel={vi.fn()}
-                onConfirm={vi.fn()}
+                onCancel={cancel}
+                onConfirm={confirm}
                 variant="destructive"
             />
             <button>Background action</button>
         </>,
     );
     const dialog = screen.getByRole("dialog", { name: "Confirm stop" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    const confirmButton = screen.getByRole("button", { name: "Stopping…" });
 
-    expect(dialog).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
-    fireEvent.keyDown(dialog, { key: "Tab" });
-    expect(dialog).toHaveFocus();
-    expect(
-        screen.getByRole("button", { name: "Background action" }),
-    ).not.toHaveFocus();
+    expect(cancelButton).toHaveFocus();
+    expect(cancelButton).toHaveAttribute("aria-disabled", "true");
+    expect(cancelButton).toBeEnabled();
+    expect(confirmButton).toHaveAttribute("aria-disabled", "true");
+    expect(confirmButton).toHaveAttribute("aria-busy", "true");
+    expect(confirmButton).toBeEnabled();
+
+    confirmButton.focus();
+    expect(confirmButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.click(cancelButton);
+    fireEvent.click(confirmButton);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
 });
 
-it("renders a grammatical busy label for Disable", () => {
+it.each([
+    ["Stop", "Stopping…"],
+    ["Delete", "Deleting…"],
+    ["Disable", "Disabling…"],
+    ["Enable", "Enabling…"],
+    ["Restart", "Restarting…"],
+    ["Revoke", "Revoking…"],
+    ["Rotate", "Rotating…"],
+    ["Approve", "Approving…"],
+    ["Deny", "Denying…"],
+])("renders the mapped busy label for %s", (actionLabel, busyLabel) => {
     render(
         <ConfirmationDialog
-            actionLabel="Disable"
+            actionLabel={actionLabel}
             busy
-            description="Disable Context?"
+            description={`${actionLabel} demo?`}
             onCancel={vi.fn()}
             onConfirm={vi.fn()}
             variant="destructive"
         />,
     );
 
-    expect(screen.getByRole("button", { name: "Disabling…" })).toBeDisabled();
+    const action = screen.getByRole("button", { name: busyLabel });
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    expect(action).toHaveAttribute("aria-busy", "true");
+});
+
+it("falls back to the action label for unknown actions", () => {
+    render(
+        <ConfirmationDialog
+            actionLabel="Cancel transfer"
+            busy
+            description="Cancel transfer?"
+            onCancel={vi.fn()}
+            onConfirm={vi.fn()}
+            variant="destructive"
+        />,
+    );
+
+    expect(
+        screen.getByRole("button", { name: "Cancel transfer…" }),
+    ).toBeInTheDocument();
 });
 
 it("uses an explicit busy label for multi-word actions", () => {
@@ -139,6 +185,6 @@ it("uses an explicit busy label for multi-word actions", () => {
     const action = screen.getByRole("button", {
         name: "Cancelling transfer…",
     });
-    expect(action).toBeDisabled();
+    expect(action).toHaveAttribute("aria-disabled", "true");
     expect(action).toHaveAttribute("aria-busy", "true");
 });

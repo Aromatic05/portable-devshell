@@ -604,6 +604,9 @@ h4 {
     gap: 0.6rem;
     margin: 0.75rem 0;
 }
+.actions button[aria-disabled="true"] {
+    opacity: 0.65;
+}
 pre {
     overflow: auto;
     white-space: pre-wrap;

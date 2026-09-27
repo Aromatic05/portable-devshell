@@ -36,10 +36,6 @@ export function ConfirmationDialog({
         return () => previous?.focus();
     }, [destructive]);
 
-    useEffect(() => {
-        if (busy) dialogRef.current?.focus();
-    }, [busy]);
-
     function keyDown(event: React.KeyboardEvent<HTMLElement>): void {
         if (event.key === "Escape" && !busy) {
             event.preventDefault();
@@ -48,8 +44,7 @@ export function ConfirmationDialog({
         }
         if (event.key !== "Tab") return;
         const controls = [cancelRef.current, confirmRef.current].filter(
-            (control): control is HTMLButtonElement =>
-                control !== null && !control.disabled,
+            (control): control is HTMLButtonElement => control !== null,
         );
         if (controls.length === 0) {
             event.preventDefault();
@@ -96,14 +91,24 @@ export function ConfirmationDialog({
                     </p>
                 )}
                 <div className="actions">
-                    <button disabled={busy} onClick={onCancel} ref={cancelRef}>
+                    <button
+                        aria-disabled={busy || undefined}
+                        onClick={() => {
+                            if (busy) return;
+                            onCancel();
+                        }}
+                        ref={cancelRef}
+                    >
                         Cancel
                     </button>
                     <button
                         aria-busy={busy || undefined}
+                        aria-disabled={busy || disabled || undefined}
                         className={destructive ? "danger" : "primary"}
-                        disabled={busy || disabled}
-                        onClick={onConfirm}
+                        onClick={() => {
+                            if (busy || disabled) return;
+                            onConfirm();
+                        }}
                         ref={confirmRef}
                     >
                         {busy ? (busyLabel ?? progressLabel) : actionLabel}
@@ -114,8 +119,18 @@ export function ConfirmationDialog({
     );
 }
 
+const progressLabels: Record<string, string> = {
+    Approve: "Approving…",
+    Delete: "Deleting…",
+    Deny: "Denying…",
+    Disable: "Disabling…",
+    Enable: "Enabling…",
+    Restart: "Restarting…",
+    Revoke: "Revoking…",
+    Rotate: "Rotating…",
+    Stop: "Stopping…",
+};
+
 function actionProgressLabel(actionLabel: string): string {
-    if (actionLabel === "Stop") return "Stopping…";
-    if (actionLabel.endsWith("e")) return `${actionLabel.slice(0, -1)}ing…`;
-    return `${actionLabel}ing…`;
+    return progressLabels[actionLabel] ?? `${actionLabel}…`;
 }
