@@ -1575,17 +1575,22 @@ import { tmpdir } from "node:os";
         ctxId: string,
         task: string,
     ): Promise<{ output: string[]; task: { status: string } }> {
-        const waited = await callTool(requestId, "tmux_read", {
-            ctxId,
-            line: 200,
-            task,
-            timeMs: 30_000,
-        });
-        assert.equal(waited.error, undefined, JSON.stringify(waited));
-        const status = readString(
-            waited.result?.structuredContent?.task?.status,
-            "tmux_read task status",
-        );
+        const output: string[] = [];
+        let status = "running";
+        for (let attempt = 0; attempt < 30 && status === "running"; attempt += 1) {
+            const waited = await callTool(requestId, "tmux_read", {
+                ctxId,
+                line: 200,
+                task,
+                timeMs: 1000,
+            });
+            assert.equal(waited.error, undefined, JSON.stringify(waited));
+            output.push(...(waited.result?.structuredContent?.output ?? []));
+            status = readString(
+                waited.result?.structuredContent?.task?.status,
+                "tmux_read task status",
+            );
+        }
         assert.notEqual(status, "running");
 
         const read = await callTool(requestId, "tmux_read", {
@@ -1595,7 +1600,7 @@ import { tmpdir } from "node:os";
         });
         assert.equal(read.error, undefined, JSON.stringify(read));
         return {
-            output: [...(read.result?.structuredContent?.output ?? [])],
+            output: [...output, ...(read.result?.structuredContent?.output ?? [])],
             task: { status },
         };
     }
