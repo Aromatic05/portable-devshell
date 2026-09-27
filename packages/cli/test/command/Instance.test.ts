@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 
 import {
+    CONTROL_PROTOCOL_VERSION,
     Codec,
     SocketChannel,
     resolveControlSocketPath,
@@ -638,7 +639,7 @@ async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
         case "service.hello":
             await reply(codec, event, {
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             });
             return;
         case "cli.commands":

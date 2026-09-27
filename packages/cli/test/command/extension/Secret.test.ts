@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CONTROL_PROTOCOL_VERSION } from "@portable-devshell/shared";
+
 import { CliMain } from "../../../src/app/Main.js";
 
 test("secret cli.commands binding is dispatched with caller cwd", async () => {
@@ -19,7 +21,7 @@ test("secret cli.commands binding is dispatched with caller cwd", async () => {
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: 1,
+                            protocolVersion: CONTROL_PROTOCOL_VERSION,
                         };
                     },
                 },

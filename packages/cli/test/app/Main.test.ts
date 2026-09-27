@@ -7,6 +7,8 @@ import { Readable } from "node:stream";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
+import { CONTROL_PROTOCOL_VERSION } from "@portable-devshell/shared";
+
 import { CliMain } from "../../src/app/Main.js";
 
 test("CliMain prints the application version without contacting Control", async () => {
@@ -191,7 +193,7 @@ test("CliMain handles control lifecycle commands and exit code mapping", async (
                     clientCalls.push("hello");
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async listInstances() {
@@ -435,7 +437,7 @@ test("CliMain root help discovers installed Extension commands when Control is o
                 async hello() {
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async cliCommands() {
@@ -472,7 +474,7 @@ test("CliMain suggests a nearby command instead of treating a typo as an Extensi
                     calls.push("hello");
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async cliCommand() {
@@ -652,7 +654,7 @@ test("CliMain negotiates Control before cli.commands invocation", async () => {
                     calls.push("hello");
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async cliCommand(commandId: string, argv: readonly string[]) {
@@ -1922,7 +1924,7 @@ function testClients(client: Record<string, unknown>) {
                 }
                 return {
                     capabilities: ["request", "stream", "streamResume"],
-                    protocolVersion: 1,
+                    protocolVersion: CONTROL_PROTOCOL_VERSION,
                 };
             },
         },
