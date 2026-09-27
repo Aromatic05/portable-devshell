@@ -426,7 +426,7 @@ function temporaryOutputPath(output: string): string {
 
 function finalizeAtomicOutput(temp: string, output: string): void {
     chmodSync(temp, 0o600);
-    const file = openSync(temp, "r");
+    const file = openSync(temp, process.platform === "win32" ? "r+" : "r");
     try {
         fsyncSync(file);
     } finally {
@@ -434,6 +434,7 @@ function finalizeAtomicOutput(temp: string, output: string): void {
     }
     requireOutputAbsent(output);
     renameSync(temp, output);
+    if (process.platform === "win32") return;
     const directory = openSync(dirname(output), "r");
     try {
         fsyncSync(directory);
