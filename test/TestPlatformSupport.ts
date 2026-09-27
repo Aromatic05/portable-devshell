@@ -177,7 +177,7 @@ export function tmuxTestOptions(workerBinaryPath: string | undefined): {
         return realWorkerTestOptions(workerBinaryPath);
     }
     if (process.platform === "win32") {
-        return { skip: "tmux worker tools are Unix-only" };
+        return { skip: false };
     }
     return {
         skip: commandAvailable("tmux", ["-V"])

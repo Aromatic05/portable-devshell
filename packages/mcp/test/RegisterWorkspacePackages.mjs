@@ -9,8 +9,11 @@ if (
 }
 
 function installTestWatchdog() {
+    const defaultWatchdogTimeoutMs =
+        process.platform === "win32" ? "240000" : "120000";
     const testWatchdogTimeoutMs = Number.parseInt(
-        process.env.PORTABLE_DEVSHELL_TEST_WATCHDOG_MS ?? "120000",
+        process.env.PORTABLE_DEVSHELL_TEST_WATCHDOG_MS ??
+            defaultWatchdogTimeoutMs,
         10,
     );
     const testWatchdogOrigin =

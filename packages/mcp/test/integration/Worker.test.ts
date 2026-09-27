@@ -42,7 +42,7 @@ import { tmpdir } from "node:os";
     );
     const workerBinaryPath = resolveTestWorkerBinary();
     const tmuxAvailable =
-        process.platform !== "win32" && commandAvailable("tmux", ["-V"]);
+        process.platform === "win32" || commandAvailable("tmux", ["-V"]);
     type JsonValue =
         | boolean
         | number
@@ -898,6 +898,9 @@ import { tmpdir } from "node:os";
         | JsonValue[]
         | { [key: string]: JsonValue };
 
+    const tmuxCommand = (unix: string, windows: string): string =>
+        process.platform === "win32" ? windows : unix;
+
     test(
         "MCP tmux supports a complete interactive lifecycle when JSON-RPC request ids are reused",
         tmuxTestOptions(workerBinaryPath),
@@ -989,8 +992,10 @@ import { tmpdir } from "node:os";
                     );
 
                     const run = await callTool(requestId, "tmux_run", {
-                        command:
+                        command: tmuxCommand(
                             "read -r value; printf 'received:%s\\n' \"$value\"",
+                            '$value = [Console]::ReadLine(); Write-Output ("received:" + $value)',
+                        ),
                         ctxId,
                         wait: "nonblock",
                     });
@@ -1054,7 +1059,10 @@ import { tmpdir } from "node:os";
                 async ({ callTool, createContext, readToolCalls }) => {
                     const ctxId = await createContext();
                     const result = await callTool("block-output", "tmux_run", {
-                        command: "printf 'EARLY\\n'; printf 'LATE\\n'",
+                        command: tmuxCommand(
+                            "printf 'EARLY\\n'; printf 'LATE\\n'",
+                            "Write-Output EARLY; Write-Output LATE",
+                        ),
                         ctxId,
                         line: 80,
                         timeout: 30_000,
@@ -1117,10 +1125,13 @@ import { tmpdir } from "node:os";
                         "block-timeout-output",
                         "tmux_run",
                         {
-                            command: "printf 'EARLY\\n'; sleep 2",
+                            command: tmuxCommand(
+                                "printf 'EARLY\\n'; sleep 2",
+                                "Write-Output EARLY; Start-Sleep -Seconds 3",
+                            ),
                             ctxId,
                             line: -20,
-                            timeout: 300,
+                            timeout: process.platform === "win32" ? 1000 : 300,
                             wait: "block",
                         },
                     );
@@ -1205,7 +1216,10 @@ import { tmpdir } from "node:os";
 
                     const paneInput = await callTool(requestId, "tmux_input", {
                         ctxId: firstCtxId,
-                        input: "sleep 10^M",
+                        input: `${tmuxCommand(
+                            "sleep 10",
+                            "ping.exe 127.0.0.1 -n 11 > $null",
+                        )}^M`,
                         pane: "continued",
                     });
                     assert.equal(
@@ -1215,7 +1229,10 @@ import { tmpdir } from "node:os";
                     );
 
                     const run = await callTool(requestId, "tmux_run", {
-                        command: "sleep 10",
+                        command: tmuxCommand(
+                            "sleep 10",
+                            "Start-Sleep -Seconds 10",
+                        ),
                         ctxId: firstCtxId,
                         wait: "nonblock",
                     });
@@ -1238,7 +1255,10 @@ import { tmpdir } from "node:os";
 
                     const foreground = await callTool(requestId, "tmux_input", {
                         ctxId: refreshedCtxId,
-                        input: "sleep 10^M",
+                        input: `${tmuxCommand(
+                            "sleep 10",
+                            "ping.exe 127.0.0.1 -n 11 > $null",
+                        )}^M`,
                         pane: "continued",
                     });
                     assert.equal(
@@ -1379,12 +1399,16 @@ import { tmpdir } from "node:os";
         );
         const workspacePath =
             await createTestTempDirectory("mcp-tmux-workspace");
+        const workerEnvironment = {
+            ...process.env,
+            HOME: homeDirectory,
+            ...(process.platform === "win32"
+                ? { USERPROFILE: homeDirectory }
+                : {}),
+            XDG_RUNTIME_DIR: runtimeDirectory,
+        };
         const instance = new WorkerInstanceFactory().create({
-            env: {
-                ...process.env,
-                HOME: homeDirectory,
-                XDG_RUNTIME_DIR: runtimeDirectory,
-            },
+            env: workerEnvironment,
             homeDirectory,
             name: asInstanceName(instanceName),
             transport: new WorkerTransportDriverLocal({
@@ -1521,6 +1545,24 @@ import { tmpdir } from "node:os";
             }
             await instance.stop();
             await instance.close();
+            if (process.platform === "win32") {
+                const cleanup = spawnSync(
+                    workerBinaryPath!,
+                    ["retire", "--instance", instanceName],
+                    {
+                        encoding: "utf8",
+                        env: workerEnvironment,
+                        windowsHide: true,
+                    },
+                );
+                assert.equal(
+                    cleanup.status,
+                    0,
+                    cleanup.stderr ||
+                        cleanup.error?.message ||
+                        "failed to retire test psmux server",
+                );
+            }
             await rm(homeDirectory, { force: true, recursive: true });
             await rm(runtimeDirectory, { force: true, recursive: true });
             await rm(workspacePath, { force: true, recursive: true });
