@@ -161,18 +161,30 @@ export function Instances({
                             className={`instances${entry === undefined ? "" : " has-selection"}`}
                         >
                             {model.instances.map((item) => (
-                                <button
-                                    aria-pressed={selected === item.name}
+                                <article
                                     className={`instance card${selected === item.name ? " selected" : ""}`}
                                     key={item.name}
-                                    onClick={() => {
-                                        navigate({
+                                >
+                                    <a
+                                        aria-current={
+                                            selected === item.name
+                                                ? "page"
+                                                : undefined
+                                        }
+                                        href={webRouteHref({
                                             page: "instances",
                                             instance: item.name,
-                                        });
-                                    }}
-                                >
-                                    <strong>{item.name}</strong>
+                                        })}
+                                        onClick={(event) => {
+                                            event.preventDefault();
+                                            navigate({
+                                                page: "instances",
+                                                instance: item.name,
+                                            });
+                                        }}
+                                    >
+                                        {item.name}
+                                    </a>
                                     <span>
                                         {item.snapshot.status} ·{" "}
                                         {item.snapshot.connectionState}
@@ -185,7 +197,7 @@ export function Instances({
                                             )?.worker
                                         }
                                     />
-                                </button>
+                                </article>
                             ))}
                         </div>
                     )}

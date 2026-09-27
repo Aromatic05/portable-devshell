@@ -291,8 +291,21 @@ h4 {
     display: grid;
     gap: 0.25rem;
 }
-.instance.selected {
+.instance:hover {
+    border-color: #6d85aa;
+}
+.instance.selected,
+.instance.selected:hover {
     border-color: #8ab4ff;
+}
+.instance > a {
+    color: #8ab4ff;
+    font-size: 1.05rem;
+    font-weight: 650;
+    overflow-wrap: anywhere;
+}
+.instance > a:hover {
+    text-decoration: underline;
 }
 .instances-heading {
     display: flex;

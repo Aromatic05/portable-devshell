@@ -206,9 +206,10 @@ it("does not offer Control lifecycle actions for an online self-managed reverse 
 it("starts a stopped local instance directly and marks the selected card", () => {
     const store = localStore("stopped");
     renderInstances(store, "local-one");
-    const card = screen.getByRole("button", { name: /local-one/u });
+    const link = screen.getByRole("link", { name: /local-one/u });
 
-    expect(card).toHaveAttribute("aria-pressed", "true");
+    expect(link).toHaveAttribute("aria-current", "page");
+    expect(link).toHaveAttribute("href", "#/instances/local-one");
     expect(screen.getByRole("link", { name: "Config" })).toHaveAttribute(
         "href",
         "#/instances/local-one?view=config",
@@ -446,11 +447,13 @@ it("shows instance refresh failures beside the selected detail instead of failin
     ).toBeInTheDocument();
 });
 
-it("routes an instance card to a bookmarkable detail URL", () => {
+it("routes an instance card link to a bookmarkable detail URL", () => {
     const store = localStore("ready");
     const { navigate } = renderInstances(store);
+    const link = screen.getByRole("link", { name: /local-one/u });
 
-    fireEvent.click(screen.getByRole("button", { name: /local-one/u }));
+    expect(link).toHaveAttribute("href", "#/instances/local-one");
+    fireEvent.click(link);
 
     expect(navigate).toHaveBeenCalledWith({
         instance: "local-one",
