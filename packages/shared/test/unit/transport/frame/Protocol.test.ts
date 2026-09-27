@@ -13,6 +13,11 @@ class MemoryChannel implements Channel {
     readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     #closed = false;
     #peer?: MemoryChannel;
+    readonly #synchronous: boolean;
+
+    constructor(synchronous = false) {
+        this.#synchronous = synchronous;
+    }
 
     get closed(): boolean {
         return this.#closed;
@@ -29,7 +34,8 @@ class MemoryChannel implements Channel {
             throw new Error("memory channel peer is closed");
         }
         const copy = Uint8Array.from(data);
-        queueMicrotask(() => peer.#accept(copy));
+        if (this.#synchronous) peer.#accept(copy);
+        else queueMicrotask(() => peer.#accept(copy));
     }
 
     onData(listener: (data: Uint8Array) => void): () => void {
@@ -62,13 +68,13 @@ class MemoryChannel implements Channel {
     }
 }
 
-function pair(): {
+function pair(synchronous = false): {
     opener: FrameProtocol;
     acceptor: FrameProtocol;
     acceptorChannel: MemoryChannel;
 } {
-    const left = new MemoryChannel();
-    const right = new MemoryChannel();
+    const left = new MemoryChannel(synchronous);
+    const right = new MemoryChannel(synchronous);
     left.connect(right);
     right.connect(left);
     return {
@@ -136,6 +142,21 @@ test("per-stream credit blocks only the slow logical stream", async () => {
     assert.deepEqual(await first.remote.read(), Uint8Array.of(1, 2));
     await firstWrite;
     assert.deepEqual(await first.remote.read(), Uint8Array.of(3, 4));
+
+    opener.close();
+    acceptor.close();
+});
+
+test("WINDOW restores receive credit before a synchronous peer can spend it", async () => {
+    const { opener, acceptor } = pair(true);
+    const { local, remote } = await openPair(opener, acceptor, "credit-race", 2);
+
+    await remote.write(Uint8Array.of(1, 2));
+    const nextWrite = remote.write(Uint8Array.of(3, 4));
+
+    assert.deepEqual(await local.read(), Uint8Array.of(1, 2));
+    await nextWrite;
+    assert.deepEqual(await local.read(), Uint8Array.of(3, 4));
 
     opener.close();
     acceptor.close();

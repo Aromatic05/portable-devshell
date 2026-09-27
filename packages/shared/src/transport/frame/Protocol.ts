@@ -229,15 +229,15 @@ export class FrameProtocol implements FrameStreamHost {
         this.#assertCurrent(stream);
         if (byteLength <= 0) return;
         if (!stream.remoteFinished) {
+            if (stream.receiveCredit > UINT32_MAX - byteLength) {
+                throw this.#connectionError("Frame receive credit overflow.");
+            }
+            stream.restoreReceiveCredit(byteLength);
             await this.#writeFrame({
                 type: "window",
                 streamId: stream.id,
                 creditDelta: byteLength,
             });
-            if (stream.receiveCredit > UINT32_MAX - byteLength) {
-                throw this.#connectionError("Frame receive credit overflow.");
-            }
-            stream.restoreReceiveCredit(byteLength);
         }
         this.#cleanupIfClosed(stream);
     }
