@@ -271,6 +271,18 @@ export function selectBreadcrumbSegments(state: TuiAppState): string[] {
             if (route.view === "detail")
                 segments.push(resolveTodoBreadcrumbTitle(state, route.todoId));
             break;
+        case "extensions":
+            if (route.view === "page") {
+                const descriptor = state.readModel.tuiPages.find(
+                    (page) => page.id === route.pageId,
+                );
+                segments.push(
+                    truncateTuiBreadcrumbSegment(
+                        descriptor?.title ?? route.pageId,
+                    ),
+                );
+            }
+            break;
         case "connections":
             if (route.view === "connector")
                 segments.push(
@@ -444,6 +456,9 @@ function isTuiRouteResourceValid(
             todo?.tasks?.some((task) => task.taskId === route.todoId) === true
         );
     }
+    if (route.page === "extensions" && route.view === "page") {
+        return state.readModel.tuiPages.some((page) => page.id === route.pageId);
+    }
     return true;
 }
 
@@ -451,7 +466,7 @@ function routeContextInstance(
     page: TuiPageId,
     instance: string | undefined,
 ): string | undefined {
-    return page === "messages" ? undefined : instance;
+    return page === "messages" || page === "extensions" ? undefined : instance;
 }
 
 function assertRoutePage(state: TuiAppState, route: TuiRoute): void {

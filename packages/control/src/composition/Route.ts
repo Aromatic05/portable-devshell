@@ -14,6 +14,10 @@ import {
     createCliRouteModule,
     type CliCommandPort,
 } from "../control/extension/cli/Route.js";
+import {
+    createTuiPageRouteModule,
+    type TuiPagePort,
+} from "../control/extension/tui/Route.js";
 import type { ConfigEditorPort } from "../control/config/Route.js";
 import { createConfigRouteModule } from "../control/config/Route.js";
 import {
@@ -52,6 +56,7 @@ import { createToolRouteModule } from "../instance/execution/tool/Route.js";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,
+    type WebPagePort,
 } from "../server/web/extension/application/Route.js";
 
 export interface ControlRouteCommentPort {
@@ -79,7 +84,9 @@ export interface ControlRouteCompositionOptions {
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
     toolProvenance?: ToolCallProvenanceStore;
+    tuiPages?: TuiPagePort;
     webApplications?: WebApplicationCatalogPort;
+    webPages?: WebPagePort;
 }
 
 export class ControlRouteComposition {
@@ -148,11 +155,15 @@ export class ControlRouteComposition {
                     ...(this.#options.cliCommands === undefined
                         ? []
                         : [createCliRouteModule(this.#options.cliCommands)]),
+                    ...(this.#options.tuiPages === undefined
+                        ? []
+                        : [createTuiPageRouteModule(this.#options.tuiPages)]),
                     ...(this.#options.webApplications === undefined
                         ? []
                         : [
                               createWebApplicationRouteModule(
                                   this.#options.webApplications,
+                                  this.#options.webPages,
                               ),
                           ]),
                     createMcpRouteModule({

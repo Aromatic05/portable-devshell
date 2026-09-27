@@ -14,10 +14,12 @@ import {
 import type { InstanceRegistry } from "../../control/instance/registry/Registry.js";
 import { DebugPatchService } from "../../control/debug/Service.js";
 import { CliExtensionCommandService } from "../../control/extension/cli/command/Service.js";
+import { TuiExtensionPageService } from "../../control/extension/tui/Route.js";
 import { ModelDevshellBroker } from "../../control/extension/cli/command/ModelBroker.js";
 import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
 import { ExtensionControlService } from "../../control/extension/Service.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
+import { WebExtensionPageService } from "../../server/web/extension/page/Service.js";
 import type { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionInstallService } from "../../control/extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
@@ -181,7 +183,9 @@ export class ControlRuntime {
             runtimeSubscriptions,
             shutdown: options.shutdown,
             toolProvenance: options.mcp.toolProvenance,
+            tuiPages: new TuiExtensionPageService(this.#extensions),
             webApplications: new WebApplicationCatalog(this.#extensions),
+            webPages: new WebExtensionPageService(this.#extensions),
         });
         this.#mcp.configEditor.registerInstanceDeleted(
             async (instance) => {

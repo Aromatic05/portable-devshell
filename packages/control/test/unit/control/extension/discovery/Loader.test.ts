@@ -340,8 +340,9 @@ test("Extension loader isolates runtime directories for overlapping loads of the
 test("Extension loader rejects incompatible API without owning the CLI command namespace", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
+    const [apiMajor, apiMinor] = EXTENSION_API_VERSION.split(".").map(Number);
     const incompatible = await harness.writeGeneration({
-        apiVersion: "4.2.0",
+        apiVersion: `${apiMajor}.${apiMinor + 1}.0`,
     });
     const cliNamedExtension = await harness.writeGeneration({ id: "status" });
     let imports = 0;

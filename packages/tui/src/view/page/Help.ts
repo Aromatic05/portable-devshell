@@ -48,6 +48,10 @@ export function buildContextualHelpLines(state: TuiAppState): string[] {
             "Enter opens the focused Todo; Space expands details.",
             "Destructive actions require confirmation.",
         ],
+        extensions: [
+            "Enter opens an Extension-provided terminal page.",
+            "Extension actions use the same focus and confirmation behavior as native pages.",
+        ],
         help: [
             "This page contains the complete navigation and action reference.",
         ],

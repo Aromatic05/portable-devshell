@@ -1,11 +1,16 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
     applications,
+    pages,
     type WebApplicationBinding,
+    type WebPageBinding,
+    type WebPageRequest,
+    type WebPageSnapshot,
 } from "@portable-devshell/extension/web";
 
 import type {
     ExtensionPointSandboxBridge,
+    ExtensionPointSandboxInvocationContext,
     ExtensionPointValidationContext,
 } from "../../../control/extension/generation/registration/PointRegistry.js";
 import type { ExtensionSandboxPointCodec } from "../../../control/extension/generation/sandbox/bridge/PointCodec.js";
@@ -52,6 +57,32 @@ export const webApplicationsSandboxCodec: ExtensionSandboxPointCodec =
             return upstream?.href;
         },
     });
+
+export const webPagesSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
+    describeBinding(
+        binding: unknown,
+        context: ExtensionPointValidationContext,
+    ): ExtensionJsonValue {
+        validateWebPageBinding(binding, context);
+        return Object.freeze({ kind: "page" });
+    },
+    id: pages.id,
+    async invokeBinding(
+        binding: unknown,
+        input: ExtensionJsonValue | undefined,
+        signal: AbortSignal,
+        context: ExtensionPointSandboxInvocationContext,
+    ): Promise<unknown> {
+        validateWebPageBinding(binding, context);
+        const value = readRecord(input, "Web page invocation");
+        const request = readWebPageRequest(value.request);
+        const invocation = readRecord(value.context, "Web page invocation context");
+        return await binding(request, {
+            requestId: readString(invocation.requestId, "requestId"),
+            signal,
+        });
+    },
+});
 
 export function createWebApplicationSandboxBinding(
     descriptor: ExtensionJsonValue,
@@ -117,7 +148,53 @@ export function createWebApplicationSandboxBinding(
     );
 }
 
+export function createWebPageSandboxBinding(
+    descriptor: ExtensionJsonValue,
+    context: ExtensionPointValidationContext,
+    bridge: ExtensionPointSandboxBridge,
+): WebPageBinding {
+    const value = readRecord(
+        descriptor,
+        `Extension ${context.extensionId} web.pages/${context.id} sandbox descriptor`,
+    );
+    if (
+        value.kind !== "page" ||
+        Object.keys(value).some((key) => key !== "kind")
+    )
+        throw new TypeError(
+            `Extension ${context.extensionId} web.pages/${context.id} sandbox descriptor is invalid.`,
+        );
+    return async (request, invocation) =>
+        (await bridge.invokeBinding(
+            pages.id,
+            context.id,
+            {
+                context: { requestId: invocation.requestId },
+                request: request as unknown as ExtensionJsonValue,
+            },
+            { signal: invocation.signal, timeoutLabel: "Web page invocation" },
+        )) as WebPageSnapshot;
+}
+
 export function validateWebApplicationBinding(
+    value: unknown,
+    context: ExtensionPointValidationContext,
+): asserts value is WebApplicationBinding {
+    validateWebApplicationSourceBinding(value, context);
+}
+
+export function validateWebPageBinding(
+    value: unknown,
+    context: ExtensionPointValidationContext,
+): asserts value is WebPageBinding {
+    if (typeof value !== "function") {
+        throw new TypeError(
+            `Extension ${context.extensionId} web.pages/${context.id} binding must be a function.`,
+        );
+    }
+}
+
+function validateWebApplicationSourceBinding(
     value: unknown,
     context: ExtensionPointValidationContext,
 ): asserts value is WebApplicationBinding {
@@ -167,6 +244,33 @@ export function validateWebApplicationBinding(
     throw new TypeError(
         `Extension ${context.extensionId} web.applications/${context.id} source kind is invalid.`,
     );
+}
+
+function readWebPageRequest(value: ExtensionJsonValue | undefined): WebPageRequest {
+    const record = readRecord(value, "Web page request");
+    if (
+        record.kind === "read" &&
+        Object.keys(record).every((key) => key === "kind")
+    )
+        return { kind: "read" };
+    if (record.kind === "action") {
+        const allowed = new Set(["actionId", "kind", "rowId"]);
+        if (Object.keys(record).some((key) => !allowed.has(key)))
+            throw new TypeError("Web page action request contains unknown fields.");
+        return {
+            actionId: readString(record.actionId, "actionId"),
+            kind: "action",
+            ...(record.rowId === undefined
+                ? {}
+                : { rowId: readString(record.rowId, "rowId") }),
+        };
+    }
+    throw new TypeError("Web page request kind is invalid.");
+}
+
+function readString(value: ExtensionJsonValue | undefined, label: string): string {
+    if (typeof value === "string" && value.length > 0) return value;
+    throw new TypeError(`${label} must be a non-empty string.`);
 }
 
 function readRecord(

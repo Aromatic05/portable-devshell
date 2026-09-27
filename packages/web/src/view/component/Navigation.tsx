@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { WebApplicationDescriptor } from "@portable-devshell/shared/browser";
+import type {
+    WebApplicationDescriptor,
+    WebPageDescriptor,
+} from "@portable-devshell/shared/browser";
 
 import { pageRoute, type WebPage, type WebRoute } from "../../app/Route.js";
 
@@ -15,19 +18,29 @@ const pages: Array<{ page: WebPage; label: string }> = [
 export function PageSwitcher({
     active,
     applications,
+    extensionPages,
     counts,
     navigate,
 }: {
     active: WebRoute;
     applications: readonly WebApplicationDescriptor[];
+    extensionPages: readonly WebPageDescriptor[];
     counts: { instances: number; todos: number };
     navigate(route: WebRoute): void;
 }) {
     const [open, setOpen] = useState(false);
     const root = useRef<HTMLDivElement>(null);
     const activeTrigger = useRef<HTMLButtonElement | null>(null);
-    const current =
-        pages.find((item) => item.page === active.page) ?? pages[0]!;
+    const current = pages.find((item) => item.page === active.page) ?? pages[0]!;
+    const extensionPage =
+        active.page === "extension"
+            ? extensionPages.find((item) => item.id === active.id)
+            : undefined;
+    const currentLabel = extensionPage?.title ?? current.label;
+    const standaloneApplications = applications.filter(
+        (application) =>
+            !extensionPages.some((page) => page.id === application.id),
+    );
 
     useEffect(() => {
         if (!open) return;
@@ -83,7 +96,7 @@ export function PageSwitcher({
                 <button
                     aria-controls="page-switcher-popover"
                     aria-expanded={open}
-                    aria-label={`Switch page, current ${current.label}`}
+                    aria-label={`Switch page, current ${currentLabel}`}
                     className="page-switcher-trigger"
                     onClick={(event) => {
                         activeTrigger.current = event.currentTarget;
@@ -91,10 +104,10 @@ export function PageSwitcher({
                     }}
                     type="button"
                 >
-                    <span>{current.label}</span>
+                    <span>{currentLabel}</span>
                     <span aria-hidden="true">⌄</span>
                 </button>
-                {applications.length === 0 ? null : (
+                {extensionPages.length === 0 && standaloneApplications.length === 0 ? null : (
                     <button
                         aria-controls="page-switcher-popover"
                         aria-expanded={open}
@@ -147,7 +160,7 @@ export function PageSwitcher({
                             );
                         })}
                     </div>
-                    {applications.length === 0 ? null : (
+                    {extensionPages.length === 0 && standaloneApplications.length === 0 ? null : (
                         <>
                             <div
                                 className="page-switcher-separator"
@@ -156,7 +169,29 @@ export function PageSwitcher({
                             <span className="page-switcher-section">
                                 Extensions
                             </span>
-                            {applications.map((application) => (
+                            {extensionPages.map((page) => (
+                                <button
+                                    aria-current={
+                                        active.page === "extension" && active.id === page.id
+                                            ? "page"
+                                            : undefined
+                                    }
+                                    className={
+                                        active.page === "extension" && active.id === page.id
+                                            ? "selected"
+                                            : ""
+                                    }
+                                    key={`extension-page:${page.extensionId}:${page.id}`}
+                                    onClick={() => {
+                                        setOpen(false);
+                                        navigate({ page: "extension", id: page.id });
+                                    }}
+                                    type="button"
+                                >
+                                    {page.title}
+                                </button>
+                            ))}
+                            {standaloneApplications.map((application) => (
                                 <a
                                     href={extensionApplicationHref(
                                         application.id,

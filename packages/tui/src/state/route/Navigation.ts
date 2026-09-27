@@ -15,6 +15,7 @@ export const tuiPageEntries: readonly TuiPageEntry[] = [
     { id: "todo", label: "todo" },
     { id: "help", label: "help" },
     { id: "terminal", label: "terminal" },
+    { id: "extensions", label: "extensions" },
 ];
 
 export const tuiPageOrder: readonly TuiPageId[] = tuiPageEntries.map(
@@ -30,6 +31,7 @@ export const tuiShortcutPages: readonly TuiPageId[] = [
     "todo",
     "help",
     "terminal",
+    "extensions",
 ];
 
 const searchablePages = new Set<TuiPageId>([
@@ -39,6 +41,7 @@ const searchablePages = new Set<TuiPageId>([
     "config",
     "messages",
     "audit",
+    "extensions",
 ]);
 
 export function isTuiSearchablePage(page: TuiPageId): boolean {

@@ -40,6 +40,24 @@ export type {
     CliCommandWireResult,
 } from "./protocol/control/extension/CliCommand.js";
 export type { WebApplicationDescriptor } from "./protocol/control/extension/WebApplication.js";
+export type {
+    WebPageAction,
+    WebPageCell,
+    WebPageColumn,
+    WebPageDescriptor,
+    WebPageRow,
+    WebPageSnapshot,
+    WebPageTable,
+    WebPageTone,
+} from "./protocol/control/extension/WebPage.js";
+export type {
+    TuiPageAction,
+    TuiPageDescriptor,
+    TuiPageItem,
+    TuiPageLine,
+    TuiPageSnapshot,
+    TuiPageTone,
+} from "./protocol/control/extension/TuiPage.js";
 export {
     InstanceEventStream,
     readInstanceEvent,

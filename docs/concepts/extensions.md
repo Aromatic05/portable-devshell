@@ -30,7 +30,7 @@ Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion`
 ```json
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.1.0",
+    "apiVersion": "4.2.0",
     "activation": "lazy",
     "id": "example",
     "name": "Example",
@@ -314,7 +314,7 @@ CLI command implementation 自己抛出的 usage/business error 仍属于 comman
 
 Local-owner CLI 可以在 invocation context 中提供 `workingDirectory`。依赖 Control 主机 project 路径的 Extension 必须使用这个字段，而不能读取 daemon 自己的 `process.cwd()` 猜调用者目录。
 
-### web.applications
+### Web surfaces
 
 `@portable-devshell/extension/web` 当前公开：
 
@@ -323,6 +323,11 @@ applications
 WebApplicationDeclaration
 WebApplicationBinding
 WebApplicationSource
+
+pages
+WebPageDeclaration
+WebPageBinding
+WebPageSnapshot
 ```
 
 Web host 拥有最终 mount path、authentication/session、same-origin/security headers、HTTP/WebSocket transport 和 lease lifetime。
@@ -343,15 +348,15 @@ Web domain 同样从 static catalog 投影 application discovery DTO，只暴露
 
 Web application 的 HTTP/WebSocket failure 也由 Web host 翻译，而不是把 ExtensionHost 或 Node upstream exception 直接暴露给浏览器：未发布 application 返回 404；已发布但 activation/source/generation 暂不可用返回 503；endpoint upstream 建连失败返回 502。响应正文使用固定 Web-domain 文案，不包含 generation path、provider socket、`ECONNREFUSED` 等内部细节。
 
-CLI/Web discovery 都是各自 domain 的 read surface，不存在 public `extension.catalog`、generic contribution listing 或 runtime binding introspection API。
+`web.pages` 与 `web.applications` 是两个不同的 surface。`web.pages` 由 portable-devshell 主 WebUI 渲染，只允许 Extension 返回 Web-domain 的结构化 table / row / cell / action snapshot；Extension 不获得 React component、主 Web DOM、WebStore 或浏览器 session internals。Host 对 snapshot 做边界校验，外链只接受 HTTP(S)，destructive action 继续使用主 WebUI 的确认交互。需要完整自定义 browser application、WebSocket 或复杂实时界面的 Extension 继续使用 `web.applications`。
 
-#### TODO: Extension management UI
+两种 Web surface 都从 static declaration 建立 discovery entry，因此 navigation 不要求提前 activation Extension；真正读取 page snapshot、执行 action 或请求 application content 时才获取 generation lease。
 
-`0.7.6` 不扩张 `web.applications` 来解决 Extension 的通用管理 UI。当前 ABI 只能让 Extension 提供独立 Web application source，还没有稳定的 contract 让 Extension 向 portable-devshell 主 WebUI / TUI 注入 management state、actions 与 presentation。
+### TUI surface
 
-因此当前 Access 明确采用 CLI-first management：CLI 负责 endpoint 的创建、修改、启停、删除与 reload；内置 Web application 只作为 observation surface，不视为完整管理页面；TUI 暂不提供 Access management surface。Access 自己的 Web backend 也不构成已冻结的 public Extension UI API。
+`@portable-devshell/extension/tui` 公开 `tui.pages`。它不是 Web page contract 的终端版，而是独立的 terminal interaction contract：Extension 返回 item / summary / detail / action snapshot，Host 将其投影到现有 TUI Box、focus、route、scroll 与 confirmation 行为。TUI invocation context 另外提供 `localOwner`，让管理 action 能保留 TUI 自己的 authority 语义；Extension 不获得 Ink component tree 或 TUI internal state。
 
-后续版本需要先从多个 Extension 的真实需求中归纳通用 management UI contract，再决定由 Extension 提供完整 application、声明 host-rendered management model，或两者组合。不能为了 Access 单独引入 Host Web/TUI 私有入口并把特例固化为 public ABI。
+CLI、Web 与 TUI 因此只共享 Extension lifecycle、Config、generation lease 和 Extension 自己的业务 service，不共享 presentation / invocation contract。没有 public `management.pages`、generic contribution listing 或 runtime binding introspection API。当前 Access 同时实现 CLI、Web page、TUI page 和独立 Web application；Agent provider management 又作为第二个不同业务模型验证了同一组 surface contract，其中 Web page 保持只读，而 local-owner TUI page 可以执行 provider mutation。两者都不需要共享 presentation model。
 
 ## Generation ownership
 

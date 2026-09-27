@@ -64,6 +64,33 @@ main {
     -webkit-user-select: text;
     user-select: text;
 }
+.extension-page {
+    display: grid;
+    gap: 1rem;
+}
+.extension-table-scroll {
+    overflow-x: auto;
+}
+.extension-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.extension-table th,
+.extension-table td {
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid #34445c;
+    text-align: left;
+    vertical-align: top;
+}
+.tone-success {
+    color: #a8e6c5;
+}
+.tone-warning {
+    color: #f3ce82;
+}
+.tone-danger {
+    color: #ffb4bd;
+}
 h1,
 h2,
 h3,

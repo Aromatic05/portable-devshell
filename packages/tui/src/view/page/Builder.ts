@@ -9,6 +9,7 @@ import { buildHelpPageBoxes } from "./Help.js";
 import { buildInstancesPageBoxes } from "./instance/Instances.js";
 import { buildTodoPageBoxes } from "./workflow/Overview.js";
 import { makeBox } from "./Support.js";
+import { currentTuiRoute } from "../../state/route/State.js";
 
 export function buildBoxesForPage(
     state: TuiAppState,
@@ -20,6 +21,7 @@ export function buildBoxesForPage(
         page !== "instances" &&
         page !== "todo" &&
         page !== "config" &&
+        page !== "extensions" &&
         page !== "audit"
     ) {
         return boxes;
@@ -72,14 +74,64 @@ function buildUnfilteredBoxes(
             return instanceName === undefined
                 ? []
                 : buildAuditPageBoxes(state, instanceName);
+        case "extensions":
+            return buildExtensionPageBoxes(state);
         case "terminal":
             return [];
     }
 }
 
+function buildExtensionPageBoxes(state: TuiAppState): BoxModel[] {
+    const route = currentTuiRoute(state);
+    if (route.page !== "extensions") return [];
+    if (route.view === "list") {
+        return state.readModel.tuiPages.map((page) =>
+            makeBox(state, "extensions", undefined, {
+                detailLines: [],
+                id: `extension:${page.id}`,
+                primaryRoute: {
+                    page: "extensions",
+                    pageId: page.id,
+                    view: "page",
+                },
+                searchText: `${page.extensionId} ${page.id} ${page.title}`,
+                summaryLines: [`extension ${page.extensionId}`],
+                title: page.title,
+            }),
+        );
+    }
+    const snapshot = state.extensionPageSnapshots[route.pageId];
+    if (snapshot === undefined) return [];
+    return snapshot.items.map((item) =>
+        makeBox(state, "extensions", undefined, {
+            detailLines: [
+                ...(item.detail ?? []).map((line) => ({
+                    id: `detail:${line.text}`,
+                    text: line.text,
+                    tone: line.tone,
+                })),
+                ...(item.actions ?? []).map((action) => ({
+                    id: `button:extension.action:${action.id}`,
+                    text: `[ ${action.label} ]`,
+                    tone: action.tone === "danger" ? ("danger" as const) : ("accent" as const),
+                })),
+            ],
+            id: item.id,
+            searchText: [
+                item.title,
+                ...item.summary.map((line) => line.text),
+                ...(item.detail ?? []).map((line) => line.text),
+            ].join(" "),
+            status: item.status,
+            summaryLines: item.summary.map((line) => line.text),
+            title: item.title,
+        }),
+    );
+}
+
 function filterStatusBox(
     state: TuiAppState,
-    page: "instances" | "todo" | "config" | "audit",
+    page: "instances" | "todo" | "config" | "extensions" | "audit",
     instanceName: string | undefined,
     query: string,
     visible: number,

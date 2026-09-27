@@ -2,22 +2,28 @@ import {
     cliModelCommandsExtensionPointDefinition,
     cliNativeCommandsExtensionPointDefinition,
 } from "../control/extension/cli/Point.js";
+import { tuiPagesExtensionPointDefinition } from "../control/extension/tui/Point.js";
 import {
     toolCallReviewExtensionPointDefinition,
     toolCallRewriteExtensionPointDefinition,
 } from "../control/extension/toolcall/Point.js";
 import { ExtensionPointRegistry } from "../control/extension/generation/registration/PointRegistry.js";
 import type { ExtensionSandboxPointCodecRegistry } from "../control/extension/generation/sandbox/bridge/PointCodec.js";
-import { webApplicationsExtensionPointDefinition } from "../server/web/extension/Point.js";
+import {
+    webApplicationsExtensionPointDefinition,
+    webPagesExtensionPointDefinition,
+} from "../server/web/extension/Point.js";
 import { createControlExtensionSandboxPointRegistry } from "./Sandbox.js";
 
 export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
     const points = new ExtensionPointRegistry([
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
+        tuiPagesExtensionPointDefinition,
         toolCallReviewExtensionPointDefinition,
         toolCallRewriteExtensionPointDefinition,
         webApplicationsExtensionPointDefinition,
+        webPagesExtensionPointDefinition,
     ]);
     assertControlExtensionPointRegistryParity(
         points,

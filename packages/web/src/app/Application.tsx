@@ -12,6 +12,7 @@ import { Instances } from "../view/page/Instances.js";
 import { Messages } from "../view/page/activity/messages/Page.js";
 import { Overview } from "../view/page/Overview.js";
 import { Todos } from "../view/page/Todos.js";
+import { ExtensionPage } from "../view/page/Extension.js";
 
 export function Application({
     busy,
@@ -54,6 +55,7 @@ export function Application({
                 <PageSwitcher
                     active={route}
                     applications={state.readModel.webApplications}
+                    extensionPages={state.readModel.webPages}
                     counts={counts}
                     navigate={navigate}
                 />
@@ -111,6 +113,14 @@ export function Application({
                     )}
                 </div>
                 {route.page === "overview" ? <Overview state={state} /> : null}
+                {route.page === "extension" ? (
+                    <ExtensionPage
+                        descriptor={state.readModel.webPages.find(
+                            (page) => page.id === route.id,
+                        )}
+                        store={store}
+                    />
+                ) : null}
                 {route.page === "instances" ? (
                     <Instances
                         disabled={interactionDisabled}

@@ -30,6 +30,8 @@ test("Access Extension manifest is eager, process-managed, and declares Config o
     assert.equal(manifest.config?.access?.["web.publicBaseUrl"], "read-write");
     assert.deepEqual(Object.keys(manifest.extensions).sort(), [
         "cli.native-commands",
+        "tui.pages",
         "web.applications",
+        "web.pages",
     ]);
 });

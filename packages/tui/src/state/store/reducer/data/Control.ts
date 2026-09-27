@@ -18,6 +18,17 @@ export function reduceTuiStoreReducerControl(
             )
                 ? state
                 : { ...state, conversationPreferences: action.preferences };
+        case "extensionPage.replace": {
+            const current = state.extensionPageSnapshots[action.pageId];
+            if (isDeepStrictEqual(current, action.snapshot)) return state;
+            return {
+                ...state,
+                extensionPageSnapshots: {
+                    ...state.extensionPageSnapshots,
+                    [action.pageId]: action.snapshot,
+                },
+            };
+        }
         case "control.readModel.replace": {
             if (
                 isDeepStrictEqual(state.instances, action.instances) &&

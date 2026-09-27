@@ -11,6 +11,8 @@ export * from "./protocol/control/config/input/Validate.js";
 export * from "./protocol/control/config/model/ConfigDefaults.js";
 export * from "./protocol/control/config/model/ConfigEdit.js";
 export * from "./protocol/control/config/model/ControlConfig.js";
+export * from "./protocol/control/extension/TuiPage.js";
+export * from "./protocol/control/extension/WebPage.js";
 export * from "./protocol/artifact/Image.js";
 export * from "./protocol/artifact/Share.js";
 export * from "./protocol/artifact/Transfer.js";

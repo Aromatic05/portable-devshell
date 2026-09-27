@@ -6,7 +6,7 @@ import type {
     ExtensionPointDeclaration,
 } from "./ExtensionApi.js";
 
-export const EXTENSION_API_VERSION = "4.1.0";
+export const EXTENSION_API_VERSION = "4.2.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
 
 const capabilities = new Set<ExtensionCapability>([

@@ -28,6 +28,7 @@ import {
     createCliModelSandboxBinding,
     createCliNativeSandboxBinding,
 } from "../../../../../src/control/extension/cli/Sandbox.ts";
+import { createTuiPageSandboxBinding } from "../../../../../src/control/extension/tui/Sandbox.ts";
 import {
     createToolCallReviewSandboxBinding,
     createToolCallRewriteSandboxBinding,
@@ -40,7 +41,10 @@ import {
     EXTENSION_SANDBOX_MAX_MESSAGE_BYTES,
     type ExtensionSandboxRegistrationDescriptor,
 } from "../../../../../src/control/extension/generation/sandbox/bridge/Protocol.ts";
-import { createWebApplicationSandboxBinding } from "../../../../../src/server/web/extension/Sandbox.ts";
+import {
+    createWebApplicationSandboxBinding,
+    createWebPageSandboxBinding,
+} from "../../../../../src/server/web/extension/Sandbox.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
 const noopLogger: ExtensionLogger = {
@@ -1207,6 +1211,105 @@ export function activate(context) {
     await assert.rejects(
         sandboxWebEndpoint(sandbox, "test"),
         /Web application endpoint resolution timed out/u,
+    );
+});
+
+test("Extension sandbox keeps Web and TUI page invocation contracts separate", async (t) => {
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-ui-pages",
+        `
+export function activate(context) {
+    context.register({ id: "web.pages" }, "web", async (request, invocation) => ({
+        tables: [{
+            columns: [{ id: "value", label: "Value" }],
+            id: "table",
+            rows: [{
+                cells: { value: { text: request.kind + ":" + invocation.requestId } },
+                id: "row"
+            }]
+        }]
+    }));
+    context.register({ id: "tui.pages" }, "tui", async (request, invocation) => ({
+        items: [{
+            id: "row",
+            summary: [{ text: request.kind }],
+            title: invocation.localOwner ? "owner" : "remote"
+        }]
+    }));
+}
+`,
+    );
+    const descriptor = await sandbox.start();
+    assert.deepEqual(
+        [...descriptor.registrations].sort((left, right) =>
+            left.pointId.localeCompare(right.pointId),
+        ),
+        [
+        { descriptor: { kind: "page" }, id: "tui", pointId: "tui.pages" },
+        { descriptor: { kind: "page" }, id: "web", pointId: "web.pages" },
+        ],
+    );
+
+    const webRegistration = await sandboxRegistration(
+        sandbox,
+        "web.pages",
+        "web",
+    );
+    const web = createWebPageSandboxBinding(
+        webRegistration.descriptor,
+        sandboxPointContext("web"),
+        sandbox,
+    );
+    assert.deepEqual(
+        await web(
+            { kind: "read" },
+            { requestId: "web-1", signal: new AbortController().signal },
+        ),
+        {
+            tables: [
+                {
+                    columns: [{ id: "value", label: "Value" }],
+                    id: "table",
+                    rows: [
+                        {
+                            cells: { value: { text: "read:web-1" } },
+                            id: "row",
+                        },
+                    ],
+                },
+            ],
+        },
+    );
+
+    const tuiRegistration = await sandboxRegistration(
+        sandbox,
+        "tui.pages",
+        "tui",
+    );
+    const tui = createTuiPageSandboxBinding(
+        tuiRegistration.descriptor,
+        sandboxPointContext("tui"),
+        sandbox,
+    );
+    assert.deepEqual(
+        await tui(
+            { kind: "read" },
+            {
+                localOwner: true,
+                requestId: "tui-1",
+                signal: new AbortController().signal,
+            },
+        ),
+        {
+            items: [
+                {
+                    id: "row",
+                    summary: [{ text: "read" }],
+                    title: "owner",
+                },
+            ],
+        },
     );
 });
 

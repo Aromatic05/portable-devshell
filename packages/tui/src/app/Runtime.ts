@@ -19,6 +19,7 @@ import {
     tuiViewProjection,
 } from "../view/projection/View.js";
 import type { TuiTerminalTab } from "../state/route/Model.js";
+import { currentTuiRoute } from "../state/route/State.js";
 import { TuiApp } from "../view/shell/App.js";
 import type { TuiAppKey } from "../view/shell/App.js";
 import {
@@ -342,6 +343,13 @@ export class TuiRuntime {
             onTodoDelete: async (instance, taskId) => {
                 await this.#operations.deleteTodo(instance, taskId);
             },
+            onExtensionPageAction: async (pageId, actionId, itemId) => {
+                await this.session.invokeExtensionPageAction(
+                    pageId,
+                    actionId,
+                    itemId,
+                );
+            },
             onInstanceEnabledChange: async (instance, enabled) => {
                 await this.#operations.setInstanceEnabled(instance, enabled);
             },
@@ -355,6 +363,13 @@ export class TuiRuntime {
                 if (page === "terminal") {
                     this.#terminalController.invalidate();
                     await this.#terminalController.syncSession();
+                    return;
+                }
+                if (page === "extensions") {
+                    const route = currentTuiRoute(this.store.getState());
+                    if (route.page === "extensions" && route.view === "page")
+                        await this.session.refreshExtensionPage(route.pageId);
+                    else await this.session.refreshExtensionPages();
                     return;
                 }
                 await this.#operations.reloadPage(page, instance);

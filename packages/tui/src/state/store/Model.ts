@@ -6,6 +6,7 @@ import type {
     InstanceEvent,
     InstanceLogEntry,
     JsonValue,
+    TuiPageSnapshot,
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState, TuiInteractionState } from "../Interaction.js";
@@ -75,6 +76,7 @@ export interface TuiAppState {
     commandRecords: TuiCommandRecord[];
     connection: TuiConnectionState;
     conversationPreferences: ConversationPreferencesSnapshot;
+    extensionPageSnapshots: Record<string, TuiPageSnapshot>;
     globalDerived: TuiGlobalDerivedState;
     interaction: TuiInteractionState;
     instances: TuiInstanceListEntry[];
@@ -102,6 +104,11 @@ export type TuiAppAction =
     | {
           preferences: ConversationPreferencesSnapshot;
           type: "conversationPreferences.replace";
+      }
+    | {
+          pageId: string;
+          snapshot: TuiPageSnapshot;
+          type: "extensionPage.replace";
       }
     | { command: TuiCommandRecord; type: "command.upsert" }
     | { error?: ControlError; key: string; type: "panelError.set" }

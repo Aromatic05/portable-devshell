@@ -23,6 +23,9 @@
             "@portable-devshell/extension/web": [
                 "./packages/extension/src/domain/web.ts"
             ],
+            "@portable-devshell/extension/tui": [
+                "./packages/extension/src/domain/tui.ts"
+            ],
             "@portable-devshell/extension/comment": [
                 "./packages/extension/src/domain/comment.ts"
             ],

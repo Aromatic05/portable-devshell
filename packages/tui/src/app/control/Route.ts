@@ -54,6 +54,15 @@ export class TuiRouteDataLoader {
                     );
                 }
                 return;
+            case "extensions":
+                if (route.view === "page") {
+                    await this.options.session.refreshExtensionPage(
+                        route.pageId,
+                        undefined,
+                        signal,
+                    );
+                }
+                return;
             case "help":
             case "terminal":
                 return;

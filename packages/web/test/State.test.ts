@@ -990,6 +990,11 @@ function fakeClients(
                 throw new Error("Not used.");
             },
         },
+        tui: {
+            action: async () => ({ items: [] }),
+            page: async () => ({ items: [] }),
+            pages: async () => [],
+        },
         runtime: {
             openStart: async () => {
                 throw new Error("Not used.");
@@ -1002,7 +1007,10 @@ function fakeClients(
             subscribe: overrides.subscribe ?? (async () => pendingStream()),
         },
         web: {
+            action: async () => ({ tables: [] }),
             applications: async () => [],
+            page: async () => ({ tables: [] }),
+            pages: async () => [],
         },
     };
 }

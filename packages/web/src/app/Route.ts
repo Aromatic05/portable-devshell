@@ -17,6 +17,7 @@ export type AuditScope =
 
 export type WebRoute =
     | { page: "overview" }
+    | { page: "extension"; id: string }
     | {
           page: "instances";
           instance?: string;
@@ -65,6 +66,9 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
         return first === undefined
             ? pageRoute("instances")
             : { page: "instances", instance: first, view: "connections" };
+    }
+    if (page === "extensions" && first !== undefined) {
+        return { page: "extension", id: first };
     }
     if (page === "instances") {
         return {
@@ -120,6 +124,8 @@ export function readHashRoute(hash = window.location.hash): WebRoute {
 
 export function webRouteHref(route: WebRoute): string {
     switch (route.page) {
+        case "extension":
+            return `#/extensions/${encodeSegment(route.id)}`;
         case "instances": {
             const base =
                 route.instance === undefined

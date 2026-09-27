@@ -13,6 +13,10 @@ const workspacePackages = new Map([
         "@portable-devshell/extension/web",
         new URL("../../../packages/extension/src/domain/web.ts", import.meta.url).href,
     ],
+    [
+        "@portable-devshell/extension/tui",
+        new URL("../../../packages/extension/src/domain/tui.ts", import.meta.url).href,
+    ],
 ]);
 
 registerHooks({

@@ -6,13 +6,17 @@ import * as cliApi from "../../src/domain/cli.ts";
 import { modelCommands, nativeCommands } from "../../src/domain/cli.ts";
 import * as toolcallApi from "../../src/domain/toolcall.ts";
 import { review, rewrite } from "../../src/domain/toolcall.ts";
+import * as tuiApi from "../../src/domain/tui.ts";
+import { pages as tuiPages } from "../../src/domain/tui.ts";
 import * as webApi from "../../src/domain/web.ts";
-import { applications } from "../../src/domain/web.ts";
+import { applications, pages as webPages } from "../../src/domain/web.ts";
 
 test("domain Extension Point descriptors use stable string identity", () => {
     assert.equal(nativeCommands.id, "cli.native-commands");
     assert.equal(modelCommands.id, "cli.model-commands");
     assert.equal(applications.id, "web.applications");
+    assert.equal(webPages.id, "web.pages");
+    assert.equal(tuiPages.id, "tui.pages");
     assert.equal(review.id, "toolcall.review");
     assert.equal(rewrite.id, "toolcall.rewrite");
     assert.notEqual(
@@ -29,5 +33,6 @@ test("domain Extension Point descriptors use stable string identity", () => {
 test("domain leaf runtime exports contain only author-facing point descriptors", () => {
     assert.deepEqual(Object.keys(cliApi), ["modelCommands", "nativeCommands"]);
     assert.deepEqual(Object.keys(toolcallApi), ["review", "rewrite"]);
-    assert.deepEqual(Object.keys(webApi), ["applications"]);
+    assert.deepEqual(Object.keys(tuiApi), ["pages"]);
+    assert.deepEqual(Object.keys(webApi), ["applications", "pages"]);
 });

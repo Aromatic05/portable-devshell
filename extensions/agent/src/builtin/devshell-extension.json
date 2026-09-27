@@ -1,6 +1,6 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.0.0",
+    "apiVersion": "4.2.0",
     "activation": "lazy",
     "id": "agent",
     "name": "portable-devshell Agent",
@@ -25,6 +25,18 @@
             }
         ],
         "web.applications": [
+            {
+                "id": "agent",
+                "title": "Agent"
+            }
+        ],
+        "tui.pages": [
+            {
+                "id": "agent",
+                "title": "Agent"
+            }
+        ],
+        "web.pages": [
             {
                 "id": "agent",
                 "title": "Agent"

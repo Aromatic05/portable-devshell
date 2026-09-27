@@ -223,6 +223,44 @@ export class TuiControlSession {
         ]);
     }
 
+    async refreshExtensionPages(
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (this.#canRefresh(generation, signal))
+            await this.#model.refreshTuiPages();
+    }
+
+    async refreshExtensionPage(
+        pageId: string,
+        generation = this.#generation,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (!this.#canRefresh(generation, signal)) return;
+        const snapshot = await withRequestTimeout(
+            this.#clients.tui.page(pageId),
+            this.#readTimeoutMs,
+            `tui.page:${pageId}`,
+        );
+        if (this.#canRefresh(generation, signal))
+            this.#store.setExtensionPageSnapshot(pageId, snapshot);
+    }
+
+    async invokeExtensionPageAction(
+        pageId: string,
+        actionId: string,
+        itemId?: string,
+    ): Promise<void> {
+        const generation = this.#generation;
+        const snapshot = await withRequestTimeout(
+            this.#clients.tui.action(pageId, actionId, itemId),
+            this.#readTimeoutMs,
+            `tui.page:${pageId}:action:${actionId}`,
+        );
+        if (this.#current(generation))
+            this.#store.setExtensionPageSnapshot(pageId, snapshot);
+    }
+
     async refreshConversationPreferences(
         generation = this.#generation,
         signal?: AbortSignal,
@@ -322,6 +360,7 @@ export class TuiControlSession {
             artifacts: true,
             config: true,
             serviceStatus: false,
+            tui: true,
         });
         this.#assertCurrent(
             generation,
@@ -340,6 +379,7 @@ export class TuiControlSession {
             artifacts: true,
             config: true,
             serviceStatus: false,
+            tui: true,
         });
         this.#assertCurrent(
             generation,

@@ -5,6 +5,7 @@ import type { TuiUiIntent } from "../../../state/Interaction.js";
 import type { TuiCommandDispatcherAudit } from "./Audit.js";
 import type { TuiCommandDispatcherEditor } from "./Editor.js";
 import type { TuiCommandDispatcherFocus } from "../navigation/Focus.js";
+import { currentTuiRoute } from "../../../state/route/State.js";
 
 interface CommandDispatcherDetailOptions {
     audit: TuiCommandDispatcherAudit;
@@ -180,6 +181,36 @@ export class TuiCommandDispatcherDetail {
         const button = actionId?.startsWith("button:")
             ? actionId.slice("button:".length)
             : undefined;
+
+        if (
+            state.ui.selectedPage === "extensions" &&
+            button?.startsWith("extension.action:") === true &&
+            boxId !== undefined
+        ) {
+            const route = currentTuiRoute(state);
+            if (route.page !== "extensions" || route.view !== "page") return false;
+            const extensionActionId = button.slice("extension.action:".length);
+            const action = state.extensionPageSnapshots[route.pageId]?.items
+                .find((item) => item.id === boxId)
+                ?.actions?.find((candidate) => candidate.id === extensionActionId);
+            if (action === undefined) return false;
+            const intent = {
+                actionId: action.id,
+                itemId: boxId,
+                pageId: route.pageId,
+                type: "extensionPage.action" as const,
+            };
+            if (action.tone === "danger") {
+                return await this.#dispatch({
+                    body: `${action.label} ${box?.title ?? boxId}?`,
+                    confirmIntent: intent,
+                    confirmLabel: action.label,
+                    title: `Confirm ${action.label}`,
+                    type: "overlay.openConfirm",
+                });
+            }
+            return await this.#dispatch(intent);
+        }
 
         if (
             state.ui.selectedPage === "todo" &&

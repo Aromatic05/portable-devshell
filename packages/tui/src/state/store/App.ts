@@ -4,6 +4,7 @@ import {
     type ControlReadModelState,
     type ConversationPreferencesSnapshot,
     type InstanceEvent,
+    type TuiPageSnapshot,
 } from "@portable-devshell/shared";
 
 import type { TuiEditorState } from "../Interaction.js";
@@ -93,6 +94,10 @@ export class TuiAppStore {
             preferences,
             type: "conversationPreferences.replace",
         });
+    }
+
+    setExtensionPageSnapshot(pageId: string, snapshot: TuiPageSnapshot): void {
+        this.dispatch({ pageId, snapshot, type: "extensionPage.replace" });
     }
 
     patchControlReadModel(patch: TuiControlReadModelPatch): void {

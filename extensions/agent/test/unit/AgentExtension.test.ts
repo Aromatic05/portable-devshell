@@ -37,7 +37,7 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     );
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "index.ts");
-    assert.equal(manifest.apiVersion, "4.0.0");
+    assert.equal(manifest.apiVersion, "4.2.0");
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
         "assets",
@@ -63,6 +63,8 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
             },
         ],
         "web.applications": [{ id: "agent", title: "Agent" }],
+        "tui.pages": [{ id: "agent", title: "Agent" }],
+        "web.pages": [{ id: "agent", title: "Agent" }],
     });
 });
 
@@ -381,7 +383,7 @@ test("Agent provider mutations require local-owner Extension command authority",
     );
 });
 
-test("Agent Extension activation binds CLI and Web points without a generic RPC surface", async () => {
+test("Agent Extension activation binds separate CLI, Web, and TUI management surfaces", async () => {
     const registrations: Array<{
         binding: unknown;
         id: string;
@@ -394,7 +396,9 @@ test("Agent Extension activation binds CLI and Web points without a generic RPC 
             [
                 "cli.model-commands/agent",
                 "cli.native-commands/agent",
+                "tui.pages/agent",
                 "web.applications/agent",
+                "web.pages/agent",
             ],
         );
         assert.equal(
@@ -418,6 +422,54 @@ test("Agent Extension activation binds CLI and Web points without a generic RPC 
             | undefined;
         assert.equal(web?.source?.kind, "endpoint");
         assert.equal(typeof web?.source?.resolve, "function");
+
+        const signal = new AbortController().signal;
+        const webPage = registrations.find(
+            ({ pointId }) => pointId === "web.pages",
+        )?.binding as
+            | ((
+                  request: { kind: "read" },
+                  context: { requestId: string; signal: AbortSignal },
+              ) => Promise<{ tables: Array<{ id: string; rows: unknown[] }> }>)
+            | undefined;
+        assert.ok(webPage);
+        const webSnapshot = await webPage(
+            { kind: "read" },
+            { requestId: "web-read", signal },
+        );
+        assert.equal(webSnapshot.tables[0]?.id, "providers");
+        assert.deepEqual(webSnapshot.tables[0]?.rows, []);
+
+        const tuiPage = registrations.find(
+            ({ pointId }) => pointId === "tui.pages",
+        )?.binding as
+            | ((
+                  request:
+                      | { kind: "read" }
+                      | { actionId: string; itemId?: string; kind: "action" },
+                  context: {
+                      localOwner: boolean;
+                      requestId: string;
+                      signal: AbortSignal;
+                  },
+              ) => Promise<{ items: unknown[] }>)
+            | undefined;
+        assert.ok(tuiPage);
+        assert.deepEqual(
+            await tuiPage(
+                { kind: "read" },
+                { localOwner: true, requestId: "tui-read", signal },
+            ),
+            { items: [] },
+        );
+        await assert.rejects(
+            () =>
+                tuiPage(
+                    { actionId: "remove", itemId: "test", kind: "action" },
+                    { localOwner: false, requestId: "tui-action", signal },
+                ),
+            /local Control owner/u,
+        );
     } finally {
         await deactivate();
     }

@@ -1,6 +1,6 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.1.0",
+    "apiVersion": "4.2.0",
     "activation": "eager",
     "id": "access",
     "name": "portable-devshell Access",
@@ -98,7 +98,19 @@
                 "usage": "access <command>"
             }
         ],
+        "tui.pages": [
+            {
+                "id": "access",
+                "title": "Access"
+            }
+        ],
         "web.applications": [
+            {
+                "id": "access",
+                "title": "Access"
+            }
+        ],
+        "web.pages": [
             {
                 "id": "access",
                 "title": "Access"

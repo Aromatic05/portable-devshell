@@ -186,7 +186,15 @@ export class ControlReadModel {
             this.refreshMcp(epoch),
             this.refreshOverview(epoch),
             this.refreshContexts(epoch),
-            this.refreshWebApplications(epoch),
+            options.tui === true
+                ? this.refreshTuiPages(epoch)
+                : Promise.resolve(),
+            options.web === true
+                ? Promise.all([
+                      this.refreshWebApplications(epoch),
+                      this.refreshWebPages(epoch),
+                  ])
+                : Promise.resolve(),
             options.config === true
                 ? this.refreshConfig(epoch)
                 : Promise.resolve(),
@@ -222,8 +230,12 @@ export class ControlReadModel {
             ),
             this.refreshMcp(epoch),
             this.refreshContexts(epoch),
-            this.refreshWebApplications(epoch),
         ];
+        if (this.#loadOptions.tui === true) reads.push(this.refreshTuiPages(epoch));
+        if (this.#loadOptions.web === true) {
+            reads.push(this.refreshWebApplications(epoch));
+            reads.push(this.refreshWebPages(epoch));
+        }
         if (this.#loadOptions.config === true)
             reads.push(this.refreshConfig(epoch));
         await Promise.all(reads);
@@ -333,6 +345,54 @@ export class ControlReadModel {
                 return;
             }
             this.#setFailure("webApplications", error);
+        }
+    }
+
+    async refreshWebPages(epoch = this.#epoch): Promise<void> {
+        const version = this.#nextVersion("webPages");
+        try {
+            const pages = await this.#request(this.#clients.web.pages(), "web.pages");
+            if (!this.#valid("webPages", version, epoch)) return;
+            this.#state.webPages = [...pages].sort(
+                (left, right) =>
+                    left.title.localeCompare(right.title) ||
+                    left.id.localeCompare(right.id),
+            );
+            this.#clearFailure("webPages");
+            this.#emit();
+        } catch (error) {
+            if (!this.#valid("webPages", version, epoch)) return;
+            if (methodNotFound(error)) {
+                this.#state.webPages = [];
+                this.#clearFailure("webPages");
+                this.#emit();
+                return;
+            }
+            this.#setFailure("webPages", error);
+        }
+    }
+
+    async refreshTuiPages(epoch = this.#epoch): Promise<void> {
+        const version = this.#nextVersion("tuiPages");
+        try {
+            const pages = await this.#request(this.#clients.tui.pages(), "tui.pages");
+            if (!this.#valid("tuiPages", version, epoch)) return;
+            this.#state.tuiPages = [...pages].sort(
+                (left, right) =>
+                    left.title.localeCompare(right.title) ||
+                    left.id.localeCompare(right.id),
+            );
+            this.#clearFailure("tuiPages");
+            this.#emit();
+        } catch (error) {
+            if (!this.#valid("tuiPages", version, epoch)) return;
+            if (methodNotFound(error)) {
+                this.#state.tuiPages = [];
+                this.#clearFailure("tuiPages");
+                this.#emit();
+                return;
+            }
+            this.#setFailure("tuiPages", error);
         }
     }
 

@@ -110,6 +110,60 @@ import {
         assert.equal(store.getState().ui.mainFocusId, "audit-context:ctx-a");
     });
 
+    test("Extension pages use a global route stack and render TUI-owned snapshots as native boxes", () => {
+        const store = createStore();
+        store.patchControlReadModel({
+            tuiPages: [
+                {
+                    extensionId: "access",
+                    id: "access",
+                    title: "Access",
+                },
+            ],
+        });
+        store.setSelectedPage("extensions");
+
+        let model = selectMainScreenModel(store.getState());
+        assert.deepEqual(
+            model.boxes.map((box) => box.id),
+            ["extension:access"],
+        );
+        assert.deepEqual(model.boxes[0]?.primaryAction, {
+            kind: "navigate",
+            route: { page: "extensions", pageId: "access", view: "page" },
+        });
+
+        store.pushRoute({ page: "extensions", pageId: "access", view: "page" });
+        assert.equal(selectMainScreenModel(store.getState()).loadState.kind, "loading");
+        store.setExtensionPageSnapshot("access", {
+            items: [
+                {
+                    actions: [{ id: "disable", label: "Disable" }],
+                    detail: [{ text: "target mcp" }],
+                    id: "cloudflare-mcp",
+                    status: "ready",
+                    summary: [{ text: "cloudflared -> mcp" }],
+                    title: "cloudflare-mcp",
+                },
+            ],
+        });
+
+        model = selectMainScreenModel(store.getState());
+        assert.equal(model.loadState.kind, "ready");
+        assert.deepEqual(model.boxes.map((box) => box.id), ["cloudflare-mcp"]);
+        assert.deepEqual(selectBreadcrumbSegments(store.getState()), [
+            "extensions",
+            "Access",
+        ]);
+
+        store.setSelectedInstance("beta");
+        assert.deepEqual(currentTuiRoute(store.getState()), {
+            page: "extensions",
+            pageId: "access",
+            view: "page",
+        });
+    });
+
     test("Messages enters a thread at the sticky bottom instead of restoring an old scroll position", () => {
         const store = createStore();
         store.patchControlReadModel({

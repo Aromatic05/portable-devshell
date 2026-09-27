@@ -18,6 +18,8 @@ export type TuiRoute =
     | { ctxId: string; page: "audit"; scope: "context"; view: "conversation" }
     | { page: "todo"; view: "overview" }
     | { page: "todo"; todoId: string; view: "detail" }
+    | { page: "extensions"; view: "list" }
+    | { page: "extensions"; pageId: string; view: "page" }
     | { page: "help"; view: "index" }
     | { page: "terminal"; pane?: string; tab: TuiTerminalTab; view: "session" };
 
@@ -33,6 +35,8 @@ export function rootTuiRoute(page: TuiRoute["page"]): TuiRoute {
         case "overview":
             return { page, view: "summary" };
         case "instances":
+            return { page, view: "list" };
+        case "extensions":
             return { page, view: "list" };
         case "config":
         case "connections":
@@ -76,6 +80,10 @@ export function tuiRouteIdentity(route: TuiRoute): string {
             return route.view === "overview"
                 ? "todo/overview"
                 : `todo/detail/${encodeURIComponent(route.todoId)}`;
+        case "extensions":
+            return route.view === "list"
+                ? "extensions/list"
+                : `extensions/page/${encodeURIComponent(route.pageId)}`;
         case "connections":
             if (route.view === "overview") return "connections/overview";
             if (route.view === "connector") {

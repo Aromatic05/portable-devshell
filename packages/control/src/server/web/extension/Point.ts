@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 import {
     applications,
+    pages,
     type WebApplicationDeclaration,
     type WebApplicationBinding,
 } from "@portable-devshell/extension/web";
@@ -17,7 +18,9 @@ import type {
 } from "../../../control/extension/generation/registration/PointRegistry.js";
 import {
     createWebApplicationSandboxBinding,
+    createWebPageSandboxBinding,
     validateWebApplicationBinding,
+    validateWebPageBinding,
 } from "./Sandbox.js";
 
 export const webApplicationsExtensionPointDefinition: ExtensionPointDefinition =
@@ -55,8 +58,29 @@ export const webApplicationsExtensionPointDefinition: ExtensionPointDefinition =
         },
     });
 
+export const webPagesExtensionPointDefinition: ExtensionPointDefinition =
+    Object.freeze({
+        createSandboxBinding: createWebPageSandboxBinding,
+        id: pages.id,
+        parseDeclaration: (declaration: ExtensionPointDeclaration) =>
+            parseWebDeclaration(declaration, pages.id),
+        validateBinding(
+            binding: unknown,
+            context: ExtensionPointValidationContext,
+        ) {
+            validateWebPageBinding(binding, context);
+        },
+    });
+
 function parseWebApplicationDeclaration(
     value: ExtensionPointDeclaration,
+): WebApplicationDeclaration {
+    return parseWebDeclaration(value, applications.id);
+}
+
+function parseWebDeclaration(
+    value: ExtensionPointDeclaration,
+    pointId: string,
 ): WebApplicationDeclaration {
     const record = value as ExtensionPointDeclaration &
         Record<string, ExtensionJsonValue | undefined>;
@@ -65,7 +89,7 @@ function parseWebApplicationDeclaration(
     );
     if (unknown !== undefined)
         throw new TypeError(
-            `web.applications declaration has unknown field ${unknown}.`,
+            `${pointId} declaration has unknown field ${unknown}.`,
         );
     if (
         typeof record.title !== "string" ||
@@ -73,7 +97,7 @@ function parseWebApplicationDeclaration(
         record.title.trim() !== record.title
     ) {
         throw new TypeError(
-            "web.applications declaration title must be a non-empty trimmed string.",
+            `${pointId} declaration title must be a non-empty trimmed string.`,
         );
     }
     return Object.freeze({ id: value.id, title: record.title });

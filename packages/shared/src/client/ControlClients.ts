@@ -52,6 +52,14 @@ import type {
 } from "../protocol/control/extension/CliCommand.js";
 import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
 import type {
+    WebPageDescriptor,
+    WebPageSnapshot,
+} from "../protocol/control/extension/WebPage.js";
+import type {
+    TuiPageDescriptor,
+    TuiPageSnapshot,
+} from "../protocol/control/extension/TuiPage.js";
+import type {
     InstanceCreateDraft,
     InstanceCreateResult,
     InstanceCreateSchema,
@@ -349,8 +357,24 @@ export interface ControlClients {
             import("../protocol/tool/Definition.js").ToolSessionOpenResult
         >;
     };
+    tui: {
+        action(
+            pageId: string,
+            actionId: string,
+            itemId?: string,
+        ): Promise<TuiPageSnapshot>;
+        page(pageId: string): Promise<TuiPageSnapshot>;
+        pages(): Promise<TuiPageDescriptor[]>;
+    };
     web: {
+        action(
+            pageId: string,
+            actionId: string,
+            rowId?: string,
+        ): Promise<WebPageSnapshot>;
         applications(): Promise<WebApplicationDescriptor[]>;
+        page(pageId: string): Promise<WebPageSnapshot>;
+        pages(): Promise<WebPageDescriptor[]>;
     };
 }
 
@@ -377,6 +401,7 @@ export function createControlClients(
     const terminal = instanceClientModule(connection, "terminal");
     const todo = instanceClientModule(connection, "todo");
     const tool = instanceClientModule(connection, "tool");
+    const tui = controlClientModule(connection, "tui");
     const web = controlClientModule(connection, "web");
     const openRuntimeStart = (name: string): Promise<OpenedClientStream> =>
         runtime.openStream(name, "start");
@@ -599,8 +624,28 @@ export function createControlClients(
             openSession: (name, workspace) =>
                 tool.request(name, "openSession", { workspace }),
         },
+        tui: {
+            action: (pageId, actionId, itemId) =>
+                tui.request("page", {
+                    actionId,
+                    ...(itemId === undefined ? {} : { itemId }),
+                    kind: "action",
+                    pageId,
+                }),
+            page: (pageId) => tui.request("page", { kind: "read", pageId }),
+            pages: () => tui.request("pages"),
+        },
         web: {
+            action: (pageId, actionId, rowId) =>
+                web.request("page", {
+                    actionId,
+                    kind: "action",
+                    pageId,
+                    ...(rowId === undefined ? {} : { rowId }),
+                }),
             applications: () => web.request("applications"),
+            page: (pageId) => web.request("page", { kind: "read", pageId }),
+            pages: () => web.request("pages"),
         },
     };
 }

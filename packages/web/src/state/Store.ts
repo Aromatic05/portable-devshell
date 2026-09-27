@@ -13,6 +13,7 @@ import {
     type InstanceCreateDraft,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
+    type WebPageSnapshot,
 } from "@portable-devshell/shared/browser";
 
 import type { WebClients } from "../app/transport/Client.js";
@@ -133,7 +134,7 @@ export class WebStore {
             error: undefined,
         });
         const request = this.#model
-            .load({ artifacts: true, config: true })
+            .load({ artifacts: true, config: true, web: true })
             .then(
                 async () => {
                     if (!this.#current(generation)) return;
@@ -233,6 +234,26 @@ export class WebStore {
 
     async readToolCallDetail(instance: string, callId: string) {
         return await this.#model.readToolCallDetail(instance, callId);
+    }
+
+    async readExtensionPage(pageId: string): Promise<WebPageSnapshot> {
+        return await withRequestTimeout(
+            this.clients.web.page(pageId),
+            this.#requestTimeoutMs,
+            `web.page:${pageId}`,
+        );
+    }
+
+    async invokeExtensionPageAction(
+        pageId: string,
+        actionId: string,
+        rowId?: string,
+    ): Promise<WebPageSnapshot> {
+        return await withRequestTimeout(
+            this.clients.web.action(pageId, actionId, rowId),
+            this.#requestTimeoutMs,
+            `web.page:${pageId}:action:${actionId}`,
+        );
     }
 
     async refreshAudit(): Promise<void> {

@@ -13,12 +13,22 @@ import type {
 
 import { CliExtensionCommandService } from "../../../../src/control/extension/cli/command/Service.ts";
 import { createCliRouteModule } from "../../../../src/control/extension/cli/Route.ts";
+import {
+    createTuiPageRouteModule,
+    TuiExtensionPageService,
+} from "../../../../src/control/extension/tui/Route.ts";
 import type { ExtensionCatalogRegistration } from "../../../../src/control/extension/generation/discovery/Catalog.ts";
 import { WebApplicationCatalog } from "../../../../src/server/web/extension/application/Catalog.ts";
 import { createWebApplicationRouteModule } from "../../../../src/server/web/extension/application/Route.ts";
+import { WebExtensionPageService } from "../../../../src/server/web/extension/page/Service.ts";
 
 function registration(
-    pointId: "cli.model-commands" | "cli.native-commands" | "web.applications",
+    pointId:
+        | "cli.model-commands"
+        | "cli.native-commands"
+        | "tui.pages"
+        | "web.applications"
+        | "web.pages",
     extensionId: string,
     id: string,
     declaration: Record<string, unknown>,
@@ -238,6 +248,234 @@ test("Web discovery projects only web.applications declaration metadata", () => 
     ]);
     assert.equal("generation" in catalog.list()[0]!, false);
     assert.equal("binding" in catalog.list()[0]!, false);
+});
+
+test("Web and TUI Extension pages keep separate discovery, invocation, and client-domain contracts", async () => {
+    const events: string[] = [];
+    const entries = [
+        registration("web.pages", "access", "access", { title: "Access Web" }),
+        registration("tui.pages", "access", "access", { title: "Access TUI" }),
+    ];
+    const extensions = {
+        async acquireRegistration(pointId: string, id: string) {
+            const entry = entries.find(
+                (candidate) => candidate.pointId === pointId && candidate.id === id,
+            );
+            if (entry === undefined) throw new Error(`missing ${pointId}/${id}`);
+            const binding =
+                pointId === "web.pages"
+                    ? async (request: { kind: string }, invocation: { requestId: string }) => {
+                          events.push(
+                              `web:${request.kind}:${invocation.requestId}`,
+                          );
+                          return {
+                              tables: [
+                                  {
+                                      columns: [{ id: "state", label: "State" }],
+                                      id: "endpoints",
+                                      rows: [
+                                          {
+                                              cells: { state: { text: "running" } },
+                                              id: "endpoint",
+                                          },
+                                      ],
+                                  },
+                              ],
+                          };
+                      }
+                    : async (
+                          request: { kind: string },
+                          invocation: { localOwner: boolean; requestId: string },
+                      ) => {
+                          events.push(
+                              `tui:${request.kind}:${invocation.requestId}:${invocation.localOwner}`,
+                          );
+                          return {
+                              items: [
+                                  {
+                                      id: "endpoint",
+                                      summary: [{ text: "running" }],
+                                      title: "endpoint",
+                                  },
+                              ],
+                          };
+                      };
+            return {
+                extensionId: entry.extensionId,
+                lease: {
+                    generation: "v1",
+                    release() {
+                        events.push(`release:${pointId}`);
+                    },
+                },
+                registration: { ...entry, binding },
+            } as never;
+        },
+        listDeclarations(pointId: string) {
+            return entries.filter((entry) => entry.pointId === pointId);
+        },
+    };
+    const webPages = new WebExtensionPageService(extensions as never);
+    const tuiPages = new TuiExtensionPageService(extensions as never);
+    const web = createWebApplicationRouteModule(
+        { list: () => [] },
+        webPages,
+    );
+    const tui = createTuiPageRouteModule(tuiPages);
+
+    assert.deepEqual(
+        await operation(web, "pages").handle(
+            { id: "1", name: "pages" },
+            context("web"),
+        ),
+        [{ extensionId: "access", id: "access", title: "Access Web" }],
+    );
+    assert.deepEqual(
+        await operation(tui, "pages").handle(
+            { id: "2", name: "pages" },
+            context("tui", "local-owner"),
+        ),
+        [{ extensionId: "access", id: "access", title: "Access TUI" }],
+    );
+    assert.deepEqual(
+        await operation(web, "page").handle(
+            { id: "3", name: "page", payload: { kind: "read", pageId: "access" } },
+            context("web"),
+        ),
+        {
+            tables: [
+                {
+                    columns: [{ id: "state", label: "State" }],
+                    id: "endpoints",
+                    rows: [
+                        { cells: { state: { text: "running" } }, id: "endpoint" },
+                    ],
+                },
+            ],
+        },
+    );
+    assert.deepEqual(
+        await operation(tui, "page").handle(
+            { id: "4", name: "page", payload: { kind: "read", pageId: "access" } },
+            context("tui", "local-owner"),
+        ),
+        {
+            items: [
+                {
+                    id: "endpoint",
+                    summary: [{ text: "running" }],
+                    title: "endpoint",
+                },
+            ],
+        },
+    );
+    await assert.rejects(
+        async () =>
+            await operation(web, "page").handle(
+                { id: "5", name: "page", payload: { kind: "read", pageId: "access" } },
+                context("tui", "local-owner"),
+            ),
+        /only to Web clients/u,
+    );
+    await assert.rejects(
+        async () =>
+            await operation(tui, "page").handle(
+                { id: "6", name: "page", payload: { kind: "read", pageId: "access" } },
+                context("web"),
+            ),
+        /only to TUI clients/u,
+    );
+    assert.deepEqual(events, [
+        "web:read:req-1",
+        "release:web.pages",
+        "tui:read:req-1:true",
+        "release:tui.pages",
+    ]);
+});
+
+test("Web and TUI Extension page services reject renderer-unsafe snapshots", async () => {
+    function host(pointId: "web.pages" | "tui.pages", binding: unknown) {
+        return {
+            async acquireRegistration(requestedPointId: string, id: string) {
+                assert.equal(requestedPointId, pointId);
+                assert.equal(id, "unsafe");
+                return {
+                    extensionId: "example",
+                    lease: { generation: "v1", release() {} },
+                    registration: {
+                        binding,
+                        declaration: { id: "unsafe", title: "Unsafe" },
+                        extensionId: "example",
+                        generation: "v1",
+                        id: "unsafe",
+                        pointId,
+                    },
+                } as never;
+            },
+            listDeclarations() {
+                return [];
+            },
+        };
+    }
+
+    const web = new WebExtensionPageService(
+        host("web.pages", async () => ({
+            tables: [
+                {
+                    columns: [{ id: "link", label: "Link" }],
+                    id: "table",
+                    rows: [
+                        {
+                            cells: {
+                                link: {
+                                    href: "javascript:alert(1)",
+                                    text: "unsafe",
+                                },
+                            },
+                            id: "row",
+                        },
+                    ],
+                },
+            ],
+        })) as never,
+    );
+    await assert.rejects(
+        async () =>
+            await web.invoke(
+                "unsafe",
+                { kind: "read" },
+                {
+                    requestId: "web-unsafe",
+                    signal: new AbortController().signal,
+                },
+            ),
+        TypeError,
+    );
+
+    const tui = new TuiExtensionPageService(
+        host("tui.pages", async () => ({
+            items: [
+                {
+                    id: "row",
+                    summary: [{ text: "one", tone: "unknown" }],
+                    title: "Row",
+                },
+            ],
+        })) as never,
+    );
+    await assert.rejects(
+        async () =>
+            await tui.invoke(
+                "unsafe",
+                { kind: "read" },
+                {
+                    localOwner: true,
+                    requestId: "tui-unsafe",
+                    signal: new AbortController().signal,
+                },
+            ),
+        TypeError,
+    );
 });
 
 test("CLI command route owns invocation, caller cwd, and payload validation", async () => {

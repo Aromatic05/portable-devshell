@@ -1,6 +1,8 @@
 import type { ArtifactShareResult } from "../protocol/artifact/Share.js";
 import type { ArtifactTransferRecord } from "../protocol/artifact/Transfer.js";
 import type { WebApplicationDescriptor } from "../protocol/control/extension/WebApplication.js";
+import type { WebPageDescriptor } from "../protocol/control/extension/WebPage.js";
+import type { TuiPageDescriptor } from "../protocol/control/extension/TuiPage.js";
 import type { OperationalOverview } from "../protocol/control/Overview.js";
 import type {
     InstanceListEntry,
@@ -52,7 +54,9 @@ export type ControlGlobalReadKey =
     | "mcp"
     | "oauthApprovals"
     | "overview"
-    | "webApplications";
+    | "tuiPages"
+    | "webApplications"
+    | "webPages";
 
 export interface ControlReadFailure {
     error: Error;
@@ -73,13 +77,17 @@ export interface ControlReadModelState {
     oauthApprovals: OAuthApprovalRequest[];
     overview?: OperationalOverview;
     service?: ControlServiceStatus;
+    tuiPages: TuiPageDescriptor[];
     webApplications: WebApplicationDescriptor[];
+    webPages: WebPageDescriptor[];
 }
 
 export interface ControlReadModelLoadOptions {
     artifacts?: boolean;
     config?: boolean;
     serviceStatus?: boolean;
+    tui?: boolean;
+    web?: boolean;
 }
 
 export function createInitialControlReadModelState(): ControlReadModelState {
@@ -91,6 +99,8 @@ export function createInitialControlReadModelState(): ControlReadModelState {
         instances: [],
         instanceState: {},
         oauthApprovals: [],
+        tuiPages: [],
         webApplications: [],
+        webPages: [],
     };
 }

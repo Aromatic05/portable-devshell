@@ -41,7 +41,8 @@ export function selectActivePage(state: TuiAppState): TuiActivePage {
         instance:
             state.ui.selectedPage === "overview" ||
             state.ui.selectedPage === "help" ||
-            state.ui.selectedPage === "messages"
+            state.ui.selectedPage === "messages" ||
+            state.ui.selectedPage === "extensions"
                 ? undefined
                 : state.ui.selectedInstance,
         page: state.ui.selectedPage,
@@ -461,6 +462,7 @@ function requiresInstance(page: TuiActivePage["page"]): boolean {
         page !== "instances" &&
         page !== "connections" &&
         page !== "messages" &&
+        page !== "extensions" &&
         page !== "help"
     );
 }
@@ -470,6 +472,15 @@ function pageLoadState(
     boxes: readonly TuiBoxModel[],
     error: string | undefined,
 ): TuiPageLoadState {
+    const route = currentTuiRoute(state);
+    if (
+        route.page === "extensions" &&
+        route.view === "page" &&
+        state.extensionPageSnapshots[route.pageId] === undefined &&
+        error === undefined
+    ) {
+        return { kind: "loading" };
+    }
     if (error !== undefined)
         return boxes.length === 0
             ? { error, kind: "failed" }

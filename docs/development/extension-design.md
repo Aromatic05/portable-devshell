@@ -897,6 +897,16 @@ Extension application 不得要求访问 portable-devshell 主 Web DOM。
 
 只有未来出现“没有 application、只贡献导航动作”这类真实需求时，再定义独立 point。
 
+### 9.7 `web.pages`
+
+> 实现状态：4.2.0 已落地第一版。
+
+`web.pages` 用于向 portable-devshell 主 Web shell 注入由 Host 渲染的管理页面。它与 `web.applications` 分离：前者返回 Web-domain 的 table / row / cell / action snapshot，后者仍拥有完整 browser application content source。
+
+这一版刻意不导出 React component、DOM、router、WebStore 或 iframe contract。曾验证过把 Extension application 嵌入 iframe 的方案，但现有 application CSP 与 same-origin session/DOM 隔离都使其不适合作为 public management ABI，因此没有保留。
+
+第一版 contract 由 Access endpoint 与 Agent provider 两种真实资源管理场景共同验证。Agent 不需要新增 Web primitive，但它的 provider mutation 仍遵守 local-owner 约束，因此 Agent 的 `web.pages` 只投影 provider 状态；这说明 page 是否可执行 mutation 属于 Extension 自己的 authority policy，不由 Web presentation contract 强行统一。
+
 ## 10. Agent Domain
 
 Agent 当前本身就是 builtin Extension，因此必须避免把 Agent-specific 业务重新塞回 core Extension ABI。
@@ -1029,17 +1039,11 @@ protocol-specific metadata
 
 ## 13. TUI Domain
 
-当前没有真实需求证明第三方 Extension 需要直接挂载 portable-devshell TUI view。
+> 实现状态：4.2.0 已落地 `tui.pages` 第一版。
 
-因此第一版不定义：
+TUI 不复用 `web.pages`，也不调用 CLI argv contract。`tui.pages` 返回 terminal-specific item / line / action snapshot，由 Host 接入已有 route stack、Box、focus、scroll 与 confirmation 交互；Extension 不依赖 Ink component tree 或 portable-devshell 内部 React state。
 
-```text
-tui.views
-tui.panels
-tui.renderers
-```
-
-如果未来开放，必须保证 Extension 只获得稳定 presentation contract，不能直接依赖 Ink component tree 或 portable-devshell 内部 React state。
+当前第一版只覆盖 list/detail/action。Access endpoint 与 Agent provider 已经分别验证了不同状态模型和 action 集合，其中 Agent 还使用 `localOwner` 保留 provider mutation 的本地权限边界。form、wizard、streaming 等能力必须从新的真实 TUI 用例继续归纳，不能为了和 Web surface 对齐而加入 generic UI DSL。
 
 ## 14. Instance / Provider Domain
 

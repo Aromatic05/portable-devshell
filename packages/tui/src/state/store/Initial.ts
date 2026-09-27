@@ -12,6 +12,7 @@ export function createInitialTuiAppState(): TuiAppState {
             status: "connecting",
         },
         conversationPreferences: createEmptyConversationPreferences(),
+        extensionPageSnapshots: {},
         globalDerived: {
             connectedInstanceCount: 0,
             pendingApprovalCount: 0,

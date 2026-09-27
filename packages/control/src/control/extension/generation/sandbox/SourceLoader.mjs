@@ -29,6 +29,13 @@ const workspacePackages = new Map([
         ).href,
     ],
     [
+        "@portable-devshell/extension/tui",
+        new URL(
+            "../../../../../../extension/src/domain/tui.ts",
+            import.meta.url,
+        ).href,
+    ],
+    [
         "@portable-devshell/extension/web",
         new URL(
             "../../../../../../extension/src/domain/web.ts",

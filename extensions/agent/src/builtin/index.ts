@@ -6,13 +6,26 @@ import {
     modelCommands,
     nativeCommands,
 } from "@portable-devshell/extension/cli";
-import { applications } from "@portable-devshell/extension/web";
+import {
+    pages as tuiPages,
+    type TuiPageBinding,
+    type TuiPageItem,
+} from "@portable-devshell/extension/tui";
+import {
+    applications,
+    pages as webPages,
+    type WebPageBinding,
+    type WebPageRow,
+} from "@portable-devshell/extension/web";
 
 import { executeAgentCommand } from "./AgentCommand.js";
 import { executeAgentModelCommand } from "./AgentModelCommand.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
 import { AgentProviderLoader } from "./provider/AgentProviderLoader.js";
-import { AgentProviderManager } from "./provider/AgentProviderManager.js";
+import {
+    AgentProviderManager,
+    type AgentProviderManagementRecord,
+} from "./provider/AgentProviderManager.js";
 import { AgentProviderRegistry } from "./provider/AgentProviderRegistry.js";
 import { AgentProviderRegistryStore } from "./provider/AgentProviderRegistryStore.js";
 import { ensureBundledPiCommand } from "./pi/PiCommandInstaller.js";
@@ -94,6 +107,172 @@ export async function activate(context: ExtensionContext): Promise<void> {
             }),
         }),
     );
+    context.register(webPages, "agent", createAgentWebPage(providerManager));
+    context.register(tuiPages, "agent", createAgentTuiPage(providerManager));
+}
+
+function createAgentWebPage(providers: AgentProviderManager): WebPageBinding {
+    return async (request, invocation) => {
+        invocation.signal.throwIfAborted();
+        if (request.kind === "action") {
+            throw new Error(
+                "Agent provider mutations are restricted to the local Control owner.",
+            );
+        }
+        const [records, defaultProvider] = await Promise.all([
+            providers.list(),
+            providers.getDefault(),
+        ]);
+        return {
+            tables: [
+                {
+                    columns: [
+                        { id: "provider", label: "Provider" },
+                        { id: "version", label: "Version" },
+                        { id: "state", label: "State" },
+                        { id: "default", label: "Default" },
+                        { id: "generation", label: "Generation" },
+                        { id: "error", label: "Error" },
+                    ],
+                    id: "providers",
+                    rows: records.map((record) =>
+                        agentWebProviderRow(record, defaultProvider),
+                    ),
+                    title: "Providers",
+                },
+            ],
+        };
+    };
+}
+
+function agentWebProviderRow(
+    record: AgentProviderManagementRecord,
+    defaultProvider: string | undefined,
+): WebPageRow {
+    return {
+        cells: {
+            default: {
+                text: defaultProvider === record.id ? "yes" : "—",
+                ...(defaultProvider === record.id
+                    ? { tone: "success" as const }
+                    : {}),
+            },
+            error: {
+                text: record.error ?? "—",
+                ...(record.error === undefined
+                    ? {}
+                    : { tone: "danger" as const }),
+            },
+            generation: {
+                text: record.selectedGeneration ?? "—",
+            },
+            provider: { text: record.name ?? record.id },
+            state: {
+                text: record.state,
+                tone:
+                    record.state === "ready"
+                        ? "success"
+                        : record.state === "invalid"
+                          ? "danger"
+                          : record.state === "unselected"
+                            ? "warning"
+                            : "normal",
+            },
+            version: { text: record.version ?? "—" },
+        },
+        id: record.id,
+    };
+}
+
+function createAgentTuiPage(providers: AgentProviderManager): TuiPageBinding {
+    return async (request, invocation) => {
+        invocation.signal.throwIfAborted();
+        if (request.kind === "action") {
+            if (!invocation.localOwner) {
+                throw new Error(
+                    "Agent provider mutations require the local Control owner.",
+                );
+            }
+            if (request.itemId === undefined)
+                throw new TypeError("Agent TUI action requires a provider id.");
+            await applyAgentProviderAction(
+                providers,
+                request.actionId,
+                request.itemId,
+            );
+        }
+        const [records, defaultProvider] = await Promise.all([
+            providers.list(),
+            providers.getDefault(),
+        ]);
+        return {
+            items: records.map((record) =>
+                agentTuiProviderItem(record, defaultProvider),
+            ),
+        };
+    };
+}
+
+function agentTuiProviderItem(
+    record: AgentProviderManagementRecord,
+    defaultProvider: string | undefined,
+): TuiPageItem {
+    const isDefault = defaultProvider === record.id;
+    return {
+        actions: [
+            record.enabled
+                ? { id: "disable", label: "Disable" }
+                : { id: "enable", label: "Enable" },
+            ...(record.enabled && record.state === "ready" && !isDefault
+                ? [{ id: "default", label: "Set Default" }]
+                : []),
+            { id: "remove", label: "Remove", tone: "danger" },
+        ],
+        detail: [
+            { text: `state ${record.state}` },
+            { text: `enabled ${record.enabled ? "yes" : "no"}` },
+            ...(record.version === undefined
+                ? []
+                : [{ text: `version ${record.version}` }]),
+            ...(record.selectedGeneration === undefined
+                ? []
+                : [{ text: `generation ${record.selectedGeneration}` }]),
+            ...(record.lastKnownGoodGeneration === undefined
+                ? []
+                : [{ text: `known-good ${record.lastKnownGoodGeneration}` }]),
+            ...(isDefault ? [{ text: "default yes", tone: "success" as const }] : []),
+            ...(record.error === undefined
+                ? []
+                : [{ text: `error ${record.error}`, tone: "danger" as const }]),
+        ],
+        id: record.id,
+        status:
+            record.state === "ready"
+                ? "ready"
+                : record.state === "invalid"
+                  ? "failed"
+                  : record.state === "unselected"
+                    ? "warning"
+                    : "disabled",
+        summary: [
+            {
+                text: `${record.name ?? record.id} · ${record.version ?? "unknown"} · ${record.state}`,
+            },
+        ],
+        title: record.id,
+    };
+}
+
+async function applyAgentProviderAction(
+    providers: AgentProviderManager,
+    actionId: string,
+    providerId: string,
+): Promise<void> {
+    if (actionId === "enable") await providers.enable(providerId);
+    else if (actionId === "disable") await providers.disable(providerId);
+    else if (actionId === "default") await providers.setDefault(providerId);
+    else if (actionId === "remove") await providers.remove(providerId);
+    else throw new TypeError(`Unknown Agent provider action: ${actionId}`);
 }
 
 export async function deactivate(): Promise<void> {

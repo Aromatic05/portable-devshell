@@ -78,6 +78,11 @@ export interface TuiCommandDispatcherOptions {
     onInstanceDangerAction?(action: "delete", instance: string): Promise<void>;
     onInstanceEnabledChange?(instance: string, enabled: boolean): Promise<void>;
     onTodoDelete?(instance: string, taskId: string): Promise<void>;
+    onExtensionPageAction?(
+        pageId: string,
+        actionId: string,
+        itemId?: string,
+    ): Promise<void>;
     onOAuthApprovalDecision?(
         approvalId: string,
         decision: "approve" | "deny",
@@ -238,6 +243,17 @@ export class TuiCommandDispatcher {
                     intent.taskId,
                 );
                 this.#store.setScreenStatus("todo", "Todo project deleted.");
+                return true;
+            case "extensionPage.action":
+                await (this.#options.onExtensionPageAction ?? unavailable)(
+                    intent.pageId,
+                    intent.actionId,
+                    intent.itemId,
+                );
+                this.#store.setScreenStatus(
+                    "extensions",
+                    `${intent.actionId} completed.`,
+                );
                 return true;
             case "context.disable":
                 await (this.#options.onContextDisable ?? unavailable)(

@@ -32,6 +32,21 @@ const workspacePackages = new Map([
             .href,
     ],
     [
+        "@portable-devshell/extension/cli",
+        new URL("../../../packages/extension/src/domain/cli.ts", import.meta.url)
+            .href,
+    ],
+    [
+        "@portable-devshell/extension/tui",
+        new URL("../../../packages/extension/src/domain/tui.ts", import.meta.url)
+            .href,
+    ],
+    [
+        "@portable-devshell/extension/web",
+        new URL("../../../packages/extension/src/domain/web.ts", import.meta.url)
+            .href,
+    ],
+    [
         "@portable-devshell/shared",
         new URL("../../../packages/shared/src/index.ts", import.meta.url).href,
     ],

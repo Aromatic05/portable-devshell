@@ -8,6 +8,7 @@ export type TuiPageId =
     | "connections"
     | "messages"
     | "audit"
+    | "extensions"
     | "help"
     | "terminal";
 

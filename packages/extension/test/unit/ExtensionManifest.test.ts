@@ -256,6 +256,7 @@ test("Extension manifest defaults extensions and hostDependencies to empty colle
 });
 
 test("Extension manifest accepts compatible same-major versions and legacy integers", () => {
+    const [apiMajor, apiMinor] = EXTENSION_API_VERSION.split(".").map(Number);
     assert.equal(
         parseExtensionManifest({
             ...base,
@@ -283,11 +284,19 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
         "1.0.0",
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, apiVersion: "4.2.0" }),
+        () =>
+            parseExtensionManifest({
+                ...base,
+                apiVersion: `${apiMajor}.${apiMinor + 1}.0`,
+            }),
         /apiVersion/u,
     );
     assert.throws(
-        () => parseExtensionManifest({ ...base, apiVersion: "5.0.0" }),
+        () =>
+            parseExtensionManifest({
+                ...base,
+                apiVersion: `${apiMajor + 1}.0.0`,
+            }),
         /apiVersion/u,
     );
     assert.throws(

@@ -40,6 +40,69 @@ afterEach(() => {
 });
 
 describe("authenticated application shell", () => {
+    it("renders discovered Extension pages inside the Web shell instead of navigating to a standalone application", async () => {
+        const clients = fakeClients();
+        const pageSnapshot = {
+            tables: [
+                {
+                    columns: [
+                        { id: "endpoint", label: "Endpoint" },
+                        { id: "state", label: "State" },
+                    ],
+                    id: "endpoints",
+                    rows: [
+                        {
+                            actions: [{ id: "disable", label: "Disable" }],
+                            cells: {
+                                endpoint: { text: "cloudflare-mcp" },
+                                state: { text: "running", tone: "success" as const },
+                            },
+                            id: "cloudflare-mcp",
+                        },
+                    ],
+                    title: "Endpoints",
+                },
+            ],
+        };
+        clients.web.pages = vi.fn(async () => [
+            {
+                extensionId: "access",
+                id: "access",
+                title: "Access",
+            },
+        ]);
+        clients.web.page = vi.fn(async () => pageSnapshot);
+        clients.web.action = vi.fn(async () => pageSnapshot);
+        const session = fakeSession({
+            authMode: "none",
+            check: false,
+            establish: true,
+        });
+
+        render(<App createClients={() => clients} session={session} />);
+
+        fireEvent.click(
+            await screen.findByRole("button", {
+                name: "Switch page, current Overview",
+            }),
+        );
+        fireEvent.click(await screen.findByRole("button", { name: "Access" }));
+
+        expect(window.location.hash).toBe("#/extensions/access");
+        expect(await screen.findByText("cloudflare-mcp")).toBeVisible();
+        fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+        await waitFor(() =>
+            expect(clients.web.action).toHaveBeenCalledWith(
+                "access",
+                "disable",
+                "cloudflare-mcp",
+            ),
+        );
+        expect(clients.web.pages).toHaveBeenCalledOnce();
+        expect(clients.web.page).toHaveBeenCalledWith("access");
+        window.location.hash = "";
+    });
+
     it("renders discovered Extension applications as Web-domain navigation without invoking them", async () => {
         const clients = fakeClients();
         clients.web.applications = vi.fn(async () => [
@@ -715,7 +778,10 @@ function fakeClients(): WebClients {
             },
         },
         web: {
+            action: async () => ({ tables: [] }),
             applications: async () => [],
+            page: async () => ({ tables: [] }),
+            pages: async () => [],
         },
     };
 }
