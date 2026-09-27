@@ -8,6 +8,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
 import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import {
     asInstanceName,
+    CONTROL_PROTOCOL_VERSION,
     PrefixRoute,
     type JsonValue,
     type PrefixRouteSnapshot,
@@ -647,7 +648,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                         "stream",
                                         "streamResume",
                                     ],
-                                    protocolVersion: 1,
+                                    protocolVersion: CONTROL_PROTOCOL_VERSION,
                                 }),
                             },
                             { name: "ping", handle: () => ({ pong: true }) },

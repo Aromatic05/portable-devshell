@@ -6,6 +6,7 @@ import { type ReadStream, type WriteStream } from "node:tty";
 import test from "node:test";
 import {
     asInstanceName,
+    CONTROL_PROTOCOL_VERSION,
     type ApprovalRequest,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -2483,7 +2484,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
                 async hello() {
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async ping() {

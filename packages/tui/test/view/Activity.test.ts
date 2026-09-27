@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     asInstanceName,
+    CONTROL_PROTOCOL_VERSION,
     type ArtifactShareResult,
     type ArtifactTransferRecord,
     type JsonValue,
@@ -135,7 +136,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: 1,
+                            protocolVersion: CONTROL_PROTOCOL_VERSION,
                         };
                     },
                     async ping() {
@@ -229,7 +230,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: 1,
+                            protocolVersion: CONTROL_PROTOCOL_VERSION,
                         };
                     },
                     async ping() {
@@ -295,7 +296,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                     async hello() {
                         return {
                             capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: 1,
+                            protocolVersion: CONTROL_PROTOCOL_VERSION,
                         };
                     },
                     async ping() {
@@ -575,7 +576,7 @@ import { TuiRootLayout } from "../../src/view/shell/Layout.tsx";
                 async hello() {
                     return {
                         capabilities: ["request", "stream", "streamResume"],
-                        protocolVersion: 1,
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
                     };
                 },
                 async ping() {
