@@ -223,10 +223,7 @@ export class ControlChannelServer {
                                     retryable: false,
                                 });
                             }
-                            const hello = negotiateControlProtocol(
-                                incoming.event.payload,
-                                peer,
-                            );
+                            negotiateControlProtocol(incoming.event.payload, peer);
                             pending = {
                                 peer,
                                 protocolVersion: CONTROL_PROTOCOL_VERSION,
