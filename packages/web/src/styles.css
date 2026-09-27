@@ -954,6 +954,19 @@ pre {
     color: inherit;
     background: #10151f;
 }
+.session .token-field {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.session .token-field input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+}
+.session .token-toggle {
+    flex: 0 0 auto;
+}
 .badge {
     margin-left: 0.3rem;
     padding: 0.05rem 0.3rem;

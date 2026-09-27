@@ -8,6 +8,7 @@ export function Login({
     onLogin(token: string): Promise<boolean>;
 }) {
     const [token, setToken] = useState("");
+    const [showToken, setShowToken] = useState(false);
     const [submitting, setSubmitting] = useState(false);
 
     async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -28,15 +29,29 @@ export function Login({
                     Enter the access token configured for the Web UI in TUI →
                     Connections → Connector.
                 </p>
-                <label>
-                    Access token
+                <label htmlFor="access-token">Access token</label>
+                <span className="token-field">
                     <input
-                        autoComplete="off"
+                        autoComplete="current-password"
+                        id="access-token"
                         onChange={(event) => setToken(event.target.value)}
-                        type="password"
+                        type={showToken ? "text" : "password"}
                         value={token}
                     />
-                </label>
+                    <button
+                        aria-label={
+                            showToken
+                                ? "Hide access token"
+                                : "Show access token"
+                        }
+                        aria-pressed={showToken}
+                        className="token-toggle"
+                        onClick={() => setShowToken((value) => !value)}
+                        type="button"
+                    >
+                        {showToken ? "Hide" : "Show"}
+                    </button>
+                </span>
                 {error === undefined ? null : (
                     <p className="error" role="alert">
                         {error}

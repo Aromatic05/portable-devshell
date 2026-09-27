@@ -203,6 +203,32 @@ describe("authenticated application shell", () => {
         expect(token).toHaveValue("secret-token");
     });
 
+    it("toggles access token visibility without losing the entered token", async () => {
+        const session = fakeSession({ authMode: "token", check: false });
+        render(<App createClients={fakeClients} session={session} />);
+
+        const token = await screen.findByLabelText("Access token");
+        fireEvent.change(token, { target: { value: "secret-token" } });
+        expect(token).toHaveAttribute("type", "password");
+        expect(token).toHaveAttribute("autocomplete", "current-password");
+
+        const show = screen.getByRole("button", {
+            name: "Show access token",
+        });
+        expect(show).toHaveAttribute("aria-pressed", "false");
+        fireEvent.click(show);
+        expect(token).toHaveAttribute("type", "text");
+        expect(token).toHaveValue("secret-token");
+
+        const hide = screen.getByRole("button", {
+            name: "Hide access token",
+        });
+        expect(hide).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(hide);
+        expect(token).toHaveAttribute("type", "password");
+        expect(token).toHaveValue("secret-token");
+    });
+
     it("redirects to the OAuth start endpoint when auth=oauth2", async () => {
         const session = fakeSession({
             authMode: "oauth2",
