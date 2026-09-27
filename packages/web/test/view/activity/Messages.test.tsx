@@ -21,6 +21,7 @@ import type { WebRoute } from "../../../src/app/Route.js";
 import type { WebState } from "../../../src/state/Model.js";
 import type { WebStore } from "../../../src/state/Store.js";
 import { buildConversationMarkdown } from "../../../src/view/page/activity/messages/Export.js";
+import { formatMessageDate } from "../../../src/view/page/activity/messages/conversation/History.js";
 import { Messages } from "../../../src/view/page/activity/messages/Page.js";
 
 const state: WebState = {
@@ -1420,5 +1421,162 @@ describe("Messages", () => {
         expect(
             stableGroups.map((group) => group.getAttribute("aria-label")),
         ).toEqual(["portable-devshell", "efilinux"]);
+    });
+
+    it("renames a conversation from the row action menu", async () => {
+        const nextState = twoActiveConversationState();
+        const updateConversationPreferences = vi.fn(async () => true);
+        render(
+            <Messages
+                navigate={vi.fn()}
+                route={{ page: "messages", view: "contexts" }}
+                state={nextState}
+                store={messageStore({ updateConversationPreferences })}
+            />,
+        );
+
+        const reviewRow = screen
+            .getByRole("button", { name: /Review the Messages navigation/u })
+            .closest(".conversation-row")!;
+        fireEvent.click(
+            within(reviewRow).getByRole("button", {
+                name: "Conversation actions",
+            }),
+        );
+        fireEvent.click(
+            within(reviewRow).getByRole("button", { name: "Rename" }),
+        );
+        expect(
+            screen.queryByLabelText(/^Actions for Review/u),
+        ).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText("Conversation title"), {
+            target: { value: "Renamed from the menu" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Save title" }));
+        await waitFor(() =>
+            expect(updateConversationPreferences).toHaveBeenCalledWith({
+                titles: { "alpha\u0000ctx-second": "Renamed from the menu" },
+            }),
+        );
+    });
+
+    it("closes the conversation action menu with Escape and keeps the sidebar open", async () => {
+        render(
+            <Messages
+                navigate={vi.fn()}
+                route={{ page: "messages", view: "contexts" }}
+                state={twoActiveConversationState()}
+                store={messageStore()}
+            />,
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Open conversations" }),
+        );
+        const reviewRow = screen
+            .getByRole("button", { name: /Review the Messages navigation/u })
+            .closest(".conversation-row")!;
+        const trigger = within(reviewRow).getByRole("button", {
+            name: "Conversation actions",
+        });
+        fireEvent.click(trigger);
+        expect(
+            screen.getByLabelText(/^Actions for Review/u),
+        ).toBeInTheDocument();
+
+        fireEvent.keyDown(document, { key: "Escape" });
+
+        expect(
+            screen.queryByLabelText(/^Actions for Review/u),
+        ).not.toBeInTheDocument();
+        expect(document.querySelector(".messages-sidebar")).toHaveClass("open");
+        await waitFor(() => expect(trigger).toHaveFocus());
+    });
+
+    it("reorders conversations from the row action menu and disables boundary moves", async () => {
+        const nextState = twoActiveConversationState();
+        const updateConversationPreferences = vi.fn(async () => true);
+        render(
+            <Messages
+                navigate={vi.fn()}
+                route={{ page: "messages", view: "contexts" }}
+                state={nextState}
+                store={messageStore({ updateConversationPreferences })}
+            />,
+        );
+        const list = screen.getByRole("navigation", { name: "Conversations" });
+        const rows = list.querySelectorAll<HTMLElement>(".conversation-row");
+        expect(rows[0]).toHaveTextContent("Review the Messages navigation.");
+
+        fireEvent.click(
+            within(rows[0]!).getByRole("button", {
+                name: "Conversation actions",
+            }),
+        );
+        expect(screen.getByRole("button", { name: "Move up" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Move down" })).toBeEnabled();
+        fireEvent.keyDown(document, { key: "Escape" });
+
+        fireEvent.click(
+            within(rows[1]!).getByRole("button", {
+                name: "Conversation actions",
+            }),
+        );
+        expect(screen.getByRole("button", { name: "Move up" })).toBeEnabled();
+        expect(
+            screen.getByRole("button", { name: "Move down" }),
+        ).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Move up" }));
+
+        await waitFor(() =>
+            expect(updateConversationPreferences).toHaveBeenCalledWith({
+                orderByWorkspace: {
+                    "/work/portable-devshell": [
+                        "alpha\u0000ctx-first",
+                        "alpha\u0000ctx-second",
+                    ],
+                },
+            }),
+        );
+        expect(
+            list.querySelectorAll<HTMLElement>(".conversation-row")[0],
+        ).toHaveTextContent("Investigate the first regression in Audit.");
+    });
+
+    it("shows a draft length hint only near the maximum length", () => {
+        render(
+            <Messages
+                navigate={vi.fn()}
+                route={threadRoute}
+                state={state}
+                store={messageStore()}
+            />,
+        );
+        const composer = screen.getByRole("textbox", { name: "Comment" });
+        const form = composer.closest("form")!;
+        expect(
+            within(form).queryByText(/\d+ \/ 20000/u),
+        ).not.toBeInTheDocument();
+
+        fireEvent.change(composer, { target: { value: "a".repeat(18_000) } });
+        expect(
+            within(form).queryByText(/\d+ \/ 20000/u),
+        ).not.toBeInTheDocument();
+
+        fireEvent.change(composer, { target: { value: "a".repeat(18_001) } });
+        expect(within(form).getByText("18001 / 20000")).toBeInTheDocument();
+    });
+
+    it("formats message timestamps compactly relative to the current date", () => {
+        const now = new Date(2026, 8, 27, 12, 0, 0);
+        expect(formatMessageDate("not-a-date", now)).toBe("not-a-date");
+        expect(
+            formatMessageDate(new Date(2026, 8, 27, 9, 30).toISOString(), now),
+        ).not.toMatch(/\d{4}/u);
+        expect(
+            formatMessageDate(new Date(2026, 2, 2, 9, 30).toISOString(), now),
+        ).not.toMatch(/\d{4}/u);
+        expect(
+            formatMessageDate(new Date(2025, 8, 27, 9, 30).toISOString(), now),
+        ).toMatch(/2025/u);
     });
 });
