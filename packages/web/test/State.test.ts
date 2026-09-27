@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
+    CONTROL_PROTOCOL_VERSION,
     type ContextMessageRecord,
     type ControlProtocolHelloResponse,
     type InstanceCreateDraft,
@@ -51,7 +52,7 @@ describe("WebStore", () => {
 
         resolveHello({
             capabilities: ["request", "stream", "streamResume"],
-            protocolVersion: 1,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
         });
         await loading;
         expect(clients.conversation.preferences).toHaveBeenCalledOnce();
@@ -914,7 +915,7 @@ function fakeClients(
         service: {
             hello: async () => ({
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             }),
             ping: async () => ({ pong: true }),
             restart: async () => ({ accepted: true }),

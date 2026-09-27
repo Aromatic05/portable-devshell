@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    CONTROL_PROTOCOL_VERSION,
     WebSocketChannel,
     type Channel,
     type WebSocketClientLike,
@@ -249,7 +250,7 @@ class ReplyChannel implements Channel {
                 name: request.name,
                 payload: {
                     capabilities: ["request", "stream", "streamResume"],
-                    protocolVersion: 1,
+                    protocolVersion: CONTROL_PROTOCOL_VERSION,
                 },
                 replyTo: request.id,
                 to: "web",

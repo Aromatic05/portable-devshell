@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
+    CONTROL_PROTOCOL_VERSION,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
@@ -248,7 +249,7 @@ describe("authenticated application shell", () => {
             .mockRejectedValueOnce(new Error("Control offline"))
             .mockResolvedValue({
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             });
         const createClients = vi.fn(() => clients);
 
@@ -276,7 +277,7 @@ describe("authenticated application shell", () => {
             .mockRejectedValueOnce(new Error("Control offline"))
             .mockResolvedValue({
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             });
         render(<App createClients={() => clients} session={session} />);
 
@@ -432,7 +433,7 @@ describe("authenticated application shell", () => {
             .mockRejectedValueOnce(new Error("Control offline"))
             .mockResolvedValue({
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             });
         render(<App createClients={() => clients} session={session} />);
 
@@ -699,7 +700,7 @@ function fakeClients(): WebClients {
         service: {
             hello: async () => ({
                 capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: 1,
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
             }),
             ping: async () => ({ pong: true }),
             restart: async () => ({ accepted: true }),
