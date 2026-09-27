@@ -995,7 +995,15 @@ async function replaceSymlink(path, target, type = undefined) {
     await rm(temporary, { force: true, recursive: type === "junction" });
     await symlink(target, temporary, type);
     await rename(temporary, path).catch(async (error) => {
-        if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY") {
+        const replaceBlockedByExistingWindowsEntry =
+            process.platform === "win32" &&
+            error?.code === "EPERM" &&
+            (await pathExists(path));
+        if (
+            error?.code !== "EEXIST" &&
+            error?.code !== "ENOTEMPTY" &&
+            !replaceBlockedByExistingWindowsEntry
+        ) {
             throw error;
         }
         await rm(path, { force: true, recursive: type === "junction" });

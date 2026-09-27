@@ -23,9 +23,6 @@ const CURRENT_DEVELOPMENT_VERSION = "0.7.7"; // version-state:current-developmen
 
 test(
     "install-local rejects stale activation before stopping or changing active Worker aliases",
-    {
-        skip: process.platform === "win32",
-    },
     async () => {
         const root = await createTestTempDirectory(
             "install-local-stale-activation-test",
@@ -49,7 +46,7 @@ test(
         const currentLink = resolve(installRoot, "current");
         const workerBinDirectory = resolve(devshellHome, "bin");
         const hostTarget = resolveHostTarget();
-        const workerAsset = `devshell-worker-${hostTarget}`;
+        const workerAsset = workerAssetName(hostTarget);
         const workerBytes = Buffer.from("candidate-worker\n", "utf8");
         const workerSha = createHash("sha256")
             .update(workerBytes)
@@ -102,7 +99,11 @@ test(
                 "utf8",
             );
             await chmod(oldCli, 0o755);
-            await symlink("versions/9.8.7-activated", currentLink);
+            await writeCurrentActivation(
+                currentLink,
+                activatedVersionDirectory,
+                "versions/9.8.7-activated",
+            );
 
             const daemon = resolve(
                 runningVersionDirectory,
@@ -124,14 +125,10 @@ test(
                 "utf8",
             );
 
-            await writeFile(
-                resolve(workerBinDirectory, workerAsset),
-                "old-worker\n",
-                "utf8",
-            );
-            await symlink(
+            await writeWorkerActivation(
+                workerBinDirectory,
                 workerAsset,
-                resolve(workerBinDirectory, "devshell-worker"),
+                "old-worker\n",
             );
 
             const fakePnpm = resolve(fakeBin, "pnpm");
@@ -144,7 +141,8 @@ test(
                     "const args = process.argv.slice(2);",
                     "const deploy = args.indexOf('deploy');",
                     "if (deploy >= 0) {",
-                    "  const out = resolve(args.at(-1));",
+                    "  const rawOut = args.at(-1);",
+                    "  const out = resolve(rawOut.length >= 2 && rawOut[0] === '\"' && rawOut.at(-1) === '\"' ? rawOut.slice(1, -1) : rawOut);",
                     "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
                     "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
                     "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nif ((process.argv[2] ?? 'status') === 'status') process.stdout.write('control: stopped\\\\n'); else process.exit(2);\\n`);",
@@ -153,7 +151,7 @@ test(
                 ].join("\n"),
                 "utf8",
             );
-            await chmod(fakePnpm, 0o755);
+            await prepareFakePnpm(fakePnpm);
 
             server = createServer((request, response) => {
                 if (request.url?.endsWith(`/${workerAsset}.sha256`)) {
@@ -194,21 +192,12 @@ test(
                 /does not belong to the activated application generation/iu,
             );
             assert.equal(await readFile(stopLog, "utf8").catch(() => ""), "");
-            assert.equal(
-                await readFile(
-                    resolve(workerBinDirectory, workerAsset),
-                    "utf8",
-                ),
+            await assertWorkerActivation(
+                workerBinDirectory,
+                workerAsset,
                 "old-worker\n",
             );
-            assert.equal(
-                await readlink(resolve(workerBinDirectory, "devshell-worker")),
-                workerAsset,
-            );
-            assert.equal(
-                await readlink(currentLink),
-                "versions/9.8.7-activated",
-            );
+            await assertCurrentActivation(currentLink, activatedVersionDirectory);
             assert.doesNotThrow(() => process.kill(liveControl.pid, 0));
         } finally {
             liveControl?.kill("SIGKILL");
@@ -226,7 +215,9 @@ function resolveHostTarget() {
             ? "linux"
             : process.platform === "darwin"
               ? "darwin"
-              : undefined;
+              : process.platform === "win32"
+                ? "windows"
+                : undefined;
     const arch =
         process.arch === "x64"
             ? "x64"
@@ -238,6 +229,63 @@ function resolveHostTarget() {
             `unsupported test host ${process.platform}/${process.arch}`,
         );
     return `${os}-${arch}`;
+}
+
+function workerAssetName(target) {
+    return target.startsWith("windows-")
+        ? `devshell-worker-${target}.exe`
+        : `devshell-worker-${target}`;
+}
+
+function defaultWorkerName() {
+    return process.platform === "win32" ? "devshell-worker.exe" : "devshell-worker";
+}
+
+async function writeWorkerActivation(workerBinDirectory, workerAsset, content) {
+    await writeFile(resolve(workerBinDirectory, workerAsset), content, "utf8");
+    const active = resolve(workerBinDirectory, defaultWorkerName());
+    if (process.platform === "win32") {
+        await writeFile(active, content, "utf8");
+    } else {
+        await symlink(workerAsset, active);
+    }
+}
+
+async function assertWorkerActivation(workerBinDirectory, workerAsset, content) {
+    assert.equal(
+        await readFile(resolve(workerBinDirectory, workerAsset), "utf8"),
+        content,
+    );
+    const active = resolve(workerBinDirectory, defaultWorkerName());
+    if (process.platform === "win32") {
+        assert.equal(await readFile(active, "utf8"), content);
+    } else {
+        assert.equal(await readlink(active), workerAsset);
+    }
+}
+
+async function writeCurrentActivation(currentLink, versionDirectory, relativeTarget) {
+    await symlink(
+        process.platform === "win32" ? versionDirectory : relativeTarget,
+        currentLink,
+        process.platform === "win32" ? "junction" : undefined,
+    );
+}
+
+async function assertCurrentActivation(currentLink, expectedDirectory) {
+    const target = await readlink(currentLink);
+    assert.equal(resolve(resolve(currentLink, ".."), target), expectedDirectory);
+}
+
+async function prepareFakePnpm(script) {
+    await chmod(script, 0o755);
+    if (process.platform === "win32") {
+        await writeFile(
+            `${script}.cmd`,
+            `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`,
+            "utf8",
+        );
+    }
 }
 
 async function runProcess(command, args, env) {
@@ -265,9 +313,6 @@ async function runProcess(command, args, env) {
 
 test(
     "install-local rolls back application and Worker activation when the candidate Control cannot start",
-    {
-        skip: process.platform === "win32",
-    },
     async () => {
         const root = await createTestTempDirectory(
             "install-local-rollback-test",
@@ -286,7 +331,7 @@ test(
         const currentLink = resolve(installRoot, "current");
         const workerBinDirectory = resolve(devshellHome, "bin");
         const hostTarget = resolveHostTarget();
-        const workerAsset = `devshell-worker-${hostTarget}`;
+        const workerAsset = workerAssetName(hostTarget);
         const workerBytes = Buffer.from("candidate-worker\n", "utf8");
         const workerSha = createHash("sha256")
             .update(workerBytes)
@@ -341,7 +386,11 @@ test(
                 "utf8",
             );
             await chmod(oldCli, 0o755);
-            await symlink("versions/9.8.7-running", currentLink);
+            await writeCurrentActivation(
+                currentLink,
+                activatedVersionDirectory,
+                "versions/9.8.7-running",
+            );
 
             const daemon = resolve(
                 activatedVersionDirectory,
@@ -363,14 +412,10 @@ test(
                 "utf8",
             );
 
-            await writeFile(
-                resolve(workerBinDirectory, workerAsset),
-                "old-worker\n",
-                "utf8",
-            );
-            await symlink(
+            await writeWorkerActivation(
+                workerBinDirectory,
                 workerAsset,
-                resolve(workerBinDirectory, "devshell-worker"),
+                "old-worker\n",
             );
 
             const fakePnpm = resolve(fakeBin, "pnpm");
@@ -383,7 +428,8 @@ test(
                     "const args = process.argv.slice(2);",
                     "const deploy = args.indexOf('deploy');",
                     "if (deploy >= 0) {",
-                    "  const out = resolve(args.at(-1));",
+                    "  const rawOut = args.at(-1);",
+                    "  const out = resolve(rawOut.length >= 2 && rawOut[0] === '\"' && rawOut.at(-1) === '\"' ? rawOut.slice(1, -1) : rawOut);",
                     "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
                     "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
                     "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nconst command = process.argv[2] ?? 'status';\\nif (command === 'status') process.stdout.write('control: stopped\\\\n'); else if (command === 'start') { process.stderr.write('candidate control start failure\\\\n'); process.exit(1); } else process.exit(0);\\n`);",
@@ -392,7 +438,7 @@ test(
                 ].join("\n"),
                 "utf8",
             );
-            await chmod(fakePnpm, 0o755);
+            await prepareFakePnpm(fakePnpm);
 
             server = createServer((request, response) => {
                 if (request.url?.endsWith(`/${workerAsset}.sha256`)) {
@@ -429,17 +475,11 @@ test(
 
             assert.notEqual(result.code, 0, `${result.stdout}${result.stderr}`);
             assert.match(result.stderr, /candidate control start failure/iu);
-            assert.equal(await readlink(currentLink), "versions/9.8.7-running");
-            assert.equal(
-                await readFile(
-                    resolve(workerBinDirectory, workerAsset),
-                    "utf8",
-                ),
-                "old-worker\n",
-            );
-            assert.equal(
-                await readlink(resolve(workerBinDirectory, "devshell-worker")),
+            await assertCurrentActivation(currentLink, activatedVersionDirectory);
+            await assertWorkerActivation(
+                workerBinDirectory,
                 workerAsset,
+                "old-worker\n",
             );
             assert.deepEqual(
                 (await readFile(runtimeLog, "utf8")).trim().split("\n"),
@@ -457,9 +497,6 @@ test(
 
 test(
     "install-local completes Worker activation backup before stopping the previous runtime",
-    {
-        skip: process.platform === "win32",
-    },
     async () => {
         const root = await createTestTempDirectory(
             "install-local-pretransaction-rollback-test",
@@ -478,7 +515,7 @@ test(
         const currentLink = resolve(installRoot, "current");
         const workerBinDirectory = resolve(devshellHome, "bin");
         const hostTarget = resolveHostTarget();
-        const workerAsset = `devshell-worker-${hostTarget}`;
+        const workerAsset = workerAssetName(hostTarget);
         const workerBytes = Buffer.from("candidate-worker\n", "utf8");
         const workerSha = createHash("sha256")
             .update(workerBytes)
@@ -532,7 +569,11 @@ test(
                 "utf8",
             );
             await chmod(oldCli, 0o755);
-            await symlink("versions/9.8.7-running", currentLink);
+            await writeCurrentActivation(
+                currentLink,
+                activatedVersionDirectory,
+                "versions/9.8.7-running",
+            );
 
             const daemon = resolve(
                 activatedVersionDirectory,
@@ -555,10 +596,18 @@ test(
             );
 
             await mkdir(resolve(workerBinDirectory, workerAsset));
-            await symlink(
-                workerAsset,
-                resolve(workerBinDirectory, "devshell-worker"),
-            );
+            if (process.platform === "win32") {
+                await writeFile(
+                    resolve(workerBinDirectory, defaultWorkerName()),
+                    "old-worker\n",
+                    "utf8",
+                );
+            } else {
+                await symlink(
+                    workerAsset,
+                    resolve(workerBinDirectory, defaultWorkerName()),
+                );
+            }
 
             const fakePnpm = resolve(fakeBin, "pnpm");
             await writeFile(
@@ -570,7 +619,8 @@ test(
                     "const args = process.argv.slice(2);",
                     "const deploy = args.indexOf('deploy');",
                     "if (deploy >= 0) {",
-                    "  const out = resolve(args.at(-1));",
+                    "  const rawOut = args.at(-1);",
+                    "  const out = resolve(rawOut.length >= 2 && rawOut[0] === '\"' && rawOut.at(-1) === '\"' ? rawOut.slice(1, -1) : rawOut);",
                     "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
                     "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
                     "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nif ((process.argv[2] ?? 'status') === 'status') process.stdout.write('control: stopped\\\\n'); else process.exit(2);\\n`);",
@@ -579,7 +629,7 @@ test(
                 ].join("\n"),
                 "utf8",
             );
-            await chmod(fakePnpm, 0o755);
+            await prepareFakePnpm(fakePnpm);
 
             server = createServer((request, response) => {
                 if (request.url?.endsWith(`/${workerAsset}.sha256`)) {
@@ -619,7 +669,7 @@ test(
                 result.stderr,
                 /Unsupported active installation entry/u,
             );
-            assert.equal(await readlink(currentLink), "versions/9.8.7-running");
+            await assertCurrentActivation(currentLink, activatedVersionDirectory);
             assert.equal(
                 await readFile(runtimeLog, "utf8").catch(() => ""),
                 "",
@@ -639,9 +689,6 @@ test(
 
 test(
     "install-local does not downgrade after candidate Control is ready and instance restore begins",
-    {
-        skip: process.platform === "win32",
-    },
     async () => {
         const root = await createTestTempDirectory(
             "install-local-real-runtime-failure-test",
@@ -660,7 +707,7 @@ test(
         const currentLink = resolve(installRoot, "current");
         const workerBinDirectory = resolve(devshellHome, "bin");
         const hostTarget = resolveHostTarget();
-        const workerAsset = `devshell-worker-${hostTarget}`;
+        const workerAsset = workerAssetName(hostTarget);
         const workerBytes = Buffer.from("candidate-worker\n", "utf8");
         const workerSha = createHash("sha256")
             .update(workerBytes)
@@ -714,7 +761,11 @@ test(
                 "utf8",
             );
             await chmod(oldCli, 0o755);
-            await symlink("versions/9.8.7-running", currentLink);
+            await writeCurrentActivation(
+                currentLink,
+                activatedVersionDirectory,
+                "versions/9.8.7-running",
+            );
 
             const daemon = resolve(
                 activatedVersionDirectory,
@@ -736,14 +787,10 @@ test(
                 "utf8",
             );
 
-            await writeFile(
-                resolve(workerBinDirectory, workerAsset),
-                "old-worker\n",
-                "utf8",
-            );
-            await symlink(
+            await writeWorkerActivation(
+                workerBinDirectory,
                 workerAsset,
-                resolve(workerBinDirectory, "devshell-worker"),
+                "old-worker\n",
             );
 
             const fakePnpm = resolve(fakeBin, "pnpm");
@@ -756,7 +803,8 @@ test(
                     "const args = process.argv.slice(2);",
                     "const deploy = args.indexOf('deploy');",
                     "if (deploy >= 0) {",
-                    "  const out = resolve(args.at(-1));",
+                    "  const rawOut = args.at(-1);",
+                    "  const out = resolve(rawOut.length >= 2 && rawOut[0] === '\"' && rawOut.at(-1) === '\"' ? rawOut.slice(1, -1) : rawOut);",
                     "  mkdirSync(resolve(out, 'dist'), { recursive: true });",
                     "  writeFileSync(resolve(out, 'package.json'), JSON.stringify({ name: '@portable-devshell/cli', version: '0.0.0', type: 'module', bin: { devshell: './dist/CliMain.js' } }));",
                     "  writeFileSync(resolve(out, 'dist', 'CliMain.js'), `#!/usr/bin/env node\\nconst command = process.argv[2] ?? 'status';\\nif (command === 'status') process.stdout.write('control: stopped\\\\n'); else if (command === 'start') process.exit(0); else if (command === 'instance' && process.argv[3] === 'start') { process.stderr.write('instance restore failure\\\\n'); process.exit(1); } else process.exit(0);\\n`);",
@@ -765,7 +813,7 @@ test(
                 ].join("\n"),
                 "utf8",
             );
-            await chmod(fakePnpm, 0o755);
+            await prepareFakePnpm(fakePnpm);
 
             server = createServer((request, response) => {
                 if (request.url?.endsWith(`/${workerAsset}.sha256`)) {
@@ -806,9 +854,9 @@ test(
                 result.stderr,
                 /Automatic downgrade is disabled after candidate instances/iu,
             );
-            assert.equal(
-                await readlink(currentLink),
-                `versions/${CURRENT_DEVELOPMENT_VERSION}`,
+            await assertCurrentActivation(
+                currentLink,
+                resolve(installRoot, "versions", CURRENT_DEVELOPMENT_VERSION),
             );
             assert.deepEqual(
                 (await readFile(runtimeLog, "utf8")).trim().split("\n"),
