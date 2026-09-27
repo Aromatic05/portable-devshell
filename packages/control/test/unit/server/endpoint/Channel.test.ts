@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    CONTROL_PROTOCOL_LEGACY_VERSION,
+    CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     ClientConnection,
     PrefixRoute,
@@ -346,11 +348,65 @@ test("ControlChannelServer rejects unsupported protocol ranges during first requ
     await assert.rejects(
         connection.request("@control", "service", "hello", {
             clientKind: "tui",
-            maxProtocolVersion: CONTROL_PROTOCOL_VERSION + 1,
-            minProtocolVersion: CONTROL_PROTOCOL_VERSION + 1,
+            protocolRange: { max: "2.0.0", min: "2.0.0" },
         }),
         (error: unknown) =>
             (error as { code?: string }).code === "protocol.versionUnsupported",
+    );
+});
+
+test("ControlChannelServer negotiates semantic protocol ranges", async (t) => {
+    const provider = new MemoryControlChannelListener();
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    assert.deepEqual(
+        await connection.request("@control", "service", "hello", {
+            clientKind: "tui",
+            protocolRange: CONTROL_PROTOCOL_RANGE,
+        }),
+        {
+            capabilities: ["request", "stream", "streamResume"],
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+        },
+    );
+});
+
+test("ControlChannelServer preserves the 0.7.6 integer hello compatibility path", async (t) => {
+    const provider = new MemoryControlChannelListener();
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    assert.deepEqual(
+        await connection.request("@control", "service", "hello", {
+            clientKind: "tui",
+            maxProtocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
+            minProtocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
+        }),
+        {
+            capabilities: ["request", "stream", "streamResume"],
+            protocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
+        },
+    );
+    assert.deepEqual(
+        await connection.request<JsonValue>("@control", "service", "ping"),
+        {
+            pong: true,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
+            subject: { id: "uid:test", kind: "local-owner" },
+        },
     );
 });
 
@@ -647,8 +703,7 @@ async function negotiate(
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
         clientKind,
-        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        protocolRange: CONTROL_PROTOCOL_RANGE,
     });
 }
 

@@ -8,6 +8,7 @@ import { HttpHost } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
+    CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     CONTROL_REMOTE_RPC_PATH,
     PrefixRoute,
@@ -783,8 +784,7 @@ async function negotiate(
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
         clientKind,
-        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        protocolRange: CONTROL_PROTOCOL_RANGE,
     });
 }
 

@@ -33,7 +33,7 @@ import type {
 } from "../protocol/interaction/context/Conversation.js";
 import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
 import {
-    CONTROL_PROTOCOL_VERSION,
+    CONTROL_PROTOCOL_RANGE,
     type ControlClientKind,
     type ControlProtocolHelloResponse,
 } from "../protocol/control/ControlProtocol.js";
@@ -555,8 +555,7 @@ export function createControlClients(
             hello: () =>
                 service.request("hello", {
                     clientKind: options.clientKind,
-                    maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-                    minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+                    protocolRange: CONTROL_PROTOCOL_RANGE,
                 }),
             ping: () => service.request("ping"),
             restart: () => service.request("restart"),

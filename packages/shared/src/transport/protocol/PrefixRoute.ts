@@ -60,7 +60,7 @@ export interface PrefixRouteContext {
     readonly destination: Destination;
     readonly module: string;
     readonly peer: Exclude<Peer, "server">;
-    readonly protocolVersion?: number;
+    readonly protocolVersion?: string;
     readonly requestId: string;
     readonly signal: AbortSignal;
     readonly subject?: PrefixRouteSubject;
@@ -77,7 +77,7 @@ export interface PrefixRouteSubject {
 }
 
 export interface PrefixRouteConnectionContext {
-    readonly protocolVersion?: number;
+    readonly protocolVersion?: string;
     readonly subject?: PrefixRouteSubject;
 }
 

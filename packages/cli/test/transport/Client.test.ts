@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import test from "node:test";
 
 import {
+    CONTROL_PROTOCOL_VERSION,
     Codec,
     resolveControlSocketPath,
     SocketChannel,
@@ -36,7 +37,7 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
                 event.name === "service.hello"
                     ? {
                           capabilities: ["request", "stream", "streamResume"],
-                          protocolVersion: 1,
+                          protocolVersion: CONTROL_PROTOCOL_VERSION,
                       }
                     : event.name === "instance.list"
                       ? [
@@ -124,7 +125,7 @@ test("CliMain negotiates Control before a control-plane business request", async
                 event.name === "service.hello"
                     ? {
                           capabilities: ["request", "stream", "streamResume"],
-                          protocolVersion: 1,
+                          protocolVersion: CONTROL_PROTOCOL_VERSION,
                       }
                     : event.name === "cli.commands"
                       ? []

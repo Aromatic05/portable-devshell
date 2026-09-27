@@ -85,6 +85,8 @@ export type {
     WebSocketClientLike,
 } from "./transport/websocket/WebSocketChannel.js";
 export {
+    CONTROL_PROTOCOL_LEGACY_VERSION,
+    CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,
     CONTROL_REMOTE_RPC_PATH,
@@ -101,6 +103,7 @@ export type {
     ControlProtocolCapability,
     ControlProtocolHelloRequest,
     ControlProtocolHelloResponse,
+    ControlProtocolRange,
 } from "./protocol/control/ControlProtocol.js";
 export type {
     ConfigBatchUpdateRequest,

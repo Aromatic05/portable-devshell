@@ -19,7 +19,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { createError } from "../../protocol/Error.js";
-import { CONTROL_PROTOCOL_VERSION } from "../../protocol/control/ControlProtocol.js";
+import { CONTROL_PROTOCOL_RANGE } from "../../protocol/control/ControlProtocol.js";
 import type { JsonValue } from "../../protocol/JsonValue.js";
 import { ClientConnection } from "../ClientConnection.js";
 import { SocketChannel } from "./SocketChannel.js";
@@ -591,8 +591,7 @@ function createSocketControlLifecycleRpcClient(
             try {
                 await connection.request("@control", "service", "hello", {
                     clientKind: "cli",
-                    maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-                    minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+                    protocolRange: CONTROL_PROTOCOL_RANGE,
                 });
                 return await connection.request(
                     "@control",

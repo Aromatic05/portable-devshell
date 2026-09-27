@@ -1,4 +1,5 @@
 import {
+    CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_VERSION,
     Codec,
     PrefixRoute,
@@ -8,7 +9,6 @@ import {
 import type {
     Channel,
     ControlClientKind,
-    ControlProtocolHelloRequest,
     ControlProtocolHelloResponse,
     JsonValue,
     PrefixRouteIncoming,
@@ -185,12 +185,12 @@ export class ControlChannelServer {
         }
         try {
             let negotiated:
-                | { peer: ControlClientKind; protocolVersion: number }
+                | { peer: ControlClientKind; protocolVersion: string }
                 | undefined;
             let pending:
                 | {
                       peer: ControlClientKind;
-                      protocolVersion: number;
+                      protocolVersion: string;
                       requestId: string;
                   }
                 | undefined;
@@ -229,7 +229,7 @@ export class ControlChannelServer {
                             );
                             pending = {
                                 peer,
-                                protocolVersion: hello.protocolVersion,
+                                protocolVersion: CONTROL_PROTOCOL_VERSION,
                                 requestId: incoming.event.id,
                             };
                             return;
@@ -403,14 +403,14 @@ export function negotiateControlProtocol(
         });
     }
     if (
-        request.minProtocolVersion > CONTROL_PROTOCOL_VERSION ||
-        request.maxProtocolVersion < CONTROL_PROTOCOL_VERSION
+        compareProtocolVersion(request.protocolRange.min, CONTROL_PROTOCOL_VERSION) > 0 ||
+        compareProtocolVersion(request.protocolRange.max, CONTROL_PROTOCOL_VERSION) < 0
     ) {
         throw createError({
             code: errorCodes.protocolVersionUnsupported,
             details: {
-                clientMaxProtocolVersion: request.maxProtocolVersion,
-                clientMinProtocolVersion: request.minProtocolVersion,
+                clientMaxProtocolVersion: request.protocolRange.max,
+                clientMinProtocolVersion: request.protocolRange.min,
                 serverProtocolVersion: CONTROL_PROTOCOL_VERSION,
             },
             message: "Control RPC protocol version is not supported.",
@@ -419,13 +419,25 @@ export function negotiateControlProtocol(
     }
     return {
         capabilities: ["request", "stream", "streamResume"],
-        protocolVersion: CONTROL_PROTOCOL_VERSION,
+        protocolVersion: request.legacy
+            ? CONTROL_PROTOCOL_LEGACY_VERSION
+            : CONTROL_PROTOCOL_VERSION,
+    };
+}
+
+interface ParsedControlHelloRequest {
+    clientKind: ControlClientKind;
+    clientVersion?: string;
+    legacy: boolean;
+    protocolRange: {
+        max: string;
+        min: string;
     };
 }
 
 function readHelloRequest(
     payload: JsonValue | undefined,
-): ControlProtocolHelloRequest {
+): ParsedControlHelloRequest {
     if (
         typeof payload !== "object" ||
         payload === null ||
@@ -434,24 +446,9 @@ function readHelloRequest(
         throw invalidHello("service.hello requires an object payload.");
     }
     const clientKind = payload.clientKind;
-    const minProtocolVersion = payload.minProtocolVersion;
-    const maxProtocolVersion = payload.maxProtocolVersion;
     if (clientKind !== "cli" && clientKind !== "tui" && clientKind !== "web") {
         throw invalidHello(
             "service.hello clientKind must be cli, tui, or web.",
-        );
-    }
-    if (
-        !isProtocolVersion(minProtocolVersion) ||
-        !isProtocolVersion(maxProtocolVersion)
-    ) {
-        throw invalidHello(
-            "service.hello protocol versions must be positive safe integers.",
-        );
-    }
-    if (minProtocolVersion > maxProtocolVersion) {
-        throw invalidHello(
-            "service.hello minProtocolVersion must not exceed maxProtocolVersion.",
         );
     }
     if (
@@ -460,20 +457,104 @@ function readHelloRequest(
     ) {
         throw invalidHello("service.hello clientVersion must be a string.");
     }
-    return {
+    const base: {
+        clientKind: ControlClientKind;
+        clientVersion?: string;
+    } = {
         clientKind,
         ...(payload.clientVersion === undefined
             ? {}
             : { clientVersion: payload.clientVersion }),
-        maxProtocolVersion,
-        minProtocolVersion,
+    };
+    if (payload.protocolRange !== undefined) {
+        if (
+            payload.minProtocolVersion !== undefined ||
+            payload.maxProtocolVersion !== undefined
+        ) {
+            throw invalidHello(
+                "service.hello must not mix protocolRange with legacy protocol version fields.",
+            );
+        }
+        const protocolRange = readProtocolRange(payload.protocolRange);
+        return { ...base, legacy: false, protocolRange };
+    }
+
+    const minProtocolVersion = payload.minProtocolVersion;
+    const maxProtocolVersion = payload.maxProtocolVersion;
+    if (
+        !isLegacyProtocolVersion(minProtocolVersion) ||
+        !isLegacyProtocolVersion(maxProtocolVersion)
+    ) {
+        throw invalidHello(
+            "service.hello requires protocolRange with semantic versions.",
+        );
+    }
+    if (minProtocolVersion > maxProtocolVersion) {
+        throw invalidHello(
+            "service.hello minProtocolVersion must not exceed maxProtocolVersion.",
+        );
+    }
+    return {
+        ...base,
+        legacy: true,
+        protocolRange: {
+            max: `${maxProtocolVersion}.0.0`,
+            min: `${minProtocolVersion}.0.0`,
+        },
     };
 }
 
-function isProtocolVersion(value: JsonValue | undefined): value is number {
+function readProtocolRange(value: JsonValue): { max: string; min: string } {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw invalidHello("service.hello protocolRange must be an object.");
+    }
+    const min = value.min;
+    const max = value.max;
+    if (typeof min !== "string" || typeof max !== "string") {
+        throw invalidHello(
+            "service.hello protocolRange min and max must be semantic versions.",
+        );
+    }
+    parseProtocolVersion(min);
+    parseProtocolVersion(max);
+    if (compareProtocolVersion(min, max) > 0) {
+        throw invalidHello(
+            "service.hello protocolRange min must not exceed max.",
+        );
+    }
+    return { max, min };
+}
+
+function isLegacyProtocolVersion(value: JsonValue | undefined): value is number {
     return (
         typeof value === "number" && Number.isSafeInteger(value) && value > 0
     );
+}
+
+function compareProtocolVersion(left: string, right: string): number {
+    const leftVersion = parseProtocolVersion(left);
+    const rightVersion = parseProtocolVersion(right);
+    if (leftVersion.major !== rightVersion.major)
+        return leftVersion.major - rightVersion.major;
+    if (leftVersion.minor !== rightVersion.minor)
+        return leftVersion.minor - rightVersion.minor;
+    return leftVersion.patch - rightVersion.patch;
+}
+
+function parseProtocolVersion(value: string): {
+    major: number;
+    minor: number;
+    patch: number;
+} {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
+    if (match === null) {
+        throw invalidHello(`Invalid Control protocol version ${value}.`);
+    }
+    return {
+        major: Number(match[1]),
+        minor: Number(match[2]),
+        patch: Number(match[3]),
+    };
 }
 
 function invalidHello(message: string): Error {
