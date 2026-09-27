@@ -68,14 +68,10 @@ fn retire_windows_workspaces(instance_paths: &InstancePaths, instance: &str) -> 
         if !owned_session(&namespace, instance, Some(&psmux_data_dir))? {
             continue;
         }
-        let output = run_mux(
-            &namespace,
-            &["kill-session", "-t", TMUX_SESSION],
-            Some(&psmux_data_dir),
-        )?;
+        let output = run_mux(&namespace, &["kill-server"], Some(&psmux_data_dir))?;
         if !output.status.success() {
             return Err(format!(
-                "failed to retire psmux namespace {}: {}",
+                "failed to stop psmux namespace {}: {}",
                 namespace.display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
