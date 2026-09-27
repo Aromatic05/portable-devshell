@@ -242,7 +242,7 @@ function terminalPrintCommand(marker) {
 
 function terminalSizeProbeCommand() {
     return process.platform === "win32"
-        ? `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))"\r`
+        ? `$s=$Host.UI.RawUI.WindowSize; [Console]::WriteLine(('{0} {1}' -f $s.Height,$s.Width))\r`
         : "stty size\r";
 }
 

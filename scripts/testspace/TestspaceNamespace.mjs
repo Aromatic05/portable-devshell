@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
 import { lstat, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, posix, relative, resolve } from "node:path";
 
 import {
     createTestspaceProcessEnvironment,
@@ -30,7 +30,7 @@ export function resolveTestspaceNamespaceDirectory(root, options = {}) {
         .update(`${userIdentity}:${resolve(root)}`)
         .digest("hex")
         .slice(0, 16);
-    return join(
+    return posix.join(
         temporaryDirectory,
         `pds-testspace-ns-${userIdentity}-${identity}`,
     );

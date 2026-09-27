@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { resolvePnpmCommand } from "./PnpmCommand.mjs";
@@ -53,7 +53,7 @@ function createPnpmStepFactory(platform) {
 
 export function createCommonCiSteps(platform = process.platform) {
     const pnpmStep = createPnpmStepFactory(platform);
-    return [
+    const steps = [
         {
             args: ["scripts/check-compat-expiry.mjs"],
             command: process.execPath,
@@ -68,13 +68,18 @@ export function createCommonCiSteps(platform = process.platform) {
             command: "cargo",
             name: "Rust workspace tests",
         },
-        pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]),
+    ];
+    if (platform !== "win32") {
+        steps.push(pnpmStep("Worker tmux contract tests", ["test:worker:tmux"]));
+    }
+    steps.push(
         pnpmStep("Prepare test Worker", ["test:prepare"]),
         {
             ...pnpmStep("Package tests", ["test:packages"]),
             env: { CI: "false" },
         },
-    ];
+    );
+    return steps;
 }
 
 export function createPlatformContractCiSteps(platform = process.platform) {
@@ -103,11 +108,12 @@ export function createTargetCiSteps(target, platform = process.platform) {
         throw new Error("A native target is required.");
     }
     const pnpmStep = createPnpmStepFactory(platform);
-    const worker = join(
+    const pathJoin = platform === "win32" ? win32.join : posix.join;
+    const worker = pathJoin(
         "ci-artifacts",
         `devshell-worker-${target}${platform === "win32" ? ".exe" : ""}`,
     );
-    const application = join(
+    const application = pathJoin(
         "ci-artifacts",
         `portable-devshell-app-${target}.tar.gz`,
     );
@@ -119,6 +125,21 @@ export function createTargetCiSteps(target, platform = process.platform) {
             "--output-dir",
             "./ci-artifacts",
         ]),
+        {
+            args: ["./scripts/smoke-worker.mjs", worker],
+            command: process.execPath,
+            name: "Worker daemon smoke",
+        },
+        {
+            args: ["./scripts/smoke-reverse-worker.mjs", worker],
+            command: process.execPath,
+            name: "Reverse worker PTY smoke",
+        },
+        {
+            args: ["./scripts/smoke-client.mjs", worker],
+            command: process.execPath,
+            name: "Client and local instance smoke",
+        },
     ];
 
     if (platform === "win32") {
@@ -138,6 +159,11 @@ export function createTargetCiSteps(target, platform = process.platform) {
                 target,
                 "--output-dir",
                 "./ci-artifacts",
+            ]),
+            pnpmStep("Application package smoke", [
+                "smoke:package",
+                "--",
+                application,
             ]),
         );
         if (target === "windows-x64") {
@@ -161,21 +187,6 @@ export function createTargetCiSteps(target, platform = process.platform) {
     }
 
     steps.push(
-        {
-            args: ["./scripts/smoke-worker.mjs", worker],
-            command: process.execPath,
-            name: "Worker daemon smoke",
-        },
-        {
-            args: ["./scripts/smoke-reverse-worker.mjs", worker],
-            command: process.execPath,
-            name: "Reverse worker PTY smoke",
-        },
-        {
-            args: ["./scripts/smoke-client.mjs", worker],
-            command: process.execPath,
-            name: "Client and local instance smoke",
-        },
         pnpmStep("Package native application", [
             "package:app",
             "--",
@@ -206,12 +217,12 @@ export function createTargetCiSteps(target, platform = process.platform) {
             "smoke:agent-package",
             "--",
             application,
-            join("ci-artifacts", `portable-devshell-agent-${target}.dsext`),
-            join(
+            pathJoin("ci-artifacts", `portable-devshell-agent-${target}.dsext`),
+            pathJoin(
                 "ci-artifacts",
                 `portable-devshell-agent-provider-pi-${target}.dsprovider`,
             ),
-            join(
+            pathJoin(
                 "ci-artifacts",
                 `portable-devshell-agent-provider-opencode-${target}.dsprovider`,
             ),
@@ -237,19 +248,6 @@ export function createTargetCiSteps(target, platform = process.platform) {
 
 export function createDevelopmentCiSteps(target, platform = process.platform) {
     const targetSteps = createTargetCiSteps(target, platform);
-    if (platform === "win32") {
-        const pnpmStep = createPnpmStepFactory(platform);
-        return [
-            {
-                args: ["scripts/check-compat-expiry.mjs"],
-                command: process.execPath,
-                name: "Compatibility expiry",
-            },
-            pnpmStep("Lint", ["lint"]),
-            pnpmStep("Typecheck", ["typecheck"]),
-            ...targetSteps,
-        ];
-    }
     return [...createCommonCiSteps(platform), ...targetSteps];
 }
 

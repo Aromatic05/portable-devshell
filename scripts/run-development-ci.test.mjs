@@ -90,6 +90,35 @@ test("common CI owns source correctness without rebuilding release assets", () =
     );
 });
 
+test("Windows common CI keeps source correctness and excludes only tmux contracts", () => {
+    const directory = mkdtempSync(join(tmpdir(), "devshell-ci-plan-"));
+    const pnpmCli = join(directory, "pnpm.cjs");
+    writeFileSync(pnpmCli, "");
+    const previous = process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+    process.env.PORTABLE_DEVSHELL_PNPM_CLI = pnpmCli;
+    try {
+        const names = createCommonCiSteps("win32").map((step) => step.name);
+        assert.deepEqual(names, [
+            "Compatibility expiry",
+            "Script tests",
+            "Lint",
+            "Build",
+            "Typecheck",
+            "Rust workspace tests",
+            "Prepare test Worker",
+            "Package tests",
+        ]);
+        assert.equal(names.includes("Worker tmux contract tests"), false);
+    } finally {
+        if (previous === undefined) {
+            delete process.env.PORTABLE_DEVSHELL_PNPM_CLI;
+        } else {
+            process.env.PORTABLE_DEVSHELL_PNPM_CLI = previous;
+        }
+        rmSync(directory, { force: true, recursive: true });
+    }
+});
+
 test("Unix target CI proves the native deliverable without rerunning common correctness", () => {
     const names = createTargetCiSteps("darwin-x64", "darwin").map(
         (step) => step.name,
@@ -172,8 +201,12 @@ test("Windows x64 target CI includes installer contract and real release smoke",
         assert.deepEqual(names, [
             "Build",
             "Build native Worker",
+            "Worker daemon smoke",
+            "Reverse worker PTY smoke",
+            "Client and local instance smoke",
             "Package native application",
             "Package Agent artifacts",
+            "Application package smoke",
             "Windows installer contract tests",
             "Windows release installer smoke",
         ]);
