@@ -97,11 +97,23 @@ export const ConversationHistory = memo(function ConversationHistory({
     );
 });
 
-function formatMessageDate(value: string): string {
+export function formatMessageDate(value: string, now = new Date()): string {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
+    const sameYear = date.getFullYear() === now.getFullYear();
+    const sameDay =
+        sameYear &&
+        date.getMonth() === now.getMonth() &&
+        date.getDate() === now.getDate();
     return new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
+        ...(sameDay
+            ? {}
+            : {
+                  day: "numeric",
+                  month: "short",
+                  ...(sameYear ? {} : { year: "numeric" as const }),
+              }),
+        hour: "2-digit",
+        minute: "2-digit",
     }).format(date);
 }
