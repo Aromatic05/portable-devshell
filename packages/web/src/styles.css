@@ -311,6 +311,19 @@ h4 {
     border-top: 1px solid #34445c;
     padding-top: 1rem;
 }
+.back {
+    min-height: 36px;
+    margin: 0 0 0.35rem;
+    border: 0;
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    color: #93a4bd;
+    background: transparent;
+}
+.back:hover {
+    color: #e8ecf4;
+    background: #263247;
+}
 .instance-section-nav {
     display: flex;
     flex-wrap: wrap;
