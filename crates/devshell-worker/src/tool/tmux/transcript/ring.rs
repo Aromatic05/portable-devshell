@@ -1,5 +1,17 @@
 use std::fs::File;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(windows)]
+use std::{fs, os::windows::fs::OpenOptionsExt, os::windows::io::AsRawHandle};
+
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, HANDLE},
+    Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE},
+    System::Memory::{
+        CreateFileMappingW, FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS,
+        MapViewOfFile, PAGE_READWRITE, UnmapViewOfFile,
+    },
+};
 
 const MAGIC: &[u8; 8] = b"DSHTMUX2";
 const HEADER_BYTES: usize = 40;
@@ -337,22 +349,115 @@ fn nix_error(error: nix::errno::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error as i32)
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(windows)]
+struct SharedMapping {
+    handle: HANDLE,
+    view: MEMORY_MAPPED_VIEW_ADDRESS,
+    len: usize,
+}
+
+#[cfg(windows)]
+impl SharedMapping {
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.view.Value.cast(), self.len) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.view.Value.cast(), self.len) }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SharedMapping {
+    fn drop(&mut self) {
+        unsafe {
+            UnmapViewOfFile(self.view);
+            CloseHandle(self.handle);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn map_shared(file: &File, len: usize, writable: bool) -> std::io::Result<SharedMapping> {
+    let handle = unsafe {
+        CreateFileMappingW(
+            file.as_raw_handle() as HANDLE,
+            std::ptr::null(),
+            PAGE_READWRITE,
+            0,
+            0,
+            std::ptr::null(),
+        )
+    };
+    if handle.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let access = if writable {
+        FILE_MAP_READ | FILE_MAP_WRITE
+    } else {
+        FILE_MAP_READ
+    };
+    let view = unsafe { MapViewOfFile(handle, access, 0, 0, len) };
+    if view.Value.is_null() {
+        let error = std::io::Error::last_os_error();
+        unsafe {
+            CloseHandle(handle);
+        }
+        return Err(error);
+    }
+    Ok(SharedMapping { handle, view, len })
+}
+
+#[cfg(windows)]
+fn shared_len(file: &File) -> std::io::Result<usize> {
+    usize::try_from(file.metadata()?.len())
+        .map_err(|_| invalid_data("ring mapping length does not fit this platform"))
+}
+
+#[cfg(windows)]
+fn open_shared(name: &str, create: bool) -> std::io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if create {
+        options.create(true).truncate(true);
+    }
+    options.open(name)
+}
+
+#[cfg(windows)]
+fn resize_shared(file: &File, len: u64) -> std::io::Result<()> {
+    file.set_len(len)
+}
+
+#[cfg(windows)]
+fn remove_shared(name: &str) -> std::io::Result<()> {
+    match fs::remove_file(name) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn open_shared(_name: &str, _create: bool) -> std::io::Result<File> {
     Err(shared_memory_unsupported())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn resize_shared(_file: &File, _len: u64) -> std::io::Result<()> {
     Err(shared_memory_unsupported())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 struct SharedMapping {
     bytes: Vec<u8>,
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 impl SharedMapping {
     fn as_slice(&self) -> &[u8] {
         &self.bytes
@@ -363,37 +468,47 @@ impl SharedMapping {
     }
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn map_shared(_file: &File, _len: usize, _writable: bool) -> std::io::Result<SharedMapping> {
     Err(shared_memory_unsupported())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn shared_len(_file: &File) -> std::io::Result<usize> {
     Err(shared_memory_unsupported())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn remove_shared(_name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+#[cfg(any(target_os = "android", all(not(unix), not(windows))))]
 fn shared_memory_unsupported() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "tmux volatile transcript buffers require POSIX shared memory",
+        "tmux volatile transcript buffers require shared memory",
     )
 }
 
-#[cfg(all(test, unix, not(target_os = "android")))]
+#[cfg(all(test, any(windows, all(unix, not(target_os = "android")))))]
 mod tests {
     use super::{RingWriter, remove, snapshot};
     use uuid::Uuid;
 
     fn ring_name() -> String {
         let id = Uuid::new_v4().simple().to_string();
-        format!("/dsh-test-{}", &id[..20])
+        #[cfg(unix)]
+        {
+            format!("/dsh-test-{}", &id[..20])
+        }
+        #[cfg(windows)]
+        {
+            std::env::temp_dir()
+                .join(format!("dsh-test-{id}.ring"))
+                .to_string_lossy()
+                .into_owned()
+        }
     }
 
     #[test]

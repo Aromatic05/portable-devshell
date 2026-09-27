@@ -2114,7 +2114,7 @@ fn tmux_run_does_not_source_inherited_bash_env() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
-fn tmux_run_does_not_expose_internal_tmux_environment() {
+fn tmux_run_does_not_expose_internal_environment() {
     assert!(
         tmux_available(),
         "tmux is required to run this ignored contract test"
@@ -2129,7 +2129,7 @@ fn tmux_run_does_not_expose_internal_tmux_environment() {
         "1",
         "tmux_run",
         json!({
-            "command": "test -z \"${TMUX:-}\"\ntest -z \"${TMUX_PANE:-}\"\ntest -z \"${TMUX_TMPDIR:-}\"\nprintf 'TMUX-ENV-CLEAN\\n'",
+            "command": "test -z \"${TMUX:-}\"\ntest -z \"${TMUX_PANE:-}\"\ntest -z \"${TMUX_TMPDIR:-}\"\ntest -z \"${DEVSHELL_WORKER_INTERNAL_INSTANCE:-}\"\ntest -z \"${DEVSHELL_WORKER_INTERNAL_SECURITY_MODE:-}\"\ntest -z \"${DEVSHELL_WORKER_INTERNAL_WORKSPACE:-}\"\nprintf 'TMUX-ENV-CLEAN\\n'",
             "wait": "block", "timeMs": 3000
         }),
         "ctx-tmux-env",

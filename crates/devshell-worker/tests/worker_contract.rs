@@ -184,11 +184,12 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
         "file_grep",
         "file_read",
     ];
-    if cfg!(unix)
-        && Command::new("tmux")
-            .arg("-V")
-            .output()
-            .is_ok_and(|output| output.status.success())
+    if cfg!(windows)
+        || (cfg!(unix)
+            && Command::new("tmux")
+                .arg("-V")
+                .output()
+                .is_ok_and(|output| output.status.success()))
     {
         expected_tools.extend([
             "tmux_input",

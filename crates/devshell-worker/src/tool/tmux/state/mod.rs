@@ -1,7 +1,9 @@
 pub mod replay;
 pub mod task;
 use std::collections::HashMap;
+#[cfg(any(unix, test))]
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -1496,28 +1498,70 @@ fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath,
 }
 
 fn verify_pane_cwd(pane: &BackendPane, expected: &ResolvedPath) -> Result<(), ToolError> {
-    let expected_metadata = expected.metadata().map_err(|error| {
-        ToolError::retryable(
-            "tmux.cwdChanged",
-            format!("resolved pane cwd cannot be verified: {error}"),
-        )
-    })?;
-    let actual_metadata = fs::metadata(&pane.cwd).map_err(|error| {
-        ToolError::retryable(
-            "tmux.cwdChanged",
-            format!("created pane cwd cannot be verified: {error}"),
-        )
-    })?;
-    let (expected_device, expected_inode) = expected_metadata.device_and_inode();
-    if actual_metadata.dev() != expected_device || actual_metadata.ino() != expected_inode {
-        return Err(ToolError::retryable(
-            "tmux.cwdChanged",
-            format!(
-                "created pane cwd does not match the resolved directory: expected {}, received {}",
-                expected.canonical.display(),
-                pane.cwd,
-            ),
-        ));
+    #[cfg(unix)]
+    {
+        let expected_metadata = expected.metadata().map_err(|error| {
+            ToolError::retryable(
+                "tmux.cwdChanged",
+                format!("resolved pane cwd cannot be verified: {error}"),
+            )
+        })?;
+        let actual_metadata = fs::metadata(&pane.cwd).map_err(|error| {
+            ToolError::retryable(
+                "tmux.cwdChanged",
+                format!("created pane cwd cannot be verified: {error}"),
+            )
+        })?;
+        let (expected_device, expected_inode) = expected_metadata.device_and_inode();
+        if actual_metadata.dev() != expected_device || actual_metadata.ino() != expected_inode {
+            return Err(ToolError::retryable(
+                "tmux.cwdChanged",
+                format!(
+                    "created pane cwd does not match the resolved directory: expected {}, received {}",
+                    expected.canonical.display(),
+                    pane.cwd,
+                ),
+            ));
+        }
+    }
+    #[cfg(windows)]
+    {
+        let expected_file = expected
+            .cloned_directory_file()
+            .map_err(|error| {
+                ToolError::retryable(
+                    "tmux.cwdChanged",
+                    format!("resolved pane cwd cannot be verified: {error}"),
+                )
+            })?
+            .ok_or_else(|| {
+                ToolError::retryable(
+                    "tmux.cwdChanged",
+                    "resolved pane cwd has no anchored directory handle",
+                )
+            })?;
+        let expected_handle = same_file::Handle::from_file(expected_file).map_err(|error| {
+            ToolError::retryable(
+                "tmux.cwdChanged",
+                format!("resolved pane cwd identity cannot be read: {error}"),
+            )
+        })?;
+        let actual_handle = same_file::Handle::from_path(&pane.cwd).map_err(|error| {
+            ToolError::retryable(
+                "tmux.cwdChanged",
+                format!("created pane cwd cannot be verified: {error}"),
+            )
+        })?;
+        if expected_handle != actual_handle {
+            return Err(ToolError::retryable(
+                "tmux.cwdChanged",
+                format!(
+                    "created pane cwd does not match the resolved directory: expected {}, received {}",
+                    expected.canonical.display(),
+                    pane.cwd,
+                ),
+            ));
+        }
     }
     Ok(())
 }

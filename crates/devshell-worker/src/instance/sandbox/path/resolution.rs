@@ -612,7 +612,7 @@ impl ResolvedPath {
         })
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub fn cloned_directory_file(&self) -> io::Result<Option<File>> {
         let Some(access) = &self.anchored_access else {
             return Ok(None);

@@ -11,7 +11,6 @@ use crate::tool::file::edit::FileEditTool;
 use crate::tool::file::read::FileReadTool;
 use crate::tool::file::search::glob::FileGlobTool;
 use crate::tool::file::search::grep::FileGrepTool;
-#[cfg(unix)]
 use crate::tool::tmux::register_tools as register_tmux_tools;
 use crate::tool::{ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 use crate::transport::socket::SocketPaths;
@@ -254,7 +253,6 @@ pub fn builtin_registry(
     registry.register(Arc::new(FileEditTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGlobTool::new(Arc::clone(&files))) as Arc<_>)?;
     registry.register(Arc::new(FileGrepTool::new(Arc::clone(&files))) as Arc<_>)?;
-    #[cfg(unix)]
     register_tmux_tools(
         &mut registry,
         instance_paths,
@@ -262,8 +260,6 @@ pub fn builtin_registry(
         runtime,
         model_devshell,
     )?;
-    #[cfg(windows)]
-    let _ = (instance_paths, runtime, model_devshell);
     Ok(registry)
 }
 

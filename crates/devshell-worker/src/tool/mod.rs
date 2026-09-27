@@ -2,7 +2,6 @@ pub mod bash;
 pub mod contract;
 pub mod file;
 pub mod registry;
-#[cfg(unix)]
 pub mod tmux;
 
 pub use contract::{

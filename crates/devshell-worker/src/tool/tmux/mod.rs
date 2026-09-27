@@ -28,6 +28,11 @@ use crate::transport::socket::SocketPaths;
 
 pub use backend::retire::retire_instance_runtime;
 
+#[cfg(unix)]
+const RUN_DESCRIPTION: &str = "Start a managed PTY task in a fresh ephemeral pane using clean Bash without user rc files. command may contain multiple lines and cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.";
+#[cfg(windows)]
+const RUN_DESCRIPTION: &str = "Start a managed PTY task in a fresh ephemeral pane using PowerShell without user profiles. command uses PowerShell syntax and may contain multiple lines; cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.";
+
 fn warning(pane: Option<&str>, code: &str, message: &str) -> TmuxWarning {
     TmuxWarning {
         pane: pane.map(ToOwned::to_owned),
@@ -157,7 +162,7 @@ pub fn register_tools(
     ));
     registry.register(tool::<TmuxRunParams, TmuxRunOutput>(
         ToolName::parse("tmux_run").unwrap(),
-        "Start a managed PTY task in a fresh ephemeral pane using clean Bash without user rc files. command may contain multiple lines and cwd defaults to the workspace. wait controls whether the call returns after startup or waits for task progress or termination; timeout bounds block waiting without stopping the task. The task owns a durable bounded transcript, and its pane is destroyed after termination.",
+        RUN_DESCRIPTION,
         ToolCapability::Execute,
         Arc::clone(&states),
         TmuxState::run,
@@ -185,7 +190,7 @@ pub fn register_tools(
     ))?;
     registry.register(tool::<TmuxManageParams, TmuxManageOutput>(
         ToolName::parse("tmux_manage").unwrap(),
-        "Manage tmux-owned resource lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task, and succeeds as a no-op when that task is already terminal. The main pane cannot be closed.",
+        "Manage persistent pane and task lifecycle. command=list returns current panes and active tasks and may initialize the managed session and main pane; command=create creates a persistent interactive pane; command=close closes a persistent pane or terminates a managed task, and succeeds as a no-op when that task is already terminal. The main pane cannot be closed.",
         ToolCapability::Execute,
         states,
         TmuxState::manage,
