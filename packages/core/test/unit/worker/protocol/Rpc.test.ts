@@ -11,6 +11,7 @@ import {
 } from "@portable-devshell/shared";
 import {
     encodePacket,
+    FRAME_PROTOCOL_VERSION,
     FrameProtocol,
     PacketBuffer,
     type FrameStream,
@@ -825,7 +826,13 @@ function createRpcHarness(options?: {
     };
 
     async function serveRpcHarness(protocol: FrameProtocol): Promise<void> {
-        const open = await protocol.nextOpen();
+        let open = await protocol.nextOpen();
+        if (open?.service === "frame.negotiate") {
+            const negotiation = await open.accept();
+            await negotiation.write(Buffer.from(FRAME_PROTOCOL_VERSION));
+            await negotiation.finish();
+            open = await protocol.nextOpen();
+        }
         assert.notEqual(open, undefined);
         assert.equal(open!.service, "worker.rpc");
         assert.equal(open!.metadata.byteLength, 0);

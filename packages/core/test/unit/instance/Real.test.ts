@@ -26,6 +26,7 @@ import {
 } from "@portable-devshell/shared";
 import {
     encodePacket,
+    FRAME_PROTOCOL_VERSION,
     FrameProtocol,
     frameResetCodes,
     PacketBuffer,
@@ -2037,7 +2038,13 @@ function createWorkerInstanceHarness(): {
         protocol: FrameProtocol;
         stream?: FrameStream;
     }): Promise<void> {
-        const open = await connection.protocol.nextOpen();
+        let open = await connection.protocol.nextOpen();
+        if (open?.service === "frame.negotiate") {
+            const negotiation = await open.accept();
+            await negotiation.write(Buffer.from(FRAME_PROTOCOL_VERSION));
+            await negotiation.finish();
+            open = await connection.protocol.nextOpen();
+        }
         assert.notEqual(open, undefined);
         assert.equal(open!.service, "worker.rpc");
         assert.equal(open!.metadata.byteLength, 0);
