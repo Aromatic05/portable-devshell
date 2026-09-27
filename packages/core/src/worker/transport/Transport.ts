@@ -1,6 +1,9 @@
 import type { Channel } from "@portable-devshell/shared";
 import {
+    FRAME_PROTOCOL_RANGE,
+    FRAME_PROTOCOL_VERSION,
     FrameProtocol,
+    FrameResetError,
     FrameStreamChannel,
     frameResetCodes,
     type FrameStream,
@@ -15,6 +18,10 @@ import type {
     WorkerCommandName,
     WorkerCommandOptions,
 } from "./command/Model.js";
+
+const FRAME_NEGOTIATION_SERVICE = "frame.negotiate";
+const frameNegotiationEncoder = new TextEncoder();
+const frameNegotiationDecoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface WorkerTransport {
     connectWorkerChannel(options: WorkerChannelOptions): Promise<Channel>;
@@ -35,6 +42,7 @@ export class WorkerTransportConnection {
     #connectPromise?: Promise<FrameProtocol>;
     #generation = 0;
     #protocol?: FrameProtocol;
+    #protocolReady?: Promise<FrameProtocol>;
 
     constructor(connect?: () => Promise<Channel>) {
         this.#connect = connect;
@@ -92,6 +100,7 @@ export class WorkerTransportConnection {
     close(error?: Error): void {
         this.#generation += 1;
         this.#connectPromise = undefined;
+        this.#protocolReady = undefined;
         const protocol = this.#protocol;
         const channel = this.#channel;
         this.#protocol = undefined;
@@ -104,7 +113,12 @@ export class WorkerTransportConnection {
     }
 
     async #ensureProtocol(): Promise<FrameProtocol> {
-        if (this.#protocol?.closed === false) return this.#protocol;
+        if (this.#protocol?.closed === false) {
+            return await this.#ensureProtocolReady(
+                this.#protocol,
+                this.#generation,
+            );
+        }
         if (this.#connectPromise === undefined) {
             if (this.#connect === undefined) {
                 throw new Error("Worker transport connection is not attached.");
@@ -115,7 +129,10 @@ export class WorkerTransportConnection {
                     channel.close();
                     throw new Error("Worker transport connection was replaced.");
                 }
-                return this.#install(channel, generation);
+                return this.#ensureProtocolReady(
+                    this.#install(channel, generation),
+                    generation,
+                );
             });
             const promise = connecting.finally(() => {
                 if (this.#connectPromise === promise) {
@@ -131,6 +148,7 @@ export class WorkerTransportConnection {
         const protocol = new FrameProtocol(channel, { role: "opener" });
         this.#channel = channel;
         this.#protocol = protocol;
+        this.#protocolReady = undefined;
         channel.onClose(() => {
             if (
                 this.#generation !== generation ||
@@ -141,8 +159,73 @@ export class WorkerTransportConnection {
             }
             this.#channel = undefined;
             this.#protocol = undefined;
+            this.#protocolReady = undefined;
         });
         return protocol;
+    }
+
+    #ensureProtocolReady(
+        protocol: FrameProtocol,
+        generation: number,
+    ): Promise<FrameProtocol> {
+        if (this.#protocolReady !== undefined) return this.#protocolReady;
+        const ready = this.#negotiateFrameProtocol(protocol).then(() => {
+            if (
+                generation !== this.#generation ||
+                this.#protocol !== protocol ||
+                protocol.closed
+            ) {
+                throw new Error("Worker transport connection was replaced.");
+            }
+            return protocol;
+        });
+        this.#protocolReady = ready;
+        return ready;
+    }
+
+    async #negotiateFrameProtocol(protocol: FrameProtocol): Promise<void> {
+        const stream = await protocol.open(
+            FRAME_NEGOTIATION_SERVICE,
+            frameNegotiationEncoder.encode(
+                JSON.stringify(FRAME_PROTOCOL_RANGE),
+            ),
+        );
+        try {
+            const payload = await stream.read();
+            if (payload === undefined) {
+                throw new Error(
+                    "Frame protocol negotiation closed without selecting a version.",
+                );
+            }
+            const trailing = await stream.read();
+            if (trailing !== undefined) {
+                throw new Error(
+                    "Frame protocol negotiation returned more than one version frame.",
+                );
+            }
+            const selected = frameNegotiationDecoder.decode(payload);
+            if (selected !== FRAME_PROTOCOL_VERSION) {
+                throw new Error(
+                    `Unsupported negotiated Frame protocol version ${selected}.`,
+                );
+            }
+            await stream.finish();
+        } catch (error) {
+            if (
+                error instanceof FrameResetError &&
+                error.resetCode === frameResetCodes.unsupportedService
+            ) {
+                /**
+                 * @compat frame-protocol-v1-no-negotiation
+                 * @removeAt 0.7.10
+                 */
+                return;
+            }
+            protocol.close(
+                error instanceof Error ? error : new Error(String(error)),
+            );
+            throw error;
+        }
     }
 }
 

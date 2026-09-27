@@ -20,8 +20,9 @@ use crate::capability::artifact::payload::ArtifactPayloadStore;
 use crate::capability::artifact::receive::ArtifactReceiveStore;
 use crate::capability::rpc::client::subscribe_notifications;
 use crate::transport::frame::{
-    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, FrameEvent, FrameProtocol, FrameRole,
-    RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE, encode_frame,
+    FRAME_MAX_DATA_SIZE, FRAME_PROTOCOL_VERSION, Frame, FrameDecoder, FrameEvent, FrameProtocol,
+    FrameRole, RESET_SERVICE_FAILED, RESET_SERVICE_REJECTED, RESET_UNSUPPORTED_SERVICE,
+    encode_frame,
 };
 use crate::transport::socket::LocalIpcStream;
 
@@ -30,6 +31,15 @@ const EVENT_QUEUE_CAPACITY: usize = 64;
 const SERVICE_QUEUE_CAPACITY: usize = 1;
 const MAX_CONCURRENT_SERVICE_OPENINGS: usize = 32;
 const SERVICE_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const FRAME_NEGOTIATION_SERVICE: &str = "frame.negotiate";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameVersionState {
+    Pending,
+    Negotiated,
+    Legacy,
+    Rejected,
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct ServiceContext {
@@ -393,6 +403,7 @@ where
     let mut protocol = FrameProtocol::new(FrameRole::Acceptor);
     let mut services = HashMap::<u32, ActiveService>::new();
     let mut opening_services = HashSet::<u32>::new();
+    let mut frame_version = FrameVersionState::Pending;
 
     loop {
         match events_rx.recv_timeout(SERVICE_POLL_INTERVAL) {
@@ -402,6 +413,7 @@ where
                         &mut protocol,
                         &mut services,
                         &mut opening_services,
+                        &mut frame_version,
                         &events_tx,
                         frame,
                         &context,
@@ -693,6 +705,7 @@ fn accept_frame<W: Write>(
     protocol: &mut FrameProtocol,
     services: &mut HashMap<u32, ActiveService>,
     opening_services: &mut HashSet<u32>,
+    frame_version: &mut FrameVersionState,
     events: &SyncSender<ServerEvent>,
     frame: Frame,
     context: &ServiceContext,
@@ -707,6 +720,27 @@ fn accept_frame<W: Write>(
             service,
             metadata,
         }) => {
+            if service == FRAME_NEGOTIATION_SERVICE {
+                negotiate_frame_protocol(protocol, frame_version, stream_id, &metadata, output)?;
+                return Ok(());
+            }
+            match frame_version {
+                FrameVersionState::Pending => {
+                    // @compat frame-protocol-v1-no-negotiation
+                    // @removeAt 0.7.10
+                    *frame_version = FrameVersionState::Legacy;
+                }
+                FrameVersionState::Rejected => {
+                    let reset = protocol.reject_open(
+                        stream_id,
+                        RESET_SERVICE_REJECTED,
+                        "Frame protocol negotiation failed for this connection.".to_string(),
+                    )?;
+                    write_frame(output, &reset)?;
+                    return Ok(());
+                }
+                FrameVersionState::Negotiated | FrameVersionState::Legacy => {}
+            }
             if opening_services.len() >= MAX_CONCURRENT_SERVICE_OPENINGS {
                 let reset = protocol.reject_open(
                     stream_id,
@@ -755,6 +789,127 @@ fn accept_frame<W: Write>(
         None => {}
     }
     Ok(())
+}
+
+type FrameProtocolVersion = (u64, u64, u64);
+
+fn negotiate_frame_protocol<W: Write>(
+    protocol: &mut FrameProtocol,
+    frame_version: &mut FrameVersionState,
+    stream_id: u32,
+    metadata: &[u8],
+    output: &mut W,
+) -> Result<(), String> {
+    if *frame_version != FrameVersionState::Pending {
+        let reset = protocol.reject_open(
+            stream_id,
+            RESET_SERVICE_REJECTED,
+            "Frame protocol version is already selected for this connection.".to_string(),
+        )?;
+        write_frame(output, &reset)?;
+        return Ok(());
+    }
+
+    let (minimum, maximum) = match read_frame_protocol_range(metadata) {
+        Ok(range) => range,
+        Err(error) => {
+            *frame_version = FrameVersionState::Rejected;
+            let reset = protocol.reject_open(stream_id, RESET_SERVICE_REJECTED, error)?;
+            write_frame(output, &reset)?;
+            return Ok(());
+        }
+    };
+    let selected = parse_frame_protocol_version(FRAME_PROTOCOL_VERSION)
+        .expect("FRAME_PROTOCOL_VERSION must be a semantic version");
+    if selected < minimum || selected > maximum {
+        *frame_version = FrameVersionState::Rejected;
+        let reset = protocol.reject_open(
+            stream_id,
+            RESET_SERVICE_REJECTED,
+            format!(
+                "Frame protocol range does not include supported version {FRAME_PROTOCOL_VERSION}."
+            ),
+        )?;
+        write_frame(output, &reset)?;
+        return Ok(());
+    }
+
+    let window = protocol.accept_open(stream_id, SERVICE_RECEIVE_WINDOW)?;
+    let selected_bytes = FRAME_PROTOCOL_VERSION.as_bytes();
+    let Some((used, data)) = protocol.next_data_frame(stream_id, selected_bytes)? else {
+        *frame_version = FrameVersionState::Rejected;
+        let reset = protocol.reset(
+            stream_id,
+            RESET_SERVICE_REJECTED,
+            "Frame negotiation stream did not grant response credit.".to_string(),
+        )?;
+        write_frame(output, &reset)?;
+        return Ok(());
+    };
+    if used != selected_bytes.len() {
+        *frame_version = FrameVersionState::Rejected;
+        let reset = protocol.reset(
+            stream_id,
+            RESET_SERVICE_REJECTED,
+            "Frame negotiation receive window is too small.".to_string(),
+        )?;
+        write_frame(output, &reset)?;
+        return Ok(());
+    }
+    let fin = protocol.finish(stream_id)?;
+    write_frame(output, &window)?;
+    write_frame(output, &data)?;
+    write_frame(output, &fin)?;
+    *frame_version = FrameVersionState::Negotiated;
+    Ok(())
+}
+
+fn read_frame_protocol_range(
+    metadata: &[u8],
+) -> Result<(FrameProtocolVersion, FrameProtocolVersion), String> {
+    let value: serde_json::Value = serde_json::from_slice(metadata)
+        .map_err(|error| format!("Invalid Frame protocol negotiation metadata: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Frame protocol negotiation metadata must be an object.".to_string())?;
+    let min = object
+        .get("min")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "Frame protocol negotiation requires string min.".to_string())?;
+    let max = object
+        .get("max")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "Frame protocol negotiation requires string max.".to_string())?;
+    let minimum = parse_frame_protocol_version(min)?;
+    let maximum = parse_frame_protocol_version(max)?;
+    if minimum > maximum {
+        return Err("Frame protocol negotiation min must not exceed max.".to_string());
+    }
+    Ok((minimum, maximum))
+}
+
+fn parse_frame_protocol_version(value: &str) -> Result<FrameProtocolVersion, String> {
+    let parts = value.split('.').collect::<Vec<_>>();
+    if parts.len() != 3
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+                || (part.len() > 1 && part.starts_with('0'))
+        })
+    {
+        return Err(format!("Invalid Frame protocol version {value}."));
+    }
+    Ok((
+        parts[0]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid Frame protocol version {value}."))?,
+        parts[1]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid Frame protocol version {value}."))?,
+        parts[2]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid Frame protocol version {value}."))?,
+    ))
 }
 
 fn dispatch_input(
@@ -1203,10 +1358,111 @@ mod tests {
     }
 
     #[test]
+    fn frame_protocol_negotiation_selects_supported_semantic_version() {
+        let mut client = FrameProtocol::new(FrameRole::Opener);
+        let mut worker = FrameProtocol::new(FrameRole::Acceptor);
+        let mut services = HashMap::<u32, ActiveService>::new();
+        let mut opening_services = HashSet::<u32>::new();
+        let mut frame_version = FrameVersionState::Pending;
+        let (events_tx, _events_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
+        let context = ServiceContext::default();
+        let metadata = serde_json::to_vec(&json!({
+            "min": FRAME_PROTOCOL_VERSION,
+            "max": FRAME_PROTOCOL_VERSION,
+        }))
+        .expect("negotiation metadata");
+        let (stream_id, open) = client
+            .open(
+                FRAME_NEGOTIATION_SERVICE.to_string(),
+                metadata,
+                64 * 1024,
+            )
+            .expect("open negotiation stream");
+        let mut output = Vec::new();
+
+        accept_frame(
+            &mut worker,
+            &mut services,
+            &mut opening_services,
+            &mut frame_version,
+            &events_tx,
+            open,
+            &context,
+            &mut output,
+        )
+        .expect("negotiate Frame protocol");
+
+        assert_eq!(frame_version, FrameVersionState::Negotiated);
+        let mut decoder = FrameDecoder::default();
+        for frame in decoder.push(&output).expect("decode negotiation response") {
+            client.accept_frame(frame).expect("accept negotiation response");
+        }
+        let (selected, _window) = client
+            .read(stream_id)
+            .expect("read negotiation response")
+            .expect("selected version");
+        assert_eq!(selected, FRAME_PROTOCOL_VERSION.as_bytes());
+        assert!(
+            client
+                .read(stream_id)
+                .expect("read negotiation FIN")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn frame_protocol_negotiation_rejects_disjoint_range() {
+        let mut client = FrameProtocol::new(FrameRole::Opener);
+        let mut worker = FrameProtocol::new(FrameRole::Acceptor);
+        let mut services = HashMap::<u32, ActiveService>::new();
+        let mut opening_services = HashSet::<u32>::new();
+        let mut frame_version = FrameVersionState::Pending;
+        let (events_tx, _events_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
+        let context = ServiceContext::default();
+        let metadata = serde_json::to_vec(&json!({
+            "min": "2.0.0",
+            "max": "2.0.0",
+        }))
+        .expect("negotiation metadata");
+        let (_stream_id, open) = client
+            .open(
+                FRAME_NEGOTIATION_SERVICE.to_string(),
+                metadata,
+                64 * 1024,
+            )
+            .expect("open negotiation stream");
+        let mut output = Vec::new();
+
+        accept_frame(
+            &mut worker,
+            &mut services,
+            &mut opening_services,
+            &mut frame_version,
+            &events_tx,
+            open,
+            &context,
+            &mut output,
+        )
+        .expect("reject incompatible negotiation");
+
+        assert_eq!(frame_version, FrameVersionState::Rejected);
+        let mut decoder = FrameDecoder::default();
+        let frames = decoder.push(&output).expect("decode rejection");
+        assert!(matches!(
+            frames.as_slice(),
+            [Frame::Reset {
+                code: RESET_SERVICE_REJECTED,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
     fn slow_service_open_does_not_block_sibling_open() {
         let mut protocol = FrameProtocol::new(FrameRole::Acceptor);
         let mut services = HashMap::<u32, ActiveService>::new();
         let mut opening_services = HashSet::<u32>::new();
+        let mut frame_version = FrameVersionState::Pending;
         let (events_tx, events_rx) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let context = ServiceContext::default();
         let mut output = Vec::new();
@@ -1215,6 +1471,7 @@ mod tests {
             &mut protocol,
             &mut services,
             &mut opening_services,
+            &mut frame_version,
             &events_tx,
             Frame::Open {
                 stream_id: 1,
@@ -1230,6 +1487,7 @@ mod tests {
             &mut protocol,
             &mut services,
             &mut opening_services,
+            &mut frame_version,
             &events_tx,
             Frame::Open {
                 stream_id: 2,

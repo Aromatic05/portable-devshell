@@ -12,7 +12,12 @@ const UINT32_MAX = 0xffff_ffff;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const encoder = new TextEncoder();
 
-export const FRAME_PROTOCOL_VERSION = 1;
+const FRAME_WIRE_FORMAT_VERSION = 1;
+export const FRAME_PROTOCOL_VERSION = "1.0.0";
+export const FRAME_PROTOCOL_RANGE = Object.freeze({
+    max: FRAME_PROTOCOL_VERSION,
+    min: FRAME_PROTOCOL_VERSION,
+});
 export const FRAME_MAX_DATA_SIZE = 64 * 1024;
 export const FRAME_MAX_OPEN_METADATA_SIZE = 64 * 1024;
 export const FRAME_MAX_OPEN_SERVICE_SIZE = 256;
@@ -215,7 +220,7 @@ export function encodeFrame(frame: Frame): Uint8Array {
     }
 
     const body = new Uint8Array(FRAME_HEADER_SIZE + payload.byteLength);
-    body[0] = FRAME_PROTOCOL_VERSION;
+    body[0] = FRAME_WIRE_FORMAT_VERSION;
     body[1] = typeCode(frame.type);
     writeU32(body, 2, frame.streamId);
     body.set(payload, FRAME_HEADER_SIZE);
@@ -257,8 +262,8 @@ function decodeFramePayload(body: Uint8Array): Frame {
         throw protocolError("Frame header is incomplete.");
     }
     const version = body[0];
-    if (version !== FRAME_PROTOCOL_VERSION) {
-        throw protocolError(`Unsupported Frame protocol version ${version}.`);
+    if (version !== FRAME_WIRE_FORMAT_VERSION) {
+        throw protocolError(`Unsupported Frame wire format ${version}.`);
     }
     const type = body[1];
     const streamId = readU32(body, 2);

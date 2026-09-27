@@ -59,8 +59,10 @@ test("transport connection multiplexes Service streams over one physical Channel
         return pair.controller;
     });
 
+    const rpcPromise = connection.openService("worker.rpc");
+    await acceptFrameNegotiation(pair.worker);
     const rpcOpen = acceptService(pair.worker, "worker.rpc");
-    const rpc = await connection.openService("worker.rpc");
+    const rpc = await rpcPromise;
     const workerRpc = await rpcOpen;
 
     const processOpen = acceptService(pair.worker, "process.exec");
@@ -85,12 +87,39 @@ test("transport connection multiplexes Service streams over one physical Channel
     assert.equal(processService.closed, true);
 });
 
+test("transport connection falls back only when a legacy peer does not support Frame negotiation", async () => {
+    const pair = createFrameChannelPair();
+    const connection = new WorkerTransportConnection(async () => pair.controller);
+
+    const rpcPromise = connection.openService("worker.rpc");
+    const negotiation = await pair.worker.nextOpen();
+    assert.ok(negotiation);
+    assert.equal(negotiation.service, "frame.negotiate");
+    await negotiation.reset(
+        frameResetCodes.unsupportedService,
+        "Unsupported transport Service frame.negotiate.",
+    );
+
+    const rpcOpen = acceptService(pair.worker, "worker.rpc");
+    const rpc = await rpcPromise;
+    const workerRpc = await rpcOpen;
+    await rpc.write(Buffer.from("legacy"));
+    assert.equal(
+        Buffer.from((await workerRpc.read()) ?? []).toString(),
+        "legacy",
+    );
+
+    connection.close();
+});
+
 test("transport service client maps typed tcp and exec inputs onto Frame Service metadata", async () => {
     const pair = createFrameChannelPair();
     const connection = new WorkerTransportConnection(async () => pair.controller);
     const services = new WorkerTransportServiceClient(connection);
 
-    const tcp = await services.connectTcp({ host: "127.0.0.1", port: 8080 });
+    const tcpPromise = services.connectTcp({ host: "127.0.0.1", port: 8080 });
+    await acceptFrameNegotiation(pair.worker);
+    const tcp = await tcpPromise;
     const tcpOpen = await pair.worker.nextOpen();
     assert.ok(tcpOpen);
     assert.equal(tcpOpen.service, "network.tcp");
@@ -164,6 +193,19 @@ async function acceptService(
     assert.equal(open!.service, service);
     assert.equal(open!.metadata.byteLength, 0);
     return await open!.accept();
+}
+
+async function acceptFrameNegotiation(protocol: FrameProtocol): Promise<void> {
+    const open = await protocol.nextOpen();
+    assert.ok(open);
+    assert.equal(open.service, "frame.negotiate");
+    assert.deepEqual(JSON.parse(Buffer.from(open.metadata).toString("utf8")), {
+        max: "1.0.0",
+        min: "1.0.0",
+    });
+    const stream = await open.accept();
+    await stream.write(Buffer.from("1.0.0"));
+    await stream.finish();
 }
 
 function sanitizedWorkerEnv(): NodeJS.ProcessEnv {

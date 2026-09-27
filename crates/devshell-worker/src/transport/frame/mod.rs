@@ -6,8 +6,8 @@ use std::collections::HashMap;
 #[cfg(test)]
 pub use codec::RESET_CANCELLED;
 pub use codec::{
-    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, RESET_SERVICE_FAILED, RESET_UNSUPPORTED_SERVICE,
-    encode_frame,
+    FRAME_MAX_DATA_SIZE, FRAME_PROTOCOL_VERSION, Frame, FrameDecoder, RESET_SERVICE_FAILED,
+    RESET_SERVICE_REJECTED, RESET_UNSUPPORTED_SERVICE, encode_frame,
 };
 use stream::StreamState;
 

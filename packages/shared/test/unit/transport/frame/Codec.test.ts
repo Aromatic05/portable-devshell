@@ -5,6 +5,8 @@ import {
     FRAME_MAX_DATA_SIZE,
     FRAME_MAX_OPEN_METADATA_SIZE,
     FRAME_MAX_OPEN_SERVICE_SIZE,
+    FRAME_PROTOCOL_RANGE,
+    FRAME_PROTOCOL_VERSION,
     FrameBuffer,
     decodeFrame,
     encodeFrame,
@@ -54,6 +56,16 @@ test("Frame v1 encodes stable OPEN DATA WINDOW FIN and RESET wire vectors", () =
         assert.equal(hex(encoded), expected);
         assert.deepEqual(decodeFrame(encoded), frame);
     }
+});
+
+test("Frame semantic protocol version keeps the v1 wire format generation", () => {
+    assert.equal(FRAME_PROTOCOL_VERSION, "1.0.0");
+    assert.deepEqual(FRAME_PROTOCOL_RANGE, {
+        max: FRAME_PROTOCOL_VERSION,
+        min: FRAME_PROTOCOL_VERSION,
+    });
+    const encoded = encodeFrame({ type: "fin", streamId: 1 });
+    assert.equal(encoded[4], 1);
 });
 
 test("FrameBuffer restores split and coalesced Frame boundaries", () => {
@@ -116,7 +128,7 @@ test("Frame v1 rejects malformed headers, reserved ids and invalid flow-control 
 
     const version = Uint8Array.from(data);
     version[4] = 2;
-    assert.throws(() => decodeFrame(version), /version/iu);
+    assert.throws(() => decodeFrame(version));
 
     const type = Uint8Array.from(data);
     type[5] = 0xff;

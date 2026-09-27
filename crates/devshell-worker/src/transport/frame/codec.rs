@@ -6,13 +6,15 @@ const OPEN_FIXED_SIZE: usize = 6;
 const WINDOW_PAYLOAD_SIZE: usize = 4;
 const RESET_CODE_SIZE: usize = 2;
 
-pub const FRAME_PROTOCOL_VERSION: u8 = 1;
+const FRAME_WIRE_FORMAT_VERSION: u8 = 1;
+pub const FRAME_PROTOCOL_VERSION: &str = "1.0.0";
 pub const FRAME_MAX_DATA_SIZE: usize = 64 * 1024;
 pub const FRAME_MAX_OPEN_METADATA_SIZE: usize = 64 * 1024;
 pub const FRAME_MAX_OPEN_SERVICE_SIZE: usize = 256;
 pub const TRANSPORT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 pub const RESET_UNSUPPORTED_SERVICE: u16 = 1;
+pub const RESET_SERVICE_REJECTED: u16 = 2;
 pub const RESET_SERVICE_FAILED: u16 = 3;
 #[cfg(test)]
 pub const RESET_CANCELLED: u16 = 4;
@@ -206,7 +208,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, String> {
         u32::try_from(body_len).map_err(|_| "Frame body exceeds u32 length.".to_string())?;
     let mut output = Vec::with_capacity(PACKET_HEADER_SIZE + body_len);
     output.extend_from_slice(&body_len_u32.to_be_bytes());
-    output.push(FRAME_PROTOCOL_VERSION);
+    output.push(FRAME_WIRE_FORMAT_VERSION);
     output.push(frame_type);
     output.extend_from_slice(&stream_id.to_be_bytes());
     output.extend_from_slice(&payload);
@@ -231,8 +233,8 @@ pub fn decode_frame(packet: &[u8]) -> Result<Frame, String> {
         return Err("Frame header is incomplete.".to_string());
     }
     let version = body[0];
-    if version != FRAME_PROTOCOL_VERSION {
-        return Err(format!("Unsupported Frame protocol version {version}."));
+    if version != FRAME_WIRE_FORMAT_VERSION {
+        return Err(format!("Unsupported Frame wire format {version}."));
     }
     let frame_type = body[1];
     let stream_id = read_u32(body, 2)?;
