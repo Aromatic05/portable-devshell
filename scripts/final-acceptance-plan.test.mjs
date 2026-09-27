@@ -16,9 +16,9 @@ test("Linux final integration includes the real long tmux handoff smoke", () => 
     ]);
 });
 
-test("Windows final integration omits the tmux-only long handoff smoke", () => {
+test("Windows final integration includes the persistent-task long handoff smoke", () => {
     const names = createIntegrationSteps({ env: {} }, "win32").map(
         (step) => step.name,
     );
-    assert.equal(names.includes("Long tmux handoff smoke"), false);
+    assert.equal(names.includes("Long tmux handoff smoke"), true);
 });

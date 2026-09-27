@@ -31,23 +31,19 @@ export function createIntegrationSteps(state, platform = process.platform) {
                     inherit: true,
                 }),
         },
-        ...(platform === "win32"
-            ? []
-            : [
-                  {
-                      name: "Long tmux handoff smoke",
-                      run: () =>
-                          runCommand(
-                              process.execPath,
-                              ["acceptance/run-long-tmux-handoff-smoke.mjs"],
-                              {
-                                  env: state.env,
-                                  inherit: true,
-                                  timeoutMs: 300_000,
-                              },
-                          ),
-                  },
-              ]),
+        {
+            name: "Long tmux handoff smoke",
+            run: () =>
+                runCommand(
+                    process.execPath,
+                    ["acceptance/run-long-tmux-handoff-smoke.mjs"],
+                    {
+                        env: state.env,
+                        inherit: true,
+                        timeoutMs: 300_000,
+                    },
+                ),
+        },
         {
             name: "Web browser smoke",
             run: () =>

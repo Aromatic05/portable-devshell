@@ -12,12 +12,6 @@ const MINIMUM_EXPECTED_DETACH_MS = 170_000;
 const FINAL_READ_TIMEOUT_MS = 45_000;
 
 export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
-    if (process.platform === "win32") {
-        throw new Error(
-            "Testspace long tmux wait smoke is not supported on Windows.",
-        );
-    }
-
     const client = new Client({
         name: "portable-devshell-testspace-long-wait-smoke",
         version: "0.0.0",
@@ -37,11 +31,15 @@ export async function runTestspaceLongWaitSmoke({ endpoint, workspace }) {
         }
 
         const marker = `testspace-long-wait-${randomUUID()}`;
+        const command =
+            process.platform === "win32"
+                ? `Start-Sleep -Milliseconds ${TESTSPACE_LONG_WAIT_TASK_DURATION_MS}; Write-Output '${marker}'`
+                : `sleep ${TESTSPACE_LONG_WAIT_TASK_DURATION_MS / 1000}; printf '%s\\n' '${marker}'`;
         const startedAt = Date.now();
         const launched = await client.callTool(
             {
                 arguments: {
-                    command: `sleep ${TESTSPACE_LONG_WAIT_TASK_DURATION_MS / 1000}; printf '%s\\n' '${marker}'`,
+                    command,
                     ctxId,
                     line: 20,
                     timeout: TESTSPACE_LONG_WAIT_TOOL_TIMEOUT_MS,
