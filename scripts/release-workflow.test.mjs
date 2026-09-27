@@ -8,7 +8,7 @@ const releaseWorkflowPath = fileURLToPath(
 );
 
 async function readReleaseWorkflow() {
-    return await readFile(releaseWorkflowPath, "utf8");
+    return (await readFile(releaseWorkflowPath, "utf8")).replaceAll("\r\n", "\n");
 }
 
 test("release asset jobs install the frozen dependency graph before building", async () => {
