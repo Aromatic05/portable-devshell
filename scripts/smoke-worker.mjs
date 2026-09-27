@@ -70,13 +70,20 @@ try {
         const names = tools.tools.map((tool) => tool.name);
         if (!names.includes("bash_run"))
             throw new Error("bash_run is missing from tools.list");
-        if (
-            handshake.platform.os === "windows" &&
-            names.some((name) => name.startsWith("tmux_"))
-        ) {
-            throw new Error("Windows worker exposed tmux tools");
-        }
         if (handshake.platform.os === "windows") {
+            for (const name of [
+                "tmux_input",
+                "tmux_inspect",
+                "tmux_manage",
+                "tmux_read",
+                "tmux_run",
+            ]) {
+                if (!names.includes(name)) {
+                    throw new Error(
+                        `Windows worker is missing embedded persistent-pane tool ${name}`,
+                    );
+                }
+            }
             if (handshake.platform.shell?.kind !== "powershell") {
                 throw new Error(
                     "Windows handshake did not report the PowerShell runtime",
