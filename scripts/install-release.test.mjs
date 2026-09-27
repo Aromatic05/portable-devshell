@@ -41,6 +41,7 @@ test(
         const installRoot = resolve(root, "installed");
         const binDirectory = resolve(root, "bin");
         const devshellHome = resolve(root, "devshell-home");
+        const preflightLog = resolve(root, "preflight.jsonl");
         const applicationVersion = "9.8.7-test";
 
         try {
@@ -71,11 +72,46 @@ test(
                 `${JSON.stringify(
                     {
                         minimumNodeMajor: 24,
+                        updatePreflight: true,
                         version: applicationVersion,
                     },
                     null,
                     2,
                 )}\n`,
+                "utf8",
+            );
+            const preflightModule = resolve(
+                app,
+                "node_modules",
+                "@portable-devshell",
+                "control",
+                "dist",
+                "migration",
+                "Control.js",
+            );
+            await mkdir(resolve(preflightModule, ".."), { recursive: true });
+            await writeFile(
+                resolve(
+                    app,
+                    "node_modules",
+                    "@portable-devshell",
+                    "control",
+                    "package.json",
+                ),
+                '{"type":"module"}\n',
+                "utf8",
+            );
+            await writeFile(
+                preflightModule,
+                [
+                    'import { appendFileSync } from "node:fs";',
+                    "export async function preflightControlUpdate(options = {}) {",
+                    "  const log = process.env.PORTABLE_DEVSHELL_TEST_PREFLIGHT_LOG;",
+                    "  if (log) appendFileSync(log, \`\${JSON.stringify({ currentApplicationDirectory: options.currentApplicationDirectory ?? null })}\\n\`);",
+                    "  return { extensions: { checkedGenerations: 0 }, migration: { domains: [], required: false }, rollback: { blockers: [], feasible: true } };",
+                    "}",
+                    "",
+                ].join("\n"),
                 "utf8",
             );
             const cli = resolve(app, "custom", "devshell-entry.js");
@@ -116,9 +152,17 @@ test(
                 PORTABLE_DEVSHELL_INSTALL_ROOT: installRoot,
                 PORTABLE_DEVSHELL_BIN_DIR: binDirectory,
                 PORTABLE_DEVSHELL_HOME: devshellHome,
+                PORTABLE_DEVSHELL_TEST_PREFLIGHT_LOG: preflightLog,
             };
 
             runInstaller(environment);
+            let preflights = (await readFile(preflightLog, "utf8"))
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+            assert.deepEqual(preflights, [
+                { currentApplicationDirectory: null },
+            ]);
             await assertInstalledLayout({
                 applicationVersion,
                 binDirectory,
@@ -131,6 +175,14 @@ test(
             );
 
             runInstaller(environment);
+            preflights = (await readFile(preflightLog, "utf8"))
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+            assert.deepEqual(preflights, [
+                { currentApplicationDirectory: null },
+                { currentApplicationDirectory: resolve(installRoot, "current") },
+            ]);
             await assertInstalledLayout({
                 applicationVersion,
                 binDirectory,

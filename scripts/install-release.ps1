@@ -59,20 +59,21 @@ function Set-InstallMetadata([string]$ManifestPath, [string]$WorkerReleaseDirect
     [IO.File]::WriteAllText($ManifestPath, "$json`n", [Text.UTF8Encoding]::new($false))
 }
 
-function Invoke-CandidatePreflight([string]$ApplicationDirectory, [string]$HomeDirectory) {
+function Invoke-CandidatePreflight([string]$ApplicationDirectory, [string]$HomeDirectory, [string]$CurrentApplicationDirectory) {
     $controlModule = Join-Path $ApplicationDirectory "node_modules\@portable-devshell\control\dist\migration\Control.js"
     $script = @'
 import { pathToFileURL } from "node:url";
 const controlModule = process.argv[2];
 const homeDirectory = process.argv[3];
+const currentApplicationDirectory = process.argv[4] || undefined;
 const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
-const result = await preflightControlUpdate({ environment: process.env, homeDirectory });
+const result = await preflightControlUpdate({ currentApplicationDirectory, environment: process.env, homeDirectory });
 process.stdout.write(JSON.stringify(result));
 '@
     $scriptPath = Join-Path ([IO.Path]::GetTempPath()) ("portable-devshell-preflight-" + [Guid]::NewGuid().ToString("N") + ".mjs")
     try {
         [IO.File]::WriteAllText($scriptPath, $script, [Text.UTF8Encoding]::new($false))
-        $output = & node $scriptPath $controlModule $HomeDirectory
+        $output = & node $scriptPath $controlModule $HomeDirectory $CurrentApplicationDirectory
         if ($LASTEXITCODE -ne 0) { throw "候选版本 compatibility preflight 失败。" }
         return ($output | ConvertFrom-Json)
     } finally {
@@ -483,10 +484,16 @@ try {
     Write-InstallDetail "CLI 入口和运行时依赖验证通过"
     $migrationRequired = $false
     if ($candidatePreflight) {
-        $preflight = Invoke-CandidatePreflight $stagingDirectory $home
+        $currentApplicationDirectory = if (Test-Path -LiteralPath (Join-Path $currentDirectory "package.json") -PathType Leaf) {
+            (Resolve-Path -LiteralPath $currentDirectory).Path
+        } else {
+            ""
+        }
+        $preflight = Invoke-CandidatePreflight $stagingDirectory $home $currentApplicationDirectory
         $migrationRequired = [bool]$preflight.migration.required
         Write-InstallDetail "Compatibility preflight 通过：检查 Extension generation $($preflight.extensions.checkedGenerations) 个"
         if ($migrationRequired) { Write-InstallDetail "候选版本需要 persistent migration" }
+        if (-not [bool]$preflight.rollback.feasible) { Write-InstallDetail "Compatibility preflight：提交 persistent migration 后不可自动降级" }
     }
 
     Write-InstallStep "停止旧版本并切换安装"

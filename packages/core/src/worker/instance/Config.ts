@@ -12,7 +12,7 @@ import type {
 } from "../transport/Transport.js";
 import {
     WORKER_LEGACY_PROTOCOL_VERSION,
-    WORKER_PROTOCOL_VERSION,
+    WORKER_PROTOCOL_RANGE,
     type WorkerHandshakeParams,
 } from "../protocol/Client.js";
 import {
@@ -93,10 +93,7 @@ export function resolveWorkerInstanceConfig(
         handshake: {
             minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
             maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
-            protocolRange: {
-                min: WORKER_PROTOCOL_VERSION,
-                max: WORKER_PROTOCOL_VERSION,
-            },
+            protocolRange: WORKER_PROTOCOL_RANGE,
             clientName: "portable-devshell",
             clientVersion: "0.0.0",
             ...config.handshake,

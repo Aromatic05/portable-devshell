@@ -108,18 +108,21 @@ NODE
 preflight_candidate() {
     app_directory=$1
     home_directory=$2
-    node --input-type=module - "$app_directory" "$home_directory" <<'NODE'
+    current_application_directory=$3
+    node --input-type=module - "$app_directory" "$home_directory" "$current_application_directory" <<'NODE'
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const appDirectory = process.argv[2];
 const homeDirectory = process.argv[3];
+const currentApplicationDirectory = process.argv[4] || undefined;
 const controlModule = resolve(
     appDirectory,
     "node_modules/@portable-devshell/control/dist/migration/Control.js",
 );
 const { preflightControlUpdate } = await import(pathToFileURL(controlModule).href);
 const result = await preflightControlUpdate({
+    currentApplicationDirectory,
     environment: process.env,
     homeDirectory,
 });
@@ -627,15 +630,23 @@ fi
 detail "CLI 入口和运行时依赖验证通过"
 migration_required=0
 if [ "$candidate_preflight" -eq 1 ]; then
-    if ! preflight_json=$(preflight_candidate "$staging_directory" "$home"); then
+    current_application_directory=
+    if [ -f "$current_link/package.json" ]; then
+        current_application_directory=$current_link
+    fi
+    if ! preflight_json=$(preflight_candidate "$staging_directory" "$home" "$current_application_directory"); then
         echo "候选版本 compatibility preflight 失败；安装在停机前取消。" >&2
         exit 1
     fi
     migration_required=$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.migration?.required ? "1" : "0")' "$preflight_json")
+    rollback_feasible=$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(value.rollback?.feasible === false ? "0" : "1")' "$preflight_json")
     checked_extensions=$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.extensions?.checkedGenerations ?? 0))' "$preflight_json")
     detail "Compatibility preflight 通过：检查 Extension generation ${checked_extensions} 个"
     if [ "$migration_required" -eq 1 ]; then
         detail "候选版本需要 persistent migration"
+    fi
+    if [ "$rollback_feasible" -eq 0 ]; then
+        detail "Compatibility preflight：提交 persistent migration 后不可自动降级"
     fi
 fi
 
