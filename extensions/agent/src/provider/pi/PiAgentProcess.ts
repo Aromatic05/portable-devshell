@@ -478,6 +478,7 @@ class PiSharedProcess {
             await this.#request({ id: randomUUID(), type: "shutdown" }, true);
         } finally {
             this.terminate();
+            await this.closed;
         }
     }
 
@@ -491,8 +492,10 @@ class PiSharedProcess {
         this.#rejectPending(new Error("Pi provider child was terminated."));
         this.#agents.clear();
         this.#toolSessions.clear();
-        this.#close();
-        void this.#child.terminate("SIGTERM").catch(() => undefined);
+        void this.#child
+            .terminate("SIGTERM")
+            .catch(() => undefined)
+            .finally(this.#close);
     }
 
     async #request(
@@ -660,8 +663,10 @@ class PiSharedProcess {
         this.#rejectPending(error);
         this.#agents.clear();
         this.#toolSessions.clear();
-        this.#close();
-        void this.#child.terminate("SIGTERM").catch(() => undefined);
+        void this.#child
+            .terminate("SIGTERM")
+            .catch(() => undefined)
+            .finally(this.#close);
     }
 
     #rejectPending(error: Error): void {

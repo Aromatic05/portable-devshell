@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
@@ -81,9 +81,18 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
 
         const first = await installer.ensureInstalled(runtime);
         assert.equal(first.version, PI_BOOTSTRAP_VERSION);
-        assert.match(
-            first.entrypoint,
-            /providers\/pi\/install\/releases\/0\.85\.1\/node_modules/u,
+        const managedNodeModules = join(
+            runtime.installationDirectory,
+            "releases",
+            PI_BOOTSTRAP_VERSION,
+            "node_modules",
+        );
+        const installedRelative = relative(managedNodeModules, first.entrypoint);
+        assert.equal(
+            installedRelative === ".." ||
+                installedRelative.startsWith(".." + sep) ||
+                isAbsolute(installedRelative),
+            false,
         );
         assert.notEqual(first.entrypoint, entrypoint);
 
@@ -196,7 +205,10 @@ test("Pi provider maps each Agent into the shared managed runtime with its injec
         assert.equal(starts[0]?.managedInstallRoot, "/managed/pi");
         assert.deepEqual(starts[0]?.target, target);
         assert.equal(starts[0]?.tools, context.tools);
-        assert.match(starts[0]!.localCwd, /agents\/ag-pi-test\/cwd$/u);
+        assert.equal(
+            starts[0]!.localCwd,
+            join(runtime.stateDirectory, "agents", "ag-pi-test", "cwd"),
+        );
         assert.equal(starts[0]?.webBasePath, "/agent/");
     } finally {
         await rm(rootDirectory, { force: true, recursive: true });

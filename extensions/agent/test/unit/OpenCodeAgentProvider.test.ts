@@ -128,7 +128,10 @@ test("OpenCode provider gives its runtime factory private state and the canonica
         assert.equal(captured?.command, "/private/opencode");
         assert.equal(captured?.tools, tools);
         assert.equal(captured?.stateDirectory, runtime.stateDirectory);
-        assert.match(String(captured?.localCwd), /agents\/ag-opencode\/cwd$/u);
+        assert.equal(
+            captured?.localCwd,
+            join(runtime.stateDirectory, "agents", "ag-opencode", "cwd"),
+        );
     } finally {
         await rm(root, { force: true, recursive: true });
     }

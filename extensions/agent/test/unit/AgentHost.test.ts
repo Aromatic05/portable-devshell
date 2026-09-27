@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { ExtensionProcessCapability } from "@portable-devshell/extension";
@@ -92,7 +93,7 @@ test("AgentHost binds provider lifecycle, target, runtime prefix, tools, and one
     assert.equal(starts[0]?.web?.basePath, "/agent/");
     assert.equal(
         starts[0]?.runtime.prefixDirectory,
-        "/extension-state/agent/providers/pi/prefix/0.84.4",
+        join(runtimeRootDirectory, "providers", "pi", "prefix", "0.84.4"),
     );
     assert.deepEqual(host.list(), [record]);
     assert.deepEqual(host.webEndpoint(), {

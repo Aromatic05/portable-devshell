@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { fork, type ChildProcess } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+    chmod,
+    mkdir,
+    mkdtemp,
+    readFile,
+    rm,
+    writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -110,7 +117,8 @@ test("OpenCode provider child accepts a new prompt after the previous ACP turn b
     const root = await mkdtemp(
         join(tmpdir(), "devshell-opencode-child-turns-"),
     );
-    const command = await writeFakeAcpAgent(root);
+    const localCwd = join(root, "cwd");
+    const command = await writeFakeAcpAgent(root, localCwd);
     const childPath = fileURLToPath(
         new URL(
             "../../src/provider/opencode/OpenCodeAgentChild.ts",
@@ -139,7 +147,7 @@ test("OpenCode provider child accepts a new prompt after the previous ACP turn b
         child.send({
             command,
             id: "init-turns",
-            localCwd: join(root, "cwd"),
+            localCwd,
             modelTools: [],
             stateDirectory: join(root, "state"),
             type: "init",
@@ -212,10 +220,46 @@ test("OpenCode provider child accepts a new prompt after the previous ACP turn b
     }
 });
 
-async function writeFakeAcpAgent(root: string): Promise<string> {
+async function writeFakeAcpAgent(
+    root: string,
+    localCwd: string,
+): Promise<string> {
     const command = join(root, "fake-opencode-acp.mjs");
     const sdk = import.meta.resolve("@agentclientprotocol/sdk");
     const logPath = join(root, "prompts.log");
+    if (process.platform === "win32") {
+        await mkdir(localCwd, { recursive: true });
+        await writeFile(
+            join(localCwd, "acp"),
+            `const { appendFile } = require("node:fs/promises");
+const { Readable, Writable } = require("node:stream");
+void import(${JSON.stringify(sdk)})
+    .then((acp) => {
+        const stream = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+        acp.agent({ name: "fake-opencode" })
+            .onRequest(acp.methods.agent.initialize, ({ params }) => ({
+                agentCapabilities: { loadSession: false },
+                authMethods: [],
+                protocolVersion: params.protocolVersion
+            }))
+            .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "fake-session" }))
+            .onRequest(acp.methods.agent.session.prompt, async ({ params }) => {
+                const text = params.prompt?.find((block) => block.type === "text")?.text ?? "";
+                await appendFile(${JSON.stringify(logPath)}, text + "\\n", "utf8");
+                return { stopReason: "end_turn" };
+            })
+            .onNotification(acp.methods.agent.session.cancel, () => {})
+            .connect(stream);
+    })
+    .catch((error) => {
+        process.stderr.write(String(error) + "\\n");
+        process.exitCode = 1;
+    });
+`,
+            "utf8",
+        );
+        return process.execPath;
+    }
     await writeFile(
         command,
         `#!/usr/bin/env node

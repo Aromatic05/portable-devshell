@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -8,9 +8,8 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const generation = `sha256-${"a".repeat(64)}`;
 
-async function createLauncherHarness(t: test.TestContext) {
+async function createLauncherHarness() {
     const root = await createTestTempDirectory("agent-pi-launcher");
-    t.after(async () => await rm(root, { force: true, recursive: true }));
     const home = join(root, "home");
     const dataHome = join(root, "data");
     const devshellHome = join(home, ".devshell");
@@ -171,8 +170,8 @@ async function withPiLaunchEnvironment<T>(
     }
 }
 
-test("direct Pi keeps the invoking cwd and leaves Pi's default user data directory unresolved", async (t) => {
-    const h = await createLauncherHarness(t);
+test("direct Pi keeps the invoking cwd and leaves Pi's default user data directory unresolved", async () => {
+    const h = await createLauncherHarness();
     await withPiLaunchEnvironment(h, undefined, async () => {
         await launchInstalledPi([], process.env, h.home);
         const capture = JSON.parse(await readFile(h.capturePath, "utf8"));
@@ -185,10 +184,11 @@ test("direct Pi keeps the invoking cwd and leaves Pi's default user data directo
             /ENOENT/u,
         );
     });
+    assert.notEqual(process.cwd(), h.projectDirectory);
 });
 
-test("direct Pi preserves an explicit PI_CODING_AGENT_DIR", async (t) => {
-    const h = await createLauncherHarness(t);
+test("direct Pi preserves an explicit PI_CODING_AGENT_DIR", async () => {
+    const h = await createLauncherHarness();
     const nativeAgentDirectory = join(h.home, ".pi", "agent-custom");
     await withPiLaunchEnvironment(h, nativeAgentDirectory, async () => {
         await launchInstalledPi([], process.env, h.home);
@@ -201,4 +201,5 @@ test("direct Pi preserves an explicit PI_CODING_AGENT_DIR", async (t) => {
             /ENOENT/u,
         );
     });
+    assert.notEqual(process.cwd(), h.projectDirectory);
 });

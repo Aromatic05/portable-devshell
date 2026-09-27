@@ -68,7 +68,9 @@ test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
     const source = await readFile(result.command, "utf8");
     assert.match(source, /portable-devshell-agent:pi-launcher-v1/u);
     assert.match(source, /PiLauncher\.js/u);
-    assert.equal((await lstat(result.command)).mode & 0o111, 0o111);
+    if (process.platform !== "win32") {
+        assert.equal((await lstat(result.command)).mode & 0o111, 0o111);
+    }
 });
 
 async function withRestrictiveUmask<T>(
