@@ -312,21 +312,31 @@ impl ResolvedDirectory {
     pub fn set_modified_time(&self, relative: &Path, seconds: i64) -> io::Result<()> {
         #[cfg(windows)]
         if let Some(directory) = &self.capability {
+            use cap_std::fs::{OpenOptions, OpenOptionsExt};
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+                FILE_WRITE_ATTRIBUTES,
+            };
+
             let time = filetime::FileTime::from_unix_time(seconds, 0);
             let metadata = if relative.as_os_str().is_empty() {
                 directory.dir_metadata()?
             } else {
                 directory.metadata(relative)?
             };
-            let handle = if metadata.is_dir() {
-                if relative.as_os_str().is_empty() {
-                    directory.try_clone()?.into_std_file()
-                } else {
-                    directory.open_dir(relative)?.into_std_file()
-                }
+            let mut options = OpenOptions::new();
+            options
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+            if metadata.is_dir() {
+                options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+            }
+            let target = if relative.as_os_str().is_empty() {
+                Path::new(".")
             } else {
-                directory.open(relative)?.into_std()
+                relative
             };
+            let handle = directory.open_with(target, &options)?.into_std();
             return filetime::set_file_handle_times(&handle, None, Some(time));
         }
         #[cfg(unix)]

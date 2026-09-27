@@ -33,21 +33,25 @@ impl SocketPaths {
         };
         #[cfg(windows)]
         let instance_runtime_dir = default_runtime_dir;
+        #[cfg(windows)]
+        let pipe_scope = windows_runtime_identity(&instance_runtime_dir);
         #[cfg(unix)]
         let socket_file = instance_runtime_dir.join("worker.sock");
         #[cfg(unix)]
         let transport_socket_file = instance_runtime_dir.join("transport.sock");
         #[cfg(windows)]
         let socket_file = PathBuf::from(format!(
-            r"\\.\pipe\devshell-worker-{}-{}",
+            r"\\.\pipe\devshell-worker-{}-{}-{}",
             windows_user_identity(),
-            instance.as_str()
+            instance.as_str(),
+            pipe_scope
         ));
         #[cfg(windows)]
         let transport_socket_file = PathBuf::from(format!(
-            r"\\.\pipe\devshell-worker-{}-{}-transport",
+            r"\\.\pipe\devshell-worker-{}-{}-{}-transport",
             windows_user_identity(),
-            instance.as_str()
+            instance.as_str(),
+            pipe_scope
         ));
         Ok(Self {
             socket_file,
@@ -86,6 +90,16 @@ fn windows_user_identity() -> String {
     } else {
         normalized
     }
+}
+
+#[cfg(windows)]
+fn windows_runtime_identity(runtime_dir: &std::path::Path) -> String {
+    let normalized = runtime_dir
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let hash = blake3::hash(normalized.as_bytes()).to_hex();
+    hash[..16].to_string()
 }
 
 fn xdg_runtime_dir() -> Result<PathBuf, String> {

@@ -1796,6 +1796,8 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut write_accepted = false;
     let mut output = String::new();
+    #[cfg(windows)]
+    let mut cursor_queries_answered = 0_usize;
     while Instant::now() < deadline
         && (!write_accepted || !output.contains("forward-notification-ready"))
     {
@@ -1811,7 +1813,31 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
             && frame["method"] == "terminal.output"
             && let Some(data) = frame["params"]["dataBase64"].as_str()
         {
-            output.push_str(&String::from_utf8_lossy(&BASE64.decode(data).unwrap()));
+            let decoded = BASE64.decode(data).unwrap();
+            output.push_str(&String::from_utf8_lossy(&decoded));
+            #[cfg(windows)]
+            {
+                let cursor_queries = output.matches("\u{1b}[6n").count();
+                while cursor_queries_answered < cursor_queries {
+                    let client_seq = 2 + cursor_queries_answered as u64;
+                    write_rpc_frame(
+                        &mut stdin,
+                        &serde_json::json!({
+                            "type": "request",
+                            "id": format!("terminal-cursor-response-{client_seq}"),
+                            "method": "terminal.write",
+                            "params": {
+                                "clientSeq": client_seq,
+                                "generation": generation,
+                                "terminalId": terminal_id,
+                                "version": version,
+                                "data": BASE64.encode(b"\x1b[1;1R")
+                            }
+                        }),
+                    );
+                    cursor_queries_answered += 1;
+                }
+            }
         }
     }
     assert!(write_accepted, "terminal.write response was not forwarded");
@@ -2142,7 +2168,7 @@ fn extension_resource_prepare_creates_a_private_instance_scoped_collection() {
     assert!(expected.is_dir());
     assert_eq!(
         prepared["result"]["directory"],
-        expected.to_string_lossy().replace('\\', "/")
+        expected.to_string_lossy().into_owned()
     );
 
     let escaped = env.rpc(

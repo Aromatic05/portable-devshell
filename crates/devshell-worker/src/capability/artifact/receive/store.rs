@@ -764,6 +764,7 @@ fn extract_directory(
         output
             .sync_all()
             .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
+        drop(output);
         staged.set_permissions(&path, mode).map_err(|error| {
             ToolError::new(
                 "artifact.receiveFailed",
@@ -1011,6 +1012,7 @@ fn sync_tree(root: &ResolvedDirectory) -> Result<(), ToolError> {
                 .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;
             sync_tree(&directory)?;
         } else if metadata.is_file() {
+            #[cfg(unix)]
             root.open_file(&relative)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| ToolError::new("artifact.receiveFailed", error.to_string()))?;

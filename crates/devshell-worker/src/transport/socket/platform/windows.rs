@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED,
-    INVALID_HANDLE_VALUE,
+    ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
 use windows_sys::Win32::System::Pipes::{
@@ -156,7 +156,40 @@ impl LocalIpcStream {
 
 impl Read for LocalIpcStream {
     fn read(&mut self, buffer: &mut [u8]) -> IoResult<usize> {
-        self.inner.read(buffer)
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            let mut available = 0_u32;
+            let succeeded = unsafe {
+                PeekNamedPipe(
+                    self.inner.as_raw_handle(),
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    &mut available,
+                    ptr::null_mut(),
+                )
+            };
+            if succeeded == 0 {
+                let error = Error::last_os_error();
+                if matches!(
+                    error.raw_os_error(),
+                    Some(code)
+                        if code == ERROR_BROKEN_PIPE as i32
+                            || code == ERROR_PIPE_NOT_CONNECTED as i32
+                            || code == ERROR_NO_DATA as i32
+                ) {
+                    return Ok(0);
+                }
+                return Err(error);
+            }
+            if available != 0 {
+                let readable = buffer.len().min(available as usize);
+                return self.inner.read(&mut buffer[..readable]);
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
     }
 }
 

@@ -1385,8 +1385,19 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(first["result"]["entries"].as_array().unwrap().len(), 200);
     let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
 
-    fs::rename(&root, env.workspace().join("tree-original")).unwrap();
-    fs::create_dir_all(&root).unwrap();
+    #[cfg(windows)]
+    {
+        let rename = fs::rename(&root, env.workspace().join("tree-original"));
+        assert!(
+            rename.is_err(),
+            "a live Windows cursor must keep its traversal root name stable"
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(&root, env.workspace().join("tree-original")).unwrap();
+        fs::create_dir_all(&root).unwrap();
+    }
 
     let second = call(
         &env,
@@ -1415,6 +1426,8 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(reused["result"]["entries"].as_array().unwrap().len(), 50);
 
     env.json_command(&["stop", "--instance", instance]);
+    #[cfg(windows)]
+    fs::rename(&root, env.workspace().join("tree-original")).unwrap();
 }
 
 #[test]
@@ -1502,8 +1515,19 @@ fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(first["result"]["files"].as_array().unwrap().len(), 20);
     let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
 
-    fs::rename(&root, env.workspace().join("search-tree-original")).unwrap();
-    fs::create_dir_all(&root).unwrap();
+    #[cfg(windows)]
+    {
+        let rename = fs::rename(&root, env.workspace().join("search-tree-original"));
+        assert!(
+            rename.is_err(),
+            "a live Windows cursor must keep its traversal root name stable"
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        fs::rename(&root, env.workspace().join("search-tree-original")).unwrap();
+        fs::create_dir_all(&root).unwrap();
+    }
 
     let second = call(
         &env,
@@ -1532,6 +1556,8 @@ fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
     assert_eq!(reused["result"]["files"].as_array().unwrap().len(), 5);
 
     env.json_command(&["stop", "--instance", instance]);
+    #[cfg(windows)]
+    fs::rename(&root, env.workspace().join("search-tree-original")).unwrap();
 }
 
 #[test]

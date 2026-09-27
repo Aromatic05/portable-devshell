@@ -1,9 +1,20 @@
 use std::fs;
 use std::io::{self, Write};
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 
 use tempfile::NamedTempFile;
 use uuid::Uuid;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    DELETE, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FileRenameInfoEx, SetFileInformationByHandle,
+};
 
 use crate::instance::sandbox::path::ResolvedTarget;
 use crate::tool::ToolError;
@@ -25,6 +36,9 @@ pub fn new_temp(target: &Path) -> Result<NamedTempFile, ToolError> {
 
 pub fn publish(temp: NamedTempFile, target: &Path, mode: PublishMode) -> Result<(), ToolError> {
     match mode {
+        #[cfg(windows)]
+        PublishMode::Replace => publish_replace_windows(temp, target),
+        #[cfg(not(windows))]
         PublishMode::Replace => temp
             .persist(target)
             .map(|_| ())
@@ -37,6 +51,69 @@ pub fn publish(temp: NamedTempFile, target: &Path, mode: PublishMode) -> Result<
             }
         }),
     }
+}
+
+#[cfg(windows)]
+fn publish_replace_windows(temp: NamedTempFile, target: &Path) -> Result<(), ToolError> {
+    const FILE_RENAME_FLAG_REPLACE_IF_EXISTS: u32 = 0x1;
+    const FILE_RENAME_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+
+    let (file, temp_path) = temp
+        .keep()
+        .map_err(|error| ToolError::new("file.writeFailed", error.error.to_string()))?;
+    drop(file);
+
+    let result = (|| {
+        let source = fs::OpenOptions::new()
+            .access_mode(DELETE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&temp_path)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+        let file_name = target.as_os_str().encode_wide().collect::<Vec<_>>();
+        let file_name_bytes = file_name
+            .len()
+            .checked_mul(std::mem::size_of::<u16>())
+            .and_then(|length| u32::try_from(length).ok())
+            .ok_or_else(|| ToolError::new("file.writeFailed", "destination path is too long"))?;
+        let buffer_len = std::mem::size_of::<FILE_RENAME_INFO>()
+            .checked_add(file_name_bytes as usize)
+            .and_then(|length| length.checked_sub(std::mem::size_of::<u16>()))
+            .ok_or_else(|| ToolError::new("file.writeFailed", "destination path is too long"))?;
+        let mut buffer = vec![0_u8; buffer_len];
+        let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+        unsafe {
+            (*info).Anonymous.Flags =
+                FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+            (*info).RootDirectory = std::ptr::null_mut();
+            (*info).FileNameLength = file_name_bytes;
+            std::ptr::copy_nonoverlapping(
+                file_name.as_ptr(),
+                (*info).FileName.as_mut_ptr(),
+                file_name.len(),
+            );
+        }
+        let renamed = unsafe {
+            SetFileInformationByHandle(
+                source.as_raw_handle(),
+                FileRenameInfoEx,
+                info.cast(),
+                u32::try_from(buffer.len()).map_err(|_| {
+                    ToolError::new("file.writeFailed", "rename buffer is too large")
+                })?,
+            )
+        };
+        if renamed == 0 {
+            return Err(ToolError::new(
+                "file.writeFailed",
+                io::Error::last_os_error().to_string(),
+            ));
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result
 }
 
 pub fn write_atomic(
@@ -131,6 +208,8 @@ pub fn write_atomic_with(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(windows)]
+    use std::io::Read;
     use std::io::Write;
 
     use super::{PublishMode, new_temp, publish};
@@ -147,5 +226,23 @@ mod tests {
 
         assert_eq!(error.code, "file.alreadyExists");
         assert_eq!(fs::read_to_string(target).unwrap(), "existing");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replace_publish_replaces_an_open_target_on_windows() {
+        let directory = crate::testing::temp_dir();
+        let target = directory.path().join("target.txt");
+        fs::write(&target, "existing").unwrap();
+        let mut open_target = fs::File::open(&target).unwrap();
+        let mut temp = new_temp(&target).unwrap();
+        temp.write_all(b"replacement").unwrap();
+
+        publish(temp, &target, PublishMode::Replace).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "replacement");
+        let mut original = String::new();
+        open_target.read_to_string(&mut original).unwrap();
+        assert_eq!(original, "existing");
     }
 }
