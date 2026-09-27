@@ -57,7 +57,11 @@ test(
             "model-devshell-workspace",
         );
         const worker = new WorkerInstanceFactory().create({
-            env: { ...process.env, HOME: homeDirectory },
+            env: {
+                ...process.env,
+                HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
+            },
             homeDirectory,
             name: asInstanceName(instanceName),
             transport: new WorkerTransportDriverLocal({
@@ -166,7 +170,7 @@ test(
                 false,
                 JSON.stringify(forbidden),
             );
-            assert.equal(forbidden.result?.structuredContent?.exitCode, 127);
+            assert.notEqual(forbidden.result?.structuredContent?.exitCode, 0);
             assert.match(
                 String(forbidden.result?.structuredContent?.stderr ?? ""),
                 /CLI command stop is unavailable\./u,

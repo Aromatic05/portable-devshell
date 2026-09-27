@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::capability::rpc::bridge::send_request;
+use crate::capability::rpc::path::protocol_path;
 use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
 use crate::instance::storage::ensure_dir;
@@ -76,7 +77,7 @@ impl ModelDevshellShim {
             parent_call_id: call.operation_id.clone(),
             path,
             task_id: task_id.map(ToOwned::to_owned),
-            workspace: call.workspace.to_string_lossy().into_owned(),
+            workspace: protocol_path(&call.workspace),
         })
     }
 }
