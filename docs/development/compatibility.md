@@ -16,21 +16,21 @@ DevShell release        0.7.y
 
 这些版本只在对应 contract 发生变化时推进，不随 DevShell release 同步 bump。
 
-### 0.7.6 当前状态
+### 当前开发状态（0.7.7 interval）
 
-`0.7.x` 仍处于 contract 发现与冻结阶段，因此不能把目标态写成已经完成的现状。当前实现是：
+`0.7.x` 仍处于 contract 发现与冻结阶段，因此不能把目标态写成已经完成的现状。`0.7.6` 发布时只有 Worker Protocol 已完成语义版本协商；当前 `0.7.7` 开发 interval 已继续冻结 Control / Frame 与 Extension management ABI：
 
-| Surface | 0.7.6 representation | 状态 |
+| Surface | 当前 representation | 状态 |
 | --- | --- | --- |
 | DevShell release | `0.7.y` | 当前产品版本规则 |
-| Control Protocol | integer generation/range | 尚未迁移为 `x.y.z` |
+| Control Protocol | `x.y.z` range，当前 `1.0.0`；保留 legacy integer `1` adapter | 已使用语义版本协商 |
 | Worker Protocol | `x.y.z` range，当前 `1.0.0`；保留 legacy Worker 7 adapter | 已使用语义版本协商 |
-| Frame Protocol | integer Frame v1 | 尚未迁移为 `x.y.z` range |
-| Extension API | `x.y.z`，当前 `4.1.0` | 已使用语义版本 |
+| Frame Protocol | `x.y.z` range，当前 `1.0.0`；wire format 仍为 v1；保留 no-negotiation compatibility | 已使用语义版本协商 |
+| Extension API | `x.y.z`，当前 `4.2.0` | 已使用语义版本 |
 | Extension Schema | `x.y.z`，当前 `1.1.0` | 已使用语义版本 |
 | Persistent Schema | domain-owned integer/schema version | 由各 domain 自己迁移 |
 
-Control / Frame 的语义版本化属于后续 `0.7.x` freeze 工作，不是 `0.7.6` 已经提供的兼容承诺。
+历史 `0.7.6` release note 仍应描述当时的 integer Control / Frame contract；当前文档描述的是尚未发布的 `0.7.7` 开发状态。legacy Control integer `1`、Worker `7` 和 Frame no-negotiation compatibility 都继续保留到各自声明的 `@removeAt 0.7.10` 窗口结束。
 
 ## Release interval version rule
 
@@ -64,7 +64,7 @@ z    compatible correction or clarification
 
 同一 major 不代表任意版本天然兼容。只有落在双方声明的 supported range 内才允许建立连接。没有共同版本时必须在握手阶段失败，不能降级到未声明的兼容路径。
 
-`0.7.6` 中这套规则已经用于 Worker Protocol；Worker client 还会验证 Worker 返回的 negotiated version 是合法 `x.y.z` 且确实落在自己声明的 range 内。Control Protocol 与 Frame Protocol 仍使用各自现有的 integer generation contract，在完成后续迁移前不应把它们描述成已经具备上述 `x.y.z` range negotiation。
+当前 Control、Worker 与 Frame 都使用独立的 `x.y.z` supported range。Worker client 会验证 Worker 返回的 negotiated version 落在自己声明的 range 内；Control hello 同样拒绝无交集的 semantic range。Frame 的 semantic Protocol version 与 packet header 中的 wire-format generation 分离：当前 semantic version 为 `1.0.0`，现有 packet wire format 仍是 v1，因此冻结 semantic negotiation 不要求重写已有 Frame 编码。
 
 ## Extension version
 
@@ -146,19 +146,19 @@ resolve target release
     -> commit or rollback
 ```
 
-完整 freeze 目标中的 Compatibility preflight 至少检查：
+Compatibility preflight 当前至少检查：
 
 ```text
-Control / Worker protocol range
+Control / Worker / Frame protocol range
 required migration paths
 installed Extension API / schema compatibility
 Extension host dependency ranges
 rollback feasibility
 ```
 
-`0.7.6` 的 `devshell update` preflight 当前已经检查 persistent config migration requirement、已安装 Extension generation 的 manifest/API/schema compatibility，以及 Extension `hostDependencies`。Release installer transaction 另外负责 artifact validation、backup、candidate install/start validation 和失败 rollback。
+`0.7.6` 发布时的 `devshell update` preflight 已检查 persistent config migration requirement、已安装 Extension generation 的 manifest/API/schema compatibility，以及 Extension `hostDependencies`。当前 `0.7.7` 开发 interval 另外在停机前读取当前 application generation 的 Control / Worker / Frame contract，并与 candidate supported range 做交集检查；legacy integer/no-negotiation generation 只通过显式 `@compat` 映射参与判断，不根据 DevShell 产品版本猜测协议。
 
-Control / Worker protocol range 的安装前 compatibility 判断，以及把 rollback feasibility 本身纳入显式 preflight result，仍是后续 `0.7.x` 工作。当前实现不能因为 installer 最终具有 rollback，就在文档中声称 preflight 已经完成这两项检查。
+Preflight 现在也显式返回 rollback feasibility。若 candidate 需要 persistent migration，则结果标记 `rollback.feasible = false` 并给出 `persistentMigrationRequired` blocker：这不会阻止升级本身，但表示 migration 一旦提交，installer 不再自动降级到旧 generation。Release installer transaction 仍单独负责 artifact validation、backup、candidate install/start validation 和失败 rollback 的实际执行。
 
 `devshell migrate` 与 `devshell update` 在实现上分离，在默认升级流程中组合。这样 migration 可以独立用于恢复、离线迁移和手工安装，而 update 不需要拥有第二套 migration 规则。
 

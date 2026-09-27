@@ -37,7 +37,7 @@ devshell access disable <id>
 devshell access remove <id>
 ```
 
-这些 mutation 只允许 local-owner CLI 调用。`devshell access web` 只返回 Access Web application 的入口；`0.7.6` 中该页面是 status/observation surface，不是完整管理页面。TUI 也暂不注入 Access 管理面；通用 Extension management UI contract 留到后续版本完成，见 [Extension ABI](../concepts/extensions.md)。
+这些 mutation 仍受 local-owner authority 约束。Access 现在同时提供 CLI、独立 Web application、主 WebUI 中的 `web.pages` 管理页和 TUI 中的 `tui.pages` 管理页；这些 surface 共享 Access 自己的 runtime/service，但不共享 generic presentation contract。`web.pages` 与 `tui.pages` 的 Host-rendered ABI 见 [Extension ABI](../concepts/extensions.md)。
 
 Access 管理 tunnel lifecycle，但不替代 portable-devshell 的 MCP OAuth、Tool Approval 或外部 HTTPS/DNS 配置。公开 endpoint 仍应使用 OAuth2，并确认最终 public URL 与 reverse proxy / tunnel 实际地址一致。
 

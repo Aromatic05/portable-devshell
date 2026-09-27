@@ -2,7 +2,7 @@
 
 portable-devshell 的 Extension 运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
 
-当前 public Extension API version 为 `4.1.0`，manifest schema version 为 `1.1.0`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
+当前 public Extension API version 为 `4.2.0`，manifest schema version 为 `1.1.0`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
 
 ## 核心模型
 
@@ -255,6 +255,8 @@ Point identity 使用稳定 namespaced string：
 cli.native-commands
 cli.model-commands
 web.applications
+web.pages
+tui.pages
 ```
 
 Registration 使用 Extension-local id；Host 结合 point id、Extension id 和 local id 建立全局 identity。Runtime registration 默认属于当前 generation，generation retirement 自动撤销。
@@ -407,7 +409,11 @@ ExtensionActivation contribution object
 ```text
 Agent
     capabilities: assets, delegatedWorkers, processes
-    extensions: cli.native-commands, cli.model-commands, web.applications
+    extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
+
+Access
+    capabilities: processes
+    extensions: cli.native-commands, web.applications, web.pages, tui.pages
 
 Skill
     capabilities: assets

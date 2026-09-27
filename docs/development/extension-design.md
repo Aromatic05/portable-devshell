@@ -1,8 +1,8 @@
 # Extension 架构与 ABI 设计
 
-> 状态：核心元模型、static catalog、lazy activation 与第一批 CLI/Web domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
+> 状态：核心元模型、static catalog、lazy activation 与 CLI/Web/TUI domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API 4.1.0 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API 4.2.0 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications / web.pages / tui.pages` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -328,7 +328,7 @@ Capability 是：
 
 因此 capability 名称必须是同一层级的资源类别名词。
 
-当前 API 4.1.0 集合：
+当前 API 4.2.0 capability 集合：
 
 ```text
 artifacts
@@ -476,6 +476,8 @@ Point identity 使用稳定 namespaced id：
 cli.native-commands
 cli.model-commands
 web.applications
+web.pages
+tui.pages
 agent.providers
 tools.tools    // 仅示意；具体命名必须由 Tool domain 再审
 ```
@@ -1286,6 +1288,8 @@ workers
 cli.native-commands
 cli.model-commands
 web.applications
+web.pages
+tui.pages
 ```
 
 ### Lifecycle
@@ -1303,7 +1307,11 @@ make processes Control-owned
 ```text
 Agent
     capabilities: assets, delegatedWorkers, processes
-    extensions: cli.native-commands, cli.model-commands, web.applications
+    extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
+
+Access
+    capabilities: processes
+    extensions: cli.native-commands, web.applications, web.pages, tui.pages
 
 Skill
     capabilities: assets
