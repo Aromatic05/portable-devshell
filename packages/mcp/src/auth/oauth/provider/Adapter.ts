@@ -24,7 +24,25 @@ const sharedStores = new Map<string, SharedAdapterState>();
 export function createMcpOAuthOidcFileAdapterFactory(
     storageDir: string,
     secureStorage: (path: string) => Promise<void> = async () => {},
+    secureFile: (path: string) => Promise<void> = async () => {},
 ): AdapterFactory {
+    let storagePreparation: Promise<void> | undefined;
+    const prepareStorage = async (): Promise<void> => {
+        if (storagePreparation === undefined) {
+            const attempt = secureStorage(storageDir);
+            storagePreparation = attempt;
+            try {
+                await attempt;
+            } catch (error) {
+                if (storagePreparation === attempt) {
+                    storagePreparation = undefined;
+                }
+                throw error;
+            }
+            return;
+        }
+        await storagePreparation;
+    };
     return (name: string) => {
         const filePath = join(storageDir, `${name}.json`);
         let store = sharedStores.get(filePath);
@@ -36,7 +54,8 @@ export function createMcpOAuthOidcFileAdapterFactory(
             filePath,
             store,
             name === "Client" ? MAX_CLIENT_RECORDS : MAX_DEFAULT_RECORDS,
-            secureStorage,
+            prepareStorage,
+            secureFile,
         );
     };
 }
@@ -46,7 +65,8 @@ class McpOidcFileAdapter implements Adapter {
         private readonly filePath: string,
         private readonly store: SharedAdapterState,
         private readonly maxRecords: number,
-        private readonly secureStorage: (path: string) => Promise<void>,
+        private readonly prepareStorage: () => Promise<void>,
+        private readonly secureFile: (path: string) => Promise<void>,
     ) {}
 
     async consume(id: string): Promise<void> {
@@ -206,7 +226,7 @@ class McpOidcFileAdapter implements Adapter {
         if (process.platform !== "win32") {
             await chmod(directory, 0o700);
         }
-        await this.secureStorage(directory);
+        await this.prepareStorage();
         const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
         const file = await open(tempPath, "wx", 0o600);
         try {
@@ -219,6 +239,7 @@ class McpOidcFileAdapter implements Adapter {
         }
         await file.close();
         try {
+            await this.secureFile(tempPath);
             await rename(tempPath, this.filePath);
             if (process.platform !== "win32") {
                 await chmod(this.filePath, 0o600);
@@ -229,7 +250,6 @@ class McpOidcFileAdapter implements Adapter {
                     await directoryHandle.close();
                 }
             }
-            await this.secureStorage(directory);
         } catch (error) {
             await rm(tempPath, { force: true }).catch(() => undefined);
             throw error;

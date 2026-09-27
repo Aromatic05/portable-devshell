@@ -563,6 +563,7 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
                 async secureStorage() {
                     throw new Error("storage hardening failed");
                 },
+                async secureFile() {},
             },
         });
 
@@ -1069,6 +1070,43 @@ import { McpOAuthRegistrationLimiter } from "../../../src/auth/oauth/interaction
                     0o600,
                 );
             }
+        } finally {
+            await rm(storageDir, { force: true, recursive: true });
+        }
+    });
+
+    test("OIDC file adapters prepare shared storage once before model writes", async () => {
+        const storageDir = await createTestTempDirectory(
+            "mcp-oauth-adapter-security",
+        );
+        const prepared: string[] = [];
+        const factory = createMcpOAuthOidcFileAdapterFactory(
+            storageDir,
+            async (path) => {
+                prepared.push(path);
+            },
+        );
+        const clients = factory("Client");
+        const tokens = factory("AccessToken");
+
+        try {
+            await clients.upsert(
+                "client",
+                { clientId: "client" } as never,
+                3600,
+            );
+            await tokens.upsert(
+                "token",
+                { clientId: "client", kind: "AccessToken" } as never,
+                3600,
+            );
+            await clients.upsert(
+                "client-2",
+                { clientId: "client-2" } as never,
+                3600,
+            );
+
+            assert.deepEqual(prepared, [storageDir]);
         } finally {
             await rm(storageDir, { force: true, recursive: true });
         }

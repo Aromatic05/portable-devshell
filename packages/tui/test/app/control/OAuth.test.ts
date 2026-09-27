@@ -133,7 +133,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 token_endpoint: string;
             };
 
-            const registrationResponse = await fetch(
+            const registrationRequest = fetch(
                 metadata.registration_endpoint,
                 {
                     body: JSON.stringify({
@@ -149,19 +149,19 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     method: "POST",
                 },
             );
-            assert.equal(registrationResponse.status, 201);
-            const client = (await registrationResponse.json()) as {
-                client_id: string;
-                redirect_uris: string[];
-            };
-            assert.equal(typeof client.client_id, "string");
-
             await approvePendingWithKeyboard(
                 runtime,
                 terminal,
                 host.oauthApprovals!,
                 "registration",
             );
+            const registrationResponse = await registrationRequest;
+            assert.equal(registrationResponse.status, 201);
+            const client = (await registrationResponse.json()) as {
+                client_id: string;
+                redirect_uris: string[];
+            };
+            assert.equal(typeof client.client_id, "string");
 
             const verifier = randomBytes(32).toString("base64url");
             const challenge = createHash("sha256")

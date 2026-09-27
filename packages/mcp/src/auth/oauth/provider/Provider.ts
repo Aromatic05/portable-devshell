@@ -162,6 +162,8 @@ export class McpOAuthProviderRuntime {
                         join(this.#storageDir, "adapter"),
                         async (path) =>
                             await this.#storageSecurity.secureStorage(path),
+                        async (path) =>
+                            await this.#storageSecurity.secureFile(path),
                     ),
                     dynamicClientRequiredScopes,
                     async (clientId, payload) => {

@@ -39,6 +39,7 @@ const WINDOWS_ACL_SCRIPT = [
 
 export interface McpOAuthStorageSecurity {
     secureStorage(path: string): Promise<void>;
+    secureFile(path: string): Promise<void>;
 }
 
 export function createMcpOAuthStorageSecurity(
@@ -51,11 +52,16 @@ export function createMcpOAuthStorageSecurity(
 
 const noOpMcpOAuthStorageSecurity: McpOAuthStorageSecurity = {
     async secureStorage() {},
+    async secureFile() {},
 };
 
 class WindowsMcpOAuthStorageSecurity implements McpOAuthStorageSecurity {
     async secureStorage(path: string): Promise<void> {
         await secureDirectoryTree(path);
+    }
+
+    async secureFile(path: string): Promise<void> {
+        await secureWindowsPath(path, "file");
     }
 }
 
