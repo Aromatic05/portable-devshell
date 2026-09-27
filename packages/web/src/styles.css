@@ -1126,6 +1126,7 @@ pre {
     padding: 0.2rem 0.45rem;
     color: #91a1b8;
     background: transparent;
+    font-size: 0.7rem;
 }
 .conversation-visibility-action:hover:not(:disabled) {
     color: #dce7f7;
@@ -1321,7 +1322,8 @@ pre {
     min-width: 0;
     min-height: 44px;
     max-height: 160px;
-    resize: vertical;
+    resize: none;
+    overflow-y: auto;
     border: 0;
     outline: 0;
     padding: 0.65rem 0.75rem;
@@ -1338,9 +1340,7 @@ pre {
     font-size: 1.15rem;
 }
 .messages-composer button.messages-export {
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
+    font-size: 1.05rem;
 }
 .conversation-workspace-group {
     display: grid;
@@ -1594,7 +1594,7 @@ pre {
     .messages-thread-heading {
         position: sticky;
         z-index: 3;
-        top: 58px;
+        top: var(--header-height, 58px);
         margin: -1rem -1rem 1rem;
         padding: 0.55rem 1rem 0.65rem;
         background: rgb(16 21 31 / 96%);
@@ -1679,4 +1679,47 @@ pre {
         transition-duration: 0.01ms !important;
         animation-duration: 0.01ms !important;
     }
+}
+.conversation-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+}
+.conversation-menu-trigger {
+    min-width: 30px;
+    min-height: 30px;
+    padding: 0.2rem 0.45rem;
+    color: #91a1b8;
+    background: transparent;
+}
+.conversation-menu-trigger:hover:not(:disabled),
+.conversation-menu-trigger[aria-expanded="true"] {
+    color: #dce7f7;
+    background: #34445c;
+}
+.conversation-row-menu {
+    grid-column: 2 / -1;
+    display: grid;
+    gap: 0.1rem;
+    padding: 0 0.35rem 0.45rem 0;
+}
+.conversation-row-menu button {
+    width: 100%;
+    min-height: 32px;
+    padding: 0.3rem 0.6rem;
+    border-radius: 7px;
+    color: #dce7f7;
+    background: #1b2535;
+    font-size: 0.78rem;
+    text-align: left;
+}
+.conversation-row-menu button:hover:not(:disabled) {
+    background: #34445c;
+}
+.messages-composer-length {
+    flex-basis: 100%;
+    margin: -0.1rem 0.75rem 0.2rem;
+    color: #93a4bd;
+    font-size: 0.75rem;
+    text-align: right;
 }
