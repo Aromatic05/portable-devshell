@@ -1,3 +1,4 @@
 [workspace]
 members = ["crates/devshell-worker"]
+exclude = ["crates/psmux"]
 resolver = "2"
