@@ -264,6 +264,16 @@ h4 {
 .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.metrics .card small {
+    display: block;
+    margin-top: 0.35rem;
+}
+.metrics .card small .tone-warning {
+    color: #f3ce82;
+}
+.metrics .card small .tone-danger {
+    color: #ffb4bd;
+}
 .resource-metrics {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

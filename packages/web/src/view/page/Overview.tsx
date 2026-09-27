@@ -1,3 +1,5 @@
+import { type ReactNode } from "react";
+
 import {
     formatBytes,
     formatDuration,
@@ -41,7 +43,13 @@ export function Overview({ state }: { state: WebState }) {
                 <Metric label="Health" value={overview.health} />
                 <Metric
                     label="Instances"
-                    value={`${overview.counts.instancesTotal} total · ${overview.counts.instancesAttention} attention · ${overview.counts.instancesCritical} critical`}
+                    value={String(overview.counts.instancesTotal)}
+                    detail={
+                        <InstanceAttention
+                            attention={overview.counts.instancesAttention}
+                            critical={overview.counts.instancesCritical}
+                        />
+                    }
                 />
                 <Metric
                     label="Pending approvals"
@@ -58,9 +66,7 @@ export function Overview({ state }: { state: WebState }) {
             />
             <div className="overview-grid">
                 <section>
-                    <h3>
-                        <a href="#/overview">Alerts</a>
-                    </h3>
+                    <h3>Alerts</h3>
                     {currentAlerts.length === 0 ? (
                         <p className="empty">No current alerts.</p>
                     ) : (
@@ -161,12 +167,42 @@ export function Overview({ state }: { state: WebState }) {
     );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({
+    detail,
+    label,
+    value,
+}: {
+    detail?: ReactNode;
+    label: string;
+    value: string;
+}) {
     return (
         <div className="card">
             <span>{label}</span>
             <strong>{value}</strong>
+            {detail}
         </div>
+    );
+}
+
+function InstanceAttention({
+    attention,
+    critical,
+}: {
+    attention: number;
+    critical: number;
+}) {
+    if (attention === 0 && critical === 0) return null;
+    return (
+        <small>
+            {attention === 0 ? null : (
+                <span className="tone-warning">{attention} attention</span>
+            )}
+            {attention === 0 || critical === 0 ? null : " · "}
+            {critical === 0 ? null : (
+                <span className="tone-danger">{critical} critical</span>
+            )}
+        </small>
     );
 }
 

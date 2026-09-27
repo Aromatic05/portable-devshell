@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import {
     asInstanceName,
     createInitialControlReadModelState,
@@ -124,4 +124,90 @@ it("links an Overview instance directly to its bookmarkable detail route", () =>
         "href",
         "#/instances/demo",
     );
+});
+
+function overviewState(counts: {
+    instancesAttention: number;
+    instancesCritical: number;
+    instancesTotal: number;
+}): WebState {
+    return {
+        connection: "online",
+        operations: {},
+        readModel: {
+            ...createInitialControlReadModelState(),
+            overview: {
+                activity: [],
+                alerts: [],
+                controller: { pid: 1, uptimeSeconds: 1 },
+                counts: {
+                    activeTodos: 0,
+                    failedCalls24h: 0,
+                    instancesAttention: counts.instancesAttention,
+                    instancesCritical: counts.instancesCritical,
+                    instancesReady: 0,
+                    instancesTotal: counts.instancesTotal,
+                    pendingApprovals: 0,
+                },
+                generatedAt: "2026-09-16T00:00:00Z",
+                health: "healthy",
+                instances: [],
+                todos: [],
+            },
+        },
+    };
+}
+
+it("separates the Instances total from attention and critical annotations", () => {
+    render(
+        <Overview
+            state={overviewState({
+                instancesAttention: 2,
+                instancesCritical: 1,
+                instancesTotal: 5,
+            })}
+        />,
+    );
+
+    const metrics = screen.getByLabelText("Operational summary");
+    expect(within(metrics).getByText("5")).toBeInTheDocument();
+    expect(within(metrics).getByText("2 attention")).toHaveClass(
+        "tone-warning",
+    );
+    expect(within(metrics).getByText("1 critical")).toHaveClass("tone-danger");
+});
+
+it("omits zero instance attention and critical annotations", () => {
+    render(
+        <Overview
+            state={overviewState({
+                instancesAttention: 0,
+                instancesCritical: 0,
+                instancesTotal: 5,
+            })}
+        />,
+    );
+
+    const metrics = screen.getByLabelText("Operational summary");
+    expect(within(metrics).queryByText(/attention/u)).not.toBeInTheDocument();
+    expect(within(metrics).queryByText(/critical/u)).not.toBeInTheDocument();
+});
+
+it("renders the Alerts heading as plain text instead of a self-referential link", () => {
+    render(
+        <Overview
+            state={overviewState({
+                instancesAttention: 0,
+                instancesCritical: 0,
+                instancesTotal: 0,
+            })}
+        />,
+    );
+
+    expect(
+        screen.getByRole("heading", { name: "Alerts" }),
+    ).toBeInTheDocument();
+    expect(
+        screen.queryByRole("link", { name: "Alerts" }),
+    ).not.toBeInTheDocument();
 });
