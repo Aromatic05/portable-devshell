@@ -11,7 +11,7 @@ import {
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     ClientConnection,
-    CONTROL_PROTOCOL_VERSION,
+    CONTROL_PROTOCOL_RANGE,
     PrefixRoute,
     controlWebBasePath,
     createError,
@@ -133,8 +133,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     t.after(() => connection.close());
     await connection.request("@control", "service", "hello", {
         clientKind: "web",
-        maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-        minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+        protocolRange: CONTROL_PROTOCOL_RANGE,
     });
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
