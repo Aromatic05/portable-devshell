@@ -462,6 +462,7 @@ test(
         const env = {
             ...process.env,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
         const transport = new WorkerTransportDriverLocal({
@@ -533,6 +534,7 @@ test(
         const env = {
             ...process.env,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
         const transport = new WorkerTransportDriverLocal({
@@ -573,12 +575,15 @@ test(
         });
         const progress: Array<{ atMs: number; value: JsonValue }> = [];
         const startedAt = Date.now();
+        const progressCommand =
+            process.platform === "win32"
+                ? "[Console]::Out.WriteLine('one'); Start-Sleep -Milliseconds 20; [Console]::Out.WriteLine('two'); Start-Sleep -Milliseconds 1200; [Console]::Out.WriteLine('three')"
+                : "printf 'one\\n'; sleep 0.02; printf 'two\\n'; sleep 1.2; printf 'three\\n'";
 
         const result = (await rpcClient.request(
             "bash_run",
             {
-                command:
-                    "printf 'one\\n'; sleep 0.02; printf 'two\\n'; sleep 1.2; printf 'three\\n'",
+                command: progressCommand,
                 timeoutMs: 5_000,
             },
             {
@@ -612,7 +617,11 @@ test(
             twoFrame!.atMs < 800,
             `quiet coalesced progress was delayed until ${twoFrame!.atMs}ms`,
         );
-        assert.equal(result.stdout, "one\ntwo\nthree\n");
+        const lineEnding = process.platform === "win32" ? "\r\n" : "\n";
+        assert.equal(
+            result.stdout,
+            `one${lineEnding}two${lineEnding}three${lineEnding}`,
+        );
         assert.equal(result.exitCode, 0);
     },
 );
@@ -631,6 +640,7 @@ test(
         const env = {
             ...process.env,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
         const transport = new WorkerTransportDriverLocal({

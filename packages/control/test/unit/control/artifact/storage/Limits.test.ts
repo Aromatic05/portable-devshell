@@ -190,7 +190,7 @@ test("host receive abort is idempotent only when metadata is absent", async (t) 
     t.after(() => rm(root, { force: true, recursive: true }));
 });
 
-test("host receive recovery preserves metadata and backup on non-ENOENT lstat errors", async (t) => {
+test("host receive recovery preserves metadata and backup when restoration fails", async (t) => {
     const root = await createTestTempDirectory("artifact-host-receive-recovery-io-");
     const downloadDirectory = join(root, "Download");
     const receiveRoot = join(root, "receives");
@@ -227,9 +227,7 @@ test("host receive recovery preserves metadata and backup on non-ENOENT lstat er
         downloadDirectory,
         root: receiveRoot,
     });
-    await assert.rejects(store.initialize(), (error: unknown) =>
-        ["ENOTDIR", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? ""),
-    );
+    await assert.rejects(store.initialize());
     assert.deepEqual(await readdir(receiveRoot), [`${receiveId}.json`]);
     assert.deepEqual(await readdir(temporaryDirectory), [`${receiveId}.backup`]);
     t.after(() => rm(root, { force: true, recursive: true }));

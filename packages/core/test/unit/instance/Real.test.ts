@@ -184,6 +184,7 @@ test(
             env: {
                 ...process.env,
                 HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
                 XDG_RUNTIME_DIR: runtimeDirectory,
             },
             homeDirectory,
@@ -288,6 +289,7 @@ test(
             env: {
                 ...process.env,
                 HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
                 XDG_RUNTIME_DIR: runtimeDirectory,
             },
             homeDirectory,
@@ -368,6 +370,7 @@ test(
             env: {
                 ...process.env,
                 HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
                 XDG_RUNTIME_DIR: runtimeDirectory,
             },
             homeDirectory,
@@ -619,6 +622,7 @@ socket.on("error", (error) => {
             env: {
                 ...process.env,
                 HOME: homeDirectory,
+                USERPROFILE: homeDirectory,
                 XDG_RUNTIME_DIR: runtimeDirectory,
             },
             homeDirectory,

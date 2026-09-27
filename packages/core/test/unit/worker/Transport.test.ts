@@ -234,6 +234,7 @@ test(
         const env = {
             ...process.env,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
         const server = createServer((socket) => {
@@ -295,7 +296,9 @@ test(
             executable: process.execPath,
             args: ["-e", "setInterval(() => {}, 1000)"],
         });
-        const stalledWrite = stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61));
+        const stalledWrite = assert.rejects(
+            stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61)),
+        );
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
 
         const responsive = await services.execProcess({
@@ -311,7 +314,7 @@ test(
         assert.equal(await responsive.read(), undefined);
 
         await stalled.reset(frameResetCodes.cancelled, "test complete");
-        await assert.rejects(stalledWrite);
+        await stalledWrite;
     },
 );
 
@@ -2515,6 +2518,7 @@ test(
         const env = {
             ...process.env,
             HOME: homeDirectory,
+            USERPROFILE: homeDirectory,
             XDG_RUNTIME_DIR: runtimeDirectory,
         };
         const transport = new WorkerTransportDriverLocal({
