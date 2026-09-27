@@ -1,4 +1,5 @@
 import {
+    act,
     fireEvent,
     render,
     screen,
@@ -9,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     asInstanceName,
     CONTROL_PROTOCOL_VERSION,
+    createInitialControlReadModelState,
     type InstanceSnapshot,
 } from "@portable-devshell/shared/browser";
 
@@ -17,7 +19,9 @@ import type {
     WebRuntimeStream,
 } from "../../src/app/transport/Client.js";
 import type { WebSession } from "../../src/app/session/Session.js";
+import type { WebState, WebStore } from "../../src/state/Store.js";
 import { App } from "../../src/app/App.js";
+import { Application } from "../../src/app/Application.js";
 
 import {
     pageRoute,
@@ -38,6 +42,8 @@ const snapshot: InstanceSnapshot = {
 
 afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
+    document.title = "";
 });
 
 describe("authenticated application shell", () => {
@@ -632,6 +638,199 @@ describe("authenticated application shell", () => {
         );
     });
 });
+
+describe("application chrome", () => {
+    it("sets the document title from the active route and conversation context", async () => {
+        window.location.hash = "#/overview";
+        render(
+            <App
+                createClients={fakeClients}
+                session={fakeSession({ check: true })}
+            />,
+        );
+        await screen.findByRole("heading", { name: "Overview" });
+        expect(document.title).toBe("Overview — portable-devshell");
+
+        window.location.hash = "#/instances";
+        fireEvent(window, new HashChangeEvent("hashchange"));
+        await screen.findByRole("heading", { name: "Instances" });
+        expect(document.title).toBe("Instances — portable-devshell");
+
+        window.location.hash = "#/instances/demo";
+        fireEvent(window, new HashChangeEvent("hashchange"));
+        await screen.findByRole("heading", { name: "demo", level: 3 });
+        expect(document.title).toBe("Instances · demo — portable-devshell");
+
+        window.location.hash = "#/messages";
+        fireEvent(window, new HashChangeEvent("hashchange"));
+        await screen.findByRole("heading", { level: 3, name: "Messages" });
+        expect(document.title).toBe("Messages — portable-devshell");
+
+        window.location.hash = "#/messages/demo/ctx-a";
+        fireEvent(window, new HashChangeEvent("hashchange"));
+        await screen.findByRole("heading", { name: "ctx-a" });
+        expect(document.title).toBe("Messages · demo — portable-devshell");
+    });
+
+    it("badges Instances with the count needing attention", async () => {
+        const clients = fakeClients();
+        clients.overview.get = vi.fn(async () => ({
+            activity: [],
+            alerts: [],
+            controller: { pid: 1, uptimeSeconds: 1 },
+            counts: {
+                activeTodos: 0,
+                failedCalls24h: 0,
+                instancesAttention: 2,
+                instancesCritical: 1,
+                instancesReady: 0,
+                instancesTotal: 3,
+                pendingApprovals: 0,
+            },
+            generatedAt: "2026-09-14T10:00:02Z",
+            health: "attention" as const,
+            instances: [],
+            todos: [],
+        }));
+        window.location.hash = "#/overview";
+        render(
+            <App
+                createClients={() => clients}
+                session={fakeSession({ check: true })}
+            />,
+        );
+        await screen.findByRole("heading", { name: "Overview" });
+
+        const primary = screen.getByRole("navigation", {
+            name: "Primary navigation",
+        });
+        await waitFor(() =>
+            expect(
+                within(primary).getByRole("button", { name: /Instances/ }),
+            ).toHaveTextContent("3"),
+        );
+    });
+
+    it("hides the Instances badge when nothing needs attention", async () => {
+        window.location.hash = "#/overview";
+        render(
+            <App
+                createClients={fakeClients}
+                session={fakeSession({ check: true })}
+            />,
+        );
+        await screen.findByRole("heading", { name: "Overview" });
+
+        const primary = screen.getByRole("navigation", {
+            name: "Primary navigation",
+        });
+        const instances = within(primary).getByRole("button", {
+            name: "Instances",
+        });
+        expect(within(instances).queryByText(/\d/u)).not.toBeInTheDocument();
+    });
+});
+
+describe("application notice feedback", () => {
+    it("auto-dismisses a success notice after five seconds", () => {
+        vi.useFakeTimers();
+        window.location.hash = "#/overview";
+        const { emit, store } = fakeApplicationStore("online");
+        render(
+            <Application
+                onLogout={async () => undefined}
+                onReconnect={async () => undefined}
+                store={store}
+            />,
+        );
+
+        act(() => emit({ notice: "Configuration saved." }));
+        expect(screen.getByText("Configuration saved.")).toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(4_999);
+        });
+        expect(screen.getByText("Configuration saved.")).toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(1);
+        });
+        expect(
+            screen.queryByText("Configuration saved."),
+        ).not.toBeInTheDocument();
+    });
+
+    it("restarts the auto-dismiss timer when the notice text changes", () => {
+        vi.useFakeTimers();
+        window.location.hash = "#/overview";
+        const { emit, store } = fakeApplicationStore("online");
+        render(
+            <Application
+                onLogout={async () => undefined}
+                onReconnect={async () => undefined}
+                store={store}
+            />,
+        );
+
+        act(() => emit({ notice: "First notice." }));
+        act(() => {
+            vi.advanceTimersByTime(4_000);
+        });
+        act(() => emit({ notice: "Second notice." }));
+        act(() => {
+            vi.advanceTimersByTime(4_000);
+        });
+        expect(screen.getByText("Second notice.")).toBeInTheDocument();
+
+        act(() => {
+            vi.advanceTimersByTime(1_000);
+        });
+        expect(screen.queryByText("Second notice.")).not.toBeInTheDocument();
+    });
+});
+
+function fakeApplicationStore(connection: WebState["connection"]): {
+    emit(patch: Partial<WebState>): void;
+    store: WebStore;
+} {
+    let state: WebState = {
+        connection,
+        operations: {},
+        readModel: createInitialControlReadModelState(),
+    };
+    const listeners = new Set<() => void>();
+    const notify = () => {
+        for (const listener of listeners) listener();
+    };
+    const store = {
+        get state() {
+            return state;
+        },
+        subscribe(listener: () => void) {
+            listeners.add(listener);
+            return () => {
+                listeners.delete(listener);
+            };
+        },
+        setOverviewActive() {},
+        dismissFeedback(kind: "error" | "notice") {
+            state =
+                kind === "error"
+                    ? { ...state, error: undefined }
+                    : { ...state, notice: undefined };
+            notify();
+        },
+        refreshAudit: async () => undefined,
+        refreshMessages: async () => undefined,
+    } as unknown as WebStore;
+    return {
+        emit: (patch) => {
+            state = { ...state, ...patch };
+            notify();
+        },
+        store,
+    };
+}
 
 function fakeSession(result: {
     authMode?: "none" | "oauth2" | "token";

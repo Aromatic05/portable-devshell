@@ -1,4 +1,5 @@
 :root {
+    --header-height: 58px;
     color: #e8ecf4;
     background: #10151f;
     font:
@@ -102,7 +103,7 @@ h4 {
     z-index: 4;
     top: 0;
     display: flex;
-    min-height: 58px;
+    min-height: var(--header-height);
     align-items: center;
     gap: 0.65rem;
     padding: 0.5rem max(1rem, env(safe-area-inset-right)) 0.5rem

@@ -2,9 +2,10 @@ import { useEffect, useSyncExternalStore } from "react";
 
 import { PageSwitcher } from "../view/component/Navigation.js";
 import { PartialFailures } from "../view/component/Feedback.js";
-import { useHashRoute } from "./Route.js";
+import { useHashRoute, type WebRoute } from "./Route.js";
 import { openTodos } from "../view/ReadModel.js";
-import type { WebStore } from "../state/Store.js";
+import { selectWebMessageSession } from "../view/page/activity/messages/Model.js";
+import type { WebState, WebStore } from "../state/Store.js";
 import { webFailures } from "../state/Model.js";
 import type { ApplicationBusy } from "./session/Hook.js";
 import { Audit } from "../view/page/activity/audit/Page.js";
@@ -43,8 +44,22 @@ export function Application({
         if (route.page === "audit") void store.refreshAudit();
         else if (route.page === "messages") void store.refreshMessages();
     }, [route.page, state.connection, store]);
+    useEffect(() => {
+        if (state.notice === undefined) return;
+        const timer = setTimeout(() => store.dismissFeedback("notice"), 5_000);
+        return () => clearTimeout(timer);
+    }, [state.notice, store]);
+    const routeContext = routeSubtitle(state, route);
+    useEffect(() => {
+        document.title = pageTitle(route, routeContext);
+    }, [route, routeContext]);
+    const overview = state.readModel.overview;
     const counts = {
-        instances: state.readModel.instances.length,
+        instances:
+            overview === undefined
+                ? 0
+                : overview.counts.instancesAttention +
+                  overview.counts.instancesCritical,
         todos: openTodos(state),
     };
 
@@ -164,4 +179,38 @@ function connectionLabel(
     if (connection === "online") return "Online";
     if (connection === "connecting") return "Connecting…";
     return "Offline";
+}
+
+const pageLabels: Record<WebRoute["page"], string> = {
+    audit: "Audit",
+    extension: "Extension",
+    instances: "Instances",
+    messages: "Messages",
+    overview: "Overview",
+    todos: "Todos",
+};
+
+function routeSubtitle(state: WebState, route: WebRoute): string | undefined {
+    if (route.page === "messages" && route.view === "thread")
+        return (
+            selectWebMessageSession(state, route.instance, route.ctxId)
+                ?.title ?? route.instance
+        );
+    if (route.page === "extension")
+        return state.readModel.webPages.find((page) => page.id === route.id)
+            ?.title;
+    if (route.page === "instances") return route.instance;
+    return undefined;
+}
+
+function pageTitle(route: WebRoute, context?: string): string {
+    const heading =
+        route.page === "extension" && context !== undefined
+            ? context
+            : pageLabels[route.page];
+    const suffix =
+        context === undefined || route.page === "extension"
+            ? ""
+            : ` · ${context}`;
+    return `${heading}${suffix} — portable-devshell`;
 }
