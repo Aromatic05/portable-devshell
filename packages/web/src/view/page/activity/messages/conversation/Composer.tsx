@@ -39,6 +39,7 @@ export function ConversationComposer({
     }>();
     const controlMenuRef = useRef<HTMLDivElement>(null);
     const controlTriggerRef = useRef<HTMLButtonElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         if (!controlMenuOpen) return;
@@ -79,6 +80,8 @@ export function ConversationComposer({
             setMessageDirective(undefined);
             setControlMenuOpen(false);
             setFeedback({ kind: "success", text: "Message queued." });
+            const textarea = textareaRef.current;
+            if (textarea !== null) textarea.style.height = "";
         } else {
             setFeedback({
                 kind: "error",
@@ -157,11 +160,12 @@ export function ConversationComposer({
             </label>
             <textarea
                 id="messages-comment"
-                maxLength={20_000}
+                maxLength={composerMaxLength}
                 onChange={(event) => {
                     onActivity();
                     setFeedback(undefined);
                     setDraft(event.target.value);
+                    growComposerTextarea(event.target);
                 }}
                 onFocus={onActivity}
                 onKeyDown={(event) => {
@@ -175,6 +179,7 @@ export function ConversationComposer({
                     event.currentTarget.form?.requestSubmit();
                 }}
                 placeholder="Send a Comment"
+                ref={textareaRef}
                 rows={1}
                 value={draft}
             />
@@ -185,7 +190,7 @@ export function ConversationComposer({
                 title="Export Markdown"
                 type="button"
             >
-                MD
+                ↓
             </button>
             <button
                 aria-label="Send Comment"
@@ -197,8 +202,13 @@ export function ConversationComposer({
                 }
                 type="submit"
             >
-                {state.operations[operation] !== undefined ? "…" : "↑"}
+                {state.operations[operation] !== undefined ? "…" : "➤"}
             </button>
+            {draft.length > composerLengthHintThreshold ? (
+                <p aria-live="off" className="messages-composer-length">
+                    {draft.length} / {composerMaxLength}
+                </p>
+            ) : null}
             {feedback === undefined ? null : (
                 <p
                     className={`messages-composer-feedback ${feedback.kind === "error" ? "error" : "notice"}`}
@@ -210,6 +220,10 @@ export function ConversationComposer({
         </form>
     );
 }
+
+const composerMaxLength = 20_000;
+const composerLengthHintThreshold = 18_000;
+const composerTextareaMaxHeightPx = 160;
 
 const messageControlOptions: ReadonlyArray<{
     description: string;
@@ -242,4 +256,10 @@ function composeMessageText(
     const parsed = parseContextMessageDirective(text);
     const body = parsed.directive === undefined ? text : parsed.body;
     return body.length === 0 ? `#${directive}` : `#${directive} ${body}`;
+}
+
+function growComposerTextarea(element: HTMLTextAreaElement): void {
+    if (element.scrollHeight <= 0) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, composerTextareaMaxHeightPx)}px`;
 }
