@@ -45,7 +45,8 @@ const result = spawnSync(
         cwd: repositoryRoot,
         env: {
             ...process.env,
-            PORTABLE_DEVSHELL_TEST_WATCHDOG_MS: "60000",
+            PORTABLE_DEVSHELL_TEST_WATCHDOG_MS:
+                process.platform === "win32" ? "90000" : "60000",
             PORTABLE_DEVSHELL_TEST_WORKER_PATH: worker,
             TSX_TSCONFIG_PATH: resolve(repositoryRoot, "tsconfig.test.json"),
         },
