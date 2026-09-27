@@ -68,9 +68,13 @@ export function ConversationSidebar({
     const [editingConversationKey, setEditingConversationKey] =
         useState<string>();
     const [editingTitle, setEditingTitle] = useState("");
+    const [openMenuKey, setOpenMenuKey] = useState<string>();
     const [draggingConversationKey, setDraggingConversationKey] =
         useState<string>();
     const draggingConversationKeyRef = useRef<string>();
+    const openMenuKeyRef = useRef<string>();
+    const rowMenuRef = useRef<HTMLDivElement>(null);
+    const lastMenuTriggerRef = useRef<HTMLButtonElement>();
     const searchRef = useRef<HTMLInputElement>(null);
     const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -156,6 +160,7 @@ export function ConversationSidebar({
         searchRef.current?.focus();
         const keyDown = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
+                if (openMenuKeyRef.current !== undefined) return;
                 event.preventDefault();
                 onClose();
                 triggerRef.current?.focus();
@@ -195,6 +200,42 @@ export function ConversationSidebar({
             }
         };
     }, [onClose, open, triggerRef]);
+
+    useEffect(() => {
+        if (openMenuKey === undefined) return;
+        const pointerDown = (event: PointerEvent) => {
+            if (
+                event.target instanceof Node &&
+                rowMenuRef.current?.contains(event.target) !== true
+            ) {
+                closeRowMenu();
+            }
+        };
+        const keyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") closeRowMenu(true);
+        };
+        document.addEventListener("pointerdown", pointerDown);
+        document.addEventListener("keydown", keyDown);
+        return () => {
+            document.removeEventListener("pointerdown", pointerDown);
+            document.removeEventListener("keydown", keyDown);
+        };
+    }, [openMenuKey]);
+
+    function toggleRowMenu(key: string, trigger: HTMLButtonElement): void {
+        const next = openMenuKey === key ? undefined : key;
+        openMenuKeyRef.current = next;
+        if (next !== undefined) lastMenuTriggerRef.current = trigger;
+        setOpenMenuKey(next);
+    }
+
+    function closeRowMenu(refocus = false): void {
+        openMenuKeyRef.current = undefined;
+        setOpenMenuKey(undefined);
+        if (refocus) {
+            queueMicrotask(() => lastMenuTriggerRef.current?.focus());
+        }
+    }
 
     function saveConversationTitle(session: WebMessageSession): void {
         const key = conversationKey(session);
@@ -245,6 +286,24 @@ export function ConversationSidebar({
         );
     }
 
+    function moveConversationBy(
+        session: WebMessageSession,
+        direction: -1 | 1,
+    ): void {
+        if (!preferencesAvailable) return;
+        const workspace = workspacePreferenceKey(session);
+        const group = allSessions.filter(
+            (candidate) => workspacePreferenceKey(candidate) === workspace,
+        );
+        const index = group.findIndex(
+            (candidate) =>
+                conversationKey(candidate) === conversationKey(session),
+        );
+        const target = group[index + direction];
+        if (target === undefined) return;
+        moveConversation(conversationKey(session), conversationKey(target));
+    }
+
     function finishConversationDrag(clientX: number, clientY: number): void {
         const sourceKey = draggingConversationKeyRef.current;
         draggingConversationKeyRef.current = undefined;
@@ -274,6 +333,7 @@ export function ConversationSidebar({
         ctxIds: readonly string[],
         hidden: boolean,
     ): void {
+        closeRowMenu();
         if (!preferencesAvailable) return;
         const uniqueIds = [...new Set(ctxIds)];
         if (uniqueIds.length === 0) return;
@@ -313,11 +373,26 @@ export function ConversationSidebar({
             route.ctxId === session.ctxId;
         const key = conversationKey(session);
         const editing = editingConversationKey === key;
+        const menuOpen = openMenuKey === key;
+        const group = allSessions.filter(
+            (candidate) =>
+                workspacePreferenceKey(candidate) ===
+                workspacePreferenceKey(session),
+        );
+        const groupIndex = group.findIndex(
+            (candidate) => conversationKey(candidate) === key,
+        );
+        const canMoveUp = preferencesAvailable && groupIndex > 0;
+        const canMoveDown =
+            preferencesAvailable &&
+            groupIndex !== -1 &&
+            groupIndex < group.length - 1;
         return (
             <div
                 className={`conversation-row${active ? " selected" : ""}${draggingConversationKey === key ? " dragging" : ""}`}
                 data-conversation-key={key}
                 key={key}
+                ref={menuOpen ? rowMenuRef : undefined}
             >
                 <span
                     aria-hidden="true"
@@ -431,29 +506,94 @@ export function ConversationSidebar({
                                 {formatConversationDate(session.latestAt)}
                             </time>
                         </button>
-                        <button
-                            aria-label={
-                                sessionScope === "hidden"
-                                    ? "Restore conversation"
-                                    : "Hide conversation"
-                            }
-                            className="conversation-visibility-action"
-                            disabled={!preferencesAvailable}
-                            onClick={() =>
-                                setContextsHidden(
-                                    [session.ctxId],
-                                    sessionScope !== "hidden",
-                                )
-                            }
-                            title={
-                                sessionScope === "hidden"
-                                    ? `Restore ${session.title}`
-                                    : `Hide ${session.title}`
-                            }
-                            type="button"
-                        >
-                            {sessionScope === "hidden" ? "↩" : "×"}
-                        </button>
+                        <div className="conversation-row-actions">
+                            <button
+                                aria-label={
+                                    sessionScope === "hidden"
+                                        ? "Restore conversation"
+                                        : "Hide conversation"
+                                }
+                                className="conversation-visibility-action"
+                                disabled={!preferencesAvailable}
+                                onClick={() =>
+                                    setContextsHidden(
+                                        [session.ctxId],
+                                        sessionScope !== "hidden",
+                                    )
+                                }
+                                title={
+                                    sessionScope === "hidden"
+                                        ? `Restore ${session.title}`
+                                        : `Hide ${session.title}`
+                                }
+                                type="button"
+                            >
+                                {sessionScope === "hidden" ? "Restore" : "Hide"}
+                            </button>
+                            <button
+                                aria-expanded={menuOpen}
+                                aria-label="Conversation actions"
+                                className="conversation-menu-trigger"
+                                onClick={(event) =>
+                                    toggleRowMenu(key, event.currentTarget)
+                                }
+                                title="Conversation actions"
+                                type="button"
+                            >
+                                ⋯
+                            </button>
+                        </div>
+                        {menuOpen ? (
+                            <div
+                                aria-label={`Actions for ${session.title}`}
+                                className="conversation-row-menu"
+                            >
+                                <button
+                                    onClick={() => {
+                                        closeRowMenu();
+                                        setEditingConversationKey(key);
+                                        setEditingTitle(session.title);
+                                    }}
+                                    type="button"
+                                >
+                                    Rename
+                                </button>
+                                <button
+                                    disabled={!canMoveUp}
+                                    onClick={() => {
+                                        closeRowMenu();
+                                        moveConversationBy(session, -1);
+                                    }}
+                                    type="button"
+                                >
+                                    Move up
+                                </button>
+                                <button
+                                    disabled={!canMoveDown}
+                                    onClick={() => {
+                                        closeRowMenu();
+                                        moveConversationBy(session, 1);
+                                    }}
+                                    type="button"
+                                >
+                                    Move down
+                                </button>
+                                <button
+                                    disabled={!preferencesAvailable}
+                                    onClick={() =>
+                                        setContextsHidden(
+                                            [session.ctxId],
+                                            sessionScope !== "hidden",
+                                        )
+                                    }
+                                    type="button"
+                                >
+                                    {sessionScope === "hidden"
+                                        ? "Restore"
+                                        : "Hide"}
+                                </button>
+                            </div>
+                        ) : null}
                     </>
                 )}
             </div>
