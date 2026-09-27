@@ -6,8 +6,6 @@ import test from "node:test";
 import { launchInstalledPi } from "../../src/builtin/pi/PiLauncher.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-const generation = `sha256-${"a".repeat(64)}`;
-
 async function createLauncherHarness() {
     const root = await createTestTempDirectory("agent-pi-launcher");
     const home = join(root, "home");
@@ -21,24 +19,26 @@ async function createLauncherHarness() {
         "agent",
     );
     const providerDirectory = join(
-        dataHome,
-        "portable-devshell",
-        "extension-data",
-        "agent",
-        "bundles",
-        generation,
+        agentStateDirectory,
+        "providers",
+        "pi",
     );
-    const packageRoot = join(root, "managed-pi-package");
-    const managedInstallRoot = join(root, "managed-pi-install");
+    const managedInstallRoot = join(providerDirectory, "install");
+    const releaseRoot = join(managedInstallRoot, "releases", "0.85.1");
+    const packageRoot = join(
+        releaseRoot,
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+    );
+    const coreRoot = join(dataHome, "portable-devshell", "current");
     const capturePath = join(root, "capture.json");
     const projectDirectory = join(root, "project");
 
     await Promise.all([
         mkdir(agentStateDirectory, { recursive: true }),
-        mkdir(join(providerDirectory, "dist", "provider", "pi", "extension"), {
-            recursive: true,
-        }),
-        mkdir(packageRoot, { recursive: true }),
+        mkdir(join(packageRoot, "dist"), { recursive: true }),
+        mkdir(coreRoot, { recursive: true }),
         mkdir(projectDirectory, { recursive: true }),
     ]);
     await writeFile(
@@ -47,65 +47,51 @@ async function createLauncherHarness() {
             providers: {
                 pi: {
                     enabled: true,
-                    selectedGeneration: generation,
+                    installedVersion: "0.1.3",
                 },
             },
+            schemaVersion: 2,
+        }),
+        "utf8",
+    );
+    await writeFile(
+        join(managedInstallRoot, "managed-install.json"),
+        JSON.stringify({
+            kind: "pi-managed-install",
+            layout: "releases-v1",
             schemaVersion: 1,
         }),
         "utf8",
     );
     await writeFile(
-        join(providerDirectory, "devshell-agent-provider.json"),
-        JSON.stringify({
-            id: "pi",
-            version: "0.1.2",
-        }),
+        join(managedInstallRoot, "current-version"),
+        "0.85.1\n",
         "utf8",
     );
     await writeFile(
-        join(
-            providerDirectory,
-            "dist",
-            "provider",
-            "pi",
-            "PiProviderInstaller.js",
-        ),
-        [
-            'export const PI_BOOTSTRAP_VERSION = "0.85.1";',
-            "export class PiProviderInstaller {",
-            "  async ensureInstalled(runtime) {",
-            `    return ${JSON.stringify({
-                agentDirectory: agentStateDirectory,
-                entrypoint: join(packageRoot, "dist", "index.js"),
-                managedInstallRoot,
-                packageRoot,
-            })};`,
-            "  }",
-            "}",
-            "",
-        ].join("\n"),
+        join(releaseRoot, "package.json"),
+        JSON.stringify({ private: true, type: "module" }),
         "utf8",
     );
     await writeFile(
-        join(
-            providerDirectory,
-            "dist",
-            "provider",
-            "pi",
-            "extension",
-            "index.js",
-        ),
-        "export {};\n",
+        join(coreRoot, "package.json"),
+        JSON.stringify({ private: true, type: "module" }),
         "utf8",
     );
     await writeFile(
         join(packageRoot, "package.json"),
         JSON.stringify({
             bin: { pi: "cli.mjs" },
+            main: "dist/index.js",
             name: "@earendil-works/pi-coding-agent",
             type: "module",
             version: "0.85.1",
         }),
+        "utf8",
+    );
+    await writeFile(
+        join(packageRoot, "dist", "index.js"),
+        "export {};\n",
         "utf8",
     );
     await writeFile(

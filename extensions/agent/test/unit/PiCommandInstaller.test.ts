@@ -12,7 +12,7 @@ import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-import { ensureBundledPiCommand } from "../../src/builtin/pi/PiCommandInstaller.ts";
+import { ensurePiCommand } from "../../src/builtin/pi/PiCommandInstaller.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 async function harness(t: test.TestContext) {
@@ -52,11 +52,11 @@ async function harness(t: test.TestContext) {
     return { binDirectory, context, launcher, root };
 }
 
-test("Agent bundled Pi publishes its own Unix pi command", async (t) => {
+test("Agent Pi Provider publishes its own Unix pi command", async (t) => {
     const h = await harness(t);
     const result = await withRestrictiveUmask(
         async () =>
-            await ensureBundledPiCommand(h.context, {
+            await ensurePiCommand(h.context, {
                 environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
                 homeDirectory: h.root,
                 platform: "linux",
@@ -85,7 +85,7 @@ async function withRestrictiveUmask<T>(
     }
 }
 
-test("Agent bundled Pi migrates the legacy core-owned pi launcher", async (t) => {
+test("Agent Pi Provider migrates the legacy core-owned pi launcher", async (t) => {
     const h = await harness(t);
     await mkdir(h.binDirectory, { recursive: true });
     const legacy = join(
@@ -100,7 +100,7 @@ test("Agent bundled Pi migrates the legacy core-owned pi launcher", async (t) =>
     await writeFile(legacy, "// legacy\n", "utf8");
     await symlink(legacy, join(h.binDirectory, "pi"));
 
-    const result = await ensureBundledPiCommand(h.context, {
+    const result = await ensurePiCommand(h.context, {
         environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
         homeDirectory: h.root,
         platform: "linux",
@@ -114,13 +114,13 @@ test("Agent bundled Pi migrates the legacy core-owned pi launcher", async (t) =>
     );
 });
 
-test("Agent bundled Pi never replaces a foreign pi command", async (t) => {
+test("Agent Pi Provider never replaces a foreign pi command", async (t) => {
     const h = await harness(t);
     await mkdir(h.binDirectory, { recursive: true });
     const command = join(h.binDirectory, "pi");
     await writeFile(command, "#!/bin/sh\necho foreign-pi\n", { mode: 0o755 });
 
-    const result = await ensureBundledPiCommand(h.context, {
+    const result = await ensurePiCommand(h.context, {
         environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
         homeDirectory: h.root,
         platform: "linux",

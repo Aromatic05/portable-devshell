@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import type {
@@ -32,18 +31,6 @@ test("Pi provider implementation version is independent from the Pi bootstrap ve
     assert.notEqual(PI_PROVIDER_VERSION, PI_BOOTSTRAP_VERSION);
 });
 
-test("Pi bootstrap version matches the bundled package dependency", async () => {
-    const manifest = JSON.parse(
-        await readFile(new URL("../../package.json", import.meta.url), "utf8"),
-    ) as {
-        dependencies?: Record<string, string>;
-    };
-    assert.equal(
-        manifest.dependencies?.[PI_PACKAGE_NAME],
-        PI_BOOTSTRAP_VERSION,
-    );
-});
-
 test("Pi provider bootstraps a stable managed install once and preserves later Pi updates", async () => {
     const rootDirectory = await mkdtemp(join(tmpdir(), "devshell-agentd-pi-"));
     try {
@@ -52,7 +39,7 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
             rootDirectory,
             version: PI_PROVIDER_VERSION,
         });
-        const seedRoot = join(rootDirectory, "provider-seed");
+        const seedRoot = runtime.prefixDirectory;
         const packageRoot = join(
             seedRoot,
             "node_modules",
@@ -62,6 +49,11 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
         const entrypoint = join(packageRoot, "dist", "index.js");
         await mkdir(join(packageRoot, "dist"), { recursive: true });
         await writeFile(
+            join(seedRoot, "package.json"),
+            JSON.stringify({ private: true, type: "module" }),
+            "utf8",
+        );
+        await writeFile(
             join(packageRoot, "package.json"),
             JSON.stringify({
                 name: PI_PACKAGE_NAME,
@@ -70,12 +62,7 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
             "utf8",
         );
         await writeFile(entrypoint, "export {};\n", "utf8");
-        let resolves = 0;
         const installer = new PiProviderInstaller({
-            resolver: async () => {
-                resolves += 1;
-                return pathToFileURL(entrypoint).href;
-            },
             version: PI_BOOTSTRAP_VERSION,
         });
 
@@ -102,6 +89,12 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
             "releases",
             upgradedVersion,
         );
+        await mkdir(upgradedRoot, { recursive: true });
+        await writeFile(
+            join(upgradedRoot, "package.json"),
+            JSON.stringify({ private: true, type: "module" }),
+            "utf8",
+        );
         const upgradedPackageRoot = join(
             upgradedRoot,
             "node_modules",
@@ -127,7 +120,6 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
         );
 
         const afterProviderUpgrade = await new PiProviderInstaller({
-            resolver: async () => entrypoint,
             version: PI_BOOTSTRAP_VERSION,
         }).ensureInstalled(
             new AgentProviderRuntimePaths({
@@ -139,7 +131,6 @@ test("Pi provider bootstraps a stable managed install once and preserves later P
 
         assert.equal(afterProviderUpgrade.version, upgradedVersion);
         assert.equal(afterProviderUpgrade.entrypoint, upgradedEntrypoint);
-        assert.equal(resolves, 1);
     } finally {
         await rm(rootDirectory, { force: true, recursive: true });
     }
@@ -186,6 +177,7 @@ test("Pi provider maps each Agent into the shared managed runtime with its injec
                         agentDirectory: "/managed/state/pi",
                         entrypoint: "/managed/pi/dist/index.js",
                         managedInstallRoot: "/managed/pi",
+                        moduleRoot: "/managed/pi",
                         packageRoot: "/managed/pi",
                         version: PI_BOOTSTRAP_VERSION,
                     };
@@ -254,6 +246,7 @@ test("Pi provider can start its Web hub without creating an Agent session", asyn
                         agentDirectory: "/managed/state/pi",
                         entrypoint: "/managed/pi/dist/index.js",
                         managedInstallRoot: "/managed/pi",
+                        moduleRoot: "/managed/pi",
                         packageRoot: "/managed/pi",
                         version: PI_BOOTSTRAP_VERSION,
                     };
@@ -268,6 +261,7 @@ test("Pi provider can start its Web hub without creating an Agent session", asyn
                 agentDirectory: "/managed/state/pi",
                 entrypoint: "/managed/pi/dist/index.js",
                 managedInstallRoot: "/managed/pi",
+                moduleRoot: "/managed/pi",
                 processes: context.processes,
                 runtimeDirectory: runtime.stateDirectory,
                 webBasePath: "/agent/",

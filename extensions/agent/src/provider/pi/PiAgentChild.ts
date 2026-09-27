@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { createDevshellPiExtension } from "./extension/index.js";
+import { createDevshellPiExtension } from "./extension/DevshellPiBridge.js";
 import { PiChildToolSession } from "./PiChildToolSession.js";
 import { PiGuiWeb } from "./PiGuiWeb.js";
 import {

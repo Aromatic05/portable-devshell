@@ -27,6 +27,7 @@ export interface PiAgentProcessWebOptions {
     agentDirectory: string;
     entrypoint: string;
     managedInstallRoot: string;
+    moduleRoot: string;
     processes: ExtensionProcessCapability;
     runtimeDirectory: string;
     webBasePath: string;
@@ -149,11 +150,17 @@ export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
         const managedProcess = await options.processes.start({
             args: [
                 ...childExecArgv(this.#childModulePath),
+                "--import",
+                resolveProviderModuleResolverPath(),
                 this.#childModulePath,
                 String(PI_OWNER_HEARTBEAT_TIMEOUT_MS),
             ],
             command: process.execPath,
             cwd: options.runtimeDirectory,
+            environment: {
+                PORTABLE_DEVSHELL_AGENT_PROVIDER_MODULE_ROOT:
+                    options.moduleRoot,
+            },
             messages: true,
         });
         runtime = new PiSharedProcess(managedProcess, options);
@@ -697,6 +704,18 @@ function resolveChildModulePath(): string {
     return fileURLToPath(
         new URL(
             source.endsWith(".ts") ? "./PiAgentChild.ts" : "./PiAgentChild.js",
+            import.meta.url,
+        ),
+    );
+}
+
+function resolveProviderModuleResolverPath(): string {
+    const source = fileURLToPath(import.meta.url);
+    return fileURLToPath(
+        new URL(
+            source.endsWith(".ts")
+                ? "../AgentProviderModuleResolver.ts"
+                : "../AgentProviderModuleResolver.js",
             import.meta.url,
         ),
     );

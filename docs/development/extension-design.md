@@ -956,9 +956,7 @@ agent.providers
 
 这里 `providers` 的 owner 是 Agent domain，而不是 Extension core。
 
-它可以最终替代或统一当前独立 `.dsprovider` 的部分机制，但**第一批 Extension Point 迁移不应顺手做这个重构**。
-
-原因是允许 Extension 自己定义 / 拥有 Extension Points 会引入额外问题：
+Provider runtime 现在由 Agent Extension 自己管理，第三方依赖在客户端安装，不再存在独立 Provider artifact。未来若引入 `agent.providers` Extension Point，仍然会引入额外问题：
 
 ```text
 Extension dependency
@@ -968,7 +966,7 @@ activation order
 uninstall ordering
 ```
 
-这些语义没有设计完成前，先保持 Agent provider 的现有独立边界。
+这些语义没有设计完成前，先保持 Agent provider 作为 Agent domain 内部边界。
 
 ### 10.3 Renderer 不应提前公开
 

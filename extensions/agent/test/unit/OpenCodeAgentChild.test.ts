@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { fork, type ChildProcess } from "node:child_process";
 import {
+    cp,
     chmod,
     mkdir,
     mkdtemp,
     readFile,
+    readdir,
     rm,
     writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -21,13 +24,14 @@ import {
 } from "../../src/provider/opencode/OpenCodeProviderInstaller.ts";
 import type { OpenCodeChildMessage } from "../../src/provider/opencode/OpenCodeProcessProtocol.ts";
 
-test("OpenCode provider child completes ACP lifecycle using only the private bundled runtime", async () => {
+test("OpenCode provider child completes ACP lifecycle using the client-installed runtime", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-opencode-child-"));
     const runtimePaths = new AgentProviderRuntimePaths({
         provider: "opencode",
         rootDirectory: root,
         version: OPENCODE_PROVIDER_VERSION,
     });
+    await seedClientOpenCodeRuntime(runtimePaths.prefixDirectory);
     const installation = await new OpenCodeProviderInstaller({
         version: OPENCODE_RUNTIME_VERSION,
     }).ensureInstalled(runtimePaths);
@@ -324,6 +328,35 @@ function nextMessage(
         child.on("message", onMessage);
         child.once("exit", onExit);
     });
+}
+
+async function seedClientOpenCodeRuntime(prefix: string): Promise<void> {
+    const requireFromAgent = createRequire(
+        new URL("../../package.json", import.meta.url),
+    );
+    await mkdir(join(prefix, "node_modules"), { recursive: true });
+    await writeFile(
+        join(prefix, "package.json"),
+        JSON.stringify({ private: true, type: "module" }),
+        "utf8",
+    );
+    const packageManifest = requireFromAgent.resolve("opencode-ai/package.json");
+    await cp(
+        dirname(packageManifest),
+        join(prefix, "node_modules", "opencode-ai"),
+        {
+            dereference: true,
+            recursive: true,
+        },
+    );
+    const dependencyNodeModules = dirname(dirname(packageManifest));
+    for (const name of await readdir(dependencyNodeModules)) {
+        if (!name.startsWith("opencode-")) continue;
+        await cp(join(dependencyNodeModules, name), join(prefix, "node_modules", name), {
+            dereference: true,
+            recursive: true,
+        });
+    }
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {

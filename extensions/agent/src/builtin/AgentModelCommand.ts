@@ -214,6 +214,9 @@ function providerRecordToJson(
         enabled: record.enabled,
         ...(record.error === undefined ? {} : { error: record.error }),
         id: record.id,
+        ...(record.installedVersion === undefined
+            ? {}
+            : { installedVersion: record.installedVersion }),
         ...(record.name === undefined ? {} : { name: record.name }),
         state: record.state,
         ...(record.version === undefined ? {} : { version: record.version }),

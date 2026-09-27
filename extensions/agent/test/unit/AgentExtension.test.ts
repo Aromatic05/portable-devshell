@@ -40,7 +40,6 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     assert.equal(manifest.apiVersion, "4.2.0");
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
-        "assets",
         "delegatedWorkers",
         "processes",
     ]);
@@ -198,7 +197,6 @@ test("Agent Extension command owns the legacy devshell agent grammar", async () 
         assert.equal(providerHelp.kind, "text");
         if (providerHelp.kind === "text") {
             assert.match(providerHelp.text, /devshell agent provider list/u);
-            assert.match(providerHelp.text, /devshell agent provider bundled/u);
             assert.match(providerHelp.text, /devshell agent provider install/u);
             assert.match(providerHelp.text, /devshell agent provider update/u);
             assert.match(providerHelp.text, /devshell agent provider default/u);
@@ -317,7 +315,7 @@ test("Agent provider mutations require local-owner Extension command authority",
             executeAgentCommand(
                 runtime,
                 providers,
-                ["provider", "install", "/provider.dsprovider"],
+                ["provider", "install", "pi"],
                 invocationContext(false),
             ),
         /local owner/u,
@@ -327,7 +325,7 @@ test("Agent provider mutations require local-owner Extension command authority",
             executeAgentCommand(
                 runtime,
                 providers,
-                ["provider", "update", "/provider-v2.dsprovider"],
+                ["provider", "update", "pi"],
                 invocationContext(false),
             ),
         /local owner/u,
@@ -335,22 +333,11 @@ test("Agent provider mutations require local-owner Extension command authority",
     const installed = await executeAgentCommand(
         runtime,
         providers,
-        ["provider", "install", "/provider.dsprovider"],
-        invocationContext(true),
-    );
-    assert.equal(installed.kind, "json");
-    assert.equal(
-        events.includes("provider.install:/provider.dsprovider"),
-        true,
-    );
-    const bundled = await executeAgentCommand(
-        runtime,
-        providers,
         ["provider", "install", "pi"],
         invocationContext(true),
     );
-    assert.equal(bundled.kind, "json");
-    assert.equal(events.includes("provider.installBundled:pi"), true);
+    assert.equal(installed.kind, "json");
+    assert.equal(events.includes("provider.install:pi"), true);
     assert.deepEqual(
         await executeAgentCommand(
             runtime,
@@ -373,14 +360,11 @@ test("Agent provider mutations require local-owner Extension command authority",
     const updated = await executeAgentCommand(
         runtime,
         providers,
-        ["provider", "update", "/provider-v2.dsprovider"],
+        ["provider", "update", "pi"],
         invocationContext(true),
     );
     assert.equal(updated.kind, "json");
-    assert.equal(
-        events.includes("provider.install:/provider-v2.dsprovider"),
-        true,
-    );
+    assert.equal(events.includes("provider.update:pi"), true);
 });
 
 test("Agent Extension activation binds separate CLI, Web, and TUI management surfaces", async () => {
@@ -438,7 +422,10 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
             { requestId: "web-read", signal },
         );
         assert.equal(webSnapshot.tables[0]?.id, "providers");
-        assert.deepEqual(webSnapshot.tables[0]?.rows, []);
+        assert.deepEqual(
+            webSnapshot.tables[0]?.rows.map((row: any) => row.id),
+            ["opencode", "pi"],
+        );
 
         const tuiPage = registrations.find(
             ({ pointId }) => pointId === "tui.pages",
@@ -455,17 +442,18 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
               ) => Promise<{ items: unknown[] }>)
             | undefined;
         assert.ok(tuiPage);
+        const tuiSnapshot = await tuiPage(
+            { kind: "read" },
+            { localOwner: true, requestId: "tui-read", signal },
+        );
         assert.deepEqual(
-            await tuiPage(
-                { kind: "read" },
-                { localOwner: true, requestId: "tui-read", signal },
-            ),
-            { items: [] },
+            tuiSnapshot.items.map((item: any) => item.id),
+            ["opencode", "pi"],
         );
         await assert.rejects(
             () =>
                 tuiPage(
-                    { actionId: "remove", itemId: "test", kind: "action" },
+                    { actionId: "install", itemId: "pi", kind: "action" },
                     { localOwner: false, requestId: "tui-action", signal },
                 ),
             /local Control owner/u,
@@ -653,16 +641,12 @@ function providerCommandFixture(events: string[]): AgentProviderCommandPort {
     const record = {
         enabled: true,
         id: "pi",
-        lastKnownGoodGeneration: "sha256-test",
+        installedVersion: "0.1.3",
         name: "Pi",
-        selectedGeneration: "sha256-test",
         state: "ready" as const,
-        version: "0.1.0",
+        version: "0.1.3",
     };
     return {
-        bundledProviders() {
-            return ["pi"];
-        },
         async disable(id) {
             events.push(`provider.disable:${id}`);
             return { ...record, enabled: false, state: "disabled" };
@@ -674,12 +658,8 @@ function providerCommandFixture(events: string[]): AgentProviderCommandPort {
         async getDefault() {
             return "pi";
         },
-        async install(sourcePath) {
-            events.push(`provider.install:${sourcePath}`);
-            return record;
-        },
-        async installBundled(id) {
-            events.push(`provider.installBundled:${id}`);
+        async install(id) {
+            events.push(`provider.install:${id}`);
             return record;
         },
         async list() {
@@ -692,6 +672,10 @@ function providerCommandFixture(events: string[]): AgentProviderCommandPort {
         async setDefault(id) {
             events.push(`provider.default:${id}`);
             return id;
+        },
+        async update(id) {
+            events.push(`provider.update:${id}`);
+            return record;
         },
     };
 }

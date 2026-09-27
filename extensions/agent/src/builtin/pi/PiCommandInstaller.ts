@@ -28,7 +28,7 @@ export interface PiCommandInstallOptions {
     platform?: NodeJS.Platform;
 }
 
-export async function ensureBundledPiCommand(
+export async function ensurePiCommand(
     context: ExtensionContext,
     options: PiCommandInstallOptions = {},
 ): Promise<PiCommandInstallResult> {

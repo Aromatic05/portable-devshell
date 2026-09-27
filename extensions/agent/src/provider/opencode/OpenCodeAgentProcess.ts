@@ -27,6 +27,7 @@ export interface OpenCodeAgentProcessStartOptions {
     agentId: string;
     command: string;
     localCwd: string;
+    moduleRoot: string;
     processes: ExtensionProcessCapability;
     stateDirectory: string;
     target: AgentWorkerTarget;
@@ -58,11 +59,17 @@ export class OpenCodeAgentProcessFactory implements OpenCodeAgentRuntimeFactory 
         const child = await options.processes.start({
             args: [
                 ...childExecArgv(this.#childModulePath),
+                "--import",
+                resolveProviderModuleResolverPath(),
                 this.#childModulePath,
                 String(OWNER_HEARTBEAT_TIMEOUT_MS),
             ],
             command: process.execPath,
             cwd: options.stateDirectory,
+            environment: {
+                PORTABLE_DEVSHELL_AGENT_PROVIDER_MODULE_ROOT:
+                    options.moduleRoot,
+            },
             messages: true,
         });
         const runtime = new OpenCodeManagedProcess(child, options);
@@ -339,6 +346,18 @@ function resolveChildModulePath(): string {
             source.endsWith(".ts")
                 ? "./OpenCodeAgentChild.ts"
                 : "./OpenCodeAgentChild.js",
+            import.meta.url,
+        ),
+    );
+}
+
+function resolveProviderModuleResolverPath(): string {
+    const source = fileURLToPath(import.meta.url);
+    return fileURLToPath(
+        new URL(
+            source.endsWith(".ts")
+                ? "../AgentProviderModuleResolver.ts"
+                : "../AgentProviderModuleResolver.js",
             import.meta.url,
         ),
     );

@@ -12,9 +12,9 @@ export {
 } from "./OpenCodeAgentProcess.js";
 export {
     OPENCODE_PACKAGE_NAME,
+    OPENCODE_PROVIDER_RUNTIME_DEPENDENCIES,
     OPENCODE_RUNTIME_VERSION,
     OpenCodeProviderInstaller,
-    type OpenCodePackageResolver,
     type OpenCodeProviderInstallation,
     type OpenCodeProviderInstallerOptions,
 } from "./OpenCodeProviderInstaller.js";

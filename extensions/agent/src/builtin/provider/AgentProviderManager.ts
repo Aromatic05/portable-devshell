@@ -1,131 +1,162 @@
-import { isAbsolute } from "node:path";
-
-import type {
-    ExtensionAssetCapability,
-    ExtensionContext,
-} from "@portable-devshell/extension";
-
+import type { AgentProvider } from "./AgentProvider.js";
 import type { AgentProviderRegistry } from "./AgentProviderRegistry.js";
-import {
-    AgentProviderLoader,
-    type LoadedAgentProvider,
-} from "./AgentProviderLoader.js";
 import {
     AgentProviderRegistryStore,
     cloneAgentProviderRegistry,
     type AgentProviderRegistryEntry,
     type AgentProviderRegistrySnapshot,
 } from "./AgentProviderRegistryStore.js";
+import { AgentProviderRuntimePaths } from "./AgentProviderRuntimePaths.js";
 
 export type AgentProviderManagementState =
-    "disabled" | "invalid" | "ready" | "unselected";
+    | "disabled"
+    | "invalid"
+    | "ready"
+    | "uninstalled";
 
 export interface AgentProviderManagementRecord {
     enabled: boolean;
     error?: string;
     id: string;
-    lastKnownGoodGeneration?: string;
+    installedVersion?: string;
     name?: string;
-    selectedGeneration?: string;
     state: AgentProviderManagementState;
     version?: string;
 }
 
+export interface AgentProviderDefinition {
+    create(): AgentProvider;
+    id: string;
+    install(
+        runtime: AgentProviderRuntimePaths,
+        options?: { force?: boolean },
+    ): Promise<void>;
+    isInstalled(runtime: AgentProviderRuntimePaths): Promise<boolean>;
+    name: string;
+    remove(runtime: AgentProviderRuntimePaths): Promise<void>;
+    version: string;
+}
+
 export interface AgentProviderManagerOptions {
-    bundledProviders?: Readonly<Record<string, string>>;
-    context: ExtensionContext;
+    definitions: readonly AgentProviderDefinition[];
     isProviderInUse(id: string): boolean;
-    loader: AgentProviderLoader;
     registry: AgentProviderRegistry;
+    runtimeRootDirectory: string;
     store: AgentProviderRegistryStore;
 }
 
 export class AgentProviderManager {
-    readonly #assets: ExtensionAssetCapability;
-    readonly #bundledProviders: Readonly<Record<string, string>>;
+    readonly #definitions = new Map<string, AgentProviderDefinition>();
     readonly #isProviderInUse: (id: string) => boolean;
-    readonly #loader: AgentProviderLoader;
     readonly #registry: AgentProviderRegistry;
+    readonly #runtimeRootDirectory: string;
     readonly #store: AgentProviderRegistryStore;
     #mutation: Promise<void> = Promise.resolve();
 
     constructor(options: AgentProviderManagerOptions) {
-        const assets = options.context.capabilities.assets;
-        if (assets === undefined)
-            throw new Error("Agent Extension requires the assets capability.");
-        this.#assets = assets;
-        this.#bundledProviders = options.bundledProviders ?? {};
+        for (const definition of options.definitions) {
+            if (this.#definitions.has(definition.id)) {
+                throw new Error(
+                    "Agent provider definition already registered: " +
+                        definition.id,
+                );
+            }
+            this.#definitions.set(definition.id, definition);
+        }
         this.#isProviderInUse = options.isProviderInUse;
-        this.#loader = options.loader;
         this.#registry = options.registry;
+        this.#runtimeRootDirectory = options.runtimeRootDirectory;
         this.#store = options.store;
     }
 
-    async install(sourcePath: string): Promise<AgentProviderManagementRecord> {
-        return await this.#exclusive(
-            async () => await this.#install(sourcePath),
-        );
-    }
-
-    async installBundled(id: string): Promise<AgentProviderManagementRecord> {
-        return await this.#exclusive(async () => {
-            const before = await this.#store.read();
-            const source = this.#bundledProviders[id];
-            if (source === undefined)
-                throw new Error(`Unknown bundled Agent provider: ${id}`);
-            const existing = before.providers[id];
-            if (existing === undefined) return await this.#install(source);
-
-            const bundled = await this.#assets.installBundle(source);
-            const candidate = await this.#loadInstalledCandidate(
-                before,
-                bundled.generation,
-            );
-            if (candidate.manifest.id !== id) {
-                return await this.#failCandidate(
-                    before,
-                    bundled.generation,
-                    new Error(
-                        `Bundled Agent provider ${id} declares id ${candidate.manifest.id}.`,
-                    ),
-                    id,
-                );
+    async initialize(): Promise<void> {
+        await this.#exclusive(async () => {
+            const snapshot = await this.#store.read();
+            for (const [id, entry] of Object.entries(snapshot.providers)) {
+                if (!entry.enabled) continue;
+                const definition = this.#definitions.get(id);
+                if (definition === undefined) continue;
+                const runtime = this.#runtime(definition);
+                if (!(await definition.isInstalled(runtime))) continue;
+                this.#registry.replace(definition.create());
             }
-
-            const current = await this.#record(id, existing);
-            const runtimeReady =
-                !existing.enabled || this.#registry.get(id) !== undefined;
-            if (
-                runtimeReady &&
-                current.version !== undefined &&
-                providerVersionAtLeast(
-                    current.version,
-                    candidate.manifest.version,
-                )
-            ) {
-                if (!registryReferencesGeneration(before, bundled.generation)) {
-                    await this.#assets.removeBundle(bundled.generation);
-                }
-                if (before.defaultProvider === undefined && existing.enabled) {
-                    const next = cloneAgentProviderRegistry(before);
-                    next.defaultProvider = id;
-                    await this.#store.write(next);
-                    return await this.#record(id, next.providers[id]!);
-                }
-                return current;
-            }
-
-            return await this.#selectCandidate(
-                before,
-                bundled.generation,
-                candidate,
-                existing.enabled,
-            );
         });
     }
 
-    bundledProviders(): readonly string[] {
-        return Object.keys(this.#bundledProviders).sort();
+    availableProviders(): readonly string[] {
+        return [...this.#definitions.keys()].sort();
+    }
+
+    async install(
+        id: string,
+        options: { force?: boolean } = {},
+    ): Promise<AgentProviderManagementRecord> {
+        return await this.#exclusive(async () => {
+            const definition = this.#requireDefinition(id);
+            if (options.force === true && this.#isProviderInUse(id)) {
+                throw new Error(
+                    "Agent provider " +
+                        id +
+                        " is still in use by a running Agent.",
+                );
+            }
+            const runtime = this.#runtime(definition);
+            await definition.install(runtime, options);
+            if (!(await definition.isInstalled(runtime))) {
+                throw new Error(
+                    "Agent provider " +
+                        id +
+                        " installation completed without a usable runtime.",
+                );
+            }
+
+            const before = await this.#store.read();
+            const existing = before.providers[id];
+            const enabled = existing?.enabled ?? true;
+            const provider = definition.create();
+            assertProviderMatchesDefinition(provider, definition);
+            const previousRuntime = this.#registry.get(id);
+            if (enabled) this.#registry.replace(provider);
+            else this.#registry.unregister(id);
+
+            const next = cloneAgentProviderRegistry(before);
+            next.providers[id] = {
+                enabled,
+                installedVersion: definition.version,
+            };
+            if (enabled) next.defaultProvider ??= id;
+            try {
+                await this.#store.write(next);
+            } catch (error) {
+                this.#registry.unregister(id);
+                if (previousRuntime !== undefined) {
+                    this.#registry.replace(previousRuntime);
+                }
+                throw error;
+            }
+            return await this.#record(id, next.providers[id]!);
+        });
+    }
+
+    async update(id: string): Promise<AgentProviderManagementRecord> {
+        return await this.install(id, { force: true });
+    }
+
+    async list(): Promise<AgentProviderManagementRecord[]> {
+        await this.#mutation;
+        const snapshot = await this.#store.read();
+        const ids = new Set([
+            ...this.#definitions.keys(),
+            ...Object.keys(snapshot.providers),
+        ]);
+        return await Promise.all(
+            [...ids]
+                .sort((left, right) => left.localeCompare(right))
+                .map(
+                    async (id) =>
+                        await this.#record(id, snapshot.providers[id]),
+                ),
+        );
     }
 
     async getDefault(): Promise<string | undefined> {
@@ -139,7 +170,7 @@ export class AgentProviderManager {
             const entry = requireEntry(before, id);
             if (!entry.enabled || this.#registry.get(id) === undefined) {
                 throw new Error(
-                    `Agent provider ${id} is not enabled and ready.`,
+                    "Agent provider " + id + " is not enabled and ready.",
                 );
             }
             const next = cloneAgentProviderRegistry(before);
@@ -173,303 +204,170 @@ export class AgentProviderManager {
             );
         }
         throw new Error(
-            `Multiple Agent providers are enabled (${ready.join(", ")}). Select one with --provider or \`devshell agent provider default <id>\`.`,
-        );
-    }
-
-    async #install(sourcePath: string): Promise<AgentProviderManagementRecord> {
-        if (!isAbsolute(sourcePath)) {
-            throw new TypeError(
-                "Agent provider bundle path must be absolute. Use `agent provider install <id>` for bundled providers.",
-            );
-        }
-        const before = await this.#store.read();
-        const bundle = await this.#assets.installBundle(sourcePath);
-        const loaded = await this.#loadInstalledCandidate(
-            before,
-            bundle.generation,
-        );
-        return await this.#selectCandidate(
-            before,
-            bundle.generation,
-            loaded,
-            true,
-        );
-    }
-
-    async #selectCandidate(
-        before: AgentProviderRegistrySnapshot,
-        generation: string,
-        loaded: LoadedAgentProvider,
-        enabled: boolean,
-    ): Promise<AgentProviderManagementRecord> {
-        const manifest = loaded.manifest;
-        const next = cloneAgentProviderRegistry(before);
-        next.providers[manifest.id] = {
-            enabled,
-            lastKnownGoodGeneration: generation,
-            selectedGeneration: generation,
-        };
-        if (enabled) next.defaultProvider ??= manifest.id;
-        try {
-            await this.#store.write(next);
-        } catch (error) {
-            return await this.#failCandidate(
-                before,
-                generation,
-                error,
-                manifest.id,
-            );
-        }
-        if (!enabled)
-            return recordFromLoaded(next.providers[manifest.id]!, loaded);
-        try {
-            this.#registry.replace(loaded.provider);
-        } catch (error) {
-            try {
-                await this.#store.write(before);
-            } catch (rollbackError) {
-                throw new AggregateError(
-                    [error, rollbackError],
-                    `Agent provider ${manifest.id} runtime publish failed and registry rollback was incomplete.`,
-                );
-            }
-            return await this.#failCandidate(
-                before,
-                generation,
-                error,
-                manifest.id,
-            );
-        }
-        return recordFromLoaded(next.providers[manifest.id]!, loaded);
-    }
-
-    async list(): Promise<AgentProviderManagementRecord[]> {
-        await this.#mutation;
-        const snapshot = await this.#store.read();
-        return await Promise.all(
-            Object.entries(snapshot.providers)
-                .sort(([left], [right]) => left.localeCompare(right))
-                .map(async ([id, entry]) => await this.#record(id, entry)),
+            "Multiple Agent providers are enabled (" +
+                ready.join(", ") +
+                "). Select one with --provider or devshell agent provider default <id>.",
         );
     }
 
     async enable(id: string): Promise<AgentProviderManagementRecord> {
-        return await this.#exclusive(async () => await this.#enable(id));
-    }
-
-    async #enable(id: string): Promise<AgentProviderManagementRecord> {
-        const before = await this.#store.read();
-        const entry = requireEntry(before, id);
-        const loaded = await this.#loadPreferred(id, entry);
-        const next = cloneAgentProviderRegistry(before);
-        next.providers[id] = {
-            ...entry,
-            enabled: true,
-            selectedGeneration: loaded.generation,
-            lastKnownGoodGeneration: loaded.generation,
-        };
-        await this.#store.write(next);
-        try {
-            this.#registry.replace(loaded.provider);
-        } catch (error) {
-            try {
-                await this.#store.write(before);
-            } catch (rollbackError) {
-                throw new AggregateError(
-                    [error, rollbackError],
-                    `Agent provider ${id} enable failed and registry rollback was incomplete.`,
+        return await this.#exclusive(async () => {
+            const before = await this.#store.read();
+            const entry = requireEntry(before, id);
+            const definition = this.#requireDefinition(id);
+            const runtime = this.#runtime(definition);
+            if (!(await definition.isInstalled(runtime))) {
+                throw new Error(
+                    "Agent provider " +
+                        id +
+                        " is not installed. Run devshell agent provider install " +
+                        id +
+                        " first.",
                 );
             }
-            throw error;
-        }
-        return recordFromLoaded(next.providers[id]!, loaded);
+            const provider = definition.create();
+            assertProviderMatchesDefinition(provider, definition);
+            const next = cloneAgentProviderRegistry(before);
+            next.providers[id] = {
+                enabled: true,
+                installedVersion: definition.version,
+            };
+            await this.#store.write(next);
+            try {
+                this.#registry.replace(provider);
+            } catch (error) {
+                await this.#store.write(before).catch((rollbackError) => {
+                    throw new AggregateError(
+                        [error, rollbackError],
+                        "Agent provider " +
+                            id +
+                            " enable failed and registry rollback was incomplete.",
+                    );
+                });
+                throw error;
+            }
+            return await this.#record(id, next.providers[id]!);
+        });
     }
 
     async disable(id: string): Promise<AgentProviderManagementRecord> {
-        return await this.#exclusive(async () => await this.#disable(id));
-    }
-
-    async #disable(id: string): Promise<AgentProviderManagementRecord> {
-        const before = await this.#store.read();
-        const entry = requireEntry(before, id);
-        const next = cloneAgentProviderRegistry(before);
-        next.providers[id] = { ...entry, enabled: false };
-        const provider = this.#registry.unregister(id);
-        try {
-            await this.#store.write(next);
-        } catch (error) {
-            if (provider !== undefined) this.#registry.replace(provider);
-            throw error;
-        }
-        return await this.#record(id, next.providers[id]!);
+        return await this.#exclusive(async () => {
+            const before = await this.#store.read();
+            const entry = requireEntry(before, id);
+            const next = cloneAgentProviderRegistry(before);
+            next.providers[id] = { ...entry, enabled: false };
+            const provider = this.#registry.unregister(id);
+            try {
+                await this.#store.write(next);
+            } catch (error) {
+                if (provider !== undefined) this.#registry.replace(provider);
+                throw error;
+            }
+            return await this.#record(id, next.providers[id]!);
+        });
     }
 
     async remove(id: string): Promise<{ id: string; removed: true }> {
-        return await this.#exclusive(async () => await this.#remove(id));
-    }
-
-    async #remove(id: string): Promise<{ id: string; removed: true }> {
-        const before = await this.#store.read();
-        const entry = requireEntry(before, id);
-        if (this.#isProviderInUse(id)) {
-            throw new Error(
-                `Agent provider ${id} is still in use by a running Agent.`,
-            );
-        }
-        const next = cloneAgentProviderRegistry(before);
-        delete next.providers[id];
-        if (next.defaultProvider === id) delete next.defaultProvider;
-        const provider = this.#registry.unregister(id);
-        try {
-            await this.#store.write(next);
-        } catch (error) {
-            if (provider !== undefined) this.#registry.replace(provider);
-            throw error;
-        }
-
-        const generations = [
-            ...new Set(
-                [
-                    entry.selectedGeneration,
-                    entry.lastKnownGoodGeneration,
-                ].filter(
-                    (generation): generation is string =>
-                        generation !== undefined,
-                ),
-            ),
-        ];
-        const settled = await Promise.allSettled(
-            generations.map(async (generation) => {
-                await this.#assets.removeBundle(generation);
-            }),
-        );
-        const failures = settled.flatMap((result) =>
-            result.status === "rejected" ? [result.reason] : [],
-        );
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1) {
-            throw new AggregateError(
-                failures,
-                `Agent provider ${id} was deregistered but bundle cleanup was incomplete.`,
-            );
-        }
-        return { id, removed: true };
-    }
-
-    async #loadInstalledCandidate(
-        before: AgentProviderRegistrySnapshot,
-        generation: string,
-    ): Promise<LoadedAgentProvider> {
-        try {
-            const manifest = await this.#loader.inspectBundle(generation);
-            return await this.#loader.loadGeneration(manifest.id, generation);
-        } catch (error) {
-            return await this.#failCandidate(
-                before,
-                generation,
-                error,
-                "candidate",
-            );
-        }
-    }
-
-    async #failCandidate(
-        before: AgentProviderRegistrySnapshot,
-        generation: string,
-        error: unknown,
-        id: string,
-    ): Promise<never> {
-        if (registryReferencesGeneration(before, generation)) throw error;
-        try {
-            await this.#assets.removeBundle(generation);
-        } catch (cleanupError) {
-            throw new AggregateError(
-                [error, cleanupError],
-                `Agent provider ${id} candidate failed and bundle cleanup was incomplete.`,
-            );
-        }
-        throw error;
-    }
-
-    async #loadPreferred(
-        id: string,
-        entry: AgentProviderRegistryEntry,
-    ): Promise<LoadedAgentProvider> {
-        const candidates = [
-            ...new Set(
-                [
-                    entry.selectedGeneration,
-                    entry.lastKnownGoodGeneration,
-                ].filter(
-                    (generation): generation is string =>
-                        generation !== undefined,
-                ),
-            ),
-        ];
-        let lastFailure: unknown;
-        for (const generation of candidates) {
-            try {
-                return await this.#loader.loadGeneration(id, generation);
-            } catch (error) {
-                lastFailure = error;
+        return await this.#exclusive(async () => {
+            const before = await this.#store.read();
+            requireEntry(before, id);
+            const definition = this.#requireDefinition(id);
+            if (this.#isProviderInUse(id)) {
+                throw new Error(
+                    "Agent provider " +
+                        id +
+                        " is still in use by a running Agent.",
+                );
             }
-        }
-        if (lastFailure !== undefined) throw lastFailure;
-        throw new Error(`Agent provider ${id} has no selected generation.`);
+            const next = cloneAgentProviderRegistry(before);
+            delete next.providers[id];
+            if (next.defaultProvider === id) delete next.defaultProvider;
+            const provider = this.#registry.unregister(id);
+            try {
+                await this.#store.write(next);
+            } catch (error) {
+                if (provider !== undefined) this.#registry.replace(provider);
+                throw error;
+            }
+            try {
+                await definition.remove(this.#runtime(definition));
+            } catch (error) {
+                throw new Error(
+                    "Agent provider " +
+                        id +
+                        " was deregistered but client runtime cleanup failed.",
+                    { cause: error },
+                );
+            }
+            return { id, removed: true };
+        });
     }
 
     async #record(
         id: string,
-        entry: AgentProviderRegistryEntry,
+        entry: AgentProviderRegistryEntry | undefined,
     ): Promise<AgentProviderManagementRecord> {
-        const generation =
-            entry.selectedGeneration ?? entry.lastKnownGoodGeneration;
-        if (generation === undefined) {
+        const definition = this.#definitions.get(id);
+        if (definition === undefined) {
             return {
-                enabled: entry.enabled,
+                enabled: entry?.enabled ?? false,
+                error: "Provider is not supported by this Agent Extension.",
                 id,
-                state: entry.enabled ? "unselected" : "disabled",
+                ...(entry?.installedVersion === undefined
+                    ? {}
+                    : { installedVersion: entry.installedVersion }),
+                state: "invalid",
             };
         }
         try {
-            const manifest = await this.#loader.inspectGeneration(
-                id,
-                generation,
+            const installed = await definition.isInstalled(
+                this.#runtime(definition),
             );
+            if (!installed) {
+                return {
+                    enabled: entry?.enabled ?? false,
+                    id,
+                    name: definition.name,
+                    state: "uninstalled",
+                    version: definition.version,
+                };
+            }
             return {
-                enabled: entry.enabled,
+                enabled: entry?.enabled ?? false,
                 id,
-                ...(entry.lastKnownGoodGeneration === undefined
-                    ? {}
-                    : {
-                          lastKnownGoodGeneration:
-                              entry.lastKnownGoodGeneration,
-                      }),
-                name: manifest.name,
-                ...(entry.selectedGeneration === undefined
-                    ? {}
-                    : { selectedGeneration: entry.selectedGeneration }),
-                state: entry.enabled ? "ready" : "disabled",
-                version: manifest.version,
+                installedVersion:
+                    entry?.installedVersion ?? definition.version,
+                name: definition.name,
+                state: entry?.enabled === true ? "ready" : "disabled",
+                version: definition.version,
             };
         } catch (error) {
             return {
-                enabled: entry.enabled,
+                enabled: entry?.enabled ?? false,
                 error: error instanceof Error ? error.message : String(error),
                 id,
-                ...(entry.lastKnownGoodGeneration === undefined
+                ...(entry?.installedVersion === undefined
                     ? {}
-                    : {
-                          lastKnownGoodGeneration:
-                              entry.lastKnownGoodGeneration,
-                      }),
-                ...(entry.selectedGeneration === undefined
-                    ? {}
-                    : { selectedGeneration: entry.selectedGeneration }),
-                state: entry.enabled ? "invalid" : "disabled",
+                    : { installedVersion: entry.installedVersion }),
+                name: definition.name,
+                state: "invalid",
+                version: definition.version,
             };
         }
+    }
+
+    #runtime(definition: AgentProviderDefinition): AgentProviderRuntimePaths {
+        return new AgentProviderRuntimePaths({
+            provider: definition.id,
+            rootDirectory: this.#runtimeRootDirectory,
+            version: definition.version,
+        });
+    }
+
+    #requireDefinition(id: string): AgentProviderDefinition {
+        const definition = this.#definitions.get(id);
+        if (definition !== undefined) return definition;
+        throw new Error("Unknown Agent provider: " + id);
     }
 
     async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -487,99 +385,28 @@ export class AgentProviderManager {
     }
 }
 
-function recordFromLoaded(
-    entry: AgentProviderRegistryEntry,
-    loaded: LoadedAgentProvider,
-): AgentProviderManagementRecord {
-    return {
-        enabled: entry.enabled,
-        id: loaded.manifest.id,
-        ...(entry.lastKnownGoodGeneration === undefined
-            ? {}
-            : { lastKnownGoodGeneration: entry.lastKnownGoodGeneration }),
-        name: loaded.manifest.name,
-        ...(entry.selectedGeneration === undefined
-            ? {}
-            : { selectedGeneration: entry.selectedGeneration }),
-        state: entry.enabled ? "ready" : "disabled",
-        version: loaded.manifest.version,
-    };
-}
-
 function requireEntry(
     snapshot: AgentProviderRegistrySnapshot,
     id: string,
 ): AgentProviderRegistryEntry {
     const entry = snapshot.providers[id];
     if (entry !== undefined) return entry;
-    throw new Error(`Unknown Agent provider: ${id}`);
+    throw new Error("Unknown Agent provider: " + id);
 }
 
-function registryReferencesGeneration(
-    snapshot: AgentProviderRegistrySnapshot,
-    generation: string,
-): boolean {
-    return Object.values(snapshot.providers).some(
-        (entry) =>
-            entry.selectedGeneration === generation ||
-            entry.lastKnownGoodGeneration === generation,
-    );
-}
-
-function providerVersionAtLeast(current: string, bundled: string): boolean {
-    if (current === bundled) return true;
-    const left = parseComparableProviderVersion(current);
-    const right = parseComparableProviderVersion(bundled);
-    if (left === undefined || right === undefined) return true;
-    const core = compareVersionCore(left, right);
-    if (core !== 0) return core > 0;
-    return comparePrerelease(left[3], right[3]) >= 0;
-}
-
-function compareVersionCore(
-    left: [number, number, number, string[] | undefined],
-    right: [number, number, number, string[] | undefined],
-): number {
-    if (left[0] !== right[0]) return left[0] > right[0] ? 1 : -1;
-    if (left[1] !== right[1]) return left[1] > right[1] ? 1 : -1;
-    if (left[2] !== right[2]) return left[2] > right[2] ? 1 : -1;
-    return 0;
-}
-
-function parseComparableProviderVersion(
-    value: string,
-): [number, number, number, string[] | undefined] | undefined {
-    const match =
-        /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u.exec(
-            value,
+function assertProviderMatchesDefinition(
+    provider: AgentProvider,
+    definition: AgentProviderDefinition,
+): void {
+    if (provider.id !== definition.id || provider.version !== definition.version) {
+        throw new Error(
+            "Agent provider definition " +
+                definition.id +
+                " created incompatible runtime " +
+                provider.id +
+                "@" +
+                provider.version +
+                ".",
         );
-    if (match === null) return undefined;
-    return [
-        Number(match[1]),
-        Number(match[2]),
-        Number(match[3]),
-        match[4]?.split("."),
-    ];
-}
-
-function comparePrerelease(
-    left: string[] | undefined,
-    right: string[] | undefined,
-): number {
-    if (left === undefined) return right === undefined ? 0 : 1;
-    if (right === undefined) return -1;
-    const length = Math.max(left.length, right.length);
-    for (let index = 0; index < length; index += 1) {
-        const a = left[index];
-        const b = right[index];
-        if (a === undefined) return -1;
-        if (b === undefined) return 1;
-        if (a === b) continue;
-        const aNumeric = /^\d+$/u.test(a);
-        const bNumeric = /^\d+$/u.test(b);
-        if (aNumeric && bNumeric) return Number(a) > Number(b) ? 1 : -1;
-        if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
-        return a > b ? 1 : -1;
     }
-    return 0;
 }

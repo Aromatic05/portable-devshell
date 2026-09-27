@@ -18,12 +18,16 @@ import {
 
 const SYSTEM_OPENCODE = "/usr/bin/opencode";
 
-test("OpenCode provider resolves only its bundled absolute command and never PATH opencode", async () => {
+test("OpenCode provider resolves only its client-installed absolute command and never PATH opencode", async () => {
     const root = await mkdtemp(join(tmpdir(), "devshell-opencode-provider-"));
     try {
+        const runtime = new AgentProviderRuntimePaths({
+            provider: "opencode",
+            rootDirectory: root,
+            version: OPENCODE_PROVIDER_VERSION,
+        });
         const packageRoot = join(
-            root,
-            "provider",
+            runtime.prefixDirectory,
             "node_modules",
             OPENCODE_PACKAGE_NAME,
         );
@@ -40,16 +44,9 @@ test("OpenCode provider resolves only its bundled absolute command and never PAT
         );
         await writeFile(command, "private opencode\n", "utf8");
         const installer = new OpenCodeProviderInstaller({
-            resolver: async () => join(packageRoot, "package.json"),
             version: OPENCODE_RUNTIME_VERSION,
         });
-        const installation = await installer.ensureInstalled(
-            new AgentProviderRuntimePaths({
-                provider: "opencode",
-                rootDirectory: root,
-                version: OPENCODE_PROVIDER_VERSION,
-            }),
-        );
+        const installation = await installer.ensureInstalled(runtime);
 
         assert.equal(installation.command, command);
         assert.equal(installation.command === SYSTEM_OPENCODE, false);
@@ -101,6 +98,7 @@ test("OpenCode provider gives its runtime factory private state and the canonica
                 async ensureInstalled() {
                     return {
                         command: "/private/opencode",
+                        moduleRoot: "/private/runtime",
                         version: OPENCODE_RUNTIME_VERSION,
                     };
                 },
@@ -126,6 +124,7 @@ test("OpenCode provider gives its runtime factory private state and the canonica
 
         assert.equal(returned, handle);
         assert.equal(captured?.command, "/private/opencode");
+        assert.equal(captured?.moduleRoot, "/private/runtime");
         assert.equal(captured?.tools, tools);
         assert.equal(captured?.stateDirectory, runtime.stateDirectory);
         assert.equal(

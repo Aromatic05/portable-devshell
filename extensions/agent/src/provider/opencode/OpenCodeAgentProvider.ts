@@ -64,6 +64,7 @@ export class OpenCodeAgentProvider implements AgentProvider {
                 context.agentId,
                 "cwd",
             ),
+            moduleRoot: installation.moduleRoot,
             processes: context.processes,
             stateDirectory: context.runtime.stateDirectory,
             target: context.target,

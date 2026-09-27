@@ -13,10 +13,12 @@ export {
 export {
     PI_BOOTSTRAP_VERSION,
     PI_PACKAGE_NAME,
+    PI_PROVIDER_RUNTIME_DEPENDENCIES,
     PiProviderInstaller,
+    hasManagedPiInstallation,
+    removeManagedPiInstallation,
     type PiProviderInstallation,
     type PiProviderInstallerOptions,
-    type PiProviderPackageResolver,
 } from "./PiProviderInstaller.js";
 
 export async function createAgentProvider(): Promise<

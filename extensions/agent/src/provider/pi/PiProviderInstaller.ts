@@ -1,11 +1,18 @@
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, parse, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 import type { AgentProviderRuntimePaths } from "../../builtin/provider/AgentProviderRuntimePaths.js";
 
 export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export const PI_BOOTSTRAP_VERSION = "0.85.1";
+export const PI_PROVIDER_RUNTIME_DEPENDENCIES = Object.freeze({
+    "@earendil-works/pi-coding-agent": PI_BOOTSTRAP_VERSION,
+    "@earendil-works/pi-tui": "0.85.1",
+    diff: "9.0.0",
+    "pi-gui-extension": "0.4.1",
+    typebox: "1.3.30",
+});
+
 const MANAGED_INSTALL_MARKER = "managed-install.json";
 const MANAGED_INSTALL_KIND = "pi-managed-install";
 const MANAGED_INSTALL_LAYOUT = "releases-v1";
@@ -14,37 +21,28 @@ export interface PiProviderInstallation {
     agentDirectory: string;
     entrypoint: string;
     managedInstallRoot: string;
+    moduleRoot: string;
     packageRoot: string;
     version: string;
 }
 
-export type PiProviderPackageResolver = (
-    packageName: string,
-) => string | Promise<string>;
-
 export interface PiProviderInstallerOptions {
     packageName?: string;
-    resolver?: PiProviderPackageResolver;
     version: string;
 }
 
 /**
- * Bootstraps Pi into a stable, Pi-owned managed installation.
- *
- * The provider bundle is only a seed. Once the managed installation exists,
- * subsequent provider upgrades resolve the currently active Pi release without
- * replacing it. Pi's own managed updater may therefore advance the runtime
- * independently of the Provider generation.
+ * Bootstraps Pi from the client-installed Provider prefix into Pi's stable,
+ * self-owned managed installation. Subsequent Pi updates remain independent of
+ * the Agent Provider adapter version.
  */
 export class PiProviderInstaller {
     readonly #packageName: string;
-    readonly #resolver: PiProviderPackageResolver;
     readonly #bootstrapVersion: string;
     #resolved?: Promise<PiProviderInstallation>;
 
     constructor(options: PiProviderInstallerOptions) {
         this.#packageName = options.packageName ?? PI_PACKAGE_NAME;
-        this.#resolver = options.resolver ?? resolveBundledPackage;
         this.#bootstrapVersion = options.version;
     }
 
@@ -71,24 +69,44 @@ export class PiProviderInstaller {
         );
         if (existing !== undefined) return existing;
 
-        const resolved = await this.#resolver(this.#packageName);
-        const seedEntrypoint = toFilesystemPath(resolved);
-        const seedPackageRoot = await findPackageRoot(
-            seedEntrypoint,
-            this.#packageName,
+        const seedRoot = runtime.prefixDirectory;
+        const seedPackageRoot = join(
+            seedRoot,
+            "node_modules",
+            ...this.#packageName.split("/"),
         );
-        const seedManifest = await readPackageManifest(seedPackageRoot);
-        if (seedManifest.version !== this.#bootstrapVersion) {
+        const seedManifest = await readPackageManifest(seedPackageRoot).catch(
+            (error) => {
+                if (isMissingFile(error)) {
+                    throw new Error(
+                        "Pi Provider runtime is not installed. Run devshell agent provider install pi first.",
+                        { cause: error },
+                    );
+                }
+                throw error;
+            },
+        );
+        if (
+            seedManifest.name !== this.#packageName ||
+            seedManifest.version !== this.#bootstrapVersion
+        ) {
             throw new Error(
-                `Bundled Pi bootstrap version mismatch: expected ${this.#packageName}@${this.#bootstrapVersion}, ` +
-                    `found ${String(seedManifest.version)}.`,
+                "Client-installed Pi bootstrap version mismatch: expected " +
+                    this.#packageName +
+                    "@" +
+                    this.#bootstrapVersion +
+                    ", found " +
+                    String(seedManifest.name) +
+                    "@" +
+                    String(seedManifest.version) +
+                    ".",
             );
         }
-        const seedRoot = findDeploymentRoot(seedPackageRoot);
+
         await mkdir(runtime.providerDirectory, { recursive: true });
         const stagingRoot = join(
             runtime.providerDirectory,
-            `.install-bootstrap-${process.pid}-${Date.now()}`,
+            ".install-bootstrap-" + process.pid + "-" + Date.now(),
         );
         const releaseRoot = join(
             stagingRoot,
@@ -103,7 +121,7 @@ export class PiProviderInstaller {
             });
             await writeFile(
                 join(stagingRoot, MANAGED_INSTALL_MARKER),
-                `${JSON.stringify(
+                JSON.stringify(
                     {
                         kind: MANAGED_INSTALL_KIND,
                         layout: MANAGED_INSTALL_LAYOUT,
@@ -111,12 +129,12 @@ export class PiProviderInstaller {
                     },
                     null,
                     4,
-                )}\n`,
+                ) + "\n",
                 { mode: 0o600 },
             );
             await writeFile(
                 join(stagingRoot, "current-version"),
-                `${this.#bootstrapVersion}\n`,
+                this.#bootstrapVersion + "\n",
                 { mode: 0o600 },
             );
             await writeFile(join(stagingRoot, "update"), "", { mode: 0o600 });
@@ -143,12 +161,25 @@ export class PiProviderInstaller {
     }
 }
 
-async function resolveBundledPackage(packageName: string): Promise<string> {
-    return import.meta.resolve(packageName);
+export async function hasManagedPiInstallation(
+    runtime: AgentProviderRuntimePaths,
+): Promise<boolean> {
+    return (
+        (await resolveManagedInstallation(
+            runtime.installationDirectory,
+            runtime.stateDirectory,
+            PI_PACKAGE_NAME,
+        ).catch(() => undefined)) !== undefined
+    );
 }
 
-function toFilesystemPath(value: string): string {
-    return value.startsWith("file:") ? fileURLToPath(value) : resolve(value);
+export async function removeManagedPiInstallation(
+    runtime: AgentProviderRuntimePaths,
+): Promise<void> {
+    await rm(runtime.installationDirectory, {
+        force: true,
+        recursive: true,
+    });
 }
 
 async function resolveManagedInstallation(
@@ -171,7 +202,8 @@ async function resolveManagedInstallation(
         marker.schemaVersion !== 1
     ) {
         throw new Error(
-            `Pi managed install marker is invalid: ${join(managedInstallRoot, MANAGED_INSTALL_MARKER)}`,
+            "Pi managed install marker is invalid: " +
+                join(managedInstallRoot, MANAGED_INSTALL_MARKER),
         );
     }
     const version = (
@@ -187,7 +219,13 @@ async function resolveManagedInstallation(
     const manifest = await readPackageManifest(packageRoot);
     if (manifest.name !== packageName || manifest.version !== version) {
         throw new Error(
-            `Active Pi release ${version} does not match ${packageName}@${String(manifest.version)}.`,
+            "Active Pi release " +
+                version +
+                " does not match " +
+                packageName +
+                "@" +
+                String(manifest.version) +
+                ".",
         );
     }
     const entrypoint = await resolvePackageEntrypoint(packageRoot, manifest);
@@ -195,6 +233,7 @@ async function resolveManagedInstallation(
         agentDirectory: join(stateDirectory, "pi"),
         entrypoint,
         managedInstallRoot,
+        moduleRoot: releaseRoot,
         packageRoot,
         version,
     };
@@ -240,45 +279,11 @@ async function resolvePackageEntrypoint(
     return entrypoint;
 }
 
-async function findPackageRoot(
-    entrypoint: string,
-    packageName: string,
-): Promise<string> {
-    const filesystemRoot = parse(entrypoint).root;
-    let directory = dirname(entrypoint);
-    while (directory !== filesystemRoot) {
-        try {
-            const manifest = await readPackageManifest(directory);
-            if (manifest.name === packageName) return directory;
-        } catch (error) {
-            if (!isMissingFile(error)) throw error;
-        }
-        const parent = dirname(directory);
-        if (parent === directory) break;
-        directory = parent;
-    }
-    throw new Error(
-        `Unable to locate bundled ${packageName} package root from ${entrypoint}.`,
-    );
-}
-
-function findDeploymentRoot(packageRoot: string): string {
-    let directory = dirname(packageRoot);
-    if (packageRoot.split(/[\\/]/u).at(-2)?.startsWith("@"))
-        directory = dirname(directory);
-    if (directory.split(/[\\/]/u).at(-1) !== "node_modules") {
-        throw new Error(
-            `Bundled Pi package is not inside a deployable node_modules tree: ${packageRoot}`,
-        );
-    }
-    return dirname(directory);
-}
-
 function assertReleaseVersion(value: string): void {
     if (
         !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(value)
     ) {
-        throw new Error(`Invalid active Pi version: ${JSON.stringify(value)}`);
+        throw new Error("Invalid active Pi version: " + JSON.stringify(value));
     }
 }
 

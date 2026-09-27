@@ -1,4 +1,3 @@
-import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
@@ -21,14 +20,31 @@ import {
 import { executeAgentCommand } from "./AgentCommand.js";
 import { executeAgentModelCommand } from "./AgentModelCommand.js";
 import { AgentExtensionRuntime } from "./AgentRuntime.js";
-import { AgentProviderLoader } from "./provider/AgentProviderLoader.js";
 import {
     AgentProviderManager,
+    type AgentProviderDefinition,
     type AgentProviderManagementRecord,
 } from "./provider/AgentProviderManager.js";
+import { AgentProviderPackageInstaller } from "./provider/AgentProviderPackageInstaller.js";
 import { AgentProviderRegistry } from "./provider/AgentProviderRegistry.js";
 import { AgentProviderRegistryStore } from "./provider/AgentProviderRegistryStore.js";
-import { ensureBundledPiCommand } from "./pi/PiCommandInstaller.js";
+import { ensurePiCommand } from "./pi/PiCommandInstaller.js";
+import {
+    PI_PROVIDER_ID,
+    PI_PROVIDER_VERSION,
+    PiAgentProvider,
+} from "../provider/pi/PiAgentProvider.js";
+import {
+    PI_PROVIDER_RUNTIME_DEPENDENCIES,
+    hasManagedPiInstallation,
+    removeManagedPiInstallation,
+} from "../provider/pi/PiProviderInstaller.js";
+import {
+    OPENCODE_PROVIDER_ID,
+    OPENCODE_PROVIDER_VERSION,
+    OpenCodeAgentProvider,
+} from "../provider/opencode/OpenCodeAgentProvider.js";
+import { OPENCODE_PROVIDER_RUNTIME_DEPENDENCIES } from "../provider/opencode/OpenCodeProviderInstaller.js";
 
 let activeRuntime: AgentExtensionRuntime | undefined;
 
@@ -40,40 +56,27 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const providerStore = new AgentProviderRegistryStore(
         join(context.paths.stateDirectory, "providers.json"),
     );
-    const providerLoader = new AgentProviderLoader(
-        context,
-        undefined,
-        providerStore,
-    );
-    const providers = await providerLoader.loadSelected();
-    const providerRegistry = new AgentProviderRegistry(providers);
-    const bundledProviders = await findBundledProviders(context);
-    const runtime: AgentExtensionRuntime = new AgentExtensionRuntime(context, {
+    const processes = context.capabilities.processes;
+    if (processes === undefined) {
+        throw new Error("Agent Extension requires the processes capability.");
+    }
+    const packageInstaller = new AgentProviderPackageInstaller(processes);
+    const definitions = createProviderDefinitions(context, packageInstaller);
+    const providerRegistry = new AgentProviderRegistry();
+    let runtime: AgentExtensionRuntime | undefined;
+    const providerManager: AgentProviderManager = new AgentProviderManager({
+        definitions,
+        isProviderInUse: (id) => runtime?.isProviderInUse(id) ?? false,
+        registry: providerRegistry,
+        runtimeRootDirectory: context.paths.stateDirectory,
+        store: providerStore,
+    });
+    await providerManager.initialize();
+    runtime = new AgentExtensionRuntime(context, {
         registry: providerRegistry,
         resolveProvider: async (requested) =>
             await providerManager.resolveProvider(requested),
     });
-    const providerManager: AgentProviderManager = new AgentProviderManager({
-        bundledProviders,
-        context,
-        isProviderInUse: (id) => runtime.isProviderInUse(id),
-        loader: providerLoader,
-        registry: providerRegistry,
-        store: providerStore,
-    });
-    for (const id of providerManager.bundledProviders()) {
-        await providerManager.installBundled(id);
-    }
-    if (providerManager.bundledProviders().includes("pi")) {
-        const command = await ensureBundledPiCommand(context);
-        if (!command.installed) {
-            context.logger.warn(
-                command.reason === "collision"
-                    ? `Bundled Pi is ready, but ${command.command} is owned by another installation and was not replaced.`
-                    : "Bundled Pi is ready, but the packaged Pi launcher is missing; the pi command was not published.",
-            );
-        }
-    }
     activeRuntime = runtime;
     context.register(
         nativeCommands,
@@ -111,6 +114,61 @@ export async function activate(context: ExtensionContext): Promise<void> {
     context.register(tuiPages, "agent", createAgentTuiPage(providerManager));
 }
 
+function createProviderDefinitions(
+    context: ExtensionContext,
+    packages: AgentProviderPackageInstaller,
+): readonly AgentProviderDefinition[] {
+    const piPackage = {
+        dependencies: PI_PROVIDER_RUNTIME_DEPENDENCIES,
+        id: PI_PROVIDER_ID,
+        version: PI_PROVIDER_VERSION,
+    };
+    const openCodePackage = {
+        dependencies: OPENCODE_PROVIDER_RUNTIME_DEPENDENCIES,
+        id: OPENCODE_PROVIDER_ID,
+        version: OPENCODE_PROVIDER_VERSION,
+    };
+    return [
+        {
+            create: () => new PiAgentProvider(),
+            id: PI_PROVIDER_ID,
+            install: async (runtime, options) => {
+                await packages.install(runtime, piPackage, options);
+                const command = await ensurePiCommand(context);
+                if (!command.installed) {
+                    context.logger.warn(
+                        command.reason === "collision"
+                            ? "Pi Provider is installed, but " +
+                                  command.command +
+                                  " is owned by another installation and was not replaced."
+                            : "Pi Provider is installed, but the packaged Pi launcher is missing; the pi command was not published.",
+                    );
+                }
+            },
+            isInstalled: async (runtime) =>
+                (await packages.isInstalled(runtime, piPackage)) ||
+                (await hasManagedPiInstallation(runtime)),
+            name: "Pi",
+            remove: async (runtime) => {
+                await packages.remove(runtime);
+                await removeManagedPiInstallation(runtime);
+            },
+            version: PI_PROVIDER_VERSION,
+        },
+        {
+            create: () => new OpenCodeAgentProvider(),
+            id: OPENCODE_PROVIDER_ID,
+            install: async (runtime, options) =>
+                await packages.install(runtime, openCodePackage, options),
+            isInstalled: async (runtime) =>
+                await packages.isInstalled(runtime, openCodePackage),
+            name: "OpenCode",
+            remove: async (runtime) => await packages.remove(runtime),
+            version: OPENCODE_PROVIDER_VERSION,
+        },
+    ];
+}
+
 function createAgentWebPage(providers: AgentProviderManager): WebPageBinding {
     return async (request, invocation) => {
         invocation.signal.throwIfAborted();
@@ -131,7 +189,7 @@ function createAgentWebPage(providers: AgentProviderManager): WebPageBinding {
                         { id: "version", label: "Version" },
                         { id: "state", label: "State" },
                         { id: "default", label: "Default" },
-                        { id: "generation", label: "Generation" },
+                        { id: "installed", label: "Installed" },
                         { id: "error", label: "Error" },
                     ],
                     id: "providers",
@@ -163,8 +221,8 @@ function agentWebProviderRow(
                     ? {}
                     : { tone: "danger" as const }),
             },
-            generation: {
-                text: record.selectedGeneration ?? "—",
+            installed: {
+                text: record.installedVersion ?? "—",
             },
             provider: { text: record.name ?? record.id },
             state: {
@@ -174,7 +232,7 @@ function agentWebProviderRow(
                         ? "success"
                         : record.state === "invalid"
                           ? "danger"
-                          : record.state === "unselected"
+                          : record.state === "uninstalled"
                             ? "warning"
                             : "normal",
             },
@@ -220,13 +278,20 @@ function agentTuiProviderItem(
     const isDefault = defaultProvider === record.id;
     return {
         actions: [
-            record.enabled
-                ? { id: "disable", label: "Disable" }
-                : { id: "enable", label: "Enable" },
+            ...(record.state === "uninstalled"
+                ? [{ id: "install", label: "Install" }]
+                : [
+                      record.enabled
+                          ? { id: "disable", label: "Disable" }
+                          : { id: "enable", label: "Enable" },
+                      { id: "update", label: "Update" },
+                  ]),
             ...(record.enabled && record.state === "ready" && !isDefault
                 ? [{ id: "default", label: "Set Default" }]
                 : []),
-            { id: "remove", label: "Remove", tone: "danger" },
+            ...(record.state === "uninstalled"
+                ? []
+                : [{ id: "remove", label: "Remove", tone: "danger" as const }]),
         ],
         detail: [
             { text: `state ${record.state}` },
@@ -234,12 +299,9 @@ function agentTuiProviderItem(
             ...(record.version === undefined
                 ? []
                 : [{ text: `version ${record.version}` }]),
-            ...(record.selectedGeneration === undefined
+            ...(record.installedVersion === undefined
                 ? []
-                : [{ text: `generation ${record.selectedGeneration}` }]),
-            ...(record.lastKnownGoodGeneration === undefined
-                ? []
-                : [{ text: `known-good ${record.lastKnownGoodGeneration}` }]),
+                : [{ text: `installed ${record.installedVersion}` }]),
             ...(isDefault ? [{ text: "default yes", tone: "success" as const }] : []),
             ...(record.error === undefined
                 ? []
@@ -251,7 +313,7 @@ function agentTuiProviderItem(
                 ? "ready"
                 : record.state === "invalid"
                   ? "failed"
-                  : record.state === "unselected"
+                  : record.state === "uninstalled"
                     ? "warning"
                     : "disabled",
         summary: [
@@ -268,7 +330,9 @@ async function applyAgentProviderAction(
     actionId: string,
     providerId: string,
 ): Promise<void> {
-    if (actionId === "enable") await providers.enable(providerId);
+    if (actionId === "install") await providers.install(providerId);
+    else if (actionId === "update") await providers.update(providerId);
+    else if (actionId === "enable") await providers.enable(providerId);
     else if (actionId === "disable") await providers.disable(providerId);
     else if (actionId === "default") await providers.setDefault(providerId);
     else if (actionId === "remove") await providers.remove(providerId);
@@ -279,53 +343,4 @@ export async function deactivate(): Promise<void> {
     const runtime = activeRuntime;
     activeRuntime = undefined;
     await runtime?.dispose();
-}
-
-async function findBundledProviders(
-    context: ExtensionContext,
-): Promise<Readonly<Record<string, string>>> {
-    const root = join(context.paths.codeDirectory, "bundled-providers");
-    const entries = await readdir(root, { withFileTypes: true }).catch(
-        (error: unknown) => {
-            if (isMissing(error)) return undefined;
-            throw error;
-        },
-    );
-    if (entries === undefined) return {};
-    const providers: Record<string, string> = {};
-    for (const entry of entries.sort((left, right) =>
-        left.name.localeCompare(right.name),
-    )) {
-        if (
-            !entry.isFile() ||
-            entry.isSymbolicLink() ||
-            !entry.name.endsWith(".dsprovider")
-        ) {
-            throw new TypeError(
-                `Bundled Agent provider ${entry.name} must be a plain .dsprovider file.`,
-            );
-        }
-        const id = entry.name.slice(0, -".dsprovider".length);
-        if (!/^[a-z0-9][a-z0-9._-]*$/u.test(id)) {
-            throw new TypeError(`Invalid bundled Agent provider id: ${id}`);
-        }
-        const bundle = join(root, entry.name);
-        const metadata = await lstat(bundle);
-        if (metadata.isSymbolicLink() || !metadata.isFile()) {
-            throw new TypeError(
-                `Bundled Agent provider ${entry.name} must be a plain .dsprovider file.`,
-            );
-        }
-        providers[id] = bundle;
-    }
-    return Object.freeze(providers);
-}
-
-function isMissing(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "code" in error &&
-        (error as NodeJS.ErrnoException).code === "ENOENT"
-    );
 }
