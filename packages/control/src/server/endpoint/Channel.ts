@@ -550,11 +550,13 @@ function parseProtocolVersion(value: string): {
     if (match === null) {
         throw invalidHello(`Invalid Control protocol version ${value}.`);
     }
-    return {
-        major: Number(match[1]),
-        minor: Number(match[2]),
-        patch: Number(match[3]),
-    };
+    const major = Number(match[1]);
+    const minor = Number(match[2]);
+    const patch = Number(match[3]);
+    if (![major, minor, patch].every(Number.isSafeInteger)) {
+        throw invalidHello(`Invalid Control protocol version ${value}.`);
+    }
+    return { major, minor, patch };
 }
 
 function invalidHello(message: string): Error {

@@ -325,5 +325,13 @@ function compareProtocolVersionParts(
 function parseProtocolVersion(value: string): readonly [number, number, number] {
     const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
     if (match === null) throw new Error(`Invalid protocol version ${value}.`);
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
+    const version = [
+        Number(match[1]),
+        Number(match[2]),
+        Number(match[3]),
+    ] as const;
+    if (!version.every(Number.isSafeInteger)) {
+        throw new Error(`Invalid protocol version ${value}.`);
+    }
+    return version;
 }

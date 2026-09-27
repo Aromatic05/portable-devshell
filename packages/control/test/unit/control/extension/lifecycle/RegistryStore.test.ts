@@ -191,6 +191,39 @@ test("update preflight rejects a current protocol generation outside the candida
     );
 });
 
+test("update preflight rejects unsafe semantic protocol components", async (t) => {
+    const root = await createTestTempDirectory("protocol-update-unsafe");
+    const homeDirectory = join(root, "home");
+    const currentApplicationDirectory = join(root, "current");
+    t.after(async () => await rm(root, { force: true, recursive: true }));
+    await writeCurrentProtocolModules(currentApplicationDirectory, {
+        control: "1.0.0",
+        frame: "1.0.0",
+        worker: "1.0.0",
+    });
+    await writeFile(
+        join(
+            currentApplicationDirectory,
+            "node_modules",
+            "@portable-devshell",
+            "shared",
+            "dist",
+            "protocol",
+            "control",
+            "ControlProtocol.js",
+        ),
+        'export const CONTROL_PROTOCOL_RANGE = { min: "1.0.0", max: "9007199254740993.0.0" };\n',
+        "utf8",
+    );
+
+    await assert.rejects(() =>
+        preflightControlUpdate({
+            currentApplicationDirectory,
+            homeDirectory,
+        }),
+    );
+});
+
 test("update preflight reports persistent migration as a rollback blocker", async (t) => {
     const root = await createTestTempDirectory("rollback-update-preflight");
     const homeDirectory = join(root, "home");

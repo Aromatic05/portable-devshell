@@ -8,6 +8,7 @@ import {
     ClientConnection,
     PrefixRoute,
     createError,
+    errorCodes,
     type Channel,
     type JsonValue,
     type PrefixRouteSnapshot,
@@ -352,6 +353,30 @@ test("ControlChannelServer rejects unsupported protocol ranges during first requ
         }),
         (error: unknown) =>
             (error as { code?: string }).code === "protocol.versionUnsupported",
+    );
+});
+
+test("ControlChannelServer rejects unsafe semantic protocol components as invalid hello", async (t) => {
+    const provider = new MemoryControlChannelListener();
+    const server = new ControlChannelServer({
+        listeners: [provider],
+        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+    });
+    await server.start();
+    t.after(async () => await server.close());
+    const connection = createClient(provider, "tui");
+    t.after(() => connection.close());
+
+    await assert.rejects(
+        connection.request("@control", "service", "hello", {
+            clientKind: "tui",
+            protocolRange: {
+                max: "9007199254740992.0.0",
+                min: "9007199254740993.0.0",
+            },
+        }),
+        (error: unknown) =>
+            (error as { code?: string }).code === errorCodes.targetInvalid,
     );
 });
 
