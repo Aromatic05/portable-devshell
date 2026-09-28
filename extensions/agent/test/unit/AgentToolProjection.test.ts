@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
     prepareAgentModelToolInput,
-    projectHistoricalAgentToolResult,
     projectAgentModelToolResult,
     projectAgentModelTools,
 } from "../../src/builtin/provider/AgentToolProjection.ts";
@@ -444,32 +443,4 @@ test("Agent model file_read projection preserves per-file partial errors", () =>
     assert.match(read, /error=file\.notFound: path does not exist/u);
     assert.match(read, /file=\.\/good\.txt view=content/u);
     assert.match(read, /1:ok/u);
-});
-
-test("historical Agent tool projection bounds replayable bulk content", () => {
-    const readBody = `1:head\n2:${"x".repeat(8_000)}\n3:tail`;
-    const read = projectHistoricalAgentToolResult("file_read", {
-        files: [
-            {
-                content: readBody,
-                path: "./src/demo.ts",
-                view: "content",
-            },
-        ],
-    });
-    assert.notEqual(read, undefined);
-    assert.equal(read!.length < readBody.length / 10, true);
-
-    const shellBody = `head-${"y".repeat(8_000)}-tail`;
-    const recoveryPath = "/.devshell/tool-results/example/stdout";
-    const shell = projectHistoricalAgentToolResult("bash_run", {
-        exitCode: 1,
-        stderr: "",
-        stdout: shellBody,
-        stdoutBytes: shellBody.length,
-        stdoutPath: recoveryPath,
-        termination: "exited",
-    });
-    assert.notEqual(shell, undefined);
-    assert.equal(shell!.length < shellBody.length / 10, true);
 });

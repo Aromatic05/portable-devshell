@@ -1,7 +1,6 @@
 import type {
     BeforeAgentStartEvent,
     BeforeAgentStartEventResult,
-    ContextEvent,
     InputEvent,
     InputEventResult,
     SessionStartEvent,
@@ -29,7 +28,6 @@ import {
 } from "../render/ToolRenderer.js";
 import { attachStandaloneWorkspaceResources } from "./StandaloneResources.js";
 import type { DevshellPiTarget } from "./Target.js";
-import { compactDevshellPiContext } from "./ContextCompaction.js";
 import {
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput,
@@ -38,15 +36,6 @@ import {
 } from "./WorkspaceResources.js";
 
 export interface PiExtensionApiLike {
-    on(
-        event: "context",
-        handler: (
-            event: ContextEvent,
-        ) =>
-            | { messages?: ContextEvent["messages"] }
-            | Promise<{ messages?: ContextEvent["messages"] } | void>
-            | void,
-    ): void;
     on(
         event: "before_agent_start",
         handler: (
@@ -275,7 +264,6 @@ export function createDevshellPiWorkspaceBridge(
                     isError: true,
                 };
             });
-            pi.on("context", compactDevshellPiContext);
             const loaded = await loadResources();
             if (attachOptions.standaloneResources === true) {
                 attachStandaloneWorkspaceResources(
