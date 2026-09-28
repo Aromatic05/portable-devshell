@@ -1168,28 +1168,22 @@ fn context_snapshot(
     }
 }
 
-// @compat file-edit-apply-patch-aliases
-// @removeAt 0.7.10
 fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
-    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = normalize_change_set_dialect(input);
     let lines = normalized.split('\n').collect::<Vec<_>>();
     let first = lines
         .iter()
         .position(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if !matches!(lines[first], "*** Begin Edit" | "*** Begin Patch") {
-        return Err(invalid_edit(
-            "change set must start with `*** Begin Edit` or `*** Begin Patch`",
-        ));
+    if lines[first] != "*** Begin Edit" {
+        return Err(invalid_edit("change set must start with `*** Begin Edit`"));
     }
     let last = lines
         .iter()
         .rposition(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if !matches!(lines[last], "*** End Edit" | "*** End Patch") {
-        return Err(invalid_edit(
-            "change set must end with `*** End Edit` or `*** End Patch`",
-        ));
+    if lines[last] != "*** End Edit" {
+        return Err(invalid_edit("change set must end with `*** End Edit`"));
     }
 
     let mut operations = Vec::new();
@@ -1215,19 +1209,7 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
             index = next;
             continue;
         }
-        if let Some(path) = line.strip_prefix("*** Add File:") {
-            let path = parse_path(path)?;
-            let (body, next) = collect_body(&lines, index + 1, last);
-            let content = add_file_body(body);
-            ensure_text(&content)?;
-            operations.push(ParsedOperation::Write { path, content });
-            index = next;
-            continue;
-        }
-        if let Some(path) = line
-            .strip_prefix("*** Patch File:")
-            .or_else(|| line.strip_prefix("*** Update File:"))
-        {
+        if let Some(path) = line.strip_prefix("*** Patch File:") {
             let path = parse_path(path)?;
             let (body, next) = collect_body(&lines, index + 1, last);
             let patch = body.join("\n");
@@ -1309,21 +1291,6 @@ fn literal_body(lines: Vec<&str>) -> String {
     content
 }
 
-fn add_file_body(mut lines: Vec<&str>) -> String {
-    while lines.last() == Some(&"") {
-        lines.pop();
-    }
-    if !lines.is_empty() && lines.iter().all(|line| line.starts_with('+')) {
-        return literal_body(
-            lines
-                .into_iter()
-                .map(|line| line.strip_prefix('+').unwrap_or(line))
-                .collect(),
-        );
-    }
-    literal_body(lines)
-}
-
 const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
 
 fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
@@ -1349,13 +1316,88 @@ fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
 
 fn is_operation_header(line: &str) -> bool {
     line.starts_with("*** Write File:")
-        || line.starts_with("*** Add File:")
         || line.starts_with("*** Patch File:")
-        || line.starts_with("*** Update File:")
         || line.starts_with("*** Rewrite File:")
         || line.starts_with("*** Delete File:")
         || line.starts_with("*** Move File:")
-        || matches!(line, "*** End Edit" | "*** End Patch")
+        || line == "*** End Edit"
+}
+
+// @compat file-edit-apply-patch-aliases
+fn normalize_change_set_dialect(input: &str) -> String {
+    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = normalized.split('\n').collect::<Vec<_>>();
+    let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return normalized;
+    };
+    let Some(last) = lines.iter().rposition(|line| !line.trim().is_empty()) else {
+        return normalized;
+    };
+
+    let redundant_end_patch = if lines[last] == "*** End Edit" {
+        lines[..last]
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .filter(|index| lines[*index] == "*** End Patch")
+    } else {
+        None
+    };
+    let body_end = redundant_end_patch.unwrap_or(last);
+
+    let mut output = Vec::<String>::with_capacity(lines.len());
+    output.extend(lines[..first].iter().map(|line| (*line).to_string()));
+    output.push(match lines[first] {
+        "*** Begin Patch" => "*** Begin Edit".to_string(),
+        line => line.to_string(),
+    });
+
+    let mut index = first + 1;
+    while index < body_end {
+        let line = lines[index];
+        if let Some(path) = line.strip_prefix("*** Add File:") {
+            output.push(format!("*** Write File:{path}"));
+            let body_start = index + 1;
+            let mut next = body_start;
+            while next < body_end && !is_dialect_operation_header(lines[next]) {
+                next += 1;
+            }
+            let mut body = lines[body_start..next].to_vec();
+            while body.last() == Some(&"") {
+                body.pop();
+            }
+            if !body.is_empty() && body.iter().all(|line| line.starts_with('+')) {
+                output.extend(
+                    body.into_iter()
+                        .map(|line| line.strip_prefix('+').unwrap_or(line).to_string()),
+                );
+            } else {
+                output.extend(body.into_iter().map(str::to_string));
+            }
+            index = next;
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Update File:") {
+            output.push(format!("*** Patch File:{path}"));
+        } else {
+            output.push(line.to_string());
+        }
+        index += 1;
+    }
+
+    if lines[last] == "*** End Patch" || lines[last] == "*** End Edit" {
+        output.push("*** End Edit".to_string());
+    } else {
+        output.push(lines[last].to_string());
+    }
+    output.extend(lines[last + 1..].iter().map(|line| (*line).to_string()));
+    output.join("\n")
+}
+
+fn is_dialect_operation_header(line: &str) -> bool {
+    is_operation_header(line)
+        || line.starts_with("*** Add File:")
+        || line.starts_with("*** Update File:")
+        || line == "*** End Patch"
 }
 
 fn skip_blank_lines(lines: &[&str], mut index: usize, end: usize) -> usize {

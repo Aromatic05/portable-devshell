@@ -1824,6 +1824,84 @@ fn file_edit_accepts_common_apply_patch_aliases() {
 }
 
 #[test]
+fn file_edit_accepts_pi_v2_redundant_apply_patch_trailer() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-pi-v2-trailer";
+    fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Patch\n",
+                "*** Update File: document.txt\n",
+                "@@\n",
+                "-old\n",
+                "+new\n",
+                "*** End Patch\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "new\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_dialect_normalization_does_not_rewrite_literal_body_markers() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-literal-dialect-marker";
+    start(&env, instance);
+
+    let edited = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Write File: marker.txt\n",
+                "before\n",
+                "*** Begin Patch\n",
+                "after\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("marker.txt")).unwrap(),
+        "before\n*** Begin Patch\nafter\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_tools_normalize_bare_workspace_paths_and_selector_ranges() {
     let env = TestEnv::new();
     let instance = "aromatic-file-path-normalization";

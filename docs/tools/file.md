@@ -158,7 +158,7 @@ Delete File
 Move File
 ```
 
-Canonical 方言仍然是 `*** Begin Edit` / `*** End Edit` 与上述五种 section。为兼容常见 coding-agent 先验，parser 同时接受 `*** Begin Patch` / `*** End Patch`、`*** Update File:`（等价于 `Patch File`）以及 `*** Add File:`（等价于 `Write File`）。Codex 风格 `Add File` 中每行统一的 `+` 前缀会被去除。
+Canonical 方言仍然只有 `*** Begin Edit` / `*** End Edit` 与上述五种 section。输入侧的 `@compat` normalization 会先把常见 coding-agent 方言 `*** Begin Patch` / `*** End Patch`、`*** Update File:`（等价于 `Patch File`）以及 `*** Add File:`（等价于 `Write File`）归一化为 canonical 形式，再交给 parser。Codex 风格 `Add File` 中每行统一的 `+` 前缀会在 normalization 时去除。兼容层也接受模型实际产生的冗余尾部 `*** End Patch` 后再跟 `*** End Edit`。
 
 ### Write File
 
