@@ -19,6 +19,7 @@ import {
 
 export const PI_PROVIDER_ID = "pi";
 export const PI_PROVIDER_VERSION = "0.1.3";
+export const PI_SDK_ENTRYPOINT_ENV = "PORTABLE_DEVSHELL_PI_SDK_ENTRYPOINT";
 
 export interface PiProviderInstallerLike {
     ensureInstalled(

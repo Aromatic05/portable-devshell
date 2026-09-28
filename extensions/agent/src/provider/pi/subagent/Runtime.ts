@@ -4,7 +4,6 @@ import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 
 import { createDevshellPiExtension, type DevshellPiToolSession, type PiExtensionApiLike } from "../adapt/Bridge.js";
 import {
-    hasExpandedPiTmuxResources,
     PI_TMUX_TOOL_DOMAIN,
     PiToolExposureController,
 } from "../adapt/ToolExposure.js";
@@ -58,6 +57,12 @@ export interface PiSubagentPollResult {
     readonly timedOut: boolean;
 }
 
+export interface PiSubagentMainState {
+    readonly model?: PiModelLike;
+    readonly running: boolean;
+    readonly thinkingLevel?: string;
+}
+
 export class PiSubagentRuntime {
     readonly #agentDir: string;
     readonly #gui: PiSubagentGuiLike;
@@ -68,7 +73,7 @@ export class PiSubagentRuntime {
     readonly #sdk: PiSdkModule;
     readonly #tools: DevshellPiToolSession;
     readonly #onChildrenChanged?: (hasAliveChildren: boolean) => void;
-    #main?: PiSessionLike;
+    #main?: () => PiSubagentMainState;
 
     constructor(options: {
         agentDir: string;
@@ -90,10 +95,10 @@ export class PiSubagentRuntime {
         this.#tools = options.tools;
     }
 
-    bindMain(session: PiSessionLike): void {
+    bindMain(main: () => PiSubagentMainState): void {
         if (this.#main !== undefined)
             throw new Error("Pi subagent runtime is already bound to /root/main.");
-        this.#main = session;
+        this.#main = main;
     }
 
     async listProfiles(): Promise<readonly PiAgentProfile[]> {
@@ -118,7 +123,8 @@ export class PiSubagentRuntime {
                 `Unknown Agent profile: ${input.profile}. Available: ${available || "none"}.`,
             );
         }
-        const model = await this.#resolveModel(profile);
+        const main = this.#requireMain();
+        const model = await this.#resolveModel(profile, main.model);
         const settingsManager = this.#sdk.SettingsManager.create(
             this.#localCwd,
             this.#agentDir,
@@ -137,13 +143,12 @@ export class PiSubagentRuntime {
         });
         await resourceLoader.reload();
         const sessionManager = this.#sdk.SessionManager.create(this.#localCwd);
-        const main = this.#requireMain();
         const created = await this.#sdk.createAgentSession({
             agentDir: this.#agentDir,
             cwd: this.#localCwd,
             ...(model === undefined ? {} : { model }),
-            ...(typeof main.agent?.state?.thinkingLevel === "string"
-                ? { thinkingLevel: main.agent.state.thinkingLevel }
+            ...(typeof main.thinkingLevel === "string"
+                ? { thinkingLevel: main.thinkingLevel }
                 : {}),
             modelRuntime: this.#modelRuntime,
             noTools: "builtin",
@@ -157,15 +162,11 @@ export class PiSubagentRuntime {
         const toolExposure = new PiToolExposureController(session, {
             tmux: PI_TMUX_TOOL_DOMAIN,
         });
-        toolExposure.setExpanded(
-            "tmux",
-            await hasExpandedPiTmuxResources(this.#tools),
-        );
         const record: PiSubagentRecord = {
             activity: "running",
             id: randomUUID(),
             lifecycle: "alive",
-            model: model === undefined ? modelName(main.agent?.state?.model) : modelName(model),
+            model: model === undefined ? modelName(main.model) : modelName(model),
             name: input.name,
             path,
             ...(profile === undefined ? {} : { profile: profile.name }),
@@ -226,7 +227,7 @@ export class PiSubagentRuntime {
             cursor: this.#registry.cursor,
             events,
             main: {
-                activity: this.#requireMain().isStreaming ? "running" : "idle",
+                activity: this.#requireMain().running ? "running" : "idle",
                 agent: PI_MAIN_AGENT_PATH,
                 lifecycle: "alive",
             },
@@ -317,18 +318,18 @@ export class PiSubagentRuntime {
         );
     }
 
-    #requireMain(): PiSessionLike {
+    #requireMain(): PiSubagentMainState {
         if (this.#main === undefined)
             throw new Error("Pi subagent runtime is not bound to /root/main.");
-        return this.#main;
+        return this.#main();
     }
 
-    async #resolveModel(profile: PiAgentProfile | undefined): Promise<PiModelLike | undefined> {
+    async #resolveModel(
+        profile: PiAgentProfile | undefined,
+        inherited: PiModelLike | undefined,
+    ): Promise<PiModelLike | undefined> {
         const candidates = profile?.candidateModels ?? [];
-        if (candidates.length === 0) {
-            const inherited = this.#requireMain().agent?.state?.model;
-            return isModel(inherited) ? inherited : undefined;
-        }
+        if (candidates.length === 0) return inherited;
         for (const candidate of candidates) {
             const model = findModel(this.#modelRuntime, candidate);
             if (model === undefined) continue;
@@ -437,13 +438,8 @@ function findModel(runtime: PiModelRuntimeLike, candidate: string): PiModelLike 
         .find((model) => model.id === candidate || model.name === candidate);
 }
 
-function isModel(value: unknown): value is PiModelLike {
-    const record = asRecord(value);
-    return typeof record?.id === "string" && typeof record.provider === "string";
-}
-
-function modelName(value: unknown): string | undefined {
-    return isModel(value) ? `${value.provider}/${value.id}` : undefined;
+function modelName(value: PiModelLike | undefined): string | undefined {
+    return value === undefined ? undefined : `${value.provider}/${value.id}`;
 }
 
 function finalAssistantText(session: PiSessionLike): string {

@@ -76,6 +76,9 @@ export async function activate(context: ExtensionContext): Promise<void> {
             await providerManager.resolveProvider(requested),
     });
     await providerManager.initialize();
+    if (providerRegistry.get(PI_PROVIDER_ID) !== undefined) {
+        await publishPiCommand(context);
+    }
     activeRuntime = runtime;
     context.register(
         nativeCommands,
@@ -133,16 +136,7 @@ function createProviderDefinitions(
             id: PI_PROVIDER_ID,
             install: async (runtime, options) => {
                 await packages.install(runtime, piPackage, options);
-                const command = await ensurePiCommand(context);
-                if (!command.installed) {
-                    context.logger.warn(
-                        command.reason === "collision"
-                            ? "Pi Provider is installed, but " +
-                                  command.command +
-                                  " is owned by another installation and was not replaced."
-                            : "Pi Provider is installed, but the packaged Pi launcher is missing; the pi command was not published.",
-                    );
-                }
+                await publishPiCommand(context);
             },
             isInstalled: async (runtime) =>
                 (await packages.isInstalled(runtime, piPackage)) ||
@@ -166,6 +160,18 @@ function createProviderDefinitions(
             version: OPENCODE_PROVIDER_VERSION,
         },
     ];
+}
+
+async function publishPiCommand(context: ExtensionContext): Promise<void> {
+    const command = await ensurePiCommand(context);
+    if (command.installed) return;
+    context.logger.warn(
+        command.reason === "collision"
+            ? "Pi Provider is installed, but " +
+                  command.command +
+                  " is owned by another installation and was not replaced."
+            : "Pi Provider is installed, but the packaged Pi launcher is missing; the pi command was not published.",
+    );
 }
 
 function createAgentWebPage(providers: AgentProviderManager): WebPageBinding {

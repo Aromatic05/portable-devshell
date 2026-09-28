@@ -4,13 +4,11 @@ export interface PiModelLike {
     id: string;
     name?: string;
     provider: string;
-    [key: string]: unknown;
 }
 
 export interface PiProviderLike {
     id: string;
     name?: string;
-    [key: string]: unknown;
 }
 
 export interface PiAuthCheckLike {
@@ -57,14 +55,14 @@ export interface PiSessionLike {
         state?: {
             isStreaming?: boolean;
             messages?: unknown[];
-            model?: unknown;
-            thinkingLevel?: unknown;
+            model?: PiModelLike;
+            thinkingLevel?: string;
         };
     };
     abort(): Promise<void>;
     dispose(): void;
     followUp(text: string): Promise<void>;
-    getActiveToolNames?(): string[];
+    getActiveToolNames(): string[];
     prompt(
         text: string,
         options?: {
@@ -73,11 +71,9 @@ export interface PiSessionLike {
         },
     ): Promise<void>;
     reload(): Promise<void>;
-    setActiveToolsByName?(toolNames: readonly string[]): void;
+    setActiveToolsByName(toolNames: readonly string[]): void;
     waitForIdle(): Promise<void>;
-    setModel?(model: PiModelLike): Promise<void>;
     setSessionName?(name: string): void;
-    setThinkingLevel?(level: string): void;
     subscribe?(listener: (event: unknown) => void): () => void;
 }
 

@@ -29,6 +29,14 @@ class FakeSession implements PiSessionLike {
     readonly agent: NonNullable<PiSessionLike["agent"]>;
     disposed = false;
     aborted = 0;
+    #activeTools = [
+        "file_read",
+        "tmux_input",
+        "tmux_inspect",
+        "tmux_manage",
+        "tmux_read",
+        "tmux_run",
+    ];
     #streaming = false;
     #turn?: ReturnType<typeof deferred>;
     #listeners = new Set<(event: unknown) => void>();
@@ -62,6 +70,10 @@ class FakeSession implements PiSessionLike {
         this.followUps.push(text);
     }
 
+    getActiveToolNames(): string[] {
+        return [...this.#activeTools];
+    }
+
     async prompt(text: string): Promise<void> {
         this.prompts.push(text);
         this.#streaming = true;
@@ -70,6 +82,10 @@ class FakeSession implements PiSessionLike {
     }
 
     async reload(): Promise<void> {}
+
+    setActiveToolsByName(toolNames: readonly string[]): void {
+        this.#activeTools = [...toolNames];
+    }
 
     async waitForIdle(): Promise<void> {}
 
@@ -188,7 +204,10 @@ function fakeRuntime() {
         sdk,
         tools,
     });
-    runtime.bindMain(main);
+    runtime.bindMain(() => ({
+        model: mainModel,
+        running: main.isStreaming === true,
+    }));
     return { attached, children, detached, main, runtime };
 }
 

@@ -5,9 +5,11 @@ import type {
     InputEventResult,
     SessionStartEvent,
     SessionShutdownEvent,
+    ToolDefinition,
     ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "@portable-devshell/shared";
+import type { TSchema } from "typebox";
 
 import {
     prepareAgentModelToolInput,
@@ -88,7 +90,7 @@ export interface PiExtensionApiLike {
         name: string,
         options: {
             description?: string;
-            handler: (args: string) => Promise<void> | void;
+            handler: (args: string) => Promise<void>;
         },
     ): void;
     registerTool(tool: PiToolLike): void;
@@ -98,36 +100,11 @@ export interface PiExtensionApiLike {
     ): void;
 }
 
-export interface PiToolLike {
-    description: string;
-    execute(
-        toolCallId: string,
-        params: unknown,
-        signal?: AbortSignal,
-        onUpdate?: (result: {
-            content: Array<{ text: string; type: "text" }>;
-            details: JsonValue;
-        }) => void,
-    ): Promise<{
-        content: Array<{ text: string; type: "text" }>;
-        details: JsonValue;
-    }>;
-    label: string;
-    name: string;
-    parameters: JsonValue;
-    renderShell?: "default" | "self";
-    renderCall?(
-        args: unknown,
-        theme: PiThemeLike,
-        context: PiToolRenderContextLike,
-    ): unknown;
-    renderResult?(
-        result: PiToolRenderResultLike,
-        options: PiToolRenderResultOptionsLike,
-        theme: PiThemeLike,
-        context: PiToolRenderContextLike,
-    ): unknown;
-}
+export type PiToolLike = ToolDefinition<
+    TSchema,
+    JsonValue,
+    Record<string, unknown>
+>;
 
 export interface DevshellPiToolSession {
     readonly target: DevshellPiTarget;
@@ -364,7 +341,7 @@ function toPiTool(
         },
         label: definition.name,
         name: definition.name,
-        parameters: definition.inputSchema,
+        parameters: definition.inputSchema as TSchema,
         ...(definition.name === "file_edit"
             ? { renderShell: "self" as const }
             : {}),

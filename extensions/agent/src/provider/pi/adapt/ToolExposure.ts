@@ -1,7 +1,8 @@
-import type { JsonValue } from "@portable-devshell/shared";
-
-import type { PiSessionLike } from "../runtime/Sdk.js";
-import type { DevshellPiToolSession } from "./Bridge.js";
+export interface PiToolExposureSurface {
+    getActiveToolNames(): string[];
+    setActiveToolsByName(toolNames: readonly string[]): void;
+    subscribe?(listener: (event: unknown) => void): () => void;
+}
 
 export interface PiToolExposureDomain {
     readonly expanded: readonly string[];
@@ -27,38 +28,26 @@ export class PiToolExposureController {
     readonly #baseTools: readonly string[];
     readonly #domains: Readonly<Record<string, PiToolExposureDomain>>;
     readonly #expanded = new Map<string, boolean>();
-    readonly #session: PiSessionLike;
-    readonly #supported: boolean;
+    readonly #surface: PiToolExposureSurface;
     #unsubscribe?: () => void;
 
     constructor(
-        session: PiSessionLike,
+        surface: PiToolExposureSurface,
         domains: Readonly<Record<string, PiToolExposureDomain>>,
     ) {
-        this.#session = session;
+        this.#surface = surface;
         this.#domains = domains;
-        const getActive = session.getActiveToolNames;
-        const setActive = session.setActiveToolsByName;
-        this.#supported =
-            typeof getActive === "function" && typeof setActive === "function";
         const controlled = new Set(
             Object.values(domains).flatMap((domain) => domain.expanded),
         );
-        this.#baseTools =
-            typeof getActive === "function" && typeof setActive === "function"
-                ? getActive.call(session).filter(
-                      (name) => !controlled.has(name),
-                  )
-                : [];
+        this.#baseTools = surface
+            .getActiveToolNames()
+            .filter((name) => !controlled.has(name));
         for (const name of Object.keys(domains)) this.#expanded.set(name, false);
         this.#apply();
-        if (this.#supported && session.subscribe !== undefined) {
-            this.#unsubscribe = session.subscribe((event) => this.#observe(event));
+        if (surface.subscribe !== undefined) {
+            this.#unsubscribe = surface.subscribe((event) => this.#observe(event));
         }
-    }
-
-    get supported(): boolean {
-        return this.#supported;
     }
 
     isExpanded(domain: string): boolean {
@@ -78,8 +67,15 @@ export class PiToolExposureController {
         this.#unsubscribe = undefined;
     }
 
+    observeToolResult(toolName: string, isError: boolean): void {
+        if (isError) return;
+        for (const [name, domain] of Object.entries(this.#domains)) {
+            if (domain.expandOnTools?.includes(toolName) === true)
+                this.setExpanded(name, true);
+        }
+    }
+
     #apply(): void {
-        if (!this.#supported) return;
         const tools = new Set(this.#baseTools);
         for (const [name, domain] of Object.entries(this.#domains)) {
             const selected =
@@ -88,50 +84,21 @@ export class PiToolExposureController {
                     : domain.gateway;
             for (const toolName of selected) tools.add(toolName);
         }
-        this.#session.setActiveToolsByName?.([...tools]);
+        this.#surface.setActiveToolsByName([...tools]);
     }
 
     #observe(value: unknown): void {
         const event = asRecord(value);
         if (
             event?.type !== "tool_execution_end" ||
-            event.isError === true ||
             typeof event.toolName !== "string"
         )
             return;
-        for (const [name, domain] of Object.entries(this.#domains)) {
-            if (domain.expandOnTools?.includes(event.toolName) === true)
-                this.setExpanded(name, true);
-        }
+        this.observeToolResult(event.toolName, event.isError === true);
     }
 }
-
-export async function hasExpandedPiTmuxResources(
-    tools: DevshellPiToolSession,
-): Promise<boolean> {
-    if (!tools.tools.some((tool) => tool.name === "tmux_manage")) return false;
-    try {
-        const result = asRecord(
-            await tools.callTool(
-                "tmux_manage",
-                { command: "list" },
-                "pi-tool-exposure-tmux-list",
-            ),
-        );
-        if (!Array.isArray(result?.panes)) return false;
-        return result.panes.some((value) => {
-            const pane = asRecord(value);
-            if (pane === undefined) return false;
-            if (typeof pane.name === "string" && pane.name !== "main") return true;
-            return asRecord(pane.task) !== undefined;
-        });
-    } catch {
-        return false;
-    }
-}
-
-function asRecord(value: unknown): Record<string, JsonValue> | undefined {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as Record<string, JsonValue>)
+        ? (value as Record<string, unknown>)
         : undefined;
 }

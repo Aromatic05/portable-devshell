@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
 
 import {
+    type ExtensionAPI,
+    type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+
+import {
     CONTROL_PROTOCOL_VERSION,
     ClientConnection,
     connectControlClientChannel,
@@ -10,12 +15,11 @@ import {
 } from "@portable-devshell/shared";
 
 import { projectAgentModelTools } from "../../../builtin/provider/AgentToolProjection.js";
-import {
-    createDevshellPiExtension,
-    type DevshellPiToolSession,
-    type PiExtensionApiLike,
-} from "./Bridge.js";
+import type { DevshellPiToolSession } from "./Bridge.js";
 import type { DevshellPiTarget } from "./Target.js";
+import { PiMainRuntime } from "../runtime/MainRuntime.js";
+import { PI_SDK_ENTRYPOINT_ENV } from "../runtime/Provider.js";
+import { PiSdkLoader, type PiModelLike } from "../runtime/Sdk.js";
 
 export interface StandaloneDevshellPiOptions {
     autoStartControl?: boolean;
@@ -32,17 +36,91 @@ interface StandaloneControlSession {
 
 export function createStandaloneDevshellPiExtension(
     options: StandaloneDevshellPiOptions = {},
-): (pi: PiExtensionApiLike) => Promise<void> {
+): (pi: ExtensionAPI) => Promise<void> {
     return async (pi) => {
         const session = await openStandaloneDevshellPiToolSession(options);
-        await createDevshellPiExtension(session)(pi);
+        const sdkEntrypoint = (options.environment ?? process.env)[PI_SDK_ENTRYPOINT_ENV];
+        if (sdkEntrypoint === undefined)
+            throw new Error("Pi SDK entrypoint is not configured by the DevShell launcher.");
+        const sdk = await new PiSdkLoader().load(sdkEntrypoint);
+        const main = new PiMainRuntime({
+            agentDir: sdk.getAgentDir(),
+            gui: {
+                attach: (child) => child.sessionId,
+                detach() {},
+            },
+            localCwd: options.cwd ?? process.cwd(),
+            modelRuntime: await sdk.ModelRuntime.create(),
+            sdk,
+            tools: session,
+        });
+        let mainState: {
+            model?: PiModelLike;
+            running: boolean;
+            thinkingLevel?: string;
+        } = { running: false };
+        try {
+            await main.extension()(pi);
+            pi.on("session_start", () => {
+                pi.setSessionName(
+                    `/root/main · ${session.target.instance}:${session.target.workspace}`,
+                );
+                main.bindMain(
+                    () => mainState,
+                    {
+                        getActiveToolNames: () => pi.getActiveTools(),
+                        setActiveToolsByName: (toolNames) =>
+                            pi.setActiveTools([...toolNames]),
+                    },
+                );
+            });
+            pi.on("before_agent_start", (_event, context) => {
+                mainState = standaloneMainState(context, true);
+            });
+            pi.on("agent_settled", (_event, context) => {
+                mainState = standaloneMainState(context, false);
+            });
+            pi.on("input", () => {
+                main.notifyMainInput();
+            });
+            pi.on("tool_result", (event) => {
+                main.observeToolResult(event.toolName, event.isError === true);
+            });
+            pi.on("session_shutdown", async () => {
+                await main.close();
+                await session.close();
+            });
+        } catch (error) {
+            await main.close();
+            await session.close();
+            throw error;
+        }
     };
 }
 
 export async function standaloneDevshellPiExtension(
-    pi: PiExtensionApiLike,
+    pi: ExtensionAPI,
 ): Promise<void> {
     await createStandaloneDevshellPiExtension()(pi);
+}
+
+function standaloneMainState(
+    context: ExtensionContext,
+    running: boolean,
+): {
+    model?: PiModelLike;
+    running: boolean;
+    thinkingLevel?: string;
+} {
+    return {
+        ...(context.model === undefined
+            ? {}
+            : { model: context.model }),
+        running,
+        ...(typeof context.thinkingLevel === "string"
+            ? { thinkingLevel: context.thinkingLevel }
+            : {}),
+    };
 }
 
 export async function openStandaloneDevshellPiToolSession(

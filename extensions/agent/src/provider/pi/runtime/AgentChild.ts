@@ -1,22 +1,12 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { createDevshellPiExtension } from "../adapt/Bridge.js";
 import { PiChildToolSession } from "../adapt/ChildToolSession.js";
-import {
-    hasExpandedPiTmuxResources,
-    PI_TMUX_TOOL_DOMAIN,
-    PiToolExposureController,
-} from "../adapt/ToolExposure.js";
-import { PiAgentProfileCatalog } from "../profile/Loader.js";
 import { PiGuiWeb } from "../render/GuiWeb.js";
-import { PiSubagentRuntime } from "../subagent/Runtime.js";
-import {
-    attachPiSubagentTools,
-    PI_SUBAGENT_TOOL_NAMES,
-} from "../subagent/Tools.js";
+import { PiMainRuntime } from "./MainRuntime.js";
 import {
     PiSdkLoader,
+    type PiModelLike,
     type PiModelRuntimeLike,
     type PiSdkModule,
     type PiSessionLike,
@@ -33,10 +23,9 @@ import type { AgentWorkerTarget } from "../../../builtin/worker/AgentWorkerTarge
 
 interface ManagedPiAgent {
     localCwd: string;
+    main: PiMainRuntime;
     session: PiSessionLike;
-    subagents: PiSubagentRuntime;
     target: AgentWorkerTarget;
-    toolExposure: PiToolExposureController;
     tools: PiChildToolSession;
 }
 
@@ -135,30 +124,21 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         input.localCwd,
         activeAgentDir,
     );
-    let toolExposure: PiToolExposureController | undefined;
-    const subagents = new PiSubagentRuntime({
+    const main = new PiMainRuntime({
         agentDir: activeAgentDir,
         gui: activeGui,
         localCwd: input.localCwd,
         modelRuntime: activeModelRuntime,
-        onChildrenChanged: (hasAliveChildren) =>
-            toolExposure?.setExpanded("agent", hasAliveChildren),
-        profiles: new PiAgentProfileCatalog(activeAgentDir, tools),
         sdk: activeSdk,
         tools,
     });
-    const baseExtension = createDevshellPiExtension(tools, {
-        closeSessionOnShutdown: false,
-    });
+    const mainExtension = main.extension();
     const resourceLoader = new activeSdk.DefaultResourceLoader({
         agentDir: activeAgentDir,
         cwd: input.localCwd,
         extensionFactories: [
             {
-                factory: async (pi: Parameters<typeof baseExtension>[0]) => {
-                    await baseExtension(pi);
-                    attachPiSubagentTools(pi, subagents);
-                },
+                factory: mainExtension,
                 hidden: true,
                 name: "portable-devshell",
             },
@@ -183,28 +163,20 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
             `/root/main · ${input.target.instance}:${input.target.workspace}`,
         );
         activeGui.attach(session, input.localCwd);
-        toolExposure = new PiToolExposureController(session, {
-            agent: {
-                expanded: PI_SUBAGENT_TOOL_NAMES,
-                gateway: ["agent_spawn"],
-            },
-            tmux: PI_TMUX_TOOL_DOMAIN,
-        });
-        toolExposure.setExpanded(
-            "tmux",
-            await hasExpandedPiTmuxResources(tools),
+        const activeSession = session;
+        main.bindMain(
+            () => sessionMainState(activeSession),
+            activeSession,
         );
-        subagents.bindMain(session);
         agents.set(input.agentId, {
             localCwd: input.localCwd,
+            main,
             session,
-            subagents,
             target: { ...input.target },
-            toolExposure,
             tools,
         });
     } catch (error) {
-        toolExposure?.close();
+        await main.close().catch(() => undefined);
         session?.dispose();
         try {
             await tools.close().catch(() => undefined);
@@ -226,7 +198,7 @@ async function commandAgent(
     const active = managed.session;
     switch (message.command) {
         case "prompt":
-            managed.subagents.notifyMainInput();
+            managed.main.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "prompt",
@@ -234,7 +206,7 @@ async function commandAgent(
             );
             return;
         case "steer":
-            managed.subagents.notifyMainInput();
+            managed.main.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "steer",
@@ -242,7 +214,7 @@ async function commandAgent(
             );
             return;
         case "followUp":
-            managed.subagents.notifyMainInput();
+            managed.main.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "followUp",
@@ -270,8 +242,7 @@ async function stopAgent(agentId: string): Promise<void> {
     if (active === undefined) return;
     agents.delete(agentId);
     try {
-        await active.subagents.close();
-        active.toolExposure.close();
+        await active.main.close();
         await disposeManagedPiAgent(active, requireGui());
     } finally {
         try {
@@ -345,6 +316,21 @@ function requireMessage(message: PiChildAgentCommandMessage): string {
     if (typeof message.message === "string" && message.message.length > 0)
         return message.message;
     throw new Error(`${message.command} requires a message.`);
+}
+
+function sessionMainState(session: PiSessionLike): {
+    model?: PiModelLike;
+    running: boolean;
+    thinkingLevel?: string;
+} {
+    const state = session.agent?.state;
+    return {
+        ...(state?.model === undefined ? {} : { model: state.model }),
+        running: session.isStreaming === true,
+        ...(state?.thinkingLevel === undefined
+            ? {}
+            : { thinkingLevel: state.thinkingLevel }),
+    };
 }
 
 function sendFailure(message: PiParentMessage, error: unknown): void {

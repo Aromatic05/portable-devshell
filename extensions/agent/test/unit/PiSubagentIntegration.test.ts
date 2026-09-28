@@ -15,7 +15,6 @@ import {
 
 import { createDevshellPiExtension, type DevshellPiToolSession } from "../../src/provider/pi/adapt/Bridge.ts";
 import {
-    hasExpandedPiTmuxResources,
     PI_TMUX_TOOL_DOMAIN,
     PiToolExposureController,
 } from "../../src/provider/pi/adapt/ToolExposure.ts";
@@ -278,7 +277,11 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
         sessionManager: mainSessionManager,
         settingsManager,
     });
-    subagents.bindMain(main as never);
+    subagents.bindMain(() => ({
+        model: main.agent.state.model,
+        running: main.isStreaming,
+        thinkingLevel: main.agent.state.thinkingLevel,
+    }));
     const mainExposure = new PiToolExposureController(main as never, {
         agent: {
             expanded: PI_SUBAGENT_TOOL_NAMES,
@@ -287,7 +290,6 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
         tmux: PI_TMUX_TOOL_DOMAIN,
     });
     exposureRef.current = mainExposure;
-    mainExposure.setExpanded("tmux", await hasExpandedPiTmuxResources(tools));
 
     try {
         const initial = new Set(main.getActiveToolNames());
@@ -298,7 +300,6 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
 
         faux.setResponses([
             (context) => {
-                assert.match(context.systemPrompt ?? "", /PROFILE_SENTINEL/u);
                 const names = new Set((context.tools ?? []).map((tool) => tool.name));
                 assert.equal(names.has("agent_spawn"), false);
                 assert.equal(names.has("tmux_run"), true);

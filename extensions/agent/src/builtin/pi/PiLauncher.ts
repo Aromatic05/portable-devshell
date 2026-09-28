@@ -8,6 +8,7 @@ import { registerAgentProviderModuleResolver } from "../../provider/AgentProvide
 import {
     PI_PROVIDER_ID,
     PI_PROVIDER_VERSION,
+    PI_SDK_ENTRYPOINT_ENV,
 } from "../../provider/pi/runtime/Provider.js";
 import {
     PI_BOOTSTRAP_VERSION,
@@ -120,6 +121,7 @@ export async function launchInstalledPi(
     environment.PORTABLE_DEVSHELL_PI_WORKSPACE = launchWorkspace;
     environment.PI_MANAGED_INSTALL_ROOT =
         runtime.installation.managedInstallRoot;
+    environment[PI_SDK_ENTRYPOINT_ENV] = runtime.installation.entrypoint;
 
     registerAgentProviderModuleResolver(
         runtime.installation.moduleRoot,

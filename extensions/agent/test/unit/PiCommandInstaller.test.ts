@@ -1,21 +1,24 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import {
     lstat,
     mkdir,
-    readFile,
     rm,
     symlink,
     writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
 import { ensurePiCommand } from "../../src/builtin/pi/PiCommandInstaller.ts";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
-async function harness(t: test.TestContext) {
+const runFile = promisify(execFile);
+
+async function harness(t: test.TestContext, label = "current") {
     const root = await createTestTempDirectory("agent-pi-command");
     t.after(async () => await rm(root, { force: true, recursive: true }));
     const codeDirectory = join(root, "code");
@@ -30,11 +33,7 @@ async function harness(t: test.TestContext) {
     await mkdir(join(codeDirectory, "dist", "builtin", "pi"), {
         recursive: true,
     });
-    await writeFile(
-        launcher,
-        "export async function launchInstalledPi() {}\n",
-        "utf8",
-    );
+    await writeLauncher(launcher, label);
     const context = {
         capabilities: {},
         generation: "test-generation",
@@ -49,7 +48,7 @@ async function harness(t: test.TestContext) {
         register() {},
         version: "0.1.0",
     } as ExtensionContext;
-    return { binDirectory, context, launcher, root };
+    return { binDirectory, context, root };
 }
 
 test("Agent Pi Provider publishes its own Unix pi command", async (t) => {
@@ -65,9 +64,7 @@ test("Agent Pi Provider publishes its own Unix pi command", async (t) => {
 
     assert.equal(result.installed, true);
     assert.equal(result.command, join(h.binDirectory, "pi"));
-    const source = await readFile(result.command, "utf8");
-    assert.match(source, /portable-devshell-agent:pi-launcher-v1/u);
-    assert.match(source, /PiLauncher\.js/u);
+    assert.equal((await runFile(result.command)).stdout, "current\n");
     if (process.platform !== "win32") {
         assert.equal((await lstat(result.command)).mode & 0o111, 0o111);
     }
@@ -108,10 +105,40 @@ test("Agent Pi Provider migrates the legacy core-owned pi launcher", async (t) =
 
     assert.equal(result.installed, true);
     assert.equal((await lstat(result.command)).isSymbolicLink(), false);
-    assert.match(
-        await readFile(result.command, "utf8"),
-        /portable-devshell-agent:pi-launcher-v1/u,
+    assert.equal((await runFile(result.command)).stdout, "current\n");
+});
+
+test("Agent Pi command follows the current Extension generation", async (t) => {
+    const h = await harness(t, "generation-a");
+    const options = {
+        environment: { PORTABLE_DEVSHELL_BIN_DIR: h.binDirectory },
+        homeDirectory: h.root,
+        platform: "linux" as const,
+    };
+    const first = await ensurePiCommand(h.context, options);
+    assert.equal((await runFile(first.command)).stdout, "generation-a\n");
+
+    const nextCodeDirectory = join(h.root, "code-next");
+    const nextLauncher = join(
+        nextCodeDirectory,
+        "dist",
+        "builtin",
+        "pi",
+        "PiLauncher.js",
     );
+    await mkdir(join(nextCodeDirectory, "dist", "builtin", "pi"), {
+        recursive: true,
+    });
+    await writeLauncher(nextLauncher, "generation-b");
+    const nextContext = {
+        ...h.context,
+        generation: "test-generation-next",
+        paths: { ...h.context.paths, codeDirectory: nextCodeDirectory },
+    } satisfies ExtensionContext;
+
+    const second = await ensurePiCommand(nextContext, options);
+    assert.equal(second.command, first.command);
+    assert.equal((await runFile(second.command)).stdout, "generation-b\n");
 });
 
 test("Agent Pi Provider never replaces a foreign pi command", async (t) => {
@@ -131,8 +158,13 @@ test("Agent Pi Provider never replaces a foreign pi command", async (t) => {
         installed: false,
         reason: "collision",
     });
-    assert.equal(
-        await readFile(command, "utf8"),
-        "#!/bin/sh\necho foreign-pi\n",
-    );
+    assert.equal((await runFile(command)).stdout, "foreign-pi\n");
 });
+
+async function writeLauncher(path: string, label: string): Promise<void> {
+    await writeFile(
+        path,
+        `export async function launchInstalledPi() { process.stdout.write(${JSON.stringify(label + "\n")}); }\n`,
+        "utf8",
+    );
+}
