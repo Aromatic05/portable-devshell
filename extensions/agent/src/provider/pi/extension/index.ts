@@ -1,7 +1,6 @@
 export {
     createDevshellPiExtension,
     createDevshellPiWorkspaceBridge,
-    piPromptMetadata,
 } from "./DevshellPiBridge.js";
 export type {
     DevshellPiExtensionAttachOptions,
@@ -23,8 +22,7 @@ export {
 export type { StandaloneDevshellPiOptions } from "./standalone-client.js";
 
 export {
-    appendDevshellRemoteWorkspacePrompt,
-    replacePiProjectContext,
+    buildDevshellPiSystemPrompt,
 } from "./standalone-resources.js";
 
 export {

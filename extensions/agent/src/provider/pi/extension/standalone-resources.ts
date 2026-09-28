@@ -46,48 +46,44 @@ interface StandalonePiResourcesApiLike {
     ): void;
 }
 
-export function appendDevshellRemoteWorkspacePrompt(
-    basePrompt: string,
+export function buildDevshellPiSystemPrompt(
+    options: BeforeAgentStartEvent["systemPromptOptions"],
     target: DevshellPiTarget,
-): string {
-    const remoteWorkspace = `${target.instance}:${target.workspace}`;
-    const devshellPrompt = [
-        "portable-devshell execution environment:",
-        `- The real project workspace is ${remoteWorkspace}.`,
-        "- The local Pi process cwd is the launch workspace used for Pi session identity; it may differ from the real project workspace.",
-        "- Use the provided devshell tools for every project filesystem, shell, process, and artifact operation.",
-        "- Do not attempt to access the project with local Node.js filesystem/process APIs.",
-        "- Tool results come directly from devshell attached to the real project workspace.",
-    ].join("\n");
-    return basePrompt.length === 0
-        ? devshellPrompt
-        : `${basePrompt}\n\n${devshellPrompt}`;
-}
-
-export function replacePiProjectContext(
-    systemPrompt: string,
-    localContextFiles: readonly DevshellPiContextFile[],
-    remoteContextFiles: readonly DevshellPiContextFile[],
+    resources: DevshellPiWorkspaceResources,
     agentDir = getAgentDir(),
 ): string {
-    const resolvedAgentDir = resolve(agentDir);
-    const userContextFiles = localContextFiles.filter(
-        (file) => resolve(dirname(file.path)) === resolvedAgentDir,
-    );
-    const previousBlock = renderPiProjectContext(localContextFiles);
-    const replacementBlock = renderPiProjectContext([
-        ...userContextFiles,
-        ...remoteContextFiles,
-    ]);
-    if (previousBlock.length > 0 && systemPrompt.includes(previousBlock)) {
-        return systemPrompt.replace(previousBlock, replacementBlock);
-    }
-    if (remoteContextFiles.length === 0) return systemPrompt;
-    const currentWorkingDirectory = "\nCurrent working directory:";
-    const markerIndex = systemPrompt.lastIndexOf(currentWorkingDirectory);
-    if (markerIndex < 0)
-        return `${systemPrompt}${renderPiProjectContext(remoteContextFiles)}`;
-    return `${systemPrompt.slice(0, markerIndex)}${renderPiProjectContext(remoteContextFiles)}${systemPrompt.slice(markerIndex)}`;
+    const remoteWorkspace = `${target.instance}:${target.workspace}`;
+    const sections = [
+        [
+            "You are a coding agent working in a DevShell workspace.",
+            "",
+            `Workspace: ${remoteWorkspace}. Use DevShell tools for all project filesystem, shell, process, and artifact operations.`,
+            "",
+            "Engineering workflow:",
+            "- Prefer authoritative sources; inspect historical or superseded material only when needed.",
+            "- Gather only enough context for the next concrete implementation decision, then act.",
+            "- Batch related read-only investigation and prefer coherent edits over alternating model/tool one step at a time.",
+            "- Do not re-read unchanged or just-edited content without a concrete reason.",
+            "- Validate narrowly first; broaden only after the relevant checks pass.",
+            "- Once requirements are covered and validation passes, do one bounded final review; without a concrete new issue, finish.",
+        ].join("\n"),
+        options.customPrompt?.trim(),
+        options.appendSystemPrompt?.trim(),
+        renderPiProjectContext([
+            ...selectUserContextFiles(
+                options.contextFiles ?? [],
+                agentDir,
+            ),
+            ...resources.contextFiles,
+        ]),
+        renderDevshellPiSkills(resources.skills),
+    ];
+    return sections
+        .filter(
+            (section): section is string =>
+                typeof section === "string" && section.length > 0,
+        )
+        .join("\n\n");
 }
 
 export function attachStandaloneWorkspaceResources(
@@ -143,15 +139,22 @@ export function attachStandaloneWorkspaceResources(
         setActiveSkillNames(activeRemoteSkillNames);
     });
     pi.on("before_agent_start", (event) => ({
-        systemPrompt: appendDevshellRemoteWorkspacePrompt(
-            replacePiProjectContext(
-                event.systemPrompt,
-                event.systemPromptOptions.contextFiles ?? [],
-                resources.contextFiles,
-            ),
+        systemPrompt: buildDevshellPiSystemPrompt(
+            event.systemPromptOptions,
             target,
+            resources,
         ),
     }));
+}
+
+function selectUserContextFiles(
+    contextFiles: readonly DevshellPiContextFile[],
+    agentDir: string,
+): DevshellPiContextFile[] {
+    const resolvedAgentDir = resolve(agentDir);
+    return contextFiles.filter(
+        (file) => resolve(dirname(file.path)) === resolvedAgentDir,
+    );
 }
 
 function renderPiProjectContext(
@@ -159,9 +162,45 @@ function renderPiProjectContext(
 ): string {
     if (contextFiles.length === 0) return "";
     let block =
-        "\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n";
+        "<project_context>\n\nProject-specific instructions and guidelines:\n\n";
     for (const file of contextFiles) {
         block += `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>\n\n`;
     }
-    return `${block}</project_context>\n`;
+    return `${block}</project_context>`;
+}
+
+function renderDevshellPiSkills(
+    skills: readonly DevshellPiWorkspaceResources["skills"][number][],
+): string {
+    const visible = skills.filter(
+        (skill) => !skill.resource.disableModelInvocation,
+    );
+    if (visible.length === 0) return "";
+    const lines = [
+        "The following project skills provide specialized instructions for specific tasks.",
+        "Use file_read to load a skill file when the task matches its description.",
+        "Resolve relative references against the skill directory.",
+        "",
+        "<available_skills>",
+    ];
+    for (const { resource } of visible) {
+        lines.push("  <skill>");
+        lines.push(`    <name>${escapeXml(resource.name)}</name>`);
+        lines.push(
+            `    <description>${escapeXml(resource.description)}</description>`,
+        );
+        lines.push(`    <location>${escapeXml(resource.filePath)}</location>`);
+        lines.push("  </skill>");
+    }
+    lines.push("</available_skills>");
+    return lines.join("\n");
+}
+
+function escapeXml(value: string): string {
+    return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&apos;");
 }

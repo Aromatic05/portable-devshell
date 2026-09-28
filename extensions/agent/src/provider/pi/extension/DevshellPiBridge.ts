@@ -126,8 +126,6 @@ export interface PiToolLike {
     label: string;
     name: string;
     parameters: JsonValue;
-    promptGuidelines?: string[];
-    promptSnippet?: string;
     renderShell?: "default" | "self";
     renderCall?(
         args: unknown,
@@ -315,7 +313,6 @@ function toPiTool(
     session: DevshellPiToolSession,
     structuredToolErrors: Map<string, PiToolErrorPayload>,
 ): PiToolLike {
-    const prompt = piPromptMetadata(definition.name);
     return {
         description: definition.description,
         async execute(toolCallId, params, signal, onUpdate) {
@@ -380,7 +377,6 @@ function toPiTool(
         label: definition.name,
         name: definition.name,
         parameters: definition.inputSchema,
-        ...prompt,
         ...(definition.name === "file_edit"
             ? { renderShell: "self" as const }
             : {}),
@@ -418,31 +414,4 @@ function structuredPiToolErrorResult(error: PiToolErrorPayload): JsonValue {
 
 function isNamespacedToolErrorCode(code: string): boolean {
     return /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/u.test(code);
-}
-
-export function piPromptMetadata(
-    toolName: string,
-): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
-    switch (toolName) {
-        case "file_read":
-            return {
-                promptSnippet:
-                    "Read file contents, outlines, or metadata from the devshell workspace",
-            };
-        case "file_grep":
-            return {
-                promptSnippet: "Search file contents in the devshell workspace",
-            };
-        case "file_edit":
-            return {
-                promptSnippet:
-                    "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
-                promptGuidelines: [
-                    "Establish coverage with file_read or file_grep before the first file_edit change to existing content. Successful file_edit operations carry valid coverage forward to the resulting revision or moved path; re-read only when coverage is missing or stale, or when the next edit needs unseen existing lines.",
-                    "Prefer devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Common apply_patch aliases such as '*** Update File:' and '*** Add File:' are accepted for compatibility.",
-                ],
-            };
-        default:
-            return {};
-    }
 }

@@ -148,6 +148,13 @@ const AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS = new Map<
         },
     ],
     [
+        "file_edit",
+        {
+            changes:
+                "Ordered *** Begin Edit / *** End Edit change set using *** Patch File:, *** Write File:, *** Rewrite File:, *** Delete File:, or *** Move File: operations.",
+        },
+    ],
+    [
         "tmux_run",
         {
             timeout:

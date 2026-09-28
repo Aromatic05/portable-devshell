@@ -88,6 +88,19 @@ test("Agent model projection filters capabilities and strips non-model input fie
             .properties?.resultDetail,
         undefined,
     );
+    assert.match(
+        String(
+            (
+                projected[1]?.inputSchema as {
+                    properties?: Record<
+                        string,
+                        { description?: string; type?: string }
+                    >;
+                }
+            ).properties?.changes?.description ?? "",
+        ),
+        /Patch File.*Write File.*Rewrite File.*Delete File.*Move File/u,
+    );
     assert.equal(
         (projected[2]?.inputSchema as { properties?: Record<string, unknown> })
             .properties?.consumeOutput,

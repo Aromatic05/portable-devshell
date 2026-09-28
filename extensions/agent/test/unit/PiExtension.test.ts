@@ -6,15 +6,13 @@ import type { JsonValue } from "@portable-devshell/shared";
 
 import { prepareAgentModelToolInput } from "../../src/builtin/provider/AgentToolProjection.ts";
 import {
-    appendDevshellRemoteWorkspacePrompt,
+    buildDevshellPiSystemPrompt,
     createDevshellPiExtension,
     createDevshellPiWorkspaceBridge,
     createStandaloneDevshellPiExtension,
     expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
-    piPromptMetadata,
-    replacePiProjectContext,
     transformDevshellPiSkillInput,
     type PiToolLike,
 } from "../../src/provider/pi/extension/index.ts";
@@ -1062,59 +1060,58 @@ test("Pi devshell remote prompt expansion matches Pi positional and aggregate ar
     );
 });
 
-test("Pi devshell standalone context replaces local project instructions but preserves Pi user instructions", () => {
-    const localContext = [
-        { content: "global", path: "/home/test/.pi/agent/AGENTS.md" },
-        { content: "local-project", path: "/repo/AGENTS.md" },
-    ];
-    const localBlock = [
-        "",
-        "",
-        "<project_context>",
-        "",
-        "Project-specific instructions and guidelines:",
-        "",
-        '<project_instructions path="/home/test/.pi/agent/AGENTS.md">',
-        "global",
-        "</project_instructions>",
-        "",
-        '<project_instructions path="/repo/AGENTS.md">',
-        "local-project",
-        "</project_instructions>",
-        "",
-        "</project_context>",
-        "",
-    ].join("\n");
-    const replaced = replacePiProjectContext(
-        `base${localBlock}\nCurrent working directory: /repo`,
-        localContext,
-        [{ content: "remote-project", path: "worker-a:/srv/repo/AGENTS.md" }],
+test("Pi devshell owns the base system prompt while preserving user and remote resources", () => {
+    const prompt = buildDevshellPiSystemPrompt(
+        {
+            appendSystemPrompt: "append-user-system",
+            contextFiles: [
+                {
+                    content: "global-user-context",
+                    path: "/home/test/.pi/agent/AGENTS.md",
+                },
+                { content: "local-project", path: "/repo/AGENTS.md" },
+            ],
+            customPrompt: "custom-user-system",
+            cwd: "/local/pi/cwd",
+        },
+        { instance: "worker-a", workspace: "/srv/repo" },
+        {
+            contextFiles: [
+                {
+                    content: "remote-project",
+                    path: "worker-a:/srv/repo/AGENTS.md",
+                },
+            ],
+            prompts: [],
+            skills: [
+                {
+                    content: "remote skill body",
+                    resource: {
+                        baseDir: "/srv/repo/.pi/skills/remote-skill",
+                        description: "remote skill",
+                        disableModelInvocation: false,
+                        filePath: "/srv/repo/.pi/skills/remote-skill/SKILL.md",
+                        name: "remote-skill",
+                        sourceInfo: {
+                            origin: "top-level",
+                            path: "/srv/repo/.pi/skills/remote-skill/SKILL.md",
+                            scope: "project",
+                            source: "local",
+                        },
+                    },
+                },
+            ],
+        },
         "/home/test/.pi/agent",
     );
-    assert.match(replaced, /global/u);
-    assert.match(replaced, /worker-a:\/srv\/repo\/AGENTS\.md/u);
-    assert.match(replaced, /remote-project/u);
-    assert.doesNotMatch(replaced, /local-project/u);
-    assert.match(
-        appendDevshellRemoteWorkspacePrompt(replaced, {
-            instance: "worker-a",
-            workspace: "/srv/repo",
-        }),
-        /The real project workspace is worker-a:\/srv\/repo\./u,
-    );
-});
 
-test("Pi devshell edit tool contributes its Worker preconditions and grammar to the Pi system prompt", () => {
-    const metadata = piPromptMetadata("file_edit");
-    assert.match(metadata.promptSnippet ?? "", /Edit workspace files/u);
-    assert.equal(metadata.promptGuidelines?.length, 2);
-    assert.match(
-        metadata.promptGuidelines?.[0] ?? "",
-        /file_read or file_grep/u,
-    );
-    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Patch File:/u);
-    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Update File:/u);
-    assert.match(metadata.promptGuidelines?.[1] ?? "", /\*\*\* Add File:/u);
+    assert.match(prompt, /custom-user-system/u);
+    assert.match(prompt, /append-user-system/u);
+    assert.match(prompt, /global-user-context/u);
+    assert.match(prompt, /remote-project/u);
+    assert.match(prompt, /remote-skill/u);
+    assert.doesNotMatch(prompt, /local-project/u);
+    assert.doesNotMatch(prompt, /Pi documentation|Current working directory/u);
 });
 
 test("Pi devshell renderer formats common calls without JSON fallback", () => {
