@@ -526,6 +526,105 @@ test("Pi devshell tool hard-limits model content for long single-line progress a
     );
 });
 
+test("Pi devshell context compacts only tool results already consumed by the model", async () => {
+    let contextHandler:
+        | ((event: { messages: Array<Record<string, unknown>> }) =>
+              | { messages?: Array<Record<string, unknown>> }
+              | Promise<{ messages?: Array<Record<string, unknown>> } | void>
+              | void)
+        | undefined;
+    const extension = createDevshellPiExtension(
+        {
+            target: { instance: "worker-a", workspace: "/repo" },
+            modelTools: [
+                {
+                    description: "Read files",
+                    inputSchema: { type: "object" },
+                    name: "file_read",
+                },
+            ],
+            tools: [],
+            async callTool() {
+                throw new Error("tool call not expected");
+            },
+            close() {},
+        },
+        { closeSessionOnShutdown: false },
+    );
+    await extension({
+        getCommands: () => [],
+        on(event: string, handler: unknown) {
+            if (event === "context") {
+                contextHandler = handler as typeof contextHandler;
+            }
+        },
+        registerCommand() {},
+        registerTool() {},
+        sendUserMessage() {},
+    });
+    assert.notEqual(contextHandler, undefined);
+
+    const oldText = `1:head\n2:${"x".repeat(8_000)}\n3:tail`;
+    const oldResult = {
+        content: [{ text: oldText, type: "text" }],
+        details: {
+            files: [
+                {
+                    content: oldText,
+                    path: "./src/old.ts",
+                    view: "content",
+                },
+            ],
+        },
+        isError: false,
+        role: "toolResult",
+        timestamp: 1,
+        toolCallId: "old-read",
+        toolName: "file_read",
+    };
+    const unrelatedResult = {
+        content: [{ text: oldText, type: "text" }],
+        details: { value: oldText },
+        isError: false,
+        role: "toolResult",
+        timestamp: 2,
+        toolCallId: "other-tool",
+        toolName: "third_party_tool",
+    };
+    const consumedBy = { content: [], role: "assistant", timestamp: 3 };
+    const freshText = `1:fresh\n2:${"y".repeat(8_000)}`;
+    const freshResult = {
+        content: [{ text: freshText, type: "text" }],
+        details: {
+            files: [
+                {
+                    content: freshText,
+                    path: "./src/fresh.ts",
+                    view: "content",
+                },
+            ],
+        },
+        isError: false,
+        role: "toolResult",
+        timestamp: 4,
+        toolCallId: "fresh-read",
+        toolName: "file_read",
+    };
+    const messages = [oldResult, unrelatedResult, consumedBy, freshResult];
+
+    const result = await contextHandler!({ messages });
+    const compacted = result?.messages;
+    assert.notEqual(compacted, undefined);
+    const compactedOldText = (
+        compacted?.[0]?.content as Array<{ text?: string }> | undefined
+    )?.[0]?.text;
+    assert.equal(typeof compactedOldText, "string");
+    assert.equal(compactedOldText!.length < oldText.length / 10, true);
+    assert.deepEqual(compacted?.[1], unrelatedResult);
+    assert.deepEqual(compacted?.[3], freshResult);
+    assert.deepEqual(oldResult.content, [{ text: oldText, type: "text" }]);
+});
+
 const identityTheme: PiThemeLike = {
     bg: (_role, text) => text,
     bold: (text) => text,

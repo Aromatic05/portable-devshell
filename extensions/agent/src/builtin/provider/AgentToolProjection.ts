@@ -21,6 +21,9 @@ const TOOL_INTERNAL_INPUT_PROPERTIES = new Map<string, ReadonlySet<string>>([
 
 const MAX_MODEL_TOOL_RESULT_CHARACTERS = 12_000;
 const MAX_SEMANTIC_CONTENT_CHARACTERS = 9_000;
+const MAX_HISTORICAL_TOOL_RESULT_CHARACTERS = 3_000;
+const MAX_HISTORICAL_STREAM_CHARACTERS = 800;
+const MAX_HISTORICAL_GLOB_ENTRIES = 16;
 
 type AgentModelToolResultProjector = (
     value: Record<string, ExtensionJsonValue>,
@@ -117,6 +120,22 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
     ],
 ]);
 
+const HISTORICAL_AGENT_MODEL_TOOL_PROJECTIONS = new Map<
+    string,
+    AgentModelToolResultProjector
+>([
+    ["bash_run", renderHistoricalBashModelToolResult],
+    ["file_edit", renderFileEditModelToolResult],
+    ["file_glob", renderHistoricalFileGlobModelToolResult],
+    ["file_grep", renderHistoricalFileGrepModelToolResult],
+    ["file_read", renderHistoricalFileReadModelToolResult],
+    ["tmux_input", renderHistoricalTmuxTaskModelToolResult],
+    ["tmux_inspect", renderHistoricalTmuxInspectModelToolResult],
+    ["tmux_manage", renderTmuxManageModelToolResult],
+    ["tmux_read", renderHistoricalTmuxTaskModelToolResult],
+    ["tmux_run", renderHistoricalTmuxTaskModelToolResult],
+]);
+
 const AGENT_MODEL_INPUT_PROPERTY_DESCRIPTIONS = new Map<
     string,
     Readonly<Record<string, string>>
@@ -183,6 +202,16 @@ export function projectAgentModelToolResult(
     value: ExtensionJsonValue,
 ): string {
     return limitModelToolResult(renderAgentModelToolResult(toolName, value));
+}
+
+export function projectHistoricalAgentToolResult(
+    toolName: string,
+    value: unknown,
+): string | undefined {
+    if (!isJsonValue(value) || !isRecord(value)) return undefined;
+    const project = HISTORICAL_AGENT_MODEL_TOOL_PROJECTIONS.get(toolName);
+    if (project === undefined) return undefined;
+    return limitHistoricalToolResult(project(value));
 }
 
 function projectAgentModelInputSchema(
@@ -356,6 +385,44 @@ function renderBashModelToolResult(
     return lines.filter((line) => line.length > 0).join("\n");
 }
 
+function renderHistoricalBashModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const lines = [
+        compactFields([
+            field("termination", value.termination),
+            field("exitCode", value.exitCode),
+            field("termSignal", value.termSignal),
+            value.timedOut === true ? "timedOut=true" : undefined,
+            field("durationMs", value.durationMs),
+        ]),
+    ];
+    appendHistoricalStream(lines, "stdout", value);
+    appendHistoricalStream(lines, "stderr", value);
+    lines.push(...renderStringWarnings(value.artifactWarnings));
+    return lines.filter((line) => line.length > 0).join("\n");
+}
+
+function appendHistoricalStream(
+    lines: string[],
+    stream: "stderr" | "stdout",
+    value: Record<string, ExtensionJsonValue>,
+): void {
+    const content = typeof value[stream] === "string" ? value[stream] : "";
+    if (content.length === 0) return;
+    const recovery = value[`${stream}Path`];
+    if (typeof recovery === "string") {
+        lines.push(`${stream}Recovery=${recovery}`);
+        return;
+    }
+    const preview = previewText(content, MAX_HISTORICAL_STREAM_CHARACTERS);
+    lines.push(`${stream}HistoricalPreview:\n${preview.text}`);
+    if (preview.clipped)
+        lines.push(
+            `${stream}HistoricalPreviewOnly=true; rerun the command if exact output is required`,
+        );
+}
+
 function renderFileReadModelToolResult(
     value: Record<string, ExtensionJsonValue>,
 ): string {
@@ -418,6 +485,19 @@ function renderFileReadModelToolResult(
         .join("\n\n");
 }
 
+function renderHistoricalFileReadModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const files = Array.isArray(value.files)
+        ? value.files.filter(isRecord)
+        : undefined;
+    if (files === undefined) return renderToolResult(value);
+    return renderFileReadModelToolResult({
+        ...value,
+        files: files.map(({ content: _content, ...file }) => file),
+    });
+}
+
 function renderFileGlobModelToolResult(
     value: Record<string, ExtensionJsonValue>,
 ): string {
@@ -447,6 +527,23 @@ function renderFileGlobModelToolResult(
             `nextCursor=${value.nextCursor}; continue with file_glob cursor only`,
         );
     return lines.filter((line) => line.length > 0).join("\n");
+}
+
+function renderHistoricalFileGlobModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const entries = Array.isArray(value.entries)
+        ? value.entries.filter(isRecord)
+        : undefined;
+    if (entries === undefined || entries.length <= MAX_HISTORICAL_GLOB_ENTRIES)
+        return renderFileGlobModelToolResult(value);
+    const half = MAX_HISTORICAL_GLOB_ENTRIES / 2;
+    const sampled = [...entries.slice(0, half), ...entries.slice(-half)];
+    return [
+        `entries=${entries.length}`,
+        renderFileGlobModelToolResult({ ...value, entries: sampled }),
+        `omitted=${entries.length - sampled.length}; rerun file_glob if omitted paths are required`,
+    ].join("\n");
 }
 
 function renderFileGrepModelToolResult(
@@ -493,6 +590,19 @@ function renderFileGrepModelToolResult(
     return sections.join("\n\n");
 }
 
+function renderHistoricalFileGrepModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const files = Array.isArray(value.files)
+        ? value.files.filter(isRecord)
+        : undefined;
+    if (files === undefined) return renderToolResult(value);
+    return renderFileGrepModelToolResult({
+        ...value,
+        files: files.map(({ content: _content, ...file }) => file),
+    });
+}
+
 function renderTmuxTaskModelToolResult(
     value: Record<string, ExtensionJsonValue>,
 ): string {
@@ -535,6 +645,17 @@ function renderTmuxTaskModelToolResult(
     }
     lines.push(...renderTmuxWarnings(value.warnings));
     return lines.filter((line) => line.length > 0).join("\n");
+}
+
+function renderHistoricalTmuxTaskModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const output = stringArray(value.output).join("\n");
+    if (output.length === 0) return renderTmuxTaskModelToolResult(value);
+    return renderTmuxTaskModelToolResult({
+        ...value,
+        output: [previewText(output, MAX_HISTORICAL_STREAM_CHARACTERS).text],
+    });
 }
 
 function renderTmuxInspectModelToolResult(
@@ -588,6 +709,19 @@ function renderTmuxInspectModelToolResult(
     });
     sections.push(...renderTmuxWarnings(value.warnings));
     return sections.join("\n\n");
+}
+
+function renderHistoricalTmuxInspectModelToolResult(
+    value: Record<string, ExtensionJsonValue>,
+): string {
+    const panes = Array.isArray(value.panes)
+        ? value.panes.filter(isRecord)
+        : undefined;
+    if (panes === undefined) return renderToolResult(value);
+    return renderTmuxInspectModelToolResult({
+        ...value,
+        panes: panes.map(({ lines: _lines, ...pane }) => pane),
+    });
 }
 
 function renderTmuxListModelToolResult(
@@ -732,6 +866,16 @@ function limitModelToolResult(value: string): string {
     if (value.length <= MAX_MODEL_TOOL_RESULT_CHARACTERS) return value;
     const marker = `\n... [tool result truncated: ${value.length} characters total] ...\n`;
     const retainedCharacters = MAX_MODEL_TOOL_RESULT_CHARACTERS - marker.length;
+    const headCharacters = Math.ceil(retainedCharacters / 2);
+    const tailCharacters = retainedCharacters - headCharacters;
+    return `${value.slice(0, headCharacters)}${marker}${value.slice(-tailCharacters)}`;
+}
+
+function limitHistoricalToolResult(value: string): string {
+    if (value.length <= MAX_HISTORICAL_TOOL_RESULT_CHARACTERS) return value;
+    const marker = `\n... [historical tool result clipped: ${value.length} characters total] ...\n`;
+    const retainedCharacters =
+        MAX_HISTORICAL_TOOL_RESULT_CHARACTERS - marker.length;
     const headCharacters = Math.ceil(retainedCharacters / 2);
     const tailCharacters = retainedCharacters - headCharacters;
     return `${value.slice(0, headCharacters)}${marker}${value.slice(-tailCharacters)}`;
