@@ -78,6 +78,11 @@ export interface ExtensionInstanceEventWatch {
     signal: AbortSignal;
 }
 
+export interface ExtensionInstanceRuntimeRecord {
+    enabled: boolean;
+    name: string;
+}
+
 /** Narrow per-instance runtime I/O without Instance lifecycle mutation authority. */
 export interface ExtensionInstanceRuntimeCapability {
     appendEvent(
@@ -85,6 +90,7 @@ export interface ExtensionInstanceRuntimeCapability {
         type: string,
         data?: ExtensionJsonValue,
     ): Promise<void>;
+    list(): Promise<readonly ExtensionInstanceRuntimeRecord[]>;
     readToolCalls(
         name: string,
         query?: ExtensionJsonValue,

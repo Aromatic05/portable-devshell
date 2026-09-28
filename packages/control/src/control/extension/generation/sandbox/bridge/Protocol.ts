@@ -110,6 +110,7 @@ export type ExtensionSandboxCapabilityOperation =
     | "instances.validateCreate"
     | "instances.watchEvents"
     | "instanceRuntime.appendEvent"
+    | "instanceRuntime.list"
     | "instanceRuntime.readToolCalls"
     | "processes.send"
     | "processes.start"

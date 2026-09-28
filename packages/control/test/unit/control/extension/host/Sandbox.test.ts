@@ -1559,6 +1559,10 @@ function fakeInstanceRuntime(
         async appendEvent(name, type) {
             calls.push(`instanceRuntime.appendEvent:${name}:${type}`);
         },
+        async list() {
+            calls.push("instanceRuntime.list");
+            return [{ enabled: true, name: "local-test" }];
+        },
         async readToolCalls(name) {
             calls.push(`instanceRuntime.readToolCalls:${name}`);
             return [];

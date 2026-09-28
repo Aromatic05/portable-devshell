@@ -593,6 +593,10 @@ function createInstanceRuntimeCapability(): ExtensionInstanceRuntimeCapability {
                 type,
             } satisfies SandboxInstanceRuntimeAppendEventInput);
         },
+        list: async () =>
+            (await requestCapability("instanceRuntime.list")) as Awaited<
+                ReturnType<ExtensionInstanceRuntimeCapability["list"]>
+            >,
         readToolCalls: async (name: string, query?: ExtensionJsonValue) =>
             (await requestCapability("instanceRuntime.readToolCalls", {
                 name,

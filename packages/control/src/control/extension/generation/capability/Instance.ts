@@ -255,6 +255,14 @@ export class ExtensionInstanceRuntimeCapabilityControl
         );
     }
 
+    async list(): Promise<readonly { enabled: boolean; name: string }[]> {
+        this.#assertAllowed();
+        return this.#instances.list().map((instance) => ({
+            enabled: instance.enabled,
+            name: instance.name,
+        }));
+    }
+
     async readToolCalls(
         name: string,
         query: ExtensionJsonValue = {},

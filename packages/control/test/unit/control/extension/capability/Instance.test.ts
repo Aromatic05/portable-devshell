@@ -101,6 +101,7 @@ test("Instance runtime capability appends events and reads audit ToolCalls witho
     const queries: unknown[] = [];
     const instances = new InstanceRegistry([
         {
+            enabled: true,
             name: "demo-local",
             worker: {
                 async appendControlEvent(type: string, data: unknown) {
@@ -130,6 +131,9 @@ test("Instance runtime capability appends events and reads audit ToolCalls witho
     await capability.appendEvent("demo-local", "context.message.queued", {
         ctxId: "ctx-1",
     });
+    assert.deepEqual(await capability.list(), [
+        { enabled: true, name: "demo-local" },
+    ]);
     assert.deepEqual(
         await capability.readToolCalls("demo-local", {
             includeInput: true,

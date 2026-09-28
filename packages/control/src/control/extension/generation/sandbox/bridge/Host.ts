@@ -659,6 +659,8 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 );
                 return undefined;
             }
+            case "instanceRuntime.list":
+                return await this.#instanceRuntimeCapability.list();
             case "instanceRuntime.readToolCalls": {
                 const value = input as SandboxInstanceRuntimeReadToolCallsInput;
                 return await this.#instanceRuntimeCapability.readToolCalls(
