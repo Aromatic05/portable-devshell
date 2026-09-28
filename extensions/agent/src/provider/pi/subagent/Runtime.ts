@@ -464,8 +464,8 @@ function finalAssistantText(session: PiSessionLike): string {
     return "";
 }
 
-function asRecord(value: unknown): Record<string, any> | undefined {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? (value as Record<string, any>)
+        ? (value as Record<string, unknown>)
         : undefined;
 }
