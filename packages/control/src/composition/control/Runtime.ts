@@ -67,8 +67,6 @@ interface ControlWebRuntime {
     listener: ControlWebSocketListener;
 }
 
-const requiredBuiltinExtensionIds = new Set(["comment"]);
-
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
@@ -102,9 +100,7 @@ export class ControlRuntime {
             installer: new ExtensionInstallService({
                 host: this.#extensions,
                 paths: this.#extensionPaths,
-                requiredBuiltinIds: requiredBuiltinExtensionIds,
             }),
-            requiredBuiltinIds: requiredBuiltinExtensionIds,
         });
         this.#instances = options.instances;
         this.#toolCallBinding = new ToolCallExtensionBinding(
