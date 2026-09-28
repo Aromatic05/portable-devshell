@@ -159,6 +159,13 @@ function errorMessage(error: unknown): string {
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
+    return isJsonValueInner(value, new Set<object>());
+}
+
+function isJsonValueInner(
+    value: unknown,
+    ancestors: Set<object>,
+): value is JsonValue {
     if (
         value === null ||
         typeof value === "string" ||
@@ -166,7 +173,18 @@ function isJsonValue(value: unknown): value is JsonValue {
     )
         return true;
     if (typeof value === "number") return Number.isFinite(value);
-    if (Array.isArray(value)) return value.every(isJsonValue);
     if (typeof value !== "object") return false;
-    return Object.values(value).every(isJsonValue);
+    if (ancestors.has(value)) return false;
+    ancestors.add(value);
+    try {
+        if (Array.isArray(value))
+            return value.every((entry) => isJsonValueInner(entry, ancestors));
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) return false;
+        return Object.values(value).every((entry) =>
+            isJsonValueInner(entry, ancestors),
+        );
+    } finally {
+        ancestors.delete(value);
+    }
 }

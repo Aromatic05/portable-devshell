@@ -4,10 +4,27 @@ import test from "node:test";
 import { asInstanceName } from "@portable-devshell/shared";
 
 import { PiChildToolSession } from "../../src/provider/pi/PiChildToolSession.ts";
+import { encodePiToolError } from "../../src/provider/pi/PiProcessProtocol.ts";
 import type {
     PiChildMessage,
     PiParentMessage,
 } from "../../src/provider/pi/PiProcessProtocol.ts";
+
+test("Pi tool error encoding drops cyclic details without failing", () => {
+    const details: Record<string, unknown> = {};
+    details.self = details;
+    const error = Object.assign(new Error("snapshot required"), {
+        code: "file.snapshotRequired",
+        details,
+        retryable: true,
+    });
+
+    assert.deepEqual(encodePiToolError(error), {
+        code: "file.snapshotRequired",
+        message: "snapshot required",
+        retryable: true,
+    });
+});
 
 test("Pi child tool progress updates the pending call without resolving it", async () => {
     const sent: PiChildMessage[] = [];
