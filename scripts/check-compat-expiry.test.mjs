@@ -120,12 +120,34 @@ test("compatibility debt deadlines cannot move past 0.7.10", async () => {
     }
 });
 
-test("compat and removal annotations must be paired in one source comment", () => {
+test("stable compat annotations do not require a removal deadline", () => {
     const parsed = parseCompatibilityAnnotations(
-        [
-            "// @compat config-v2",
-            "const marker = '@removeAt 9.9.9';",
-        ].join("\n"),
+        "// @compat file-edit-apply-patch-aliases",
+        "src/config.ts",
+    );
+    assert.deepEqual(parsed.annotations, [
+        {
+            compat: "file-edit-apply-patch-aliases",
+            line: 1,
+            path: "src/config.ts",
+            removeAt: null,
+        },
+    ]);
+    assert.deepEqual(parsed.issues, []);
+});
+
+test("annotation-like strings are not parsed as compatibility comments", () => {
+    const parsed = parseCompatibilityAnnotations(
+        "const marker = '@removeAt 9.9.9';",
+        "src/config.ts",
+    );
+    assert.deepEqual(parsed.annotations, []);
+    assert.deepEqual(parsed.issues, []);
+});
+
+test("removal annotations require a compat owner in the same source comment", () => {
+    const parsed = parseCompatibilityAnnotations(
+        "// @removeAt 0.7.10",
         "src/config.ts",
     );
     assert.equal(parsed.annotations.length, 0);

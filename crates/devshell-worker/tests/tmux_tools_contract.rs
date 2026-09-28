@@ -557,6 +557,71 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
 
 #[test]
 #[ignore = "requires tmux on PATH"]
+fn tmux_run_accepts_bare_workspace_relative_cwd() {
+    assert!(
+        tmux_available(),
+        "tmux is required to run this ignored contract test"
+    );
+    let env = TestEnv::new();
+    let instance = "aromatic-tmux-bare-cwd";
+    std::fs::create_dir_all(env.workspace().join("extensions/stats")).unwrap();
+    std::fs::write(
+        env.workspace().join("extensions/stats/marker.txt"),
+        "inside",
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let run = call(
+        &env,
+        instance,
+        "1",
+        "tmux_run",
+        json!({
+            "command": "test -f marker.txt && printf 'READY\n'",
+            "cwd": "extensions/stats",
+            "wait": "block",
+            "timeout": 3000,
+            "line": 80
+        }),
+        "ctx-a",
+        "run-bare-cwd",
+    );
+
+    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert!(
+        run["result"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|line| line.as_str() == Some("READY")),
+        "{run}"
+    );
+
+    let home = call(
+        &env,
+        instance,
+        "2",
+        "tmux_run",
+        json!({
+            "command": "printf 'SHOULD_NOT_RUN\n'",
+            "cwd": "~/extensions/stats",
+            "wait": "block",
+            "timeout": 3000,
+            "line": 80
+        }),
+        "ctx-a",
+        "run-home-cwd",
+    );
+    assert_eq!(home["ok"], false, "{home}");
+    assert_eq!(home["error"]["code"], "tmux.invalidCwd", "{home}");
+
+    stop(&env, instance);
+}
+
+#[test]
+#[ignore = "requires tmux on PATH"]
 fn tmux_run_public_timeout_bounds_direct_block_wait() {
     assert!(
         tmux_available(),

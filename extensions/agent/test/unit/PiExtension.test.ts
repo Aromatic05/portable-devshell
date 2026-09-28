@@ -16,6 +16,7 @@ import {
     piPromptMetadata,
     replacePiProjectContext,
     transformDevshellPiSkillInput,
+    type PiToolLike,
 } from "../../src/provider/pi/extension/index.ts";
 import standaloneDevshellPiExtension from "../../src/provider/pi/extension/index.ts";
 import {
@@ -260,6 +261,154 @@ test("Pi devshell tool forwards Worker progress through Pi onUpdate before the f
         stdout: "partial\nfinal\n",
         termination: "exited",
     });
+});
+
+test("Pi devshell structured tool failures remain errors with model-visible metadata", async () => {
+    let registeredTool: PiToolLike | undefined;
+    let toolResultHandler:
+        | ((event: {
+              content: Array<{ text: string; type: "text" }>;
+              details: unknown;
+              input: Record<string, unknown>;
+              isError: boolean;
+              toolCallId: string;
+              toolName: string;
+          }) =>
+              | Promise<
+                    | {
+                          content?: Array<{ text: string; type: "text" }>;
+                          details?: unknown;
+                          isError?: boolean;
+                      }
+                    | void
+                >
+              | {
+                    content?: Array<{ text: string; type: "text" }>;
+                    details?: unknown;
+                    isError?: boolean;
+                }
+              | void)
+        | undefined;
+    const extension = createDevshellPiExtension(
+        {
+            target: { instance: "worker-a", workspace: "/repo" },
+            modelTools: [
+                {
+                    description: "Edit files",
+                    inputSchema: { type: "object" },
+                    name: "file_edit",
+                },
+            ],
+            tools: [
+                {
+                    description: "Edit files",
+                    inputSchema: { type: "object" },
+                    name: "file_edit",
+                },
+            ],
+            async callTool() {
+                throw Object.assign(new Error("snapshot required"), {
+                    code: "file.snapshotRequired",
+                    details: { path: "./document.txt" },
+                    retryable: true,
+                });
+            },
+            close() {},
+        },
+        { closeSessionOnShutdown: false },
+    );
+    await extension({
+        getCommands: () => [],
+        on(event: string, handler: unknown) {
+            if (event === "tool_result") {
+                toolResultHandler = handler as typeof toolResultHandler;
+            }
+        },
+        registerCommand() {},
+        registerTool(tool) {
+            registeredTool = tool;
+        },
+        sendUserMessage() {},
+    });
+    assert.notEqual(registeredTool, undefined);
+    assert.notEqual(toolResultHandler, undefined);
+
+    const result = await registeredTool!.execute("call-error", {
+        changes: "...",
+    });
+    const projected = JSON.parse(result.content[0]!.text) as {
+        error?: unknown;
+    };
+    assert.deepEqual(projected.error, {
+        code: "file.snapshotRequired",
+        details: { path: "./document.txt" },
+        message: "snapshot required",
+        retryable: true,
+    });
+
+    const hookResult = await toolResultHandler!({
+        content: result.content,
+        details: result.details,
+        input: { changes: "..." },
+        isError: false,
+        toolCallId: "call-error",
+        toolName: "file_edit",
+    });
+    assert.equal(hookResult?.isError, true);
+    assert.deepEqual(hookResult?.details, {
+        error: {
+            code: "file.snapshotRequired",
+            details: { path: "./document.txt" },
+            message: "snapshot required",
+            retryable: true,
+        },
+    });
+});
+
+test("Pi devshell leaves non-namespaced runtime errors on the native throw path", async () => {
+    let registeredTool: PiToolLike | undefined;
+    const extension = createDevshellPiExtension(
+        {
+            target: { instance: "worker-a", workspace: "/repo" },
+            modelTools: [
+                {
+                    description: "Run bash",
+                    inputSchema: { type: "object" },
+                    name: "bash_run",
+                },
+            ],
+            tools: [
+                {
+                    description: "Run bash",
+                    inputSchema: { type: "object" },
+                    name: "bash_run",
+                },
+            ],
+            async callTool() {
+                throw Object.assign(new Error("pipe closed"), { code: "EPIPE" });
+            },
+            close() {},
+        },
+        { closeSessionOnShutdown: false },
+    );
+    await extension({
+        getCommands: () => [],
+        on() {},
+        registerCommand() {},
+        registerTool(tool) {
+            registeredTool = tool;
+        },
+        sendUserMessage() {},
+    });
+    assert.notEqual(registeredTool, undefined);
+
+    await assert.rejects(
+        () => registeredTool!.execute("call-runtime-error", { command: "true" }),
+        (error: unknown) =>
+            error instanceof Error &&
+            error.message === "pipe closed" &&
+            (error as Error & { code?: string }).code === "EPIPE",
+    );
 });
 
 test("Pi devshell tool hard-limits model content for long single-line progress and final results", async () => {

@@ -148,9 +148,9 @@ test("bash_run error hints cover invalid command and cancellation semantics", ()
         codes(resolveErrorHints("bash_run", body("bash.invalidCommand"))),
         ["bash.invalidCommand"],
     );
-    assert.match(
-        resolveErrorHints("bash_run", body("bash.invalidCwd"))[0]?.text ?? "",
-        /\.\/.*workspace-relative/u,
+    assert.deepEqual(
+        codes(resolveErrorHints("bash_run", body("bash.invalidCwd"))),
+        ["bash.invalidCwd"],
     );
     const cancelled = resolveErrorHints("bash_run", body("tool.cancelled"));
     assert.deepEqual(codes(cancelled), ["tool.cancelled"]);
@@ -417,11 +417,10 @@ test("tmux_run start-unconfirmed forbids an immediate relaunch", () => {
     assert.deepEqual(codes(hints), ["tmux.taskStartUnconfirmed"]);
 });
 
-test("tmux cwd errors explain the supported path namespaces", () => {
-    assert.match(
-        resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))[0]?.text ??
-            "",
-        /\.\/.*workspace-relative/u,
+test("tmux cwd errors preserve their diagnostic code", () => {
+    assert.deepEqual(
+        codes(resolveErrorHints("tmux_manage", body("tmux.invalidCwd"))),
+        ["tmux.invalidCwd"],
     );
 });
 

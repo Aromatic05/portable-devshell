@@ -125,11 +125,13 @@ main         user's interactive shell environment
 `cwd` 使用与其他 worker path 一致的语义：
 
 ```text
+foo     workspace-relative
 ./foo   workspace-relative
+.       current workspace
 /foo    absolute path
 ```
 
-省略时默认当前 workspace。worker 在真正放行 task program 前验证新 pane 的实际 cwd 仍对应已解析目录，避免路径在创建过程中被替换。
+省略时默认当前 workspace。home-relative 的 `~` / `~/...` 不接受；Windows drive-relative / root-relative path（例如 `C:foo`、`\foo`）也不接受，必须使用 workspace-relative path 或真正的 absolute path。worker 在真正放行 task program 前验证新 pane 的实际 cwd 仍对应已解析目录，避免路径在创建过程中被替换。
 
 ### Wait
 

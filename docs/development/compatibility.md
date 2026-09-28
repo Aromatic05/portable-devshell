@@ -106,7 +106,13 @@ Wait.ts       legacy Wait state migration
 
 ## Compatibility expiry
 
-仍然存在的历史兼容实现必须在其逻辑 owner 处标记维护期限：
+兼容实现统一在其逻辑 owner 处使用稳定 slug 标记：
+
+```text
+@compat <stable-slug>
+```
+
+长期稳定兼容只需要 `@compat`。仍属于 compatibility debt、计划在维护窗口内删除的临时兼容再附加：
 
 ```text
 @compat <stable-slug>
@@ -115,21 +121,21 @@ Wait.ts       legacy Wait state migration
 
 TypeScript/JavaScript 使用普通 source comment/JSDoc，Rust 使用 `//`，shell/PowerShell 使用 `#`。一个逻辑兼容面只要求 owner annotation，不要求每个调用点重复标记；跨语言拥有独立实现时可以重复使用同一个 `@compat` slug。
 
-`@removeAt` 是 maintenance deadline，不是 persistent schema 或 public protocol 的 compatibility contract。当当前 DevShell version **大于或等于** `@removeAt` 时，`scripts/check-compat-expiry.mjs` 必须失败。
+`@removeAt` 是可选的 maintenance deadline，不是 persistent schema 或 public protocol 的 compatibility contract。当它存在且当前 DevShell version **大于或等于** `@removeAt` 时，`scripts/check-compat-expiry.mjs` 必须失败。没有 `@removeAt` 的 `@compat` 表示已经确认长期支持，不参与 expiry。
 
-当前已经识别出的 compatibility debt 统一以 **`0.7.10`** 为硬截止；checker 同时拒绝任何晚于 `0.7.10` 的 `@removeAt`。Deadline 可以提前，但不能向后移动。到期前必须真正解决：删除临时兼容实现与对应旧行为测试，或者在确认它本来就应该长期支持时把该行为正式纳入稳定 contract，并去掉“临时兼容”语义。不能通过改成 `0.7.11`、`1.0.0` 或其他更晚版本绕过门禁。
+当前已经识别出的 compatibility debt 统一以 **`0.7.10`** 为硬截止；checker 同时拒绝任何晚于 `0.7.10` 的 `@removeAt`。Deadline 可以提前，但不能向后移动。到期前必须真正解决：删除临时兼容实现与对应旧行为测试，或者在确认它本来就应该长期支持时把该行为纳入稳定 compatibility contract 并移除 `@removeAt`。不能通过改成 `0.7.11`、`1.0.0` 或其他更晚版本绕过门禁。
 
 当前入口：
 
 ```text
 pnpm compat:check    fail on expired/invalid annotations
-pnpm compat:list     list the current compatibility debt
+pnpm compat:list     list stable compatibility and expiring debt
 pnpm version:check   product version gate + compatibility expiry gate
 ```
 
 Compatibility expiry 同时进入 development CI、final acceptance 与 release gate。`dist/`、`target/`、`node_modules/` 等生成物不参与扫描，避免编译产物复制 source comments 后产生重复债务记录。
 
-对于 persistent migration，是否还能读取旧数据仍由 `minimum readable schema` 决定；`@removeAt` 约束的是旧 migration implementation 必须在 deadline 前完成生命周期处理。对于外部协议兼容也是一样：如果审查后决定长期支持，应在 deadline 前把它正式化为 contract，而不是延期 compatibility debt。
+对于 persistent migration，是否还能读取旧数据仍由 `minimum readable schema` 决定；`@removeAt` 约束的是旧 migration implementation 必须在 deadline 前完成生命周期处理。对于外部协议或输入方言兼容也是一样：如果审查后决定长期支持，应移除 `@removeAt` 并保留稳定 `@compat` owner，而不是延期 compatibility debt。
 
 ## Update lifecycle
 

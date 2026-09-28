@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(windows)]
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir as CapabilityDir, OpenOptions as CapabilityOpenOptions};
 #[cfg(unix)]
@@ -793,6 +792,69 @@ pub fn resolve_create_target(
         .rev()
         .fold(canonical_ancestor, |path, segment| path.join(segment));
     Ok(plain(canonical))
+}
+
+pub fn resolve_create_candidate(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<PathBuf, ToolError> {
+    match resolve_create_target(workspace, requested) {
+        Ok(resolved) => Ok(resolved.canonical),
+        #[cfg(any(unix, windows))]
+        Err(error)
+            if requested.namespace == PathNamespace::Workspace && error.code == "file.notFound" =>
+        {
+            let root = workspace
+                .canonicalize()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            let segments = workspace_segments(requested)?;
+            if segments.is_empty() {
+                return Err(ToolError::new(
+                    "file.invalidPath",
+                    "workspace root cannot be created",
+                ));
+            }
+            Ok(segments
+                .iter()
+                .fold(root, |path, segment| path.join(segment)))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn create_parent_directories(
+    workspace: &Path,
+    requested: &RequestedPath,
+) -> Result<(), ToolError> {
+    let candidate = resolve_create_candidate(workspace, requested)?;
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| ToolError::new("file.invalidPath", "target has no parent directory"))?;
+
+    if requested.namespace != PathNamespace::Workspace {
+        return fs::create_dir_all(parent)
+            .map_err(|error| ToolError::new("file.writeFailed", error.to_string()));
+    }
+    let root = workspace
+        .canonicalize()
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    let relative_parent = parent.strip_prefix(&root).map_err(|_| {
+        ToolError::new(
+            "file.pathEscapesWorkspace",
+            format!("path escapes workspace: {}", parent.display()),
+        )
+    })?;
+    let directory = CapabilityDir::open_ambient_dir(&root, ambient_authority())
+        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+    directory.create_dir_all(relative_parent).map_err(|error| {
+        ToolError::new(
+            "file.writeFailed",
+            format!(
+                "failed to create parent directory for {}: {error}",
+                requested.raw
+            ),
+        )
+    })
 }
 
 fn plain(canonical: PathBuf) -> ResolvedPath {

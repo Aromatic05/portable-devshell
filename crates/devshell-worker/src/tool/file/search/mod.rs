@@ -10,9 +10,10 @@ use globset::{Glob, GlobMatcher};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::instance::sandbox::path::{
-    ResolvedDirectory, ResolvedMetadata, ResolvedPath, parse_requested_path,
+    ResolvedDirectory, ResolvedMetadata, ResolvedPath, normalize_requested_path,
+    parse_requested_path,
 };
-use crate::tool::file::{authorize, normalize_file_path, resolve_existing};
+use crate::tool::file::{authorize, resolve_existing};
 use crate::tool::{ToolCall, ToolError};
 
 #[derive(Clone)]
@@ -70,7 +71,7 @@ impl DiscoveryCursor {
         let mut pending = VecDeque::with_capacity(specs.len());
         for spec in specs {
             call.check_cancelled()?;
-            let spec = normalize_file_path(spec)?;
+            let spec = normalize_requested_path(spec)?;
             pending.push_back(prepare_source(call, &spec, hidden, gitignore)?);
         }
         Ok(Self {

@@ -47,7 +47,7 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
         "file_edit",
         {
             description:
-                "Apply an ordered multi-file change set. Before changing an existing file, establish edit coverage with file_read or file_grep. Keep one coherent change set; if an operation fails, later operations are not executed.",
+                "Apply an ordered multi-file change set. Establish edit coverage with file_read or file_grep before the first change to existing content. Successful edits carry valid coverage forward, so re-read only when coverage is missing, stale, or the next edit touches unseen existing lines. Keep one coherent change set; if an operation fails, later operations are not executed.",
             projectResult: renderFileEditModelToolResult,
         },
     ],
@@ -71,7 +71,7 @@ const AGENT_MODEL_TOOL_PROJECTIONS = new Map<
         "file_read",
         {
             description:
-                "Read file content, structural outline, metadata, or a retained tool-result path. Use focused selectors for large files. Read existing target lines before file_edit to establish edit coverage, and follow nextSelector when a content read is truncated.",
+                "Read file content, structural outline, metadata, or a retained tool-result path. Use focused selectors for large files. Returned content lines and exact signature lines rendered by outline establish edit coverage; metadata and retained tool-result reads do not. Follow nextSelector when a content read is truncated.",
             projectResult: renderFileReadModelToolResult,
         },
     ],

@@ -13,6 +13,7 @@ import type {
     PiParentToolProgressMessage,
     PiParentToolResultMessage,
 } from "./PiProcessProtocol.js";
+import { decodePiToolError } from "./PiProcessProtocol.js";
 
 interface PendingToolRequest {
     onProgress?: (progress: JsonValue) => void;
@@ -150,7 +151,7 @@ export class PiChildToolSession implements DevshellPiToolSession {
         this.#pending.delete(message.callId);
         if (!message.ok) {
             pending.reject(
-                new Error(message.error ?? "Pi tool request failed."),
+                decodePiToolError(message.error, "Pi tool request failed."),
             );
             return;
         }

@@ -5,6 +5,7 @@ import type {
     InputEventResult,
     SessionStartEvent,
     SessionShutdownEvent,
+    ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "@portable-devshell/shared";
 
@@ -13,6 +14,10 @@ import {
     projectAgentModelToolResult,
 } from "../../../builtin/provider/AgentToolProjection.js";
 import type { AgentModelToolDefinition } from "../../../builtin/provider/AgentToolSession.js";
+import {
+    encodePiToolError,
+    type PiToolErrorPayload,
+} from "../PiProcessProtocol.js";
 import {
     renderPiToolCall,
     renderPiToolResult,
@@ -53,6 +58,26 @@ export interface PiExtensionApiLike {
     on(
         event: "session_shutdown",
         handler: (event: SessionShutdownEvent) => Promise<void> | void,
+    ): void;
+    on(
+        event: "tool_result",
+        handler: (
+            event: ToolResultEvent,
+        ) =>
+            | {
+                  content?: ToolResultEvent["content"];
+                  details?: unknown;
+                  isError?: boolean;
+              }
+            | Promise<
+                  | {
+                        content?: ToolResultEvent["content"];
+                        details?: unknown;
+                        isError?: boolean;
+                    }
+                  | void
+              >
+            | void,
     ): void;
     getCommands(): Array<{
         name: string;
@@ -174,6 +199,7 @@ export function createDevshellPiWorkspaceBridge(
     let resourcesPromise: Promise<DevshellPiWorkspaceResources> | undefined;
     let resourceGeneration = 0;
     let activeSkillNames: ReadonlySet<string> | undefined;
+    const structuredToolErrors = new Map<string, PiToolErrorPayload>();
 
     const fetchResources = async () => {
         const generation = ++resourceGeneration;
@@ -209,6 +235,7 @@ export function createDevshellPiWorkspaceBridge(
     const close = async () => {
         if (closed) return;
         closed = true;
+        structuredToolErrors.clear();
         await session.close();
     };
 
@@ -216,8 +243,29 @@ export function createDevshellPiWorkspaceBridge(
         close,
         extension: async (pi, attachOptions = {}) => {
             for (const definition of catalog) {
-                pi.registerTool(toPiTool(definition, session));
+                pi.registerTool(
+                    toPiTool(definition, session, structuredToolErrors),
+                );
             }
+            pi.on("tool_result", (event) => {
+                const error = structuredToolErrors.get(event.toolCallId);
+                if (error === undefined) return;
+                structuredToolErrors.delete(event.toolCallId);
+                const details = structuredPiToolErrorResult(error);
+                return {
+                    content: [
+                        {
+                            text: projectAgentModelToolResult(
+                                event.toolName,
+                                details,
+                            ),
+                            type: "text",
+                        },
+                    ],
+                    details,
+                    isError: true,
+                };
+            });
             const loaded = await loadResources();
             if (attachOptions.standaloneResources === true) {
                 attachStandaloneWorkspaceResources(
@@ -253,6 +301,7 @@ export function createDevshellPiWorkspaceBridge(
 function toPiTool(
     definition: DevshellPiToolDefinition,
     session: DevshellPiToolSession,
+    structuredToolErrors: Map<string, PiToolErrorPayload>,
 ): PiToolLike {
     const prompt = piPromptMetadata(definition.name);
     return {
@@ -260,28 +309,48 @@ function toPiTool(
         async execute(toolCallId, params, signal, onUpdate) {
             signal?.throwIfAborted();
             const input = prepareAgentModelToolInput(definition.name, params);
-            const result = await session.callTool(
-                definition.name,
-                input,
-                toolCallId,
-                signal,
-                onUpdate === undefined
-                    ? undefined
-                    : (progress) => {
-                          onUpdate({
-                              content: [
-                                  {
-                                      text: projectAgentModelToolResult(
-                                          definition.name,
-                                          progress,
-                                      ),
-                                      type: "text",
-                                  },
-                              ],
-                              details: progress,
-                          });
-                      },
-            );
+            let result: JsonValue;
+            try {
+                result = await session.callTool(
+                    definition.name,
+                    input,
+                    toolCallId,
+                    signal,
+                    onUpdate === undefined
+                        ? undefined
+                        : (progress) => {
+                              onUpdate({
+                                  content: [
+                                      {
+                                          text: projectAgentModelToolResult(
+                                              definition.name,
+                                              progress,
+                                          ),
+                                          type: "text",
+                                      },
+                                  ],
+                                  details: progress,
+                              });
+                          },
+                );
+            } catch (error) {
+                const structured = structuredPiToolError(error);
+                if (structured === undefined) throw error;
+                structuredToolErrors.set(toolCallId, structured);
+                const details = structuredPiToolErrorResult(structured);
+                return {
+                    content: [
+                        {
+                            text: projectAgentModelToolResult(
+                                definition.name,
+                                details,
+                            ),
+                            type: "text",
+                        },
+                    ],
+                    details,
+                };
+            }
             signal?.throwIfAborted();
             return {
                 content: [
@@ -318,6 +387,27 @@ function toPiTool(
     };
 }
 
+function structuredPiToolError(error: unknown): PiToolErrorPayload | undefined {
+    const encoded = encodePiToolError(error);
+    return encoded.code !== undefined && isNamespacedToolErrorCode(encoded.code)
+        ? encoded
+        : undefined;
+}
+
+function structuredPiToolErrorResult(error: PiToolErrorPayload): JsonValue {
+    const structured: Record<string, JsonValue> = {
+        message: error.message,
+    };
+    if (error.code !== undefined) structured.code = error.code;
+    if (error.details !== undefined) structured.details = error.details;
+    if (error.retryable !== undefined) structured.retryable = error.retryable;
+    return { error: structured };
+}
+
+function isNamespacedToolErrorCode(code: string): boolean {
+    return /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/u.test(code);
+}
+
 export function piPromptMetadata(
     toolName: string,
 ): Pick<PiToolLike, "promptGuidelines" | "promptSnippet"> {
@@ -336,7 +426,7 @@ export function piPromptMetadata(
                 promptSnippet:
                     "Edit workspace files with devshell Write/Patch/Rewrite/Delete/Move edit blocks",
                 promptGuidelines: [
-                    "Before file_edit modifies an existing file, use file_read or file_grep on that file in the current context; file_edit rejects unseen existing files.",
+                    "Establish coverage with file_read or file_grep before the first file_edit change to existing content. Successful file_edit operations carry valid coverage forward to the resulting revision or moved path; re-read only when coverage is missing or stale, or when the next edit needs unseen existing lines.",
                     "Prefer devshell edit blocks: start with '*** Begin Edit', use '*** Patch File:', '*** Write File:', '*** Rewrite File:', '*** Delete File:', or '*** Move File:', and finish with '*** End Edit'. Common apply_patch aliases such as '*** Update File:' and '*** Add File:' are accepted for compatibility.",
                 ],
             };

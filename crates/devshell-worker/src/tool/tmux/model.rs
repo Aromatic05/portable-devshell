@@ -15,7 +15,7 @@ pub enum TmuxWaitMode {
 #[serde(rename_all = "camelCase")]
 pub struct TmuxRunParams {
     #[serde(default)]
-    /// Initial task directory. Use ./ for a workspace-relative path or / for an absolute path.
+    /// Initial task directory. Bare relative paths and ./ paths are workspace-relative; absolute paths are also accepted.
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     #[schemars(length(min = 1))]
@@ -165,7 +165,7 @@ pub struct TmuxManageParams {
         regex(pattern = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     )]
     pub name: Option<String>,
-    /// Initial pane directory for command=create.
+    /// Initial pane directory for command=create. Bare relative paths and ./ paths are workspace-relative; absolute paths are also accepted.
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     /// Managed task id to terminate for command=close. Mutually exclusive with pane.
@@ -188,7 +188,7 @@ pub struct TmuxCreateParams {
     )]
     pub name: String,
     #[serde(default)]
-    /// Initial pane directory. Use ./ for a workspace-relative path or / for an absolute path.
+    /// Initial pane directory. Bare relative paths and ./ paths are workspace-relative; absolute paths are also accepted.
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
 }

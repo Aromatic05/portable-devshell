@@ -16,7 +16,9 @@ use crate::tool::file::model::{
 use crate::tool::file::state::{
     ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextFormat, TextInspection,
 };
-use crate::tool::file::{FileToolState, resolve_create};
+use crate::tool::file::{
+    FileToolState, create_parent_directories, resolve_create, resolve_create_plan,
+};
 use crate::tool::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const MAX_CHANGE_OPERATIONS: usize = 256;
@@ -45,7 +47,7 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
+            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Write/Add and Move targets create missing parent directories automatically. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Existing content requires edit coverage established in the current context; successful edits carry valid coverage forward to their resulting revision or path, while failed edits do not create coverage. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
             [ToolCapability::Write],
         )
     }
@@ -153,7 +155,6 @@ impl FileEditTool {
                 ParsedOperation::Write { path, content } => {
                     ensure_text(&content)?;
                     let (display, resolved) = resolve_for_plan(call, &path)?;
-                    require_existing_parent(&resolved)?;
                     let entry = virtual_entry(&mut virtual_entries, &resolved);
                     if entry.exists {
                         return Err(ToolError::new(
@@ -252,7 +253,6 @@ impl FileEditTool {
                 ParsedOperation::Move { source, target } => {
                     let (source_display, source_path) = resolve_for_plan(call, &source)?;
                     let (target_display, target_path) = resolve_for_plan(call, &target)?;
-                    require_existing_parent(&target_path)?;
                     if source_path == target_path {
                         return Err(ToolError::new(
                             "file.pathConflict",
@@ -572,6 +572,14 @@ impl FileEditTool {
         content: String,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
+        let (requested, planned) = resolve_create_plan(call, &display)?;
+        if planned != path {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "path resolved to a different target after preflight",
+            ));
+        }
+        create_parent_directories(call, &requested)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let target = resolved
             .target()
@@ -970,7 +978,6 @@ impl FileEditTool {
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let source_resolved = rebind_for_execution(call, &source_display, &source)?;
-        let target_resolved = rebind_for_execution(call, &target_display, &target)?;
         let (first, second) = if source <= target {
             (
                 self.state.write_lock(&source),
@@ -993,6 +1000,15 @@ impl FileEditTool {
         if current.revision != base.revision {
             return Err(revision_mismatch());
         }
+        let (target_requested, planned_target) = resolve_create_plan(call, &target_display)?;
+        if planned_target != target {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "path resolved to a different target after preflight",
+            ));
+        }
+        create_parent_directories(call, &target_requested)?;
+        let target_resolved = rebind_for_execution(call, &target_display, &target)?;
         let source_target = source_resolved
             .target()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
@@ -1168,28 +1184,22 @@ fn context_snapshot(
     }
 }
 
-// @compat file-edit-apply-patch-aliases
-// @removeAt 0.7.10
 fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
-    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let normalized = normalize_change_set_dialect(input);
     let lines = normalized.split('\n').collect::<Vec<_>>();
     let first = lines
         .iter()
         .position(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if !matches!(lines[first], "*** Begin Edit" | "*** Begin Patch") {
-        return Err(invalid_edit(
-            "change set must start with `*** Begin Edit` or `*** Begin Patch`",
-        ));
+    if lines[first] != "*** Begin Edit" {
+        return Err(invalid_edit("change set must start with `*** Begin Edit`"));
     }
     let last = lines
         .iter()
         .rposition(|line| !line.trim().is_empty())
         .ok_or_else(|| invalid_edit("change set is empty"))?;
-    if !matches!(lines[last], "*** End Edit" | "*** End Patch") {
-        return Err(invalid_edit(
-            "change set must end with `*** End Edit` or `*** End Patch`",
-        ));
+    if lines[last] != "*** End Edit" {
+        return Err(invalid_edit("change set must end with `*** End Edit`"));
     }
 
     let mut operations = Vec::new();
@@ -1215,19 +1225,7 @@ fn parse_change_set(input: &str) -> Result<Vec<ParsedOperation>, ToolError> {
             index = next;
             continue;
         }
-        if let Some(path) = line.strip_prefix("*** Add File:") {
-            let path = parse_path(path)?;
-            let (body, next) = collect_body(&lines, index + 1, last);
-            let content = add_file_body(body);
-            ensure_text(&content)?;
-            operations.push(ParsedOperation::Write { path, content });
-            index = next;
-            continue;
-        }
-        if let Some(path) = line
-            .strip_prefix("*** Patch File:")
-            .or_else(|| line.strip_prefix("*** Update File:"))
-        {
+        if let Some(path) = line.strip_prefix("*** Patch File:") {
             let path = parse_path(path)?;
             let (body, next) = collect_body(&lines, index + 1, last);
             let patch = body.join("\n");
@@ -1309,21 +1307,6 @@ fn literal_body(lines: Vec<&str>) -> String {
     content
 }
 
-fn add_file_body(mut lines: Vec<&str>) -> String {
-    while lines.last() == Some(&"") {
-        lines.pop();
-    }
-    if !lines.is_empty() && lines.iter().all(|line| line.starts_with('+')) {
-        return literal_body(
-            lines
-                .into_iter()
-                .map(|line| line.strip_prefix('+').unwrap_or(line))
-                .collect(),
-        );
-    }
-    literal_body(lines)
-}
-
 const LITERAL_DIFF_LINE_RATIO: f64 = 0.5;
 
 fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
@@ -1349,13 +1332,89 @@ fn reject_literal_diff(content: &str) -> Result<(), ToolError> {
 
 fn is_operation_header(line: &str) -> bool {
     line.starts_with("*** Write File:")
-        || line.starts_with("*** Add File:")
         || line.starts_with("*** Patch File:")
-        || line.starts_with("*** Update File:")
         || line.starts_with("*** Rewrite File:")
         || line.starts_with("*** Delete File:")
         || line.starts_with("*** Move File:")
         || matches!(line, "*** End Edit" | "*** End Patch")
+}
+
+// @compat file-edit-apply-patch-aliases
+fn normalize_change_set_dialect(input: &str) -> String {
+    let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
+    let lines = normalized.split('\n').collect::<Vec<_>>();
+    let Some(first) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return normalized;
+    };
+    let Some(last) = lines.iter().rposition(|line| !line.trim().is_empty()) else {
+        return normalized;
+    };
+
+    let redundant_end_patch = if lines[first] == "*** Begin Patch" && lines[last] == "*** End Edit"
+    {
+        lines[..last]
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .filter(|index| lines[*index] == "*** End Patch")
+    } else {
+        None
+    };
+    let body_end = redundant_end_patch.unwrap_or(last);
+
+    let mut output = Vec::<String>::with_capacity(lines.len());
+    output.extend(lines[..first].iter().map(|line| (*line).to_string()));
+    output.push(match lines[first] {
+        "*** Begin Patch" => "*** Begin Edit".to_string(),
+        line => line.to_string(),
+    });
+
+    let mut index = first + 1;
+    while index < body_end {
+        let line = lines[index];
+        if let Some(path) = line.strip_prefix("*** Add File:") {
+            output.push(format!("*** Write File:{path}"));
+            let body_start = index + 1;
+            let mut next = body_start;
+            while next < body_end && !is_dialect_operation_header(lines[next]) {
+                next += 1;
+            }
+            let mut body = lines[body_start..next].to_vec();
+            while body.last() == Some(&"") {
+                body.pop();
+            }
+            if !body.is_empty() && body.iter().all(|line| line.starts_with('+')) {
+                output.extend(
+                    body.into_iter()
+                        .map(|line| line.strip_prefix('+').unwrap_or(line).to_string()),
+                );
+            } else {
+                output.extend(body.into_iter().map(str::to_string));
+            }
+            index = next;
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Update File:") {
+            output.push(format!("*** Patch File:{path}"));
+        } else {
+            output.push(line.to_string());
+        }
+        index += 1;
+    }
+
+    if lines[last] == "*** End Patch" || lines[last] == "*** End Edit" {
+        output.push("*** End Edit".to_string());
+    } else {
+        output.push(lines[last].to_string());
+    }
+    output.extend(lines[last + 1..].iter().map(|line| (*line).to_string()));
+    output.join("\n")
+}
+
+fn is_dialect_operation_header(line: &str) -> bool {
+    is_operation_header(line)
+        || line.starts_with("*** Add File:")
+        || line.starts_with("*** Update File:")
+        || line == "*** End Patch"
 }
 
 fn skip_blank_lines(lines: &[&str], mut index: usize, end: usize) -> usize {
@@ -1377,8 +1436,8 @@ fn parse_path(raw: &str) -> Result<String, ToolError> {
 }
 
 fn resolve_for_plan(call: &ToolCall, raw: &str) -> Result<(String, PathBuf), ToolError> {
-    let (requested, resolved) = resolve_create(call, raw)?;
-    Ok((requested.raw, resolved.canonical))
+    let (requested, canonical) = resolve_create_plan(call, raw)?;
+    Ok((requested.raw, canonical))
 }
 
 fn rebind_for_execution(
@@ -1425,19 +1484,38 @@ fn semantic_current(
 }
 
 fn require_semantic_absent(call: &ToolCall, display: &str, path: &Path) -> Result<(), ToolError> {
-    let resolved = rebind_for_execution(call, display, path)?;
-    let target = resolved
-        .target()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-    if target
-        .metadata(false)
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
-        .is_some()
-    {
-        return Err(ToolError::new(
-            "file.alreadyExists",
-            format!("target already exists: {display}"),
+    let (_, rebound) = resolve_create_plan(call, display)?;
+    if rebound != path {
+        return Err(ToolError::retryable(
+            "file.revisionMismatch",
+            "path resolved to a different target after preflight",
         ));
+    }
+    match resolve_create(call, display) {
+        Ok((_, resolved)) => {
+            if resolved.canonical != path {
+                return Err(ToolError::retryable(
+                    "file.revisionMismatch",
+                    "path resolved to a different target after preflight",
+                ));
+            }
+            let target = resolved
+                .target()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            if target
+                .metadata(false)
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+                .is_none()
+            {
+                return Ok(());
+            }
+            return Err(ToolError::new(
+                "file.alreadyExists",
+                format!("target already exists: {display}"),
+            ));
+        }
+        Err(error) if error.code == "file.notFound" => {}
+        Err(error) => return Err(error),
     }
     Ok(())
 }
@@ -1465,25 +1543,6 @@ fn virtual_entry(entries: &mut HashMap<PathBuf, VirtualEntry>, path: &Path) -> V
             exists: path.symlink_metadata().is_ok(),
             known: false,
         })
-}
-
-fn require_existing_parent(path: &Path) -> Result<(), ToolError> {
-    let Some(parent) = path.parent() else {
-        return Err(ToolError::new(
-            "file.invalidPath",
-            "target has no parent directory",
-        ));
-    };
-    if parent.is_dir() {
-        return Ok(());
-    }
-    Err(ToolError::new(
-        "file.parentNotFound",
-        format!(
-            "target parent directory does not exist: {}",
-            parent.display()
-        ),
-    ))
 }
 
 #[cfg(target_os = "linux")]

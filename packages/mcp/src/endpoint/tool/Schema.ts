@@ -74,7 +74,7 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
     [
         "bash_run",
         {
-            cwd: "Working directory; ./ is workspace-relative, / absolute.",
+            cwd: "Working directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
             stdin: "Omit to send EOF.",
             timeoutMs: "Required timeout in milliseconds.",
         },
@@ -133,6 +133,7 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
     [
         "tmux_manage",
         {
+            cwd: "Initial pane directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
             force: "Allow closing a running or busy resource.",
         },
     ],
@@ -146,6 +147,7 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
     [
         "tmux_run",
         {
+            cwd: "Initial task directory; bare relative and ./ paths are workspace-relative, absolute paths are also accepted.",
             line: "Output lines returned with the task.",
             timeout:
                 "Block-wait deadline; the task keeps running after it expires.",

@@ -37,11 +37,20 @@ export function parseCompatibilityAnnotations(source, path = "<source>") {
         const removeAt = [...comment.text.matchAll(/@removeAt\s+([^\s*]+)/gu)];
         if (compat.length === 0 && removeAt.length === 0) continue;
         const line = comment.line;
-        if (compat.length !== 1 || removeAt.length !== 1) {
+        if (compat.length !== 1 || removeAt.length > 1) {
             issues.push({
                 kind: "invalid-annotation",
                 line,
                 path,
+            });
+            continue;
+        }
+        if (removeAt.length === 0) {
+            annotations.push({
+                compat: compat[0][1],
+                line,
+                path,
+                removeAt: null,
             });
             continue;
         }
@@ -84,6 +93,7 @@ export async function checkCompatibilityExpiry(options = {}) {
         issues.push(...parsed.issues);
     }
     for (const annotation of annotations) {
+        if (annotation.removeAt === null) continue;
         if (
             compareVersions(
                 annotation.removeAt,
@@ -131,12 +141,14 @@ export async function listCompatibilityExpiry(options = {}) {
             ...parsed.annotations.map((annotation) => ({
                 ...annotation,
                 expired:
+                    annotation.removeAt !== null &&
                     compareVersions(currentVersion, annotation.removeAt) >= 0,
             })),
         );
         issues.push(...parsed.issues);
     }
     for (const annotation of annotations) {
+        if (annotation.removeAt === null) continue;
         if (
             compareVersions(
                 annotation.removeAt,
@@ -254,7 +266,7 @@ function formatIssue(issue) {
     if (issue.kind === "deadline-after-policy") {
         return `${location} ${issue.compat} moves @removeAt to ${issue.removeAt}, past the fixed compatibility debt deadline ${issue.deadline}`;
     }
-    return `${location} compatibility comment must contain exactly one @compat and one @removeAt`;
+    return `${location} compatibility comment must contain exactly one @compat and at most one @removeAt`;
 }
 
 function readRootOption(args) {
@@ -281,15 +293,21 @@ async function main(argv) {
             process.stdout.write(`invalid\t-\t-\t${formatIssue(issue)}\n`);
         }
         for (const annotation of result.annotations) {
+            const state =
+                annotation.removeAt === null
+                    ? "stable"
+                    : annotation.expired
+                      ? "expired"
+                      : "active";
             process.stdout.write(
-                `${annotation.expired ? "expired" : "active"}\t${annotation.removeAt}\t${annotation.compat}\t${annotation.path}:${annotation.line}\n`,
+                `${state}\t${annotation.removeAt ?? "-"}\t${annotation.compat}\t${annotation.path}:${annotation.line}\n`,
             );
         }
         return;
     }
     const result = await checkCompatibilityExpiry({ root });
     process.stdout.write(
-        `compat expiry check passed: ${result.annotations.length} active annotations at ${result.currentVersion}\n`,
+        `compat expiry check passed: ${result.annotations.length} compatibility annotations at ${result.currentVersion}\n`,
     );
 }
 
