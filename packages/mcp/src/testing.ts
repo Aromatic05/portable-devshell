@@ -9,6 +9,9 @@ export * from "./context/registry/Registry.js";
 
 export * from "./endpoint/Binding.js";
 export * from "./endpoint/Endpoint.js";
+export * from "./endpoint/extension/Contract.js";
+export * from "./endpoint/extension/Registry.js";
+export * from "./endpoint/extension/Workspace.js";
 export * from "./endpoint/Port.js";
 export * from "./endpoint/domain/artifact/Catalog.js";
 export * from "./endpoint/domain/environment/Catalog.js";

@@ -550,7 +550,9 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
     test("Control-owned MCP tools describe their structured output instead of generic objects", () => {
         const definitions = [
             ...new McpToolCatalogArtifact().list(),
-            ...new McpToolCatalogEnvironment().list({ workspaceApp: true }),
+            ...new McpToolCatalogEnvironment().list({
+                presentationResourceUri: workspaceAppResourceUri,
+            }),
             ...new McpToolCatalogInteraction().list(),
         ];
 

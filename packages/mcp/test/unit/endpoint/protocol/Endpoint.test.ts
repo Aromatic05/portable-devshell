@@ -13,7 +13,9 @@ import {
     McpContextRegistry,
     McpEndpointBinding,
     McpEndpointWorker,
+    McpExtensionRegistry,
     McpNativeToolResult,
+    createWorkspaceMcpExtension,
     workspaceAppLegacyResourceUris,
     workspaceAppResourceMeta,
     workspaceAppResourceUri,
@@ -155,6 +157,9 @@ test("HTTP tools/list keeps Workspace actions app-only while advertising host au
     } as unknown as McpInstanceGateway;
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
+            extensions: new McpExtensionRegistry([
+                createWorkspaceMcpExtension(),
+            ]),
             gateway,
             instanceName: "demo",
             worker: harness.worker,
@@ -285,6 +290,104 @@ test("tmux_run does not render a Workspace App", () => {
         undefined,
     );
     assert.equal(meta?.["openai/toolInvocation/invoking"], undefined);
+});
+
+test("MCP endpoint serves App resources and environment presentation from a generic Extension contribution", async () => {
+    const extensions = new McpExtensionRegistry([
+        {
+            id: "example",
+            presentation: {
+                bootstrap: "environment",
+                resourceUri: "ui://example/app-v2.html",
+            },
+            resources: [
+                {
+                    aliases: ["ui://example/app.html"],
+                    app: true,
+                    mimeType: "text/html;profile=mcp-app",
+                    name: "Example App",
+                    read: () => ({
+                        _meta: { source: "example" },
+                        text: "<html>example</html>",
+                    }),
+                    uri: "ui://example/app-v2.html",
+                },
+            ],
+        },
+    ]);
+    const harness = createWorkerHarness();
+    const binding = new McpEndpointBinding(
+        new McpEndpointWorker({
+            extensions,
+            instanceName: "demo",
+            worker: harness.worker,
+            workspaceAppEnabled: false,
+        }),
+    );
+    const server = await createBindingServer(binding);
+
+    try {
+        const session = await initialize(server.url);
+        assert.deepEqual(
+            session.initializeResult?.capabilities?.extensions?.[
+                "io.modelcontextprotocol/ui"
+            ],
+            {},
+        );
+        const tools = await postJson(
+            server.url,
+            await readFixture("mcp-tools-list.json"),
+            session.headers,
+        );
+        const environment = (
+            tools.body.result?.tools as
+                | Array<{ _meta?: Record<string, JsonValue>; name?: string }>
+                | undefined
+        )?.find((tool) => tool.name === "environ_info");
+        assert.equal(
+            environment?._meta?.["openai/outputTemplate"],
+            "ui://example/app-v2.html",
+        );
+
+        const listed = await postJson(
+            server.url,
+            {
+                id: "req-generic-resource-list",
+                jsonrpc: "2.0",
+                method: "resources/list",
+                params: {},
+            },
+            session.headers,
+        );
+        assert.deepEqual(listed.body.result?.resources, [
+            {
+                mimeType: "text/html;profile=mcp-app",
+                name: "Example App",
+                uri: "ui://example/app-v2.html",
+            },
+        ]);
+
+        const read = await postJson(
+            server.url,
+            {
+                id: "req-generic-resource-read",
+                jsonrpc: "2.0",
+                method: "resources/read",
+                params: { uri: "ui://example/app.html" },
+            },
+            session.headers,
+        );
+        assert.deepEqual(read.body.result?.contents, [
+            {
+                _meta: { source: "example" },
+                mimeType: "text/html;profile=mcp-app",
+                text: "<html>example</html>",
+                uri: "ui://example/app.html",
+            },
+        ]);
+    } finally {
+        await server.close();
+    }
 });
 
 test("Workspace MCP App renders from a versioned URI while keeping the stable reader alias", async () => {
@@ -1850,16 +1953,22 @@ function createBinding(
                   waitForWait: unused,
               } as unknown as McpInstanceGateway)
             : undefined;
+    const extensions =
+        options?.workspaceApp === true
+            ? new McpExtensionRegistry([
+                  createWorkspaceMcpExtension(options.publicBaseUrl),
+              ])
+            : undefined;
     return new McpEndpointBinding(
         new McpEndpointWorker({
             contextMode: options?.contextMode,
+            ...(extensions === undefined ? {} : { extensions }),
             ...(gateway === undefined ? {} : { gateway }),
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
             worker: harness.worker,
         }),
         options?.serverVersion,
-        options?.publicBaseUrl,
     );
 }
 

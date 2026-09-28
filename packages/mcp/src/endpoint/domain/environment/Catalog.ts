@@ -1,7 +1,5 @@
 import type { JsonValue, ToolDefinition } from "@portable-devshell/shared";
 
-import { workspaceAppResourceUri } from "../../../workspace/app/App.js";
-
 export const mcpEnvironmentToolName = "environ_info" as const;
 export const mcpRemoteEnvironmentToolName = "environ_remote" as const;
 
@@ -9,9 +7,9 @@ export type McpToolCatalogEnvironmentName =
     typeof mcpEnvironmentToolName | typeof mcpRemoteEnvironmentToolName;
 
 export interface McpToolCatalogEnvironmentListOptions {
+    presentationResourceUri?: string;
     remoteEnvironment?: boolean;
     requireExplicitContextId?: boolean;
-    workspaceApp?: boolean;
 }
 
 const contextStateProperties: Record<string, JsonValue> = {
@@ -209,17 +207,18 @@ export class McpToolCatalogEnvironment {
             }
         }
         definitions[0]!.description = environmentDescription(
-            options.workspaceApp === true,
+            options.presentationResourceUri !== undefined,
             requireExplicitContextId,
         );
-        if (options.workspaceApp === true) {
+        if (options.presentationResourceUri !== undefined) {
+            const resourceUri = options.presentationResourceUri;
             definitions[0]!._meta = {
                 ui: {
-                    resourceUri: workspaceAppResourceUri,
+                    resourceUri,
                     visibility: ["model", "app"],
                 },
-                "ui/resourceUri": workspaceAppResourceUri,
-                "openai/outputTemplate": workspaceAppResourceUri,
+                "ui/resourceUri": resourceUri,
+                "openai/outputTemplate": resourceUri,
                 "openai/widgetAccessible": true,
             };
         }

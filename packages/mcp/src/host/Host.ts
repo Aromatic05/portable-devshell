@@ -21,6 +21,8 @@ import { McpOAuthProtectedResource } from "../auth/oauth/Resource.js";
 import { McpOAuthApprovalService } from "../auth/oauth/interaction/Approval.js";
 import { McpEndpointBinding } from "../endpoint/Binding.js";
 import { McpEndpointWorker } from "../endpoint/Endpoint.js";
+import { McpExtensionRegistry } from "../endpoint/extension/Registry.js";
+import { createWorkspaceMcpExtension } from "../endpoint/extension/Workspace.js";
 import type { McpToolProvenanceRecorder } from "../endpoint/domain/worker/Provenance.js";
 import {
     installMcpWorkspaceLiveRoute,
@@ -301,12 +303,18 @@ export class McpHost {
         const liveBaseUrl = workspaceApp
             ? workspaceLiveBaseUrl(this.#config.publicBaseUrl, instance.name)
             : undefined;
+        const extensions = new McpExtensionRegistry(
+            workspaceApp
+                ? [createWorkspaceMcpExtension(this.#config.publicBaseUrl)]
+                : [],
+        );
         const binding = new McpEndpointBinding(
             new McpEndpointWorker({
                 auth: instance.auth,
                 cleanup: this.#runtimeState.environmentCleanup,
                 contextRegistry: this.#contextRegistry,
                 contextMode: instance.contextMode ?? "explicit",
+                extensions,
                 gateway: instance.gateway,
                 instanceName: instance.name,
                 toolProvenance: this.#config.toolProvenance,
@@ -323,7 +331,6 @@ export class McpHost {
                     : { workspaceLiveBaseUrl: liveBaseUrl }),
             }),
             this.#config.serverVersion,
-            this.#config.publicBaseUrl,
         );
         const path = instance.path ?? `/${instance.name}/mcp`;
 

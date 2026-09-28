@@ -11,6 +11,7 @@ import { McpContextRegistry } from "../context/registry/Registry.js";
 import { createMcpContextSelector } from "../context/Selector.js";
 import type { McpInstanceGateway } from "./Port.js";
 import type { McpTool } from "./tool/Schema.js";
+import { McpExtensionRegistry } from "./extension/Registry.js";
 import type { WorkspaceAppLeaseStore } from "../workspace/app/Lease.js";
 import type { WorkspaceAppPresenceStore } from "../workspace/app/Presence.js";
 import { McpEndpointCatalog } from "./tool/Catalog.js";
@@ -32,6 +33,7 @@ export interface McpEndpointWorkerOptions {
     cleanup?: McpContextEnvironmentCleanupService;
     contextRegistry?: McpContextRegistry;
     contextMode?: ControlMcpContextMode;
+    extensions?: McpExtensionRegistry;
     gateway?: McpInstanceGateway;
     instanceName: string;
     readyWaitMs?: number;
@@ -46,6 +48,7 @@ export interface McpEndpointWorkerOptions {
 export class McpEndpointWorker {
     readonly #catalog: McpEndpointCatalog;
     readonly #dispatch: McpEndpointDispatch;
+    readonly #extensions: McpExtensionRegistry;
     readonly #instanceName: string;
     readonly #worker: McpEndpointWorkerPort;
 
@@ -53,11 +56,14 @@ export class McpEndpointWorker {
         const contextSelector = createMcpContextSelector(
             options.contextMode ?? "explicit",
         );
+        this.#extensions = options.extensions ?? new McpExtensionRegistry();
         this.#catalog = new McpEndpointCatalog({
             auth: options.auth,
             contextSelector,
             gateway: options.gateway,
             instanceName: options.instanceName,
+            presentationResourceUri:
+                this.#extensions.environmentPresentation()?.resourceUri,
             worker: options.worker,
             workspaceAppEnabled: options.workspaceAppEnabled,
         });
@@ -102,8 +108,16 @@ export class McpEndpointWorker {
         return this.#catalog.snapshot().hasWorkerSchema;
     }
 
-    hasWorkspaceApp(): boolean {
-        return this.#catalog.getExposed("workspace_open") !== undefined;
+    hasAppResources(): boolean {
+        return this.#extensions.hasAppResources();
+    }
+
+    listResources() {
+        return this.#extensions.listResources();
+    }
+
+    async readResource(uri: string) {
+        return await this.#extensions.readResource(uri);
     }
 
     async callTool(

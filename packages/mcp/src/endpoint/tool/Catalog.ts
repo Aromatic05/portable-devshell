@@ -49,6 +49,7 @@ export interface McpEndpointCatalogOptions {
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
+    presentationResourceUri?: string;
     worker: McpEndpointCatalogWorker;
     workspaceAppEnabled?: boolean;
 }
@@ -70,6 +71,7 @@ export class McpEndpointCatalog {
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
     readonly #interactionTools = new McpToolCatalogInteraction();
+    readonly #presentationResourceUri?: string;
     readonly #schemaAdapter = new McpToolSchemaAdapter();
     readonly #todoTools = new McpToolCatalogTodo();
     readonly #worker: McpEndpointCatalogWorker;
@@ -82,6 +84,7 @@ export class McpEndpointCatalog {
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
+        this.#presentationResourceUri = options.presentationResourceUri;
         this.#worker = options.worker;
         this.#workspaceAppEnabled = options.workspaceAppEnabled !== false;
     }
@@ -198,17 +201,14 @@ export class McpEndpointCatalog {
             isMcpInteractionGateway(this.#gateway)
                 ? this.#interactionTools.list()
                 : [];
-        const workspaceApp = workspaceTools.some(
-            (tool) => tool.name === "workspace_open",
-        );
         const sources: McpToolCatalogEndpointSource[] = [
             {
                 owner: "environment",
                 tools: this.#environmentTools.list({
+                    presentationResourceUri: this.#presentationResourceUri,
                     remoteEnvironment: this.#gateway !== undefined,
                     requireExplicitContextId:
                         this.#contextSelector.requiresExplicitContextId,
-                    workspaceApp,
                 }),
             },
         ];

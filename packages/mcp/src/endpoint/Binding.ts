@@ -1,9 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import {
-    EXTENSION_ID,
-    RESOURCE_MIME_TYPE,
-} from "@modelcontextprotocol/ext-apps/server";
+import { EXTENSION_ID } from "@modelcontextprotocol/ext-apps/server";
 import {
     toNodeHandler,
     type NodeMcpRequestHandler,
@@ -23,12 +20,6 @@ import {
 } from "@portable-devshell/shared";
 
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
-import {
-    workspaceAppHtml,
-    workspaceAppResourceMetaForPublicBaseUrl,
-    workspaceAppResourceUri,
-    workspaceAppResourceUris,
-} from "../workspace/app/App.js";
 import { McpEndpointWorker } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./Endpoint.js";
 import { McpEndpointCallError } from "./dispatch/Feedback.js";
@@ -38,19 +29,10 @@ export class McpEndpointBinding {
     readonly #nodeHandler: NodeMcpRequestHandler;
     readonly #serverVersion: string;
     readonly #worker: McpEndpointWorker;
-    readonly #workspaceResourceMeta: ReturnType<
-        typeof workspaceAppResourceMetaForPublicBaseUrl
-    >;
 
-    constructor(
-        worker: McpEndpointWorker,
-        serverVersion = "0.0.0",
-        publicBaseUrl?: string,
-    ) {
+    constructor(worker: McpEndpointWorker, serverVersion = "0.0.0") {
         this.#serverVersion = serverVersion;
         this.#worker = worker;
-        this.#workspaceResourceMeta =
-            workspaceAppResourceMetaForPublicBaseUrl(publicBaseUrl);
         /**
          * @compat mcp-stateless-transport
          * @removeAt 0.7.10
@@ -80,7 +62,8 @@ export class McpEndpointBinding {
     }
 
     #createServer(): Server {
-        const workspaceApp = this.#worker.hasWorkspaceApp();
+        const resources = this.#worker.listResources();
+        const appResources = this.#worker.hasAppResources();
         const server = new Server(
             {
                 name: "portable-devshell-mcp",
@@ -88,33 +71,25 @@ export class McpEndpointBinding {
             },
             {
                 capabilities: {
-                    ...(workspaceApp
+                    ...(appResources
                         ? { extensions: { [EXTENSION_ID]: {} } }
                         : {}),
-                    ...(workspaceApp ? { resources: {} } : {}),
+                    ...(resources.length > 0 ? { resources: {} } : {}),
                     tools: {},
                 },
             },
         );
 
-        if (workspaceApp) {
+        if (resources.length > 0) {
             server.setRequestHandler("resources/list", async () => ({
-                resources: [
-                    {
-                        mimeType: RESOURCE_MIME_TYPE,
-                        name: "portable-devshell Workspace",
-                        uri: workspaceAppResourceUri,
-                    },
-                ],
+                resources: [...resources],
             }));
 
             server.setRequestHandler("resources/read", async (request) => {
-                if (
-                    !workspaceAppResourceUris.includes(
-                        request.params
-                            .uri as (typeof workspaceAppResourceUris)[number],
-                    )
-                ) {
+                const content = await this.#worker.readResource(
+                    request.params.uri,
+                );
+                if (content === undefined) {
                     throw new ProtocolError(
                         ProtocolErrorCode.InvalidParams,
                         `Unknown resource: ${request.params.uri}`,
@@ -123,10 +98,12 @@ export class McpEndpointBinding {
                 return {
                     contents: [
                         {
-                            _meta: this.#workspaceResourceMeta,
-                            mimeType: RESOURCE_MIME_TYPE,
-                            text: workspaceAppHtml,
-                            uri: request.params.uri,
+                            ...(content._meta === undefined
+                                ? {}
+                                : { _meta: content._meta }),
+                            mimeType: content.mimeType,
+                            text: content.text,
+                            uri: content.uri,
                         },
                     ],
                 };
