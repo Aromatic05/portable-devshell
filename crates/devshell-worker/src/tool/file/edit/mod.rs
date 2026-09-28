@@ -1336,7 +1336,7 @@ fn is_operation_header(line: &str) -> bool {
         || line.starts_with("*** Rewrite File:")
         || line.starts_with("*** Delete File:")
         || line.starts_with("*** Move File:")
-        || line == "*** End Edit"
+        || matches!(line, "*** End Edit" | "*** End Patch")
 }
 
 // @compat file-edit-apply-patch-aliases
@@ -1350,7 +1350,8 @@ fn normalize_change_set_dialect(input: &str) -> String {
         return normalized;
     };
 
-    let redundant_end_patch = if lines[last] == "*** End Edit" {
+    let redundant_end_patch = if lines[first] == "*** Begin Patch" && lines[last] == "*** End Edit"
+    {
         lines[..last]
             .iter()
             .rposition(|line| !line.trim().is_empty())

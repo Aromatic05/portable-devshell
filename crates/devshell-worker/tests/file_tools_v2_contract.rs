@@ -2312,33 +2312,45 @@ fn file_edit_accepts_pi_v2_redundant_apply_patch_trailer() {
 }
 
 #[test]
-fn file_edit_dialect_normalization_does_not_rewrite_literal_body_markers() {
+fn file_edit_canonical_wrapper_does_not_absorb_end_patch_trailer() {
     let env = TestEnv::new();
-    let instance = "aromatic-file-edit-literal-dialect-marker";
+    let instance = "aromatic-file-edit-canonical-end-patch";
+    fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
     start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
 
     let edited = call(
         &env,
         instance,
-        "1",
+        "2",
         "ctx-a",
         "file_edit",
         json!({
             "changes": concat!(
                 "*** Begin Edit\n",
-                "*** Write File: marker.txt\n",
-                "before\n",
-                "*** Begin Patch\n",
-                "after\n",
+                "*** Patch File: document.txt\n",
+                "@@\n",
+                "-old\n",
+                "+new\n",
+                "*** End Patch\n",
                 "*** End Edit"
             )
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["ok"], false, "{edited}");
     assert_eq!(
-        fs::read_to_string(env.workspace().join("marker.txt")).unwrap(),
-        "before\n*** Begin Patch\nafter\n"
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "old\n"
     );
 
     env.json_command(&["stop", "--instance", instance]);
