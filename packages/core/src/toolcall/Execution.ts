@@ -415,6 +415,15 @@ export class ToolCallExecution {
                     failureStage = "outboundBoundary";
                     throw outboundBoundaryFailure();
                 }
+                const feedback = await reviewOutboundFeedback(boundary, {
+                    callId: scope.callId,
+                    context: boundaryContext,
+                    direction: "outbound",
+                    kind: "result",
+                    payload: result,
+                    signal: boundarySignal,
+                    toolName,
+                });
                 toolExecutionSucceeded = true;
                 if (hostRecorded) {
                     const bashResult =
@@ -427,6 +436,7 @@ export class ToolCallExecution {
                         approvalState,
                         result,
                         bashResult,
+                        feedback,
                         async () => {
                             if (bashResult !== undefined) {
                                 await this.#log.append(
@@ -437,19 +447,7 @@ export class ToolCallExecution {
                         },
                     );
                 }
-                await deliverOutboundReviewFeedback(
-                    boundary,
-                    {
-                        callId: scope.callId,
-                        context: boundaryContext,
-                        direction: "outbound",
-                        kind: "result",
-                        payload: result,
-                        signal: boundarySignal,
-                        toolName,
-                    },
-                    onFeedback,
-                );
+                deliverFeedback(feedback, onFeedback);
                 return result;
             } catch (error) {
                 if (toolExecutionSucceeded) throw error;
@@ -487,6 +485,7 @@ export class ToolCallExecution {
                                 errorCodes.coreProviderFailed,
                             ),
                             undefined,
+                            [],
                             async () => undefined,
                             auditFailure(),
                         );
@@ -504,6 +503,15 @@ export class ToolCallExecution {
                         : rawErrorCode;
                 const nonRunningStatus =
                     readNonRunningSchedulerStatus(errorCode);
+                const feedback = await reviewOutboundFeedback(boundary, {
+                    callId: scope.callId,
+                    context: boundaryContext,
+                    direction: "outbound",
+                    kind: "error",
+                    payload: outerFailure.payload,
+                    signal: boundarySignal,
+                    toolName,
+                });
 
                 if (nonRunningStatus !== undefined) {
                     if (hostRecorded) {
@@ -513,21 +521,10 @@ export class ToolCallExecution {
                             approvalState,
                             nonRunningStatus,
                             errorCode,
+                            feedback,
                         );
                     }
-                    await deliverOutboundReviewFeedback(
-                        boundary,
-                        {
-                            callId: scope.callId,
-                            context: boundaryContext,
-                            direction: "outbound",
-                            kind: "error",
-                            payload: outerFailure.payload,
-                            signal: boundarySignal,
-                            toolName,
-                        },
-                        onFeedback,
-                    );
+                    deliverFeedback(feedback, onFeedback);
                     throw normalizeToolSchedulerError(outerFailure.error);
                 }
 
@@ -538,6 +535,7 @@ export class ToolCallExecution {
                         approvalState,
                         errorCode,
                         outerFailure.result,
+                        feedback,
                         async () => {
                             if (outerFailure.result !== undefined) {
                                 await this.#log.append(
@@ -549,19 +547,7 @@ export class ToolCallExecution {
                         auditFailure(),
                     );
                 }
-                await deliverOutboundReviewFeedback(
-                    boundary,
-                    {
-                        callId: scope.callId,
-                        context: boundaryContext,
-                        direction: "outbound",
-                        kind: "error",
-                        payload: outerFailure.payload,
-                        signal: boundarySignal,
-                        toolName,
-                    },
-                    onFeedback,
-                );
+                deliverFeedback(feedback, onFeedback);
                 throw outerFailure.error;
             }
         } finally {
@@ -575,11 +561,19 @@ async function deliverOutboundReviewFeedback(
     input: Parameters<ToolCallBoundarySequence["review"]>[0],
     onFeedback: ((feedback: readonly string[]) => void) | undefined,
 ): Promise<void> {
+    deliverFeedback(await reviewOutboundFeedback(boundary, input), onFeedback);
+}
+
+async function reviewOutboundFeedback(
+    boundary: ToolCallBoundarySequence,
+    input: Parameters<ToolCallBoundarySequence["review"]>[0],
+): Promise<readonly string[]> {
     try {
         const review = await boundary.review(input);
-        deliverFeedback(review.feedback, onFeedback);
+        return review.feedback ?? [];
     } catch (error) {
         console.warn(error instanceof Error ? error : new Error(String(error)));
+        return [];
     }
 }
 

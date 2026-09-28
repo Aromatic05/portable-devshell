@@ -554,6 +554,7 @@ test("ToolCallExecution records completed execution when outbound result Rewrite
                 _approval: unknown,
                 _errorCode: string,
                 _result: unknown,
+                _feedback: unknown,
                 _appendLogs: unknown,
                 failure: unknown,
             ) {
@@ -756,6 +757,8 @@ test("ToolCallExecution preserves the original failure when outbound error Revie
 
 test("ToolCallExecution masks error message, details, and command streams before audit and delivery", async () => {
     const failedResults: unknown[] = [];
+    const failedFeedback: string[][] = [];
+    const feedback: string[] = [];
     const reviewed: unknown[] = [];
     const execution = new ToolCallExecution({
         approval: { async prepare() { return {}; } },
@@ -769,8 +772,16 @@ test("ToolCallExecution masks error message, details, and command streams before
             runningContext() { return {}; },
             async running() {},
             async completed() {},
-            async failed(_scope: unknown, _running: unknown, _approval: unknown, _errorCode: string, result: unknown) {
+            async failed(
+                _scope: unknown,
+                _running: unknown,
+                _approval: unknown,
+                _errorCode: string,
+                result: unknown,
+                entries: readonly string[],
+            ) {
                 failedResults.push(result);
+                failedFeedback.push([...entries]);
             },
             async failActive() {},
             async nonRunning() {},
@@ -779,8 +790,13 @@ test("ToolCallExecution masks error message, details, and command streams before
             release() {},
             sequence: new ToolCallBoundarySequence({
                 reviews: [async (input) => {
-                    if (input.direction === "outbound" && input.kind === "error")
+                    if (input.direction === "outbound" && input.kind === "error") {
                         reviewed.push(input.payload);
+                        return {
+                            decision: "accept",
+                            feedback: ["masked error feedback"],
+                        };
+                    }
                     return { decision: "accept" };
                 }],
                 rewrites: [async (input) =>
@@ -820,7 +836,17 @@ test("ToolCallExecution masks error message, details, and command streams before
     } as never);
 
     await assert.rejects(
-        execution.call("bash_run", {}, context),
+        execution.call(
+            "bash_run",
+            {},
+            context,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "host",
+            (entries) => feedback.push(...entries),
+        ),
         (error: unknown) => {
             const value = error as {
                 details?: { token?: string };
@@ -845,6 +871,8 @@ test("ToolCallExecution masks error message, details, and command streams before
             timedOut: false,
         },
     ]);
+    assert.deepEqual(failedFeedback, [["masked error feedback"]]);
+    assert.deepEqual(feedback, ["masked error feedback"]);
     assert.equal(JSON.stringify(reviewed).includes("real-token"), false);
     assert.equal(JSON.stringify(reviewed).includes("${SECRET:github}"), true);
 });
@@ -853,6 +881,7 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
     const events: string[] = [];
     const reviews: string[] = [];
     const feedback: string[] = [];
+    const auditFeedback: string[][] = [];
     const operationInputs: unknown[] = [];
     let readinessChecks = 0;
     const execution = new ToolCallExecution({
@@ -869,9 +898,17 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
             async queued() { events.push("audit.queued"); },
             runningContext() { return {}; },
             async running() { events.push("audit.running"); },
-            async completed(_scope: unknown, _running: unknown, _approval: unknown, result: unknown) {
+            async completed(
+                _scope: unknown,
+                _running: unknown,
+                _approval: unknown,
+                result: unknown,
+                _bashResult: unknown,
+                entries: readonly string[],
+            ) {
                 events.push("audit.completed");
                 assert.deepEqual(result, { value: "outer-result" });
+                auditFeedback.push([...entries]);
             },
             async denied() {},
             async failed() {},
@@ -938,6 +975,7 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
         "inbound:call:feedback",
         "outbound:result:feedback",
     ]);
+    assert.deepEqual(auditFeedback, [["outbound:result:feedback"]]);
     assert.deepEqual(events, [
         "audit.requested",
         "reserve",

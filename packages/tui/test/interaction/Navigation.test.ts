@@ -889,11 +889,11 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             callId: "call-comment",
             completedAt: "2026-08-02T00:01:30.000Z",
             ctxId: "ctx-alpha",
+            feedback: ["first comment"],
             input: { command: "pwd" },
             inputSummary: '{"command":"pwd"}',
             instance: asInstanceName("alpha"),
             output: {
-                comment: ["first comment"],
                 exitCode: 0,
                 stderr: "",
                 stdout: "/workspace\n",
@@ -903,11 +903,28 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
             status: "completed",
             toolName: "bash_run",
         };
+        const legacyCommentCall: ToolCallRecord = {
+            ...commentCall,
+            callId: "call-comment-legacy",
+            completedAt: "2026-08-02T00:01:50.000Z",
+            feedback: undefined,
+            output: {
+                comment: ["legacy comment"],
+                exitCode: 0,
+                stderr: "",
+                stdout: "/workspace\n",
+            },
+            startedAt: "2026-08-02T00:01:40.000Z",
+        };
         harness.store.patchControlReadModel({
             instanceState: { ["alpha"]: { toolCalls: [] } },
         });
         harness.store.patchControlReadModel({
-            instanceState: { ["alpha"]: { commentCalls: [commentCall] } },
+            instanceState: {
+                ["alpha"]: {
+                    commentCalls: [commentCall, legacyCommentCall],
+                },
+            },
         });
         assert.equal(
             harness.store.getState().readModel.instanceState.alpha?.toolCalls
@@ -948,7 +965,14 @@ import { tuiTextDetailBodyRows } from "../../src/view/component/content/Detail.t
         assert.ok(
             text.indexOf("first comment") < text.indexOf("second comment"),
         );
+        assert.ok(
+            text.indexOf("first comment") < text.indexOf("legacy comment"),
+        );
+        assert.ok(
+            text.indexOf("legacy comment") < text.indexOf("second comment"),
+        );
         assert.match(text, /call-comment/i);
+        assert.match(text, /call-comment-legacy/i);
         assert.match(text, /bash_run/i);
         assert.match(text, /failed/i);
         assert.match(text, /delivery failed/i);

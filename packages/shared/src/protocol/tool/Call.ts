@@ -59,6 +59,7 @@ export interface ToolCallRecord extends ToolCallProvenance {
     executionCompleted?: boolean;
     exitCode?: number | null;
     failureStage?: ToolCallFailureStage;
+    feedback?: string[];
     inputSummary: string;
     input?: JsonValue;
     output?: JsonValue;

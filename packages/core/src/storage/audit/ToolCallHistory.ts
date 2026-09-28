@@ -45,6 +45,7 @@ interface ToolCallCompletionResult {
     executionCompleted?: boolean;
     exitCode?: number | null;
     failureStage?: ToolCallFailureStage;
+    feedback?: readonly string[];
     output?: JsonValue;
     stderrBytes?: number;
     stdoutBytes?: number;
@@ -170,12 +171,15 @@ export class AuditToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
+        feedback?: readonly string[],
     ): Promise<ToolCallRecord> {
         return await this.#finishNonRunning(
             callId,
             error,
             completedAt,
             "queueTimeout",
+            undefined,
+            feedback,
         );
     }
 
@@ -183,12 +187,15 @@ export class AuditToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
+        feedback?: readonly string[],
     ): Promise<ToolCallRecord> {
         return await this.#finishNonRunning(
             callId,
             error,
             completedAt,
             "cancelled",
+            undefined,
+            feedback,
         );
     }
 
@@ -346,6 +353,9 @@ export class AuditToolCallHistory {
             ...(result?.failureStage === undefined
                 ? {}
                 : { failureStage: result.failureStage }),
+            ...(result?.feedback === undefined || result.feedback.length === 0
+                ? {}
+                : { feedback: [...result.feedback] }),
             instance: this.#instanceName,
             ...(result?.output === undefined ? {} : { output: result.output }),
             status,
@@ -377,6 +387,7 @@ export class AuditToolCallHistory {
             "denied" | "expired" | "queueTimeout" | "cancelled"
         >,
         decision?: ToolCallApprovalDecision,
+        feedback?: readonly string[],
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);
@@ -385,6 +396,9 @@ export class AuditToolCallHistory {
             completedAt,
             ...(decision === undefined ? {} : { decision }),
             error,
+            ...(feedback === undefined || feedback.length === 0
+                ? {}
+                : { feedback: [...feedback] }),
             instance: this.#instanceName,
             status,
         };
