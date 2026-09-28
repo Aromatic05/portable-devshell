@@ -1,4 +1,3 @@
-export { ToolCallCommentReview } from "./Comment.js";
 export {
     ToolCallSecretRewrite,
     type ToolCallSecretRewriteScope,

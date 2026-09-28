@@ -9,19 +9,16 @@ import {
     review,
     rewrite,
     type ToolCallReviewBinding,
+    type ToolCallReviewContext,
     type ToolCallReviewInvocation,
     type ToolCallRewriteBinding,
     type ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 
 import type { ExtensionHost } from "../Host.js";
-import {
-    ToolCallCommentReview,
-    ToolCallSecretRewrite,
-} from "./interface/index.js";
+import { ToolCallSecretRewrite } from "./interface/index.js";
 
 export class ToolCallExtensionBinding {
-    readonly #comment: ToolCallCommentReview;
     readonly #secret: ToolCallSecretRewrite;
     readonly #extensions: Pick<
         ExtensionHost,
@@ -33,10 +30,8 @@ export class ToolCallExtensionBinding {
             ExtensionHost,
             "acquireRegistration" | "listDeclarations"
         >,
-        comment: ToolCallCommentReview = new ToolCallCommentReview(),
         secret: ToolCallSecretRewrite = new ToolCallSecretRewrite(),
     ) {
-        this.#comment = comment;
         this.#secret = secret;
         this.#extensions = extensions;
     }
@@ -76,7 +71,7 @@ export class ToolCallExtensionBinding {
                 const invocation = input as ToolCallReviewInvocation;
                 return await binding(
                     invocation,
-                    this.#comment.context(extensionId, invocation),
+                    unsupportedReviewContext(extensionId),
                 );
             });
         }
@@ -101,4 +96,16 @@ export class ToolCallExtensionBinding {
         }
         return bindings;
     }
+}
+
+function unsupportedReviewContext(
+    extensionId: string | undefined,
+): ToolCallReviewContext {
+    return Object.freeze({
+        requestInterface: async (operation: string): Promise<never> => {
+            throw new TypeError(
+                `Unsupported ToolCall review interface operation for Extension ${extensionId ?? "unknown"}: ${operation}.`,
+            );
+        },
+    });
 }

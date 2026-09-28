@@ -23,11 +23,7 @@ import { WebExtensionPageService } from "../../server/web/extension/page/Service
 import type { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionInstallService } from "../../control/extension/install/Service.js";
 import { ToolCallExtensionBinding } from "../../control/extension/toolcall/Binding.js";
-import {
-    ToolCallCommentReview,
-    ToolCallSecretRewrite,
-} from "../../control/extension/toolcall/interface/index.js";
-import type { ToolCallCommentPort } from "../../control/extension/toolcall/interface/Comment.js";
+import { ToolCallSecretRewrite } from "../../control/extension/toolcall/interface/index.js";
 import type { ExtensionPathLayout } from "../../control/extension/state/Layout.js";
 import type { BuiltinExtensionSource } from "../../control/extension/install/BuiltinSource.js";
 import { OperationalOverviewService } from "../../control/overview/Service.js";
@@ -52,7 +48,6 @@ import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 
 interface ControlRuntimeComment {
-    readonly comment: ToolCallCommentPort;
     readonly routes: ControlRouteCommentPort;
     close(): Promise<void>;
     retireInstance(instance: string, reason: string): Promise<void>;
@@ -120,7 +115,6 @@ export class ControlRuntime {
         this.#comment = options.comment;
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
-            new ToolCallCommentReview(this.#comment.comment),
             new ToolCallSecretRewrite(options.config),
         );
         this.#bindToolCallBoundaries();

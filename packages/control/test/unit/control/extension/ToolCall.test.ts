@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
-import { reviewCommentToolCall } from "@portable-devshell/extension/comment";
 import { readSecretEnvironment } from "@portable-devshell/extension/secret";
 import type {
     ToolCallReviewInvocation,
@@ -10,7 +9,6 @@ import type {
 } from "@portable-devshell/extension/toolcall";
 
 import { ToolCallExtensionBinding } from "../../../../src/control/extension/toolcall/Binding.ts";
-import { ToolCallCommentReview } from "../../../../src/control/extension/toolcall/interface/Comment.ts";
 import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
 import {
     createToolCallReviewSandboxBinding,
@@ -99,42 +97,32 @@ test("ToolCall Extension binding acquires registrations once and releases them w
     ]);
 });
 
-test("ToolCall Extension binding supplies the same scoped Comment interface to in-process review bindings", async () => {
-    const comment = new ToolCallCommentReview({
-        feedback() {
-            return [];
+test("ToolCall Extension binding does not expose builtin-specific review interfaces", async () => {
+    const bindings = new ToolCallExtensionBinding({
+        listDeclarations(pointId: string) {
+            return pointId === "toolcall.review"
+                ? [{ extensionId: "example", id: "review" }]
+                : [];
         },
-        async reviewToolCall(instance: string) {
-            assert.equal(instance, "demo");
-            return { commentId: "stop-1", kind: "stop" as const };
-        },
-    });
-    const bindings = new ToolCallExtensionBinding(
-        {
-            listDeclarations(pointId: string) {
-                return pointId === "toolcall.review"
-                    ? [{ extensionId: "comment", id: "comment" }]
-                    : [];
-            },
-            async acquireRegistration() {
-                return {
-                    extensionId: "comment",
-                    lease: { release() {} },
-                    registration: {
-                        binding: async (_input: unknown, context: Parameters<typeof reviewCommentToolCall>[0]) =>
-                            (await reviewCommentToolCall(context)).kind === "stop"
-                                ? { decision: "reject" as const, reason: "stop" }
-                                : { decision: "accept" as const },
+        async acquireRegistration() {
+            return {
+                extensionId: "example",
+                lease: { release() {} },
+                registration: {
+                    binding: async (_input: unknown, context: {
+                        requestInterface(operation: string): Promise<unknown>;
+                    }) => {
+                        await context.requestInterface("example.private");
+                        return { decision: "accept" as const };
                     },
-                } as never;
-            },
-        } as never,
-        comment,
-    );
+                },
+            } as never;
+        },
+    } as never);
     const lease = await bindings.acquire(toolCallContext);
     try {
-        assert.deepEqual(
-            await lease.sequence.review({
+        await assert.rejects(
+            lease.sequence.review({
                 callId: "call-2",
                 context: toolCallContext,
                 direction: "inbound",
@@ -143,7 +131,7 @@ test("ToolCall Extension binding supplies the same scoped Comment interface to i
                 signal: new AbortController().signal,
                 toolName: "bash_run",
             }),
-            { decision: "reject", reason: "stop" },
+            /Unsupported ToolCall review interface operation/u,
         );
     } finally {
         lease.release();
@@ -197,7 +185,6 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
                 } as never;
             },
         } as never,
-        new ToolCallCommentReview(),
         secret,
     );
     const lease = await bindings.acquire(toolCallContext);
