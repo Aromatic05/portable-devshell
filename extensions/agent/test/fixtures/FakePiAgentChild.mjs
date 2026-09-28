@@ -9,11 +9,7 @@ let nextToolCall = 0;
 process.on("message", (message) => {
     if (message.type === "owner.heartbeat") return;
     if (message.type === "tool.result") {
-        const pending = pendingTools.get(message.callId);
-        if (pending === undefined) return;
-        pendingTools.delete(message.callId);
-        if (message.ok) pending.resolve(message.result ?? null);
-        else pending.reject(new Error(message.error ?? "tool request failed"));
+        void acceptToolResult(message);
         return;
     }
     void handle(message).catch((error) => {
@@ -88,6 +84,17 @@ async function handle(message) {
             });
             await request.result.catch(() => undefined);
         }
+        if (
+            message.command === "prompt" &&
+            message.message === "__tool-error__"
+        ) {
+            await callTool(
+                message.agentId,
+                "error_tool",
+                { value: "fail" },
+                "fake-error-operation",
+            ).catch(() => undefined);
+        }
         if (message.command === "stop") {
             await closeTools(message.agentId);
             agents.delete(message.agentId);
@@ -99,6 +106,26 @@ async function handle(message) {
         process.send?.({ id: message.id, ok: true, type: "result" });
         setImmediate(() => process.exit(0));
     }
+}
+
+async function acceptToolResult(message) {
+    await appendFile(
+        logPath,
+        `${process.pid}\t${process.env.PI_CODING_AGENT_DIR ?? ""}\ttool.result\t${message.agentId ?? ""}\t\t[]\t${JSON.stringify(message.error ?? null)}\n`,
+        "utf8",
+    );
+    const pending = pendingTools.get(message.callId);
+    if (pending === undefined) return;
+    pendingTools.delete(message.callId);
+    if (message.ok) pending.resolve(message.result ?? null);
+    else
+        pending.reject(
+            new Error(
+                message.error?.message ??
+                    message.error ??
+                    "tool request failed",
+            ),
+        );
 }
 
 async function callTool(agentId, toolName, input, operationId) {

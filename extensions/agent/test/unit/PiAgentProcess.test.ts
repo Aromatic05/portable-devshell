@@ -13,6 +13,7 @@ import type {
     ExtensionProcessExit,
     ExtensionProcessStartInput,
 } from "@portable-devshell/extension";
+import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
 import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
@@ -205,6 +206,63 @@ test("Pi process forwards child tool calls, cancellation, and close to the paren
 
         await handle.stop();
         assert.equal(closes, 1);
+    } finally {
+        await rm(runtimeDirectory, { force: true, recursive: true });
+    }
+});
+
+test("Pi process preserves structured tool errors across the child IPC boundary", async () => {
+    const runtimeDirectory = await mkdtemp(
+        join(tmpdir(), "devshell-pi-tool-error-"),
+    );
+    const factory = new PiAgentProcessFactory({ childModulePath });
+    const base = {
+        entrypoint: "/managed/pi/dist/index.js",
+        runtimeDirectory,
+        webBasePath: "/web/agent/",
+    };
+    const target = parseAgentWorkerTarget("worker-a:/repo/tools");
+    const tools = toolSession(target, {
+        async callTool(toolName) {
+            if (toolName === "error_tool") {
+                throw new ExtensionError({
+                    code: "file.snapshotRequired",
+                    details: { path: "./document.txt" },
+                    message: "snapshot required",
+                    retryable: true,
+                });
+            }
+            return null;
+        },
+    });
+
+    try {
+        const handle = await factory.start(
+            startOptions(base, "ag-tool-error", target, tools),
+        );
+        await handle.prompt("__tool-error__");
+
+        const entries = await readEntries(runtimeDirectory);
+        const result = entries.find(
+            (entry) =>
+                entry.type === "tool.result" &&
+                typeof entry.payload === "object" &&
+                entry.payload !== null &&
+                "code" in entry.payload,
+        );
+        assert.notEqual(result, undefined);
+        const payload = result!.payload as {
+            code?: string;
+            details?: unknown;
+            message?: unknown;
+            retryable?: boolean;
+        };
+        assert.equal(payload.code, "file.snapshotRequired");
+        assert.deepEqual(payload.details, { path: "./document.txt" });
+        assert.equal(payload.retryable, true);
+        assert.equal(typeof payload.message, "string");
+
+        await handle.stop();
     } finally {
         await rm(runtimeDirectory, { force: true, recursive: true });
     }
@@ -527,6 +585,7 @@ async function readEntries(runtimeDirectory: string): Promise<
         agentId: string;
         command: string;
         execArgv: string[];
+        payload?: unknown;
         pid: string;
         type: string;
     }>
@@ -540,7 +599,7 @@ async function readEntries(runtimeDirectory: string): Promise<
         .split("\n")
         .filter(Boolean)
         .map((line) => {
-            const [pid, stateDir, type, agentId, command, execArgv] =
+            const [pid, stateDir, type, agentId, command, execArgv, payload] =
                 line.split("\t");
             return {
                 agentDir: stateDir ?? "",
@@ -550,6 +609,10 @@ async function readEntries(runtimeDirectory: string): Promise<
                     execArgv === undefined
                         ? []
                         : (JSON.parse(execArgv) as string[]),
+                payload:
+                    payload === undefined || payload === ""
+                        ? undefined
+                        : (JSON.parse(payload) as unknown),
                 pid: pid ?? "",
                 type: type ?? "",
             };

@@ -19,6 +19,7 @@ import type {
     PiChildMessage,
     PiParentMessage,
 } from "./PiProcessProtocol.js";
+import { encodePiToolError } from "./PiProcessProtocol.js";
 
 const PI_OWNER_HEARTBEAT_INTERVAL_MS = 2_000;
 const PI_OWNER_HEARTBEAT_TIMEOUT_MS = 10_000;
@@ -42,7 +43,9 @@ export interface PiAgentProcessStartOptions extends PiAgentProcessWebOptions {
 
 export interface PiAgentRuntimeFactory {
     start(options: PiAgentProcessStartOptions): Promise<AgentProviderHandle>;
-    startWeb(options: PiAgentProcessWebOptions): Promise<AgentProviderWebHandle>;
+    startWeb(
+        options: PiAgentProcessWebOptions,
+    ): Promise<AgentProviderWebHandle>;
 }
 
 export class PiAgentProcessFactory implements PiAgentRuntimeFactory {
@@ -591,7 +594,11 @@ class PiSharedProcess {
             await this.#send({
                 agentId: message.agentId,
                 callId: message.callId,
-                error: `Unknown Pi Agent tool session: ${message.agentId}`,
+                error: encodePiToolError(
+                    new Error(
+                        `Unknown Pi Agent tool session: ${message.agentId}`,
+                    ),
+                ),
                 ok: false,
                 type: "tool.result",
             });
@@ -625,7 +632,7 @@ class PiSharedProcess {
             await this.#send({
                 agentId: message.agentId,
                 callId: message.callId,
-                error: error instanceof Error ? error.message : String(error),
+                error: encodePiToolError(error),
                 ok: false,
                 type: "tool.result",
             });
@@ -649,7 +656,7 @@ class PiSharedProcess {
             await this.#send({
                 agentId,
                 callId,
-                error: error instanceof Error ? error.message : String(error),
+                error: encodePiToolError(error),
                 ok: false,
                 type: "tool.result",
             });
