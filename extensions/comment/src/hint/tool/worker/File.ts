@@ -280,13 +280,6 @@ export function fileErrorHints(
                     "Resolve conflicting path operations.",
                 ),
             ];
-        case "file.parentNotFound":
-            return [
-                errorHint(
-                    "file.parentNotFound",
-                    "Create the parent only if explicitly requested.",
-                ),
-            ];
         case "file.patchOverlap":
             return [
                 errorHint(
