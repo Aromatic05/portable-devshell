@@ -9,6 +9,7 @@ import {
     type ExtensionManifest,
 } from "@portable-devshell/extension";
 import { nativeCommands } from "@portable-devshell/extension/cli";
+import { tools as mcpTools } from "@portable-devshell/extension/mcp";
 import { applications } from "@portable-devshell/extension/web";
 
 import { createControlExtensionPointRegistry } from "../../../../../src/composition/Extension.ts";
@@ -104,6 +105,32 @@ test("Extension registration rejects undeclared, duplicate, and invalid bindings
             }),
         /must provide resolve/u,
     );
+});
+
+test("Extension registration preserves point-specific declaration ids", () => {
+    const base = manifest();
+    const builder = new ExtensionRegistrationBuilder(
+        {
+            ...base,
+            extensions: {
+                ...base.extensions,
+                "mcp.tools": [
+                    {
+                        description: "Report progress",
+                        id: "todo_report",
+                        inputSchema: { type: "object" },
+                        outputSchema: { type: "object" },
+                    },
+                ],
+            },
+        },
+        "/unused",
+        createControlExtensionPointRegistry(),
+    );
+
+    builder.register(mcpTools, "todo_report", async () => ({
+        structuredContent: { reported: true },
+    }));
 });
 
 test("Extension registration rejects a manifest declaration that activate did not bind", async () => {

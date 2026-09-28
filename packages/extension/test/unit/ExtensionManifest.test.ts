@@ -210,7 +210,7 @@ test("Extension manifest rejects invalid ids, escaping entry paths and duplicate
     );
 });
 
-test("Extension manifest validates Extension Point identities and declaration-local identities", () => {
+test("Extension manifest validates Extension Point identities while preserving point-specific declaration ids", () => {
     assert.throws(
         () =>
             parseExtensionManifest({
@@ -219,13 +219,12 @@ test("Extension manifest validates Extension Point identities and declaration-lo
             }),
         /Extension Point id/u,
     );
-    assert.throws(
-        () =>
-            parseExtensionManifest({
-                ...base,
-                extensions: { "cli.native-commands": [{ id: "Bad_ID" }] },
-            }),
-        /cli\.native-commands/u,
+    assert.equal(
+        parseExtensionManifest({
+            ...base,
+            extensions: { "mcp.tools": [{ id: "todo_report" }] },
+        }).extensions["mcp.tools"]?.[0]?.id,
+        "todo_report",
     );
     assert.throws(
         () =>

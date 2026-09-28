@@ -321,7 +321,7 @@ function readDeclaration(
             `Extension Point ${pointId} declaration ${index} must be an object.`,
         );
     }
-    const id = readLocalId(value.id, `${pointId}[${index}].id`);
+    const id = readString(value.id, `${pointId}[${index}].id`);
     const declaration: { id: string } & Record<string, ExtensionJsonValue> = {
         id,
     };

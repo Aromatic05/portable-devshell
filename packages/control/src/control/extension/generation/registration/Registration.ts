@@ -72,11 +72,6 @@ export class ExtensionRegistrationBuilder {
     }
 
     registerById(pointId: string, id: string, binding: unknown): void {
-        if (!/^[a-z][a-z0-9-]*$/u.test(id)) {
-            throw new TypeError(
-                `Extension registration id must match [a-z][a-z0-9-]*: ${id}.`,
-            );
-        }
         const declaration = this.#manifest.extensions[pointId]?.find(
             (candidate) => candidate.id === id,
         );

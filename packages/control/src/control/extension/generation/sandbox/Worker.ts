@@ -989,9 +989,6 @@ function rejectInvocationInterfaceRequests(
 }
 
 function registerBinding(pointId: string, id: string, binding: unknown): void {
-    if (!/^[a-z][a-z0-9-]*$/u.test(id)) {
-        throw new TypeError(`Extension registration id is invalid: ${id}.`);
-    }
     const key = registrationKey(pointId, id);
     if (registrations.has(key)) {
         throw new TypeError(
