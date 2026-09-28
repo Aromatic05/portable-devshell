@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { toControlErrorBody } from "@portable-devshell/shared";
 
 import {
     InstanceRegistry,
@@ -10,6 +9,7 @@ import {
 
 function emptyComment() {
     return {
+        async beforeTodoToolCall() {},
         async consumePending(
             _instance: string,
             _ctxId: string,
@@ -20,22 +20,8 @@ function emptyComment() {
         async failPending() {
             return [];
         },
-        async listConversation() {
-            return [];
-        },
-        async pendingReport() {
-            return {};
-        },
-        async recordReport() {},
-    };
-}
-
-function emptyConversation() {
-    return {
-        async list() {
-            return [];
-        },
-        async recordReport() {},
+        recordTodoInvalid() {},
+        async reportTodo() {},
     };
 }
 
@@ -57,178 +43,8 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
 
     return new McpInstanceGatewayControl({
         comment: emptyComment(),
-        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
-    });
-}
-
-function createTodoReportHarness() {
-    let now = Date.parse("2026-09-14T00:00:00.000Z");
-    let callSequence = 0;
-    let failNext = false;
-    let pendingReplyCommentId: string | undefined;
-    let pendingPush:
-        | { commentId: string; message: string }
-        | undefined;
-    const entries: Array<Record<string, unknown>> = [];
-    const reports: string[] = [];
-    const comment = {
-        async consumePending(
-            _instance: string,
-            _ctxId: string,
-            callId: string,
-        ) {
-            return { callId, messages: [] };
-        },
-        async failPending() {
-            return [];
-        },
-        async listConversation(
-            _instance: string,
-            input: { ctxId?: string; limit?: number } = {},
-        ) {
-            const filtered = entries.filter(
-                (entry) =>
-                    input.ctxId === undefined || entry.ctxId === input.ctxId,
-            );
-            return (
-                input.limit === undefined
-                    ? filtered
-                    : filtered.slice(-input.limit)
-            ) as never;
-        },
-        async pendingReport() {
-            return {
-                ...(pendingPush === undefined ? {} : { push: { ...pendingPush } }),
-                ...(pendingReplyCommentId === undefined
-                    ? {}
-                    : { replyCommentId: pendingReplyCommentId }),
-            };
-        },
-        async recordReport(
-            _instance: string,
-            input: {
-                callId: string;
-                ctxId: string;
-                push?: { commentId: string; message: string };
-                replyCommentId?: string;
-                text: string;
-            },
-        ) {
-            if (failNext) {
-                failNext = false;
-                throw new Error("report failed");
-            }
-            reports.push(input.text);
-            entries.push({
-                callId: input.callId,
-                createdAt: new Date(now).toISOString(),
-                ctxId: input.ctxId,
-                id: input.callId,
-                kind: "report",
-                text: input.text,
-            });
-            if (
-                input.replyCommentId !== undefined &&
-                input.replyCommentId === pendingReplyCommentId
-            ) {
-                pendingReplyCommentId = undefined;
-            }
-            if (
-                input.push !== undefined &&
-                pendingPush?.commentId === input.push.commentId &&
-                pendingPush.message === input.push.message
-            ) {
-                pendingPush = undefined;
-            }
-        },
-    };
-    const conversation = {
-        list: comment.listConversation,
-        recordReport: comment.recordReport,
-    };
-    const registry = new InstanceRegistry([
-        {
-            enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/local/mcp",
-            modelExtensions: [],
-            name: "local",
-        } as never,
-    ]);
-    const gateway = new McpInstanceGatewayControl({
-        comment,
-        conversation,
-        getConfig: () => createDefaultControlConfig(),
-        instanceRegistry: registry,
-        now: () => now,
-    });
-    const context = {
-        ctxId: "ctx-report-policy",
-        source: "mcp" as const,
-        workspace: "/workspace",
-    };
-
-    return {
-        advance(milliseconds: number) {
-            now += milliseconds;
-        },
-        context,
-        deliverComment(id: string, text: string) {
-            const timestamp = new Date(now).toISOString();
-            entries.push({
-                callId: `delivery-${id}`,
-                createdAt: timestamp,
-                ctxId: context.ctxId,
-                deliveredAt: timestamp,
-                id,
-                kind: "comment",
-                status: "delivered",
-                text,
-            });
-            pendingReplyCommentId = id;
-        },
-        failNextReport() {
-            failNext = true;
-        },
-        push(message: string) {
-            pendingPush = { commentId: `push-${callSequence}`, message };
-        },
-        gateway,
-        async report(message: string) {
-            callSequence += 1;
-            await gateway.reportTodo(
-                "local",
-                message,
-                `report-${callSequence}`,
-                context,
-            );
-        },
-        reports,
-    };
-}
-
-async function assertTodoUseOtherTools(
-    operation: Promise<unknown>,
-): Promise<void> {
-    await assert.rejects(operation, (error: unknown) => {
-        const body = toControlErrorBody(error);
-        assert.equal(body?.code, "todo.invalid");
-        assert.equal(body?.retryable, false);
-        assert.equal(
-            body?.message,
-            "You have performed too many useless operations. Use other tools.",
-        );
-        assert.equal(
-            typeof body?.details === "object" &&
-                body.details !== null &&
-                !Array.isArray(body.details)
-                ? body.details.action
-                : undefined,
-            "use_other_tools",
-        );
-        return true;
     });
 }
 
@@ -284,7 +100,6 @@ test("cross-instance audit is recorded by the target worker", async () => {
     ]);
     const gateway = new McpInstanceGatewayControl({
         comment: emptyComment(),
-        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -311,216 +126,6 @@ test("cross-instance audit is recorded by the target worker", async () => {
     ]);
 });
 
-test("todo_report autonomous updates use a two-token bucket with fractional refill", async () => {
-    const harness = createTodoReportHarness();
-
-    await harness.report("first");
-    await harness.report("second");
-    await assertTodoUseOtherTools(harness.report("third"));
-    harness.advance(15_000);
-    await assertTodoUseOtherTools(harness.report("third"));
-    harness.advance(15_000);
-    await harness.report("third");
-    harness.advance(60_000);
-    await harness.report("fourth");
-    await harness.report("fifth");
-    await assertTodoUseOtherTools(harness.report("sixth"));
-
-    assert.deepEqual(harness.reports, [
-        "first",
-        "second",
-        "third",
-        "fourth",
-        "fifth",
-    ]);
-});
-
-test("todo_report rejects an unchanged autonomous report without spending a token", async () => {
-    const harness = createTodoReportHarness();
-
-    await harness.report("same");
-    await assert.rejects(harness.report("same"), (error: unknown) => {
-        assert.equal((error as { code?: string }).code, "todo.invalid");
-        assert.equal(
-            (error as { details?: { reason?: string } }).details?.reason,
-            "duplicate",
-        );
-        return true;
-    });
-    await harness.report("second");
-    await assertTodoUseOtherTools(harness.report("third"));
-});
-
-test("three todo.invalid failures within two minutes disable Todo for five minutes", async () => {
-    const harness = createTodoReportHarness();
-
-    await harness.report("same");
-    for (let index = 0; index < 3; index += 1) {
-        await assert.rejects(
-            harness.report("same"),
-            (error: unknown) =>
-                toControlErrorBody(error)?.code === "todo.invalid",
-        );
-    }
-
-    await assertTodoUseOtherTools(
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_read",
-            harness.context,
-        ),
-    );
-    harness.advance(299_999);
-    await assertTodoUseOtherTools(
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_report",
-            harness.context,
-        ),
-    );
-    harness.advance(1);
-    await harness.gateway.beforeTodoToolCall(
-        "local",
-        "todo_report",
-        harness.context,
-    );
-});
-
-test("todo.invalid failures outside the two-minute window do not accumulate", async () => {
-    const harness = createTodoReportHarness();
-
-    await harness.report("same");
-    for (let index = 0; index < 2; index += 1) {
-        await assert.rejects(
-            harness.report("same"),
-            (error: unknown) =>
-                toControlErrorBody(error)?.code === "todo.invalid",
-        );
-    }
-    harness.advance(120_000);
-    await assert.rejects(
-        harness.report("same"),
-        (error: unknown) => toControlErrorBody(error)?.code === "todo.invalid",
-    );
-
-    await harness.report("new information");
-});
-
-test("todo_report serializes concurrent autonomous bursts through the same bucket", async () => {
-    const harness = createTodoReportHarness();
-
-    const results = await Promise.allSettled([
-        harness.report("parallel one"),
-        harness.report("parallel two"),
-        harness.report("parallel three"),
-    ]);
-
-    assert.equal(
-        results.filter((result) => result.status === "fulfilled").length,
-        2,
-    );
-    assert.equal(
-        results.filter((result) => result.status === "rejected").length,
-        1,
-    );
-    assert.equal(harness.reports.length, 2);
-});
-
-test("todo_read and todo_write share a bucket that is independent from todo_report", async () => {
-    const harness = createTodoReportHarness();
-
-    await harness.gateway.beforeTodoToolCall(
-        "local",
-        "todo_read",
-        harness.context,
-    );
-    await harness.gateway.beforeTodoToolCall(
-        "local",
-        "todo_write",
-        harness.context,
-    );
-    await assertTodoUseOtherTools(
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_read",
-            harness.context,
-        ),
-    );
-
-    await harness.report("report one");
-    await harness.report("report two");
-    await assertTodoUseOtherTools(harness.report("report three"));
-
-    harness.advance(30_000);
-    await harness.gateway.beforeTodoToolCall(
-        "local",
-        "todo_write",
-        harness.context,
-    );
-    await harness.report("report three");
-});
-
-test("todo_read and todo_write serialize concurrent bursts through their shared bucket", async () => {
-    const harness = createTodoReportHarness();
-
-    const results = await Promise.allSettled([
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_read",
-            harness.context,
-        ),
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_write",
-            harness.context,
-        ),
-        harness.gateway.beforeTodoToolCall(
-            "local",
-            "todo_read",
-            harness.context,
-        ),
-    ]);
-
-    assert.equal(
-        results.filter((result) => result.status === "fulfilled").length,
-        2,
-    );
-    assert.equal(
-        results.filter((result) => result.status === "rejected").length,
-        1,
-    );
-});
-
-test("failed reports neither spend a token nor satisfy a Comment obligation", async () => {
-    const harness = createTodoReportHarness();
-    harness.failNextReport();
-    await assert.rejects(harness.report("first"), /report failed/u);
-    await harness.report("first");
-    await harness.report("second");
-    await assertTodoUseOtherTools(harness.report("third"));
-
-    harness.deliverComment(
-        "comment-failure",
-        "Reply even if persistence fails",
-    );
-    harness.failNextReport();
-    await assert.rejects(harness.report("reply"), /report failed/u);
-    await harness.report("reply");
-    await assertTodoUseOtherTools(harness.report("autonomous after reply"));
-});
-
-test("a required #push report bypasses the autonomous report bucket and clears only after success", async () => {
-    const harness = createTodoReportHarness();
-    await harness.report("autonomous one");
-    await harness.report("autonomous two");
-    harness.push("#push report progress");
-
-    harness.failNextReport();
-    await assert.rejects(harness.report("required reply"), /report failed/u);
-    await harness.report("required reply");
-    await assertTodoUseOtherTools(harness.report("autonomous after push"));
-});
-
 test("closing an MCP tool session releases worker-owned session state", async () => {
     const released: string[] = [];
     const registry = new InstanceRegistry(
@@ -539,7 +144,6 @@ test("closing an MCP tool session releases worker-owned session state", async ()
     );
     const gateway = new McpInstanceGatewayControl({
         comment: emptyComment(),
-        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -606,7 +210,6 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
     ]);
     const gateway = new McpInstanceGatewayControl({
         comment: emptyComment(),
-        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -677,7 +280,6 @@ test("MCP instance connect lifecycle uses Context references without adopting an
     ]);
     const gateway = new McpInstanceGatewayControl({
         comment: emptyComment(),
-        conversation: emptyConversation(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });

@@ -105,7 +105,6 @@ export class ControlRuntimeFactory {
             const mcp = new ControlRuntimeMcp({
                 artifact,
                 comment: comment.comment,
-                conversation: comment.conversation,
                 controlPaths,
                 factory: this.#mcpFactory,
                 state: options.state,

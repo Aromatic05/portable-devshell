@@ -28,6 +28,7 @@ import { createConversationPreferenceRouteModule } from "./conversation/preferen
 import { ConversationPreferenceStore } from "./conversation/preference/Store.js";
 import { ConversationStore } from "./conversation/store/ConversationStore.js";
 import { resolveToolCallFeedback } from "./hint/Feedback.js";
+import { CommentReportService } from "./comment/report/Service.js";
 
 export interface CommentExtensionInstance {
     appendEvent(
@@ -52,6 +53,11 @@ export interface CommentInstanceSource {
 }
 
 export interface CommentPort {
+    beforeTodoToolCall(
+        instance: string,
+        ctxId: string,
+        toolName: string,
+    ): Promise<void>;
     consumePending(
         instance: string,
         ctxId: string,
@@ -70,6 +76,13 @@ export interface CommentPort {
         push?: { commentId: string; message: string };
         replyCommentId?: string;
     }>;
+    recordTodoInvalid(instance: string, ctxId: string): void;
+    reportTodo(
+        instance: string,
+        ctxId: string,
+        message: string,
+        callId: string,
+    ): Promise<void>;
     reviewToolCall(
         instance: string,
         ctxId: string,
@@ -106,6 +119,7 @@ interface CommentExtensionInstanceState {
     readonly conversation: ConversationService;
     enabled: boolean;
     readonly key: object;
+    readonly report: CommentReportService;
     retirement?: Promise<void>;
 }
 
@@ -127,6 +141,11 @@ export class CommentExtension {
             options.preferencesFile,
         );
         const comment: CommentPort = {
+            beforeTodoToolCall: async (instance, ctxId, toolName) =>
+                await this.#require(instance).report.beforeTodoToolCall(
+                    ctxId,
+                    toolName,
+                ),
             consumePending: async (instance, ctxId, callId) =>
                 await this.#require(instance).comment.consumePending(
                     ctxId,
@@ -140,6 +159,14 @@ export class CommentExtension {
             feedback: (input) => resolveToolCallFeedback(input),
             pendingReport: async (instance, ctxId) =>
                 await this.#require(instance).comment.pendingReport(ctxId),
+            recordTodoInvalid: (instance, ctxId) =>
+                this.#require(instance).report.recordTodoInvalid(ctxId),
+            reportTodo: async (instance, ctxId, message, callId) =>
+                await this.#require(instance).report.report(
+                    ctxId,
+                    message,
+                    callId,
+                ),
             reviewToolCall: async (instance, ctxId, toolName, requestId) =>
                 await this.#require(instance).comment.reviewToolCall(
                     ctxId,
@@ -241,19 +268,25 @@ export class CommentExtension {
                               instance.legacyContextMessagesFile,
                       }),
             });
+            const commentService = new CommentService({
+                appendEvent: instance.appendEvent,
+                instanceName: instance.name,
+                store,
+            });
+            const conversationService = new ConversationService({
+                instanceName: instance.name,
+                legacyReports: instance.legacyReports,
+                store,
+            });
             const next: CommentExtensionInstanceState = {
-                comment: new CommentService({
-                    appendEvent: instance.appendEvent,
-                    instanceName: instance.name,
-                    store,
-                }),
-                conversation: new ConversationService({
-                    instanceName: instance.name,
-                    legacyReports: instance.legacyReports,
-                    store,
-                }),
+                comment: commentService,
+                conversation: conversationService,
                 enabled: true,
                 key: instance.key,
+                report: new CommentReportService({
+                    comment: commentService,
+                    conversation: conversationService,
+                }),
             };
             this.#instances.set(instance.name, next);
             if (current !== undefined) {
