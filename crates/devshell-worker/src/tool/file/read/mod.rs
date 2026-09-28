@@ -47,7 +47,7 @@ impl ToolHandler for FileReadTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry::<FileReadBatchInput, FileReadBatchOutput>(
             &self.name,
-            "Read one or more paths as text content, structural outline, or filesystem metadata. Bare relative paths are normalized to the workspace namespace. Batch requests return successful items alongside per-item read errors. Content selectors support N, N-M, N+count, and comma-separated ranges; ranges are sorted, merged, and clamped to EOF when unambiguous. Workspace content reads establish edit coverage; virtual tool-result reads, outline reads, and metadata reads do not.".to_string(),
+            "Read one or more paths as text content, structural outline, or filesystem metadata. Bare relative paths are normalized to the workspace namespace. Batch requests return successful items alongside per-item read errors. Content selectors support N, N-M, N+count, and comma-separated ranges; ranges are sorted, merged, and clamped to EOF when unambiguous. Workspace content reads establish edit coverage for returned source lines; outline reads establish coverage only for exact signature source lines rendered in the outline. Virtual tool-result reads and metadata reads do not establish edit coverage.".to_string(),
             [ToolCapability::Read],
         )
     }

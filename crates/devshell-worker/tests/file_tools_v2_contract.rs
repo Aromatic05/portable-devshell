@@ -278,6 +278,353 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
 }
 
 #[test]
+fn file_edit_successful_patch_carries_generated_coverage_across_calls() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-patch-knowledge";
+    fs::write(env.workspace().join("document.txt"), "one\ntwo\nthree\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "2-2:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let first = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Patch File: document.txt\n",
+                "@@\n",
+                "-two\n",
+                "+second\n",
+                "+inserted\n",
+                "*** End Edit"
+            )
+        }),
+    );
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["operations"][0]["status"], "applied");
+
+    let second = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Patch File: document.txt\n",
+                "@@\n",
+                "-inserted\n",
+                "+replacement\n",
+                "*** End Edit"
+            )
+        }),
+    );
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["operations"][0]["status"], "applied");
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
+        "one\nsecond\nreplacement\nthree\n"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_failed_patch_neither_expands_nor_discards_coverage() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-failed-knowledge";
+    fs::write(env.workspace().join("document.txt"), "one\ntwo\nthree\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    for id in ["2", "3"] {
+        let denied = call(
+            &env,
+            instance,
+            id,
+            "ctx-a",
+            "file_edit",
+            json!({
+                "changes": concat!(
+                    "*** Begin Edit\n",
+                    "*** Patch File: document.txt\n",
+                    "@@\n",
+                    "-three\n",
+                    "+third\n",
+                    "*** End Edit"
+                )
+            }),
+        );
+        assert_eq!(denied["ok"], true, "{denied}");
+        assert_eq!(denied["result"]["operations"][0]["status"], "failed");
+        assert_eq!(
+            denied["result"]["operations"][0]["error"]["code"],
+            "file.unreadRange"
+        );
+    }
+
+    let allowed = call(
+        &env,
+        instance,
+        "4",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Patch File: document.txt\n",
+                "@@\n",
+                "-one\n",
+                "+first\n",
+                "*** End Edit"
+            )
+        }),
+    );
+    assert_eq!(allowed["ok"], true, "{allowed}");
+    assert_eq!(allowed["result"]["operations"][0]["status"], "applied");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_write_and_move_carry_knowledge_across_calls() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-write-move-knowledge";
+    fs::write(env.workspace().join("source.txt"), "move me\n").unwrap();
+    start(&env, instance);
+
+    let written = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Write File: created.txt\ncreated\n*** End Edit"
+        }),
+    );
+    assert_eq!(written["ok"], true, "{written}");
+
+    let patched = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: created.txt\n@@\n-created\n+updated\n*** End Edit"
+        }),
+    );
+    assert_eq!(patched["ok"], true, "{patched}");
+    assert_eq!(patched["result"]["operations"][0]["status"], "applied");
+
+    let read = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "source.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let moved = call(
+        &env,
+        instance,
+        "4",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Move File: source.txt\n*** To: moved.txt\n*** End Edit"
+        }),
+    );
+    assert_eq!(moved["ok"], true, "{moved}");
+
+    let moved_patch = call(
+        &env,
+        instance,
+        "5",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: moved.txt\n@@\n-move me\n+moved knowledge\n*** End Edit"
+        }),
+    );
+    assert_eq!(moved_patch["ok"], true, "{moved_patch}");
+    assert_eq!(moved_patch["result"]["operations"][0]["status"], "applied");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_rewrite_carries_generated_knowledge_across_calls() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-rewrite-knowledge";
+    fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "view": "content" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let rewritten = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Rewrite File: document.txt\nfirst\nsecond\n*** End Edit"
+        }),
+    );
+    assert_eq!(rewritten["ok"], true, "{rewritten}");
+    assert_eq!(rewritten["result"]["operations"][0]["status"], "applied");
+
+    let patched = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: document.txt\n@@\n-second\n+changed\n*** End Edit"
+        }),
+    );
+    assert_eq!(patched["ok"], true, "{patched}");
+    assert_eq!(patched["result"]["operations"][0]["status"], "applied");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_delete_clears_knowledge_for_a_recreated_path() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-edit-delete-knowledge";
+    fs::write(env.workspace().join("document.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "document.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let deleted = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Delete File: document.txt\n*** End Edit"
+        }),
+    );
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    fs::write(env.workspace().join("document.txt"), "replacement\n").unwrap();
+
+    let denied = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: document.txt\n@@\n-replacement\n+changed\n*** End Edit"
+        }),
+    );
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "file.snapshotRequired");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_read_outline_establishes_only_rendered_signature_coverage() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-outline-coverage";
+    fs::write(
+        env.workspace().join("sample.rs"),
+        "struct Demo;\n\nfn helper() {\n    println!(\"body\");\n}\n",
+    )
+    .unwrap();
+    start(&env, instance);
+
+    let outline = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "sample.rs", "view": "outline" }),
+    );
+    assert_eq!(outline["ok"], true, "{outline}");
+
+    let signature = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: sample.rs\n@@\n-struct Demo;\n+struct Renamed;\n*** End Edit"
+        }),
+    );
+    assert_eq!(signature["ok"], true, "{signature}");
+    assert_eq!(signature["result"]["operations"][0]["status"], "applied");
+
+    let body = call(
+        &env,
+        instance,
+        "3",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": "*** Begin Edit\n*** Patch File: sample.rs\n@@\n-    println!(\"body\");\n+    println!(\"changed\");\n*** End Edit"
+        }),
+    );
+    assert_eq!(body["ok"], true, "{body}");
+    assert_eq!(body["result"]["operations"][0]["status"], "failed");
+    assert_eq!(
+        body["result"]["operations"][0]["error"]["code"],
+        "file.unreadRange"
+    );
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_grep_establishes_edit_coverage() {
     let env = TestEnv::new();
     let instance = "aromatic-file-search-snapshot";

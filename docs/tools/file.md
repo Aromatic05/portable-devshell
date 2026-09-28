@@ -4,7 +4,7 @@
 
 ## `file_read`
 
-`file_read` 批量读取文件正文、结构或路径元数据。正文和 outline 读取在当前 worker instance 与 `ctxId` 内建立隐式编辑快照；metadata 只观察文件系统状态，不建立编辑 coverage。调用方不需要复制 snapshot ID、tag 或 revision。
+`file_read` 批量读取文件正文、结构或路径元数据。正文读取会为实际返回的源码行建立隐式编辑 coverage；outline 只为实际渲染出来且来自源码的精确 signature 行建立 coverage，不等于读过整个文件。metadata 只观察文件系统状态，不建立编辑 coverage。调用方不需要复制 snapshot ID、tag 或 revision。
 
 输入：
 
@@ -54,7 +54,7 @@ raw
 
 多个显式范围可以乱序、重叠或相邻；Worker 会先排序并合并。结束行超过 EOF 时自动截到文件末尾；起始行已经超过 EOF、反向范围或非法行号仍返回 `file.invalidRange`。Batch 中单个 path 的 `notFound`、`notFile`、`invalidRange`、`outlineUnavailable` 等读取错误不会丢掉其他成功项，而是写入该项的 `error` 字段。
 
-outline 返回符号的起止行、层级、语言和 `parseStatus`。outline 不使用正文分页式 `nextSelector`；根据符号范围再次调用 `view=content` 即可读取实现。
+outline 返回符号的起止行、层级、语言和 `parseStatus`。outline 中实际展示的精确 signature 行算作已观察源码，因此可以直接用于这些行的后续编辑；符号 body 或仅作为范围信息出现、但没有展示源码内容的行不进入 coverage。outline 不使用正文分页式 `nextSelector`；根据符号范围再次调用 `view=content` 即可读取实现。
 
 ## `file_glob`
 
@@ -136,7 +136,9 @@ file_grep
 成功的 file_edit 子操作
 ```
 
-MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_grep` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。`file_read view=metadata` 不建立快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。
+knowledge progression 的规则是：`file_read` / `file_grep` 建立 knowledge；成功的 `file_edit` 将 knowledge 推进到新 revision；失败的 `file_edit` 不创建新的 knowledge，也不丢弃原先有效的 knowledge。Write/Rewrite 成功后结果正文全部 known；Patch 成功后原 coverage 随行号变化 remap，并把本次生成的源码行计入 coverage；Move 将 snapshot 随路径迁移；Delete 清除该路径 snapshot。
+
+MCP/RPC transport session 关闭不会清理 Context 快照；重连后只要仍解析到同一个内部 `ctxId` 就可以继续使用。`file_grep` 只为本次实际返回在 `files` 数组中的结果建立或更新快照，分页之外或因输出预算未返回的匹配文件不会获得快照。`file_read view=metadata` 不建立快照。没有快照时，修改已有文件返回 `file.snapshotRequired`。Patch 使用未读取的源码行时返回 `file.unreadRange`。因此成功 edit 后不需要机械地重新 read；只有 coverage 缺失、因外部修改失效，或下一次 edit 需要尚未观察的既有源码行时才需要重新读取或搜索。
 
 ## `file_edit`
 
