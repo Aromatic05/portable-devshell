@@ -122,7 +122,7 @@ pub struct BashRunParams {
     #[schemars(length(min = 1))]
     pub command: String,
     #[serde(default)]
-    /// Working directory. Use ./ for a workspace-relative path or / for an absolute path.
+    /// Working directory. Bare relative paths and ./ paths are workspace-relative; absolute paths are also accepted.
     #[schemars(length(min = 1))]
     pub cwd: Option<String>,
     #[serde(default)]

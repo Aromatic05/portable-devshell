@@ -487,6 +487,102 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
 }
 
 #[test]
+fn bash_run_accepts_bare_workspace_relative_cwd() {
+    let env = TestEnv::new();
+    let instance = "aromatic-bash-bare-cwd";
+    fs::write(env.workspace().join("root-marker.txt"), "root").unwrap();
+    fs::create_dir_all(env.workspace().join("extensions/stats")).unwrap();
+    fs::write(
+        env.workspace().join("extensions/stats/marker.txt"),
+        "inside",
+    )
+    .unwrap();
+
+    env.command()
+        .current_dir(env.workspace())
+        .args(["start", "--instance", instance])
+        .assert()
+        .success();
+
+    #[cfg(unix)]
+    let command = "test -f marker.txt && printf ready";
+    #[cfg(windows)]
+    let command = "if (Test-Path marker.txt) { [Console]::Out.Write('ready') } else { exit 7 }";
+
+    let response = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "bare-cwd",
+            "method": "bash_run",
+            "params": {
+                "command": command,
+                "cwd": "extensions/stats",
+                "timeoutMs": 30_000
+            },
+            "context": {
+                "ctxId": "ctx-bare-cwd",
+                "source": "mcp",
+                "workspace": env.workspace()
+            }
+        }),
+    );
+
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["result"]["exitCode"], 0, "{response}");
+    assert_eq!(response["result"]["stdout"], "ready", "{response}");
+
+    #[cfg(unix)]
+    let root_command = "test -f root-marker.txt && printf root";
+    #[cfg(windows)]
+    let root_command =
+        "if (Test-Path root-marker.txt) { [Console]::Out.Write('root') } else { exit 7 }";
+    let root = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "dot-cwd",
+            "method": "bash_run",
+            "params": {
+                "command": root_command,
+                "cwd": ".",
+                "timeoutMs": 30_000
+            },
+            "context": {
+                "ctxId": "ctx-dot-cwd",
+                "source": "mcp",
+                "workspace": env.workspace()
+            }
+        }),
+    );
+    assert_eq!(root["ok"], true, "{root}");
+    assert_eq!(root["result"]["stdout"], "root", "{root}");
+
+    let home = env.rpc(
+        instance,
+        &serde_json::json!({
+            "type": "request",
+            "id": "home-cwd",
+            "method": "bash_run",
+            "params": {
+                "command": command,
+                "cwd": "~/extensions/stats",
+                "timeoutMs": 30_000
+            },
+            "context": {
+                "ctxId": "ctx-home-cwd",
+                "source": "mcp",
+                "workspace": env.workspace()
+            }
+        }),
+    );
+    assert_eq!(home["ok"], false, "{home}");
+    assert_eq!(home["error"]["code"], "bash.invalidCwd", "{home}");
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn handshake_rejects_unsupported_protocol_versions() {
     let env = TestEnv::new();
     let instance = "aromatic-lab";

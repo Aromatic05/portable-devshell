@@ -15,8 +15,8 @@ use super::warning;
 use crate::capability::rpc::command::client::ModelDevshellShim;
 
 use crate::instance::sandbox::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
-    resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
+    parse_requested_path, resolve_existing_target,
 };
 use crate::tool::tmux::backend::{BackendPane, BackendWorkspace, MAX_PANES, TmuxBackend};
 use crate::tool::tmux::model::{
@@ -1463,7 +1463,10 @@ fn require_read(call: &ToolCall) -> Result<(), ToolError> {
 fn resolve_cwd(call: &ToolCall, requested: Option<&str>) -> Result<ResolvedPath, ToolError> {
     let explicit = requested.is_some();
     let raw = requested.unwrap_or("./");
-    let requested = parse_requested_path(raw)?;
+    let normalized = normalize_requested_path(raw)
+        .map_err(|error| ToolError::new("tmux.invalidCwd", error.message))?;
+    let requested = parse_requested_path(&normalized)
+        .map_err(|error| ToolError::new("tmux.invalidCwd", error.message))?;
     if explicit {
         let (read, write) = match requested.namespace {
             PathNamespace::Workspace => (

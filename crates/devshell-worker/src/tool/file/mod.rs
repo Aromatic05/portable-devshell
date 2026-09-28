@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex, Weak};
 
 use crate::instance::sandbox::path::{
     FilesystemCapability, PathNamespace, RequestedPath, ResolvedEntry, ResolvedPath,
-    parse_requested_path, resolve_create_target, resolve_entry, resolve_existing_target,
+    normalize_requested_path, parse_requested_path, resolve_create_target, resolve_entry,
+    resolve_existing_target,
 };
 use crate::tool::{ToolCall, ToolError};
 
@@ -54,7 +55,7 @@ pub fn resolve_existing(
     raw: &str,
     write: bool,
 ) -> Result<(RequestedPath, ResolvedPath), ToolError> {
-    let normalized = normalize_file_path(raw)?;
+    let normalized = normalize_requested_path(raw)?;
     let requested = parse_requested_path(&normalized)?;
     authorize(call, requested.namespace, write)?;
     let resolved = resolve_existing_target(&call.workspace, &requested)?;
@@ -64,7 +65,7 @@ pub fn resolve_create(
     call: &ToolCall,
     raw: &str,
 ) -> Result<(RequestedPath, ResolvedPath), ToolError> {
-    let normalized = normalize_file_path(raw)?;
+    let normalized = normalize_requested_path(raw)?;
     let requested = parse_requested_path(&normalized)?;
     authorize(call, requested.namespace, true)?;
     let resolved = resolve_create_target(&call.workspace, &requested)?;
@@ -75,28 +76,13 @@ pub fn resolve_info(
     call: &ToolCall,
     raw: &str,
 ) -> Result<(RequestedPath, ResolvedEntry), ToolError> {
-    let normalized = normalize_file_path(raw)?;
+    let normalized = normalize_requested_path(raw)?;
     let requested = parse_requested_path(&normalized)?;
     authorize(call, requested.namespace, false)?;
     let entry = resolve_entry(&call.workspace, &requested)?;
     Ok((requested, entry))
 }
 
-pub fn normalize_file_path(raw: &str) -> Result<String, ToolError> {
-    if raw == "." {
-        return Ok("./".to_string());
-    }
-    if raw == "~" || raw.starts_with("~/") {
-        return Err(ToolError::new(
-            "file.invalidPath",
-            "home-relative paths are not supported; use a workspace-relative or absolute path",
-        ));
-    }
-    if raw == "./" || raw.starts_with("./") || Path::new(raw).is_absolute() {
-        return Ok(raw.to_string());
-    }
-    Ok(format!("./{raw}"))
-}
 pub fn authorize(call: &ToolCall, namespace: PathNamespace, write: bool) -> Result<(), ToolError> {
     let capability = match (namespace, write) {
         (PathNamespace::Workspace, false) => FilesystemCapability::WorkspaceRead,

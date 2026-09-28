@@ -19,8 +19,8 @@ use crate::capability::rpc::error::RpcError;
 use crate::capability::rpc::notification::WorkerNotificationQueue;
 use crate::instance::sandbox::SecurityPolicy;
 use crate::instance::sandbox::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
-    resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
+    parse_requested_path, resolve_existing_target,
 };
 #[cfg(test)]
 use crate::instance::sandbox::{SecurityMode, build_security_policy};
@@ -584,7 +584,7 @@ fn resolve_cwd(
             "terminal workspace must be an absolute path",
         ));
     }
-    let raw = normalize_cwd_request(value);
+    let raw = normalize_requested_path(value.unwrap_or("./"))?;
     let requested = parse_requested_path(&raw)?;
     let (read, write) = match requested.namespace {
         PathNamespace::Workspace => (
@@ -622,18 +622,6 @@ fn resolve_cwd(
         ));
     }
     Ok(cwd)
-}
-
-fn normalize_cwd_request(value: Option<&str>) -> String {
-    match value {
-        None => "./".to_string(),
-        Some(value) if Path::new(value).is_absolute() => value.to_string(),
-        Some(".") => "./".to_string(),
-        #[cfg(windows)]
-        Some(value) if value.starts_with(".\\") => format!("./{}", &value[2..]),
-        Some(value) if value.starts_with("./") => value.to_string(),
-        Some(value) => format!("./{value}"),
-    }
 }
 
 fn epoch_millis() -> u128 {

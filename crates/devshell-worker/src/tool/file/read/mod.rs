@@ -6,6 +6,7 @@ use view::{ParsedSelector, parse_selector, remaining_selector};
 
 use crate::capability::artifact::result_path::{ToolResultPath, parse_tool_result_path};
 use crate::capability::artifact::store::ArtifactStore;
+use crate::instance::sandbox::path::normalize_requested_path;
 use crate::instance::sandbox::path::{ResolvedEntry, ResolvedMetadata, ResolvedPath};
 use crate::tool::file::model::{
     FileEntryType, FileParseStatus, FileReadBatchEntry, FileReadBatchInput, FileReadBatchOutput,
@@ -13,7 +14,7 @@ use crate::tool::file::model::{
     FileReadView,
 };
 use crate::tool::file::state::{FULL_SNAPSHOT_LIMIT, TextFile, TextMetadata};
-use crate::tool::file::{FileToolState, normalize_file_path, resolve_existing, resolve_info};
+use crate::tool::file::{FileToolState, resolve_existing, resolve_info};
 use crate::tool::unix_time_millis;
 use crate::tool::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
@@ -475,7 +476,7 @@ impl FileReadTool {
 fn batch_display_path(raw: &str) -> String {
     match parse_tool_result_path(raw) {
         Ok(Some(_)) => raw.to_string(),
-        _ => normalize_file_path(raw).unwrap_or_else(|_| raw.to_string()),
+        _ => normalize_requested_path(raw).unwrap_or_else(|_| raw.to_string()),
     }
 }
 

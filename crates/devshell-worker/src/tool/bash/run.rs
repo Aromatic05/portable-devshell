@@ -14,8 +14,8 @@ use crate::capability::rpc::command::client::ModelDevshellShim;
 use crate::daemon::process::platform;
 use crate::daemon::process::registry::ActiveProcessGuard;
 use crate::instance::sandbox::path::{
-    FilesystemCapability, PathNamespace, ResolvedPath, parse_requested_path,
-    resolve_existing_target,
+    FilesystemCapability, PathNamespace, ResolvedPath, normalize_requested_path,
+    parse_requested_path, resolve_existing_target,
 };
 use crate::tool::bash::bash_run_name;
 use crate::tool::bash::model::ShellRuntime;
@@ -331,8 +331,10 @@ struct StreamOutput {
     artifact_warning: Option<String>,
 }
 fn resolve_cwd(call: &ToolCall, raw: Option<&str>) -> Result<ResolvedPath, ToolError> {
-    let requested = parse_requested_path(raw.unwrap_or("./"))
-        .map_err(|_| ToolError::new("bash.invalidCwd", "cwd must use `./` or `/` syntax"))?;
+    let normalized = normalize_requested_path(raw.unwrap_or("./"))
+        .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
+    let requested = parse_requested_path(&normalized)
+        .map_err(|error| ToolError::new("bash.invalidCwd", error.message))?;
     let (read, write) = match requested.namespace {
         PathNamespace::Workspace => (
             FilesystemCapability::WorkspaceRead,
