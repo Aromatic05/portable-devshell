@@ -6,7 +6,9 @@
     "name": "portable-devshell Comment",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": [],
+    "capabilities": [
+        "instanceRuntime"
+    ],
     "extensions": {
         "toolcall.review": [
             {

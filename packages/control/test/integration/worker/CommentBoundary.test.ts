@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import { CommentExtension } from "@portable-devshell/comment-extension";
+import {
+    CommentExtension,
+    createCommentReview,
+    type CommentPort,
+} from "@portable-devshell/comment-extension";
 import {
     McpHost,
     type McpInstanceGateway,
@@ -15,12 +19,10 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-import { createCommentReview } from "../../../../../extensions/comment/src/builtin/CommentReview.ts";
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
 import { ToolCallExecution } from "../../../../../packages/core/src/toolcall/Execution.ts";
 import type { ToolCallBoundaryContext } from "../../../../../packages/core/src/toolcall/boundary/Review.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
-import { ToolCallCommentReview } from "../../../src/control/extension/toolcall/interface/Comment.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -62,8 +64,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
         preferencesFile: join(root, "conversation-preferences.json"),
     });
     const binding = new ToolCallExtensionBinding(
-        commentReviewRegistrationHost(),
-        new ToolCallCommentReview(comment.comment),
+        commentReviewRegistrationHost(comment.comment),
     );
     let executions = 0;
     const execution = new ToolCallExecution({
@@ -271,8 +272,8 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
 
 const instanceKey = {};
 
-function commentReviewRegistrationHost() {
-    const review = createCommentReview();
+function commentReviewRegistrationHost(comment: CommentPort) {
+    const review = createCommentReview(comment);
     return {
         async acquireRegistration(pointId: string, id: string) {
             assert.equal(pointId, "toolcall.review");

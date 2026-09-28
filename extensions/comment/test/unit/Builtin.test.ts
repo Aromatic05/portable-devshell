@@ -3,18 +3,37 @@ import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
-import { activate } from "../../src/builtin/index.ts";
+import { activate, deactivate } from "../../src/index.ts";
 
-test("Comment Extension activates one toolcall.review binding without a global capability", async () => {
+test("Comment Extension activates its review from instanceRuntime without a Comment host interface", async (t) => {
     const registrations: Array<{ id: string; pointId: string; binding: unknown }> = [];
+    let lists = 0;
     const context = {
-        capabilities: {},
+        capabilities: {
+            instanceRuntime: {
+                async appendEvent() {},
+                async list() {
+                    lists += 1;
+                    return [];
+                },
+                async readToolCalls() {
+                    return [];
+                },
+            },
+        },
+        paths: {
+            codeDirectory: "/comment/code",
+            dataDirectory: "/comment/data",
+            runtimeDirectory: "/comment/runtime",
+            stateDirectory: "/tmp/comment-control/extensions/state/comment",
+        },
         register(point: { id: string }, id: string, binding: unknown) {
             registrations.push({ binding, id, pointId: point.id });
         },
     } as unknown as ExtensionContext;
+    t.after(async () => await deactivate());
 
-    activate(context);
+    await activate(context);
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0]?.pointId, "toolcall.review");
     assert.equal(registrations[0]?.id, "comment");
@@ -27,10 +46,11 @@ test("Comment Extension activates one toolcall.review binding without a global c
     assert.deepEqual(
         await binding(
             {
+                callId: "call-1",
                 context: {
                     ctxId: "ctx-1",
                     instance: "demo",
-                    source: "mcp",
+                    source: "cli",
                 },
                 direction: "inbound",
                 kind: "call",
@@ -39,19 +59,12 @@ test("Comment Extension activates one toolcall.review binding without a global c
                 toolName: "bash_run",
             },
             {
-                async requestInterface(operation) {
-                    assert.equal(operation, "comment.reviewToolCall");
-                    return { commentId: "stop-1", kind: "stop" };
+                async requestInterface() {
+                    throw new Error("Comment review must not request a host interface");
                 },
             },
         ),
-        {
-            decision: "reject",
-            error: {
-                code: "control.modelStopped",
-                details: { commentId: "stop-1" },
-            },
-            reason: "Stopped by user. Tool calls are disabled until the user sends #resume.",
-        },
+        { decision: "accept" },
     );
+    assert.equal(lists, 2);
 });

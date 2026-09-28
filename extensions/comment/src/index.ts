@@ -1,9 +1,19 @@
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ExtensionError } from "@portable-devshell/extension";
-import type { ExtensionCommentControlDecision } from "@portable-devshell/extension/comment";
-import type { ToolCallReviewInvocation } from "@portable-devshell/extension/toolcall";
+import {
+    ExtensionError,
+    type ExtensionContext,
+    type ExtensionJsonValue,
+} from "@portable-devshell/extension";
+import type { ExtensionInstanceRuntimeCapability } from "@portable-devshell/extension/instance";
+import {
+    review,
+    type ToolCallReviewBinding,
+    type ToolCallReviewInvocation,
+    type ToolCallReviewResult,
+} from "@portable-devshell/extension/toolcall";
 import type {
     ContextMessageReadResult,
     ContextMessageRecord,
@@ -28,6 +38,25 @@ import { ConversationPreferenceStore } from "./conversation/preference/Store.js"
 import { ConversationStore } from "./conversation/store/ConversationStore.js";
 import { resolveToolCallFeedback } from "./hint/Feedback.js";
 import { CommentReportService } from "./comment/report/Service.js";
+
+export type CommentControlDecision =
+    | { readonly kind: "allow" }
+    | {
+          readonly comment: string;
+          readonly commentId: string;
+          readonly kind: "push";
+          readonly toolCallBudget: number;
+      }
+    | {
+          readonly comment: string;
+          readonly commentId: string;
+          readonly kind: "resume";
+      }
+    | {
+          readonly comment?: string;
+          readonly commentId: string;
+          readonly kind: "stop";
+      };
 
 export interface CommentExtensionInstance {
     appendEvent(
@@ -87,7 +116,7 @@ export interface CommentPort {
         ctxId: string,
         toolName: string,
         requestId?: string,
-    ): Promise<ExtensionCommentControlDecision>;
+    ): Promise<CommentControlDecision>;
 }
 
 export interface ConversationPort {
@@ -353,8 +382,323 @@ export class CommentExtension {
     }
 }
 
+interface BuiltinCommentRuntime {
+    readonly comment: CommentExtension;
+    readonly source: BuiltinCommentInstanceSource;
+}
+
+let builtinRuntime: BuiltinCommentRuntime | undefined;
+
+export async function activate(context: ExtensionContext): Promise<void> {
+    if (builtinRuntime !== undefined)
+        throw new Error("Comment Extension is already active.");
+    const instanceRuntime = context.capabilities.instanceRuntime;
+    if (instanceRuntime === undefined) {
+        throw new Error(
+            "Comment Extension requires the instanceRuntime capability.",
+        );
+    }
+    const source = new BuiltinCommentInstanceSource(instanceRuntime);
+    await source.refresh();
+    const comment = new CommentExtension({
+        instances: source,
+        preferencesFile: legacyConversationPreferencesFile(
+            context.paths.stateDirectory,
+        ),
+    });
+    const binding = createCommentReview(comment.comment);
+    context.register(review, "comment", async (input, invocation) => {
+        await source.refresh();
+        return await binding(input, invocation);
+    });
+    builtinRuntime = { comment, source };
+}
+
+export async function retireInstance(instance: string): Promise<void> {
+    const runtime = builtinRuntime;
+    if (runtime === undefined) return;
+    await runtime.comment.retireInstance(
+        instance,
+        `Instance ${instance} was retired before Comment delivery.`,
+    );
+    await runtime.source.refresh(instance);
+}
+
+export async function deactivate(): Promise<void> {
+    const runtime = builtinRuntime;
+    builtinRuntime = undefined;
+    await runtime?.comment.close();
+}
+
+export function createCommentReview(
+    comment: Pick<
+        CommentPort,
+        | "beforeTodoToolCall"
+        | "consumePending"
+        | "feedback"
+        | "recordTodoInvalid"
+        | "reviewToolCall"
+    >,
+): ToolCallReviewBinding {
+    return async (
+        input: ToolCallReviewInvocation,
+    ): Promise<ToolCallReviewResult> => {
+        if (
+            input.direction === "outbound" &&
+            (input.kind === "result" || input.kind === "error")
+        ) {
+            if (
+                input.kind === "error" &&
+                input.toolName === "todo_write" &&
+                input.context.ctxId !== undefined &&
+                readToolErrorCode(input.payload) === "todo.invalid"
+            ) {
+                comment.recordTodoInvalid(
+                    input.context.instance,
+                    input.context.ctxId,
+                );
+            }
+            const feedback = [...comment.feedback(input)];
+            if (
+                input.kind === "result" &&
+                input.context.ctxId !== undefined &&
+                input.callId !== undefined
+            ) {
+                const delivered = await comment.consumePending(
+                    input.context.instance,
+                    input.context.ctxId,
+                    input.callId,
+                );
+                if (delivered.comment !== undefined)
+                    feedback.unshift(delivered.comment);
+            }
+            const unique = [...new Set(feedback)];
+            return {
+                decision: "accept",
+                ...(unique.length === 0 ? {} : { feedback: unique }),
+            };
+        }
+        if (
+            input.direction !== "inbound" ||
+            input.kind !== "call" ||
+            input.context.source !== "mcp" ||
+            input.context.ctxId === undefined
+        ) {
+            return { decision: "accept" };
+        }
+        const decision = await comment.reviewToolCall(
+            input.context.instance,
+            input.context.ctxId,
+            input.toolName,
+            input.callId ?? input.context.requestId,
+        );
+        const result = reviewDecision(decision);
+        if (result.decision === "accept") {
+            await comment.beforeTodoToolCall(
+                input.context.instance,
+                input.context.ctxId,
+                input.toolName,
+            );
+        }
+        return result;
+    };
+}
+
+class BuiltinCommentInstanceSource implements CommentInstanceSource {
+    readonly #instanceRuntime: ExtensionInstanceRuntimeCapability;
+    readonly #keys = new Map<string, object>();
+    readonly #listeners = new Set<() => void>();
+    #records: readonly { enabled: boolean; name: string }[] = [];
+
+    constructor(instanceRuntime: ExtensionInstanceRuntimeCapability) {
+        this.#instanceRuntime = instanceRuntime;
+    }
+
+    list(): readonly CommentExtensionInstance[] {
+        const homeDirectory = resolveWorkerHomeDirectory();
+        return this.#records.map((record) => {
+            const root = join(
+                homeDirectory,
+                ".devshell",
+                record.name,
+                "control-worker",
+            );
+            return {
+                appendEvent: async (type, data) =>
+                    await this.#instanceRuntime.appendEvent(
+                        record.name,
+                        type,
+                        data as unknown as ExtensionJsonValue,
+                    ),
+                conversationDatabaseFile: join(
+                    root,
+                    "conversation.sqlite3",
+                ),
+                enabled: record.enabled,
+                key: this.#requireKey(record.name),
+                legacyContextMessagesFile: join(
+                    root,
+                    "context-messages.json",
+                ),
+                legacyReports: async () =>
+                    (await this.#instanceRuntime.readToolCalls(record.name, {
+                        includeInput: true,
+                        includeOutput: false,
+                        toolName: "todo_report",
+                    })) as unknown as ToolCallRecord[],
+                name: record.name,
+            };
+        });
+    }
+
+    onChange(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
+    }
+
+    async refresh(renewInstance?: string): Promise<void> {
+        const next = [...(await this.#instanceRuntime.list())];
+        const previousSignature = instanceSignature(this.#records);
+        const nextNames = new Set(next.map((record) => record.name));
+        for (const name of [...this.#keys.keys()]) {
+            if (!nextNames.has(name)) this.#keys.delete(name);
+        }
+        if (
+            renewInstance !== undefined &&
+            nextNames.has(renewInstance)
+        ) {
+            this.#keys.set(renewInstance, {});
+        }
+        for (const record of next) this.#requireKey(record.name);
+        this.#records = next;
+        if (
+            renewInstance !== undefined ||
+            previousSignature !== instanceSignature(next)
+        ) {
+            for (const listener of [...this.#listeners]) listener();
+        }
+    }
+
+    #requireKey(name: string): object {
+        let key = this.#keys.get(name);
+        if (key === undefined) {
+            key = {};
+            this.#keys.set(name, key);
+        }
+        return key;
+    }
+}
+
+function reviewDecision(
+    decision: CommentControlDecision,
+): ToolCallReviewResult {
+    switch (decision.kind) {
+        case "allow":
+            return { decision: "accept" };
+        case "push":
+            return {
+                decision: "reject",
+                error: {
+                    code: "control.modelReplyRequired",
+                    details: {
+                        commentId: decision.commentId,
+                        toolCallBudget: decision.toolCallBudget,
+                    },
+                },
+                reason: [
+                    "#push response deadline reached.",
+                    "You must reply to the user's #push message before using more tools.",
+                    `#push message: ${decision.comment}`,
+                    "Call todo_report with a direct response to the #push message above.",
+                ].join("\n\n"),
+            };
+        case "resume":
+            return {
+                decision: "reject",
+                error: {
+                    code: "control.modelResumed",
+                    details: { commentId: decision.commentId },
+                },
+                reason: `The user sent #resume. This tool was not executed. Read the Comment before deciding the next action: ${decision.comment}`,
+            };
+        case "stop":
+            return {
+                decision: "reject",
+                error: {
+                    code: "control.modelStopped",
+                    details: { commentId: decision.commentId },
+                },
+                reason:
+                    decision.comment === undefined
+                        ? "Stopped by user. Tool calls are disabled until the user sends #resume."
+                        : `Stopped by user. Tool calls are disabled until the user sends #resume. User Comment: ${decision.comment}`,
+            };
+    }
+}
+
+function readToolErrorCode(value: ExtensionJsonValue): string | undefined {
+    if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value) ||
+        typeof value.error !== "object" ||
+        value.error === null ||
+        Array.isArray(value.error)
+    ) {
+        return undefined;
+    }
+    return typeof value.error.code === "string" ? value.error.code : undefined;
+}
+
+function instanceSignature(
+    records: readonly { enabled: boolean; name: string }[],
+): string {
+    return records
+        .map((record) => `${record.name}\u0000${record.enabled ? "1" : "0"}`)
+        .join("\u0001");
+}
+
+/**
+ * @compat comment-control-storage-v1
+ * @removeAt 0.7.10
+ */
+function legacyConversationPreferencesFile(stateDirectory: string): string {
+    return resolve(stateDirectory, "../../..", "conversation-preferences.json");
+}
+
+/**
+ * @compat comment-instance-storage-v1
+ * @removeAt 0.7.10
+ */
+function resolveWorkerHomeDirectory(): string {
+    const environment = process.env;
+    const configured =
+        process.platform === "win32"
+            ? firstNonEmpty(
+                  environment.USERPROFILE,
+                  environment.HOMEDRIVE !== undefined &&
+                      environment.HOMEPATH !== undefined
+                      ? `${environment.HOMEDRIVE}${environment.HOMEPATH}`
+                      : undefined,
+                  environment.HOME,
+              )
+            : firstNonEmpty(environment.HOME, environment.USERPROFILE);
+    const resolved = configured ?? homedir();
+    if (resolved.length === 0)
+        throw new Error("the current user home directory is unavailable");
+    return resolved;
+}
+
+function firstNonEmpty(
+    ...values: readonly (string | undefined)[]
+): string | undefined {
+    return values.find(
+        (value): value is string => value !== undefined && value.length > 0,
+    );
+}
+
 export function commentExtensionDirectory(): string {
-    return resolve(dirname(fileURLToPath(import.meta.url)), "builtin");
+    return dirname(fileURLToPath(import.meta.url));
 }
 
 function reportBackgroundError(error: unknown): void {
