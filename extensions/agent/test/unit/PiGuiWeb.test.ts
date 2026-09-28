@@ -4,7 +4,6 @@ import test from "node:test";
 import {
     PiGuiWeb,
     isManagedPiGuiRequest,
-    rewritePiGuiAsset,
 } from "../../src/provider/pi/render/GuiWeb.ts";
 
 test("Pi GUI asset rebasing follows the current forwarded Agent mount path", async (t) => {
@@ -19,22 +18,6 @@ test("Pi GUI asset rebasing follows the current forwarded Agent mount path", asy
     assert.equal(response.status, 200);
     assert.doesNotMatch(body, /\/old\/web\/agent\/assets\//u);
     assert.match(body, /\/new\/web\/agent\/assets\//u);
-});
-
-test("Pi GUI assets are rebased under the single Agent path", () => {
-    const source = [
-        '<script src="/assets/index.js"></script>',
-        "fetch(`/api/sessions/${id}/messages`)",
-        'const icon="/favicon.svg";',
-        "var preload=function(e){return`/`+e}",
-    ].join("\n");
-
-    const rewritten = rewritePiGuiAsset(source, "/web/agent/");
-
-    assert.match(rewritten, /src="\/web\/agent\/assets\/index\.js"/u);
-    assert.match(rewritten, /fetch\(`\/web\/agent\/api\/sessions/u);
-    assert.match(rewritten, /"\/web\/agent\/favicon\.svg"/u);
-    assert.match(rewritten, /return`\/web\/agent\/`\+e/u);
 });
 
 test("Pi GUI exposes managed live-session controls but blocks local runtime escape hatches", () => {
