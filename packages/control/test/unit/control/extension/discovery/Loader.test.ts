@@ -475,6 +475,49 @@ test("Extension loader retires Extension-owned state with host-managed Worker re
     await candidate.retire();
 });
 
+test("Extension loader retires Extension-owned Context state without touching Worker lifetime", async (t) => {
+    const harness = await createHarness();
+    t.after(harness.cleanup);
+    const target = await harness.writeGeneration({ capabilities: ["workers"] });
+    const events: string[] = [];
+    const loader = new ExtensionLoader({
+        importer: async () => ({
+            activate() {},
+            retireContext(input: {
+                ctxId: string;
+                instance: string;
+                reason: "disabled" | "expired";
+            }) {
+                events.push(
+                    "module.retire-context:" +
+                        input.instance +
+                        ":" +
+                        input.ctxId +
+                        ":" +
+                        input.reason,
+                );
+            },
+        }),
+        instances: { list: () => [] } as never,
+        paths: harness.paths,
+        points: createControlExtensionPointRegistry(),
+        workerFactory: () => fakeWorker(events),
+    });
+    const candidate = await loader.load(target.id, target.generation);
+    candidate.activate();
+
+    await candidate.retireContextResources({
+        ctxId: "ctx-one",
+        instance: "local",
+        reason: "disabled",
+    });
+
+    assert.deepEqual(events, [
+        "module.retire-context:local:ctx-one:disabled",
+    ]);
+    await candidate.retire();
+});
+
 test("Extension loader rejects Web file bindings escaping the immutable generation", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);

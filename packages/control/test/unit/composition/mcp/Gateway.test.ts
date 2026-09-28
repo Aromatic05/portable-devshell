@@ -375,52 +375,30 @@ test("MCP Extension tools hold their generation lease through invocation", async
     assert.equal(releases, 1);
 });
 
-test("MCP Context terminal cleanup runs every Extension and releases every lease", async () => {
-    const calls: string[] = [];
-    let releases = 0;
+test("MCP Context terminal delegates to generic Extension Context retirement", async () => {
+    const calls: Array<{
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }> = [];
     const service = new McpExtensionService({
-        listDeclarations(pointId: string) {
-            assert.equal(pointId, "mcp.context-terminal");
-            return [
-                { declaration: { id: "first" }, extensionId: "one", id: "first" },
-                {
-                    declaration: { id: "second" },
-                    extensionId: "two",
-                    id: "second",
-                },
-            ] as never;
+        listDeclarations() {
+            return [];
         },
-        async acquireRegistration(_pointId: string, id: string) {
-            return {
-                extensionId: id,
-                lease: {
-                    release() {
-                        releases += 1;
-                    },
-                },
-                registration: {
-                    binding: async (event: {
-                        ctxId: string;
-                        instance: string;
-                        reason: string;
-                    }) => {
-                        calls.push(
-                            `${id}:${event.instance}:${event.ctxId}:${event.reason}`,
-                        );
-                        if (id === "first") throw new Error("first failed");
-                    },
-                },
-            } as never;
+        async acquireRegistration() {
+            throw new Error("unexpected registration lookup");
+        },
+        async retireContextResources(input) {
+            calls.push(input);
         },
     } as never);
 
-    await assert.rejects(
-        service.contextTerminated("remote-server", "ctx-one", "expired"),
-        /first failed/u,
-    );
+    await service.contextTerminated("remote-server", "ctx-one", "expired");
     assert.deepEqual(calls, [
-        "first:remote-server:ctx-one:expired",
-        "second:remote-server:ctx-one:expired",
+        {
+            ctxId: "ctx-one",
+            instance: "remote-server",
+            reason: "expired",
+        },
     ]);
-    assert.equal(releases, 2);
 });

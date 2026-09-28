@@ -42,11 +42,6 @@
                 "scope": "control"
             }
         ],
-        "mcp.context-terminal": [
-            {
-                "id": "comment"
-            }
-        ],
         "mcp.tools": [
             {
                 "id": "todo_report",

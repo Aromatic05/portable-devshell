@@ -313,6 +313,14 @@ async function invoke(
                 hostModulesLease.release();
                 hostModules.dispose();
                 break;
+            case "retireContext":
+                await extensionModule.retireContext?.({
+                    ctxId: operation.ctxId,
+                    instance: operation.instance,
+                    reason: operation.reason,
+                });
+                value = undefined;
+                break;
             case "retireInstance":
                 await extensionModule.retireInstance?.(operation.instance);
                 value = undefined;
@@ -1065,6 +1073,16 @@ function readExtensionModule(value: unknown): ExtensionModule {
         );
     }
     if (
+        value.retireContext !== undefined &&
+        typeof value.retireContext !== "function"
+    ) {
+        throw new TypeError(
+            "Extension " +
+                data.context.id +
+                " retireContext export must be a function.",
+        );
+    }
+    if (
         value.retireInstance !== undefined &&
         typeof value.retireInstance !== "function"
     ) {
@@ -1079,6 +1097,13 @@ function readExtensionModule(value: unknown): ExtensionModule {
             : {
                   deactivate: value.deactivate as NonNullable<
                       ExtensionModule["deactivate"]
+                  >,
+              }),
+        ...(value.retireContext === undefined
+            ? {}
+            : {
+                  retireContext: value.retireContext as NonNullable<
+                      ExtensionModule["retireContext"]
                   >,
               }),
         ...(value.retireInstance === undefined

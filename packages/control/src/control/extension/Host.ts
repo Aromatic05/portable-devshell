@@ -525,6 +525,40 @@ export class ExtensionHost {
         }
     }
 
+    async retireContextResources(input: {
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }): Promise<void> {
+        const failures: unknown[] = [];
+        await Promise.all(
+            [...this.#active.entries()].map(async ([id, generation]) => {
+                try {
+                    await generation.retireContextResources(input);
+                } catch (error) {
+                    failures.push(
+                        new Error(
+                            "Extension " +
+                                id +
+                                " failed to retire resources for Context " +
+                                input.ctxId +
+                                ".",
+                            { cause: error },
+                        ),
+                    );
+                }
+            }),
+        );
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                "Extensions failed to retire resources for Context " +
+                    input.ctxId +
+                    ".",
+            );
+        }
+    }
+
     #notifyChange(): void {
         for (const listener of this.#listeners) listener();
     }

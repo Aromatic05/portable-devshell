@@ -1,9 +1,6 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
-    contextTerminal,
     tools,
-    type McpContextTerminalBinding,
-    type McpContextTerminalReason,
     type McpToolBinding,
     type McpToolDeclaration,
     type McpToolInvocationContext,
@@ -16,13 +13,13 @@ import type { ExtensionHost } from "../../../control/extension/Host.js";
 export class McpExtensionService {
     readonly #extensions: Pick<
         ExtensionHost,
-        "acquireRegistration" | "listDeclarations"
+        "acquireRegistration" | "listDeclarations" | "retireContextResources"
     >;
 
     constructor(
         extensions: Pick<
             ExtensionHost,
-            "acquireRegistration" | "listDeclarations"
+            "acquireRegistration" | "listDeclarations" | "retireContextResources"
         >,
     ) {
         this.#extensions = extensions;
@@ -70,45 +67,13 @@ export class McpExtensionService {
     async contextTerminated(
         instance: string,
         ctxId: string,
-        reason: McpContextTerminalReason,
+        reason: "disabled" | "expired",
     ): Promise<void> {
-        const failures: unknown[] = [];
-        for (const declaration of this.#extensions.listDeclarations(
-            contextTerminal.id,
-        )) {
-            try {
-                const { lease, registration } =
-                    await this.#extensions.acquireRegistration(
-                        contextTerminal.id,
-                        declaration.id,
-                    );
-                try {
-                    if (typeof registration.binding !== "function")
-                        throw new TypeError(
-                            "MCP Context terminal " +
-                                declaration.id +
-                                " has an invalid Extension binding.",
-                        );
-                    await (registration.binding as McpContextTerminalBinding)({
-                        ctxId,
-                        instance,
-                        reason,
-                    });
-                } finally {
-                    lease.release();
-                }
-            } catch (error) {
-                failures.push(error);
-            }
-        }
-        if (failures.length === 1) throw failures[0];
-        if (failures.length > 1)
-            throw new AggregateError(
-                failures,
-                "MCP Context " +
-                    ctxId +
-                    " terminal Extension cleanup was incomplete.",
-            );
+        await this.#extensions.retireContextResources({
+            ctxId,
+            instance,
+            reason,
+        });
     }
 }
 

@@ -3,7 +3,6 @@ import type {
     ExtensionPointDeclaration,
 } from "@portable-devshell/extension";
 import {
-    contextTerminal,
     tools,
     type McpToolActivity,
     type McpToolDeclaration,
@@ -14,9 +13,7 @@ import type {
     ExtensionPointValidationContext,
 } from "../../../control/extension/generation/registration/PointRegistry.js";
 import {
-    createMcpContextTerminalSandboxBinding,
     createMcpToolSandboxBinding,
-    validateMcpContextTerminalBinding,
     validateMcpToolBinding,
 } from "./Sandbox.js";
 
@@ -30,19 +27,6 @@ export const mcpToolsExtensionPointDefinition: ExtensionPointDefinition =
             context: ExtensionPointValidationContext,
         ) {
             validateMcpToolBinding(binding, context);
-        },
-    });
-
-export const mcpContextTerminalExtensionPointDefinition: ExtensionPointDefinition =
-    Object.freeze({
-        createSandboxBinding: createMcpContextTerminalSandboxBinding,
-        id: contextTerminal.id,
-        parseDeclaration: parseMcpContextTerminalDeclaration,
-        validateBinding(
-            binding: unknown,
-            context: ExtensionPointValidationContext,
-        ) {
-            validateMcpContextTerminalBinding(binding, context);
         },
     });
 
@@ -91,17 +75,6 @@ function parseMcpToolDeclaration(
         ...optionalBoolean(record, "idempotentHint"),
         ...optionalBoolean(record, "openWorldHint"),
     });
-}
-
-function parseMcpContextTerminalDeclaration(
-    value: ExtensionPointDeclaration,
-): ExtensionPointDeclaration {
-    const unknown = Object.keys(value).find((key) => key !== "id");
-    if (unknown !== undefined)
-        throw new TypeError(
-            contextTerminal.id + " declaration has unknown field " + unknown + ".",
-        );
-    return Object.freeze({ id: value.id });
 }
 
 function readString(

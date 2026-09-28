@@ -355,6 +355,9 @@ export class ExtensionLoader {
                 generation,
                 manifest,
                 registrations: bindings,
+                retireContextResources: async (input) => {
+                    await module!.retireContext?.(input);
+                },
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         module!.retireInstance?.(instance),
@@ -516,6 +519,9 @@ export class ExtensionLoader {
                 generation: input.generation,
                 manifest: input.manifest,
                 registrations: bindings,
+                retireContextResources: async (context) => {
+                    await sandbox.retireContext(context);
+                },
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         sandbox.retireInstance(instance),
@@ -662,6 +668,14 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
         );
     }
     if (
+        value.retireContext !== undefined &&
+        typeof value.retireContext !== "function"
+    ) {
+        throw new TypeError(
+            "Extension " + id + " retireContext export must be a function.",
+        );
+    }
+    if (
         value.retireInstance !== undefined &&
         typeof value.retireInstance !== "function"
     ) {
@@ -676,6 +690,13 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
             : {
                   deactivate: value.deactivate as NonNullable<
                       ExtensionModule["deactivate"]
+                  >,
+              }),
+        ...(value.retireContext === undefined
+            ? {}
+            : {
+                  retireContext: value.retireContext as NonNullable<
+                      ExtensionModule["retireContext"]
                   >,
               }),
         ...(value.retireInstance === undefined

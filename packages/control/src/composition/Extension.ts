@@ -3,10 +3,7 @@ import {
     cliNativeCommandsExtensionPointDefinition,
 } from "../control/extension/cli/Point.js";
 import { controlRoutesExtensionPointDefinition } from "../control/extension/Route.js";
-import {
-    mcpContextTerminalExtensionPointDefinition,
-    mcpToolsExtensionPointDefinition,
-} from "./mcp/extension/Point.js";
+import { mcpToolsExtensionPointDefinition } from "./mcp/extension/Point.js";
 import { tuiPagesExtensionPointDefinition } from "../control/extension/tui/Point.js";
 import {
     toolCallReviewExtensionPointDefinition,
@@ -25,7 +22,6 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
         controlRoutesExtensionPointDefinition,
-        mcpContextTerminalExtensionPointDefinition,
         mcpToolsExtensionPointDefinition,
         tuiPagesExtensionPointDefinition,
         toolCallReviewExtensionPointDefinition,

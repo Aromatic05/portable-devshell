@@ -10,6 +10,11 @@ export interface ExtensionGenerationOptions {
     generation: string;
     manifest: ExtensionManifest;
     registrations: ExtensionRegistrationSet;
+    retireContextResources?: (input: {
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }) => Promise<void>;
     retireInstanceResources?: (instance: string) => Promise<void>;
 }
 
@@ -25,6 +30,7 @@ export class ExtensionGeneration {
     readonly manifest: ExtensionManifest;
     readonly registrations: ExtensionRegistrationSet;
     readonly #dispose: () => Promise<void>;
+    readonly #retireContextResources?: ExtensionGenerationOptions["retireContextResources"];
     readonly #retireInstanceResources?: (instance: string) => Promise<void>;
     readonly #retirement: Promise<void>;
     #disposeError?: unknown;
@@ -40,6 +46,7 @@ export class ExtensionGeneration {
         this.manifest = options.manifest;
         this.registrations = options.registrations;
         this.#dispose = options.dispose;
+        this.#retireContextResources = options.retireContextResources;
         this.#retireInstanceResources = options.retireInstanceResources;
         this.#retirement = new Promise<void>((resolve, reject) => {
             this.#resolveRetirement = resolve;
@@ -96,6 +103,14 @@ export class ExtensionGeneration {
 
     async retireInstanceResources(instance: string): Promise<void> {
         await this.#retireInstanceResources?.(instance);
+    }
+
+    async retireContextResources(input: {
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }): Promise<void> {
+        await this.#retireContextResources?.(input);
     }
 
     fault(error: unknown): void {

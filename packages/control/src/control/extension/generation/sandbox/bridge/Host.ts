@@ -311,6 +311,14 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         await this.#invoke({ instance, kind: "retireInstance" });
     }
 
+    async retireContext(input: {
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }): Promise<void> {
+        await this.#invoke({ ...input, kind: "retireContext" });
+    }
+
     async invokeBinding(
         pointId: string,
         id: string,

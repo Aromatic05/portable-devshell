@@ -53,21 +53,3 @@ export type McpToolBinding = (
 export const tools = defineExtensionPoint<McpToolDeclaration, McpToolBinding>(
     "mcp.tools",
 );
-
-export type McpContextTerminalReason = "disabled" | "expired";
-
-export interface McpContextTerminalEvent {
-    readonly ctxId: string;
-    readonly instance: string;
-    readonly reason: McpContextTerminalReason;
-}
-
-export type McpContextTerminalBinding = (
-    event: McpContextTerminalEvent,
-) => Promise<void> | void;
-
-/** Cleanup callback for one instance attached to a terminal MCP Context. */
-export const contextTerminal = defineExtensionPoint<
-    ExtensionPointDeclaration,
-    McpContextTerminalBinding
->("mcp.context-terminal");

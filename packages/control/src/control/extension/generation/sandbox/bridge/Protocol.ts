@@ -77,6 +77,12 @@ export type ExtensionSandboxInvokeOperation =
           pointId: string;
       }
     | { kind: "deactivate" }
+    | {
+          ctxId: string;
+          instance: string;
+          kind: "retireContext";
+          reason: "disabled" | "expired";
+      }
     | { instance: string; kind: "retireInstance" };
 
 export type ExtensionSandboxCapabilityOperation =

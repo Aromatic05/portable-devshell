@@ -34,7 +34,7 @@ test("Comment Extension activates its review from instanceRuntime without a Comm
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 8);
+    assert.equal(registrations.length, 7);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
@@ -48,7 +48,6 @@ test("Comment Extension activates its review from instanceRuntime without a Comm
                 pointId: "control.routes",
             },
             { id: "todo_report", pointId: "mcp.tools" },
-            { id: "comment", pointId: "mcp.context-terminal" },
         ],
     );
     assert.equal(typeof registrations[0]?.binding, "function");

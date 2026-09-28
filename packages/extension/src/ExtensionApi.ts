@@ -303,6 +303,12 @@ export interface ExtensionModule {
     activate(context: ExtensionContext): Promise<void> | void;
     /** Extension-owned graceful cleanup only; host-managed resources are reclaimed independently. */
     deactivate?(): Promise<void> | void;
+    /** Release Extension-owned state associated with one retired Context. */
+    retireContext?(input: {
+        ctxId: string;
+        instance: string;
+        reason: "disabled" | "expired";
+    }): Promise<void> | void;
     /** Release Extension-owned state associated with one retired Instance. */
     retireInstance?(instance: string): Promise<void> | void;
 }

@@ -14,9 +14,7 @@ import {
 } from "@portable-devshell/extension/control";
 import type { ExtensionInstanceRuntimeCapability } from "@portable-devshell/extension/instance";
 import {
-    contextTerminal,
     tools as mcpTools,
-    type McpContextTerminalBinding,
     type McpToolBinding,
 } from "@portable-devshell/extension/mcp";
 import {
@@ -428,11 +426,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
         "todo_report",
         createTodoReportTool(source, comment.comment),
     );
-    context.register(
-        contextTerminal,
-        "comment",
-        createCommentContextTerminal(source, comment.comment),
-    );
     builtinRuntime = { comment, source };
 }
 
@@ -444,6 +437,26 @@ export async function retireInstance(instance: string): Promise<void> {
         `Instance ${instance} was retired before Comment delivery.`,
     );
     await runtime.source.refresh(instance);
+}
+
+export async function retireContext(input: {
+    ctxId: string;
+    instance: string;
+    reason: "disabled" | "expired";
+}): Promise<void> {
+    const runtime = builtinRuntime;
+    if (runtime === undefined) return;
+    await runtime.source.refresh();
+    if (!runtime.source.has(input.instance)) return;
+    await runtime.comment.comment.failPending(
+        input.instance,
+        input.ctxId,
+        "Context " +
+            input.ctxId +
+            " was " +
+            input.reason +
+            " before Comment delivery.",
+    );
 }
 
 export async function deactivate(): Promise<void> {
@@ -643,25 +656,6 @@ function createTodoReportTool(
             content: [{ text: message, type: "text" }],
             structuredContent: { reported: true },
         };
-    };
-}
-
-function createCommentContextTerminal(
-    source: BuiltinCommentInstanceSource,
-    comment: Pick<CommentPort, "failPending">,
-): McpContextTerminalBinding {
-    return async ({ ctxId, instance, reason }) => {
-        await source.refresh();
-        if (!source.has(instance)) return;
-        await comment.failPending(
-            instance,
-            ctxId,
-            "Context " +
-                ctxId +
-                " was " +
-                reason +
-                " before Comment delivery.",
-        );
     };
 }
 

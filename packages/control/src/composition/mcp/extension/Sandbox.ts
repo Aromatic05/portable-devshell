@@ -1,9 +1,6 @@
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import {
-    contextTerminal,
     tools,
-    type McpContextTerminalBinding,
-    type McpContextTerminalEvent,
     type McpToolBinding,
     type McpToolInvocationContext,
     type McpToolResult,
@@ -51,34 +48,6 @@ export const mcpToolsSandboxCodec: ExtensionSandboxPointCodec = Object.freeze({
     },
 });
 
-export const mcpContextTerminalSandboxCodec: ExtensionSandboxPointCodec =
-    Object.freeze({
-        describeBinding(
-            binding: unknown,
-            context: ExtensionPointValidationContext,
-        ): ExtensionJsonValue {
-            validateMcpContextTerminalBinding(binding, context);
-            return Object.freeze({ kind: "context-terminal" });
-        },
-        id: contextTerminal.id,
-        async invokeBinding(
-            binding: unknown,
-            input: ExtensionJsonValue | undefined,
-            _signal: AbortSignal,
-            context: ExtensionPointSandboxInvocationContext,
-        ): Promise<unknown> {
-            validateMcpContextTerminalBinding(binding, context);
-            const value = readRecord(input, "MCP Context terminal event");
-            return await (binding as McpContextTerminalBinding)(
-                Object.freeze({
-                    ctxId: readString(value.ctxId, "ctxId"),
-                    instance: readString(value.instance, "instance"),
-                    reason: readTerminalReason(value.reason),
-                }),
-            );
-        },
-    });
-
 export function createMcpToolSandboxBinding(
     descriptor: ExtensionJsonValue,
     context: ExtensionPointValidationContext,
@@ -115,43 +84,11 @@ export function createMcpToolSandboxBinding(
         )) as McpToolResult;
 }
 
-export function createMcpContextTerminalSandboxBinding(
-    descriptor: ExtensionJsonValue,
-    context: ExtensionPointValidationContext,
-    bridge: ExtensionPointSandboxBridge,
-): McpContextTerminalBinding {
-    assertDescriptor(
-        descriptor,
-        context,
-        "context-terminal",
-        contextTerminal.id,
-    );
-    return async (event: McpContextTerminalEvent): Promise<void> => {
-        await bridge.invokeBinding(
-            contextTerminal.id,
-            context.id,
-            {
-                ctxId: event.ctxId,
-                instance: event.instance,
-                reason: event.reason,
-            },
-            { timeoutLabel: "MCP Context terminal callback" },
-        );
-    };
-}
-
 export function validateMcpToolBinding(
     binding: unknown,
     context: ExtensionPointValidationContext,
 ): asserts binding is McpToolBinding {
     validateFunction(binding, context, tools.id);
-}
-
-export function validateMcpContextTerminalBinding(
-    binding: unknown,
-    context: ExtensionPointValidationContext,
-): asserts binding is McpContextTerminalBinding {
-    validateFunction(binding, context, contextTerminal.id);
 }
 
 function validateFunction(
@@ -225,13 +162,4 @@ function optionalString(
 ): Partial<Record<typeof field, string>> {
     const value = record[field];
     return value === undefined ? {} : { [field]: readString(value, field) };
-}
-
-function readTerminalReason(
-    value: ExtensionJsonValue | undefined,
-): McpContextTerminalEvent["reason"] {
-    if (value === "disabled" || value === "expired") return value;
-    throw new TypeError(
-        "MCP Context terminal reason must be disabled or expired.",
-    );
 }

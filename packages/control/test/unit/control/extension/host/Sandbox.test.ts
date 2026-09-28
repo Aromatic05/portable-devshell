@@ -169,6 +169,36 @@ export function retireInstance(instance) {
     });
 });
 
+test("Extension sandbox delivers Context retirement to Extension-owned state", async (t) => {
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-retire-context",
+        `
+const retired = [];
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => ({
+        kind: "json",
+        value: { retired: [...retired] }
+    }));
+}
+export function retireContext(input) {
+    retired.push(input);
+}
+`,
+    );
+
+    await sandbox.start();
+    await sandbox.retireContext({
+        ctxId: "ctx-one",
+        instance: "local",
+        reason: "expired",
+    });
+
+    assert.deepEqual(await cliJson(sandbox, [], "retirement"), {
+        retired: [{ ctxId: "ctx-one", instance: "local", reason: "expired" }],
+    });
+});
+
 test("Extension sandbox preserves public structured Extension errors", async (t) => {
     const sandbox = await setupSandbox(
         t,
