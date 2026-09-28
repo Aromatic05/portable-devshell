@@ -3,10 +3,18 @@ import { join } from "node:path";
 
 import { createDevshellPiExtension } from "../adapt/Bridge.js";
 import { PiChildToolSession } from "../adapt/ChildToolSession.js";
+import {
+    hasExpandedPiTmuxResources,
+    PI_TMUX_TOOL_DOMAIN,
+    PiToolExposureController,
+} from "../adapt/ToolExposure.js";
 import { PiAgentProfileCatalog } from "../profile/Loader.js";
 import { PiGuiWeb } from "../render/GuiWeb.js";
 import { PiSubagentRuntime } from "../subagent/Runtime.js";
-import { attachPiSubagentTools } from "../subagent/Tools.js";
+import {
+    attachPiSubagentTools,
+    PI_SUBAGENT_TOOL_NAMES,
+} from "../subagent/Tools.js";
 import {
     PiSdkLoader,
     type PiModelRuntimeLike,
@@ -28,6 +36,7 @@ interface ManagedPiAgent {
     session: PiSessionLike;
     subagents: PiSubagentRuntime;
     target: AgentWorkerTarget;
+    toolExposure: PiToolExposureController;
     tools: PiChildToolSession;
 }
 
@@ -126,11 +135,14 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         input.localCwd,
         activeAgentDir,
     );
+    let toolExposure: PiToolExposureController | undefined;
     const subagents = new PiSubagentRuntime({
         agentDir: activeAgentDir,
         gui: activeGui,
         localCwd: input.localCwd,
         modelRuntime: activeModelRuntime,
+        onChildrenChanged: (hasAliveChildren) =>
+            toolExposure?.setExpanded("agent", hasAliveChildren),
         profiles: new PiAgentProfileCatalog(activeAgentDir, tools),
         sdk: activeSdk,
         tools,
@@ -171,15 +183,28 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
             `/root/main · ${input.target.instance}:${input.target.workspace}`,
         );
         activeGui.attach(session, input.localCwd);
+        toolExposure = new PiToolExposureController(session, {
+            agent: {
+                expanded: PI_SUBAGENT_TOOL_NAMES,
+                gateway: ["agent_spawn"],
+            },
+            tmux: PI_TMUX_TOOL_DOMAIN,
+        });
+        toolExposure.setExpanded(
+            "tmux",
+            await hasExpandedPiTmuxResources(tools),
+        );
         subagents.bindMain(session);
         agents.set(input.agentId, {
             localCwd: input.localCwd,
             session,
             subagents,
             target: { ...input.target },
+            toolExposure,
             tools,
         });
     } catch (error) {
+        toolExposure?.close();
         session?.dispose();
         try {
             await tools.close().catch(() => undefined);
@@ -246,6 +271,7 @@ async function stopAgent(agentId: string): Promise<void> {
     agents.delete(agentId);
     try {
         await active.subagents.close();
+        active.toolExposure.close();
         await disposeManagedPiAgent(active, requireGui());
     } finally {
         try {

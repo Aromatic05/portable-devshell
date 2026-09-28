@@ -3,6 +3,11 @@ import { randomUUID } from "node:crypto";
 import type { BeforeAgentStartEvent } from "@earendil-works/pi-coding-agent";
 
 import { createDevshellPiExtension, type DevshellPiToolSession, type PiExtensionApiLike } from "../adapt/Bridge.js";
+import {
+    hasExpandedPiTmuxResources,
+    PI_TMUX_TOOL_DOMAIN,
+    PiToolExposureController,
+} from "../adapt/ToolExposure.js";
 import type { PiAgentProfile } from "../profile/Profile.js";
 import type { PiModelLike, PiModelRuntimeLike, PiSdkModule, PiSessionLike } from "../runtime/Sdk.js";
 import {
@@ -62,6 +67,7 @@ export class PiSubagentRuntime {
     readonly #registry = new PiAgentRegistry();
     readonly #sdk: PiSdkModule;
     readonly #tools: DevshellPiToolSession;
+    readonly #onChildrenChanged?: (hasAliveChildren: boolean) => void;
     #main?: PiSessionLike;
 
     constructor(options: {
@@ -69,6 +75,7 @@ export class PiSubagentRuntime {
         gui: PiSubagentGuiLike;
         localCwd: string;
         modelRuntime: PiModelRuntimeLike;
+        onChildrenChanged?: (hasAliveChildren: boolean) => void;
         profiles: PiAgentProfileCatalogLike;
         sdk: PiSdkModule;
         tools: DevshellPiToolSession;
@@ -77,6 +84,7 @@ export class PiSubagentRuntime {
         this.#gui = options.gui;
         this.#localCwd = options.localCwd;
         this.#modelRuntime = options.modelRuntime;
+        this.#onChildrenChanged = options.onChildrenChanged;
         this.#profiles = options.profiles;
         this.#sdk = options.sdk;
         this.#tools = options.tools;
@@ -146,6 +154,13 @@ export class PiSubagentRuntime {
         const session = created.session;
         session.setSessionName?.(path);
         this.#gui.attach(session, this.#localCwd);
+        const toolExposure = new PiToolExposureController(session, {
+            tmux: PI_TMUX_TOOL_DOMAIN,
+        });
+        toolExposure.setExpanded(
+            "tmux",
+            await hasExpandedPiTmuxResources(this.#tools),
+        );
         const record: PiSubagentRecord = {
             activity: "running",
             id: randomUUID(),
@@ -156,12 +171,14 @@ export class PiSubagentRuntime {
             ...(profile === undefined ? {} : { profile: profile.name }),
             session,
             task: input.task,
+            toolExposure,
             turnGeneration: 0,
         };
         record.unsubscribe = session.subscribe?.((event) =>
             this.#observe(record, event),
         );
         this.#registry.add(record);
+        this.#notifyChildrenChanged();
         this.#startTurn(record, input.task);
         return snapshot(record);
     }
@@ -263,12 +280,14 @@ export class PiSubagentRuntime {
         if (record.activity === "running")
             await record.session.abort().catch(() => undefined);
         record.unsubscribe?.();
+        record.toolExposure?.close();
         this.#gui.detach(record.session);
         record.session.dispose();
         record.lifecycle = "terminated";
         record.activity = "idle";
         record.lastActivity = undefined;
         this.#registry.emit(record.path, "terminated");
+        this.#notifyChildrenChanged();
         return snapshot(record);
     }
 
@@ -288,6 +307,14 @@ export class PiSubagentRuntime {
     #assertAlive(record: PiSubagentRecord): void {
         if (record.lifecycle !== "alive")
             throw new Error(`Agent is terminated: ${record.path}.`);
+    }
+
+    #notifyChildrenChanged(): void {
+        this.#onChildrenChanged?.(
+            this.#registry
+                .records()
+                .some((record) => record.lifecycle === "alive"),
+        );
     }
 
     #requireMain(): PiSessionLike {

@@ -64,6 +64,7 @@ export interface PiSessionLike {
     abort(): Promise<void>;
     dispose(): void;
     followUp(text: string): Promise<void>;
+    getActiveToolNames?(): string[];
     prompt(
         text: string,
         options?: {
@@ -72,6 +73,7 @@ export interface PiSessionLike {
         },
     ): Promise<void>;
     reload(): Promise<void>;
+    setActiveToolsByName?(toolNames: readonly string[]): void;
     waitForIdle(): Promise<void>;
     setModel?(model: PiModelLike): Promise<void>;
     setSessionName?(name: string): void;
