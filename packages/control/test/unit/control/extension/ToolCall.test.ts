@@ -35,9 +35,19 @@ test("ToolCall Extension binding acquires registrations once and releases them w
     const bindings = new ToolCallExtensionBinding({
         listDeclarations(pointId: string) {
             return pointId === "toolcall.review"
-                ? [{ id: "comment" }]
+                ? [
+                      {
+                          declaration: { hook: "500-comment", id: "comment" },
+                          id: "comment",
+                      },
+                  ]
                 : pointId === "toolcall.rewrite"
-                  ? [{ id: "secret" }]
+                  ? [
+                        {
+                            declaration: { hook: "500-secret", id: "secret" },
+                            id: "secret",
+                        },
+                    ]
                   : [];
         },
         async acquireRegistration(pointId: string, id: string) {
@@ -97,11 +107,53 @@ test("ToolCall Extension binding acquires registrations once and releases them w
     ]);
 });
 
+test("ToolCall Extension binding orders stage hooks by hook name independently of registration id", async () => {
+    const events: string[] = [];
+    const bindings = new ToolCallExtensionBinding({
+        listDeclarations(pointId: string) {
+            return pointId === "toolcall.review"
+                ? [
+                      {
+                          declaration: { hook: "900-last", id: "alpha" },
+                          extensionId: "alpha-extension",
+                          id: "alpha",
+                      },
+                      {
+                          declaration: { hook: "001-first", id: "zeta" },
+                          extensionId: "zeta-extension",
+                          id: "zeta",
+                      },
+                  ]
+                : [];
+        },
+        async acquireRegistration(_pointId: string, id: string) {
+            events.push(id);
+            return {
+                extensionId: `${id}-extension`,
+                lease: { release() {} },
+                registration: {
+                    binding: async () => ({ decision: "accept" as const }),
+                },
+            } as never;
+        },
+    } as never);
+
+    const lease = await bindings.acquire(toolCallContext);
+    assert.deepEqual(events, ["zeta", "alpha"]);
+    lease.release();
+});
+
 test("ToolCall Extension binding does not expose builtin-specific review interfaces", async () => {
     const bindings = new ToolCallExtensionBinding({
         listDeclarations(pointId: string) {
             return pointId === "toolcall.review"
-                ? [{ extensionId: "example", id: "review" }]
+                ? [
+                      {
+                          declaration: { hook: "500-review", id: "review" },
+                          extensionId: "example",
+                          id: "review",
+                      },
+                  ]
                 : [];
         },
         async acquireRegistration() {
@@ -155,7 +207,13 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
         {
             listDeclarations(pointId: string) {
                 return pointId === "toolcall.rewrite"
-                    ? [{ extensionId: "secret", id: "secret" }]
+                    ? [
+                          {
+                              declaration: { hook: "500-secret", id: "secret" },
+                              extensionId: "secret",
+                              id: "secret",
+                          },
+                      ]
                     : [];
             },
             async acquireRegistration() {
@@ -240,7 +298,16 @@ test("ToolCall Extension binding rolls back acquired generation leases when acqu
     const bindings = new ToolCallExtensionBinding({
         listDeclarations(pointId: string) {
             return pointId === "toolcall.review"
-                ? [{ id: "one" }, { id: "two" }]
+                ? [
+                      {
+                          declaration: { hook: "001-one", id: "one" },
+                          id: "one",
+                      },
+                      {
+                          declaration: { hook: "002-two", id: "two" },
+                          id: "two",
+                      },
+                  ]
                 : [];
         },
         async acquireRegistration(_pointId: string, id: string) {
@@ -458,7 +525,14 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
     let generation = "g1";
     const bindings = new ToolCallExtensionBinding({
         listDeclarations(pointId: string) {
-            return pointId === "toolcall.rewrite" ? [{ id: "secret" }] : [];
+            return pointId === "toolcall.rewrite"
+                ? [
+                      {
+                          declaration: { hook: "500-secret", id: "secret" },
+                          id: "secret",
+                      },
+                  ]
+                : [];
         },
         async acquireRegistration(pointId: string, id: string) {
             const acquired = generation;

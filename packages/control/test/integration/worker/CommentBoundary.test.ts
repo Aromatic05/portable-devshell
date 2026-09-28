@@ -285,7 +285,14 @@ function commentReviewRegistrationHost(comment: CommentPort) {
             };
         },
         listDeclarations(pointId: string) {
-            return pointId === "toolcall.review" ? [{ id: "comment" }] : [];
+            return pointId === "toolcall.review"
+                ? [
+                      {
+                          declaration: { hook: "500-comment", id: "comment" },
+                          id: "comment",
+                      },
+                  ]
+                : [];
         },
     } as never;
 }

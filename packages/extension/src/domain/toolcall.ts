@@ -5,6 +5,7 @@ import {
 } from "../ExtensionApi.js";
 
 export interface ToolCallExtensionDeclaration extends ExtensionPointDeclaration {
+    readonly hook: string;
     readonly id: string;
 }
 

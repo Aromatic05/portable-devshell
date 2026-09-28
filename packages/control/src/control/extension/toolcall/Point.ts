@@ -1,7 +1,11 @@
 import type {
     ExtensionPointDeclaration,
 } from "@portable-devshell/extension";
-import { review, rewrite } from "@portable-devshell/extension/toolcall";
+import {
+    review,
+    rewrite,
+    type ToolCallExtensionDeclaration,
+} from "@portable-devshell/extension/toolcall";
 
 import type {
     ExtensionPointDefinition,
@@ -42,11 +46,22 @@ export const toolCallRewriteExtensionPointDefinition: ExtensionPointDefinition =
 
 function parseDeclaration(
     declaration: ExtensionPointDeclaration,
-): ExtensionPointDeclaration {
-    const unknown = Object.keys(declaration).find((key) => key !== "id");
+): ToolCallExtensionDeclaration {
+    const unknown = Object.keys(declaration).find(
+        (key) => key !== "hook" && key !== "id",
+    );
     if (unknown !== undefined)
         throw new TypeError(
             `ToolCall Extension Point declaration has unknown field ${unknown}.`,
         );
-    return Object.freeze({ id: declaration.id });
+    const hook = declaration.hook;
+    if (
+        typeof hook !== "string" ||
+        !/^(?!000)[0-9]{3}-[a-z][a-z0-9-]*$/u.test(hook)
+    ) {
+        throw new TypeError(
+            "ToolCall hook must match NNN-name with a priority from 001 through 999.",
+        );
+    }
+    return Object.freeze({ hook, id: declaration.id });
 }

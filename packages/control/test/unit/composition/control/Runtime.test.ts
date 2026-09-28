@@ -1023,7 +1023,13 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
     const extensions = {
         ...(testExtensions() as unknown as Record<string, unknown>),
         listDeclarations(pointId: string) {
-            if (pointId === "toolcall.review") return [{ id: "guard" }];
+            if (pointId === "toolcall.review")
+                return [
+                    {
+                        declaration: { hook: "500-guard", id: "guard" },
+                        id: "guard",
+                    },
+                ];
             return [];
         },
         async acquireRegistration(pointId: string, id: string) {

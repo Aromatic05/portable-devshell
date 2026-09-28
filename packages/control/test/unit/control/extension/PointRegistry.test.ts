@@ -72,27 +72,36 @@ test("Control domain point definitions own declaration schema validation", () =>
     assert.deepEqual(
         points.parseDeclaration(
             "toolcall.review",
-            { id: "comment" },
+            { hook: "500-comment", id: "comment" },
             "example",
         ),
-        { id: "comment" },
+        { hook: "500-comment", id: "comment" },
     );
     assert.deepEqual(
         points.parseDeclaration(
             "toolcall.rewrite",
-            { id: "secret" },
+            { hook: "500-secret", id: "secret" },
             "example",
         ),
-        { id: "secret" },
+        { hook: "500-secret", id: "secret" },
     );
     assert.throws(
         () =>
             points.parseDeclaration(
                 "toolcall.rewrite",
-                { id: "secret", priority: 10 },
+                { hook: "500-secret", id: "secret", priority: 10 },
                 "example",
             ),
         /unknown field/u,
+    );
+    assert.throws(
+        () =>
+            points.parseDeclaration(
+                "toolcall.review",
+                { hook: "comment", id: "comment" },
+                "example",
+            ),
+        /NNN-name/u,
     );
     assert.throws(
         () =>

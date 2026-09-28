@@ -83,6 +83,7 @@
         ],
         "toolcall.review": [
             {
+                "hook": "500-comment",
                 "id": "comment"
             }
         ]

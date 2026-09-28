@@ -28,6 +28,6 @@ test("Secret Extension declares and activates one toolcall.rewrite binding", asy
         ),
     ) as { extensions?: Record<string, unknown> };
     assert.deepEqual(manifest.extensions?.["toolcall.rewrite"], [
-        { id: "secret" },
+        { hook: "500-secret", id: "secret" },
     ]);
 });

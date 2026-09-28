@@ -8,6 +8,7 @@ import {
 import {
     review,
     rewrite,
+    type ToolCallExtensionDeclaration,
     type ToolCallReviewBinding,
     type ToolCallReviewContext,
     type ToolCallReviewInvocation,
@@ -62,7 +63,9 @@ export class ToolCallExtensionBinding {
         releases: Array<() => void>,
     ): Promise<readonly ToolCallReview[]> {
         const bindings: ToolCallReview[] = [];
-        for (const { id } of this.#extensions.listDeclarations(review.id)) {
+        for (const { id } of orderedHooks(
+            this.#extensions.listDeclarations(review.id),
+        )) {
             const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(review.id, id);
             releases.push(() => lease.release());
@@ -83,7 +86,9 @@ export class ToolCallExtensionBinding {
         context: ToolCallBoundaryContext,
     ): Promise<readonly ToolCallRewrite[]> {
         const bindings: ToolCallRewrite[] = [];
-        for (const { id } of this.#extensions.listDeclarations(rewrite.id)) {
+        for (const { id } of orderedHooks(
+            this.#extensions.listDeclarations(rewrite.id),
+        )) {
             const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(rewrite.id, id);
             releases.push(() => lease.release());
@@ -96,6 +101,20 @@ export class ToolCallExtensionBinding {
         }
         return bindings;
     }
+}
+
+function orderedHooks(
+    declarations: ReturnType<ExtensionHost["listDeclarations"]>,
+): ReturnType<ExtensionHost["listDeclarations"]> {
+    return [...declarations].sort((left, right) => {
+        const leftHook = (left.declaration as ToolCallExtensionDeclaration).hook;
+        const rightHook = (right.declaration as ToolCallExtensionDeclaration).hook;
+        return (
+            leftHook.localeCompare(rightHook) ||
+            left.id.localeCompare(right.id) ||
+            left.extensionId.localeCompare(right.extensionId)
+        );
+    });
 }
 
 function unsupportedReviewContext(
