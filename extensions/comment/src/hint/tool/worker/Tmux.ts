@@ -246,7 +246,7 @@ export function tmuxErrorHints(
             return [
                 errorHint(
                     "tmux.invalidCwd",
-                    "Use ./ for a workspace-relative cwd or / for an absolute cwd.",
+                    "Use a workspace-relative or absolute directory path.",
                 ),
             ];
         case "tmux.invalidInput":

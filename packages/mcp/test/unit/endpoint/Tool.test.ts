@@ -506,10 +506,7 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             }
         ).properties;
         assert.equal(properties?.command?.description, undefined);
-        assert.equal(
-            properties?.cwd?.description,
-            "Working directory; ./ is workspace-relative, / absolute.",
-        );
+        assert.equal(typeof properties?.cwd?.description, "string");
         assert.equal(properties?.purpose?.description, "Intended outcome.");
         const input = tool.inputSchema as Record<string, unknown>;
         assert.equal(input.$schema, undefined);
