@@ -1,14 +1,15 @@
-import type {
-    ExtensionAssetProjectionInput,
-    ExtensionCapability,
-    ExtensionConfigChange,
-    ExtensionJsonValue,
-    ExtensionPaths,
-    ExtensionProcessExit,
-    ExtensionProcessStartInput,
-    ExtensionWorkerEnvironment,
-    ExtensionWorkerToolDefinition,
-    ExtensionWorkerOpenInput,
+import {
+    ExtensionError,
+    type ExtensionAssetProjectionInput,
+    type ExtensionCapability,
+    type ExtensionConfigChange,
+    type ExtensionJsonValue,
+    type ExtensionPaths,
+    type ExtensionProcessExit,
+    type ExtensionProcessStartInput,
+    type ExtensionWorkerEnvironment,
+    type ExtensionWorkerToolDefinition,
+    type ExtensionWorkerOpenInput,
 } from "@portable-devshell/extension";
 import type {
     ExtensionArtifactShareInput,
@@ -495,11 +496,21 @@ export function assertExtensionSandboxMessage(
 }
 
 export function serializeSandboxError(error: unknown): ExtensionSandboxError {
-    const sourceBody = toControlErrorBody(error) ?? {
-        code: "error.unknown",
-        message: error instanceof Error ? error.message : String(error),
-        retryable: false,
-    };
+    const sourceBody =
+        error instanceof ExtensionError
+            ? {
+                  code: error.code,
+                  ...(error.details === undefined
+                      ? {}
+                      : { details: error.details }),
+                  message: error.message,
+                  retryable: error.retryable,
+              }
+            : (toControlErrorBody(error) ?? {
+                  code: "error.unknown",
+                  message: error instanceof Error ? error.message : String(error),
+                  retryable: false,
+              });
     const body: ControlErrorBody = {
         code: sourceBody.code,
         ...(sourceBody.details === undefined

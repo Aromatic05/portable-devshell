@@ -26,6 +26,7 @@ import type {
     CliNativeCommandInvocationContext,
     CliCommandResult,
 } from "@portable-devshell/extension/cli";
+import { toControlErrorBody } from "@portable-devshell/shared";
 
 import {
     createCliModelSandboxBinding,
@@ -166,6 +167,37 @@ export function retireInstance(instance) {
 
     assert.deepEqual(await cliJson(sandbox, [], "retirement"), {
         retired: ["local"],
+    });
+});
+
+test("Extension sandbox preserves public structured Extension errors", async (t) => {
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-structured-error",
+        `
+import { ExtensionError } from "@portable-devshell/extension";
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        throw new ExtensionError({
+            code: "example.rejected",
+            details: { reason: "policy" },
+            message: "Rejected by Extension policy.",
+            retryable: false
+        });
+    });
+}
+`,
+    );
+    await sandbox.start();
+
+    await assert.rejects(cliText(sandbox, [], "structured-error"), (error) => {
+        assert.deepEqual(toControlErrorBody(error), {
+            code: "example.rejected",
+            details: { reason: "policy" },
+            message: "Rejected by Extension policy.",
+            retryable: false,
+        });
+        return true;
     });
 });
 

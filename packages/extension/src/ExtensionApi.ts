@@ -10,6 +10,28 @@ export type ExtensionJsonValue =
     | ExtensionJsonValue[]
     | { [key: string]: ExtensionJsonValue };
 
+export interface ExtensionErrorOptions {
+    readonly code: string;
+    readonly details?: ExtensionJsonValue;
+    readonly message: string;
+    readonly retryable?: boolean;
+}
+
+/** Public structured error that preserves an Extension-owned protocol code across the sandbox boundary. */
+export class ExtensionError extends Error {
+    readonly code: string;
+    readonly details?: ExtensionJsonValue;
+    readonly retryable: boolean;
+
+    constructor(options: ExtensionErrorOptions) {
+        super(options.message);
+        this.name = "ExtensionError";
+        this.code = requireExtensionErrorCode(options.code);
+        this.details = options.details;
+        this.retryable = options.retryable ?? false;
+    }
+}
+
 export type ExtensionConfigAccess = "read" | "read-write";
 
 export interface ExtensionConfigDeclaration {
@@ -283,4 +305,10 @@ export interface ExtensionModule {
     deactivate?(): Promise<void> | void;
     /** Release Extension-owned state associated with one retired Instance. */
     retireInstance?(instance: string): Promise<void> | void;
+}
+
+function requireExtensionErrorCode(value: string): string {
+    if (/^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)+$/u.test(value))
+        return value;
+    throw new TypeError("Extension error code must be a namespaced identifier.");
 }
