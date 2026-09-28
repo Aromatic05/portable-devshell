@@ -1,7 +1,7 @@
 export {
     createDevshellPiExtension,
     createDevshellPiWorkspaceBridge,
-} from "./DevshellPiBridge.js";
+} from "./Bridge.js";
 export type {
     DevshellPiExtensionAttachOptions,
     DevshellPiExtensionOptions,
@@ -10,31 +10,31 @@ export type {
     DevshellPiWorkspaceBridge,
     PiExtensionApiLike,
     PiToolLike,
-} from "./DevshellPiBridge.js";
-export type { DevshellPiTarget } from "./DevshellPiTarget.js";
+} from "./Bridge.js";
+export type { DevshellPiTarget } from "./Target.js";
 
 export {
     createStandaloneDevshellPiExtension,
     openStandaloneDevshellPiToolSession,
     parseStandaloneDevshellPiTarget,
     standaloneDevshellPiExtension,
-} from "./standalone-client.js";
-export type { StandaloneDevshellPiOptions } from "./standalone-client.js";
+} from "./StandaloneClient.js";
+export type { StandaloneDevshellPiOptions } from "./StandaloneClient.js";
 
 export {
     buildDevshellPiSystemPrompt,
-} from "./standalone-resources.js";
+} from "./StandaloneResources.js";
 
 export {
     expandDevshellPiPromptTemplate,
     loadDevshellPiWorkspaceContext,
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput,
-} from "./workspace-resources.js";
+} from "./WorkspaceResources.js";
 export type {
     DevshellPiContextFile,
     DevshellPiWorkspaceResources,
     DevshellPiWorkspaceSkill,
-} from "./workspace-resources.js";
+} from "./WorkspaceResources.js";
 
-export { standaloneDevshellPiExtension as default } from "./standalone-client.js";
+export { standaloneDevshellPiExtension as default } from "./StandaloneClient.js";

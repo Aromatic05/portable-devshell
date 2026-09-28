@@ -15,8 +15,8 @@ import {
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput,
     type PiToolLike,
-} from "../../src/provider/pi/extension/index.ts";
-import standaloneDevshellPiExtension from "../../src/provider/pi/extension/index.ts";
+} from "../../src/provider/pi/adapt/index.ts";
+import standaloneDevshellPiExtension from "../../src/provider/pi/adapt/index.ts";
 import {
     devshellPiRendererToolNames,
     formatPiToolCall,
@@ -28,7 +28,7 @@ import {
     renderWorkerUnifiedDiff,
     type PiThemeLike,
     type PiToolRenderContextLike,
-} from "../../src/provider/pi/extension/renderer.ts";
+} from "../../src/provider/pi/render/ToolRenderer.ts";
 
 test("Pi devshell adapter requires an injected tool session instead of opening Control itself", async () => {
     let closes = 0;

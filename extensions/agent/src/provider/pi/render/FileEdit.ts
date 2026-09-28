@@ -17,7 +17,7 @@ import type {
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 
 const writeCollapsedLineLimit = 10;
 

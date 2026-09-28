@@ -7,7 +7,7 @@ import type {
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 import {
     asRecord,
     formatDuration,
@@ -20,7 +20,7 @@ import {
     style,
     tailWithHint,
     textContentLines,
-} from "./renderer-utils.js";
+} from "./Utils.js";
 
 export function formatShellCall(
     record: Record<string, unknown>,

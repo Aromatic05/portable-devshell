@@ -14,8 +14,8 @@ import {
     createDevshellPiExtension,
     type DevshellPiToolSession,
     type PiExtensionApiLike,
-} from "./DevshellPiBridge.js";
-import type { DevshellPiTarget } from "./DevshellPiTarget.js";
+} from "./Bridge.js";
+import type { DevshellPiTarget } from "./Target.js";
 
 export interface StandaloneDevshellPiOptions {
     autoStartControl?: boolean;

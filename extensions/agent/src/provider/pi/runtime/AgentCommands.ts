@@ -1,4 +1,4 @@
-import type { PiSessionLike } from "./PiSdkLoader.js";
+import type { PiSessionLike } from "./Sdk.js";
 
 export type PiAgentMessageCommand = "followUp" | "prompt" | "steer";
 

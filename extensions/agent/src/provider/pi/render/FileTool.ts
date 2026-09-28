@@ -7,7 +7,7 @@ import type {
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 import {
     asRecord,
     clearComponent,
@@ -20,7 +20,7 @@ import {
     stringField,
     style,
     textContentLines,
-} from "./renderer-utils.js";
+} from "./Utils.js";
 
 export function formatReadCall(
     record: Record<string, unknown>,

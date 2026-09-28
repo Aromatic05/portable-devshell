@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deliverPiAgentMessage } from "../../src/provider/pi/PiAgentCommands.ts";
-import type { PiSessionLike } from "../../src/provider/pi/PiSdkLoader.ts";
+import { deliverPiAgentMessage } from "../../src/provider/pi/runtime/AgentCommands.ts";
+import type { PiSessionLike } from "../../src/provider/pi/runtime/Sdk.ts";
 
 interface PromptOptionsLike {
     preflightResult?: (success: boolean) => void;

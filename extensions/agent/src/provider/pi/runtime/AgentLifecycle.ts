@@ -1,4 +1,4 @@
-import type { PiSessionLike } from "./PiSdkLoader.js";
+import type { PiSessionLike } from "./Sdk.js";
 
 export interface ManagedPiAgentResources {
     session: PiSessionLike;

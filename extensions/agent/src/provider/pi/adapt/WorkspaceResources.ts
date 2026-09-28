@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { DevshellPiTarget } from "./DevshellPiTarget.js";
+import type { DevshellPiTarget } from "./Target.js";
 
 export interface DevshellPiContextFile {
     content: string;

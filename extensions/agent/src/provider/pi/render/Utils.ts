@@ -7,7 +7,7 @@ import {
 
 import type { JsonValue } from "@portable-devshell/shared";
 
-import type { PiThemeLike, PiToolRenderResultLike } from "./renderer-types.js";
+import type { PiThemeLike, PiToolRenderResultLike } from "./Types.js";
 
 export class OutputPreviewComponent implements Component {
     #expanded = false;

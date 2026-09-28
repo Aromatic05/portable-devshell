@@ -15,16 +15,16 @@ import { parseAgentWorkerTarget } from "../../src/builtin/worker/AgentWorkerTarg
 import {
     PI_PROVIDER_VERSION,
     PiAgentProvider,
-} from "../../src/provider/pi/PiAgentProvider.ts";
+} from "../../src/provider/pi/runtime/Provider.ts";
 import type {
     PiAgentProcessStartOptions,
     PiAgentRuntimeFactory,
-} from "../../src/provider/pi/PiAgentProcess.ts";
+} from "../../src/provider/pi/runtime/AgentProcess.ts";
 import {
     PI_BOOTSTRAP_VERSION,
     PI_PACKAGE_NAME,
     PiProviderInstaller,
-} from "../../src/provider/pi/PiProviderInstaller.ts";
+} from "../../src/provider/pi/install/ProviderInstaller.ts";
 
 test("Pi provider implementation version is independent from the Pi bootstrap version", () => {
     assert.equal(PI_PROVIDER_VERSION, "0.1.3");

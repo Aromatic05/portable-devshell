@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import type { AgentProviderRuntimePaths } from "../../builtin/provider/AgentProviderRuntimePaths.js";
+import type { AgentProviderRuntimePaths } from "../../../builtin/provider/AgentProviderRuntimePaths.js";
 
 export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 export const PI_BOOTSTRAP_VERSION = "0.85.1";

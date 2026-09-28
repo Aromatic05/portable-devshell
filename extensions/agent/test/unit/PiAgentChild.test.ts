@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import type { PiChildMessage } from "../../src/provider/pi/PiProcessProtocol.ts";
+import type { PiChildMessage } from "../../src/provider/pi/protocol/Process.ts";
 
 function nextMessage(child: ChildProcess): Promise<PiChildMessage> {
     return new Promise((resolve, reject) => {
@@ -65,7 +65,7 @@ test("Pi provider child exits when its parent IPC channel disconnects", async ()
         join(tmpdir(), "devshell-pi-child-disconnect-"),
     );
     const childPath = fileURLToPath(
-        new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url),
+        new URL("../../src/provider/pi/runtime/AgentChild.ts", import.meta.url),
     );
     const workspaceLoader = new URL(
         "../RegisterWorkspacePackages.mjs",
@@ -112,7 +112,7 @@ test("Pi provider child exits when owner heartbeat stops while IPC remains conne
         join(tmpdir(), "devshell-pi-child-heartbeat-"),
     );
     const childPath = fileURLToPath(
-        new URL("../../src/provider/pi/PiAgentChild.ts", import.meta.url),
+        new URL("../../src/provider/pi/runtime/AgentChild.ts", import.meta.url),
     );
     const workspaceLoader = new URL(
         "../RegisterWorkspacePackages.mjs",

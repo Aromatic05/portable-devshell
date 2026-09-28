@@ -5,7 +5,7 @@ import {
     renderFileEditCallComponent,
     renderFileEditFallback,
     renderFileEditResultComponent,
-} from "./file-edit-renderer.js";
+} from "./FileEdit.js";
 import {
     formatGlobCall,
     formatGrepCall,
@@ -15,13 +15,13 @@ import {
     renderFileRead,
     renderFileReadComponent,
     renderFileSummaryComponent,
-} from "./file-tool-renderer.js";
+} from "./FileTool.js";
 import type {
     PiThemeLike,
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 import {
     asRecord,
     joinCall,
@@ -33,28 +33,28 @@ import {
     style,
     summarizeRecord,
     textContentLines,
-} from "./renderer-utils.js";
+} from "./Utils.js";
 import {
     formatShellCall,
     renderBashResult,
     renderBashResultComponent,
-} from "./shell-tool-renderer.js";
+} from "./Shell.js";
 import {
     formatTmuxCall,
     renderTerminalResultComponent,
     renderTmuxResult,
-} from "./tmux-tool-renderer.js";
+} from "./Tmux.js";
 
 export {
     parseEditChangeSet,
     renderWorkerUnifiedDiff,
-} from "./file-edit-renderer.js";
+} from "./FileEdit.js";
 export type {
     PiThemeLike,
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 
 export const devshellPiRendererToolNames = Object.freeze([
     "bash_run",

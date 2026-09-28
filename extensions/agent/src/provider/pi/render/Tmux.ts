@@ -7,7 +7,7 @@ import type {
     PiToolRenderContextLike,
     PiToolRenderResultLike,
     PiToolRenderResultOptionsLike,
-} from "./renderer-types.js";
+} from "./Types.js";
 import {
     asRecord,
     joinCall,
@@ -22,7 +22,7 @@ import {
     style,
     tailWithHint,
     textContentLines,
-} from "./renderer-utils.js";
+} from "./Utils.js";
 
 export function formatTmuxCall(
     toolName: string,

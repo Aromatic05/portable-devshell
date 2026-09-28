@@ -3,12 +3,12 @@ import test from "node:test";
 
 import { asInstanceName } from "@portable-devshell/shared";
 
-import { PiChildToolSession } from "../../src/provider/pi/PiChildToolSession.ts";
-import { encodePiToolError } from "../../src/provider/pi/PiProcessProtocol.ts";
+import { PiChildToolSession } from "../../src/provider/pi/adapt/ChildToolSession.ts";
+import { encodePiToolError } from "../../src/provider/pi/protocol/Process.ts";
 import type {
     PiChildMessage,
     PiParentMessage,
-} from "../../src/provider/pi/PiProcessProtocol.ts";
+} from "../../src/provider/pi/protocol/Process.ts";
 
 test("Pi tool error encoding drops cyclic details without failing", () => {
     const details: Record<string, unknown> = {};

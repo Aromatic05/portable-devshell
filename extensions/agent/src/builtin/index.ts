@@ -33,12 +33,12 @@ import {
     PI_PROVIDER_ID,
     PI_PROVIDER_VERSION,
     PiAgentProvider,
-} from "../provider/pi/PiAgentProvider.js";
+} from "../provider/pi/runtime/Provider.js";
 import {
     PI_PROVIDER_RUNTIME_DEPENDENCIES,
     hasManagedPiInstallation,
     removeManagedPiInstallation,
-} from "../provider/pi/PiProviderInstaller.js";
+} from "../provider/pi/install/ProviderInstaller.js";
 import {
     OPENCODE_PROVIDER_ID,
     OPENCODE_PROVIDER_VERSION,

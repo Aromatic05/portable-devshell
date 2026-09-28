@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { disposeManagedPiAgent } from "../../src/provider/pi/PiAgentLifecycle.ts";
-import type { PiSessionLike } from "../../src/provider/pi/PiSdkLoader.ts";
+import { disposeManagedPiAgent } from "../../src/provider/pi/runtime/AgentLifecycle.ts";
+import type { PiSessionLike } from "../../src/provider/pi/runtime/Sdk.ts";
 
 function fakeSession(events: string[], abortError?: Error): PiSessionLike {
     return {

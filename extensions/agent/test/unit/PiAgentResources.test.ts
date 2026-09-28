@@ -4,7 +4,7 @@ import test from "node:test";
 import {
     mergeManagedPiProjectPrompts,
     mergeManagedPiProjectSkills,
-} from "../../src/provider/pi/PiAgentResources.ts";
+} from "../../src/provider/pi/adapt/AgentResources.ts";
 
 const userSource = {
     path: "/user",

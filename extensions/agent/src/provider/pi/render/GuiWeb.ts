@@ -7,7 +7,7 @@ import {
     type ServerResponse,
 } from "node:http";
 
-import type { PiSessionLike } from "./PiSdkLoader.js";
+import type { PiSessionLike } from "../runtime/Sdk.js";
 
 const MAX_REWRITE_BYTES = 64 * 1024 * 1024;
 const MANAGED_ERROR =

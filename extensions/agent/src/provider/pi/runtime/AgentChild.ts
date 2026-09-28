@@ -1,24 +1,24 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { createDevshellPiExtension } from "./extension/DevshellPiBridge.js";
-import { PiChildToolSession } from "./PiChildToolSession.js";
-import { PiGuiWeb } from "./PiGuiWeb.js";
+import { createDevshellPiExtension } from "../adapt/Bridge.js";
+import { PiChildToolSession } from "../adapt/ChildToolSession.js";
+import { PiGuiWeb } from "../render/GuiWeb.js";
 import {
     PiSdkLoader,
     type PiModelRuntimeLike,
     type PiSdkModule,
     type PiSessionLike,
-} from "./PiSdkLoader.js";
+} from "./Sdk.js";
 import type {
     PiChildAgentCommandMessage,
     PiChildAgentStartMessage,
     PiChildInitMessage,
     PiParentMessage,
-} from "./PiProcessProtocol.js";
-import { deliverPiAgentMessage } from "./PiAgentCommands.js";
-import { disposeManagedPiAgent } from "./PiAgentLifecycle.js";
-import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
+} from "../protocol/Process.js";
+import { deliverPiAgentMessage } from "./AgentCommands.js";
+import { disposeManagedPiAgent } from "./AgentLifecycle.js";
+import type { AgentWorkerTarget } from "../../../builtin/worker/AgentWorkerTarget.js";
 
 interface ManagedPiAgent {
     localCwd: string;

@@ -6,16 +6,16 @@ import type {
     AgentProviderStartContext,
     AgentProviderWebHandle,
     AgentProviderWebStartContext,
-} from "../../builtin/provider/AgentProvider.js";
+} from "../../../builtin/provider/AgentProvider.js";
 import {
     PI_BOOTSTRAP_VERSION,
     PiProviderInstaller,
     type PiProviderInstallation,
-} from "./PiProviderInstaller.js";
+} from "../install/ProviderInstaller.js";
 import {
     PiAgentProcessFactory,
     type PiAgentRuntimeFactory,
-} from "./PiAgentProcess.js";
+} from "./AgentProcess.js";
 
 export const PI_PROVIDER_ID = "pi";
 export const PI_PROVIDER_VERSION = "0.1.3";

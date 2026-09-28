@@ -1,19 +1,19 @@
 import { randomUUID } from "node:crypto";
 
-import type { DevshellPiToolSession } from "./extension/index.js";
+import type { DevshellPiToolSession } from "./index.js";
 import type { JsonValue } from "@portable-devshell/shared";
 import type {
     AgentModelToolDefinition,
     AgentToolDefinition,
-} from "../../builtin/provider/AgentToolSession.js";
-import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
+} from "../../../builtin/provider/AgentToolSession.js";
+import type { AgentWorkerTarget } from "../../../builtin/worker/AgentWorkerTarget.js";
 import type {
     PiChildMessage,
     PiParentMessage,
     PiParentToolProgressMessage,
     PiParentToolResultMessage,
-} from "./PiProcessProtocol.js";
-import { decodePiToolError } from "./PiProcessProtocol.js";
+} from "../protocol/Process.js";
+import { decodePiToolError } from "../protocol/Process.js";
 
 interface PendingToolRequest {
     onProgress?: (progress: JsonValue) => void;

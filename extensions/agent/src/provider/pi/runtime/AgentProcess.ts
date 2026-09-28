@@ -11,15 +11,15 @@ import type {
 import type {
     AgentProviderHandle,
     AgentProviderWebHandle,
-} from "../../builtin/provider/AgentProvider.js";
-import type { AgentToolSession } from "../../builtin/provider/AgentToolSession.js";
-import type { AgentWorkerTarget } from "../../builtin/worker/AgentWorkerTarget.js";
+} from "../../../builtin/provider/AgentProvider.js";
+import type { AgentToolSession } from "../../../builtin/provider/AgentToolSession.js";
+import type { AgentWorkerTarget } from "../../../builtin/worker/AgentWorkerTarget.js";
 import type {
     PiChildAgentCommandMessage,
     PiChildMessage,
     PiParentMessage,
-} from "./PiProcessProtocol.js";
-import { encodePiToolError } from "./PiProcessProtocol.js";
+} from "../protocol/Process.js";
+import { encodePiToolError } from "../protocol/Process.js";
 
 const PI_OWNER_HEARTBEAT_INTERVAL_MS = 2_000;
 const PI_OWNER_HEARTBEAT_TIMEOUT_MS = 10_000;
@@ -710,7 +710,7 @@ function resolveChildModulePath(): string {
     const source = fileURLToPath(import.meta.url);
     return fileURLToPath(
         new URL(
-            source.endsWith(".ts") ? "./PiAgentChild.ts" : "./PiAgentChild.js",
+            source.endsWith(".ts") ? "./AgentChild.ts" : "./AgentChild.js",
             import.meta.url,
         ),
     );
@@ -721,8 +721,8 @@ function resolveProviderModuleResolverPath(): string {
     return fileURLToPath(
         new URL(
             source.endsWith(".ts")
-                ? "../AgentProviderModuleResolver.ts"
-                : "../AgentProviderModuleResolver.js",
+                ? "../../AgentProviderModuleResolver.ts"
+                : "../../AgentProviderModuleResolver.js",
             import.meta.url,
         ),
     );

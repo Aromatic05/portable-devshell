@@ -16,7 +16,7 @@ import type {
 import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";
-import { PiAgentProcessFactory } from "../../src/provider/pi/PiAgentProcess.ts";
+import { PiAgentProcessFactory } from "../../src/provider/pi/runtime/AgentProcess.ts";
 import {
     parseAgentWorkerTarget,
     type AgentWorkerTarget,

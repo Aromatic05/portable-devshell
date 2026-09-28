@@ -11,8 +11,8 @@ import {
     transformDevshellPiSkillInput,
     type DevshellPiContextFile,
     type DevshellPiWorkspaceResources,
-} from "./workspace-resources.js";
-import type { DevshellPiTarget } from "./DevshellPiTarget.js";
+} from "./WorkspaceResources.js";
+import type { DevshellPiTarget } from "./Target.js";
 
 interface StandalonePiResourcesApiLike {
     on(

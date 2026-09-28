@@ -18,7 +18,7 @@ import type { AgentModelToolDefinition } from "../../../builtin/provider/AgentTo
 import {
     encodePiToolError,
     type PiToolErrorPayload,
-} from "../PiProcessProtocol.js";
+} from "../protocol/Process.js";
 import {
     renderPiToolCall,
     renderPiToolResult,
@@ -26,16 +26,16 @@ import {
     type PiToolRenderContextLike,
     type PiToolRenderResultLike,
     type PiToolRenderResultOptionsLike,
-} from "./renderer.js";
-import { attachStandaloneWorkspaceResources } from "./standalone-resources.js";
-import type { DevshellPiTarget } from "./DevshellPiTarget.js";
-import { compactDevshellPiContext } from "./PiContextCompaction.js";
+} from "../render/ToolRenderer.js";
+import { attachStandaloneWorkspaceResources } from "./StandaloneResources.js";
+import type { DevshellPiTarget } from "./Target.js";
+import { compactDevshellPiContext } from "./ContextCompaction.js";
 import {
     loadDevshellPiWorkspaceResources,
     transformDevshellPiSkillInput,
     type DevshellPiContextFile,
     type DevshellPiWorkspaceResources,
-} from "./workspace-resources.js";
+} from "./WorkspaceResources.js";
 
 export interface PiExtensionApiLike {
     on(

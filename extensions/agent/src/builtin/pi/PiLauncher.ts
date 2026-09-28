@@ -8,12 +8,12 @@ import { registerAgentProviderModuleResolver } from "../../provider/AgentProvide
 import {
     PI_PROVIDER_ID,
     PI_PROVIDER_VERSION,
-} from "../../provider/pi/PiAgentProvider.js";
+} from "../../provider/pi/runtime/Provider.js";
 import {
     PI_BOOTSTRAP_VERSION,
     PiProviderInstaller,
     type PiProviderInstallation,
-} from "../../provider/pi/PiProviderInstaller.js";
+} from "../../provider/pi/install/ProviderInstaller.js";
 
 interface PiProviderRegistryEntry {
     enabled?: unknown;
@@ -91,8 +91,8 @@ export async function resolveInstalledPiRuntime(
     const extensionEntrypoint = resolve(
         dirname(source),
         source.endsWith(".ts")
-            ? "../../provider/pi/extension/index.ts"
-            : "../../provider/pi/extension/index.js",
+            ? "../../provider/pi/adapt/index.ts"
+            : "../../provider/pi/adapt/index.js",
     );
     await assertPlainFile(
         extensionEntrypoint,
