@@ -159,12 +159,10 @@ export class WorkerInstanceToolAudit {
         approvalState: ToolCallApprovalState,
         result: JsonValue,
         bashResult: WorkerInstanceBashToolResult | undefined,
-        feedback: readonly string[],
         appendLogs: () => Promise<void>,
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         await this.#toolCallHistory.completed(scope.callId, completedAt, {
-            ...(feedback.length === 0 ? {} : { feedback }),
             output:
                 bashResult === undefined ? result : stripCommandStreams(result),
             ...(bashResult === undefined
@@ -203,7 +201,6 @@ export class WorkerInstanceToolAudit {
         approvalState: ToolCallApprovalState,
         status: "queueTimeout" | "cancelled",
         errorCode: string,
-        feedback: readonly string[],
     ): Promise<void> {
         const completedAt = new Date().toISOString();
         if (status === "queueTimeout") {
@@ -211,14 +208,12 @@ export class WorkerInstanceToolAudit {
                 scope.callId,
                 errorCode,
                 completedAt,
-                feedback,
             );
         } else {
             await this.#toolCallHistory.cancelled(
                 scope.callId,
                 errorCode,
                 completedAt,
-                feedback,
             );
         }
         await this.#appendEvent(
@@ -244,7 +239,6 @@ export class WorkerInstanceToolAudit {
         approvalState: ToolCallApprovalState,
         errorCode: string,
         result: CommandResult | undefined,
-        feedback: readonly string[],
         appendLogs: () => Promise<void>,
         failure?: {
             executionCompleted?: boolean;
@@ -254,12 +248,9 @@ export class WorkerInstanceToolAudit {
         const completedAt = new Date().toISOString();
         await appendLogs();
         const completion =
-            result === undefined &&
-            failure === undefined &&
-            feedback.length === 0
+            result === undefined && failure === undefined
                 ? undefined
                 : {
-                      ...(feedback.length === 0 ? {} : { feedback }),
                       ...(failure ?? {}),
                       ...(result === undefined
                           ? {}

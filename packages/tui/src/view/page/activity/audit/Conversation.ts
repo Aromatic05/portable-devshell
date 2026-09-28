@@ -177,7 +177,6 @@ function mergeCommentText(messages: readonly ContextMessageRecord[]): string {
 }
 
 function readCallComments(call: ToolCallRecord): string[] {
-    if ((call.feedback?.length ?? 0) > 0) return [...call.feedback!];
     return readComments(call.output);
 }
 
