@@ -1140,6 +1140,10 @@ test("Pi devshell renderer formats common calls without JSON fallback", () => {
 
 test("Pi devshell renderer explicitly covers the current Agent model tool surface", () => {
     const expected = [
+        "agent_interact",
+        "agent_manage",
+        "agent_poll",
+        "agent_spawn",
         "bash_run",
         "file_edit",
         "file_glob",

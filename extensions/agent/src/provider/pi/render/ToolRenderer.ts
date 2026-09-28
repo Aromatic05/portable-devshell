@@ -1,5 +1,6 @@
 import type { Component } from "@earendil-works/pi-tui";
 
+import { formatAgentCall, renderAgentResult } from "./Agent.js";
 import {
     formatFileEditStaticCall,
     renderFileEditCallComponent,
@@ -57,6 +58,10 @@ export type {
 } from "./Types.js";
 
 export const devshellPiRendererToolNames = Object.freeze([
+    "agent_interact",
+    "agent_manage",
+    "agent_poll",
+    "agent_spawn",
     "bash_run",
     "file_edit",
     "file_glob",
@@ -150,6 +155,11 @@ export function formatPiToolCall(
         return style(theme, "toolTitle", displayToolLabel(toolName), true);
 
     switch (toolName) {
+        case "agent_interact":
+        case "agent_manage":
+        case "agent_poll":
+        case "agent_spawn":
+            return formatAgentCall(toolName, record, theme);
         case "bash_run":
             return formatShellCall(record, theme);
         case "file_edit":
@@ -188,6 +198,14 @@ export function formatPiToolResult(
     if (isError) return renderError(result, theme);
 
     switch (toolName) {
+        case "agent_interact":
+        case "agent_manage":
+        case "agent_poll":
+        case "agent_spawn":
+            return joinStyled(
+                renderAgentResult(toolName, result.details, expanded, theme),
+                theme,
+            );
         case "bash_run":
             return joinStyled(
                 renderBashResult(result.details, expanded),

@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 import { createDevshellPiExtension } from "../adapt/Bridge.js";
 import { PiChildToolSession } from "../adapt/ChildToolSession.js";
+import { PiAgentProfileCatalog } from "../profile/Loader.js";
 import { PiGuiWeb } from "../render/GuiWeb.js";
+import { PiSubagentRuntime } from "../subagent/Runtime.js";
+import { attachPiSubagentTools } from "../subagent/Tools.js";
 import {
     PiSdkLoader,
     type PiModelRuntimeLike,
@@ -23,6 +26,7 @@ import type { AgentWorkerTarget } from "../../../builtin/worker/AgentWorkerTarge
 interface ManagedPiAgent {
     localCwd: string;
     session: PiSessionLike;
+    subagents: PiSubagentRuntime;
     target: AgentWorkerTarget;
     tools: PiChildToolSession;
 }
@@ -122,14 +126,27 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         input.localCwd,
         activeAgentDir,
     );
+    const subagents = new PiSubagentRuntime({
+        agentDir: activeAgentDir,
+        gui: activeGui,
+        localCwd: input.localCwd,
+        modelRuntime: activeModelRuntime,
+        profiles: new PiAgentProfileCatalog(activeAgentDir, tools),
+        sdk: activeSdk,
+        tools,
+    });
+    const baseExtension = createDevshellPiExtension(tools, {
+        closeSessionOnShutdown: false,
+    });
     const resourceLoader = new activeSdk.DefaultResourceLoader({
         agentDir: activeAgentDir,
         cwd: input.localCwd,
         extensionFactories: [
             {
-                factory: createDevshellPiExtension(tools, {
-                    closeSessionOnShutdown: false,
-                }),
+                factory: async (pi: Parameters<typeof baseExtension>[0]) => {
+                    await baseExtension(pi);
+                    attachPiSubagentTools(pi, subagents);
+                },
                 hidden: true,
                 name: "portable-devshell",
             },
@@ -151,12 +168,14 @@ async function startAgent(input: PiChildAgentStartMessage): Promise<void> {
         });
         session = created.session;
         session.setSessionName?.(
-            `${input.agentId} · ${input.target.instance}:${input.target.workspace}`,
+            `/root/main · ${input.target.instance}:${input.target.workspace}`,
         );
         activeGui.attach(session, input.localCwd);
+        subagents.bindMain(session);
         agents.set(input.agentId, {
             localCwd: input.localCwd,
             session,
+            subagents,
             target: { ...input.target },
             tools,
         });
@@ -178,9 +197,11 @@ async function commandAgent(
         await stopAgent(message.agentId);
         return;
     }
-    const active = requireAgent(message.agentId).session;
+    const managed = requireAgent(message.agentId);
+    const active = managed.session;
     switch (message.command) {
         case "prompt":
+            managed.subagents.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "prompt",
@@ -188,6 +209,7 @@ async function commandAgent(
             );
             return;
         case "steer":
+            managed.subagents.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "steer",
@@ -195,6 +217,7 @@ async function commandAgent(
             );
             return;
         case "followUp":
+            managed.subagents.notifyMainInput();
             await deliverPiAgentMessage(
                 active,
                 "followUp",
@@ -222,6 +245,7 @@ async function stopAgent(agentId: string): Promise<void> {
     if (active === undefined) return;
     agents.delete(agentId);
     try {
+        await active.subagents.close();
         await disposeManagedPiAgent(active, requireGui());
     } finally {
         try {
