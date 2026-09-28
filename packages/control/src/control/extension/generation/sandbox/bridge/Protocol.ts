@@ -75,7 +75,8 @@ export type ExtensionSandboxInvokeOperation =
           kind: "binding";
           pointId: string;
       }
-    | { kind: "deactivate" };
+    | { kind: "deactivate" }
+    | { instance: string; kind: "retireInstance" };
 
 export type ExtensionSandboxCapabilityOperation =
     | "artifacts.cancelTransfer"

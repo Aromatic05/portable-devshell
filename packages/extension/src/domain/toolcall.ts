@@ -24,6 +24,7 @@ export interface ToolCallContext {
 }
 
 export interface ToolCallReviewInvocation {
+    readonly callId: string;
     readonly context: ToolCallContext;
     readonly direction: ToolCallDirection;
     readonly kind: ToolCallPayloadKind;

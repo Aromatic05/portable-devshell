@@ -17,7 +17,10 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
+import type {
+    ExtensionInstanceCapability,
+    ExtensionInstanceRuntimeCapability,
+} from "@portable-devshell/extension/instance";
 import type {
     CliModelCommandInvocationContext,
     CliNativeCommandInvocationContext,
@@ -140,6 +143,32 @@ export function activate(context) {
     ]);
 });
 
+test("Extension sandbox delivers instance retirement to Extension-owned state", async (t) => {
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-retire-instance",
+        `
+const retired = [];
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => ({
+        kind: "json",
+        value: { retired: [...retired] }
+    }));
+}
+export function retireInstance(instance) {
+    retired.push(instance);
+}
+`,
+    );
+
+    await sandbox.start();
+    await sandbox.retireInstance("local");
+
+    assert.deepEqual(await cliJson(sandbox, [], "retirement"), {
+        retired: ["local"],
+    });
+});
+
 test("Extension sandbox bridges a Comment interface scoped to one toolcall.review invocation", async (t) => {
     const sandbox = await setupSandbox(
         t,
@@ -169,6 +198,7 @@ export function activate(context) {
     assert.deepEqual(
         await binding(
             {
+                callId: "call-comment",
                 context: {
                     ctxId: "ctx-comment",
                     instance: "demo",
@@ -1324,6 +1354,7 @@ function createSandbox(options: {
     hostCallbackTimeoutMs?: number;
     invocationAbortGraceMs?: number;
     instances?: ExtensionInstanceCapability;
+    instanceRuntime?: ExtensionInstanceRuntimeCapability;
     memoryWatchIntervalMs?: number;
     onFault?: (error: Error) => void;
     processes?: ExtensionProcessCapability;
@@ -1361,6 +1392,7 @@ function createSandbox(options: {
             ? {}
             : { invocationAbortGraceMs: options.invocationAbortGraceMs }),
         instances: options.instances ?? fakeInstances([]),
+        instanceRuntime: options.instanceRuntime ?? fakeInstanceRuntime([]),
         logger: noopLogger,
         ...(options.memoryWatchIntervalMs === undefined
             ? {}
@@ -1485,6 +1517,20 @@ function fakeInstances(calls: string[]): ExtensionInstanceCapability {
             return {};
         },
         async watchEvents() {},
+    };
+}
+
+function fakeInstanceRuntime(
+    calls: string[],
+): ExtensionInstanceRuntimeCapability {
+    return {
+        async appendEvent(name, type) {
+            calls.push(`instanceRuntime.appendEvent:${name}:${type}`);
+        },
+        async readToolCalls(name) {
+            calls.push(`instanceRuntime.readToolCalls:${name}`);
+            return [];
+        },
     };
 }
 

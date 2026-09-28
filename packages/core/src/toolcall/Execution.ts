@@ -201,6 +201,7 @@ export class ToolCallExecution {
             let review;
             try {
                 review = await boundary.review({
+                    callId: scope.callId,
                     context: boundaryContext,
                     direction: "inbound",
                     kind: "call",
@@ -325,6 +326,7 @@ export class ToolCallExecution {
                                   await deliverOutboundReviewFeedback(
                                       boundary,
                                       {
+                                          callId: scope.callId,
                                           context: boundaryContext,
                                           direction: "outbound",
                                           kind: "progress",
@@ -438,6 +440,7 @@ export class ToolCallExecution {
                 await deliverOutboundReviewFeedback(
                     boundary,
                     {
+                        callId: scope.callId,
                         context: boundaryContext,
                         direction: "outbound",
                         kind: "result",
@@ -515,6 +518,7 @@ export class ToolCallExecution {
                     await deliverOutboundReviewFeedback(
                         boundary,
                         {
+                            callId: scope.callId,
                             context: boundaryContext,
                             direction: "outbound",
                             kind: "error",
@@ -548,6 +552,7 @@ export class ToolCallExecution {
                 await deliverOutboundReviewFeedback(
                     boundary,
                     {
+                        callId: scope.callId,
                         context: boundaryContext,
                         direction: "outbound",
                         kind: "error",

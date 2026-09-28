@@ -65,6 +65,7 @@ test("ToolCall Extension binding acquires registrations once and releases them w
 
     assert.deepEqual(
         await lease.sequence.review({
+            callId: "call-1",
             context: toolCallContext,
             direction: "inbound",
             kind: "call",
@@ -134,6 +135,7 @@ test("ToolCall Extension binding supplies the same scoped Comment interface to i
     try {
         assert.deepEqual(
             await lease.sequence.review({
+                callId: "call-2",
                 context: toolCallContext,
                 direction: "inbound",
                 kind: "call",
@@ -296,6 +298,7 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
     assert.deepEqual(
         await binding(
             {
+                callId: "call-3",
                 context: toolCallContext,
                 direction: "inbound",
                 kind: "call",
@@ -323,6 +326,7 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
         {
             id: "entry",
             input: {
+                callId: "call-3",
                 context: {
                     ctxId: "ctx-1",
                     instance: "demo",
@@ -348,6 +352,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
     assert.deepEqual(
         await toolCallReviewSandboxCodec.invokeBinding(
             async (input: ToolCallReviewInvocation) => {
+                assert.equal(input.callId, "call-4");
                 reviewSignal = input.signal;
                 assert.deepEqual(input.payload, { output: "safe" });
                 return {
@@ -361,6 +366,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 };
             },
             {
+                callId: "call-4",
                 context: { instance: "demo", source: "mcp" },
                 direction: "outbound",
                 kind: "result",

@@ -7,6 +7,7 @@ export type ToolCallBoundaryContext = ToolCallContext & { readonly instance: Ins
 export type ToolCallReviewDecision = "accept" | "approve" | "reject";
 
 export interface ToolCallReviewInput {
+    readonly callId: string;
     readonly context: ToolCallBoundaryContext;
     readonly direction: ToolCallBoundaryDirection;
     readonly kind: ToolCallBoundaryPayloadKind;

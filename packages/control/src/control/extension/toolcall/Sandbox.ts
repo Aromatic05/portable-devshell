@@ -139,6 +139,7 @@ export function validateToolCallRewriteBinding(
 
 function encodeReviewInvocation(input: ToolCallReviewInvocation): ExtensionJsonValue {
     return {
+        callId: input.callId,
         context: encodeContext(input.context),
         direction: input.direction,
         kind: input.kind,
@@ -153,6 +154,7 @@ function decodeReviewInvocation(
 ): ToolCallReviewInvocation {
     const value = readRecord(input, "ToolCall review invocation");
     return Object.freeze({
+        callId: readString(value.callId, "callId"),
         context: decodeContext(value.context),
         direction: readDirection(value.direction),
         kind: readKind(value.kind),

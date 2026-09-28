@@ -449,13 +449,18 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
     assert.deepEqual(events, ["module.deactivate"]);
 });
 
-test("Extension loader keeps internal Worker retirement active without an Extension lifecycle callback", async (t) => {
+test("Extension loader retires Extension-owned state with host-managed Worker resources", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const target = await harness.writeGeneration({ capabilities: ["workers"] });
     const events: string[] = [];
     const loader = new ExtensionLoader({
-        importer: async () => ({ activate() {} }),
+        importer: async () => ({
+            activate() {},
+            retireInstance(instance: string) {
+                events.push(`module.retire:${instance}`);
+            },
+        }),
         instances: { list: () => [] } as never,
         paths: harness.paths,
         points: createControlExtensionPointRegistry(),
@@ -466,7 +471,7 @@ test("Extension loader keeps internal Worker retirement active without an Extens
 
     await candidate.retireInstanceResources("local");
 
-    assert.deepEqual(events, ["worker.retire:local"]);
+    assert.deepEqual(events, ["module.retire:local", "worker.retire:local"]);
     await candidate.retire();
 });
 
