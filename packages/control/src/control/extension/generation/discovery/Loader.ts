@@ -17,7 +17,10 @@ import {
     type ExtensionWorkerCapability,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
+import type {
+    ExtensionInstanceCapability,
+    ExtensionInstanceRuntimeCapability,
+} from "@portable-devshell/extension/instance";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 import { ExtensionAssetCapabilityControl } from "../capability/Resource.js";
@@ -31,6 +34,7 @@ import {
 } from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
 import { ExtensionWorkerCapabilityControl } from "../capability/Execution.js";
+import { ExtensionInstanceRuntimeCapabilityControl } from "../capability/Instance.js";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
@@ -203,6 +207,12 @@ export class ExtensionLoader {
                 extensionId: id,
                 generation,
             }) ?? unavailableInstances(id);
+        const instanceRuntime: ExtensionInstanceRuntimeCapability =
+            new ExtensionInstanceRuntimeCapabilityControl({
+                allowed: manifest.capabilities.includes("instanceRuntime"),
+                extensionId: id,
+                instances: this.#instances,
+            });
 
         const worker = manifest.capabilities.includes("workers")
             ? (this.#workerFactory?.({
@@ -272,6 +282,9 @@ export class ExtensionLoader {
                 ...(manifest.capabilities.includes("instances")
                     ? { instances: instanceManagement }
                     : {}),
+                ...(manifest.capabilities.includes("instanceRuntime")
+                    ? { instanceRuntime }
+                    : {}),
                 ...(manifest.capabilities.includes("processes")
                     ? { processes }
                     : {}),
@@ -304,6 +317,7 @@ export class ExtensionLoader {
                 generation,
                 id,
                 instanceManagement,
+                instanceRuntime,
                 logger,
                 manifest,
                 processes,
@@ -434,6 +448,7 @@ export class ExtensionLoader {
         generation: string;
         id: string;
         instanceManagement: ExtensionInstanceCapability;
+        instanceRuntime: ExtensionInstanceRuntimeCapability;
         logger: ExtensionLogger;
         manifest: ExtensionManifest;
         processes: ExtensionProcessRuntime;
@@ -459,6 +474,7 @@ export class ExtensionLoader {
             entryUrl: pathToFileURL(input.entryPath).href,
             hostDependencies: input.manifest.hostDependencies,
             instances: input.instanceManagement,
+            instanceRuntime: input.instanceRuntime,
             logger: input.logger,
             onFault: (error) => {
                 candidate?.fault(error);

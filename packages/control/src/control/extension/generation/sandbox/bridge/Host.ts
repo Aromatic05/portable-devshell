@@ -19,7 +19,10 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
+import type {
+    ExtensionInstanceCapability,
+    ExtensionInstanceRuntimeCapability,
+} from "@portable-devshell/extension/instance";
 
 import type {
     ExtensionPointSandboxBridge,
@@ -48,6 +51,8 @@ import {
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
+    type SandboxInstanceRuntimeAppendEventInput,
+    type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
@@ -90,6 +95,7 @@ export interface ExtensionSandboxHostOptions {
     initializationTimeoutMs?: number;
     invocationAbortGraceMs?: number;
     instances: ExtensionInstanceCapability;
+    instanceRuntime: ExtensionInstanceRuntimeCapability;
     logger: ExtensionLogger;
     memoryWatchIntervalMs?: number;
     onFault?(error: Error): void;
@@ -132,6 +138,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #hostCallbackTimeoutMs: number;
     readonly #initializationTimeoutMs: number;
     readonly #instanceCapability: ExtensionInstanceCapability;
+    readonly #instanceRuntimeCapability: ExtensionInstanceRuntimeCapability;
     readonly #invocationAbortGraceMs: number;
     readonly #invocationInterfaces = new Map<
         string,
@@ -193,6 +200,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
             options.initializationTimeoutMs ??
             DEFAULT_INITIALIZATION_TIMEOUT_MS;
         this.#instanceCapability = options.instances;
+        this.#instanceRuntimeCapability = options.instanceRuntime;
         this.#invocationAbortGraceMs =
             options.invocationAbortGraceMs ?? DEFAULT_INVOCATION_ABORT_GRACE_MS;
         this.#logger = options.logger;
@@ -637,6 +645,22 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     signal,
                 });
                 return undefined;
+            }
+            case "instanceRuntime.appendEvent": {
+                const value = input as SandboxInstanceRuntimeAppendEventInput;
+                await this.#instanceRuntimeCapability.appendEvent(
+                    value.name,
+                    value.type,
+                    value.data,
+                );
+                return undefined;
+            }
+            case "instanceRuntime.readToolCalls": {
+                const value = input as SandboxInstanceRuntimeReadToolCallsInput;
+                return await this.#instanceRuntimeCapability.readToolCalls(
+                    value.name,
+                    value.query,
+                );
             }
             case "processes.start": {
                 const started = await this.#processCapability.start(

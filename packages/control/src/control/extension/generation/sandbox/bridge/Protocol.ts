@@ -107,6 +107,8 @@ export type ExtensionSandboxCapabilityOperation =
     | "instances.stop"
     | "instances.validateCreate"
     | "instances.watchEvents"
+    | "instanceRuntime.appendEvent"
+    | "instanceRuntime.readToolCalls"
     | "processes.send"
     | "processes.start"
     | "processes.terminate"
@@ -315,6 +317,15 @@ export interface SandboxInstanceWatchInput {
     eventTypes?: readonly string[];
     fromSeq: number;
     name: string;
+}
+export interface SandboxInstanceRuntimeAppendEventInput {
+    data?: ExtensionJsonValue;
+    name: string;
+    type: string;
+}
+export interface SandboxInstanceRuntimeReadToolCallsInput {
+    name: string;
+    query?: ExtensionJsonValue;
 }
 export type SandboxWorkerOpenInput = ExtensionWorkerOpenInput;
 

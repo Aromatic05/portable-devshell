@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionInstanceCapabilityControl } from "../../../../../src/control/extension/generation/capability/Instance.ts";
+import {
+    ExtensionInstanceCapabilityControl,
+    ExtensionInstanceRuntimeCapabilityControl,
+} from "../../../../../src/control/extension/generation/capability/Instance.ts";
 import type { InstanceDescriptor } from "../../../../../src/control/instance/Descriptor.ts";
 import { InstanceRegistry } from "../../../../../src/control/instance/registry/Registry.ts";
 import { RuntimeSubscriptionManager } from "../../../../../src/instance/execution/runtime/Subscription.ts";
@@ -91,4 +94,64 @@ test("Instance capability watchEvents filters authoritative runtime events and s
 
     assert.deepEqual(events, ["1:log.appended"]);
     assert.ok(subscriptions >= 2);
+});
+
+test("Instance runtime capability appends events and reads audit ToolCalls without management authority", async () => {
+    const appended: Array<{ type: string; data: unknown }> = [];
+    const queries: unknown[] = [];
+    const instances = new InstanceRegistry([
+        {
+            name: "demo-local",
+            worker: {
+                async appendControlEvent(type: string, data: unknown) {
+                    appended.push({ data, type });
+                },
+                async readToolCalls(query: unknown) {
+                    queries.push(query);
+                    return [
+                        {
+                            callId: "call-1",
+                            context: { ctxId: "ctx-1", source: "mcp" },
+                            input: { message: "progress" },
+                            status: "succeeded",
+                            toolName: "todo_report",
+                        },
+                    ];
+                },
+            },
+        } as unknown as InstanceDescriptor,
+    ]);
+    const capability = new ExtensionInstanceRuntimeCapabilityControl({
+        allowed: true,
+        extensionId: "comment",
+        instances,
+    });
+
+    await capability.appendEvent("demo-local", "context.message.queued", {
+        ctxId: "ctx-1",
+    });
+    assert.deepEqual(
+        await capability.readToolCalls("demo-local", {
+            includeInput: true,
+            toolName: "todo_report",
+        }),
+        [
+            {
+                callId: "call-1",
+                context: { ctxId: "ctx-1", source: "mcp" },
+                input: { message: "progress" },
+                status: "succeeded",
+                toolName: "todo_report",
+            },
+        ],
+    );
+    assert.deepEqual(appended, [
+        {
+            data: { ctxId: "ctx-1" },
+            type: "context.message.queued",
+        },
+    ]);
+    assert.deepEqual(queries, [
+        { includeInput: true, toolName: "todo_report" },
+    ]);
 });

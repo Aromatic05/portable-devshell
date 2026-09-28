@@ -30,6 +30,7 @@ import type {
     ExtensionInstanceCapability,
     ExtensionInstanceEventWatch,
     ExtensionInstanceLogQuery,
+    ExtensionInstanceRuntimeCapability,
 } from "@portable-devshell/extension/instance";
 
 import { createControlExtensionSandboxPointRegistry } from "../../../../composition/Sandbox.js";
@@ -60,6 +61,8 @@ import {
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
+    type SandboxInstanceRuntimeAppendEventInput,
+    type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
@@ -341,6 +344,9 @@ function createContext(): ExtensionContext {
         ...(data.capabilities.includes("instances")
             ? { instances: createInstanceCapability() }
             : {}),
+        ...(data.capabilities.includes("instanceRuntime")
+            ? { instanceRuntime: createInstanceRuntimeCapability() }
+            : {}),
         ...(data.capabilities.includes("processes")
             ? { processes: createProcessCapability() }
             : {}),
@@ -567,6 +573,29 @@ function createInstanceCapability(): ExtensionInstanceCapability {
             await delivery;
             if (deliveryFailure !== undefined) throw deliveryFailure;
         },
+    });
+}
+
+function createInstanceRuntimeCapability(): ExtensionInstanceRuntimeCapability {
+    return Object.freeze({
+        appendEvent: async (
+            name: string,
+            type: string,
+            data?: ExtensionJsonValue,
+        ) => {
+            await requestCapability("instanceRuntime.appendEvent", {
+                ...(data === undefined ? {} : { data }),
+                name,
+                type,
+            } satisfies SandboxInstanceRuntimeAppendEventInput);
+        },
+        readToolCalls: async (name: string, query?: ExtensionJsonValue) =>
+            (await requestCapability("instanceRuntime.readToolCalls", {
+                name,
+                ...(query === undefined ? {} : { query }),
+            } satisfies SandboxInstanceRuntimeReadToolCallsInput)) as Awaited<
+                ReturnType<ExtensionInstanceRuntimeCapability["readToolCalls"]>
+            >,
     });
 }
 

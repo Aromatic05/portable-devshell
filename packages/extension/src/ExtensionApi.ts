@@ -1,5 +1,8 @@
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
-import type { ExtensionInstanceCapability } from "./domain/instance.js";
+import type {
+    ExtensionInstanceCapability,
+    ExtensionInstanceRuntimeCapability,
+} from "./domain/instance.js";
 
 export type ExtensionJsonPrimitive = boolean | number | string | null;
 export type ExtensionJsonValue =
@@ -36,6 +39,7 @@ export type ExtensionCapability =
     | "artifacts"
     | "assets"
     | "delegatedWorkers"
+    | "instanceRuntime"
     | "instances"
     | "processes"
     | "workers";
@@ -223,6 +227,7 @@ export interface ExtensionCapabilities {
     readonly assets?: ExtensionAssetCapability;
     /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
     readonly delegatedWorkers?: ExtensionWorkerCapability;
+    readonly instanceRuntime?: ExtensionInstanceRuntimeCapability;
     readonly instances?: ExtensionInstanceCapability;
     readonly processes?: ExtensionProcessCapability;
     readonly workers?: ExtensionWorkerCapability;

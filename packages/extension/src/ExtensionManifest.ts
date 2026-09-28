@@ -13,6 +13,7 @@ const capabilities = new Set<ExtensionCapability>([
     "artifacts",
     "assets",
     "delegatedWorkers",
+    "instanceRuntime",
     "instances",
     "processes",
     "workers",

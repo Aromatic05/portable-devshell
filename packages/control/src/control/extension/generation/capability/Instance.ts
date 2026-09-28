@@ -6,6 +6,7 @@ import type {
     ExtensionInstanceLogEntry,
     ExtensionInstanceLogQuery,
     ExtensionInstanceRecord,
+    ExtensionInstanceRuntimeCapability,
     ExtensionInstanceSnapshot,
 } from "@portable-devshell/extension/instance";
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
@@ -15,8 +16,10 @@ import {
     type InstanceCreateResult,
     type InstanceCreateSchema,
     type InstanceCreateSummary,
+    type InstanceEventType,
     type InstanceLogEntry,
     type JsonValue,
+    type ToolCallQuery,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -219,6 +222,74 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
         if (this.#allowed) return;
         throw new Error(
             `Extension ${this.#extensionId} did not declare the instances capability.`,
+        );
+    }
+}
+
+export class ExtensionInstanceRuntimeCapabilityControl
+    implements ExtensionInstanceRuntimeCapability
+{
+    readonly #allowed: boolean;
+    readonly #extensionId: string;
+    readonly #instances: InstanceRegistry;
+
+    constructor(options: {
+        allowed: boolean;
+        extensionId: string;
+        instances: InstanceRegistry;
+    }) {
+        this.#allowed = options.allowed;
+        this.#extensionId = options.extensionId;
+        this.#instances = options.instances;
+    }
+
+    async appendEvent(
+        name: string,
+        type: string,
+        data?: ExtensionJsonValue,
+    ): Promise<void> {
+        this.#assertAllowed();
+        await this.#require(name).worker.appendControlEvent(
+            requireEventType(type) as InstanceEventType,
+            data as JsonValue | undefined,
+        );
+    }
+
+    async readToolCalls(
+        name: string,
+        query: ExtensionJsonValue = {},
+    ): Promise<readonly ExtensionJsonValue[]> {
+        this.#assertAllowed();
+        if (
+            typeof query !== "object" ||
+            query === null ||
+            Array.isArray(query)
+        ) {
+            throw new TypeError(
+                "Extension instanceRuntime readToolCalls query must be an object.",
+            );
+        }
+        return (await this.#require(name).worker.readToolCalls(
+            query as ToolCallQuery,
+        )).map(toExtensionJson);
+    }
+
+    #require(name: string) {
+        const instance = requireName(name);
+        const descriptor = this.#instances.get(instance);
+        if (descriptor !== undefined) return descriptor;
+        throw createError({
+            code: errorCodes.instanceMissing,
+            details: { instance },
+            message: `Instance ${instance} was not found or is disabled.`,
+            retryable: false,
+        });
+    }
+
+    #assertAllowed(): void {
+        if (this.#allowed) return;
+        throw new Error(
+            `Extension ${this.#extensionId} did not declare the instanceRuntime capability.`,
         );
     }
 }

@@ -78,6 +78,19 @@ export interface ExtensionInstanceEventWatch {
     signal: AbortSignal;
 }
 
+/** Narrow per-instance runtime I/O without Instance lifecycle mutation authority. */
+export interface ExtensionInstanceRuntimeCapability {
+    appendEvent(
+        name: string,
+        type: string,
+        data?: ExtensionJsonValue,
+    ): Promise<void>;
+    readToolCalls(
+        name: string,
+        query?: ExtensionJsonValue,
+    ): Promise<readonly ExtensionJsonValue[]>;
+}
+
 /** Host-owned Instance management operations available to an Extension generation. */
 export interface ExtensionInstanceCapability {
     create(draft: ExtensionJsonValue): Promise<ExtensionInstanceCreateResult>;
