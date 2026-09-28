@@ -34,12 +34,15 @@ test("Comment Extension activates its review from instanceRuntime without a Comm
     t.after(async () => await deactivate());
 
     await activate(context);
-    assert.equal(registrations.length, 8);
+    assert.equal(registrations.length, 11);
     assert.deepEqual(
         registrations.map(({ id, pointId }) => ({ id, pointId })),
         [
-            { id: "comment", pointId: "toolcall.review" },
-            { id: "comment", pointId: "toolcall.rewrite" },
+            { id: "toolcall-gate", pointId: "toolcall.review" },
+            { id: "todo-access", pointId: "toolcall.rewrite" },
+            { id: "comment-delivery", pointId: "toolcall.rewrite" },
+            { id: "tool-advice", pointId: "toolcall.rewrite" },
+            { id: "todo-invalid", pointId: "toolcall.rewrite" },
             { id: "context-message-list", pointId: "control.routes" },
             { id: "context-message-queue", pointId: "control.routes" },
             { id: "conversation-list", pointId: "control.routes" },

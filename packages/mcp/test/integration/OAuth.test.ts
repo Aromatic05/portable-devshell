@@ -31,7 +31,11 @@ import type {
 } from "@modelcontextprotocol/client";
 import {
     CommentExtension,
-    createCommentReview,
+    createCommentAdvice,
+    createCommentDelivery,
+    createCommentTodoAccess,
+    createCommentTodoInvalid,
+    createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
 import { ToolCallBoundarySequence } from "@portable-devshell/core";
 import {
@@ -260,19 +264,43 @@ test(
                 { enabled: false, provider: "none" },
                 gateway,
             );
-        const commentReview = createCommentReview(comment.comment);
+        const commentGate = createCommentToolCallGate(comment.comment);
+        const commentTodoAccess = createCommentTodoAccess(comment.comment);
+        const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
+        const commentAdvice = createCommentAdvice();
+        const commentDelivery = createCommentDelivery(comment.comment);
+        const unsupportedInvocation = {
+            async requestInterface(): Promise<never> {
+                throw new Error(
+                    "Comment ToolCall hooks must not request a host interface.",
+                );
+            },
+        };
         instance.bindToolCallBoundary(() => ({
             release() {},
             sequence: new ToolCallBoundarySequence({
                 reviews: [
                     async (input) =>
-                        await commentReview(input as never, {
-                            async requestInterface() {
-                                throw new Error(
-                                    "Comment review must not request a host interface.",
-                                );
-                            },
-                        }),
+                        await commentGate(input as never, unsupportedInvocation),
+                ],
+                rewrites: [
+                    async (input) =>
+                        await commentTodoAccess(
+                            input as never,
+                            unsupportedInvocation,
+                        ),
+                    async (input) =>
+                        await commentTodoInvalid(
+                            input as never,
+                            unsupportedInvocation,
+                        ),
+                    async (input) =>
+                        await commentAdvice(input as never, unsupportedInvocation),
+                    async (input) =>
+                        await commentDelivery(
+                            input as never,
+                            unsupportedInvocation,
+                        ),
                 ],
             }),
         }));
@@ -332,16 +360,12 @@ test(
                     record.status === "completed",
             );
             assert.deepEqual(
-                audited?.feedback,
+                (audited?.output as { comment?: string[] } | undefined)
+                    ?.comment,
                 [
                     "Inspect this result before continuing\n\nCompare it with the next call",
                 ],
-                "Audit must persist the same feedback returned to the MCP consumer",
-            );
-            assert.equal(
-                (audited?.output as { comment?: string[] } | undefined)
-                    ?.comment,
-                undefined,
+                "Audit must persist the same rewritten output returned to the MCP consumer",
             );
             assert.ok(audited?.callId);
             assert.deepEqual(

@@ -4,8 +4,11 @@ import test from "node:test";
 
 import {
     CommentExtension,
-    createCommentReview,
-    createCommentRewrite,
+    createCommentAdvice,
+    createCommentDelivery,
+    createCommentTodoAccess,
+    createCommentTodoInvalid,
+    createCommentToolCallGate,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
 import {
@@ -274,18 +277,36 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
 const instanceKey = {};
 
 function commentReviewRegistrationHost(comment: CommentPort) {
-    const review = createCommentReview(comment);
-    const rewrite = createCommentRewrite(comment);
+    const bindings: Record<string, unknown> = {
+        "toolcall-gate": createCommentToolCallGate(comment),
+        "todo-access": createCommentTodoAccess(comment),
+        "comment-delivery": createCommentDelivery(comment),
+        "tool-advice": createCommentAdvice(),
+        "todo-invalid": createCommentTodoInvalid(comment),
+    };
+    const declarations = [
+        {
+            hook: "500-toolcall-gate",
+            id: "toolcall-gate",
+            pointId: "toolcall.review",
+        },
+        { hook: "500-todo-access", id: "todo-access", pointId: "toolcall.rewrite" },
+        {
+            hook: "500-todo-invalid",
+            id: "todo-invalid",
+            pointId: "toolcall.rewrite",
+        },
+        { hook: "501-tool-advice", id: "tool-advice", pointId: "toolcall.rewrite" },
+        {
+            hook: "502-comment-delivery",
+            id: "comment-delivery",
+            pointId: "toolcall.rewrite",
+        },
+    ];
     return {
         async acquireRegistration(pointId: string, id: string) {
-            assert.equal(id, "comment");
-            const binding =
-                pointId === "toolcall.review"
-                    ? review
-                    : pointId === "toolcall.rewrite"
-                      ? rewrite
-                      : undefined;
-            assert.notEqual(binding, undefined);
+            const binding = bindings[id];
+            assert.notEqual(binding, undefined, `${pointId}:${id}`);
             return {
                 extensionId: "comment",
                 lease: { release() {} },
@@ -293,14 +314,12 @@ function commentReviewRegistrationHost(comment: CommentPort) {
             };
         },
         listDeclarations(pointId: string) {
-            return pointId === "toolcall.review" || pointId === "toolcall.rewrite"
-                ? [
-                      {
-                          declaration: { hook: "500-comment", id: "comment" },
-                          id: "comment",
-                      },
-                  ]
-                : [];
+            return declarations
+                .filter((declaration) => declaration.pointId === pointId)
+                .map(({ hook, id }) => ({
+                    declaration: { hook, id },
+                    id,
+                }));
         },
     } as never;
 }

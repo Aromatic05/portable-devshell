@@ -417,15 +417,30 @@ export async function activate(context: ExtensionContext): Promise<void> {
             context.paths.stateDirectory,
         ),
     });
-    const reviewBinding = createCommentReview(comment.comment);
-    const rewriteBinding = createCommentRewrite(comment.comment);
-    context.register(review, "comment", async (input, invocation) => {
+    const gate = createCommentToolCallGate(comment.comment);
+    const todoAccess = createCommentTodoAccess(comment.comment);
+    const delivery = createCommentDelivery(comment.comment);
+    const advice = createCommentAdvice();
+    const todoInvalid = createCommentTodoInvalid(comment.comment);
+    context.register(review, "toolcall-gate", async (input, invocation) => {
         await source.refresh();
-        return await reviewBinding(input, invocation);
+        return await gate(input, invocation);
     });
-    context.register(rewrite, "comment", async (input, invocation) => {
+    context.register(rewrite, "todo-access", async (input, invocation) => {
         await source.refresh();
-        return await rewriteBinding(input, invocation);
+        return await todoAccess(input, invocation);
+    });
+    context.register(rewrite, "comment-delivery", async (input, invocation) => {
+        await source.refresh();
+        return await delivery(input, invocation);
+    });
+    context.register(rewrite, "tool-advice", async (input, invocation) => {
+        await source.refresh();
+        return await advice(input, invocation);
+    });
+    context.register(rewrite, "todo-invalid", async (input, invocation) => {
+        await source.refresh();
+        return await todoInvalid(input, invocation);
     });
     registerCommentRoutes(context, source, comment);
     context.register(
@@ -472,28 +487,12 @@ export async function deactivate(): Promise<void> {
     await runtime?.comment.close();
 }
 
-export function createCommentReview(
-    comment: Pick<
-        CommentPort,
-        "beforeTodoToolCall" | "recordTodoInvalid" | "reviewToolCall"
-    >,
+export function createCommentToolCallGate(
+    comment: Pick<CommentPort, "reviewToolCall">,
 ): ToolCallReviewBinding {
     return async (
         input: ToolCallReviewInvocation,
     ): Promise<ToolCallReviewResult> => {
-        if (
-            input.direction === "outbound" &&
-            input.kind === "error" &&
-            input.toolName === "todo_write" &&
-            input.context.ctxId !== undefined &&
-            readToolErrorCode(input.payload) === "todo.invalid"
-        ) {
-            comment.recordTodoInvalid(
-                input.context.instance,
-                input.context.ctxId,
-            );
-            return { decision: "accept" };
-        }
         if (
             input.direction !== "inbound" ||
             input.kind !== "call" ||
@@ -508,41 +507,83 @@ export function createCommentReview(
             input.toolName,
             input.callId ?? input.context.requestId,
         );
-        const result = reviewDecision(decision);
-        if (result.decision === "accept") {
-            await comment.beforeTodoToolCall(
-                input.context.instance,
-                input.context.ctxId,
-                input.toolName,
-            );
-        }
-        return result;
+        return reviewDecision(decision);
     };
 }
 
-export function createCommentRewrite(
+export function createCommentTodoAccess(
+    comment: Pick<CommentPort, "beforeTodoToolCall">,
+): ToolCallRewriteBinding {
+    return async (
+        input: ToolCallRewriteInvocation,
+    ): Promise<ExtensionJsonValue> => {
+        if (
+            input.direction !== "inbound" ||
+            input.kind !== "call" ||
+            input.context.source !== "mcp" ||
+            input.context.ctxId === undefined
+        ) {
+            return input.payload;
+        }
+        await comment.beforeTodoToolCall(
+            input.context.instance,
+            input.context.ctxId,
+            input.toolName,
+        );
+        return input.payload;
+    };
+}
+
+export function createCommentDelivery(
     comment: Pick<CommentPort, "consumePending">,
 ): ToolCallRewriteBinding {
     return async (
         input: ToolCallRewriteInvocation,
     ): Promise<ExtensionJsonValue> => {
-        if (input.direction !== "outbound") return input.payload;
-        const hints = resolveToolCallHints(input);
-        const delivered =
-            input.kind === "result" && input.context.ctxId !== undefined
-                ? await comment.consumePending(
-                      input.context.instance,
-                      input.context.ctxId,
-                      input.callId,
-                  )
-                : undefined;
-        const comments = mergeComments(
-            delivered?.comment === undefined ? [] : [delivered.comment],
-            hints,
+        if (
+            input.direction !== "outbound" ||
+            input.kind !== "result" ||
+            input.context.ctxId === undefined
+        ) {
+            return input.payload;
+        }
+        const delivered = await comment.consumePending(
+            input.context.instance,
+            input.context.ctxId,
+            input.callId,
         );
+        return delivered.comment === undefined
+            ? input.payload
+            : appendOutputComments(input.payload, [delivered.comment]);
+    };
+}
+
+export function createCommentAdvice(): ToolCallRewriteBinding {
+    return (input: ToolCallRewriteInvocation): ExtensionJsonValue => {
+        const comments = mergeComments([], resolveToolCallHints(input));
         return comments.length === 0
             ? input.payload
             : appendOutputComments(input.payload, comments);
+    };
+}
+
+export function createCommentTodoInvalid(
+    comment: Pick<CommentPort, "recordTodoInvalid">,
+): ToolCallRewriteBinding {
+    return (input: ToolCallRewriteInvocation): ExtensionJsonValue => {
+        if (
+            input.direction === "outbound" &&
+            input.kind === "error" &&
+            input.toolName === "todo_write" &&
+            input.context.ctxId !== undefined &&
+            readToolErrorCode(input.payload) === "todo.invalid"
+        ) {
+            comment.recordTodoInvalid(
+                input.context.instance,
+                input.context.ctxId,
+            );
+        }
+        return input.payload;
     };
 }
 
