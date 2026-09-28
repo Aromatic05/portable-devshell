@@ -136,6 +136,15 @@ test("stable compat annotations do not require a removal deadline", () => {
     assert.deepEqual(parsed.issues, []);
 });
 
+test("annotation-like strings are not parsed as compatibility comments", () => {
+    const parsed = parseCompatibilityAnnotations(
+        "const marker = '@removeAt 9.9.9';",
+        "src/config.ts",
+    );
+    assert.deepEqual(parsed.annotations, []);
+    assert.deepEqual(parsed.issues, []);
+});
+
 test("removal annotations require a compat owner in the same source comment", () => {
     const parsed = parseCompatibilityAnnotations(
         "// @removeAt 0.7.10",
