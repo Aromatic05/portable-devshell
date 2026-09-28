@@ -16,7 +16,9 @@ use crate::tool::file::model::{
 use crate::tool::file::state::{
     ContextFileSnapshot, FULL_SNAPSHOT_LIMIT, SnapshotContent, TextFile, TextFormat, TextInspection,
 };
-use crate::tool::file::{FileToolState, resolve_create};
+use crate::tool::file::{
+    FileToolState, create_parent_directories, resolve_create, resolve_create_plan,
+};
 use crate::tool::{ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName};
 
 const MAX_CHANGE_OPERATIONS: usize = 256;
@@ -45,7 +47,7 @@ impl ToolHandler for FileEditTool {
     fn catalog_entry(&self) -> ToolCatalogEntry {
         crate::tool::contract::catalog_entry::<FileChangeSetInput, FileChangeSetOutput>(
             &self.name,
-            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
+            "Apply an ordered multi-file change set. Prefer *** Begin Edit / *** End Edit with Write File, Patch File, Rewrite File, Delete File, or Move File sections; common Begin/End Patch, Update File, and Add File aliases are accepted. Write/Add and Move targets create missing parent directories automatically. Move File requires a following *** To: target line; patch hunks use @@, @@ BOF, or @@ EOF with space, -, and + line prefixes. Mutations of existing files require edit coverage established earlier in the same context. Multi-operation change sets are semantically validated before writing, so validation failures leave the workspace unchanged; an OS-level commit failure remains fail-stop and may retain earlier committed operations.".to_string(),
             [ToolCapability::Write],
         )
     }
@@ -153,7 +155,6 @@ impl FileEditTool {
                 ParsedOperation::Write { path, content } => {
                     ensure_text(&content)?;
                     let (display, resolved) = resolve_for_plan(call, &path)?;
-                    require_existing_parent(&resolved)?;
                     let entry = virtual_entry(&mut virtual_entries, &resolved);
                     if entry.exists {
                         return Err(ToolError::new(
@@ -252,7 +253,6 @@ impl FileEditTool {
                 ParsedOperation::Move { source, target } => {
                     let (source_display, source_path) = resolve_for_plan(call, &source)?;
                     let (target_display, target_path) = resolve_for_plan(call, &target)?;
-                    require_existing_parent(&target_path)?;
                     if source_path == target_path {
                         return Err(ToolError::new(
                             "file.pathConflict",
@@ -572,6 +572,14 @@ impl FileEditTool {
         content: String,
         local_snapshots: &mut HashMap<PathBuf, ContextFileSnapshot>,
     ) -> Result<FileChangeOperationOutput, ToolError> {
+        let (requested, planned) = resolve_create_plan(call, &display)?;
+        if planned != path {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "path resolved to a different target after preflight",
+            ));
+        }
+        create_parent_directories(call, &requested)?;
         let resolved = rebind_for_execution(call, &display, &path)?;
         let target = resolved
             .target()
@@ -970,7 +978,6 @@ impl FileEditTool {
     ) -> Result<FileChangeOperationOutput, ToolError> {
         let base = require_bound_base(base)?;
         let source_resolved = rebind_for_execution(call, &source_display, &source)?;
-        let target_resolved = rebind_for_execution(call, &target_display, &target)?;
         let (first, second) = if source <= target {
             (
                 self.state.write_lock(&source),
@@ -993,6 +1000,15 @@ impl FileEditTool {
         if current.revision != base.revision {
             return Err(revision_mismatch());
         }
+        let (target_requested, planned_target) = resolve_create_plan(call, &target_display)?;
+        if planned_target != target {
+            return Err(ToolError::retryable(
+                "file.revisionMismatch",
+                "path resolved to a different target after preflight",
+            ));
+        }
+        create_parent_directories(call, &target_requested)?;
+        let target_resolved = rebind_for_execution(call, &target_display, &target)?;
         let source_target = source_resolved
             .target()
             .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
@@ -1419,8 +1435,8 @@ fn parse_path(raw: &str) -> Result<String, ToolError> {
 }
 
 fn resolve_for_plan(call: &ToolCall, raw: &str) -> Result<(String, PathBuf), ToolError> {
-    let (requested, resolved) = resolve_create(call, raw)?;
-    Ok((requested.raw, resolved.canonical))
+    let (requested, canonical) = resolve_create_plan(call, raw)?;
+    Ok((requested.raw, canonical))
 }
 
 fn rebind_for_execution(
@@ -1467,19 +1483,38 @@ fn semantic_current(
 }
 
 fn require_semantic_absent(call: &ToolCall, display: &str, path: &Path) -> Result<(), ToolError> {
-    let resolved = rebind_for_execution(call, display, path)?;
-    let target = resolved
-        .target()
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
-    if target
-        .metadata(false)
-        .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
-        .is_some()
-    {
-        return Err(ToolError::new(
-            "file.alreadyExists",
-            format!("target already exists: {display}"),
+    let (_, rebound) = resolve_create_plan(call, display)?;
+    if rebound != path {
+        return Err(ToolError::retryable(
+            "file.revisionMismatch",
+            "path resolved to a different target after preflight",
         ));
+    }
+    match resolve_create(call, display) {
+        Ok((_, resolved)) => {
+            if resolved.canonical != path {
+                return Err(ToolError::retryable(
+                    "file.revisionMismatch",
+                    "path resolved to a different target after preflight",
+                ));
+            }
+            let target = resolved
+                .target()
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?;
+            if target
+                .metadata(false)
+                .map_err(|error| ToolError::new("file.writeFailed", error.to_string()))?
+                .is_none()
+            {
+                return Ok(());
+            }
+            return Err(ToolError::new(
+                "file.alreadyExists",
+                format!("target already exists: {display}"),
+            ));
+        }
+        Err(error) if error.code == "file.notFound" => {}
+        Err(error) => return Err(error),
     }
     Ok(())
 }
@@ -1507,25 +1542,6 @@ fn virtual_entry(entries: &mut HashMap<PathBuf, VirtualEntry>, path: &Path) -> V
             exists: path.symlink_metadata().is_ok(),
             known: false,
         })
-}
-
-fn require_existing_parent(path: &Path) -> Result<(), ToolError> {
-    let Some(parent) = path.parent() else {
-        return Err(ToolError::new(
-            "file.invalidPath",
-            "target has no parent directory",
-        ));
-    };
-    if parent.is_dir() {
-        return Ok(());
-    }
-    Err(ToolError::new(
-        "file.parentNotFound",
-        format!(
-            "target parent directory does not exist: {}",
-            parent.display()
-        ),
-    ))
 }
 
 #[cfg(target_os = "linux")]

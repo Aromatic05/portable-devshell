@@ -563,6 +563,102 @@ fn file_edit_applies_all_five_operations_in_order() {
 }
 
 #[test]
+fn file_edit_creates_missing_parent_directories_for_write_add_and_move() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-create-parents";
+    fs::write(env.workspace().join("move-source.txt"), "move me\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "move-source.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Write File: generated/deep/new.txt\n",
+                "new file\n",
+                "*** Add File: generated/add/deep/added.txt\n",
+                "+added file\n",
+                "*** Move File: move-source.txt\n",
+                "*** To: archive/deep/moved.txt\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert!(
+        edited["result"]["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|operation| operation["status"] == "applied"),
+        "{edited}"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("generated/deep/new.txt")).unwrap(),
+        "new file\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("generated/add/deep/added.txt")).unwrap(),
+        "added file\n"
+    );
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("archive/deep/moved.txt")).unwrap(),
+        "move me\n"
+    );
+    assert!(!env.workspace().join("move-source.txt").exists());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_edit_parent_creation_does_not_follow_workspace_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let env = TestEnv::new();
+    let outside = tempfile::tempdir().unwrap();
+    let instance = "aromatic-file-create-parent-symlink";
+    symlink(outside.path(), env.workspace().join("escape")).unwrap();
+    start(&env, instance);
+
+    let edited = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Write File: escape/deep/new.txt\n",
+                "outside\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], false, "{edited}");
+    assert!(!outside.path().join("deep").exists());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
 fn file_edit_rejects_patch_context_outside_read_coverage() {
     let env = TestEnv::new();
     let instance = "aromatic-file-unread-range";
@@ -2387,6 +2483,59 @@ fn file_edit_semantic_failure_after_virtual_move_leaves_no_intermediate_paths() 
     );
     assert!(!env.workspace().join("first.txt").exists());
     assert!(!env.workspace().join("second.txt").exists());
+
+    env.json_command(&["stop", "--instance", instance]);
+}
+
+#[test]
+fn file_edit_semantic_failure_does_not_create_missing_parent_directories() {
+    let env = TestEnv::new();
+    let instance = "aromatic-file-parent-semantic-atomic";
+    fs::write(env.workspace().join("existing.txt"), "old\n").unwrap();
+    start(&env, instance);
+
+    let read = call(
+        &env,
+        instance,
+        "1",
+        "ctx-a",
+        "file_read",
+        json!({ "path": "existing.txt", "selector": "1-1:raw" }),
+    );
+    assert_eq!(read["ok"], true, "{read}");
+
+    let edited = call(
+        &env,
+        instance,
+        "2",
+        "ctx-a",
+        "file_edit",
+        json!({
+            "changes": concat!(
+                "*** Begin Edit\n",
+                "*** Write File: generated/deep/new.txt\n",
+                "new file\n",
+                "*** Patch File: existing.txt\n",
+                "@@\n",
+                "-missing\n",
+                "+changed\n",
+                "*** End Edit"
+            )
+        }),
+    );
+
+    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(
+        edited["result"]["operations"][1]["error"]["code"],
+        "file.patchNotFound"
+    );
+    assert!(!env.workspace().join("generated").exists());
+    assert_eq!(
+        fs::read_to_string(env.workspace().join("existing.txt")).unwrap(),
+        "old\n"
+    );
 
     env.json_command(&["stop", "--instance", instance]);
 }

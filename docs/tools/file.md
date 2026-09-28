@@ -170,7 +170,7 @@ Canonical 方言仍然只有 `*** Begin Edit` / `*** End Edit` 与上述五种 s
 pub struct NewModule;
 ```
 
-目标父目录必须已经存在。
+目标父目录不存在时会在真正执行该 Write 时自动递归创建；语义预演阶段不会提前创建目录。
 
 ### Rewrite File
 
@@ -231,7 +231,7 @@ Patch 行前缀：
 *** To: ./src/new.rs
 ```
 
-源文件必须存在并已读取，目标必须不存在，目标父目录必须存在。Move 只使用同一文件系统内的原子 no-clobber rename；不退化成复制后删除。
+源文件必须存在并已读取，目标必须不存在。目标父目录不存在时会在真正执行该 Move 时自动递归创建。Move 只使用同一文件系统内的原子 no-clobber rename；不退化成复制后删除。
 
 ## 执行语义
 
