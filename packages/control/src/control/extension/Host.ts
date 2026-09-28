@@ -46,6 +46,7 @@ export class ExtensionHost {
     readonly #catalog: ExtensionCatalog;
     readonly #configRegistry: ConfigRegistry;
     readonly #failures = new Map<string, ExtensionFailure>();
+    readonly #listeners = new Set<() => void>();
     readonly #loader: ExtensionGenerationLoader;
     readonly #registry: ExtensionRegistryPort;
     readonly #retired = new Map<string, Set<ExtensionGeneration>>();
@@ -96,6 +97,12 @@ export class ExtensionHost {
             }
             this.#started = true;
         });
+        this.#notifyChange();
+    }
+
+    onChange(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
     }
 
     acquire(id: string): ExtensionGenerationLease {
@@ -356,10 +363,10 @@ export class ExtensionHost {
             this.#registrySnapshot = next;
             if (enabled) {
                 this.#replaceConfigDomain(id, generation, candidate.manifest);
-                this.#catalog.replace(id, generation, candidate.manifest);
+                this.#replaceCatalog(id, generation, candidate.manifest);
             } else {
                 this.#removeConfigDomain(id);
-                this.#catalog.remove(id);
+                this.#removeCatalog(id);
             }
 
             const active = this.#active.get(id);
@@ -438,7 +445,7 @@ export class ExtensionHost {
                 this.#registrySnapshot = next;
             }
             this.#removeConfigDomain(id);
-            this.#catalog.remove(id);
+            this.#removeCatalog(id);
             const active = this.#active.get(id);
             if (active !== undefined) {
                 this.#active.delete(id);
@@ -489,7 +496,7 @@ export class ExtensionHost {
             await this.#registry.write(next);
             this.#registrySnapshot = next;
             this.#removeConfigDomain(id);
-            this.#catalog.remove(id);
+            this.#removeCatalog(id);
             this.#failures.delete(id);
         });
     }
@@ -516,6 +523,24 @@ export class ExtensionHost {
                 `Extensions failed to retire resources for instance ${instance}.`,
             );
         }
+    }
+
+    #notifyChange(): void {
+        for (const listener of this.#listeners) listener();
+    }
+
+    #replaceCatalog(
+        id: string,
+        generation: string,
+        manifest: ExtensionManifest,
+    ): void {
+        this.#catalog.replace(id, generation, manifest);
+        if (this.#started) this.#notifyChange();
+    }
+
+    #removeCatalog(id: string): void {
+        this.#catalog.remove(id);
+        if (this.#started) this.#notifyChange();
     }
 
     async list(): Promise<ExtensionRuntimeRecord[]> {
@@ -601,7 +626,7 @@ export class ExtensionHost {
                 this.#registrySnapshot = next;
             }
             this.#replaceConfigDomain(id, generation, manifest);
-            this.#catalog.replace(id, generation, manifest);
+            this.#replaceCatalog(id, generation, manifest);
             this.#failures.delete(id);
             return;
         }
@@ -821,7 +846,7 @@ export class ExtensionHost {
             candidate.generation,
             candidate.manifest,
         );
-        this.#catalog.replace(id, candidate.generation, candidate.manifest);
+        this.#replaceCatalog(id, candidate.generation, candidate.manifest);
         this.#publish(id, candidate);
     }
 

@@ -7,8 +7,28 @@ import {
     type PrefixRouteContext,
     type PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
+import type {
+    ExtensionJsonValue,
+    ExtensionPointDeclaration,
+} from "@portable-devshell/extension";
+import {
+    routes,
+    type ControlRouteBinding,
+    type ControlRouteDeclaration,
+    type ControlRouteInvocationContext,
+    type ControlRouteRequest,
+    type ControlRouteScope,
+} from "@portable-devshell/extension/control";
 
 import { routeModule } from "../../server/Route.js";
+import type { ExtensionHost } from "./Host.js";
+import type {
+    ExtensionPointDefinition,
+    ExtensionPointSandboxBridge,
+    ExtensionPointSandboxInvocationContext,
+    ExtensionPointValidationContext,
+} from "./generation/registration/PointRegistry.js";
+import type { ExtensionSandboxPointCodec } from "./generation/sandbox/bridge/PointCodec.js";
 
 export interface ExtensionControlPort {
     disable(id: string): Promise<void>;
@@ -17,6 +37,235 @@ export interface ExtensionControlPort {
     list(): Promise<ExtensionRuntimeRecord[]>;
     reload(id: string): Promise<void>;
     remove(id: string, purge: boolean): Promise<ExtensionRemoveResult>;
+}
+
+export const controlRoutesExtensionPointDefinition: ExtensionPointDefinition =
+    Object.freeze({
+        createSandboxBinding: createControlRouteSandboxBinding,
+        id: routes.id,
+        parseDeclaration: parseControlRouteDeclaration,
+        validateBinding(
+            binding: unknown,
+            context: ExtensionPointValidationContext,
+        ) {
+            validateControlRouteBinding(binding, context);
+        },
+    });
+
+export const controlRoutesSandboxCodec: ExtensionSandboxPointCodec =
+    Object.freeze({
+        describeBinding(
+            binding: unknown,
+            context: ExtensionPointValidationContext,
+        ): ExtensionJsonValue {
+            validateControlRouteBinding(binding, context);
+            return Object.freeze({ kind: "route" });
+        },
+        id: routes.id,
+        async invokeBinding(
+            binding: unknown,
+            input: ExtensionJsonValue | undefined,
+            signal: AbortSignal,
+            context: ExtensionPointSandboxInvocationContext,
+        ): Promise<unknown> {
+            validateControlRouteBinding(binding, context);
+            const value = readExtensionRecord(input, "Control route invocation");
+            const request = readControlRouteRequest(value.request);
+            const invocation = readExtensionRecord(
+                value.context,
+                "Control route invocation context",
+            );
+            return await (binding as ControlRouteBinding)(
+                request,
+                Object.freeze({
+                    destination: readExtensionString(
+                        invocation.destination,
+                        "destination",
+                    ),
+                    peer: readRoutePeer(invocation.peer),
+                    ...(invocation.protocolVersion === undefined
+                        ? {}
+                        : {
+                              protocolVersion: readExtensionString(
+                                  invocation.protocolVersion,
+                                  "protocolVersion",
+                              ),
+                          }),
+                    requestId: readExtensionString(
+                        invocation.requestId,
+                        "requestId",
+                    ),
+                    signal,
+                    ...(invocation.subject === undefined
+                        ? {}
+                        : { subject: readRouteSubject(invocation.subject) }),
+                }),
+            );
+        },
+    });
+
+export class ControlExtensionRouteService {
+    readonly #extensions: Pick<
+        ExtensionHost,
+        "acquireRegistration" | "listDeclarations" | "onChange"
+    >;
+
+    constructor(
+        extensions: Pick<
+            ExtensionHost,
+            "acquireRegistration" | "listDeclarations" | "onChange"
+        >,
+    ) {
+        this.#extensions = extensions;
+    }
+
+    modules(scope: ControlRouteScope): readonly PrefixRouteModuleDefinition[] {
+        const grouped = new Map<
+            string,
+            Map<string, { declaration: ControlRouteDeclaration; id: string }>
+        >();
+        for (const registration of this.#extensions.listDeclarations(routes.id)) {
+            const declaration =
+                registration.declaration as ControlRouteDeclaration;
+            if (declaration.scope !== scope) continue;
+            const operations =
+                grouped.get(declaration.module) ??
+                new Map<
+                    string,
+                    { declaration: ControlRouteDeclaration; id: string }
+                >();
+            if (operations.has(declaration.operation)) {
+                throw new TypeError(
+                    `Control route ${scope}/${declaration.module}/${declaration.operation} is registered more than once.`,
+                );
+            }
+            operations.set(declaration.operation, {
+                declaration,
+                id: declaration.id,
+            });
+            grouped.set(declaration.module, operations);
+        }
+        return [...grouped.entries()]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([module, operations]) =>
+                routeModule(
+                    module,
+                    Object.fromEntries(
+                        [...operations.entries()]
+                            .sort(([left], [right]) =>
+                                left.localeCompare(right),
+                            )
+                            .map(([operation, entry]) => [
+                                operation,
+                                async (request, context) =>
+                                    await this.#invoke(
+                                        entry.id,
+                                        request,
+                                        context,
+                                    ),
+                            ]),
+                    ),
+                ),
+            );
+    }
+
+    onChange(listener: () => void): () => void {
+        return this.#extensions.onChange(listener);
+    }
+
+    async #invoke(
+        id: string,
+        request: { payload?: JsonValue; seq?: number },
+        context: PrefixRouteContext,
+    ): Promise<JsonValue | undefined> {
+        const { lease, registration } =
+            await this.#extensions.acquireRegistration(routes.id, id);
+        try {
+            if (typeof registration.binding !== "function") {
+                throw new TypeError(
+                    `Control route ${id} has an invalid binding.`,
+                );
+            }
+            return (await (registration.binding as ControlRouteBinding)(
+                Object.freeze({
+                    ...(request.payload === undefined
+                        ? {}
+                        : {
+                              payload:
+                                  request.payload as unknown as ExtensionJsonValue,
+                          }),
+                    ...(request.seq === undefined ? {} : { seq: request.seq }),
+                }),
+                Object.freeze({
+                    destination: context.destination,
+                    peer: context.peer,
+                    ...(context.protocolVersion === undefined
+                        ? {}
+                        : { protocolVersion: context.protocolVersion }),
+                    requestId: context.requestId,
+                    signal: context.signal,
+                    ...(context.subject === undefined
+                        ? {}
+                        : { subject: { ...context.subject } }),
+                }),
+            )) as JsonValue | undefined;
+        } finally {
+            lease.release();
+        }
+    }
+}
+
+export function createControlRouteSandboxBinding(
+    descriptor: ExtensionJsonValue,
+    context: ExtensionPointValidationContext,
+    bridge: ExtensionPointSandboxBridge,
+): ControlRouteBinding {
+    const value = readExtensionRecord(
+        descriptor,
+        `Extension ${context.extensionId} control.routes/${context.id} sandbox descriptor`,
+    );
+    if (
+        value.kind !== "route" ||
+        Object.keys(value).some((key) => key !== "kind")
+    ) {
+        throw new TypeError(
+            `Extension ${context.extensionId} control.routes/${context.id} sandbox descriptor is invalid.`,
+        );
+    }
+    return async (request, invocation) =>
+        (await bridge.invokeBinding(
+            routes.id,
+            context.id,
+            {
+                context: {
+                    destination: invocation.destination,
+                    peer: invocation.peer,
+                    ...(invocation.protocolVersion === undefined
+                        ? {}
+                        : { protocolVersion: invocation.protocolVersion }),
+                    requestId: invocation.requestId,
+                    ...(invocation.subject === undefined
+                        ? {}
+                        : { subject: { ...invocation.subject } }),
+                },
+                request: request as unknown as ExtensionJsonValue,
+            },
+            {
+                signal: invocation.signal,
+                timeoutLabel: "Control route invocation",
+            },
+        )) as ExtensionJsonValue | undefined;
+}
+
+export function validateControlRouteBinding(
+    binding: unknown,
+    context: ExtensionPointValidationContext,
+): asserts binding is ControlRouteBinding {
+    if (typeof binding !== "function") {
+        throw new TypeError(
+            `Extension ${context.extensionId} control.routes/${context.id} binding must be a function.`,
+        );
+    }
 }
 
 export function createExtensionRouteModule(
@@ -157,4 +406,114 @@ function invalid(message: string): Error {
         message,
         retryable: false,
     });
+}
+
+function parseControlRouteDeclaration(
+    value: ExtensionPointDeclaration,
+): ControlRouteDeclaration {
+    const record = value as ExtensionPointDeclaration &
+        Record<string, ExtensionJsonValue | undefined>;
+    const unknown = Object.keys(record).find(
+        (key) =>
+            key !== "id" &&
+            key !== "module" &&
+            key !== "operation" &&
+            key !== "scope",
+    );
+    if (unknown !== undefined) {
+        throw new TypeError(
+            `control.routes declaration has unknown field ${unknown}.`,
+        );
+    }
+    const scope =
+        record.scope === "control" || record.scope === "instance"
+            ? record.scope
+            : undefined;
+    if (scope === undefined) {
+        throw new TypeError(
+            "control.routes declaration scope must be control or instance.",
+        );
+    }
+    return Object.freeze({
+        id: value.id,
+        module: readRouteSegment(record.module, "module"),
+        operation: readRouteSegment(record.operation, "operation"),
+        scope,
+    });
+}
+
+function readRouteSegment(
+    value: ExtensionJsonValue | undefined,
+    label: string,
+): string {
+    const segment = readExtensionString(value, label);
+    if (segment.trim() !== segment || segment.includes(".")) {
+        throw new TypeError(
+            `control.routes declaration ${label} must be a trimmed route segment without dots.`,
+        );
+    }
+    return segment;
+}
+
+function readControlRouteRequest(
+    value: ExtensionJsonValue | undefined,
+): ControlRouteRequest {
+    const record = readExtensionRecord(value, "Control route request");
+    const unknown = Object.keys(record).find(
+        (key) => key !== "payload" && key !== "seq",
+    );
+    if (unknown !== undefined) {
+        throw new TypeError(
+            `Control route request contains unknown field ${unknown}.`,
+        );
+    }
+    if (
+        record.seq !== undefined &&
+        (typeof record.seq !== "number" ||
+            !Number.isSafeInteger(record.seq) ||
+            record.seq < 0)
+    ) {
+        throw new TypeError(
+            "Control route request seq must be a non-negative integer.",
+        );
+    }
+    return Object.freeze({
+        ...(record.payload === undefined ? {} : { payload: record.payload }),
+        ...(record.seq === undefined ? {} : { seq: record.seq }),
+    });
+}
+
+function readRoutePeer(
+    value: ExtensionJsonValue | undefined,
+): ControlRouteInvocationContext["peer"] {
+    if (value === "cli" || value === "tui" || value === "web") return value;
+    throw new TypeError("Control route peer is invalid.");
+}
+
+function readRouteSubject(
+    value: ExtensionJsonValue,
+): NonNullable<ControlRouteInvocationContext["subject"]> {
+    const record = readExtensionRecord(value, "Control route subject");
+    return Object.freeze({
+        id: readExtensionString(record.id, "subject.id"),
+        kind: readExtensionString(record.kind, "subject.kind"),
+    });
+}
+
+function readExtensionRecord(
+    value: ExtensionJsonValue | undefined,
+    label: string,
+): Record<string, ExtensionJsonValue> {
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        return value as Record<string, ExtensionJsonValue>;
+    }
+    throw new TypeError(`${label} must be an object.`);
+}
+
+function readExtensionString(
+    value: ExtensionJsonValue | undefined,
+    label: string,
+): string {
+    if (typeof value === "string" && value.length > 0) return value;
+    throw new TypeError(`${label} must be a non-empty string.`);
 }

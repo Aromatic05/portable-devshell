@@ -19,6 +19,9 @@
             "@portable-devshell/extension/instance": [
                 "./packages/extension/src/domain/instance.ts"
             ],
+            "@portable-devshell/extension/control": [
+                "./packages/extension/src/domain/control.ts"
+            ],
             "@portable-devshell/extension/web": [
                 "./packages/extension/src/domain/web.ts"
             ],

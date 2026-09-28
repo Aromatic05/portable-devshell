@@ -38,6 +38,10 @@
             "types": "./dist/domain/comment.d.ts",
             "default": "./dist/domain/comment.js"
         },
+        "./control": {
+            "types": "./dist/domain/control.d.ts",
+            "default": "./dist/domain/control.js"
+        },
         "./secret": {
             "types": "./dist/domain/secret.d.ts",
             "default": "./dist/domain/secret.js"

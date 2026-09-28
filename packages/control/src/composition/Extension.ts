@@ -2,6 +2,7 @@ import {
     cliModelCommandsExtensionPointDefinition,
     cliNativeCommandsExtensionPointDefinition,
 } from "../control/extension/cli/Point.js";
+import { controlRoutesExtensionPointDefinition } from "../control/extension/Route.js";
 import { tuiPagesExtensionPointDefinition } from "../control/extension/tui/Point.js";
 import {
     toolCallReviewExtensionPointDefinition,
@@ -19,6 +20,7 @@ export function createControlExtensionPointRegistry(): ExtensionPointRegistry {
     const points = new ExtensionPointRegistry([
         cliModelCommandsExtensionPointDefinition,
         cliNativeCommandsExtensionPointDefinition,
+        controlRoutesExtensionPointDefinition,
         tuiPagesExtensionPointDefinition,
         toolCallReviewExtensionPointDefinition,
         toolCallRewriteExtensionPointDefinition,

@@ -2,6 +2,7 @@ import {
     cliModelCommandsSandboxCodec,
     cliNativeCommandsSandboxCodec,
 } from "../control/extension/cli/Sandbox.js";
+import { controlRoutesSandboxCodec } from "../control/extension/Route.js";
 import { tuiPagesSandboxCodec } from "../control/extension/tui/Sandbox.js";
 import {
     toolCallReviewSandboxCodec,
@@ -17,6 +18,7 @@ export function createControlExtensionSandboxPointRegistry(): ExtensionSandboxPo
     return new ExtensionSandboxPointCodecRegistry([
         cliModelCommandsSandboxCodec,
         cliNativeCommandsSandboxCodec,
+        controlRoutesSandboxCodec,
         tuiPagesSandboxCodec,
         toolCallReviewSandboxCodec,
         toolCallRewriteSandboxCodec,

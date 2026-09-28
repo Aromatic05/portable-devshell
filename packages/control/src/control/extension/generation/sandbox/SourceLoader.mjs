@@ -22,6 +22,13 @@ const workspacePackages = new Map([
         ).href,
     ],
     [
+        "@portable-devshell/extension/control",
+        new URL(
+            "../../../../../../extension/src/domain/control.ts",
+            import.meta.url,
+        ).href,
+    ],
+    [
         "@portable-devshell/extension/instance",
         new URL(
             "../../../../../../extension/src/domain/instance.ts",
