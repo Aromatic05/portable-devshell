@@ -7,14 +7,13 @@ import type {
     JsonValue,
     PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
-import {
-    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
-    createError,
-    errorCodes,
-    parseContextMessageDirective,
-} from "@portable-devshell/shared";
+import { ExtensionError } from "@portable-devshell/extension";
 import { randomUUID } from "node:crypto";
 
+import {
+    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
+    parseContextMessageDirective,
+} from "../conversation/ConversationControl.js";
 import { ConversationStore } from "../conversation/store/ConversationStore.js";
 import { CommentState } from "./CommentState.js";
 
@@ -324,8 +323,8 @@ export class CommentService {
 }
 
 function retiredCommentService(instance: string): Error {
-    return createError({
-        code: errorCodes.instanceMissing,
+    return new ExtensionError({
+        code: "control.instanceNotFound",
         details: { instance },
         message: `Instance ${instance} was not found or is disabled.`,
         retryable: false,
@@ -424,8 +423,8 @@ function readCommentListInput(value: JsonValue): ContextMessageListInput {
 }
 
 function invalidRouteInput(message: string): Error {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return new ExtensionError({
+        code: "control.invalidTarget",
         message,
         retryable: false,
     });

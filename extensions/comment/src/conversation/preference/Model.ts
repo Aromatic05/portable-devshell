@@ -1,12 +1,22 @@
-import {
-    CONVERSATION_PREFERENCES_VERSION,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
 } from "@portable-devshell/shared";
 
+export const CONVERSATION_PREFERENCES_VERSION = 1 as const;
 const MAX_KEYS = 10_000;
 const MAX_KEY_LENGTH = 8_192;
 const MAX_TITLE_LENGTH = 120;
+
+export function createEmptyConversationPreferences(): ConversationPreferencesSnapshot {
+    return {
+        hiddenContexts: {},
+        orderByWorkspace: {},
+        titles: {},
+        version: CONVERSATION_PREFERENCES_VERSION,
+        workspaceOrder: [],
+    };
+}
 
 export function parseConversationPreferencesPatch(
     value: unknown,

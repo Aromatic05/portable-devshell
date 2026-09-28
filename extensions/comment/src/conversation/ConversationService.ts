@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { ExtensionError } from "@portable-devshell/extension";
 import type {
     ConversationEntry,
     ConversationListInput,
@@ -104,8 +104,8 @@ export class ConversationService {
 }
 
 function retiredConversationService(instance: string): Error {
-    return createError({
-        code: errorCodes.instanceMissing,
+    return new ExtensionError({
+        code: "control.instanceNotFound",
         details: { instance },
         message: `Instance ${instance} was not found or is disabled.`,
         retryable: false,
@@ -167,8 +167,8 @@ function readConversationListInput(value: JsonValue): ConversationListInput {
 }
 
 function invalidRouteInput(message: string): Error {
-    return createError({
-        code: errorCodes.targetInvalid,
+    return new ExtensionError({
+        code: "control.invalidTarget",
         message,
         retryable: false,
     });

@@ -1,10 +1,9 @@
-import {
-    createError,
-    errorCodes,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
-    type JsonValue,
-    type PrefixRouteModuleDefinition,
+import { ExtensionError } from "@portable-devshell/extension";
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
+    JsonValue,
+    PrefixRouteModuleDefinition,
 } from "@portable-devshell/shared";
 
 import { parseConversationPreferencesPatch } from "./Model.js";
@@ -46,8 +45,8 @@ function readConversationPreferencesPatch(
         return parseConversationPreferencesPatch(value);
     } catch (error) {
         if (!(error instanceof TypeError)) throw error;
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw new ExtensionError({
+            code: "control.invalidTarget",
             message: error.message,
             retryable: false,
         });

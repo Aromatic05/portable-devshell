@@ -1,11 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { parseContextMessageDirective } from "@portable-devshell/shared";
-
 import {
     applyDeliveredControls,
     applyQueuedControl,
     clearConversationControlStates,
+    parseContextMessageDirective,
     type ConversationControlState,
     normalizeConversationControlState,
     writeConversationControlState,

@@ -1,12 +1,22 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import type { ContextMessageRecord } from "@portable-devshell/shared";
-import {
-    CONTEXT_MESSAGE_PUSH_TOOL_BUDGET,
-    parseContextMessageDirective,
-} from "@portable-devshell/shared";
 
 export const CONTROL_STATE_METADATA_PREFIX = "context-control:v1:";
+export const CONTEXT_MESSAGE_PUSH_TOOL_BUDGET = 5;
+
+export function parseContextMessageDirective(text: string): {
+    body: string;
+    directive?: "push" | "resume" | "stop";
+} {
+    const trimmed = text.trimStart();
+    const match = /^#(push|stop|resume)(?:\s+|$)/u.exec(trimmed);
+    if (match === null) return { body: text };
+    return {
+        body: trimmed.slice(match[0].length).trimStart(),
+        directive: match[1] as "push" | "resume" | "stop",
+    };
+}
 
 export interface ConversationControlState {
     pendingPushCommentId?: string;

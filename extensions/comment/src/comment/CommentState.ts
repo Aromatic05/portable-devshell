@@ -2,7 +2,7 @@ import type {
     ContextMessageQueueInput,
     ContextMessageRecord,
 } from "@portable-devshell/shared";
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { ExtensionError } from "@portable-devshell/extension";
 import { randomUUID } from "node:crypto";
 
 const MAX_TERMINAL_MESSAGES = 256;
@@ -160,8 +160,8 @@ function requireText(value: unknown, field: string, maxLength: number): string {
         value.trim().length === 0 ||
         value.length > maxLength
     ) {
-        throw createError({
-            code: errorCodes.targetInvalid,
+        throw new ExtensionError({
+            code: "control.invalidTarget",
             details: { field, maxLength },
             message: `context message ${field} must be non-empty and at most ${maxLength} characters.`,
             retryable: false,

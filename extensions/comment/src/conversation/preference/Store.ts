@@ -2,15 +2,15 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import {
-    createEmptyConversationPreferences,
-    type ConversationPreferencesPatch,
-    type ConversationPreferencesSnapshot,
+import type {
+    ConversationPreferencesPatch,
+    ConversationPreferencesSnapshot,
 } from "@portable-devshell/shared";
 
 import {
     applyPatch,
     clonePreferences,
+    createEmptyConversationPreferences,
     parseConversationPreferencesPatch,
     parseConversationPreferencesSnapshot,
     samePreferences,

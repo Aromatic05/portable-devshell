@@ -1,80 +1,79 @@
 import type { ControlErrorBody } from "@portable-devshell/shared";
-import { errorCodes } from "@portable-devshell/shared";
 import { errorHint, type ToolDiagnosticHint } from "../Hint.js";
 
 const crossToolHints: Record<string, string> = {
-    [errorCodes.coreToolSchedulerFull]: "Wait for tool capacity.",
-    [errorCodes.coreToolQueueTimeout]: "Retry after capacity frees.",
-    [errorCodes.coreToolCallCancelled]:
+    "core.toolSchedulerFull": "Wait for tool capacity.",
+    "core.toolQueueTimeout": "Retry after capacity frees.",
+    "core.toolCallCancelled":
         "Call cancelled; verify whether it started.",
-    [errorCodes.coreApprovalRequired]: "Wait for user approval.",
-    [errorCodes.coreApprovalDenied]: "Do not retry without a new user request.",
-    [errorCodes.coreApprovalExpired]: "Request fresh approval.",
-    [errorCodes.coreApprovalNotFound]: "Refresh approval state.",
-    [errorCodes.coreApprovalAlreadyDecided]: "Refresh approval state.",
-    [errorCodes.coreApprovalPolicyInvalid]: "Fix the approval policy.",
-    [errorCodes.coreToolSchemaUnavailable]:
+    "core.approvalRequired": "Wait for user approval.",
+    "core.approvalDenied": "Do not retry without a new user request.",
+    "core.approvalExpired": "Request fresh approval.",
+    "core.approvalNotFound": "Refresh approval state.",
+    "core.approvalAlreadyDecided": "Refresh approval state.",
+    "core.approvalPolicyInvalid": "Fix the approval policy.",
+    "core.toolSchemaUnavailable":
         "Check tool policy and instance readiness.",
     "mcp.toolSchemaUnavailable": "Check instance readiness and capability.",
-    [errorCodes.coreInstanceNotReady]: "Run devshell instance status.",
-    [errorCodes.coreInstanceBusy]: "Wait, then run devshell instance status.",
-    [errorCodes.coreProviderFailed]: "Inspect provider diagnostics.",
-    [errorCodes.coreWorkerAssetUnavailable]:
+    "core.instanceNotReady": "Run devshell instance status.",
+    "core.instanceBusy": "Wait, then run devshell instance status.",
+    "core.providerFailed": "Inspect provider diagnostics.",
+    "core.workerAssetUnavailable":
         "Verify the target platform and worker asset.",
-    [errorCodes.coreWorkerHandshakeFailed]:
+    "core.workerHandshakeFailed":
         "Check worker logs and protocol version.",
-    [errorCodes.coreWorkerProvisionFailed]: "Inspect provisioning diagnostics.",
-    [errorCodes.coreWorkerRpcDisconnected]:
+    "core.workerProvisionFailed": "Inspect provisioning diagnostics.",
+    "core.workerRpcDisconnected":
         "Verify target state before retrying.",
-    [errorCodes.coreWorkerRpcSpawnFailed]: "Check the worker runtime.",
-    [errorCodes.coreWorkerStartFailed]:
+    "core.workerRpcSpawnFailed": "Check the worker runtime.",
+    "core.workerStartFailed":
         "Run devshell instance status and inspect provider diagnostics.",
-    [errorCodes.coreWorkerStatusFailed]:
+    "core.workerStatusFailed":
         "Inspect provider diagnostics and worker logs.",
-    [errorCodes.coreWorkerStopFailed]:
+    "core.workerStopFailed":
         "Confirm state with devshell instance status.",
-    [errorCodes.coreWorkerTargetProbeFailed]: "Check provider connectivity.",
-    [errorCodes.coreWorkerTargetUnsupported]:
+    "core.workerTargetProbeFailed": "Check provider connectivity.",
+    "core.workerTargetUnsupported":
         "Use a supported provider or target.",
-    [errorCodes.reverseSelfManagedLifecycle]:
+    "reverse.selfManagedLifecycle":
         "Start or stop the worker on the remote machine.",
-    [errorCodes.reverseSelfManagedOffline]:
+    "reverse.selfManagedOffline":
         "Wait for the remote worker to connect.",
-    [errorCodes.reverseTransportUnavailable]: "Check the reverse connection.",
-    [errorCodes.reverseGenerationInvalid]:
+    "reverse.transportUnavailable": "Check the reverse connection.",
+    "reverse.generationInvalid":
         "Use the current connection generation.",
-    [errorCodes.reverseConnectionSuperseded]:
+    "reverse.connectionSuperseded":
         "Reconnect with the active session.",
-    [errorCodes.reverseDeviceCodeInvalid]: "Generate a new enrollment code.",
-    [errorCodes.reverseDeviceCodeExpired]: "Generate a new enrollment code.",
-    [errorCodes.reverseDeviceCodeConsumed]: "Generate a new enrollment code.",
-    [errorCodes.reverseDeviceTokenInvalid]:
+    "reverse.deviceCodeInvalid": "Generate a new enrollment code.",
+    "reverse.deviceCodeExpired": "Generate a new enrollment code.",
+    "reverse.deviceCodeConsumed": "Generate a new enrollment code.",
+    "reverse.deviceTokenInvalid":
         "Re-enroll or rotate the credential.",
-    [errorCodes.reverseDeviceTokenRevoked]:
+    "reverse.deviceTokenRevoked":
         "Re-enroll or rotate the credential.",
-    [errorCodes.reverseInstanceNotReverse]:
+    "reverse.instanceNotReverse":
         "Use reverse operations only on reverse instances.",
-    [errorCodes.reverseFrameInvalid]: "Reconnect the reverse transport.",
-    [errorCodes.streamGap]: "Fetch a fresh snapshot and resubscribe.",
-    [errorCodes.mcpContextExpired]:
+    "reverse.frameInvalid": "Reconnect the reverse transport.",
+    "stream.gap": "Fetch a fresh snapshot and resubscribe.",
+    "mcp.contextExpired":
         "Call environ_info to renew the current Context, adding workspace only if it is not already attached.",
-    [errorCodes.mcpContextDisabled]:
+    "mcp.contextDisabled":
         "Call environ_info with workspace to establish a new active Context.",
-    [errorCodes.mcpContextInstanceMasked]:
+    "mcp.contextInstanceMasked":
         "This instance is permanently unavailable for the lifetime of the current Context; do not retry or attempt to unmask it.",
-    [errorCodes.mcpContextInvalid]:
+    "mcp.contextInvalid":
         "Call environ_info with workspace to establish or recover the current Context.",
-    [errorCodes.mcpContextWorkspaceRequired]:
+    "mcp.contextWorkspaceRequired":
         "Obtain the instance handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.",
-    [errorCodes.targetInvalid]: "Use a valid instance target.",
-    [errorCodes.controlClientIdentityRequired]:
+    "control.invalidTarget": "Use a valid instance target.",
+    "control.clientIdentityRequired":
         "Supply the required client identity.",
-    [errorCodes.controlClientIdentityInvalid]: "Correct the client identity.",
-    [errorCodes.controlModelReplyRequired]:
+    "control.clientIdentityInvalid": "Correct the client identity.",
+    "control.modelReplyRequired":
         "Call todo_report before using more tools.",
-    [errorCodes.controlModelResumed]:
+    "control.modelResumed":
         "Read the resumed user instruction before deciding the next action.",
-    [errorCodes.controlModelStopped]:
+    "control.modelStopped":
         "Do not call tools until the user sends #resume.",
 };
 

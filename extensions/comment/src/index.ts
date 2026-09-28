@@ -1,19 +1,18 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ExtensionError } from "@portable-devshell/extension";
 import type { ExtensionCommentControlDecision } from "@portable-devshell/extension/comment";
 import type { ToolCallReviewInvocation } from "@portable-devshell/extension/toolcall";
-import {
-    createError,
-    errorCodes,
-    type ContextMessageReadResult,
-    type ContextMessageRecord,
-    type ConversationEntry,
-    type ConversationListInput,
-    type InstanceEventType,
-    type JsonValue,
-    type PrefixRouteModuleDefinition,
-    type ToolCallRecord,
+import type {
+    ContextMessageReadResult,
+    ContextMessageRecord,
+    ConversationEntry,
+    ConversationListInput,
+    InstanceEventType,
+    JsonValue,
+    PrefixRouteModuleDefinition,
+    ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -308,8 +307,8 @@ export class CommentExtension {
     #require(instance: string): CommentExtensionInstanceState {
         const state = this.#instances.get(instance);
         if (state !== undefined && state.enabled) return state;
-        throw createError({
-            code: errorCodes.instanceMissing,
+        throw new ExtensionError({
+            code: "control.instanceNotFound",
             details: { instance },
             message: `Instance ${instance} was not found or is disabled.`,
             retryable: false,

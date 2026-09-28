@@ -1,4 +1,4 @@
-import { createError, errorCodes } from "@portable-devshell/shared";
+import { ExtensionError } from "@portable-devshell/extension";
 
 export const COMMENT_REPORT_BUCKET_CAPACITY = 2;
 export const COMMENT_REPORT_REFILL_INTERVAL_MS = 30_000;
@@ -24,8 +24,8 @@ export function refillBucket(
 }
 
 export function duplicateReportError(ctxId: string): Error {
-    return createError({
-        code: errorCodes.todoInvalid,
+    return new ExtensionError({
+        code: "todo.invalid",
         details: { ctxId, reason: "duplicate" },
         message:
             "todo_report rejected an unchanged consecutive report. Continue useful work until there is new information.",
@@ -34,8 +34,8 @@ export function duplicateReportError(ctxId: string): Error {
 }
 
 export function todoUseOtherToolsError(): Error {
-    return createError({
-        code: errorCodes.todoInvalid,
+    return new ExtensionError({
+        code: "todo.invalid",
         details: { action: "use_other_tools" },
         message:
             "You have performed too many useless operations. Use other tools.",
