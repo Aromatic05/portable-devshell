@@ -51,7 +51,7 @@ importers:
         version: link:../../packages/extension
 
   extensions/agent:
-    dependencies:
+    devDependencies:
       '@agentclientprotocol/sdk':
         specifier: 1.4.0
         version: 1.4.0(zod@4.6.2)

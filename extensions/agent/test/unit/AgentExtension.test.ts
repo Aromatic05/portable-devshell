@@ -27,16 +27,13 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     const manifest = parseExtensionManifest(
         JSON.parse(
             await readFile(
-                new URL(
-                    "../../src/builtin/devshell-extension.json",
-                    import.meta.url,
-                ),
+                new URL("../../devshell-extension.json", import.meta.url),
                 "utf8",
             ),
         ),
     );
     assert.equal(manifest.id, "agent");
-    assert.equal(manifest.entry, "index.ts");
+    assert.equal(manifest.entry, "dist/builtin/index.js");
     assert.equal(manifest.apiVersion, "4.2.0");
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
@@ -414,7 +411,9 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
             | ((
                   request: { kind: "read" },
                   context: { requestId: string; signal: AbortSignal },
-              ) => Promise<{ tables: Array<{ id: string; rows: unknown[] }> }>)
+              ) => Promise<{
+                  tables: Array<{ id: string; rows: Array<{ id: string }> }>;
+              }>)
             | undefined;
         assert.ok(webPage);
         const webSnapshot = await webPage(
@@ -423,7 +422,7 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
         );
         assert.equal(webSnapshot.tables[0]?.id, "providers");
         assert.deepEqual(
-            webSnapshot.tables[0]?.rows.map((row: any) => row.id),
+            webSnapshot.tables[0]?.rows.map((row) => row.id),
             ["opencode", "pi"],
         );
 
@@ -439,7 +438,7 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
                       requestId: string;
                       signal: AbortSignal;
                   },
-              ) => Promise<{ items: unknown[] }>)
+              ) => Promise<{ items: Array<{ id: string }> }>)
             | undefined;
         assert.ok(tuiPage);
         const tuiSnapshot = await tuiPage(
@@ -447,7 +446,7 @@ test("Agent Extension activation binds separate CLI, Web, and TUI management sur
             { localOwner: true, requestId: "tui-read", signal },
         );
         assert.deepEqual(
-            tuiSnapshot.items.map((item: any) => item.id),
+            tuiSnapshot.items.map((item) => item.id),
             ["opencode", "pi"],
         );
         await assert.rejects(

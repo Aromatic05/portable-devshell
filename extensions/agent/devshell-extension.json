@@ -5,7 +5,7 @@
     "id": "agent",
     "name": "portable-devshell Agent",
     "version": "0.1.3",
-    "entry": "index.ts",
+    "entry": "dist/builtin/index.js",
     "capabilities": ["delegatedWorkers", "processes"],
     "extensions": {
         "cli.native-commands": [

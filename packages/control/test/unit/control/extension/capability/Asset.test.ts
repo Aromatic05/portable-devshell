@@ -22,7 +22,7 @@ async function harness(t: test.TestContext) {
     const dataDirectory = join(root, "data");
     await mkdir(source, { recursive: true });
     await writeFile(join(source, "payload.txt"), "provider payload\n", "utf8");
-    const bundle = join(root, "provider.dsprovider");
+    const bundle = join(root, "payload.bundle");
     await createArtifactDirectoryArchive(source, bundle);
     return { bundle, dataDirectory, root, source };
 }
@@ -81,7 +81,7 @@ test("Extension assets refuse undeclared access and symlink sources", async (t) 
         /did not declare the assets capability/u,
     );
 
-    const link = join(h.root, "provider-link.dsprovider");
+    const link = join(h.root, "payload-link.bundle");
     await symlink(h.bundle, link);
     const allowed = new ExtensionAssetCapabilityControl({
         allowed: true,

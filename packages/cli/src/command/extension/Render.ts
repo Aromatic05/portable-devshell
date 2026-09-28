@@ -6,8 +6,8 @@ import type {
 export function renderExtensionUsage(): string {
     return [
         "Usage:",
-        "  devshell extension install <bundle-or-directory>",
-        "  devshell extension update <bundle-or-directory>",
+        "  devshell extension install <bundle-or-directory|npm:package>",
+        "  devshell extension update <bundle-or-directory|npm:package>",
         "  devshell extension remove <extensionId> [--purge]",
         "  devshell extension list [--json]",
         "  devshell extension inspect <extensionId>",

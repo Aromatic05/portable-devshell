@@ -28,7 +28,9 @@ test("Agent Extension source package owns provider adapters without separate Age
             "utf8",
         ),
     );
-    assert.equal(agentExtension.dependencies.diff, "9.0.0");
+    assert.equal(agentExtension.private, false);
+    assert.equal(agentExtension.devDependencies.diff, "9.0.0");
+    assert.equal(agentExtension.dependencies, undefined);
     await assert.rejects(
         readFile(new URL("packages/agentd/package.json", repoRoot), "utf8"),
     );
@@ -59,7 +61,7 @@ test("thin Agent Extension payload guard rejects private node_modules and bundle
     await rm(join(root, "node_modules"), { force: true, recursive: true });
     await mkdir(join(root, "bundled-providers"), { recursive: true });
     await writeFile(
-        join(root, "bundled-providers", "pi.dsprovider"),
+        join(root, "bundled-providers", "legacy-provider.bundle"),
         "legacy\n",
         "utf8",
     );
@@ -78,13 +80,12 @@ test("thin Agent Extension shaping keeps provider adapter code and removes deplo
         "export {};\n",
         "utf8",
     );
-    await mkdir(join(root, "dist", "builtin"), { recursive: true });
     await writeFile(
-        join(root, "dist", "builtin", "devshell-extension.json"),
+        join(root, "devshell-extension.json"),
         JSON.stringify({
             apiVersion: 2,
             capabilities: ["command"],
-            entry: "index.js",
+            entry: "dist/builtin/index.js",
             id: "agent",
             name: "portable-devshell Agent",
             schemaVersion: 1,
@@ -116,9 +117,7 @@ test("thin Agent Extension shaping keeps provider adapter code and removes deplo
         await readFile(join(root, "package.json"), "utf8"),
     );
     assert.equal(manifest.name, "@portable-devshell/agent-extension");
-    assert.deepEqual(Object.keys(manifest.dependencies).sort(), [
-        "@portable-devshell/extension",
-    ]);
+    assert.deepEqual(Object.keys(manifest.dependencies).sort(), []);
     const extensionManifest = JSON.parse(
         await readFile(join(root, "devshell-extension.json"), "utf8"),
     );

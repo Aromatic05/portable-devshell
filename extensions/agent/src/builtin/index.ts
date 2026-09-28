@@ -63,7 +63,6 @@ export async function activate(context: ExtensionContext): Promise<void> {
     const packageInstaller = new AgentProviderPackageInstaller(processes);
     const definitions = createProviderDefinitions(context, packageInstaller);
     const providerRegistry = new AgentProviderRegistry();
-    let runtime: AgentExtensionRuntime | undefined;
     const providerManager: AgentProviderManager = new AgentProviderManager({
         definitions,
         isProviderInUse: (id) => runtime?.isProviderInUse(id) ?? false,
@@ -71,12 +70,12 @@ export async function activate(context: ExtensionContext): Promise<void> {
         runtimeRootDirectory: context.paths.stateDirectory,
         store: providerStore,
     });
-    await providerManager.initialize();
-    runtime = new AgentExtensionRuntime(context, {
+    const runtime = new AgentExtensionRuntime(context, {
         registry: providerRegistry,
         resolveProvider: async (requested) =>
             await providerManager.resolveProvider(requested),
     });
+    await providerManager.initialize();
     activeRuntime = runtime;
     context.register(
         nativeCommands,

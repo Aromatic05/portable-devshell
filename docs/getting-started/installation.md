@@ -76,37 +76,31 @@ devshell status
 
 ### 安装 Agent Extension
 
-Agent 不属于 Control builtin Extension。需要 Agent 时，再从同一 Release 安装公共 Agent Extension。Agent Extension 自带一个通过标准 Agent Provider ABI 安装的 Pi Provider，因此首次安装后即可直接使用；Pi 不属于 portable-devshell 主程序。
+Agent 不属于 Control builtin Extension，也不属于 portable-devshell Core Release。Agent Extension 使用独立版本和发布生命周期，由客户端从 npm 安装；`.dsext` 仍是通用 Extension archive 格式，但 Core Release 不再按平台发布 Agent `.dsext`。
 
 ```bash
-base=https://github.com/Aromatic05/portable-devshell/releases/latest/download
-target=linux-x64
-curl -fLO "$base/portable-devshell-agent-$target.dsext"
-curl -fLO "$base/portable-devshell-agent-$target.dsext.sha256"
-
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c "portable-devshell-agent-$target.dsext.sha256"
-else
-  shasum -a 256 -c "portable-devshell-agent-$target.dsext.sha256"
-fi
-
 devshell start
-devshell extension install "$PWD/portable-devshell-agent-$target.dsext"
+devshell extension install npm:@portable-devshell/agent-extension
 devshell agent provider list
-devshell agent provider default
+devshell agent provider install pi
+devshell agent provider default pi
 pi --version
 ```
 
-首次安装时，若用户此前没有 Pi Provider 记录，Agent Extension 会 ensure-install 随包 Pi，并将首个可用 Provider 设为默认；同时由 Agent Extension 发布 `pi` 用户命令。若该路径已经存在非 portable-devshell 所有的 `pi`，Agent Extension 不会覆盖它。旧版本由 portable-devshell 主程序创建的 Pi launcher 会在 Agent 安装时迁移为 Agent-owned launcher。如果 Pi Provider 已安装或用户已经升级到更新 generation，升级 Agent Extension 不会强制覆盖或降级它。
-
-其他 Provider 仍独立安装。例如下载当前平台的 `.dsprovider` 后：
+`npm:` 是通用 Extension 安装源，不是 Agent 专用语法。CLI 在客户端临时 materialize npm package，再交给现有 Extension install/update 生命周期完成 generation 校验和原子切换。更新 Agent Extension：
 
 ```bash
-devshell agent provider install "$PWD/portable-devshell-agent-provider-opencode-linux-x64.dsprovider"
+devshell extension update npm:@portable-devshell/agent-extension
+```
+
+Provider 不再使用独立 `.dsprovider` artifact。Agent Extension 只携带 provider adapter；`provider install` 在客户端把对应第三方 runtime 安装到 Provider 自己的 versioned prefix，由 npm 在实际运行机器上解析 OS/architecture 依赖：
+
+```bash
+devshell agent provider install opencode
 devshell agent provider default opencode
 ```
 
-`target` 可取 `linux-x64`、`linux-arm64`、`darwin-x64`、`darwin-arm64`、`windows-x64` 或 `windows-arm64`。由于 Agent Extension 内含可离线引导 Pi runtime 的 Provider seed，`.dsext` 按目标平台发布；这不改变 Provider ABI，其他 Provider 仍可独立安装。随 Agent Extension 提供的 Provider 可用 `devshell agent provider bundled` 查看，并可用 `devshell agent provider install <id>` 重新 ensure-install；外部 Provider bundle 使用绝对路径安装。Provider 显式更新使用 `devshell agent provider update <absolute-bundle-path>`。
+Provider 显式更新使用 `devshell agent provider update <id>`。Pi 的 provider prefix 只负责首次引导；Pi 自己的 stable managed install 和后续更新仍独立于 Agent Extension/provider adapter 版本。若 `~/.local/bin/pi` 已经是非 portable-devshell 所有的命令，Agent Extension 不会覆盖它；旧版本由 portable-devshell 主程序创建的 Pi launcher 仍按兼容迁移处理。
 
 ## 从源码安装
 
@@ -143,11 +137,11 @@ pnpm install:local
 ~/.local/share/portable-devshell/current/
 ~/.local/share/portable-devshell/versions/<version>/
 ~/.local/share/portable-devshell/extensions/agent/<generation>/
-~/.local/share/portable-devshell/extension-data/agent/bundles/<provider-generation>/
 ~/.devshell/bin/devshell-worker
 ~/.devshell/bin/devshell-worker-<host-target>
 ~/.devshell/workers/<target>/<sha256>/devshell-worker
 ~/.devshell/release-cache/workers/<tag>/<target>/<sha256>/devshell-worker
+~/.devshell/control/extensions/state/agent/providers/<provider>/prefix/<version>/
 ~/.devshell/control/extensions/state/agent/providers/pi/install/
 ~/.devshell/control/extensions/state/agent/providers/pi/state/pi/
 ~/.local/bin/pi  # 仅安装 Agent Extension 后，由 Agent 发布
@@ -209,7 +203,7 @@ rm -f ~/.local/bin/devshell
 rm -rf ~/.local/share/portable-devshell
 ```
 
-主程序安装和卸载都不会接管已有的 `pi` 命令；`pi` 的发布属于 Agent Extension。Agent Extension code/provider bundles 位于 portable-devshell 的 Extension data 目录，Provider 的稳定 runtime/state 位于 `~/.devshell/control/extensions/state/agent/`。如果已经安装 Agent，还应通过 Extension 生命周期卸载 Agent；不要把删除主程序目录当作 Agent runtime/state 的完整卸载。自定义安装路径时，上述卸载命令也应替换成对应路径。
+主程序安装和卸载都不会接管已有的 `pi` 命令；`pi` 的发布属于 Agent Extension。Agent Extension code generation 位于 portable-devshell 的 Extension data 目录，Provider 的客户端 runtime/state 位于 `~/.devshell/control/extensions/state/agent/`。如果已经安装 Agent，还应通过 Extension 生命周期卸载 Agent；不要把删除主程序目录当作 Agent runtime/state 的完整卸载。自定义安装路径时，上述卸载命令也应替换成对应路径。
 
 Windows PowerShell：
 

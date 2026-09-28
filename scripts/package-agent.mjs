@@ -108,21 +108,11 @@ async function removeNodeModulesDeploymentMetadata(directory) {
  */
 export async function shapeThinAgentExtensionTree(root) {
     const builtinManifest = JSON.parse(
-        await readFile(
-            join(root, "dist", "builtin", "devshell-extension.json"),
-            "utf8",
-        ),
-    );
-    await writeFile(
-        join(root, "devshell-extension.json"),
-        `${JSON.stringify({ ...builtinManifest, entry: "dist/builtin/index.js" }, null, 4)}\n`,
-        "utf8",
+        await readFile(join(root, "devshell-extension.json"), "utf8"),
     );
     await rm(join(root, "node_modules"), { force: true, recursive: true });
     await rewriteDeploymentPackage(root, {
-        dependencies: {
-            "@portable-devshell/extension": "workspace:*",
-        },
+        dependencies: {},
         entry: "./dist/index.js",
         name: "@portable-devshell/agent-extension",
         version: builtinManifest.version,
@@ -175,6 +165,10 @@ async function rewriteDeploymentPackage(root, options) {
         },
     };
     manifest.dependencies = options.dependencies;
+    delete manifest.devDependencies;
+    delete manifest.files;
+    delete manifest.publishConfig;
+    delete manifest.scripts;
     await writeFile(path, `${JSON.stringify(manifest, null, 4)}\n`, "utf8");
 }
 

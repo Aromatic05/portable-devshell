@@ -164,6 +164,7 @@ export class AgentProviderPackageInstaller {
         const child = await this.#processes.start({
             args: [
                 "install",
+                "--ignore-scripts",
                 "--omit=dev",
                 "--no-audit",
                 "--no-fund",

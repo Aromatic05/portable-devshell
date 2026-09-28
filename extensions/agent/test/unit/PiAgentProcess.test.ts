@@ -372,6 +372,7 @@ function startOptions(
         agentDirectory: join(base.runtimeDirectory, "user-pi-state"),
         localCwd: join(base.runtimeDirectory, "agents", agentId, "cwd"),
         managedInstallRoot: join(base.runtimeDirectory, "managed-pi"),
+        moduleRoot: base.runtimeDirectory,
         processes: nodeProcessCapability(),
         target,
         tools,
@@ -387,6 +388,7 @@ function webOptions(base: {
         ...base,
         agentDirectory: join(base.runtimeDirectory, "user-pi-state"),
         managedInstallRoot: join(base.runtimeDirectory, "managed-pi"),
+        moduleRoot: base.runtimeDirectory,
         processes: nodeProcessCapability(),
     };
 }

@@ -85,6 +85,7 @@ test("OpenCode process uses the provider-neutral Agent tool input and result pro
                 "ag-opencode-tools",
                 "cwd",
             ),
+            moduleRoot: runtimeDirectory,
             processes: nodeProcessCapability(),
             stateDirectory: runtimeDirectory,
             target,

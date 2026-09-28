@@ -213,7 +213,7 @@ export class AgentProviderManager {
     async enable(id: string): Promise<AgentProviderManagementRecord> {
         return await this.#exclusive(async () => {
             const before = await this.#store.read();
-            const entry = requireEntry(before, id);
+            requireEntry(before, id);
             const definition = this.#requireDefinition(id);
             const runtime = this.#runtime(definition);
             if (!(await definition.isInstalled(runtime))) {

@@ -34,6 +34,7 @@ test("Provider runtime dependencies install on the client and are reused until u
     assert.equal(h.starts[0]?.command, process.platform === "win32" ? "npm.cmd" : "npm");
     assert.deepEqual(h.starts[0]?.args, [
         "install",
+        "--ignore-scripts",
         "--omit=dev",
         "--no-audit",
         "--no-fund",
