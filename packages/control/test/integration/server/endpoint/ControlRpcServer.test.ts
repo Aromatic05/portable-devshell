@@ -437,7 +437,14 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
         preferencesFile: join(directory, "conversation-preferences.json"),
     });
     const routes = new ControlRouteComposition({
-        comment: comment.routes,
+        extensionRoutes: {
+            modules(scope) {
+                return scope === "control" ? comment.routes.control() : [];
+            },
+            onChange() {
+                return () => undefined;
+            },
+        },
         instances: new InstanceRegistry([]),
         shutdown() {},
     });

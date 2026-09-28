@@ -59,19 +59,19 @@ import {
     type WebPagePort,
 } from "../server/web/extension/application/Route.js";
 
-export interface ControlRouteCommentPort {
-    control(): readonly PrefixRouteModuleDefinition[];
-    instance(instance: string): readonly PrefixRouteModuleDefinition[];
+export interface ControlRouteExtensionPort {
+    modules(scope: "control" | "instance"): readonly PrefixRouteModuleDefinition[];
+    onChange(listener: () => void): () => void;
 }
 
 export interface ControlRouteCompositionOptions {
     artifact?: ArtifactService;
     cliCommands?: CliCommandPort;
-    comment?: ControlRouteCommentPort;
     config?: ConfigEditorPort;
     contextAdmin?: () => ContextAdminPort | undefined;
     debug?: DebugPatchPort;
     extension?: ExtensionControlPort;
+    extensionRoutes?: ControlRouteExtensionPort;
     instanceCreate?: InstanceCreatePort;
     configuredInstances?: InstanceRouteModuleOptions["configuredInstances"];
     instances: InstanceRegistry;
@@ -94,6 +94,7 @@ export class ControlRouteComposition {
     readonly #options: ControlRouteCompositionOptions;
     readonly #subscriptions: RuntimeSubscriptionManager;
     readonly #terminals = new TerminalSessionService();
+    readonly #unsubscribeExtensions: () => void;
     readonly #unsubscribeInstances: () => void;
     #snapshot: PrefixRouteSnapshot;
 
@@ -108,6 +109,10 @@ export class ControlRouteComposition {
                 oauthApprovals: options.oauthApprovals,
             });
         this.#snapshot = this.#build();
+        this.#unsubscribeExtensions =
+            options.extensionRoutes?.onChange(() => {
+                this.#snapshot = this.#build();
+            }) ?? (() => undefined);
         this.#unsubscribeInstances = options.instances.onChange(() => {
             this.#snapshot = this.#build();
         });
@@ -126,6 +131,7 @@ export class ControlRouteComposition {
     }
 
     dispose(): void {
+        this.#unsubscribeExtensions();
         this.#unsubscribeInstances();
         this.#terminals.close();
     }
@@ -177,7 +183,7 @@ export class ControlRouteComposition {
                             })),
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
-                    ...(this.#options.comment?.control() ?? []),
+                    ...(this.#options.extensionRoutes?.modules("control") ?? []),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
                         configuredInstances: this.#options.configuredInstances,
@@ -204,7 +210,7 @@ export class ControlRouteComposition {
                     this.#options.instances,
                     this.#subscriptions,
                 ),
-                ...(this.#options.comment?.instance(descriptor.name) ?? []),
+                ...(this.#options.extensionRoutes?.modules("instance") ?? []),
                 createGoalRouteModule(descriptor),
                 createTodoRouteModule(descriptor, this.#subscriptions),
                 createToolRouteModule(

@@ -7,6 +7,11 @@ import {
     type ExtensionContext,
     type ExtensionJsonValue,
 } from "@portable-devshell/extension";
+import {
+    routes as controlRoutes,
+    type ControlRouteBinding,
+    type ControlRouteScope,
+} from "@portable-devshell/extension/control";
 import type { ExtensionInstanceRuntimeCapability } from "@portable-devshell/extension/instance";
 import {
     review,
@@ -411,6 +416,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
         await source.refresh();
         return await binding(input, invocation);
     });
+    registerCommentRoutes(context, source, comment);
     builtinRuntime = { comment, source };
 }
 
@@ -501,6 +507,98 @@ export function createCommentReview(
             );
         }
         return result;
+    };
+}
+
+function registerCommentRoutes(
+    context: ExtensionContext,
+    source: BuiltinCommentInstanceSource,
+    comment: CommentExtension,
+): void {
+    for (const route of [
+        {
+            id: "context-message-list",
+            module: "contextMessage",
+            operation: "list",
+            scope: "instance",
+        },
+        {
+            id: "context-message-queue",
+            module: "contextMessage",
+            operation: "queue",
+            scope: "instance",
+        },
+        {
+            id: "conversation-list",
+            module: "conversation",
+            operation: "list",
+            scope: "instance",
+        },
+        {
+            id: "conversation-preferences",
+            module: "conversation",
+            operation: "preferences",
+            scope: "control",
+        },
+        {
+            id: "conversation-update-preferences",
+            module: "conversation",
+            operation: "updatePreferences",
+            scope: "control",
+        },
+    ] as const) {
+        context.register(
+            controlRoutes,
+            route.id,
+            createCommentRouteBinding(source, comment, route),
+        );
+    }
+}
+
+function createCommentRouteBinding(
+    source: BuiltinCommentInstanceSource,
+    comment: CommentExtension,
+    route: {
+        readonly module: string;
+        readonly operation: string;
+        readonly scope: ControlRouteScope;
+    },
+): ControlRouteBinding {
+    return async (request, invocation) => {
+        await source.refresh();
+        const modules =
+            route.scope === "control"
+                ? comment.routes.control()
+                : comment.routes.instance(invocation.destination);
+        const module = modules.find(
+            (candidate) => candidate.name === route.module,
+        );
+        const operation = module?.operations.find(
+            (candidate) => candidate.name === route.operation,
+        );
+        if (operation === undefined) {
+            throw new ExtensionError({
+                code: "control.methodNotFound",
+                details: {
+                    destination: invocation.destination,
+                    module: route.module,
+                    operation: route.operation,
+                },
+                message: `Comment route ${route.module}.${route.operation} is unavailable for ${invocation.destination}.`,
+                retryable: false,
+            });
+        }
+        return (await operation.handle(
+            {
+                id: invocation.requestId,
+                name: route.operation,
+                ...(request.payload === undefined
+                    ? {}
+                    : { payload: request.payload as unknown as JsonValue }),
+                ...(request.seq === undefined ? {} : { seq: request.seq }),
+            },
+            undefined as never,
+        )) as unknown as ExtensionJsonValue | undefined;
     };
 }
 

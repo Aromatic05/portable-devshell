@@ -10,6 +10,38 @@
         "instanceRuntime"
     ],
     "extensions": {
+        "control.routes": [
+            {
+                "id": "context-message-list",
+                "module": "contextMessage",
+                "operation": "list",
+                "scope": "instance"
+            },
+            {
+                "id": "context-message-queue",
+                "module": "contextMessage",
+                "operation": "queue",
+                "scope": "instance"
+            },
+            {
+                "id": "conversation-list",
+                "module": "conversation",
+                "operation": "list",
+                "scope": "instance"
+            },
+            {
+                "id": "conversation-preferences",
+                "module": "conversation",
+                "operation": "preferences",
+                "scope": "control"
+            },
+            {
+                "id": "conversation-update-preferences",
+                "module": "conversation",
+                "operation": "updatePreferences",
+                "scope": "control"
+            }
+        ],
         "toolcall.review": [
             {
                 "id": "comment"

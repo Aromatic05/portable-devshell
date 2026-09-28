@@ -18,6 +18,7 @@ import { TuiExtensionPageService } from "../../control/extension/tui/Route.js";
 import { ModelDevshellBroker } from "../../control/extension/cli/command/ModelBroker.js";
 import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
 import { ExtensionControlService } from "../../control/extension/Service.js";
+import { ControlExtensionRouteService } from "../../control/extension/Route.js";
 import { WebApplicationCatalog } from "../../server/web/extension/application/Catalog.js";
 import { WebExtensionPageService } from "../../server/web/extension/page/Service.js";
 import type { ExtensionHost } from "../../control/extension/Host.js";
@@ -38,17 +39,13 @@ import { ControlWebSessionService } from "../../server/web/auth/Session.js";
 import { ControlWebSocketAccessService } from "../../server/web/auth/Access.js";
 import { ControlWebSocketListener } from "../../server/web/Socket.js";
 import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
-import {
-    ControlRouteComposition,
-    type ControlRouteCommentPort,
-} from "../Route.js";
+import { ControlRouteComposition } from "../Route.js";
 import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
 import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 
 interface ControlRuntimeComment {
-    readonly routes: ControlRouteCommentPort;
     close(): Promise<void>;
     retireInstance(instance: string, reason: string): Promise<void>;
 }
@@ -156,7 +153,6 @@ export class ControlRuntime {
             cliCommands: new CliExtensionCommandService(this.#extensions, {
                 surface: "native",
             }),
-            comment: this.#comment.routes,
             config: options.mcp.configEditor,
             ...(options.config === undefined
                 ? {}
@@ -164,6 +160,7 @@ export class ControlRuntime {
             contextAdmin: () => options.mcp.host?.contextAdmin,
             debug: this.#debug,
             extension: this.#extensionControl,
+            extensionRoutes: new ControlExtensionRouteService(this.#extensions),
             instanceCreate: options.mcp.instanceCreate,
             instances: options.instances,
             mcpStatus: () => options.mcp.status(),
