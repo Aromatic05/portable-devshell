@@ -1,5 +1,6 @@
 import type { ControlErrorBody } from "@portable-devshell/shared";
 import type { JsonValue } from "@portable-devshell/shared";
+import type { ToolCallRewriteInvocation } from "@portable-devshell/extension/toolcall";
 import { crossToolErrorHints } from "./tool/Error.js";
 import { errorHint, type ToolDiagnosticHint } from "./Hint.js";
 import { artifactControlErrorHints } from "./tool/control/Artifact.js";
@@ -96,4 +97,31 @@ export function resolveErrorHints(
         );
     }
     return hints;
+}
+
+export function resolveToolCallHints(
+    input: ToolCallRewriteInvocation,
+): ToolDiagnosticHint[] {
+    if (input.direction !== "outbound") return [];
+    if (input.kind === "result")
+        return resolveResultHints(input.toolName, input.payload as JsonValue);
+    if (input.kind !== "error") return [];
+    const body = readErrorBody(input.payload as JsonValue);
+    return body === undefined ? [] : resolveErrorHints(input.toolName, body);
+}
+
+function readErrorBody(value: JsonValue): ControlErrorBody | undefined {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return undefined;
+    const error = value.error;
+    if (typeof error !== "object" || error === null || Array.isArray(error))
+        return undefined;
+    if (
+        typeof error.code !== "string" ||
+        typeof error.message !== "string" ||
+        typeof error.retryable !== "boolean"
+    ) {
+        return undefined;
+    }
+    return error as unknown as ControlErrorBody;
 }

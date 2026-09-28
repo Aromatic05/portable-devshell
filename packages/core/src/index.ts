@@ -1,6 +1,10 @@
 export { ToolCallBoundarySequence } from "./toolcall/boundary/Sequence.js";
 export type { ToolCallBoundaryLease, ToolCallBoundaryProvider } from "./toolcall/boundary/Sequence.js";
 export type { ToolCallBoundaryContext } from "./toolcall/boundary/Review.js";
+export {
+    attachToolCallErrorPayload,
+    readToolCallErrorPayload,
+} from "./toolcall/ErrorPayload.js";
 export type {
     ToolCallReview,
     ToolCallReviewInput,

@@ -41,12 +41,11 @@ export interface ToolCallReviewError {
 
 export interface ToolCallReviewResult {
     /**
-     * Admission decision for inbound calls. Outbound review is feedback-only;
-     * its decision does not change an already-established ToolCall outcome.
+     * Admission decision for inbound calls. An outbound review decision does
+     * not change an already-established ToolCall outcome.
      */
     readonly decision: ToolCallReviewDecision;
     readonly error?: ToolCallReviewError;
-    readonly feedback?: readonly string[];
     readonly reason?: string;
 }
 
@@ -72,19 +71,19 @@ export interface ToolCallRewriteContext {
 }
 
 export interface ToolCallRewriteInvocation {
+    readonly callId: string;
     readonly context: ToolCallContext;
     readonly direction: ToolCallDirection;
     readonly kind: ToolCallPayloadKind;
-    readonly path: readonly (number | string)[];
+    readonly payload: ExtensionJsonValue;
     readonly signal: AbortSignal;
-    readonly text: string;
     readonly toolName: string;
 }
 
 export type ToolCallRewriteBinding = (
     input: ToolCallRewriteInvocation,
     context: ToolCallRewriteContext,
-) => Promise<string> | string;
+) => Promise<ExtensionJsonValue> | ExtensionJsonValue;
 
 export const review = defineExtensionPoint<
     ToolCallExtensionDeclaration,

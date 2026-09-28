@@ -69,9 +69,7 @@ export const toolCallRewriteSandboxCodec: ExtensionSandboxPointCodec =
                 decodeRewriteInvocation(input, signal),
                 createSandboxRewriteContext(context),
             );
-            if (typeof result !== "string")
-                throw new TypeError("ToolCall rewrite binding must return a string.");
-            return result;
+            return readJson(result, "rewrite result");
         },
     });
 
@@ -107,7 +105,7 @@ export function createToolCallRewriteSandboxBinding(
     return async (
         input: ToolCallRewriteInvocation,
         invocation: ToolCallRewriteContext,
-    ): Promise<string> => {
+    ): Promise<ExtensionJsonValue> => {
         const result = await bridge.invokeBinding(
             rewrite.id,
             context.id,
@@ -117,9 +115,7 @@ export function createToolCallRewriteSandboxBinding(
                 signal: input.signal,
             },
         );
-        if (typeof result !== "string")
-            throw new TypeError("ToolCall rewrite sandbox result must be a string.");
-        return result;
+        return readJson(result as ExtensionJsonValue | undefined, "rewrite result");
     };
 }
 
@@ -166,11 +162,11 @@ function decodeReviewInvocation(
 
 function encodeRewriteInvocation(input: ToolCallRewriteInvocation): ExtensionJsonValue {
     return {
+        callId: input.callId,
         context: encodeContext(input.context),
         direction: input.direction,
         kind: input.kind,
-        path: [...input.path],
-        text: input.text,
+        payload: input.payload,
         toolName: input.toolName,
     };
 }
@@ -181,12 +177,12 @@ function decodeRewriteInvocation(
 ): ToolCallRewriteInvocation {
     const value = readRecord(input, "ToolCall rewrite invocation");
     return Object.freeze({
+        callId: readString(value.callId, "callId"),
         context: decodeContext(value.context),
         direction: readDirection(value.direction),
         kind: readKind(value.kind),
-        path: readPath(value.path),
+        payload: readJson(value.payload, "payload"),
         signal,
-        text: readString(value.text, "text"),
         toolName: readString(value.toolName, "toolName"),
     });
 }
@@ -205,9 +201,6 @@ function encodeReviewResult(result: ToolCallReviewResult): ExtensionJsonValue {
                           : { details: decoded.error.details }),
                   },
               }),
-        ...(decoded.feedback === undefined
-            ? {}
-            : { feedback: [...decoded.feedback] }),
         ...(decoded.reason === undefined ? {} : { reason: decoded.reason }),
     };
 }
@@ -217,21 +210,6 @@ function decodeReviewResult(value: unknown): ToolCallReviewResult {
     const decision = record.decision;
     if (decision !== "accept" && decision !== "approve" && decision !== "reject")
         throw new TypeError("ToolCall review decision is invalid.");
-    const feedbackValue = record.feedback;
-    let feedback: readonly string[] | undefined;
-    if (feedbackValue !== undefined) {
-        if (
-            !Array.isArray(feedbackValue) ||
-            !feedbackValue.every(
-                (entry) => typeof entry === "string" && entry.length > 0,
-            )
-        ) {
-            throw new TypeError(
-                "ToolCall review feedback must contain non-empty strings.",
-            );
-        }
-        feedback = Object.freeze([...feedbackValue]);
-    }
     const reason = record.reason;
     if (reason !== undefined && typeof reason !== "string")
         throw new TypeError("ToolCall review reason must be a string.");
@@ -261,7 +239,6 @@ function decodeReviewResult(value: unknown): ToolCallReviewResult {
     return Object.freeze({
         decision,
         ...(error === undefined ? {} : { error }),
-        ...(feedback === undefined ? {} : { feedback }),
         ...(reason === undefined ? {} : { reason }),
     });
 }
@@ -307,16 +284,6 @@ function readKind(value: ExtensionJsonValue | undefined): ToolCallPayloadKind {
     if (value === "call" || value === "error" || value === "progress" || value === "result")
         return value;
     throw new TypeError("ToolCall payload kind is invalid.");
-}
-
-function readPath(value: ExtensionJsonValue | undefined): readonly (number | string)[] {
-    if (!Array.isArray(value)) throw new TypeError("ToolCall rewrite path must be an array.");
-    const result = value.map((entry) => {
-        if (typeof entry === "string") return entry;
-        if (typeof entry === "number" && Number.isSafeInteger(entry)) return entry;
-        throw new TypeError("ToolCall rewrite path entries must be strings or integers.");
-    });
-    return Object.freeze(result);
 }
 
 function readJson(value: ExtensionJsonValue | undefined, field: string): ExtensionJsonValue {

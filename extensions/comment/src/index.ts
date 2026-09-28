@@ -19,9 +19,12 @@ import {
 } from "@portable-devshell/extension/mcp";
 import {
     review,
+    rewrite,
     type ToolCallReviewBinding,
     type ToolCallReviewInvocation,
     type ToolCallReviewResult,
+    type ToolCallRewriteBinding,
+    type ToolCallRewriteInvocation,
 } from "@portable-devshell/extension/toolcall";
 import type {
     ContextMessageReadResult,
@@ -45,7 +48,8 @@ import {
 import { createConversationPreferenceRouteModule } from "./conversation/preference/Route.js";
 import { ConversationPreferenceStore } from "./conversation/preference/Store.js";
 import { ConversationStore } from "./conversation/store/ConversationStore.js";
-import { resolveToolCallFeedback } from "./hint/Feedback.js";
+import { resolveToolCallHints } from "./hint/Resolver.js";
+import { mergeComments } from "./comment/Merge.js";
 import { CommentReportService } from "./comment/report/Service.js";
 
 export type CommentControlDecision =
@@ -105,7 +109,6 @@ export interface CommentPort {
         ctxId: string,
         reason: string,
     ): Promise<ContextMessageRecord[]>;
-    feedback(input: ToolCallReviewInvocation): readonly string[];
     pendingReport(
         instance: string,
         ctxId: string,
@@ -193,7 +196,6 @@ export class CommentExtension {
                     ctxId,
                     reason,
                 ),
-            feedback: (input) => resolveToolCallFeedback(input),
             pendingReport: async (instance, ctxId) =>
                 await this.#require(instance).comment.pendingReport(ctxId),
             recordTodoInvalid: (instance, ctxId) =>
@@ -415,10 +417,15 @@ export async function activate(context: ExtensionContext): Promise<void> {
             context.paths.stateDirectory,
         ),
     });
-    const binding = createCommentReview(comment.comment);
+    const reviewBinding = createCommentReview(comment.comment);
+    const rewriteBinding = createCommentRewrite(comment.comment);
     context.register(review, "comment", async (input, invocation) => {
         await source.refresh();
-        return await binding(input, invocation);
+        return await reviewBinding(input, invocation);
+    });
+    context.register(rewrite, "comment", async (input, invocation) => {
+        await source.refresh();
+        return await rewriteBinding(input, invocation);
     });
     registerCommentRoutes(context, source, comment);
     context.register(
@@ -468,11 +475,7 @@ export async function deactivate(): Promise<void> {
 export function createCommentReview(
     comment: Pick<
         CommentPort,
-        | "beforeTodoToolCall"
-        | "consumePending"
-        | "feedback"
-        | "recordTodoInvalid"
-        | "reviewToolCall"
+        "beforeTodoToolCall" | "recordTodoInvalid" | "reviewToolCall"
     >,
 ): ToolCallReviewBinding {
     return async (
@@ -480,38 +483,16 @@ export function createCommentReview(
     ): Promise<ToolCallReviewResult> => {
         if (
             input.direction === "outbound" &&
-            (input.kind === "result" || input.kind === "error")
+            input.kind === "error" &&
+            input.toolName === "todo_write" &&
+            input.context.ctxId !== undefined &&
+            readToolErrorCode(input.payload) === "todo.invalid"
         ) {
-            if (
-                input.kind === "error" &&
-                input.toolName === "todo_write" &&
-                input.context.ctxId !== undefined &&
-                readToolErrorCode(input.payload) === "todo.invalid"
-            ) {
-                comment.recordTodoInvalid(
-                    input.context.instance,
-                    input.context.ctxId,
-                );
-            }
-            const feedback = [...comment.feedback(input)];
-            if (
-                input.kind === "result" &&
-                input.context.ctxId !== undefined &&
-                input.callId !== undefined
-            ) {
-                const delivered = await comment.consumePending(
-                    input.context.instance,
-                    input.context.ctxId,
-                    input.callId,
-                );
-                if (delivered.comment !== undefined)
-                    feedback.unshift(delivered.comment);
-            }
-            const unique = [...new Set(feedback)];
-            return {
-                decision: "accept",
-                ...(unique.length === 0 ? {} : { feedback: unique }),
-            };
+            comment.recordTodoInvalid(
+                input.context.instance,
+                input.context.ctxId,
+            );
+            return { decision: "accept" };
         }
         if (
             input.direction !== "inbound" ||
@@ -536,6 +517,57 @@ export function createCommentReview(
             );
         }
         return result;
+    };
+}
+
+export function createCommentRewrite(
+    comment: Pick<CommentPort, "consumePending">,
+): ToolCallRewriteBinding {
+    return async (
+        input: ToolCallRewriteInvocation,
+    ): Promise<ExtensionJsonValue> => {
+        if (input.direction !== "outbound") return input.payload;
+        const hints = resolveToolCallHints(input);
+        const delivered =
+            input.kind === "result" && input.context.ctxId !== undefined
+                ? await comment.consumePending(
+                      input.context.instance,
+                      input.context.ctxId,
+                      input.callId,
+                  )
+                : undefined;
+        const comments = mergeComments(
+            delivered?.comment === undefined ? [] : [delivered.comment],
+            hints,
+        );
+        return comments.length === 0
+            ? input.payload
+            : appendOutputComments(input.payload, comments);
+    };
+}
+
+function appendOutputComments(
+    payload: ExtensionJsonValue,
+    comments: readonly string[],
+): ExtensionJsonValue {
+    if (
+        typeof payload !== "object" ||
+        payload === null ||
+        Array.isArray(payload)
+    ) {
+        throw new TypeError(
+            "ToolCall result must be an object when Comment delivery is pending.",
+        );
+    }
+    const existing = Array.isArray(payload.comment)
+        ? payload.comment.filter(
+              (entry): entry is string =>
+                  typeof entry === "string" && entry.length > 0,
+          )
+        : [];
+    return {
+        ...payload,
+        comment: [...new Set([...existing, ...comments])],
     };
 }
 

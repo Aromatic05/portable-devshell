@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { attachToolCallErrorPayload } from "@portable-devshell/core";
 import {
     createError,
     type JsonValue,
@@ -19,23 +20,25 @@ function routeContext(connectionId: string): PrefixRouteContext {
 
 function callHandler(
     callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>,
-    feedback: readonly string[] = [],
+    comments: readonly string[] = [],
 ) {
     const module = createToolRouteModule({
         worker: {
             async callTool(
                 toolName: string,
                 input: JsonValue,
-                _context?: unknown,
-                _signal?: AbortSignal,
-                _transformResult?: unknown,
-                _invocationInput?: unknown,
-                _onProgress?: unknown,
-                _recording?: "caller" | "host",
-                onFeedback?: (feedback: readonly string[]) => void,
             ) {
-                onFeedback?.(feedback);
-                return callTool(toolName, input);
+                try {
+                    const result = await callTool(toolName, input);
+                    if (comments.length === 0) return result;
+                    if (typeof result !== "object" || result === null || Array.isArray(result))
+                        return result;
+                    return { ...result, comment: [...comments] };
+                } catch (error) {
+                    if (comments.length > 0 && error instanceof Error)
+                        throw attachToolCallErrorPayload(error, { comment: [...comments] });
+                    throw error;
+                }
             },
             async decideApproval() {
                 throw new Error("unused");
@@ -156,7 +159,6 @@ test("control tool stream forwards progress before completing the unchanged fina
                 _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 onProgress?: (progress: JsonValue) => void,
                 recording?: "caller" | "host",
-                _onFeedback?: (feedback: readonly string[]) => void,
             ) {
                 workerContext = context;
                 workerRecording = recording;
@@ -237,7 +239,6 @@ test("control tool stream forwards progress before completing the unchanged fina
         { name: "progress", payload: { stdout: "one\ntwo" } },
     ]);
     assert.deepEqual(completed, {
-        comment: [],
         exitCode: 0,
         stdout: "one\ntwo",
         stderr: "",

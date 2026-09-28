@@ -1131,12 +1131,11 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
             _signal,
             _transformResult,
             _invocationInput,
-            onFeedback,
         ) {
-            onFeedback?.([
-                "[bash.outputTruncated] stdout output is incomplete.",
-            ]);
             return {
+                comment: [
+                    "[bash.outputTruncated] stdout output is incomplete.",
+                ],
                 exitCode: 0,
                 stderr: "",
                 stderrTruncated: false,
@@ -1446,7 +1445,6 @@ function createWorker(
             _context: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
             _signal?: AbortSignal,
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             await afterReview?.("call-test");
@@ -1467,7 +1465,6 @@ function createWorker(
             _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ) {
             await afterReview?.("call-test");
@@ -1544,7 +1541,6 @@ function createGateway(
             callContext: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
             signal?: AbortSignal,
-            onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
@@ -1555,7 +1551,6 @@ function createGateway(
                     callContext,
                     operation,
                     signal,
-                    onFeedback,
                     afterReview,
                 );
             }
@@ -1570,7 +1565,6 @@ function createGateway(
             signal,
             transformResult,
             invocationInput,
-            onFeedback,
             afterReview,
         ) {
             await afterReview?.("call-test");
@@ -1585,7 +1579,6 @@ function createGateway(
                           signal,
                           transformResult,
                           invocationInput,
-                          onFeedback,
                           afterReview,
                       );
             return transformResult === undefined

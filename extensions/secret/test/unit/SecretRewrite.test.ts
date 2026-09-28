@@ -7,9 +7,10 @@ const signal = new AbortController().signal;
 
 function invocation(
     direction: "inbound" | "outbound",
-    text: string,
+    payload: string | Record<string, unknown>,
 ) {
     return {
+        callId: "call-secret",
         context: {
             ctxId: "ctx-secret",
             instance: "demo",
@@ -17,9 +18,8 @@ function invocation(
         },
         direction,
         kind: direction === "inbound" ? ("call" as const) : ("result" as const),
-        path: ["text"],
+        payload,
         signal,
-        text,
         toolName: "bash_run",
     };
 }
@@ -130,7 +130,8 @@ test("Secret rewrite does not let an unknown placeholder shield a resolved raw s
         invocation("outbound", "${SECRET:real-token} real-token"),
         host.context,
     );
-    assert.equal(result.includes("real-token"), false);
+    assert.equal(typeof result, "string");
+    assert.equal((result as string).includes("real-token"), false);
 });
 
 test("Secret rewrite rejects an inbound reference missing from the current instance env", async () => {

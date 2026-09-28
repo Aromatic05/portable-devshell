@@ -76,7 +76,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             ctxId: string;
         }> = [];
         const { dispatch } = createHarness({
-            feedback(context, callId) {
+            comments(context, callId) {
                 const ctxId = context.ctxId;
                 if (ctxId === undefined) return [];
                 consumed.push({ callId, ctxId });
@@ -133,10 +133,10 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         ]);
     });
 
-    test("a failed tool call does not emit queued Comment feedback", async () => {
+    test("a failed tool call does not consume queued Comment", async () => {
         let consumeCount = 0;
         const { dispatch, worker } = createHarness({
-            feedback() {
+            comments() {
                 consumeCount += 1;
                 return ["Keep this pending"];
             },
@@ -180,7 +180,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 audited.push({ instance, toolName });
@@ -193,7 +192,16 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                         ctxId: context.ctxId,
                         instance,
                     });
-                    onFeedback?.(["beta comment"]);
+                    if (
+                        typeof result === "object" &&
+                        result !== null &&
+                        !Array.isArray(result)
+                    ) {
+                        return {
+                            ...result,
+                            comment: ["beta comment"],
+                        } as T;
+                    }
                 }
                 return result;
             },
@@ -326,7 +334,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
     function createHarness(
         gatewayOverrides: {
-            feedback?(
+            comments?(
                 context: ToolCallContext,
                 callId: string,
             ): readonly string[];
@@ -345,7 +353,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                _onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 await afterReview?.("call-test");
@@ -363,7 +370,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 _onProgress?: (progress: JsonValue) => void,
                 _recording?: "caller" | "host",
-                onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<JsonValue> {
                 if (worker.fail) throw new Error("worker failed");
@@ -373,9 +379,16 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 const transformed = transformResult === undefined
                     ? result
                     : await transformResult(result, callId);
-                const feedback =
-                    gatewayOverrides.feedback?.(_context, callId) ?? [];
-                if (feedback.length > 0) onFeedback?.(feedback);
+                const comments =
+                    gatewayOverrides.comments?.(_context, callId) ?? [];
+                if (
+                    comments.length > 0 &&
+                    typeof transformed === "object" &&
+                    transformed !== null &&
+                    !Array.isArray(transformed)
+                ) {
+                    return { ...transformed, comment: [...comments] };
+                }
                 return transformed;
             },
             handshake: {

@@ -44,7 +44,7 @@ test("ToolCall Extension binding acquires registrations once and releases them w
                 : pointId === "toolcall.rewrite"
                   ? [
                         {
-                            declaration: { hook: "500-secret", id: "secret" },
+                            declaration: { hook: "100-secret", id: "secret" },
                             id: "secret",
                         },
                     ]
@@ -62,8 +62,8 @@ test("ToolCall Extension binding acquires registrations once and releases them w
                     binding:
                         pointId === "toolcall.review"
                             ? async () => ({ decision: "approve" as const })
-                            : async (input: { text: string }) =>
-                                  `masked(${input.text})`,
+                            : async (input: { payload: unknown }) =>
+                                  `masked(${String(input.payload)})`,
                 },
             } as never;
         },
@@ -85,6 +85,7 @@ test("ToolCall Extension binding acquires registrations once and releases them w
     );
     assert.equal(
         await lease.sequence.rewrite({
+            callId: "call-rewrite",
             context: toolCallContext,
             direction: "outbound",
             kind: "result",
@@ -209,7 +210,7 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
                 return pointId === "toolcall.rewrite"
                     ? [
                           {
-                              declaration: { hook: "500-secret", id: "secret" },
+                              declaration: { hook: "100-secret", id: "secret" },
                               extensionId: "secret",
                               id: "secret",
                           },
@@ -229,15 +230,10 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
                                 context,
                                 input.direction === "inbound" ? ["TOKEN"] : undefined,
                             );
+                            const text = input.payload as string;
                             return input.direction === "inbound"
-                                ? input.text.replace(
-                                      "${SECRET:TOKEN}",
-                                      environment.TOKEN!,
-                                  )
-                                : input.text.replace(
-                                      environment.TOKEN!,
-                                      "${SECRET:TOKEN}",
-                                  );
+                                ? text.replace("${SECRET:TOKEN}", environment.TOKEN!)
+                                : text.replace(environment.TOKEN!, "${SECRET:TOKEN}");
                         },
                     },
                 } as never;
@@ -250,6 +246,7 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
         const signal = new AbortController().signal;
         assert.equal(
             await lease.sequence.rewrite({
+                callId: "call-secret",
                 context: toolCallContext,
                 direction: "inbound",
                 kind: "call",
@@ -262,6 +259,7 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
         token = "new-token";
         assert.equal(
             await lease.sequence.rewrite({
+                callId: "call-secret",
                 context: toolCallContext,
                 direction: "outbound",
                 kind: "result",
@@ -279,6 +277,7 @@ test("ToolCall Extension binding pins one Secret env snapshot for inbound and ou
     try {
         assert.equal(
             await nextLease.sequence.rewrite({
+                callId: "call-secret-next",
                 context: toolCallContext,
                 direction: "inbound",
                 kind: "call",
@@ -342,7 +341,6 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
                         code: "control.modelStopped",
                         details: { commentId: "stop-1" },
                     },
-                    feedback: ["safe feedback"],
                     reason: "blocked",
                 };
             },
@@ -372,7 +370,6 @@ test("ToolCall sandbox review binding preserves outer invocation fields and Abor
                 code: "control.modelStopped",
                 details: { commentId: "stop-1" },
             },
-            feedback: ["safe feedback"],
             reason: "blocked",
         },
     );
@@ -415,7 +412,6 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                         code: "control.modelReplyRequired",
                         details: { commentId: "push-1", toolCallBudget: 5 },
                     },
-                    feedback: ["reply feedback"],
                     reason: "reply first",
                 };
             },
@@ -441,24 +437,23 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 code: "control.modelReplyRequired",
                 details: { commentId: "push-1", toolCallBudget: 5 },
             },
-            feedback: ["reply feedback"],
             reason: "reply first",
         },
     );
 
-    assert.equal(
+    assert.deepEqual(
         await toolCallRewriteSandboxCodec.invokeBinding(
             async (input: ToolCallRewriteInvocation) => {
                 rewriteSignal = input.signal;
-                assert.deepEqual(input.path, ["stdout", 0]);
-                return `mask(${input.text})`;
+                assert.deepEqual(input.payload, { stdout: ["secret"] });
+                return { stdout: ["masked"] };
             },
             {
+                callId: "call-rewrite",
                 context: { instance: "demo", source: "mcp" },
                 direction: "outbound",
                 kind: "progress",
-                path: ["stdout", 0],
-                text: "secret",
+                payload: { stdout: ["secret"] },
                 toolName: "bash_run",
             },
             signal,
@@ -469,7 +464,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 },
             },
         ),
-        "mask(secret)",
+        { stdout: ["masked"] },
     );
     assert.equal(reviewSignal, signal);
     assert.equal(rewriteSignal, signal);
@@ -483,6 +478,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 assert.equal(id, "entry");
                 assert.equal(options?.signal, signal);
                 assert.deepEqual(input, {
+                    callId: "call-binding",
                     context: {
                         ctxId: "ctx-1",
                         instance: "demo",
@@ -491,23 +487,22 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                     },
                     direction: "inbound",
                     kind: "call",
-                    path: ["command"],
-                    text: "${SECRET:github}",
+                    payload: { command: "secret-ref" },
                     toolName: "bash_run",
                 });
-                return "expanded";
+                return { command: "expanded" };
             },
         },
     );
-    assert.equal(
+    assert.deepEqual(
         await rewriteBinding(
             {
+                callId: "call-binding",
                 context: toolCallContext,
                 direction: "inbound",
                 kind: "call",
-                path: ["command"],
+                payload: { command: "secret-ref" },
                 signal,
-                text: "${SECRET:github}",
                 toolName: "bash_run",
             },
             {
@@ -516,7 +511,7 @@ test("ToolCall sandbox codecs decode review and rewrite invocations without expo
                 },
             },
         ),
-        "expanded",
+        { command: "expanded" },
     );
 });
 
@@ -528,7 +523,7 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
             return pointId === "toolcall.rewrite"
                 ? [
                       {
-                          declaration: { hook: "500-secret", id: "secret" },
+                          declaration: { hook: "100-secret", id: "secret" },
                           id: "secret",
                       },
                   ]
@@ -544,8 +539,8 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
                     },
                 },
                 registration: {
-                    binding: async (input: { text: string }) =>
-                        `${acquired}(${input.text})`,
+                    binding: async (input: { payload: unknown }) =>
+                        `${acquired}(${String(input.payload)})`,
                 },
             } as never;
         },
@@ -556,6 +551,7 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
     const signal = new AbortController().signal;
     assert.deepEqual(
         await lease.sequence.rewrite({
+            callId: "call-rewrite",
             context: toolCallContext,
             direction: "inbound",
             kind: "call",
@@ -567,6 +563,7 @@ test("ToolCall Boundary holds exact Extension generation leases for the whole ca
     );
     assert.deepEqual(
         await lease.sequence.rewrite({
+            callId: "call-rewrite",
             context: toolCallContext,
             direction: "outbound",
             kind: "result",

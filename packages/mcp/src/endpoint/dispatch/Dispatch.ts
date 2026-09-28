@@ -23,7 +23,6 @@ import {
     type McpInstanceGateway,
     type McpTmuxWaitGateway,
 } from "../Port.js";
-import { McpEndpointCallError } from "./Feedback.js";
 import type { McpToolCatalogArtifactName } from "../domain/artifact/Catalog.js";
 import { mcpEnvironmentToolName } from "../domain/environment/Catalog.js";
 import type { McpToolCatalogInteractionName } from "../domain/interaction/Catalog.js";
@@ -39,7 +38,6 @@ import {
     mcpLegacyToolTombstone,
     resolveMcpLegacyTool,
 } from "../domain/worker/Compatibility.js";
-import { attachMcpComments } from "../domain/interaction/Handler.js";
 import type {
     McpEndpointCatalog,
     McpEndpointCatalogWorker,
@@ -180,25 +178,7 @@ export class McpEndpointDispatch {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
-        const feedback: string[] = [];
-        const onFeedback = (entries: readonly string[]): void => {
-            appendUnique(feedback, entries);
-        };
-        try {
-            return attachEndpointFeedback(
-                await this.#callTool(
-                    toolName,
-                    input,
-                    requestContext,
-                    signal,
-                    onFeedback,
-                ),
-                feedback,
-            );
-        } catch (error) {
-            if (feedback.length === 0) throw error;
-            throw new McpEndpointCallError(error, feedback);
-        }
+        return await this.#callTool(toolName, input, requestContext, signal);
     }
 
     async #callTool(
@@ -206,7 +186,6 @@ export class McpEndpointDispatch {
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         signal: AbortSignal | undefined,
-        onFeedback: (feedback: readonly string[]) => void,
     ): Promise<McpEndpointResult> {
         throwIfMcpEndpointAborted(signal);
         const requestedToolName = toolName;
@@ -240,7 +219,6 @@ export class McpEndpointDispatch {
                 requestContext,
                 selected !== undefined,
                 signal,
-                onFeedback,
             );
             const workspaceApp = snapshot.exposed.some(
                 (entry) =>
@@ -443,7 +421,6 @@ export class McpEndpointDispatch {
                     routed.instance,
                     recordProvenance,
                     signal,
-                    onFeedback,
                     afterReview,
                 );
             }
@@ -466,7 +443,6 @@ export class McpEndpointDispatch {
                     recordProvenance,
                     signal,
                     () => executionEpoch,
-                    onFeedback,
                     afterReview,
                 );
             }
@@ -489,7 +465,6 @@ export class McpEndpointDispatch {
                     recordProvenance,
                     signal,
                     () => executionEpoch,
-                    onFeedback,
                     afterReview,
                 );
             }
@@ -517,7 +492,6 @@ export class McpEndpointDispatch {
                     }
                     return result;
                 },
-                onFeedback,
                 afterReview,
             );
         } catch (error) {
@@ -562,7 +536,6 @@ export class McpEndpointDispatch {
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: () => number | undefined,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -600,7 +573,6 @@ export class McpEndpointDispatch {
                   invocationInput,
                   undefined,
                   "host",
-                  onFeedback,
                   afterReview,
               )
             : await gateway.callTool(
@@ -611,7 +583,6 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
-                  onFeedback,
                   afterReview,
               );
     }
@@ -809,7 +780,6 @@ export class McpEndpointDispatch {
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
         executionEpoch?: () => number | undefined,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const gateway = this.#gateway;
@@ -846,7 +816,6 @@ export class McpEndpointDispatch {
                   invocationInput,
                   undefined,
                   "host",
-                  onFeedback,
                   afterReview,
               )
             : await gateway.callTool(
@@ -857,7 +826,6 @@ export class McpEndpointDispatch {
                   signal,
                   transformResult,
                   invocationInput,
-                  onFeedback,
                   afterReview,
               );
     }
@@ -1761,7 +1729,6 @@ export class McpEndpointDispatch {
         instance: string,
         recordProvenance: (callId: string) => Promise<void>,
         signal?: AbortSignal,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<McpEndpointResult> {
         let nativeResult: McpNativeToolResult | undefined;
@@ -1771,7 +1738,6 @@ export class McpEndpointDispatch {
             gateway: this.#gateway,
             input,
             localInstance: this.#instanceName,
-            onFeedback,
             operation: async (callId, operationInput) => {
                 await recordProvenance(callId);
                 const result = await this.#callControlTool(
@@ -1868,31 +1834,6 @@ export class McpEndpointDispatch {
                 );
         }
     }
-}
-
-function appendUnique(target: string[], entries: readonly string[]): void {
-    for (const entry of entries) {
-        if (!target.includes(entry)) target.push(entry);
-    }
-}
-
-function attachEndpointFeedback(
-    result: McpEndpointResult,
-    feedback: readonly string[],
-): McpEndpointResult {
-    if (feedback.length === 0) return result;
-    if (result instanceof McpNativeToolResult) {
-        return new McpNativeToolResult({
-            ...(result._meta === undefined ? {} : { _meta: result._meta }),
-            content: result.content,
-            isError: result.isError,
-            structuredContent: attachMcpComments(
-                result.structuredContent,
-                feedback,
-            ),
-        });
-    }
-    return attachMcpComments(result, feedback);
 }
 
 function isAppOnlyInteractionTool(toolName: string): boolean {

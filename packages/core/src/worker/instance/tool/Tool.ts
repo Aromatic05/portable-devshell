@@ -90,7 +90,6 @@ export class WorkerInstanceTool {
         invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         return await this.#execution.call(
@@ -102,7 +101,6 @@ export class WorkerInstanceTool {
             invocationInput,
             onProgress,
             recording,
-            onFeedback,
             afterReview,
         );
     }
@@ -113,7 +111,6 @@ export class WorkerInstanceTool {
         context: ToolCallContext,
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<T> {
         return await this.#execution.callOperation(
@@ -122,7 +119,6 @@ export class WorkerInstanceTool {
             context,
             operation,
             signal,
-            onFeedback,
             afterReview,
         );
     }

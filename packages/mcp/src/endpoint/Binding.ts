@@ -14,6 +14,9 @@ import {
     type Tool,
 } from "@modelcontextprotocol/server";
 import {
+    readToolCallErrorPayload,
+} from "@portable-devshell/core";
+import {
     toControlErrorBody,
     type ControlErrorBody,
     type JsonValue,
@@ -22,7 +25,6 @@ import {
 import { McpToolSchemaUnavailableError } from "./tool/Schema.js";
 import { McpEndpointWorker } from "./Endpoint.js";
 import { McpNativeToolResult, type McpEndpointResult } from "./Endpoint.js";
-import { McpEndpointCallError } from "./dispatch/Feedback.js";
 
 export class McpEndpointBinding {
     readonly #handler: McpHttpHandler;
@@ -189,17 +191,11 @@ function toCallToolResult(result: McpEndpointResult) {
 }
 
 function toMcpError(error: unknown): ProtocolError {
-    const failure =
-        error instanceof McpEndpointCallError ? error : undefined;
-    const sourceError = failure?.original ?? error;
-    const body = toControlErrorBody(sourceError);
-    const comment =
-        failure === undefined || failure.feedback.length === 0
-            ? undefined
-            : [...failure.feedback];
-    if (sourceError instanceof McpToolSchemaUnavailableError) {
-        return new ProtocolError(-32002, sourceError.message, {
-            code: sourceError.code,
+    const body = toControlErrorBody(error);
+    const comment = readToolCallComments(readToolCallErrorPayload(error));
+    if (error instanceof McpToolSchemaUnavailableError) {
+        return new ProtocolError(-32002, error.message, {
+            code: error.code,
             ...(comment === undefined ? {} : { comment }),
         });
     }
@@ -225,10 +221,10 @@ function toMcpError(error: unknown): ProtocolError {
         );
     }
 
-    if (sourceError instanceof Error) {
+    if (error instanceof Error) {
         return new ProtocolError(
             ProtocolErrorCode.InternalError,
-            sourceError.message,
+            error.message,
             comment === undefined ? undefined : { comment },
         );
     }
@@ -238,6 +234,19 @@ function toMcpError(error: unknown): ProtocolError {
         "Unknown MCP error.",
         comment === undefined ? undefined : { comment },
     );
+}
+
+function readToolCallComments(
+    payload: JsonValue | undefined,
+): readonly string[] | undefined {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload))
+        return undefined;
+    const comment = payload.comment;
+    if (!Array.isArray(comment)) return undefined;
+    const entries = comment.filter(
+        (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    );
+    return entries.length === 0 ? undefined : entries;
 }
 
 function toProtocolTool(

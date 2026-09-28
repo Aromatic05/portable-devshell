@@ -21,6 +21,7 @@ function input(
     payload: ToolCallReviewInput["payload"],
 ): ToolCallReviewInput {
     return {
+        callId: "call-review",
         context,
         direction: "inbound",
         kind: "call",
@@ -63,25 +64,6 @@ test("reviewers see one frozen outer payload and aggregate reject over approve o
     assert.equal(Object.isFrozen(outer), false);
 });
 
-test("review aggregates non-blocking feedback without changing decision precedence", async () => {
-    const sequence = new ToolCallBoundarySequence({
-        reviews: [
-            async () => ({ decision: "accept", feedback: ["first"] }),
-            async () => ({ decision: "approve", feedback: ["second"] }),
-            async () => ({
-                decision: "reject",
-                feedback: ["third"],
-                reason: "blocked",
-            }),
-        ],
-    });
-    assert.deepEqual(await sequence.review(input({ command: "echo ok" })), {
-        decision: "reject",
-        feedback: ["first", "second", "third"],
-        reason: "blocked",
-    });
-});
-
 test("review decision aggregation is independent of reviewer registration order", async () => {
     const makeReview = (decision: "accept" | "approve" | "reject"): ToolCallReview =>
         async () => ({ decision });
@@ -104,13 +86,13 @@ test("review decision aggregation is independent of reviewer registration order"
     }
 });
 
-test("rewrite visits only string leaves and unwinds the stack on outbound", async () => {
+test("rewrite passes the whole payload through hooks and unwinds on outbound", async () => {
     const calls: string[] = [];
     const rewrite = (name: string): ToolCallRewrite => async (rewriteInput) => {
-        calls.push(
-            `${rewriteInput.direction}:${name}:${rewriteInput.path.join(".")}:${rewriteInput.text}`,
-        );
-        return `${name}(${rewriteInput.text})`;
+        const payload = rewriteInput.payload as Record<string, unknown>;
+        const trace = Array.isArray(payload.trace) ? payload.trace : [];
+        calls.push(`${rewriteInput.direction}:${name}:${trace.join(",")}`);
+        return { ...payload, trace: [...trace, name] };
     };
     const sequence = new ToolCallBoundarySequence({
         rewrites: [rewrite("A"), rewrite("B")],
@@ -122,6 +104,7 @@ test("rewrite visits only string leaves and unwinds the stack on outbound", asyn
     };
 
     const inbound = await sequence.rewrite({
+        callId: "call-1",
         context,
         direction: "inbound",
         kind: "call",
@@ -130,19 +113,16 @@ test("rewrite visits only string leaves and unwinds the stack on outbound", asyn
         toolName: "bash_run",
     });
     assert.deepEqual(inbound, {
-        command: "B(A(secret))",
+        command: "secret",
         count: 2,
-        nested: [true, "B(A(tail))", null],
+        nested: [true, "tail", null],
+        trace: ["A", "B"],
     });
-    assert.deepEqual(calls, [
-        "inbound:A:command:secret",
-        "inbound:B:command:A(secret)",
-        "inbound:A:nested.1:tail",
-        "inbound:B:nested.1:A(tail)",
-    ]);
+    assert.deepEqual(calls, ["inbound:A:", "inbound:B:A"]);
 
     calls.length = 0;
     const outbound = await sequence.rewrite({
+        callId: "call-1",
         context,
         direction: "outbound",
         kind: "result",
@@ -150,11 +130,8 @@ test("rewrite visits only string leaves and unwinds the stack on outbound", asyn
         signal: new AbortController().signal,
         toolName: "bash_run",
     });
-    assert.deepEqual(outbound, { output: "A(B(secret))" });
-    assert.deepEqual(calls, [
-        "outbound:B:output:secret",
-        "outbound:A:output:B(secret)",
-    ]);
+    assert.deepEqual(outbound, { output: "secret", trace: ["B", "A"] });
+    assert.deepEqual(calls, ["outbound:B:", "outbound:A:B"]);
     assert.deepEqual(payload, {
         command: "secret",
         count: 2,
@@ -162,13 +139,14 @@ test("rewrite visits only string leaves and unwinds the stack on outbound", asyn
     });
 });
 
-test("rewrite rejects non-string replacement results", async () => {
+test("rewrite accepts any JSON replacement payload", async () => {
     const sequence = new ToolCallBoundarySequence({
-        rewrites: [async () => 1 as never],
+        rewrites: [async () => [1, { ok: true }]],
     });
 
-    await assert.rejects(
-        sequence.rewrite({
+    assert.deepEqual(
+        await sequence.rewrite({
+            callId: "call-json",
             context,
             direction: "inbound",
             kind: "call",
@@ -176,7 +154,7 @@ test("rewrite rejects non-string replacement results", async () => {
             signal: new AbortController().signal,
             toolName: "bash_run",
         }),
-        /must return a string/u,
+        [1, { ok: true }],
     );
 });
 
@@ -202,20 +180,20 @@ test("review handles deeply nested JSON without recursive stack growth", async (
     assert.equal(current, "leaf");
 });
 
-test("rewrite handles deeply nested JSON and materializes the leaf path once", async () => {
+test("rewrite snapshots deeply nested whole payloads without recursive stack growth", async () => {
     const depth = 10_000;
     let payload: ToolCallReviewInput["payload"] = "leaf";
     for (let index = 0; index < depth; index += 1) payload = [payload];
-    let pathLength = 0;
+    let seen: ToolCallReviewInput["payload"] | undefined;
     const sequence = new ToolCallBoundarySequence({
         rewrites: [async (rewriteInput) => {
-            pathLength = rewriteInput.path.length;
-            assert.equal(rewriteInput.path.every((segment) => segment === 0), true);
-            return `rewritten:${rewriteInput.text}`;
+            seen = rewriteInput.payload;
+            return rewriteInput.payload;
         }],
     });
 
     let rewritten = await sequence.rewrite({
+        callId: "call-deep",
         context,
         direction: "inbound",
         kind: "call",
@@ -223,10 +201,14 @@ test("rewrite handles deeply nested JSON and materializes the leaf path once", a
         signal: new AbortController().signal,
         toolName: "bash_run",
     });
+    assert.notEqual(seen, payload);
     for (let index = 0; index < depth; index += 1) {
+        assert.equal(Array.isArray(seen), true);
+        assert.equal(Object.isFrozen(seen), true);
+        seen = (seen as ToolCallReviewInput["payload"][])[0];
         assert.equal(Array.isArray(rewritten), true);
         rewritten = (rewritten as ToolCallReviewInput["payload"][])[0]!;
     }
-    assert.equal(rewritten, "rewritten:leaf");
-    assert.equal(pathLength, depth);
+    assert.equal(seen, "leaf");
+    assert.equal(rewritten, "leaf");
 });

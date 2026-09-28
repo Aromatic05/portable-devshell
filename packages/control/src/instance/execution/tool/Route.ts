@@ -1,4 +1,7 @@
-import type { WorkerInstance } from "@portable-devshell/core";
+import {
+    readToolCallErrorPayload,
+    type WorkerInstance,
+} from "@portable-devshell/core";
 import {
     ControlError,
     createError,
@@ -44,10 +47,6 @@ export function createToolRouteModule(
             const { input, recording, toolName, workspace } = readToolCall(
                 request.payload,
             );
-            const feedback: string[] = [];
-            const onFeedback = (entries: readonly string[]): void => {
-                appendFeedback(feedback, entries);
-            };
             try {
                 const result = await instance.worker.callTool(
                     toolName,
@@ -63,9 +62,8 @@ export function createToolRouteModule(
                     undefined,
                     undefined,
                     recording,
-                    onFeedback,
                 );
-                return attachComments(result, feedback);
+                return result;
             } catch (error) {
                 const failure =
                     error instanceof ControlError
@@ -79,7 +77,7 @@ export function createToolRouteModule(
                               retryable: false,
                           });
                 return {
-                    comment: feedback,
+                    ...toolCallErrorComment(error),
                     error: {
                         code: failure.code,
                         message: failure.message,
@@ -119,10 +117,6 @@ export function createToolRouteModule(
                         controller.abort(error);
                     });
             };
-            const feedback: string[] = [];
-            const onFeedback = (entries: readonly string[]): void => {
-                appendFeedback(feedback, entries);
-            };
             let result: JsonValue;
             try {
                 const raw = await instance.worker.callTool(
@@ -140,9 +134,8 @@ export function createToolRouteModule(
                     undefined,
                     emitProgress,
                     recording,
-                    onFeedback,
                 );
-                result = attachComments(raw, feedback);
+                result = raw;
             } catch (error) {
                 const failure =
                     error instanceof ControlError
@@ -156,7 +149,7 @@ export function createToolRouteModule(
                               retryable: false,
                           });
                 result = {
-                    comment: feedback,
+                    ...toolCallErrorComment(error),
                     error: {
                         code: failure.code,
                         message: failure.message,
@@ -219,27 +212,14 @@ export function createToolRouteModule(
     });
 }
 
-function appendFeedback(
-    target: string[],
-    entries: readonly string[],
-): void {
-    for (const entry of entries) {
-        if (!target.includes(entry)) target.push(entry);
-    }
-}
-
-function attachComments(
-    result: JsonValue,
-    comments: readonly string[],
-): JsonValue {
-    if (
-        typeof result !== "object" ||
-        result === null ||
-        Array.isArray(result)
-    ) {
-        throw new Error(
-            "Tool results must be objects when context comments are enabled.",
-        );
-    }
-    return { ...result, comment: [...comments] };
+function toolCallErrorComment(error: unknown): { comment?: readonly string[] } {
+    const payload = readToolCallErrorPayload(error);
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload))
+        return {};
+    const comment = payload.comment;
+    if (!Array.isArray(comment)) return {};
+    const entries = comment.filter(
+        (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    );
+    return entries.length === 0 ? {} : { comment: entries };
 }

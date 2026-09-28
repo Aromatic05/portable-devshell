@@ -59,9 +59,9 @@ export class ToolCallSecretRewrite {
                             const names = readRequestedNames(requestInput);
                             const selected: Record<string, string> = {};
                             for (const name of names) {
-                                if (!input.text.includes(`\${SECRET:${name}}`)) {
+                                if (!payloadContainsReference(input.payload, name)) {
                                     throw new TypeError(
-                                        `Secret ${name} is not present in the current ToolCall text.`,
+                                        `Secret ${name} is not present in the current ToolCall payload.`,
                                     );
                                 }
                                 const value = environment[name];
@@ -107,6 +107,25 @@ export class ToolCallSecretRewrite {
         }
         return Object.freeze({ ...(instance.env ?? {}) });
     }
+}
+
+function payloadContainsReference(
+    value: ExtensionJsonValue,
+    name: string,
+): boolean {
+    const reference = `\${SECRET:${name}}`;
+    const stack: ExtensionJsonValue[] = [value];
+    while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (typeof current === "string") {
+            if (current.includes(reference)) return true;
+            continue;
+        }
+        if (typeof current !== "object" || current === null) continue;
+        if (Array.isArray(current)) stack.push(...current);
+        else stack.push(...Object.values(current));
+    }
+    return false;
 }
 
 function readRequestedNames(input: ExtensionJsonValue | undefined): readonly string[] {

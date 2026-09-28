@@ -110,7 +110,6 @@ function createWorker(
             context: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
             _signal?: AbortSignal,
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             audited.push({ context, toolName });
@@ -150,7 +149,6 @@ function createWorker(
             _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             await afterReview?.("call-test");
@@ -775,7 +773,6 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
@@ -1272,7 +1269,6 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
             invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            _onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");

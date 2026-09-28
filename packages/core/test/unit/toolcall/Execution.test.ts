@@ -6,6 +6,7 @@ import {
     errorCodes,
     asInstanceName,
     toControlErrorBody,
+    type JsonValue,
 } from "@portable-devshell/shared";
 
 import { ToolCallExecution } from "../../../src/toolcall/Execution.ts";
@@ -17,6 +18,22 @@ const context = Object.freeze({
     source: "mcp" as const,
     workspace: "/repo",
 });
+
+function mapJsonStrings(
+    value: JsonValue,
+    transform: (text: string) => string,
+): JsonValue {
+    if (typeof value === "string") return transform(value);
+    if (Array.isArray(value))
+        return value.map((entry) => mapJsonStrings(entry, transform));
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [
+            key,
+            mapJsonStrings(entry, transform),
+        ]),
+    );
+}
 
 function createHarness(
     reviewResult:
@@ -385,9 +402,13 @@ test("ToolCallExecution rewrites only at the trusted execution edge and exposes 
                 }],
                 rewrites: [async (input) => {
                     events.push(`rewrite.${input.direction}.${input.kind}`);
-                    return input.direction === "inbound"
-                        ? input.text.replaceAll("${SECRET:github}", "real-token")
-                        : input.text.replaceAll("real-token", "${SECRET:github}");
+                    return mapJsonStrings(
+                        input.payload,
+                        (text) =>
+                            input.direction === "inbound"
+                                ? text.replaceAll("${SECRET:github}", "real-token")
+                                : text.replaceAll("real-token", "${SECRET:github}"),
+                    );
                 }],
             }),
         }),
@@ -487,10 +508,11 @@ test("ToolCallExecution serializes asynchronous progress rewrites before complet
             sequence: new ToolCallBoundarySequence({
                 rewrites: [async (input) => {
                     if (input.kind === "progress") {
-                        await new Promise<void>((resolve) => setTimeout(resolve, input.text === "one" ? 10 : 1));
-                        events.push(`rewrite.${input.text}`);
+                        const text = input.payload as string;
+                        await new Promise<void>((resolve) => setTimeout(resolve, text === "one" ? 10 : 1));
+                        events.push(`rewrite.${text}`);
                     }
-                    return input.text;
+                    return input.payload;
                 }],
             }),
         }),
@@ -572,7 +594,7 @@ test("ToolCallExecution records completed execution when outbound result Rewrite
                     ) {
                         throw new Error("masking failed");
                     }
-                    return input.text;
+                    return input.payload;
                 }],
             }),
         }),
@@ -784,9 +806,13 @@ test("ToolCallExecution masks error message, details, and command streams before
                     return { decision: "accept" };
                 }],
                 rewrites: [async (input) =>
-                    input.direction === "outbound"
-                        ? input.text.replaceAll("real-token", "${SECRET:github}")
-                        : input.text],
+                    mapJsonStrings(
+                        input.payload,
+                        (text) =>
+                            input.direction === "outbound"
+                                ? text.replaceAll("real-token", "${SECRET:github}")
+                                : text,
+                    )],
             }),
         }),
         instanceName: asInstanceName("boundary-error"),
@@ -852,7 +878,6 @@ test("ToolCallExecution masks error message, details, and command streams before
 test("ToolCallExecution callOperation uses the same Boundary without requiring Worker readiness", async () => {
     const events: string[] = [];
     const reviews: string[] = [];
-    const feedback: string[] = [];
     const operationInputs: unknown[] = [];
     let readinessChecks = 0;
     const execution = new ToolCallExecution({
@@ -883,15 +908,16 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
             sequence: new ToolCallBoundarySequence({
                 reviews: [async (input) => {
                     reviews.push(`${input.direction}:${input.kind}`);
-                    return {
-                        decision: "accept",
-                        feedback: [`${input.direction}:${input.kind}:feedback`],
-                    };
+                    return { decision: "accept" };
                 }],
                 rewrites: [async (input) =>
-                    input.direction === "inbound"
-                        ? input.text.replaceAll("outer", "inner")
-                        : input.text.replaceAll("inner", "outer")],
+                    mapJsonStrings(
+                        input.payload,
+                        (text) =>
+                            input.direction === "inbound"
+                                ? text.replaceAll("outer", "inner")
+                                : text.replaceAll("inner", "outer"),
+                    )],
             }),
         }),
         instanceName: asInstanceName("control-operation"),
@@ -927,17 +953,12 @@ test("ToolCallExecution callOperation uses the same Boundary without requiring W
             return { value: "inner-result" };
         },
         undefined,
-        (entries) => feedback.push(...entries),
     );
 
     assert.equal(readinessChecks, 0);
     assert.deepEqual(operationInputs, [{ value: "inner-input" }]);
     assert.deepEqual(result, { value: "outer-result" });
     assert.deepEqual(reviews, ["inbound:call", "outbound:result"]);
-    assert.deepEqual(feedback, [
-        "inbound:call:feedback",
-        "outbound:result:feedback",
-    ]);
     assert.deepEqual(events, [
         "audit.requested",
         "reserve",

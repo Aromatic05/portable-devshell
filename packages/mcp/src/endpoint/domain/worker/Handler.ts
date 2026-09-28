@@ -37,7 +37,6 @@ export class McpEndpointHandlerWorker {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const routed = readMcpRoutedInput(
@@ -62,7 +61,6 @@ export class McpEndpointHandlerWorker {
                 undefined,
                 undefined,
                 "host",
-                onFeedback,
                 async (callId) => {
                     await waitForMcpEndpointReady(
                         this.options.worker,
@@ -94,7 +92,6 @@ export class McpEndpointHandlerWorker {
             signal,
             transformResult,
             undefined,
-            onFeedback,
             async (callId) => {
                 await waitForMcpGatewayReady(gateway, routed.instance, signal, {
                     timeoutMs: this.options.readyWaitMs,

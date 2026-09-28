@@ -10,7 +10,7 @@ import {
 import {
     rewriteToolCallPayload,
     type ToolCallRewrite,
-    type ToolCallRewritePayloadInput,
+    type ToolCallRewriteInput,
 } from "./Rewrite.js";
 
 export interface ToolCallBoundarySequenceOptions {
@@ -40,7 +40,7 @@ export class ToolCallBoundarySequence {
         return await reviewToolCall(this.#reviews, input);
     }
 
-    async rewrite(input: ToolCallRewritePayloadInput): Promise<JsonValue> {
+    async rewrite(input: ToolCallRewriteInput): Promise<JsonValue> {
         return await rewriteToolCallPayload(this.#rewrites, input);
     }
 }

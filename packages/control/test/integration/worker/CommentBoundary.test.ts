@@ -5,6 +5,7 @@ import test from "node:test";
 import {
     CommentExtension,
     createCommentReview,
+    createCommentRewrite,
     type CommentPort,
 } from "@portable-devshell/comment-extension";
 import {
@@ -274,18 +275,25 @@ const instanceKey = {};
 
 function commentReviewRegistrationHost(comment: CommentPort) {
     const review = createCommentReview(comment);
+    const rewrite = createCommentRewrite(comment);
     return {
         async acquireRegistration(pointId: string, id: string) {
-            assert.equal(pointId, "toolcall.review");
             assert.equal(id, "comment");
+            const binding =
+                pointId === "toolcall.review"
+                    ? review
+                    : pointId === "toolcall.rewrite"
+                      ? rewrite
+                      : undefined;
+            assert.notEqual(binding, undefined);
             return {
                 extensionId: "comment",
                 lease: { release() {} },
-                registration: { binding: review },
+                registration: { binding },
             };
         },
         listDeclarations(pointId: string) {
-            return pointId === "toolcall.review"
+            return pointId === "toolcall.review" || pointId === "toolcall.rewrite"
                 ? [
                       {
                           declaration: { hook: "500-comment", id: "comment" },
@@ -324,7 +332,6 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
             context: ToolCallContext,
             operation: (callId: string, input: JsonValue) => Promise<T>,
             signal?: AbortSignal,
-            onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             return await execution.callOperation(
@@ -333,7 +340,6 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
                 context,
                 operation,
                 signal,
-                onFeedback,
                 afterReview,
             );
         },
@@ -351,7 +357,6 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
             ) => Promise<JsonValue> | JsonValue,
             onProgress?: (progress: JsonValue) => void,
             recording: "caller" | "host" = "host",
-            onFeedback?: (feedback: readonly string[]) => void,
             afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             return await execution.call(
@@ -363,7 +368,6 @@ function createWorker(execution: ToolCallExecution, workspace: string) {
                 invocationInput,
                 onProgress,
                 recording,
-                onFeedback,
                 afterReview,
             );
         },

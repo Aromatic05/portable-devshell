@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { requireTcpPort } from "../../../../../../test/TestHttpSupport.ts";
 import { parseMcpHttpResponse } from "../../../TestMcpHttpResponse.ts";
 
+import { attachToolCallErrorPayload } from "@portable-devshell/core";
+
 import {
     McpContextRegistry,
     McpEndpointBinding,
@@ -807,7 +809,7 @@ test("tools/call returns a structured hint when the tool fails", async () => {
         async callHandler() {
             throw new Error("command failed");
         },
-        feedback: ["[error.unknown] Inspect the error before retrying."],
+        comments: ["[error.unknown] Inspect the error before retrying."],
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -829,13 +831,13 @@ test("tools/call returns a structured hint when the tool fails", async () => {
     }
 });
 
-test("tools/call preserves feedback when the thrown Error is frozen", async () => {
+test("tools/call preserves comments when the thrown Error is frozen", async () => {
     const frozen = Object.freeze(new Error("command failed"));
     const harness = createWorkerHarness({
         async callHandler() {
             throw frozen;
         },
-        feedback: ["[error.unknown] Inspect the error before retrying."],
+        comments: ["[error.unknown] Inspect the error before retrying."],
     });
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -862,7 +864,7 @@ test("tools/call preserves feedback when the thrown Error is frozen", async () =
 
 test("tools/call appends a worker result hint and keeps the flat shape", async () => {
     const harness = createWorkerHarness({
-        feedback: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
+        comments: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
         result: {
             exitCode: 7,
             stderr: "boom",
@@ -2135,7 +2137,7 @@ function createWorkerHarness(options?: {
         context: { ctxId?: string; requestId?: string; source: string },
         signal?: AbortSignal,
     ) => Promise<CommandResult>;
-    feedback?: readonly string[];
+    comments?: readonly string[];
     hasToolSchemaCache?: boolean;
     ready?: boolean;
     result?: CommandResult;
@@ -2194,7 +2196,6 @@ function createWorkerHarness(options?: {
                 context: { ctxId?: string; requestId?: string; source: string },
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                _onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 auditedCalls.push({ context, input, toolName });
@@ -2286,7 +2287,6 @@ function createWorkerHarness(options?: {
                 _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 _onProgress?: (progress: JsonValue) => void,
                 _recording?: "caller" | "host",
-                onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ) {
                 if (!ready) {
@@ -2301,17 +2301,36 @@ function createWorkerHarness(options?: {
 
                 await afterReview?.("call-test");
 
-                onFeedback?.(options?.feedback ?? []);
                 calls.push({ toolName, input, ...context });
-                const toolResult =
-                    options?.callHandler === undefined
-                        ? result
-                        : await options.callHandler(
-                              toolName,
-                              input,
-                              context,
-                              signal,
-                          );
+                let toolResult: JsonValue;
+                try {
+                    toolResult =
+                        options?.callHandler === undefined
+                            ? result
+                            : await options.callHandler(
+                                  toolName,
+                                  input,
+                                  context,
+                                  signal,
+                              );
+                } catch (error) {
+                    if ((options?.comments?.length ?? 0) > 0 && error instanceof Error)
+                        throw attachToolCallErrorPayload(error, {
+                            comment: [...options!.comments!],
+                        });
+                    throw error;
+                }
+                if (
+                    (options?.comments?.length ?? 0) > 0 &&
+                    typeof toolResult === "object" &&
+                    toolResult !== null &&
+                    !Array.isArray(toolResult)
+                ) {
+                    toolResult = {
+                        ...toolResult,
+                        comment: [...options!.comments!],
+                    };
+                }
                 return transformResult === undefined
                     ? toolResult
                     : await transformResult(toolResult, "call-test");

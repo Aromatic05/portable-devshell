@@ -68,7 +68,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         context: ToolCallContext,
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<T> {
         return await this.#requireDescriptor(instance).worker.callToolOperation(
@@ -77,7 +76,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             context,
             operation,
             signal,
-            onFeedback,
             afterReview,
         );
     }
@@ -93,7 +91,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             callId: string,
         ) => Promise<JsonValue>,
         invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-        onFeedback?: (feedback: readonly string[]) => void,
         afterReview?: (callId: string) => Promise<void> | void,
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
@@ -106,7 +103,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             invocationInput,
             undefined,
             "host",
-            onFeedback,
             afterReview,
         );
     }

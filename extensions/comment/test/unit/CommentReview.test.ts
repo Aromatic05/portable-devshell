@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     createCommentReview,
+    createCommentRewrite,
     type CommentControlDecision,
     type CommentPort,
 } from "../../src/index.ts";
@@ -26,7 +27,6 @@ type ReviewPort = Pick<
     CommentPort,
     | "beforeTodoToolCall"
     | "consumePending"
-    | "feedback"
     | "recordTodoInvalid"
     | "reviewToolCall"
 >;
@@ -42,9 +42,6 @@ function createPort(overrides: Partial<ReviewPort> = {}): ReviewPort {
         async beforeTodoToolCall() {},
         async consumePending(_instance, _ctxId, callId) {
             return { callId, messages: [] };
-        },
-        feedback() {
-            return [];
         },
         recordTodoInvalid() {},
         async reviewToolCall() {
@@ -91,8 +88,8 @@ test("Comment review applies model control only to inbound MCP calls with a Cont
     assert.deepEqual(calls, ["review:bash_run", "before:bash_run"]);
 });
 
-test("Comment outbound review delivers queued Comment before non-blocking hints", async () => {
-    const review = createCommentReview(
+test("Comment outbound rewrite writes queued Comment and hints into the result payload", async () => {
+    const rewrite = createCommentRewrite(
         createPort({
             async consumePending(_instance, _ctxId, callId) {
                 return {
@@ -101,34 +98,36 @@ test("Comment outbound review delivers queued Comment before non-blocking hints"
                     messages: [],
                 };
             },
-            feedback() {
-                return [
-                    "[bash.nonZeroExit] Exited with code 7; inspect output.",
-                ];
-            },
         }),
     );
 
     assert.deepEqual(
-        await review(
+        await rewrite(
             {
                 ...base,
                 direction: "outbound",
                 kind: "result",
-                payload: { exitCode: 7 },
+                payload: {
+                    exitCode: 7,
+                    stderr: "",
+                    stdout: "",
+                    termination: "exited",
+                },
             },
             unusedInvocation,
         ),
         {
-            decision: "accept",
-            feedback: [
+            comment: [
                 "User Comment",
                 "[bash.nonZeroExit] Exited with code 7; inspect output.",
             ],
+            exitCode: 7,
+            stderr: "",
+            stdout: "",
+            termination: "exited",
         },
     );
 });
-
 test("Comment review maps push stop and resume to rejected ToolCalls", async () => {
     const decisions: CommentControlDecision[] = [
         {

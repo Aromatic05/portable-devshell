@@ -2089,7 +2089,6 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                _onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 await afterReview?.("call-test");
@@ -2107,7 +2106,6 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 _invocationInput,
                 _onProgress,
                 _recording,
-                _onFeedback,
                 afterReview,
             ) {
                 await afterReview?.("call-test");
