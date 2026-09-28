@@ -38,8 +38,23 @@ pub fn normalize_requested_path(raw: &str) -> Result<String, ToolError> {
         ));
     }
     #[cfg(windows)]
-    if let Some(relative) = raw.strip_prefix(".\\") {
-        return Ok(format!("./{relative}"));
+    {
+        let path = Path::new(raw);
+        if !path.is_absolute()
+            && (path.has_root()
+                || matches!(
+                    path.components().next(),
+                    Some(std::path::Component::Prefix(_))
+                ))
+        {
+            return Err(ToolError::new(
+                "file.invalidPath",
+                "Windows drive-relative and root-relative paths are not supported; use a workspace-relative or absolute path",
+            ));
+        }
+        if let Some(relative) = raw.strip_prefix(".\\") {
+            return Ok(format!("./{relative}"));
+        }
     }
     if raw == "./" || raw.starts_with("./") || Path::new(raw).is_absolute() {
         return Ok(raw.to_string());
@@ -59,5 +74,20 @@ impl RequestedPath {
             }
             PathNamespace::Absolute => PathBuf::from(&self.raw),
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::normalize_requested_path;
+
+    #[test]
+    fn bare_normalization_rejects_windows_drive_relative_paths() {
+        let error = normalize_requested_path("C:relative").unwrap_err();
+        assert_eq!(error.code, "file.invalidPath");
+        let error = normalize_requested_path(r"\relative").unwrap_err();
+        assert_eq!(error.code, "file.invalidPath");
+        let error = normalize_requested_path("/relative").unwrap_err();
+        assert_eq!(error.code, "file.invalidPath");
     }
 }
