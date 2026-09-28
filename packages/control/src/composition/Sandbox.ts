@@ -3,6 +3,10 @@ import {
     cliNativeCommandsSandboxCodec,
 } from "../control/extension/cli/Sandbox.js";
 import { controlRoutesSandboxCodec } from "../control/extension/Route.js";
+import {
+    mcpContextTerminalSandboxCodec,
+    mcpToolsSandboxCodec,
+} from "./mcp/extension/Sandbox.js";
 import { tuiPagesSandboxCodec } from "../control/extension/tui/Sandbox.js";
 import {
     toolCallReviewSandboxCodec,
@@ -19,6 +23,8 @@ export function createControlExtensionSandboxPointRegistry(): ExtensionSandboxPo
         cliModelCommandsSandboxCodec,
         cliNativeCommandsSandboxCodec,
         controlRoutesSandboxCodec,
+        mcpContextTerminalSandboxCodec,
+        mcpToolsSandboxCodec,
         tuiPagesSandboxCodec,
         toolCallReviewSandboxCodec,
         toolCallRewriteSandboxCodec,

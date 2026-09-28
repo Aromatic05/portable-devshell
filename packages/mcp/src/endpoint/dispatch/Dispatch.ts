@@ -44,6 +44,7 @@ import type {
     McpEndpointCatalog,
     McpEndpointCatalogWorker,
 } from "../tool/Catalog.js";
+import { mcpToolActivity } from "../tool/Metadata.js";
 import {
     readMcpContextInput,
     readMcpProvenanceInput,
@@ -305,6 +306,7 @@ export class McpEndpointDispatch {
                       toolName,
                       routed.input,
                       this.#tmuxBlockSyncMs,
+                      selected.definition._meta,
                   )
                 : undefined;
         let executionEpoch: number | undefined;
@@ -338,20 +340,6 @@ export class McpEndpointDispatch {
                       resolvedContext.record,
                       routed.instance,
                   );
-                  if (selected.owner === "todo") {
-                      await this.#gateway?.beforeTodoToolCall?.(
-                          routed.instance,
-                          toolName,
-                          {
-                              ctxId: resolvedContext.record.ctxId,
-                              requestId: requestContext.requestId,
-                              source: "mcp",
-                              ...(environment?.workspace === undefined
-                                  ? {}
-                                  : { workspace: environment.workspace }),
-                          },
-                      );
-                  }
                   await this.restoreTmuxWaits(this.#instanceName);
                   if (selected.owner === "worker") {
                       const prepared = await this.#ensureContextWorkerState(
@@ -442,6 +430,7 @@ export class McpEndpointDispatch {
             if (
                 selected.owner === "todo" ||
                 selected.owner === "artifact" ||
+                selected.owner === "extension" ||
                 selected.owner === "workspace"
             ) {
                 const owner = selected.owner;
@@ -526,13 +515,7 @@ export class McpEndpointDispatch {
                             false,
                         );
                     }
-                    const withComments = await this.#attachComments(
-                                                result,
-                        context,
-                        callId,
-                        routed.instance,
-                    );
-                    return withComments;
+                    return result;
                 },
                 onFeedback,
                 afterReview,
@@ -671,12 +654,7 @@ export class McpEndpointDispatch {
                 completed,
                 false,
             );
-            return await this.#attachComments(
-                                completed,
-                context,
-                callId,
-                instance,
-            );
+            return completed;
         }
 
         await this.#supersedeObservedTmuxWaits(
@@ -803,12 +781,7 @@ export class McpEndpointDispatch {
             current?.status === "detached" ||
             (current?.status === "resolved" && current.detachedAt !== undefined)
         ) {
-            return await this.#attachComments(
-                                { ...observed, detached: true },
-                context,
-                callId,
-                instance,
-            );
+            return { ...observed, detached: true };
         }
         if (current?.status === "resolved") {
             await gateway.consumeWait(this.#instanceName, wait.waitId);
@@ -818,12 +791,7 @@ export class McpEndpointDispatch {
                 line,
                 context,
             );
-            return await this.#attachComments(
-                                completed,
-                context,
-                callId,
-                instance,
-            );
+            return completed;
         }
         if (current?.status === "cancelled" && outcome.kind === "waitError")
             throw outcome.error;
@@ -927,12 +895,7 @@ export class McpEndpointDispatch {
                 context,
                 signal,
             );
-            return await this.#attachComments(
-                                { ...started, ...completed },
-                context,
-                callId,
-                instance,
-            );
+            return { ...started, ...completed };
         }
 
         const task = started.task.id;
@@ -1053,12 +1016,7 @@ export class McpEndpointDispatch {
             current?.status === "detached" ||
             (current?.status === "resolved" && current.detachedAt !== undefined)
         ) {
-            return await this.#attachComments(
-                                { ...started, detached: true },
-                context,
-                callId,
-                instance,
-            );
+            return { ...started, detached: true };
         }
         if (current?.status === "resolved") {
             await gateway.consumeWait(this.#instanceName, wait.waitId);
@@ -1075,12 +1033,7 @@ export class McpEndpointDispatch {
                     context,
                     signal,
                 );
-                return await this.#attachComments(
-                                        { ...started, ...current.result, ...completed },
-                    context,
-                    callId,
-                    instance,
-                );
+                return { ...started, ...current.result, ...completed };
             }
             const completed = await this.#readTmuxTaskOutput(
                 instance,
@@ -1088,12 +1041,7 @@ export class McpEndpointDispatch {
                 line,
                 context,
             );
-            return await this.#attachComments(
-                                { ...started, ...current.result, ...completed },
-                context,
-                callId,
-                instance,
-            );
+            return { ...started, ...current.result, ...completed };
         }
         if (current?.status === "cancelled" && outcome.kind === "waitError")
             throw outcome.error;
@@ -1639,39 +1587,6 @@ export class McpEndpointDispatch {
             ?.controller.abort("Workspace interrupted tmux_run");
     }
 
-    async #attachComments(
-        result: JsonValue,
-        context: ToolCallContext,
-        callId: string,
-        instance: string = this.#instanceName,
-    ): Promise<JsonValue> {
-        if (context.ctxId === undefined) return result;
-        return attachMcpComments(
-            result,
-            await this.#consumeQueuedComments(
-                instance,
-                context.ctxId,
-                callId,
-            ),
-        );
-    }
-
-    async #consumeQueuedComments(
-        instance: string,
-        ctxId: string,
-        callId: string,
-    ): Promise<string[]> {
-        const consume = this.#gateway?.consumeContextMessages;
-        if (consume === undefined) return [];
-        const result = await consume.call(
-            this.#gateway,
-            instance,
-            ctxId,
-            callId,
-        );
-        return result.comment === undefined ? [] : [result.comment];
-    }
-
     async #createToolContext(
         record: McpContextRecord,
         requestContext: McpEndpointCallContext,
@@ -1839,7 +1754,7 @@ export class McpEndpointDispatch {
     }
 
     async #auditControlTool(
-        owner: "artifact" | "workspace" | "todo",
+        owner: "artifact" | "extension" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -1864,16 +1779,12 @@ export class McpEndpointDispatch {
                     toolName,
                     operationInput,
                     context,
+                    instance,
                     callId,
                     signal,
                 );
                 if (result instanceof McpNativeToolResult) {
-                    const structuredContent = await this.#attachComments(
-                                                result.structuredContent,
-                        context,
-                        callId,
-                        instance,
-                    );
+                    const structuredContent = result.structuredContent;
                     nativeResult = new McpNativeToolResult({
                         ...(result._meta === undefined
                             ? {}
@@ -1884,12 +1795,7 @@ export class McpEndpointDispatch {
                     });
                     return structuredContent;
                 }
-                return await this.#attachComments(
-                                        result,
-                    context,
-                    callId,
-                    instance,
-                );
+                return result;
             },
             signal,
             targetInstance: instance,
@@ -1908,10 +1814,11 @@ export class McpEndpointDispatch {
     }
 
     async #callControlTool(
-        owner: "artifact" | "workspace" | "todo",
+        owner: "artifact" | "extension" | "workspace" | "todo",
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
+        instance: string,
         callId: string,
         signal?: AbortSignal,
     ): Promise<McpEndpointResult> {
@@ -1923,6 +1830,27 @@ export class McpEndpointDispatch {
                     context,
                     signal,
                 );
+            case "extension": {
+                const callExtensionTool = this.#gateway?.callExtensionTool;
+                if (callExtensionTool === undefined)
+                    throw new Error(
+                        "MCP Extension tool invocation is unavailable.",
+                    );
+                const result = await callExtensionTool.call(
+                    this.#gateway,
+                    instance,
+                    toolName,
+                    input,
+                    context,
+                    callId,
+                    signal,
+                );
+                return new McpNativeToolResult({
+                    content: [...(result.content ?? [])],
+                    isError: result.isError,
+                    structuredContent: result.structuredContent,
+                });
+            }
             case "workspace":
                 return await this.#interaction.call(
                     toolName as McpToolCatalogInteractionName,
@@ -1937,7 +1865,6 @@ export class McpEndpointDispatch {
                     input,
                     context,
                     signal,
-                    callId,
                 );
         }
     }
@@ -2003,7 +1930,6 @@ const OBSERVATION_TOOLS = new Set([
     "instance_status",
     "tmux_inspect",
     "todo_read",
-    "todo_report",
     "workspace_open",
 ]);
 
@@ -2013,7 +1939,10 @@ function workspaceGoalActivity(
     toolName: string,
     input: JsonValue,
     tmuxBlockSyncMs: number,
+    meta?: JsonValue,
 ): GoalActivityKind {
+    const declared = mcpToolActivity(meta);
+    if (declared !== undefined) return declared;
     if (toolName === "workspace_ask") return "wait";
     if (toolName === "tmux_run")
         return readTmuxBlock(input) ? "wait" : "execution";

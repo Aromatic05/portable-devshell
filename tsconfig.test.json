@@ -20,6 +20,9 @@
             "@portable-devshell/extension/instance": [
                 "./packages/extension/src/domain/instance.ts"
             ],
+            "@portable-devshell/extension/mcp": [
+                "./packages/extension/src/domain/mcp.ts"
+            ],
             "@portable-devshell/extension/control": [
                 "./packages/extension/src/domain/control.ts"
             ],
@@ -28,9 +31,6 @@
             ],
             "@portable-devshell/extension/tui": [
                 "./packages/extension/src/domain/tui.ts"
-            ],
-            "@portable-devshell/extension/comment": [
-                "./packages/extension/src/domain/comment.ts"
             ],
             "@portable-devshell/extension/toolcall": [
                 "./packages/extension/src/domain/toolcall.ts"

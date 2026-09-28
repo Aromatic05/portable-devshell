@@ -6,24 +6,7 @@ import {
     McpInstanceGatewayControl,
     createDefaultControlConfig,
 } from "../../../../src/testing.ts";
-
-function emptyComment() {
-    return {
-        async beforeTodoToolCall() {},
-        async consumePending(
-            _instance: string,
-            _ctxId: string,
-            callId: string,
-        ) {
-            return { callId, messages: [] };
-        },
-        async failPending() {
-            return [];
-        },
-        recordTodoInvalid() {},
-        async reportTodo() {},
-    };
-}
+import { McpExtensionService } from "../../../../src/composition/mcp/extension/Service.ts";
 
 function createGateway(ready: boolean): McpInstanceGatewayControl {
     const registry = new InstanceRegistry([
@@ -42,7 +25,6 @@ function createGateway(ready: boolean): McpInstanceGatewayControl {
     ]);
 
     return new McpInstanceGatewayControl({
-        comment: emptyComment(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -99,7 +81,6 @@ test("cross-instance audit is recorded by the target worker", async () => {
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
-        comment: emptyComment(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -143,7 +124,6 @@ test("closing an MCP tool session releases worker-owned session state", async ()
         })) as never,
     );
     const gateway = new McpInstanceGatewayControl({
-        comment: emptyComment(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -209,7 +189,6 @@ test("MCP instance lifecycle responses preserve active Todo summaries", async ()
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
-        comment: emptyComment(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -279,7 +258,6 @@ test("MCP instance connect lifecycle uses Context references without adopting an
         } as never,
     ]);
     const gateway = new McpInstanceGatewayControl({
-        comment: emptyComment(),
         getConfig: () => createDefaultControlConfig(),
         instanceRegistry: registry,
     });
@@ -298,4 +276,151 @@ test("MCP instance connect lifecycle uses Context references without adopting an
     await gateway.releaseInstanceReference("external", "ctx-external");
     await registry.stopOwned();
     assert.equal(stopCalls, 1);
+});
+
+test("MCP Extension tools hold their generation lease through invocation", async () => {
+    let releases = 0;
+    const service = new McpExtensionService({
+        listDeclarations(pointId: string) {
+            assert.equal(pointId, "mcp.tools");
+            return [
+                {
+                    declaration: {
+                        activity: "observation",
+                        description: "Send progress.",
+                        destructiveHint: false,
+                        id: "todo_report",
+                        idempotentHint: false,
+                        inputSchema: {
+                            properties: {
+                                message: {
+                                    description: "Progress message.",
+                                    type: "string",
+                                },
+                            },
+                            type: "object",
+                        },
+                        openWorldHint: false,
+                        outputSchema: {
+                            properties: { reported: { type: "boolean" } },
+                            type: "object",
+                        },
+                        readOnlyHint: false,
+                        title: "Message user",
+                    },
+                    extensionId: "comment",
+                    id: "todo_report",
+                },
+            ] as never;
+        },
+        async acquireRegistration(pointId: string, id: string) {
+            assert.equal(pointId, "mcp.tools");
+            assert.equal(id, "todo_report");
+            return {
+                extensionId: "comment",
+                lease: {
+                    release() {
+                        releases += 1;
+                    },
+                },
+                registration: {
+                    binding: async (input: unknown, context: { ctxId?: string }) => {
+                        assert.deepEqual(input, { message: "done" });
+                        assert.equal(context.ctxId, "ctx-one");
+                        return {
+                            content: [{ text: "done", type: "text" }],
+                            structuredContent: { reported: true },
+                        };
+                    },
+                },
+            } as never;
+        },
+    } as never);
+
+    const [tool] = service.listTools();
+    assert.equal(tool?.name, "todo_report");
+    assert.equal(tool?.description, "Send progress.");
+    assert.deepEqual(tool?._meta, {
+        devshell: {
+            extensionId: "comment",
+            mcp: {
+                activity: "observation",
+                annotations: {
+                    destructiveHint: false,
+                    idempotentHint: false,
+                    openWorldHint: false,
+                    readOnlyHint: false,
+                },
+                extensionTool: true,
+                preserveInputDescriptions: true,
+                title: "Message user",
+            },
+        },
+    });
+    assert.deepEqual(
+        await service.callTool(
+            "todo_report",
+            { message: "done" },
+            {
+                callId: "call-one",
+                ctxId: "ctx-one",
+                instance: "remote-server",
+            },
+        ),
+        {
+            content: [{ text: "done", type: "text" }],
+            structuredContent: { reported: true },
+        },
+    );
+    assert.equal(releases, 1);
+});
+
+test("MCP Context terminal cleanup runs every Extension and releases every lease", async () => {
+    const calls: string[] = [];
+    let releases = 0;
+    const service = new McpExtensionService({
+        listDeclarations(pointId: string) {
+            assert.equal(pointId, "mcp.context-terminal");
+            return [
+                { declaration: { id: "first" }, extensionId: "one", id: "first" },
+                {
+                    declaration: { id: "second" },
+                    extensionId: "two",
+                    id: "second",
+                },
+            ] as never;
+        },
+        async acquireRegistration(_pointId: string, id: string) {
+            return {
+                extensionId: id,
+                lease: {
+                    release() {
+                        releases += 1;
+                    },
+                },
+                registration: {
+                    binding: async (event: {
+                        ctxId: string;
+                        instance: string;
+                        reason: string;
+                    }) => {
+                        calls.push(
+                            `${id}:${event.instance}:${event.ctxId}:${event.reason}`,
+                        );
+                        if (id === "first") throw new Error("first failed");
+                    },
+                },
+            } as never;
+        },
+    } as never);
+
+    await assert.rejects(
+        service.contextTerminated("remote-server", "ctx-one", "expired"),
+        /first failed/u,
+    );
+    assert.deepEqual(calls, [
+        "first:remote-server:ctx-one:expired",
+        "second:remote-server:ctx-one:expired",
+    ]);
+    assert.equal(releases, 2);
 });

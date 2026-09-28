@@ -7,25 +7,25 @@ import {
 
 import type { ExtensionControlPort } from "./Route.js";
 import type { ExtensionHost } from "./Host.js";
-import {
-    REQUIRED_BUILTIN_EXTENSION_IDS,
-    type ExtensionInstallService,
-} from "./install/Service.js";
+import type { ExtensionInstallService } from "./install/Service.js";
 
 export class ExtensionControlService implements ExtensionControlPort {
     readonly #host: ExtensionHost;
     readonly #installer: ExtensionInstallService;
+    readonly #requiredBuiltinIds: ReadonlySet<string>;
 
     constructor(options: {
         host: ExtensionHost;
         installer: ExtensionInstallService;
+        requiredBuiltinIds?: ReadonlySet<string>;
     }) {
         this.#host = options.host;
         this.#installer = options.installer;
+        this.#requiredBuiltinIds = new Set(options.requiredBuiltinIds ?? []);
     }
 
     async disable(id: string): Promise<void> {
-        if (REQUIRED_BUILTIN_EXTENSION_IDS.has(id))
+        if (this.#requiredBuiltinIds.has(id))
             throw requiredBuiltinDisableError(id);
         await this.#host.disable(id);
     }

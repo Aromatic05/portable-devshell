@@ -10,9 +10,6 @@
             "@portable-devshell/extension": [
                 "../../packages/extension/dist/index.d.ts"
             ],
-            "@portable-devshell/extension/comment": [
-                "../../packages/extension/dist/domain/comment.d.ts"
-            ],
             "@portable-devshell/extension/toolcall": [
                 "../../packages/extension/dist/domain/toolcall.d.ts"
             ],

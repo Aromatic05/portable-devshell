@@ -20,7 +20,6 @@ import { ToolCallProvenanceStore } from "../../../instance/execution/tool/Proven
 import {
     decorateMcpInstanceGatewayArtifact,
     McpInstanceGatewayControl,
-    type McpCommentPort,
 } from "../../mcp/Gateway.js";
 import { InstanceCreateCoordinator } from "../../../control/instance/create/Coordinator.js";
 import { McpRuntimeFactory } from "../../mcp/Runtime.js";
@@ -30,7 +29,6 @@ import type { ControlRuntimeState } from "../State.js";
 
 export interface ControlRuntimeMcpOptions {
     artifact: ControlRuntimeArtifact;
-    comment: McpCommentPort;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
     state: ControlRuntimeState;
@@ -97,7 +95,6 @@ export class ControlRuntimeMcp {
             setConfig: (config) => options.state.setConfig(config),
         });
         this.instanceGateway = new McpInstanceGatewayControl({
-            comment: options.comment,
             getConfig: () => options.state.requireConfig(),
             instanceRegistry: options.state.instances,
             toolProvenance: this.toolProvenance,

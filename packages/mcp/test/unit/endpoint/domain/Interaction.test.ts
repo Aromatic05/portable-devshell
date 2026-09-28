@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
-    ContextMessageReadResult,
     JsonValue,
     ToolCallContext,
     ToolDefinition,
@@ -71,53 +70,29 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
     });
 
     test("the next successful tool result carries queued Comments for its exact ctxId once", async () => {
-        const pendingByCtx = new Map<string, ContextMessageReadResult>();
+        const pendingByCtx = new Map<string, string>();
         const consumed: Array<{
             callId: string;
             ctxId: string;
-            instance: string;
         }> = [];
         const { dispatch } = createHarness({
-            async consumeContextMessages(instance, ctxId, callId) {
-                consumed.push({ callId, ctxId, instance });
-                const result = pendingByCtx.get(ctxId);
+            feedback(context, callId) {
+                const ctxId = context.ctxId;
+                if (ctxId === undefined) return [];
+                consumed.push({ callId, ctxId });
+                const comment = pendingByCtx.get(ctxId);
                 pendingByCtx.delete(ctxId);
-                return result === undefined
-                    ? { callId, messages: [] }
-                    : { ...result, callId };
+                return comment === undefined ? [] : [comment];
             },
         });
 
         const first = await createContext(dispatch, "ctx-a");
         const second = await createContext(dispatch, "ctx-b");
-        pendingByCtx.set(first, {
-            callId: "pending",
-            comment:
-                "Review the failure before continuing\n\nThen compare the next output",
-            messages: [
-                {
-                    createdAt: "2026-08-03T00:00:00.000Z",
-                    id: "message-a",
-                    text: "Review the failure before continuing",
-                },
-                {
-                    createdAt: "2026-08-03T00:00:00.500Z",
-                    id: "message-a-2",
-                    text: "Then compare the next output",
-                },
-            ],
-        });
-        pendingByCtx.set(second, {
-            callId: "pending",
-            comment: "This belongs only to context B",
-            messages: [
-                {
-                    createdAt: "2026-08-03T00:00:01.000Z",
-                    id: "message-b",
-                    text: "This belongs only to context B",
-                },
-            ],
-        });
+        pendingByCtx.set(
+            first,
+            "Review the failure before continuing\n\nThen compare the next output",
+        );
+        pendingByCtx.set(second, "This belongs only to context B");
 
         const firstResult = await dispatch.callTool(
             "bash_run",
@@ -152,28 +127,18 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             stdout: "ok",
         });
         assert.deepEqual(consumed, [
-            { callId: "worker-call-1", ctxId: first, instance: "alpha" },
-            { callId: "worker-call-2", ctxId: first, instance: "alpha" },
-            { callId: "worker-call-3", ctxId: second, instance: "alpha" },
+            { callId: "worker-call-1", ctxId: first },
+            { callId: "worker-call-2", ctxId: first },
+            { callId: "worker-call-3", ctxId: second },
         ]);
     });
 
-    test("a failed tool call does not consume a queued Comment", async () => {
+    test("a failed tool call does not emit queued Comment feedback", async () => {
         let consumeCount = 0;
         const { dispatch, worker } = createHarness({
-            async consumeContextMessages(_instance, _ctxId, callId) {
+            feedback() {
                 consumeCount += 1;
-                return {
-                    callId,
-                    comment: "Keep this pending",
-                    messages: [
-                        {
-                            createdAt: "2026-08-03T00:00:00.000Z",
-                            id: "message-a",
-                            text: "Keep this pending",
-                        },
-                    ],
-                };
+                return ["Keep this pending"];
             },
         });
         const ctxId = await createContext(dispatch, "failed");
@@ -212,25 +177,25 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 instance: string,
                 toolName: string,
                 input: JsonValue,
-                _context: ToolCallContext,
+                context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                _onFeedback?: (feedback: readonly string[]) => void,
+                onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 audited.push({ instance, toolName });
-                await afterReview?.(`audit-${toolName}`);
-                return await operation(`audit-${toolName}`, input);
-            },
-            async consumeContextMessages(
-                instance: string,
-                ctxId: string,
-                callId: string,
-            ) {
-                consumed.push({ callId, ctxId, instance });
-                return instance === "beta"
-                    ? { callId, comment: "beta comment", messages: [] }
-                    : { callId, messages: [] };
+                const callId = `audit-${toolName}`;
+                await afterReview?.(callId);
+                const result = await operation(callId, input);
+                if (instance === "beta" && context.ctxId !== undefined) {
+                    consumed.push({
+                        callId,
+                        ctxId: context.ctxId,
+                        instance,
+                    });
+                    onFeedback?.(["beta comment"]);
+                }
+                return result;
             },
             environment(instance: string) {
                 return instance === "beta"
@@ -361,11 +326,10 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
 
     function createHarness(
         gatewayOverrides: {
-            consumeContextMessages?(
-                instance: string,
-                ctxId: string,
+            feedback?(
+                context: ToolCallContext,
                 callId: string,
-            ): Promise<ContextMessageReadResult>;
+            ): readonly string[];
         } = {},
         options: { contextRegistry?: McpContextRegistry } = {},
     ) {
@@ -399,16 +363,20 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
                 _onProgress?: (progress: JsonValue) => void,
                 _recording?: "caller" | "host",
-                _onFeedback?: (feedback: readonly string[]) => void,
+                onFeedback?: (feedback: readonly string[]) => void,
                 afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<JsonValue> {
                 if (worker.fail) throw new Error("worker failed");
                 const callId = `worker-call-${++callSequence}`;
                 await afterReview?.(callId);
                 const result = { exitCode: 0, stderr: "", stdout: "ok" };
-                return transformResult === undefined
+                const transformed = transformResult === undefined
                     ? result
                     : await transformResult(result, callId);
+                const feedback =
+                    gatewayOverrides.feedback?.(_context, callId) ?? [];
+                if (feedback.length > 0) onFeedback?.(feedback);
+                return transformed;
             },
             handshake: {
                 homeDirectory: "/workspace",

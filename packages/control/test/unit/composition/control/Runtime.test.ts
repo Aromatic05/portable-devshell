@@ -42,7 +42,6 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     });
     let artifactStopping = false;
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -103,7 +102,6 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
     const calls: string[] = [];
     const runtime = new ControlRuntime({
         artifact: { service: undefined, async stop() {} } as never,
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         instances: {
@@ -178,8 +176,6 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
             service: undefined,
             async stop() {},
         } as never,
-        comment: testComment().comment,
-        conversation: testConversation(),
         controlPaths: new ControlPathHome(homeDirectory),
         state,
     });
@@ -214,30 +210,24 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
     assert.deepEqual(calls, ["web", "mcp"]);
 });
 
-test("runtime wires Comment retirement only to committed instance lifecycle events", async (t) => {
-    const runtimeDir = await createTestTempDirectory("runtime-comment-lifecycle");
-    const socketPath = createTestIpcPath("control-runtime-comment", runtimeDir);
+test("runtime retires Extension resources through generation lifecycle", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-extension-lifecycle");
+    const socketPath = createTestIpcPath("control-runtime-extension", runtimeDir);
     const retired: string[] = [];
-    let disabled:
-        | ((instance: { name: string }) => Promise<void>)
-        | undefined;
-    let deleted:
-        | ((instance: { name: string }) => Promise<void>)
-        | undefined;
     let disableRetirements = 0;
     let deleteRetirements = 0;
-    let generationRetirements = 0;
-    const baseComment = testComment();
+    const generationRetirements: Array<
+        (instance: { name: string }) => Promise<void>
+    > = [];
     const runtime = new ControlRuntime({
         artifact: { service: undefined, async stop() {} } as never,
-        comment: {
-            ...baseComment,
-            async retireInstance(instance: string, reason: string) {
-                retired.push(`${instance}:${reason}`);
-            },
-        },
         extensionPaths: testExtensionPaths(),
-        extensions: testExtensions(),
+        extensions: {
+            ...testExtensions(),
+            async retireInstanceResources(instance: string) {
+                retired.push(instance);
+            },
+        } as never,
         instances: {
             list: () => [],
             onChange: () => () => undefined,
@@ -245,24 +235,18 @@ test("runtime wires Comment retirement only to committed instance lifecycle even
         } as never,
         mcp: {
             configEditor: {
-                registerInstanceDisabled(listener: typeof disabled) {
-                    disabled = listener;
-                    return () => undefined;
-                },
                 registerInstanceDisableRetirement() {
                     disableRetirements += 1;
-                    return () => undefined;
-                },
-                registerInstanceDeleted(listener: typeof deleted) {
-                    deleted = listener;
                     return () => undefined;
                 },
                 registerInstanceDeleteRetirement() {
                     deleteRetirements += 1;
                     return () => undefined;
                 },
-                registerInstanceGenerationRetirement() {
-                    generationRetirements += 1;
+                registerInstanceGenerationRetirement(listener: (
+                    instance: { name: string },
+                ) => Promise<void>) {
+                    generationRetirements.push(listener);
                     return () => undefined;
                 },
             },
@@ -287,16 +271,11 @@ test("runtime wires Comment retirement only to committed instance lifecycle even
 
     assert.equal(disableRetirements, 0);
     assert.equal(deleteRetirements, 0);
-    assert.equal(generationRetirements, 3);
-    assert.notEqual(disabled, undefined);
-    assert.notEqual(deleted, undefined);
-
-    await disabled!({ name: "alpha" });
-    await deleted!({ name: "beta" });
-    assert.deepEqual(retired, [
-        "alpha:Instance alpha was disabled before Comment delivery.",
-        "beta:Instance beta was deleted before Comment delivery.",
-    ]);
+    assert.equal(generationRetirements.length, 3);
+    for (const retire of generationRetirements) {
+        await retire({ name: "alpha" });
+    }
+    assert.deepEqual(retired, ["alpha"]);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -306,50 +285,6 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error("Timed out waiting for condition.");
-}
-
-function testComment() {
-    return {
-        async close() {},
-        comment: {
-            async consumePending(_instance: string, _ctxId: string, callId: string) {
-                return { callId, messages: [] };
-            },
-            async failAllPending() {
-                return [];
-            },
-            async failPending() {
-                return [];
-            },
-            feedback() {
-                return [];
-            },
-            async pendingReport() {
-                return {};
-            },
-            async reviewToolCall() {
-                return { kind: "allow" as const };
-            },
-        },
-        async retireInstance() {},
-        routes: {
-            control() {
-                return [];
-            },
-            instance() {
-                return [];
-            },
-        },
-    };
-}
-
-function testConversation() {
-    return {
-        async list() {
-            return [];
-        },
-        async recordReport() {},
-    };
 }
 
 function testConfigEditor() {
@@ -374,18 +309,29 @@ function testConfigEditor() {
 
 function testInstanceGateway() {
     return {
+        setExtensionService() {},
         setModelCommandCatalog() {},
     };
 }
 
 function testExtensions() {
     return {
+        async acquireRegistration() {
+            throw new Error("No test Extension registration.");
+        },
         async disable() {},
         async enable() {},
+        listDeclarations() {
+            return [];
+        },
         async list() {
             return [];
         },
+        onChange() {
+            return () => undefined;
+        },
         async reload() {},
+        async retireInstanceResources() {},
         async start() {},
         async stop() {},
     } as never;
@@ -403,7 +349,6 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -497,7 +442,6 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         async stop() {},
     };
     new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -567,7 +511,6 @@ test("Web hot replacement preserves the original failure when host rollback also
         async stop() {},
     };
     new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -636,7 +579,6 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         },
     };
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -700,7 +642,6 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -782,16 +723,12 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         service: undefined,
         async stop() {},
     } as never;
-    const mcpComment = testComment();
     const mcp = new ControlRuntimeMcp({
         artifact,
-        comment: mcpComment.comment,
-        conversation: testConversation(),
         controlPaths,
         state,
     });
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
@@ -914,6 +851,9 @@ test("runtime installs builtin Extensions through the normal installer before op
     });
     let selectedGeneration: string | undefined;
     const extensions = {
+        async acquireRegistration() {
+            throw new Error("No test Extension registration.");
+        },
         async selectGeneration(id: string, generation: string) {
             assert.equal(id, "skill");
             assert.equal(
@@ -925,6 +865,9 @@ test("runtime installs builtin Extensions through the normal installer before op
         async disable() {},
         async enable() {},
         async forget() {},
+        listDeclarations() {
+            return [];
+        },
         async list() {
             return selectedGeneration === undefined
                 ? []
@@ -939,13 +882,16 @@ test("runtime installs builtin Extensions through the normal installer before op
                       },
                   ];
         },
+        onChange() {
+            return () => undefined;
+        },
         async reload() {},
+        async retireInstanceResources() {},
         async start() {},
         async stop() {},
         async waitForDrain() {},
     } as never;
     const runtime = new ControlRuntime({
-        comment: testComment(),
         artifact: {
             service: undefined,
             async stop() {},
@@ -996,7 +942,6 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     const source = join(root, "invalid-builtin");
     await mkdir(source, { recursive: true });
     const runtime = new ControlRuntime({
-        comment: testComment(),
         artifact: { service: undefined, async stop() {} } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths: new ExtensionPathLayout({
@@ -1005,13 +950,23 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             runtimeRoot: join(root, "runtime"),
         }),
         extensions: {
+            async acquireRegistration() {
+                throw new Error("No test Extension registration.");
+            },
             async disable() {},
             async enable() {},
             async forget() {},
+            listDeclarations() {
+                return [];
+            },
             async list() {
                 return [];
             },
+            onChange() {
+                return () => undefined;
+            },
             async reload() {},
+            async retireInstanceResources() {},
             async selectGeneration() {},
             async start() {},
             async stop() {},
@@ -1096,7 +1051,6 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
         async stopOwned() {},
     };
     const runtime = new ControlRuntime({
-        comment: testComment(),
         extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,

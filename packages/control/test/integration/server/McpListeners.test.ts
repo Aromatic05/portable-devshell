@@ -177,8 +177,6 @@ test("instance MCP auth updates do not replace an unrelated Web listener", async
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -225,8 +223,6 @@ test("enabling MCP hot-applies the listener without requiring Control restart", 
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -286,8 +282,6 @@ test("MCP migration starts a different listener before retiring the previous lis
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -350,8 +344,6 @@ test("MCP same-endpoint replacement reports both startup and rollback failures",
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -423,8 +415,6 @@ test("MCP restore attempts every host transition and reports rollback failures",
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         factory: {
@@ -483,8 +473,6 @@ test("Web same-endpoint replacement reports both startup and rollback bind failu
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: { service: {}, installHttpRoute() {} } as never,
         controlPaths: new ControlPathHome(homeDirectory),
         state,
@@ -537,8 +525,6 @@ test("shared listener Web auth changes require an explicit control restart witho
     });
     await state.load();
     const runtime = new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: {
             service: {},
             installHttpRoute() {},
@@ -585,8 +571,6 @@ async function createRuntime(
     });
     await state.load();
     return new ControlRuntimeMcp({
-        comment: testComment(),
-        conversation: testConversation(),
         artifact: {
             service: {},
             installHttpRoute() {},
@@ -594,29 +578,6 @@ async function createRuntime(
         controlPaths: new ControlPathHome(homeDirectory),
         state,
     });
-}
-
-function testComment() {
-    return {
-        async consumePending(_instance: string, _ctxId: string, callId: string) {
-            return { callId, messages: [] };
-        },
-        async failPending() {
-            return [];
-        },
-        async pendingReport() {
-            return {};
-        },
-    };
-}
-
-function testConversation() {
-    return {
-        async list() {
-            return [];
-        },
-        async recordReport() {},
-    };
 }
 
 function createConfig(mcpPort: number, webPort: number): ControlConfig {

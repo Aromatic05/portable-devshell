@@ -8,7 +8,7 @@ import {
     type ToolDefinition,
 } from "@portable-devshell/shared";
 
-export type McpToolCatalogTodoName = "todo_read" | "todo_report" | "todo_write";
+export type McpToolCatalogTodoName = "todo_read" | "todo_write";
 
 const todoItemSchema: JsonValue = {
     additionalProperties: false,
@@ -181,35 +181,6 @@ export class McpToolCatalogTodo {
             },
             name: "todo_read",
             outputSchema: outputSchema(),
-        },
-        {
-            requiredCapabilities: [],
-            description:
-                "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
-            group: "todo",
-            inputSchema: {
-                additionalProperties: false,
-                properties: {
-                    message: {
-                        description:
-                            "Concise user reply or meaningful progress update.",
-                        minLength: 1,
-                        maxLength: TODO_MAX_TEXT_LENGTH,
-                        type: "string",
-                    },
-                },
-                required: ["message"],
-                type: "object",
-            },
-            name: "todo_report",
-            outputSchema: {
-                additionalProperties: false,
-                properties: {
-                    reported: { type: "boolean" },
-                },
-                required: ["reported"],
-                type: "object",
-            },
         },
         {
             requiredCapabilities: [],

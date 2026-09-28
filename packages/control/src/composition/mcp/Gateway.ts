@@ -1,14 +1,8 @@
 import type { McpInstanceGateway } from "@portable-devshell/mcp";
-import {
-    createError,
-    errorCodes,
-    toControlErrorBody,
-} from "@portable-devshell/shared";
+import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
-    ContextMessageReadResult,
-    ContextMessageRecord,
     ControlConfig,
     JsonValue,
     ToolCallContext,
@@ -18,34 +12,9 @@ import type { InstanceRegistry } from "../../control/instance/registry/Registry.
 import { InstanceConnectionService } from "../../control/instance/registry/Connection.js";
 import type { ToolCallProvenanceStore } from "../../instance/execution/tool/Provenance.js";
 import type { ArtifactService } from "../../control/artifact/Service.js";
-
-export interface McpCommentPort {
-    beforeTodoToolCall(
-        instance: string,
-        ctxId: string,
-        toolName: string,
-    ): Promise<void>;
-    consumePending(
-        instance: string,
-        ctxId: string,
-        callId: string,
-    ): Promise<ContextMessageReadResult>;
-    failPending(
-        instance: string,
-        ctxId: string,
-        reason: string,
-    ): Promise<ContextMessageRecord[]>;
-    recordTodoInvalid(instance: string, ctxId: string): void;
-    reportTodo(
-        instance: string,
-        ctxId: string,
-        message: string,
-        callId: string,
-    ): Promise<void>;
-}
+import type { McpExtensionService } from "./extension/Service.js";
 
 export interface McpInstanceGatewayControlOptions {
-    comment: McpCommentPort;
     getConfig: () => ControlConfig;
     instanceRegistry: InstanceRegistry;
     instanceConnections?: InstanceConnectionService;
@@ -53,15 +22,14 @@ export interface McpInstanceGatewayControlOptions {
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
-    readonly #comment: McpInstanceGatewayControlOptions["comment"];
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;
+    #extensions?: McpExtensionService;
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
-        this.#comment = options.comment;
         this.#getConfig = options.getConfig;
         this.#instanceRegistry = options.instanceRegistry;
         this.#instanceConnections =
@@ -91,16 +59,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
                 retryable: false,
             });
         }
-    }
-
-    async beforeTodoToolCall(
-        instance: string,
-        toolName: string,
-        context: ToolCallContext,
-    ): Promise<void> {
-        const ctxId = context.ctxId;
-        if (ctxId === undefined) return;
-        await this.#comment.beforeTodoToolCall(instance, ctxId, toolName);
     }
 
     async callToolOperation<T extends JsonValue>(
@@ -186,6 +144,53 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         provider: (instance: string) => readonly string[],
     ): void {
         this.#modelCommands = provider;
+    }
+
+    setExtensionService(service: McpExtensionService): void {
+        this.#extensions = service;
+    }
+
+    listExtensionTools(instance: string): readonly ToolDefinition[] {
+        this.#requireDescriptor(instance);
+        return this.#extensions?.listTools() ?? [];
+    }
+
+    async callExtensionTool(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        callId: string,
+        signal?: AbortSignal,
+    ) {
+        this.#requireDescriptor(instance);
+        const extensions = this.#extensions;
+        if (extensions === undefined)
+            throw new Error("MCP Extension service is unavailable.");
+        return await extensions.callTool(
+            toolName,
+            input,
+            {
+                callId,
+                instance,
+                ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
+                ...(context.requestId === undefined
+                    ? {}
+                    : { requestId: context.requestId }),
+                ...(context.workspace === undefined
+                    ? {}
+                    : { workspace: context.workspace }),
+            },
+            signal,
+        );
+    }
+
+    async contextTerminated(
+        instance: string,
+        ctxId: string,
+        reason: "disabled" | "expired",
+    ): Promise<void> {
+        await this.#extensions?.contextTerminated(instance, ctxId, reason);
     }
 
     async listInstances(): Promise<JsonValue> {
@@ -441,18 +446,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         );
     }
 
-    async failContextMessages(instance: string, ctxId: string, reason: string) {
-        return await this.#comment.failPending(instance, ctxId, reason);
-    }
-
-    async consumeContextMessages(
-        instance: string,
-        ctxId: string,
-        callId: string,
-    ) {
-        return await this.#comment.consumePending(instance, ctxId, callId);
-    }
-
     async readTodo(
         instance: string,
         input?: import("@portable-devshell/shared").TodoReadInput,
@@ -551,27 +544,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
     ): Promise<JsonValue> {
         const descriptor = this.#requireDescriptor(instance);
         const ctxId = requireCtxId(context);
-        try {
-            return (await descriptor.todo.write(
-                input as unknown as import("@portable-devshell/shared").TodoWriteInput,
-                ctxId,
-            )) as unknown as JsonValue;
-        } catch (error) {
-            if (toControlErrorBody(error)?.code === errorCodes.todoInvalid) {
-                this.#comment.recordTodoInvalid(instance, ctxId);
-            }
-            throw error;
-        }
-    }
-
-    async reportTodo(
-        instance: string,
-        message: string,
-        callId: string,
-        context: ToolCallContext,
-    ): Promise<void> {
-        const ctxId = requireCtxId(context);
-        await this.#comment.reportTodo(instance, ctxId, message, callId);
+        return (await descriptor.todo.write(
+            input as unknown as import("@portable-devshell/shared").TodoWriteInput,
+            ctxId,
+        )) as unknown as JsonValue;
     }
 
     #requireWait(instance: string) {

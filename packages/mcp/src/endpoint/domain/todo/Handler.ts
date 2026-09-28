@@ -5,9 +5,9 @@ import {
 
 import type { McpInstanceGateway } from "../../Port.js";
 import type { McpToolCatalogTodoName } from "./Catalog.js";
-import { readTodoInput, readTodoReportMessage } from "./Input.js";
+import { readTodoInput } from "./Input.js";
 import { waitForMcpEndpointAbortable } from "../../dispatch/Support.js";
-import { McpNativeToolResult, type McpEndpointResult } from "../../Endpoint.js";
+import type { McpEndpointResult } from "../../Endpoint.js";
 import { requireMcpEndpointGateway } from "../../dispatch/Support.js";
 
 export class McpEndpointHandlerTodo {
@@ -23,7 +23,6 @@ export class McpEndpointHandlerTodo {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        callId?: string,
     ): Promise<McpEndpointResult> {
         const gateway = requireMcpEndpointGateway(
             this.options.gateway,
@@ -38,24 +37,6 @@ export class McpEndpointHandlerTodo {
                     ),
                     signal,
                 );
-            case "todo_report": {
-                const message = readTodoReportMessage(input);
-                if (callId !== undefined && gateway.reportTodo !== undefined) {
-                    await waitForMcpEndpointAbortable(
-                        gateway.reportTodo(
-                            this.options.instanceName,
-                            message,
-                            callId,
-                            context,
-                        ),
-                        signal,
-                    );
-                }
-                return new McpNativeToolResult({
-                    content: [{ type: "text", text: message }],
-                    structuredContent: { reported: true },
-                });
-            }
             case "todo_write": {
                 const written = await waitForMcpEndpointAbortable(
                     gateway.writeTodo(

@@ -42,6 +42,50 @@
                 "scope": "control"
             }
         ],
+        "mcp.context-terminal": [
+            {
+                "id": "comment"
+            }
+        ],
+        "mcp.tools": [
+            {
+                "id": "todo_report",
+                "activity": "observation",
+                "description": "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
+                "title": "Message user",
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": false,
+                "inputSchema": {
+                    "additionalProperties": false,
+                    "properties": {
+                        "message": {
+                            "description": "User reply or meaningful progress update.",
+                            "minLength": 1,
+                            "maxLength": 4000,
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "message"
+                    ],
+                    "type": "object"
+                },
+                "outputSchema": {
+                    "additionalProperties": false,
+                    "properties": {
+                        "reported": {
+                            "type": "boolean"
+                        }
+                    },
+                    "required": [
+                        "reported"
+                    ],
+                    "type": "object"
+                }
+            }
+        ],
         "toolcall.review": [
             {
                 "id": "comment"

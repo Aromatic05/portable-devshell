@@ -1,25 +1,4 @@
-import {
-    TODO_MAX_TEXT_LENGTH,
-    type JsonValue,
-    type TodoReadInput,
-} from "@portable-devshell/shared";
-
-export function readTodoReportMessage(input: JsonValue): string {
-    if (typeof input !== "object" || input === null || Array.isArray(input))
-        throw new Error("todo_report requires an object input.");
-    const keys = Object.keys(input);
-    if (keys.length !== 1 || keys[0] !== "message")
-        throw new Error("todo_report accepts only message.");
-    const value = input.message;
-    if (typeof value !== "string" || value.trim().length === 0)
-        throw new Error("todo_report message must be a non-empty string.");
-    const message = value.trim();
-    if (message.length > TODO_MAX_TEXT_LENGTH)
-        throw new Error(
-            `todo_report message must be at most ${TODO_MAX_TEXT_LENGTH} characters.`,
-        );
-    return message;
-}
+import type { JsonValue, TodoReadInput } from "@portable-devshell/shared";
 
 /**
  * @compat todo-title-selector

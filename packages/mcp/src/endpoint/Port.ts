@@ -4,8 +4,6 @@ import type {
 } from "@portable-devshell/shared";
 import type {
     ApprovalRequest,
-    ContextMessageReadResult,
-    ContextMessageRecord,
     GoalActivityKind,
     GoalContinuationInput,
     GoalManageInput,
@@ -113,6 +111,15 @@ export interface McpWorkspaceEventSlice {
     lastSeq: number;
 }
 
+export interface McpExtensionToolResult {
+    content?: readonly {
+        text: string;
+        type: "text";
+    }[];
+    isError?: boolean;
+    structuredContent: JsonValue;
+}
+
 export interface McpInstanceGateway {
     appendMcpToolCalled(
         instance: string,
@@ -120,11 +127,14 @@ export interface McpInstanceGateway {
         context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
     assertReady(instance: string): void;
-    beforeTodoToolCall?(
+    callExtensionTool?(
         instance: string,
         toolName: string,
+        input: JsonValue,
         context: ToolCallContext,
-    ): Promise<void>;
+        callId: string,
+        signal?: AbortSignal,
+    ): Promise<McpExtensionToolResult>;
     callToolOperation<T extends JsonValue>(
         instance: string,
         toolName: string,
@@ -269,24 +279,14 @@ export interface McpInstanceGateway {
         ctxId: string,
         expectedRevision?: number,
     ): Promise<JsonValue>;
-    consumeContextMessages?(
+    contextTerminated?(
         instance: string,
         ctxId: string,
-        callId: string,
-    ): Promise<ContextMessageReadResult>;
-    failContextMessages?(
-        instance: string,
-        ctxId: string,
-        reason: string,
-    ): Promise<ContextMessageRecord[]>;
-    readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
-    reportTodo?(
-        instance: string,
-        message: string,
-        callId: string,
-        context: ToolCallContext,
+        reason: "disabled" | "expired",
     ): Promise<void>;
+    readTodo(instance: string, input?: TodoReadInput): Promise<JsonValue>;
     listTools(instance: string): ToolDefinition[];
+    listExtensionTools?(instance: string): readonly ToolDefinition[];
     observeTmuxTask?(
         instance: string,
         taskId: string,

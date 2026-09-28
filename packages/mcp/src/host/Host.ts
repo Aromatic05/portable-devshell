@@ -598,16 +598,12 @@ export class McpHost {
                         }
                     }
                 }
-                if (gateway.failContextMessages !== undefined) {
+                if (gateway.contextTerminated !== undefined) {
                     await cleanup(async () => {
-                        await gateway.failContextMessages!(
+                        await gateway.contextTerminated!(
                             environment.instance,
                             terminal.ctxId,
-                            "Context " +
-                                terminal.ctxId +
-                                " was " +
-                                terminalReason +
-                                " before Comment delivery.",
+                            terminalReason,
                         );
                     });
                 }

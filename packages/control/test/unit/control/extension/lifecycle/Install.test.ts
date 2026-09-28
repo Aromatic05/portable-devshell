@@ -68,12 +68,18 @@ async function harness(t: test.TestContext, limits = {}): Promise<Harness> {
         await rm(root, { force: true, recursive: true });
     };
     t.after(cleanup);
+    const requiredBuiltinIds = new Set(["comment"]);
     return {
         cleanup,
         host,
         paths,
         root,
-        service: new ExtensionInstallService({ host, limits, paths }),
+        service: new ExtensionInstallService({
+            host,
+            limits,
+            paths,
+            requiredBuiltinIds,
+        }),
         async source(name, options = {}) {
             const source = join(root, name);
             const id = options.id ?? "example";
@@ -242,6 +248,7 @@ test("builtin Extension identity cannot be replaced by ordinary install", async 
     const control = new ExtensionControlService({
         host: h.host,
         installer: h.service,
+        requiredBuiltinIds: new Set(["comment"]),
     });
     await assert.rejects(
         control.disable("comment"),

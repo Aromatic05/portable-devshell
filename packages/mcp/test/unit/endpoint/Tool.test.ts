@@ -51,6 +51,22 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         requiredCapabilities: [],
     };
 
+    const extensionToolMeta: JsonValue = {
+        devshell: {
+            mcp: {
+                annotations: {
+                    destructiveHint: false,
+                    idempotentHint: false,
+                    openWorldHint: false,
+                    readOnlyHint: false,
+                },
+                extensionTool: true,
+                preserveInputDescriptions: true,
+                title: "Message user",
+            },
+        },
+    };
+
     test("MCP safety annotations are explicit for known semantics and conservative for unknown tools", () => {
         assert.deepEqual(mcpToolAnnotations("file_read"), {
             destructiveHint: false,
@@ -82,12 +98,15 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             openWorldHint: false,
             readOnlyHint: false,
         });
-        assert.deepEqual(mcpToolAnnotations("todo_report"), {
-            destructiveHint: false,
-            idempotentHint: false,
-            openWorldHint: false,
-            readOnlyHint: false,
-        });
+        assert.deepEqual(
+            mcpToolAnnotations("todo_report", extensionToolMeta),
+            {
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: false,
+                readOnlyHint: false,
+            },
+        );
         assert.deepEqual(mcpToolAnnotations("workspace_approval"), {
             destructiveHint: true,
             idempotentHint: false,
@@ -107,7 +126,10 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
         assert.equal(mcpToolTitle("workspace_open"), "Open Workspace");
         assert.equal(mcpToolTitle("artifact_viewImage"), "View image");
         assert.equal(mcpToolTitle("tmux_manage"), "Manage tmux resources");
-        assert.equal(mcpToolTitle("todo_report"), "Message user");
+        assert.equal(
+            mcpToolTitle("todo_report", extensionToolMeta),
+            "Message user",
+        );
         assert.equal(mcpToolTitle("future_unknown"), "Future unknown");
     });
 
@@ -187,13 +209,15 @@ import type { ToolDefinition, JsonValue } from "@portable-devshell/shared";
             enhancer.enhance("workspace_open", "  Open workspace  "),
             /environ_info/u,
         );
-        assert.match(
-            enhancer.enhance("todo_report", "verbose internal contract"),
-            /#push/u,
-        );
-        assert.match(
-            enhancer.enhance("todo_report", "verbose internal contract"),
-            /#stop/u,
+        const extensionDescription =
+            "Reply to comments first. #push requires a reply. #stop disables tools.";
+        assert.equal(
+            enhancer.enhance(
+                "todo_report",
+                extensionDescription,
+                extensionToolMeta,
+            ),
+            extensionDescription,
         );
         assert.equal(enhancer.enhance("future_tool", undefined), "");
     });

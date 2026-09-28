@@ -14,6 +14,12 @@ import {
 } from "@portable-devshell/extension/control";
 import type { ExtensionInstanceRuntimeCapability } from "@portable-devshell/extension/instance";
 import {
+    contextTerminal,
+    tools as mcpTools,
+    type McpContextTerminalBinding,
+    type McpToolBinding,
+} from "@portable-devshell/extension/mcp";
+import {
     review,
     type ToolCallReviewBinding,
     type ToolCallReviewInvocation,
@@ -417,6 +423,16 @@ export async function activate(context: ExtensionContext): Promise<void> {
         return await binding(input, invocation);
     });
     registerCommentRoutes(context, source, comment);
+    context.register(
+        mcpTools,
+        "todo_report",
+        createTodoReportTool(source, comment.comment),
+    );
+    context.register(
+        contextTerminal,
+        "comment",
+        createCommentContextTerminal(source, comment.comment),
+    );
     builtinRuntime = { comment, source };
 }
 
@@ -602,6 +618,84 @@ function createCommentRouteBinding(
     };
 }
 
+function createTodoReportTool(
+    source: BuiltinCommentInstanceSource,
+    comment: Pick<CommentPort, "reportTodo">,
+): McpToolBinding {
+    return async (input, invocation) => {
+        await source.refresh();
+        const ctxId = invocation.ctxId;
+        if (ctxId === undefined || ctxId.length === 0) {
+            throw new ExtensionError({
+                code: "mcp.contextInvalid",
+                message: "todo_report requires a validated ctxId.",
+                retryable: false,
+            });
+        }
+        const message = readTodoReportMessage(input);
+        await comment.reportTodo(
+            invocation.instance,
+            ctxId,
+            message,
+            invocation.callId,
+        );
+        return {
+            content: [{ text: message, type: "text" }],
+            structuredContent: { reported: true },
+        };
+    };
+}
+
+function createCommentContextTerminal(
+    source: BuiltinCommentInstanceSource,
+    comment: Pick<CommentPort, "failPending">,
+): McpContextTerminalBinding {
+    return async ({ ctxId, instance, reason }) => {
+        await source.refresh();
+        if (!source.has(instance)) return;
+        await comment.failPending(
+            instance,
+            ctxId,
+            "Context " +
+                ctxId +
+                " was " +
+                reason +
+                " before Comment delivery.",
+        );
+    };
+}
+
+const COMMENT_REPORT_MAX_TEXT_LENGTH = 4_000;
+
+function readTodoReportMessage(input: ExtensionJsonValue): string {
+    if (typeof input !== "object" || input === null || Array.isArray(input))
+        throw invalidTodoReportInput("todo_report requires an object input.");
+    const keys = Object.keys(input);
+    if (keys.length !== 1 || keys[0] !== "message")
+        throw invalidTodoReportInput("todo_report accepts only message.");
+    const value = input.message;
+    if (typeof value !== "string" || value.trim().length === 0)
+        throw invalidTodoReportInput(
+            "todo_report message must be a non-empty string.",
+        );
+    const message = value.trim();
+    if (message.length > COMMENT_REPORT_MAX_TEXT_LENGTH)
+        throw invalidTodoReportInput(
+            "todo_report message must be at most " +
+                COMMENT_REPORT_MAX_TEXT_LENGTH +
+                " characters.",
+        );
+    return message;
+}
+
+function invalidTodoReportInput(message: string): ExtensionError {
+    return new ExtensionError({
+        code: "control.invalidTarget",
+        message,
+        retryable: false,
+    });
+}
+
 class BuiltinCommentInstanceSource implements CommentInstanceSource {
     readonly #instanceRuntime: ExtensionInstanceRuntimeCapability;
     readonly #keys = new Map<string, object>();
@@ -652,6 +746,10 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
     onChange(listener: () => void): () => void {
         this.#listeners.add(listener);
         return () => this.#listeners.delete(listener);
+    }
+
+    has(name: string): boolean {
+        return this.#records.some((record) => record.name === name);
     }
 
     async refresh(renewInstance?: string): Promise<void> {

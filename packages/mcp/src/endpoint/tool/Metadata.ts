@@ -27,7 +27,6 @@ const nonDestructiveMutationTools = new Set([
     "environ_info",
     "instance_create",
     "tmux_read",
-    "todo_report",
     "workspace_ask",
     "workspace_goal",
     "workspace_resume",
@@ -53,7 +52,6 @@ const closedWorldTools = new Set([
     "tmux_manage",
     "tmux_read",
     "todo_read",
-    "todo_report",
     "todo_write",
     "workspace_ask",
     "workspace_goal",
@@ -70,14 +68,25 @@ const closedWorldTools = new Set([
     "workspace_watch",
 ]);
 
-export function mcpToolAnnotations(toolName: string): McpToolAnnotations {
+export function mcpToolAnnotations(
+    toolName: string,
+    meta?: JsonValue,
+): McpToolAnnotations {
     const readOnlyHint = readOnlyTools.has(toolName);
+    const extension = extensionMcpMeta(meta);
+    const extensionAnnotations = asRecord(extension.annotations);
     return {
-        readOnlyHint,
+        readOnlyHint:
+            booleanField(extensionAnnotations, "readOnlyHint") ?? readOnlyHint,
         destructiveHint:
-            !readOnlyHint && !nonDestructiveMutationTools.has(toolName),
-        idempotentHint: readOnlyHint || idempotentMutationTools.has(toolName),
-        openWorldHint: !closedWorldTools.has(toolName),
+            booleanField(extensionAnnotations, "destructiveHint") ??
+            (!readOnlyHint && !nonDestructiveMutationTools.has(toolName)),
+        idempotentHint:
+            booleanField(extensionAnnotations, "idempotentHint") ??
+            (readOnlyHint || idempotentMutationTools.has(toolName)),
+        openWorldHint:
+            booleanField(extensionAnnotations, "openWorldHint") ??
+            !closedWorldTools.has(toolName),
     };
 }
 
@@ -135,10 +144,6 @@ const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
         "Read todo plans. With no selector, list live tasks. Prefer taskId once known; title is compatibility-only. Use todo tools only for multi-step work.",
     ],
     [
-        "todo_report",
-        "Send a user-visible message without ending the turn or changing Todo state. Reply to comments first. #push requires a reply within five tool calls. #stop disables tools until #resume. Otherwise report only meaningful new progress; never repeat reports.",
-    ],
-    [
         "todo_write",
         "Replace a todo plan completely. Create with revision=0 and immutable title; then reuse taskId and current revision. At most one item is in_progress; blocked/failed require detail. checkpoint stores durable handoff context. Update on state changes.",
     ],
@@ -157,7 +162,13 @@ const MCP_WORKER_TOOL_DESCRIPTIONS = new Map<string, string>([
 ]);
 
 export class McpToolDescriptionEnhancer {
-    enhance(toolName: string, description: string | undefined): string {
+    enhance(
+        toolName: string,
+        description: string | undefined,
+        meta?: JsonValue,
+    ): string {
+        if (extensionMcpMeta(meta).extensionTool === true)
+            return description?.trim() ?? "";
         return (
             MCP_WORKER_TOOL_DESCRIPTIONS.get(toolName) ??
             description?.trim() ??
@@ -186,7 +197,6 @@ const titles: Readonly<Record<string, string>> = {
     tmux_read: "Read tmux task",
     tmux_run: "Run tmux task",
     todo_read: "Read task plan",
-    todo_report: "Message user",
     todo_write: "Update task plan",
     workspace_ask: "Ask user",
     workspace_approval: "Decide approval",
@@ -203,8 +213,9 @@ const titles: Readonly<Record<string, string>> = {
     workspace_watch: "Watch Workspace",
 };
 
-export function mcpToolTitle(toolName: string): string {
-    return titles[toolName] ?? humanizeToolName(toolName);
+export function mcpToolTitle(toolName: string, meta?: JsonValue): string {
+    const extensionTitle = stringField(extensionMcpMeta(meta), "title");
+    return extensionTitle ?? titles[toolName] ?? humanizeToolName(toolName);
 }
 
 const invocationStatuses: Readonly<
@@ -222,8 +233,58 @@ const invocationStatuses: Readonly<
 
 export function mcpToolInvocationStatus(
     toolName: string,
+    meta?: JsonValue,
 ): { invoked: string; invoking: string } | undefined {
+    const extension = extensionMcpMeta(meta);
+    const invoked = stringField(extension, "invoked");
+    const invoking = stringField(extension, "invoking");
+    if (invoked !== undefined && invoking !== undefined)
+        return { invoked, invoking };
     return invocationStatuses[toolName];
+}
+
+export function mcpToolActivity(
+    meta?: JsonValue,
+): "execution" | "mutation" | "observation" | "wait" | undefined {
+    const activity = extensionMcpMeta(meta).activity;
+    return activity === "execution" ||
+        activity === "mutation" ||
+        activity === "observation" ||
+        activity === "wait"
+        ? activity
+        : undefined;
+}
+
+export function mcpToolPreserveInputDescriptions(meta?: JsonValue): boolean {
+    return extensionMcpMeta(meta).preserveInputDescriptions === true;
+}
+
+function extensionMcpMeta(meta?: JsonValue): Record<string, JsonValue> {
+    return asRecord(asRecord(asRecord(meta).devshell).mcp);
+}
+
+function booleanField(
+    value: Record<string, JsonValue>,
+    field: string,
+): boolean | undefined {
+    return typeof value[field] === "boolean"
+        ? (value[field] as boolean)
+        : undefined;
+}
+
+function stringField(
+    value: Record<string, JsonValue>,
+    field: string,
+): string | undefined {
+    return typeof value[field] === "string" && value[field].length > 0
+        ? (value[field] as string)
+        : undefined;
+}
+
+function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : {};
 }
 
 function humanizeToolName(toolName: string): string {

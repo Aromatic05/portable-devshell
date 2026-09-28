@@ -1,8 +1,6 @@
 import { homedir } from "node:os";
 
-import { CommentExtension } from "@portable-devshell/comment-extension";
-import { InstancePaths, resolveWorkerHomeDirectory } from "@portable-devshell/core";
-import { asInstanceName, ControlPathHome } from "@portable-devshell/shared";
+import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
@@ -64,47 +62,8 @@ export class ControlRuntimeFactory {
             });
             const extensionPoints = createControlExtensionPointRegistry();
             const runtimeSubscriptions = new RuntimeSubscriptionManager();
-            const commentHomeDirectory = resolveWorkerHomeDirectory();
-            const comment = new CommentExtension({
-                instances: {
-                    list: () =>
-                        options.state.instances
-                            .list()
-                            .map((descriptor) => {
-                            const paths = new InstancePaths(
-                                asInstanceName(descriptor.name),
-                                commentHomeDirectory,
-                            );
-                            return {
-                                appendEvent: async (type, data) => {
-                                    await descriptor.worker.appendControlEvent(
-                                        type,
-                                        data,
-                                    );
-                                },
-                                conversationDatabaseFile:
-                                    paths.conversationDatabaseFile,
-                                enabled: descriptor.enabled,
-                                key: descriptor.worker,
-                                legacyContextMessagesFile:
-                                    paths.contextMessagesFile,
-                                legacyReports: async () =>
-                                    await descriptor.worker.readToolCalls({
-                                        includeInput: true,
-                                        includeOutput: false,
-                                        toolName: "todo_report",
-                                    }),
-                                name: descriptor.name,
-                            };
-                        }),
-                    onChange: (listener) =>
-                        options.state.instances.onChange(listener),
-                },
-                preferencesFile: controlPaths.conversationPreferencesFile,
-            });
             const mcp = new ControlRuntimeMcp({
                 artifact,
-                comment: comment.comment,
                 controlPaths,
                 factory: this.#mcpFactory,
                 state: options.state,
@@ -188,7 +147,6 @@ export class ControlRuntimeFactory {
             return new ControlRuntime({
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
-                comment,
                 config: () => options.state.requireConfig(),
                 extensionPaths,
                 extensions,

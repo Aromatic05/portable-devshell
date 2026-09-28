@@ -34,7 +34,6 @@ import {
 } from "../../../../../src/control/extension/cli/Sandbox.ts";
 import { createTuiPageSandboxBinding } from "../../../../../src/control/extension/tui/Sandbox.ts";
 import {
-    createToolCallReviewSandboxBinding,
     createToolCallRewriteSandboxBinding,
 } from "../../../../../src/control/extension/toolcall/Sandbox.ts";
 import {
@@ -199,62 +198,6 @@ export function activate(context) {
         });
         return true;
     });
-});
-
-test("Extension sandbox bridges a Comment interface scoped to one toolcall.review invocation", async (t) => {
-    const sandbox = await setupSandbox(
-        t,
-        "extension-sandbox-comment",
-        `
-export function activate(context) {
-    context.register({ id: "toolcall.review" }, "comment", async (_input, invocation) => {
-        const decision = await invocation.requestInterface("comment.reviewToolCall");
-        return decision.kind === "allow"
-            ? { decision: "accept" }
-            : { decision: "reject", reason: decision.kind };
-    });
-}
-`,
-    );
-    const descriptor = await sandbox.start();
-    assert.deepEqual(descriptor.registrations, [
-        { descriptor: { kind: "review" }, id: "comment", pointId: "toolcall.review" },
-    ]);
-    const binding = createToolCallReviewSandboxBinding(
-        { kind: "review" },
-        { codeDirectory: "/extension", extensionId: "comment", id: "comment" },
-        sandbox,
-    );
-    const calls: unknown[] = [];
-    const signal = new AbortController().signal;
-    assert.deepEqual(
-        await binding(
-            {
-                callId: "call-comment",
-                context: {
-                    ctxId: "ctx-comment",
-                    instance: "demo",
-                    requestId: "request-comment",
-                    source: "mcp",
-                },
-                direction: "inbound",
-                kind: "call",
-                payload: { command: "pwd" },
-                signal,
-                toolName: "bash_run",
-            },
-            {
-                async requestInterface(operation, input) {
-                    calls.push({ input, operation });
-                    return { commentId: "stop-1", kind: "stop" };
-                },
-            },
-        ),
-        { decision: "reject", reason: "stop" },
-    );
-    assert.deepEqual(calls, [
-        { input: undefined, operation: "comment.reviewToolCall" },
-    ]);
 });
 
 test("Extension sandbox bridges a Secret interface scoped to one toolcall.rewrite invocation", async (t) => {

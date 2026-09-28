@@ -43,8 +43,6 @@ export const BUILTIN_EXTENSION_IDS = new Set([
     "storage",
 ]);
 
-export const REQUIRED_BUILTIN_EXTENSION_IDS = new Set(["comment"]);
-
 export interface ExtensionInstallHost {
     disable(id: string): Promise<void>;
     enable(id: string): Promise<void>;
@@ -58,17 +56,20 @@ export interface ExtensionInstallServiceOptions {
     host: ExtensionInstallHost;
     limits?: Partial<ExtensionInstallLimits>;
     paths: ExtensionPathLayout;
+    requiredBuiltinIds?: ReadonlySet<string>;
 }
 
 export class ExtensionInstallService {
     readonly #host: ExtensionInstallHost;
     readonly #limits: ExtensionInstallLimits;
     readonly #paths: ExtensionPathLayout;
+    readonly #requiredBuiltinIds: ReadonlySet<string>;
 
     constructor(options: ExtensionInstallServiceOptions) {
         this.#host = options.host;
         this.#paths = options.paths;
         this.#limits = resolveExtensionInstallLimits(options.limits);
+        this.#requiredBuiltinIds = new Set(options.requiredBuiltinIds ?? []);
     }
 
     async install(sourcePath: string): Promise<ExtensionRuntimeRecord> {
@@ -85,7 +86,7 @@ export class ExtensionInstallService {
             );
         }
         const installed = await this.#install(sourcePath, id);
-        if (!REQUIRED_BUILTIN_EXTENSION_IDS.has(id) || installed.enabled)
+        if (!this.#requiredBuiltinIds.has(id) || installed.enabled)
             return installed;
         await this.#host.enable(id);
         return await requireRuntimeRecord(this.#host, id);

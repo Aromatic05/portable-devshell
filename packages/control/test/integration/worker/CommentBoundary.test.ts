@@ -408,17 +408,6 @@ function createCommentGateway(
         async callTool() {
             throw new Error("unexpected routed ToolCall");
         },
-        async consumeContextMessages(
-            _instance: string,
-            ctxId: string,
-            callId: string,
-        ) {
-            return await comment.comment.consumePending(
-                instanceName,
-                ctxId,
-                callId,
-            );
-        },
         environment() {
             return handshake as never;
         },

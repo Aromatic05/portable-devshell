@@ -29,7 +29,11 @@ import type {
     OAuthDiscoveryState,
     OAuthTokens,
 } from "@modelcontextprotocol/client";
-import { CommentExtension } from "@portable-devshell/comment-extension";
+import {
+    CommentExtension,
+    createCommentReview,
+} from "@portable-devshell/comment-extension";
+import { ToolCallBoundarySequence } from "@portable-devshell/core";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -209,14 +213,6 @@ test(
             async callTool() {
                 throw new Error("routed calls are not used by this test");
             },
-            async consumeContextMessages(
-                instance: string,
-                ctxId: string,
-                callId: string,
-            ) {
-                assert.equal(instance, "real-comment");
-                return await comment.comment.consumePending(instance, ctxId, callId);
-            },
             environment() {
                 return undefined;
             },
@@ -264,6 +260,22 @@ test(
                 { enabled: false, provider: "none" },
                 gateway,
             );
+        const commentReview = createCommentReview(comment.comment);
+        instance.bindToolCallBoundary(() => ({
+            release() {},
+            sequence: new ToolCallBoundarySequence({
+                reviews: [
+                    async (input) =>
+                        await commentReview(input as never, {
+                            async requestInterface() {
+                                throw new Error(
+                                    "Comment review must not request a host interface.",
+                                );
+                            },
+                        }),
+                ],
+            }),
+        }));
         cleanupDirs.push(contextRoot);
 
         try {
@@ -279,10 +291,6 @@ test(
                     (tool) => tool.name === "context_message_read",
                 ),
                 false,
-            );
-            assert.equal(
-                tools.tools.some((tool) => tool.name === "todo_report"),
-                true,
             );
 
             const ctxId = await readContextId(client, workspacePath);
@@ -324,12 +332,16 @@ test(
                     record.status === "completed",
             );
             assert.deepEqual(
-                (audited?.output as { comment?: string[] } | undefined)
-                    ?.comment,
+                audited?.feedback,
                 [
                     "Inspect this result before continuing\n\nCompare it with the next call",
                 ],
-                "Audit Output must persist the same Comment payload returned to the MCP consumer",
+                "Audit must persist the same feedback returned to the MCP consumer",
+            );
+            assert.equal(
+                (audited?.output as { comment?: string[] } | undefined)
+                    ?.comment,
+                undefined,
             );
             assert.ok(audited?.callId);
             assert.deepEqual(
@@ -395,29 +407,6 @@ test(
                 ).length,
                 0,
             );
-            await queueComment(
-                comment,
-                ctxId,
-                "Use the runtime comment before the next action",
-            );
-            const report = await client.callTool({
-                arguments: {
-                    ctxId,
-                    message: "Reached the MCP client acceptance boundary.",
-                },
-                name: "todo_report",
-            });
-            assert.equal(report.isError, false);
-            assert.deepEqual(report.content, [
-                {
-                    type: "text",
-                    text: "Reached the MCP client acceptance boundary.",
-                },
-            ]);
-            assert.deepEqual(report.structuredContent, {
-                comment: ["Use the runtime comment before the next action"],
-                reported: true,
-            });
             await client.close();
         } finally {
             comment.close();

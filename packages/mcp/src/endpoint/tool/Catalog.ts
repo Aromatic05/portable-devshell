@@ -13,7 +13,10 @@ import {
     type McpContextSelector,
 } from "../../context/Selector.js";
 import { isMcpInteractionGateway, type McpInstanceGateway } from "../Port.js";
-import { mcpToolAnnotations } from "./Metadata.js";
+import {
+    mcpToolAnnotations,
+    mcpToolPreserveInputDescriptions,
+} from "./Metadata.js";
 import { McpToolDescriptionEnhancer } from "./Metadata.js";
 import { mcpToolInvocationStatus, mcpToolTitle } from "./Metadata.js";
 import {
@@ -151,11 +154,19 @@ export class McpEndpointCatalog {
             this.#descriptionEnhancer.enhance(
                 exposed.name,
                 exposed.description,
+                exposed._meta,
             ),
-            { modelFacing },
+            {
+                modelFacing,
+                preserveInputDescriptions:
+                    mcpToolPreserveInputDescriptions(exposed._meta),
+            },
         );
         const securitySchemes = mcpToolSecuritySchemes(this.#auth);
-        const invocationStatus = mcpToolInvocationStatus(exposed.name);
+        const invocationStatus = mcpToolInvocationStatus(
+            exposed.name,
+            exposed._meta,
+        );
         const meta = {
             ...asRecord(adapted._meta),
             ...(invocationStatus === undefined
@@ -171,8 +182,8 @@ export class McpEndpointCatalog {
             ...adapted,
             ...(Object.keys(meta).length === 0 ? {} : { _meta: meta }),
             ...(securitySchemes === undefined ? {} : { securitySchemes }),
-            annotations: mcpToolAnnotations(exposed.name),
-            title: mcpToolTitle(exposed.name),
+            annotations: mcpToolAnnotations(exposed.name, exposed._meta),
+            title: mcpToolTitle(exposed.name, exposed._meta),
         };
     }
 
@@ -210,6 +221,14 @@ export class McpEndpointCatalog {
         }
 
         if (this.#gateway !== undefined) {
+            const extensionTools =
+                this.#gateway.listExtensionTools?.(this.#instanceName) ?? [];
+            if (extensionTools.length > 0) {
+                sources.push({
+                    owner: "extension",
+                    tools: extensionTools,
+                });
+            }
             const artifactTools = this.#artifactTools.list({
                 viewImage: this.#gateway.viewArtifactImage !== undefined,
             });
@@ -286,7 +305,12 @@ function isModelFacingTool(tool: ToolDefinition): boolean {
 }
 
 export type McpToolCatalogEndpointOwner =
-    "worker" | "artifact" | "environment" | "workspace" | "todo";
+    | "worker"
+    | "artifact"
+    | "environment"
+    | "extension"
+    | "workspace"
+    | "todo";
 
 export interface McpToolCatalogEndpointEntry {
     definition: ToolDefinition;

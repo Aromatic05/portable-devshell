@@ -10,6 +10,7 @@ export interface McpTool {
 
 export interface McpToolSchemaAdapterOptions {
     modelFacing?: boolean;
+    preserveInputDescriptions?: boolean;
 }
 
 export class McpToolSchemaUnavailableError extends Error {
@@ -37,7 +38,11 @@ export class McpToolSchemaAdapter {
             ...(tool._meta === undefined ? {} : { _meta: tool._meta }),
             description,
             inputSchema: modelFacing
-                ? compactModelInputSchema(tool.name, tool.inputSchema)
+                ? compactModelInputSchema(
+                      tool.name,
+                      tool.inputSchema,
+                      options.preserveInputDescriptions === true,
+                  )
                 : normalizeModelInputSchema(tool.inputSchema),
             name: tool.name,
             outputSchema: modelFacing
@@ -155,12 +160,6 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
         },
     ],
     [
-        "todo_report",
-        {
-            message: "User reply or meaningful progress update.",
-        },
-    ],
-    [
         "todo_write",
         {
             checkpoint: "Optional durable handoff context.",
@@ -175,13 +174,19 @@ const MODEL_INPUT_HINTS = new Map<string, Readonly<Record<string, string>>>([
 function compactModelInputSchema(
     toolName: string,
     value: JsonValue,
+    preserveDescriptions = false,
 ): JsonValue {
     const normalized = hideModelInputProperties(
         toolName,
         normalizeModelInputSchema(value),
     );
     return pruneUnusedLocalDefinitions(
-        compactModelInputDescriptions(toolName, normalized),
+        compactModelInputDescriptions(
+            toolName,
+            normalized,
+            undefined,
+            preserveDescriptions,
+        ),
     );
 }
 
@@ -211,17 +216,33 @@ function compactModelInputDescriptions(
     toolName: string,
     value: JsonValue,
     hint?: string,
+    preserveDescriptions = false,
 ): JsonValue {
     if (Array.isArray(value)) {
         return value.map((entry) =>
-            compactModelInputDescriptions(toolName, entry),
+            compactModelInputDescriptions(
+                toolName,
+                entry,
+                undefined,
+                preserveDescriptions,
+            ),
         );
     }
     if (!isRecord(value)) return value;
 
     const compacted: Record<string, JsonValue> = {};
     for (const [key, entry] of Object.entries(value)) {
-        if (key === "description" || key === "$schema" || key === "title")
+        if (key === "description") {
+            if (
+                preserveDescriptions &&
+                hint === undefined &&
+                typeof entry === "string" &&
+                entry.length > 0
+            )
+                compacted.description = entry;
+            continue;
+        }
+        if (key === "$schema" || key === "title")
             continue;
         if (key === "properties" && isRecord(entry)) {
             compacted.properties = Object.fromEntries(
@@ -231,12 +252,18 @@ function compactModelInputDescriptions(
                         toolName,
                         propertySchema,
                         modelInputHint(toolName, propertyName),
+                        preserveDescriptions,
                     ),
                 ]),
             );
             continue;
         }
-        compacted[key] = compactModelInputDescriptions(toolName, entry);
+        compacted[key] = compactModelInputDescriptions(
+            toolName,
+            entry,
+            undefined,
+            preserveDescriptions,
+        );
     }
     return hint === undefined ? compacted : { ...compacted, description: hint };
 }

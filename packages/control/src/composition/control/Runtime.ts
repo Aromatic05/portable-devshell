@@ -44,16 +44,11 @@ import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
 import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
-
-interface ControlRuntimeComment {
-    close(): Promise<void>;
-    retireInstance(instance: string, reason: string): Promise<void>;
-}
+import { McpExtensionService } from "../mcp/extension/Service.js";
 
 export interface ControlRuntimeOptions {
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
-    comment: ControlRuntimeComment;
     config?: () => ControlConfig;
     extensionPaths: ExtensionPathLayout;
     extensions: ExtensionHost;
@@ -72,11 +67,12 @@ interface ControlWebRuntime {
     listener: ControlWebSocketListener;
 }
 
+const requiredBuiltinExtensionIds = new Set(["comment"]);
+
 export class ControlRuntime {
     readonly #artifact: ControlRuntimeArtifact;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #channels: ControlChannelServer;
-    readonly #comment: ControlRuntimeComment;
     readonly #debug: DebugPatchService;
     readonly #extensionControl: ExtensionControlService;
     readonly #extensionPaths: ExtensionPathLayout;
@@ -106,10 +102,11 @@ export class ControlRuntime {
             installer: new ExtensionInstallService({
                 host: this.#extensions,
                 paths: this.#extensionPaths,
+                requiredBuiltinIds: requiredBuiltinExtensionIds,
             }),
+            requiredBuiltinIds: requiredBuiltinExtensionIds,
         });
         this.#instances = options.instances;
-        this.#comment = options.comment;
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
             new ToolCallSecretRewrite(options.config),
@@ -119,6 +116,9 @@ export class ControlRuntime {
             this.#bindToolCallBoundaries(),
         );
         this.#mcp = options.mcp;
+        this.#mcp.instanceGateway.setExtensionService(
+            new McpExtensionService(this.#extensions),
+        );
         this.#reverse = options.reverse;
         this.#debug = new DebugPatchService(options.instances);
         const runtimeSubscriptions =
@@ -178,22 +178,6 @@ export class ControlRuntime {
             webApplications: new WebApplicationCatalog(this.#extensions),
             webPages: new WebExtensionPageService(this.#extensions),
         });
-        this.#mcp.configEditor.registerInstanceDeleted(
-            async (instance) => {
-                await this.#comment.retireInstance(
-                    instance.name,
-                    `Instance ${instance.name} was deleted before Comment delivery.`,
-                );
-            },
-        );
-        this.#mcp.configEditor.registerInstanceDisabled(
-            async (instance) => {
-                await this.#comment.retireInstance(
-                    instance.name,
-                    `Instance ${instance.name} was disabled before Comment delivery.`,
-                );
-            },
-        );
         this.#mcp.configEditor.registerInstanceGenerationRetirement(
             async (instance) => {
                 await this.#extensions.retireInstanceResources(instance.name);
@@ -303,11 +287,6 @@ export class ControlRuntime {
         this.#webFlowUninstall = undefined;
         try {
             this.#reverse.stop();
-        } catch (error) {
-            failures.push(error);
-        }
-        try {
-            await this.#comment.close();
         } catch (error) {
             failures.push(error);
         }

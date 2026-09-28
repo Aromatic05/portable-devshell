@@ -309,7 +309,6 @@ test("ordinary MCP tools cross inbound Review before mutable Context and Todo pr
     const boundaryCalls: string[] = [];
     let appendCalls = 0;
     let prepareCalls = 0;
-    let todoGateCalls = 0;
     let touchAlertCalls = 0;
     const worker = {
         ...createWorker(),
@@ -338,11 +337,7 @@ test("ordinary MCP tools cross inbound Review before mutable Context and Todo pr
             touchAlertCalls += 1;
         },
     };
-    const gateway = createGateway({
-        async beforeTodoToolCall() {
-            todoGateCalls += 1;
-        },
-    });
+    const gateway = createGateway();
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
         gateway,
@@ -381,7 +376,6 @@ test("ordinary MCP tools cross inbound Review before mutable Context and Todo pr
     assert.deepEqual(boundaryCalls, ["bash_run", "todo_read"]);
     assert.equal(appendCalls, 0);
     assert.equal(prepareCalls, 0);
-    assert.equal(todoGateCalls, 0);
     assert.equal(touchAlertCalls, 0);
     assert.equal(afterContext.lastAccessedAt, beforeContext.lastAccessedAt);
     assert.equal(afterContext.expiresAt, beforeContext.expiresAt);
@@ -1524,11 +1518,23 @@ function createGateway(
         assertReady(instance) {
             overrides.assertReady?.(instance);
         },
-        async beforeTodoToolCall(instance, toolName, callContext) {
-            await overrides.beforeTodoToolCall?.(
+        async callExtensionTool(
+            instance,
+            toolName,
+            input,
+            callContext,
+            callId,
+            signal,
+        ) {
+            if (overrides.callExtensionTool === undefined)
+                throw new Error("Extension tool unavailable.");
+            return await overrides.callExtensionTool(
                 instance,
                 toolName,
+                input,
                 callContext,
+                callId,
+                signal,
             );
         },
         async callToolOperation<T extends JsonValue>(
@@ -1601,6 +1607,9 @@ function createGateway(
         listTools(instance) {
             return overrides.listTools?.(instance) ?? [bashTool];
         },
+        listExtensionTools(instance) {
+            return overrides.listExtensionTools?.(instance) ?? [];
+        },
         async prepareWorkspace(instance, workspace) {
             return await (overrides.prepareWorkspace?.(instance, workspace) ??
                 Promise.resolve({
@@ -1625,14 +1634,6 @@ function createGateway(
                     revision: 0,
                     summary: { completed: 0, total: 0 },
                 }));
-        },
-        async reportTodo(instance, message, callId, callContext) {
-            await overrides.reportTodo?.(
-                instance,
-                message,
-                callId,
-                callContext,
-            );
         },
         async connectInstance(instance, reference) {
             return await (overrides.connectInstance?.(instance, reference) ??
@@ -1666,9 +1667,68 @@ function createGateway(
     };
 }
 
-test("todo tools are fixed control-side primitives and remain available while the worker is stopped", async () => {
+test("Todo read/write and Extension report remain available while the worker is stopped", async () => {
     const calls: string[] = [];
     const gateway = createGateway({
+        async callExtensionTool(
+            instance,
+            toolName,
+            input,
+            callContext,
+            callId,
+        ) {
+            assert.equal(toolName, "todo_report");
+            const message = (input as { message?: string }).message ?? "";
+            calls.push(
+                `report:${instance}:${callContext.ctxId}:${callId}:${message}`,
+            );
+            return {
+                content: [{ type: "text", text: message }],
+                structuredContent: { reported: true },
+            };
+        },
+        listExtensionTools() {
+            return [
+                {
+                    _meta: {
+                        devshell: {
+                            mcp: {
+                                annotations: {
+                                    destructiveHint: false,
+                                    idempotentHint: false,
+                                    openWorldHint: false,
+                                    readOnlyHint: false,
+                                },
+                                extensionTool: true,
+                                preserveInputDescriptions: true,
+                                title: "Message user",
+                            },
+                        },
+                    },
+                    description:
+                        "Send a user-visible message. #push requires a reply; #stop disables tools until #resume.",
+                    group: "todo",
+                    inputSchema: {
+                        additionalProperties: false,
+                        properties: {
+                            message: {
+                                description: "User reply or progress update.",
+                                type: "string",
+                            },
+                        },
+                        required: ["message"],
+                        type: "object",
+                    },
+                    name: "todo_report",
+                    outputSchema: {
+                        properties: { reported: { type: "boolean" } },
+                        required: ["reported"],
+                        type: "object",
+                    },
+                    requiredCapabilities: [],
+                },
+            ];
+        },
         async readTodo(instance, input) {
             calls.push(
                 `read:${instance}:${input?.taskId ?? input?.title ?? "all"}`,
@@ -1678,11 +1738,6 @@ test("todo tools are fixed control-side primitives and remain available while th
                 revision: 0,
                 summary: { completed: 0, total: 0 },
             };
-        },
-        async reportTodo(instance, message, callId, callContext) {
-            calls.push(
-                `report:${instance}:${callContext.ctxId}:${callId}:${message}`,
-            );
         },
         async writeTodo(instance, input, callContext) {
             calls.push(

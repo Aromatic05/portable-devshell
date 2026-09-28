@@ -99,12 +99,12 @@ const workspacePackages = new Map([
         new URL("../../extension/src/domain/control.ts", import.meta.url).href,
     ],
     [
-        "@portable-devshell/extension/comment",
-        new URL("../../extension/src/domain/comment.ts", import.meta.url).href,
-    ],
-    [
         "@portable-devshell/extension/instance",
         new URL("../../extension/src/domain/instance.ts", import.meta.url).href,
+    ],
+    [
+        "@portable-devshell/extension/mcp",
+        new URL("../../extension/src/domain/mcp.ts", import.meta.url).href,
     ],
     [
         "@portable-devshell/extension/secret",

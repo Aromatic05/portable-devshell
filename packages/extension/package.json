@@ -22,6 +22,10 @@
             "types": "./dist/domain/instance.d.ts",
             "default": "./dist/domain/instance.js"
         },
+        "./mcp": {
+            "types": "./dist/domain/mcp.d.ts",
+            "default": "./dist/domain/mcp.js"
+        },
         "./toolcall": {
             "types": "./dist/domain/toolcall.d.ts",
             "default": "./dist/domain/toolcall.js"
@@ -33,10 +37,6 @@
         "./web": {
             "types": "./dist/domain/web.d.ts",
             "default": "./dist/domain/web.js"
-        },
-        "./comment": {
-            "types": "./dist/domain/comment.d.ts",
-            "default": "./dist/domain/comment.js"
         },
         "./control": {
             "types": "./dist/domain/control.d.ts",
