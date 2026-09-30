@@ -138,7 +138,9 @@ test(
         await page.goto(`${runtime.origin}${runtime.basePath}/`, {
             waitUntil: "domcontentloaded",
         });
-        const tokenInput = page.getByLabel("Access token");
+        const tokenInput = page.getByRole("textbox", {
+            name: "Access token",
+        });
         await tokenInput.waitFor({ state: "visible" });
         await tokenInput.fill("wrong-token");
         await page.getByRole("button", { name: "Sign in" }).click();

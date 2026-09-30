@@ -200,13 +200,13 @@ async function exerciseInstanceLifecycle(devtools, instanceName, timeoutMs) {
     await evaluateRequired(
         devtools,
         `(() => {
-            const target = [...document.querySelectorAll('button.instance.card')]
-                .find((button) => button.textContent?.includes(${JSON.stringify(instanceName)}));
-            if (!(target instanceof HTMLElement)) return false;
+            const target = [...document.querySelectorAll('a[href]')]
+                .find((link) => link.textContent?.trim() === ${JSON.stringify(instanceName)});
+            if (!(target instanceof HTMLAnchorElement)) return false;
             target.click();
             return true;
         })()`,
-        "Target instance card is not clickable.",
+        "Target instance link is not clickable.",
     );
     await waitForCondition(
         devtools,
