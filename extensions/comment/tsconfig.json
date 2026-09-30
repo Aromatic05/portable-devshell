@@ -6,6 +6,7 @@
         "declarationMap": true,
         "outDir": "dist",
         "rootDir": "src",
+        "tsBuildInfoFile": "dist/.tsbuildinfo",
         "paths": {
             "@portable-devshell/extension": [
                 "../../packages/extension/dist/index.d.ts"

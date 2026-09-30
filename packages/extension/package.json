@@ -51,7 +51,7 @@
         "dist"
     ],
     "scripts": {
-        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
         "test": "node ../../test/RunPackageTests.mjs --loader ../core/test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\""
     }

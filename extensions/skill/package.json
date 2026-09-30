@@ -18,7 +18,7 @@
         "@portable-devshell/extension": "workspace:*"
     },
     "scripts": {
-        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b --force && node ./scripts/write-dist-manifest.mjs",
+        "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -b && node ./scripts/write-dist-manifest.mjs",
         "typecheck": "tsc --noEmit -p ../../tsconfig.typecheck.json",
         "test": "node ../../test/RunPackageTests.mjs --loader ./test/RegisterWorkspacePackages.mjs --concurrency 1 \"test/unit/*.test.ts\""
     }
