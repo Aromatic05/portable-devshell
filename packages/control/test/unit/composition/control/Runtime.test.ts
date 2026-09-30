@@ -223,7 +223,7 @@ test("runtime retires Extension resources through generation lifecycle", async (
         artifact: { service: undefined, async stop() {} } as never,
         extensionPaths: testExtensionPaths(),
         extensions: {
-            ...testExtensions(),
+            ...testExtensionSurface(),
             async retireInstanceResources(instance: string) {
                 retired.push(instance);
             },
@@ -314,7 +314,7 @@ function testInstanceGateway() {
     };
 }
 
-function testExtensions() {
+function testExtensionSurface() {
     return {
         async acquireRegistration() {
             throw new Error("No test Extension registration.");
@@ -334,7 +334,11 @@ function testExtensions() {
         async retireInstanceResources() {},
         async start() {},
         async stop() {},
-    } as never;
+    };
+}
+
+function testExtensions() {
+    return testExtensionSurface() as never;
 }
 
 function testExtensionPaths() {
@@ -1021,7 +1025,7 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
     descriptors.push({ name: "existing", worker: worker("existing") });
 
     const extensions = {
-        ...(testExtensions() as unknown as Record<string, unknown>),
+        ...testExtensionSurface(),
         listDeclarations(pointId: string) {
             if (pointId === "toolcall.review")
                 return [

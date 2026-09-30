@@ -388,7 +388,11 @@ test("MCP Context terminal delegates to generic Extension Context retirement", a
         async acquireRegistration() {
             throw new Error("unexpected registration lookup");
         },
-        async retireContextResources(input) {
+        async retireContextResources(input: {
+            ctxId: string;
+            instance: string;
+            reason: "disabled" | "expired";
+        }) {
             calls.push(input);
         },
     } as never);

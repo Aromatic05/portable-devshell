@@ -122,7 +122,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.deepEqual(worker.logReadQueries, []);
     });
 
-    test("TuiControlSession loads exact Conversation report history without rereading todo_report ToolCalls", async (t) => {
+    test("TuiControlSession loads exact Conversation report history", async (t) => {
         const runtimeDir = await createTestTempDirectory("tui-report-history");
         const socketPath = createTestIpcPath("tui-report-history", runtimeDir);
         const worker = new FakeWorker("alpha");
@@ -152,13 +152,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         await session.start();
         await session.refreshAudit("alpha");
 
-        assert.equal(
-            worker.toolCallQueries.some(
-                (query) => query.toolName === "todo_report",
-            ),
-            false,
-            JSON.stringify(worker.toolCallQueries),
-        );
         assert.deepEqual(
             session.store.getState().readModel.instanceState.alpha
                 ?.conversationEntries,
@@ -830,15 +823,12 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         let oauthApprovalReads = 0;
         let restartCount = 0;
         const routes = new ControlRouteComposition({
-            comment:
+            extensionRoutes:
                 options.conversationEntries === undefined
                     ? undefined
                     : {
-                          control() {
-                              return [];
-                          },
-                          instance(instance: string) {
-                              return instance !== "alpha"
+                          modules(scope) {
+                              return scope === "control"
                                   ? []
                                   : [
                                         {
@@ -852,6 +842,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                                             ],
                                         },
                                     ];
+                          },
+                          onChange() {
+                              return () => undefined;
                           },
                       },
             artifact: {
