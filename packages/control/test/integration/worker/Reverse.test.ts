@@ -41,6 +41,7 @@ import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
     readRelativeMarkerCommand,
+    terminalDelayedPrintCommand,
     terminalExpectedSize,
     terminalPrintCommand,
     terminalSizeProbeCommand,
@@ -497,24 +498,40 @@ test(
         );
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
+        const restartStartedMarker = "reverse-control-restart-started";
         await terminalStream.send("input", {
             clientSeq: restartInputSeq,
-            data: terminalPrintCommand("reverse-after-control-restart", 1_000),
+            data: terminalDelayedPrintCommand(
+                restartStartedMarker,
+                "reverse-after-control-restart",
+                2_000,
+            ),
             generation: opened.generation,
             terminalId: opened.terminalId,
             version: terminalVersion,
         });
-        await waitForTerminal(
+        let restartInputAccepted = false;
+        const restartStarted = await waitForTerminal(
             terminalStream,
-            (event) =>
-                event.name === "terminal.inputAccepted" &&
-                (event.payload as { clientSeq?: number } | undefined)
-                    ?.clientSeq === restartInputSeq,
+            (event, output) => {
+                if (
+                    event.name === "terminal.inputAccepted" &&
+                    (event.payload as { clientSeq?: number } | undefined)
+                        ?.clientSeq === restartInputSeq
+                ) {
+                    restartInputAccepted = true;
+                }
+                return (
+                    restartInputAccepted &&
+                    output.includes(restartStartedMarker)
+                );
+            },
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
             observeTerminalProtocol,
         );
+        outputSeq = Math.max(outputSeq, restartStarted.lastOutputSeq);
         resumed.stream.close();
         terminalClient.close();
 
