@@ -314,10 +314,6 @@ export class McpEndpointDispatch {
                                     ),
                       };
                   }
-                  const environment = contextEnvironment(
-                      resolvedContext.record,
-                      routed.instance,
-                  );
                   await this.restoreTmuxWaits(this.#instanceName);
                   if (selected.owner === "worker") {
                       const prepared = await this.#ensureContextWorkerState(
