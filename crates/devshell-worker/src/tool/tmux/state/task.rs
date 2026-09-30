@@ -116,6 +116,9 @@ impl TaskRegistry {
 
 pub fn refresh_task_record(task: &mut TaskRecord, pane: &BackendPane) {
     task.last_pane = Some(pane.clone());
+    if !task.state.is_active() {
+        return;
+    }
     if pane.managed_task_id.as_deref() == Some(&task.id) {
         match pane.status.as_deref() {
             Some("running") => task.state = TaskState::Running,
@@ -298,5 +301,17 @@ mod tests {
 
         assert_eq!(task.state, TaskState::Lost);
         assert!(task.finished_at_ms.is_some());
+    }
+
+    #[test]
+    fn completed_task_state_is_not_downgraded_by_later_unknown_pane_status() {
+        let mut task = task("task-a", TaskState::Exited(0), Some(unix_time_millis()));
+        let mut pane = pane();
+        pane.managed_task_id = Some("task-a".to_string());
+        pane.status = Some("unknown".to_string());
+
+        refresh_task_record(&mut task, &pane);
+
+        assert_eq!(task.state, TaskState::Exited(0));
     }
 }
