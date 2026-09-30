@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { runCiSteps } from "../scripts/run-development-ci.mjs";
 import { resolvePreparedWorker, runCommand } from "./AcceptanceSupport.mjs";
 
-export function createIntegrationSteps(state, platform = process.platform) {
+export function createIntegrationSteps(state) {
     return [
         {
             name: "Resolve prepared Worker",
