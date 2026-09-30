@@ -19,6 +19,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
+import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/control/extension/install/BuiltinSource.ts";
 import {
     createTestWindowsIdentity,
     realWorkerTestOptions,
@@ -70,6 +71,9 @@ if (process.env.PORTABLE_DEVSHELL_REAL_WORKER_CHILD !== "1") {
             const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
             const manager = new ControlLifecycleManager({
                 daemonModulePath: controlDaemonModulePath(),
+                env: {
+                    [CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: "[]",
+                },
                 homeDirectory,
                 xdgRuntimeDir,
                 waitTimeoutMs: 10_000,

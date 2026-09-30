@@ -26,6 +26,7 @@ import {
 import type { FrameStream } from "@portable-devshell/shared/transport/frame";
 
 import { ControlServer } from "../../../src/server/Server.ts";
+import { ControlRuntimeFactory } from "../../../src/composition/control/Factory.ts";
 import { InstanceRegistryFactory } from "../../../src/control/instance/registry/Factory.ts";
 import type { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
 import { ControlPathHome } from "@portable-devshell/shared";
@@ -109,6 +110,9 @@ test(
         const server = new ControlServer({
             homeDirectory,
             instanceRegistryBuilder,
+            runtimeFactory: new ControlRuntimeFactory({
+                builtinExtensionSources: [],
+            }),
             xdgRuntimeDir,
         });
         const workerRef: { value?: ChildProcessWithoutNullStreams } = {};
@@ -616,6 +620,9 @@ test(
         const paths = new ControlPathHome(controlHome);
         const server = new ControlServer({
             homeDirectory: controlHome,
+            runtimeFactory: new ControlRuntimeFactory({
+                builtinExtensionSources: [],
+            }),
             xdgRuntimeDir: controlRuntime,
         });
         const workerEnvironment: NodeJS.ProcessEnv = {

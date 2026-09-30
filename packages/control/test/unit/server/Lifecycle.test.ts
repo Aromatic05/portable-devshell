@@ -21,6 +21,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
+import { CONTROL_BUILTIN_EXTENSION_SOURCES_ENV } from "../../../src/control/extension/install/BuiltinSource.ts";
 import {
     createTestIpcPath,
     installUniqueWindowsTestIdentity,
@@ -30,6 +31,10 @@ import {
     encodeInstanceConfig,
 } from "../control/config/persistence/Support.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+
+const isolatedControlEnvironment = {
+    [CONTROL_BUILTIN_EXTENSION_SOURCES_ENV]: "[]",
+};
 
 test("start creates control directory, socket, pid and status uses rpc", async (t) => {
     const harness = await createHarness();
@@ -89,6 +94,7 @@ test("concurrent lifecycle managers create only one control daemon", async (t) =
     t.after(() => harness.cleanup());
     const second = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
+        env: isolatedControlEnvironment,
         homeDirectory: harness.homeDirectory,
         xdgRuntimeDir: harness.xdgRuntimeDir,
         waitTimeoutMs: 10_000,
@@ -745,6 +751,7 @@ test("start keeps real worker config registered and does not auto-start worker",
     const runtimePaths = new ControlPathRuntime(xdgRuntimeDir);
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
+        env: isolatedControlEnvironment,
         homeDirectory,
         xdgRuntimeDir,
         waitTimeoutMs: 10_000,
@@ -807,6 +814,7 @@ async function createHarness(): Promise<{
     );
     const manager = new ControlLifecycleManager({
         daemonModulePath: controlDaemonModulePath(),
+        env: isolatedControlEnvironment,
         homeDirectory,
         xdgRuntimeDir,
         waitTimeoutMs: 10_000,
