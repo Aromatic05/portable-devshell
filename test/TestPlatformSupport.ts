@@ -134,21 +134,17 @@ export function terminalPrintCommand(marker: string, delayMs = 0): string {
     return `${delay}printf '%s%s\\n' '${left}' '${right}'\r`;
 }
 
-export function terminalGatedPrintCommand(
+export function terminalInputGatedPrintCommand(
     startedMarker: string,
-    gateFileName: string,
     completedMarker: string,
 ): string {
     const [startedLeft, startedRight] = splitTerminalMarker(startedMarker);
     const [completedLeft, completedRight] =
         splitTerminalMarker(completedMarker);
-    if (!/^[A-Za-z0-9._-]+$/u.test(gateFileName)) {
-        throw new Error(`invalid terminal gate file: ${gateFileName}`);
-    }
     if (process.platform === "win32") {
-        return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${startedLeft}' + '${startedRight}')); while (!(Test-Path -LiteralPath '.\\${gateFileName}')) { Start-Sleep -Milliseconds 50 }; [Console]::WriteLine(('${completedLeft}' + '${completedRight}'))"\r`;
+        return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${startedLeft}' + '${startedRight}')); [Console]::ReadLine() | Out-Null; [Console]::WriteLine(('${completedLeft}' + '${completedRight}'))"\r`;
     }
-    return `printf '%s%s\\n' '${startedLeft}' '${startedRight}'; while [ ! -f './${gateFileName}' ]; do sleep 0.050; done; printf '%s%s\\n' '${completedLeft}' '${completedRight}'\r`;
+    return `printf '%s%s\\n' '${startedLeft}' '${startedRight}'; IFS= read -r _; printf '%s%s\\n' '${completedLeft}' '${completedRight}'\r`;
 }
 
 export function terminalSizeProbeCommand(): string {

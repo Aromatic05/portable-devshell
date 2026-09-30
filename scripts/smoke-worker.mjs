@@ -254,7 +254,7 @@ function terminalSizeProbeCommand() {
 }
 
 async function waitForTerminalOutput(rpc, terminal, client, expected) {
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + (client.windows ? 30_000 : 10_000);
     let output = "";
     while (Date.now() < deadline) {
         const attached = await rpc.request("terminal.attach", {

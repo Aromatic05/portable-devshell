@@ -41,7 +41,7 @@ import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
     readRelativeMarkerCommand,
-    terminalGatedPrintCommand,
+    terminalInputGatedPrintCommand,
     terminalExpectedSize,
     terminalPrintCommand,
     terminalSizeProbeCommand,
@@ -499,12 +499,10 @@ test(
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
         const restartStartedMarker = "reverse-control-restart-started";
-        const restartGateName = "reverse-control-restart-release";
         await terminalStream.send("input", {
             clientSeq: restartInputSeq,
-            data: terminalGatedPrintCommand(
+            data: terminalInputGatedPrintCommand(
                 restartStartedMarker,
-                restartGateName,
                 "reverse-after-control-restart",
             ),
             generation: opened.generation,
@@ -568,11 +566,30 @@ test(
             },
         );
         terminalStream = recovered.stream;
-        await writeFile(join(workspace, restartGateName), "release", "utf8");
+        const restartReleaseInputSeq = terminalClientSeq++;
+        await terminalStream.send("input", {
+            clientSeq: restartReleaseInputSeq,
+            data: "release\r",
+            generation: opened.generation,
+            terminalId: opened.terminalId,
+            version: terminalVersion,
+        });
+        let restartReleaseAccepted = false;
         await waitForTerminal(
             terminalStream,
-            (_event, output) =>
-                output.includes("reverse-after-control-restart"),
+            (event, output) => {
+                if (
+                    event.name === "terminal.inputAccepted" &&
+                    (event.payload as { clientSeq?: number } | undefined)
+                        ?.clientSeq === restartReleaseInputSeq
+                ) {
+                    restartReleaseAccepted = true;
+                }
+                return (
+                    restartReleaseAccepted &&
+                    output.includes("reverse-after-control-restart")
+                );
+            },
             () =>
                 `worker stdout:\n${workerStdout}\nworker stderr:\n${workerStderr}`,
             10_000,
