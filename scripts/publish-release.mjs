@@ -30,6 +30,8 @@ export function expectedReleaseAssetNames() {
         );
     }
     assets.push(
+        "portable-devshell-agent.dsext",
+        "portable-devshell-agent.dsext.sha256",
         "install-release.sh",
         "install-release.sh.sha256",
         "install-release.ps1",

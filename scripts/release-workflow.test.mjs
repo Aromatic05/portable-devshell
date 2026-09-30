@@ -32,14 +32,15 @@ test("release asset jobs install the frozen dependency graph before building", a
     );
 });
 
-test("release matrix does not package Agent Extension or Provider artifacts", async () => {
+test("release matrix publishes one platform-neutral Agent Extension and no Provider artifacts", async () => {
     const workflow = await readReleaseWorkflow();
     const buildStart = workflow.indexOf("    build-worker:\n");
     const publishStart = workflow.indexOf("    publish:\n", buildStart);
     const buildJob = workflow.slice(buildStart, publishStart);
-    assert.doesNotMatch(buildJob, /package:agent/u);
-    assert.doesNotMatch(buildJob, /smoke:agent-package/u);
-    assert.doesNotMatch(buildJob, /\.dsext/u);
+    assert.match(
+        buildJob,
+        /if: matrix\.target == 'linux-x64'[\s\S]*?pnpm package:agent -- --output-dir \.\/release-assets/u,
+    );
     assert.doesNotMatch(buildJob, /\.dsprovider/u);
 });
 

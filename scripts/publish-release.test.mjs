@@ -60,7 +60,7 @@ test("release preflight fails closed when GitHub cannot determine tag publicatio
     );
 });
 
-test("Core release assets contain only application and Worker platform artifacts", () => {
+test("Core release assets include the platform-neutral Agent Extension and no Provider artifacts", () => {
     const names = expectedReleaseAssetNames();
     for (const target of [
         "linux-x64",
@@ -83,7 +83,11 @@ test("Core release assets contain only application and Worker platform artifacts
         assert.equal(names.includes(worker), true, worker);
         assert.equal(names.includes(`${worker}.sha256`), true, `${worker}.sha256`);
     }
-    assert.equal(names.some((name) => name.endsWith(".dsext")), false);
+    assert.equal(names.includes("portable-devshell-agent.dsext"), true);
+    assert.equal(
+        names.includes("portable-devshell-agent.dsext.sha256"),
+        true,
+    );
     assert.equal(names.some((name) => name.endsWith(".dsprovider")), false);
 });
 

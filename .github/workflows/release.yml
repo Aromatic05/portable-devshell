@@ -116,6 +116,10 @@ jobs:
                   pnpm build:worker "${{ matrix.target }}" --output-dir ./release-assets
                   pnpm package:app -- --target "${{ matrix.target }}" --output-dir ./release-assets
 
+            - name: 构建 Agent Extension 发布资产
+              if: matrix.target == 'linux-x64'
+              run: pnpm package:agent -- --output-dir ./release-assets
+
             - name: 验证 Windows 安装/回滚契约
               if: matrix.target == 'windows-x64'
               run: node --test ./scripts/install-release.test.mjs

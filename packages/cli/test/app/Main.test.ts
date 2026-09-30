@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-    lstat,
     mkdir,
     mkdtemp,
     readFile,
@@ -17,7 +16,6 @@ import { pathToFileURL } from "node:url";
 import { CONTROL_PROTOCOL_VERSION } from "@portable-devshell/shared";
 
 import { CliMain } from "../../src/app/Main.js";
-import { materializeExtensionInstallSource } from "../../src/command/extension/Command.js";
 
 test("CliMain prints the application version without contacting Control", async () => {
     const stdout = createBuffer();
@@ -38,48 +36,6 @@ test("CliMain prints the application version without contacting Control", async 
     assert.match(stdout.flush(), /^devshell \d+\.\d+\.\d+(?:[-+].+)?\n$/u);
     assert.equal(stderr.flush(), "");
     assert.equal(closeCalls, 1);
-});
-
-test("Extension npm sources materialize one installable package and clean it after use", async () => {
-    const materialized = await materializeExtensionInstallSource(
-        "npm:@portable-devshell/agent-extension@0.1.3",
-        {
-            async installNpmPackage(spec, root) {
-                assert.equal(
-                    spec,
-                    "@portable-devshell/agent-extension@0.1.3",
-                );
-                const packageRoot = join(
-                    root,
-                    "node_modules",
-                    "@portable-devshell",
-                    "agent-extension",
-                );
-                await mkdir(packageRoot, { recursive: true });
-                await writeFile(
-                    join(packageRoot, "devshell-extension.json"),
-                    JSON.stringify({ id: "agent" }),
-                    "utf8",
-                );
-            },
-        },
-    );
-    const packagePath = materialized.path;
-    assert.match(
-        packagePath.replaceAll("\\", "/"),
-        /node_modules\/@portable-devshell\/agent-extension$/u,
-    );
-    assert.equal(
-        JSON.parse(
-            await readFile(
-                join(packagePath, "devshell-extension.json"),
-                "utf8",
-            ),
-        ).id,
-        "agent",
-    );
-    await materialized.dispose();
-    await assert.rejects(() => lstat(packagePath), /ENOENT/u);
 });
 
 test("CliMain runs migrate locally without contacting or creating Control state", async () => {

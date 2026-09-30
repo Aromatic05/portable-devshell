@@ -148,6 +148,18 @@ export async function assertThinAgentExtensionTree(root) {
                 `Agent Extension payload must not contain bundled Provider artifacts: ${normalized}`,
             );
         }
+        if (
+            normalized === "src" ||
+            normalized.startsWith("src/") ||
+            normalized === "test" ||
+            normalized.startsWith("test/") ||
+            normalized === "tests" ||
+            normalized.startsWith("tests/")
+        ) {
+            throw new Error(
+                `Agent Extension payload must not contain source or test trees: ${normalized}`,
+            );
+        }
     });
 }
 

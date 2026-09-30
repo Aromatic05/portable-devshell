@@ -76,21 +76,31 @@ devshell status
 
 ### 安装 Agent Extension
 
-Agent 不属于 Control builtin Extension，也不属于 portable-devshell Core Release。Agent Extension 使用独立版本和发布生命周期，由客户端从 npm 安装；`.dsext` 仍是通用 Extension archive 格式，但 Core Release 不再按平台发布 Agent `.dsext`。
+Agent 不属于 Control builtin Extension，但 Core Release 会同时发布一个平台无关的 Agent Extension `.dsext`。Agent 不会自动安装或启用；需要 Agent 时，由 CLI 通过标准 Extension lifecycle 显式安装。
 
 ```bash
+base=https://github.com/Aromatic05/portable-devshell/releases/latest/download
+curl -fLO "$base/portable-devshell-agent.dsext"
+curl -fLO "$base/portable-devshell-agent.dsext.sha256"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c portable-devshell-agent.dsext.sha256
+else
+  shasum -a 256 -c portable-devshell-agent.dsext.sha256
+fi
+
 devshell start
-devshell extension install npm:@portable-devshell/agent-extension
+devshell extension install "$PWD/portable-devshell-agent.dsext"
 devshell agent provider list
 devshell agent provider install pi
 devshell agent provider default pi
 pi --version
 ```
 
-`npm:` 是通用 Extension 安装源，不是 Agent 专用语法。CLI 在客户端临时 materialize npm package，再交给现有 Extension install/update 生命周期完成 generation 校验和原子切换。更新 Agent Extension：
+更新 Agent Extension 时下载新 Core Release 中的 `portable-devshell-agent.dsext`，继续走相同的 Extension generation 校验和原子切换：
 
 ```bash
-devshell extension update npm:@portable-devshell/agent-extension
+devshell extension update "$PWD/portable-devshell-agent.dsext"
 ```
 
 Provider 不再使用独立 `.dsprovider` artifact。Agent Extension 只携带 provider adapter；`provider install` 在客户端把对应第三方 runtime 安装到 Provider 自己的 versioned prefix，由 npm 在实际运行机器上解析 OS/architecture 依赖：
@@ -100,7 +110,7 @@ devshell agent provider install opencode
 devshell agent provider default opencode
 ```
 
-Provider 显式更新使用 `devshell agent provider update <id>`。Pi 的 provider prefix 只负责首次引导；Pi 自己的 stable managed install 和后续更新仍独立于 Agent Extension/provider adapter 版本。若 `~/.local/bin/pi` 已经是非 portable-devshell 所有的命令，Agent Extension 不会覆盖它；旧版本由 portable-devshell 主程序创建的 Pi launcher 仍按兼容迁移处理。
+Provider 显式更新使用 `devshell agent provider update <id>`。Pi 的 provider prefix 只负责首次引导；Pi 自己的 stable managed install 和后续更新仍独立于 Agent Extension/provider adapter 版本。若 `~/.local/bin/pi` 已经是非 portable-devshell 所有的命令，Agent Extension 不会覆盖它；旧版本由 portable-devshell 主程序创建的 Pi launcher 仍按兼容迁移处理。Core Release 不发布 `.dsprovider`；Provider runtime 仍在客户端按需安装。
 
 ## 从源码安装
 

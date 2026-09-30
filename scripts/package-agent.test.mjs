@@ -28,7 +28,8 @@ test("Agent Extension source package owns provider adapters without separate Age
             "utf8",
         ),
     );
-    assert.equal(agentExtension.private, false);
+    assert.equal(agentExtension.private, true);
+    assert.equal(agentExtension.publishConfig, undefined);
     assert.equal(agentExtension.devDependencies.diff, "9.0.0");
     assert.equal(agentExtension.dependencies, undefined);
     await assert.rejects(
@@ -68,6 +69,12 @@ test("thin Agent Extension payload guard rejects private node_modules and bundle
     await assert.rejects(
         () => assertThinAgentExtensionTree(root),
         /must not contain bundled Provider artifacts/u,
+    );
+    await rm(join(root, "bundled-providers"), { force: true, recursive: true });
+    await mkdir(join(root, "test"), { recursive: true });
+    await assert.rejects(
+        () => assertThinAgentExtensionTree(root),
+        /must not contain source or test trees/u,
     );
 });
 
