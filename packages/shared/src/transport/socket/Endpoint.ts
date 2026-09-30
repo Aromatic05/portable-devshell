@@ -20,8 +20,18 @@ export class ControlPathHome {
     readonly oauthDir: string;
     readonly reverseDir: string;
 
-    constructor(homeDirectory = homedir()) {
-        this.controlHomeDir = join(homeDirectory, ".devshell", "control");
+    constructor(
+        homeDirectory?: string,
+        environment: NodeJS.ProcessEnv = process.env,
+    ) {
+        const configured = environment.PORTABLE_DEVSHELL_HOME;
+        const devshellHome =
+            homeDirectory === undefined &&
+            configured !== undefined &&
+            configured.length > 0
+                ? configured
+                : join(homeDirectory ?? homedir(), ".devshell");
+        this.controlHomeDir = join(devshellHome, "control");
         this.artifactsDir = join(this.controlHomeDir, "artifacts");
         this.configFile = join(this.controlHomeDir, "config.toml");
         this.contextsFile = join(this.controlHomeDir, "contexts.json");

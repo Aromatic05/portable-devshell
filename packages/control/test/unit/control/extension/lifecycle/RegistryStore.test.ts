@@ -18,6 +18,17 @@ import { ExtensionPathLayout } from "../../../../../src/control/extension/state/
 import { ExtensionRegistryStore } from "../../../../../src/control/extension/state/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
+test("Extension state follows PORTABLE_DEVSHELL_HOME", () => {
+    const devshellHome = join("custom", "devshell-home");
+    const paths = new ExtensionPathLayout({
+        environment: { PORTABLE_DEVSHELL_HOME: devshellHome },
+    });
+    assert.equal(
+        paths.stateRoot,
+        join(devshellHome, "control", "extensions"),
+    );
+});
+
 test("Extension registry persists selected and last-known-good generations atomically", async (t) => {
     const root = await createTestTempDirectory("extension-registry");
     t.after(async () => await rm(root, { force: true, recursive: true }));

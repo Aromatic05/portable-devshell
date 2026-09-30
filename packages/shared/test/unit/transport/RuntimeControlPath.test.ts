@@ -1,11 +1,28 @@
 import assert from "node:assert/strict";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
+    ControlPathHome,
     resolveControlRuntimeDirectory,
     resolveControlSocketPath,
 } from "@portable-devshell/shared";
+
+test("Control home honors PORTABLE_DEVSHELL_HOME unless an explicit homeDirectory is supplied", () => {
+    const configured = join("custom", "devshell-home");
+    assert.equal(
+        new ControlPathHome(undefined, {
+            PORTABLE_DEVSHELL_HOME: configured,
+        }).controlHomeDir,
+        join(configured, "control"),
+    );
+    assert.equal(
+        new ControlPathHome(join("explicit", "home"), {
+            PORTABLE_DEVSHELL_HOME: configured,
+        }).controlHomeDir,
+        join("explicit", "home", ".devshell", "control"),
+    );
+});
 
 test("Windows named pipe identity never contains path separators", () => {
     const prefix = "\\\\.\\pipe\\";

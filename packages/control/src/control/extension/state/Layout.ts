@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { ControlPathRuntime } from "@portable-devshell/shared";
+import { ControlPathHome, ControlPathRuntime } from "@portable-devshell/shared";
 
 import { assertExtensionGeneration, assertExtensionId } from "./Model.js";
 
@@ -33,7 +33,10 @@ export class ExtensionPathLayout {
                 : join(home, ".local", "share"));
         this.codeRoot = join(dataHome, "portable-devshell", "extensions");
         this.dataRoot = join(dataHome, "portable-devshell", "extension-data");
-        this.stateRoot = join(home, ".devshell", "control", "extensions");
+        this.stateRoot = join(
+            new ControlPathHome(options.homeDirectory, environment).controlHomeDir,
+            "extensions",
+        );
         this.registryFile = join(this.stateRoot, "registry.json");
         this.runtimeRoot =
             options.runtimeRoot ??
