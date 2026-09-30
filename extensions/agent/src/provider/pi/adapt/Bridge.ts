@@ -23,10 +23,6 @@ import {
 import {
     renderPiToolCall,
     renderPiToolResult,
-    type PiThemeLike,
-    type PiToolRenderContextLike,
-    type PiToolRenderResultLike,
-    type PiToolRenderResultOptionsLike,
 } from "../render/ToolRenderer.js";
 import { attachStandaloneWorkspaceResources } from "./StandaloneResources.js";
 import type { DevshellPiTarget } from "./Target.js";

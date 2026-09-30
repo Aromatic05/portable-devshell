@@ -15,8 +15,12 @@ function fakeSession(events: string[], abortError?: Error): PiSessionLike {
             events.push("dispose");
         },
         async followUp() {},
+        getActiveToolNames() {
+            return [];
+        },
         async prompt() {},
         async reload() {},
+        setActiveToolsByName() {},
         async waitForIdle() {},
     };
 }

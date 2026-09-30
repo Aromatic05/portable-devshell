@@ -4,10 +4,10 @@ import { dirname, join, resolve } from "node:path";
 import type { AgentProviderRuntimePaths } from "../../../builtin/provider/AgentProviderRuntimePaths.js";
 
 export const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-export const PI_BOOTSTRAP_VERSION = "0.85.1";
+export const PI_BOOTSTRAP_VERSION = "0.99.1";
 export const PI_PROVIDER_RUNTIME_DEPENDENCIES = Object.freeze({
     "@earendil-works/pi-coding-agent": PI_BOOTSTRAP_VERSION,
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-tui": "0.99.1",
     diff: "9.0.0",
     "pi-gui-extension": "0.4.1",
     typebox: "1.3.30",

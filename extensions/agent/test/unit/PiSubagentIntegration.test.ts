@@ -32,7 +32,6 @@ import {
 type FauxContext = {
     systemPrompt?: string;
     messages: unknown[];
-    tools?: Array<{ name: string }>;
 };
 
 type FauxOptions = { signal?: AbortSignal };
@@ -70,6 +69,27 @@ function record(value: unknown): Record<string, unknown> | undefined {
         : undefined;
 }
 
+function effectiveToolNames(context: FauxContext): Set<string> {
+    const names = new Set<string>();
+    for (const message of context.messages) {
+        const system = record(message);
+        if (system?.role !== "system") continue;
+        if (Array.isArray(system.toolsRemoved)) {
+            for (const tool of system.toolsRemoved) {
+                const name = record(tool)?.name;
+                if (typeof name === "string") names.delete(name);
+            }
+        }
+        if (Array.isArray(system.toolsAdded)) {
+            for (const tool of system.toolsAdded) {
+                const name = record(tool)?.name;
+                if (typeof name === "string") names.add(name);
+            }
+        }
+    }
+    return names;
+}
+
 function lastUserText(context: FauxContext): string {
     for (let index = context.messages.length - 1; index >= 0; index -= 1) {
         const message = record(context.messages[index]);
@@ -98,7 +118,20 @@ function toolResultDetails(result: unknown): Record<string, unknown> {
 function toolByName(runtime: PiSubagentRuntime, name: string) {
     const tool = createPiSubagentTools(runtime).find((candidate) => candidate.name === name);
     assert.notEqual(tool, undefined, `missing ${name}`);
-    return tool!;
+    return {
+        execute(
+            toolCallId: string,
+            params: Parameters<NonNullable<typeof tool>["execute"]>[1],
+        ) {
+            return tool!.execute(
+                toolCallId,
+                params,
+                undefined,
+                undefined,
+                {} as Parameters<NonNullable<typeof tool>["execute"]>[4],
+            );
+        },
+    };
 }
 
 async function pollToolUntilIdle(
@@ -300,7 +333,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
 
         faux.setResponses([
             (context) => {
-                const names = new Set((context.tools ?? []).map((tool) => tool.name));
+                const names = effectiveToolNames(context);
                 assert.equal(names.has("agent_spawn"), false);
                 assert.equal(names.has("tmux_run"), true);
                 assert.equal(names.has("tmux_read"), false);
@@ -374,7 +407,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
 
         faux.appendResponses([
             (context) => {
-                const names = new Set((context.tools ?? []).map((tool) => tool.name));
+                const names = effectiveToolNames(context);
                 assert.equal(names.has("tmux_run"), true);
                 assert.equal(names.has("tmux_read"), false);
                 return fauxModule.fauxAssistantMessage(
@@ -383,7 +416,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
                 );
             },
             (context) => {
-                const names = new Set((context.tools ?? []).map((tool) => tool.name));
+                const names = effectiveToolNames(context);
                 assert.equal(names.has("tmux_read"), true);
                 assert.equal(names.has("tmux_input"), true);
                 assert.equal(names.has("tmux_manage"), true);
@@ -540,7 +573,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
 
         faux.appendResponses([
             (context) => {
-                const names = new Set((context.tools ?? []).map((tool) => tool.name));
+                const names = effectiveToolNames(context);
                 assert.equal(names.has("tmux_run"), true);
                 assert.equal(names.has("tmux_read"), false);
                 return fauxModule.fauxAssistantMessage(
@@ -549,7 +582,7 @@ test("real Pi runtime executes Profile/Subagent and state-driven Agent/Tmux expo
                 );
             },
             (context) => {
-                const names = new Set((context.tools ?? []).map((tool) => tool.name));
+                const names = effectiveToolNames(context);
                 assert.equal(names.has("tmux_read"), true);
                 assert.equal(names.has("tmux_input"), true);
                 assert.equal(names.has("tmux_manage"), true);

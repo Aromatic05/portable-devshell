@@ -10,23 +10,37 @@ import {
     type PiToolLike,
 } from "../../src/provider/pi/adapt/index.ts";
 
+type PiToolResult = Awaited<ReturnType<PiToolLike["execute"]>>;
+type PiTextContent = Extract<PiToolResult["content"][number], { type: "text" }>;
+
+const piToolContext = {} as Parameters<PiToolLike["execute"]>[4];
+
+function executePiTool(
+    tool: PiToolLike,
+    toolCallId: string,
+    params: Parameters<PiToolLike["execute"]>[1],
+    onUpdate?: Parameters<PiToolLike["execute"]>[3],
+): Promise<PiToolResult> {
+    return tool.execute(toolCallId, params, undefined, onUpdate, piToolContext);
+}
+
+function firstText(result: PiToolResult): string {
+    const content = result.content[0];
+    assert.equal(content?.type, "text");
+    if (content?.type !== "text") throw new Error("Expected text tool content.");
+    return content.text;
+}
+
+function textOnlyContent(result: PiToolResult): PiTextContent[] {
+    return result.content.map((content) => {
+        assert.equal(content.type, "text");
+        if (content.type !== "text") throw new Error("Expected text tool content.");
+        return content;
+    });
+}
+
 test("Pi devshell tool forwards Worker progress through Pi onUpdate before the final result", async () => {
-    let registeredTool:
-        | {
-              execute(
-                  toolCallId: string,
-                  params: unknown,
-                  signal?: AbortSignal,
-                  onUpdate?: (result: {
-                      content: Array<{ text: string; type: "text" }>;
-                      details: JsonValue;
-                  }) => void,
-              ): Promise<{
-                  content: Array<{ text: string; type: "text" }>;
-                  details: JsonValue;
-              }>;
-          }
-        | undefined;
+    let registeredTool: PiToolLike | undefined;
     const extension = createDevshellPiExtension(
         {
             target: { instance: "worker-a", workspace: "/repo" },
@@ -80,15 +94,12 @@ test("Pi devshell tool forwards Worker progress through Pi onUpdate before the f
         sendUserMessage() {},
     });
     assert.notEqual(registeredTool, undefined);
-    const updates: Array<{
-        content: Array<{ text: string; type: "text" }>;
-        details: JsonValue;
-    }> = [];
+    const updates: PiToolResult[] = [];
 
-    const result = await registeredTool!.execute(
+    const result = await executePiTool(
+        registeredTool!,
         "call-stream",
         { command: "printf partial; printf final" },
-        undefined,
         (update) => updates.push(update),
     );
 
@@ -99,7 +110,7 @@ test("Pi devshell tool forwards Worker progress through Pi onUpdate before the f
         stdout: "partial\n",
         termination: "running",
     });
-    assert.match(updates[0]?.content[0]?.text ?? "", /partial/u);
+    assert.match(firstText(updates[0]!), /partial/u);
     assert.deepEqual(result.details, {
         durationMs: 250,
         exitCode: 0,
@@ -179,10 +190,10 @@ test("Pi devshell structured tool failures remain errors with model-visible meta
     assert.notEqual(registeredTool, undefined);
     assert.notEqual(toolResultHandler, undefined);
 
-    const result = await registeredTool!.execute("call-error", {
+    const result = await executePiTool(registeredTool!, "call-error", {
         changes: "...",
     });
-    const projected = JSON.parse(result.content[0]!.text) as {
+    const projected = JSON.parse(firstText(result)) as {
         error?: unknown;
     };
     assert.deepEqual(projected.error, {
@@ -193,7 +204,7 @@ test("Pi devshell structured tool failures remain errors with model-visible meta
     });
 
     const hookResult = await toolResultHandler!({
-        content: result.content,
+        content: textOnlyContent(result),
         details: result.details,
         input: { changes: "..." },
         isError: false,
@@ -249,7 +260,10 @@ test("Pi devshell leaves non-namespaced runtime errors on the native throw path"
     assert.notEqual(registeredTool, undefined);
 
     await assert.rejects(
-        () => registeredTool!.execute("call-runtime-error", { command: "true" }),
+        () =>
+            executePiTool(registeredTool!, "call-runtime-error", {
+                command: "true",
+            }),
         (error: unknown) =>
             error instanceof Error &&
             error.message === "pipe closed" &&

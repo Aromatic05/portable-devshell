@@ -24,7 +24,7 @@ async function createLauncherHarness() {
         "pi",
     );
     const managedInstallRoot = join(providerDirectory, "install");
-    const releaseRoot = join(managedInstallRoot, "releases", "0.85.1");
+    const releaseRoot = join(managedInstallRoot, "releases", "0.99.1");
     const packageRoot = join(
         releaseRoot,
         "node_modules",
@@ -65,7 +65,7 @@ async function createLauncherHarness() {
     );
     await writeFile(
         join(managedInstallRoot, "current-version"),
-        "0.85.1\n",
+        "0.99.1\n",
         "utf8",
     );
     await writeFile(
@@ -85,7 +85,7 @@ async function createLauncherHarness() {
             main: "dist/index.js",
             name: "@earendil-works/pi-coding-agent",
             type: "module",
-            version: "0.85.1",
+            version: "0.99.1",
         }),
         "utf8",
     );
