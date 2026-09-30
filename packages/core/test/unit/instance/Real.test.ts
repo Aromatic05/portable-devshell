@@ -909,7 +909,7 @@ test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall
                 }],
                 rewrites: [async (input) => {
                     rewrites += 1;
-                    return input.text;
+                    return input.payload;
                 }],
             }),
         };

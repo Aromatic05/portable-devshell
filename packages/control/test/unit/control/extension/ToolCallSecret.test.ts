@@ -8,6 +8,7 @@ import type { ControlConfig } from "@portable-devshell/shared";
 import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
 
 const inbound: ToolCallRewriteInvocation = {
+    callId: "call-secret",
     context: {
         ctxId: "ctx-secret",
         instance: "demo",
@@ -15,16 +16,15 @@ const inbound: ToolCallRewriteInvocation = {
     },
     direction: "inbound",
     kind: "call",
-    path: ["command"],
     signal: new AbortController().signal,
-    text: "echo ${SECRET:TOKEN}",
+    payload: "echo ${SECRET:TOKEN}",
     toolName: "bash_run",
 };
 const outbound: ToolCallRewriteInvocation = {
     ...inbound,
     direction: "outbound",
     kind: "result",
-    text: "result",
+    payload: "result",
 };
 
 function config(env: Record<string, string>): ControlConfig {
@@ -57,7 +57,7 @@ test("ToolCall Secret interface pins one env snapshot and exposes only names res
     const nextScope = secret.scope("secret", "demo");
     const nextInbound = {
         ...inbound,
-        text: "echo ${SECRET:OTHER}",
+        payload: "echo ${SECRET:OTHER}",
     } satisfies ToolCallRewriteInvocation;
     assert.deepEqual(
         await nextScope
@@ -104,7 +104,7 @@ test("ToolCall Secret interface rejects other Extensions, wrong-direction reques
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["OTHER"],
             }),
-        /not present in the current ToolCall text/u,
+        /not present in the current ToolCall payload/u,
     );
     await assert.rejects(
         secret

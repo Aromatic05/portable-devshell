@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
+
 import { createSecretRewrite } from "../../src/builtin/rewrite/SecretRewrite.ts";
 
 const signal = new AbortController().signal;
 
 function invocation(
     direction: "inbound" | "outbound",
-    payload: string | Record<string, unknown>,
+    payload: ExtensionJsonValue,
 ) {
     return {
         callId: "call-secret",

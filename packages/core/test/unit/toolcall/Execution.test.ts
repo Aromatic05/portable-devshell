@@ -232,7 +232,6 @@ test("ToolCallExecution keeps one canonical input and context snapshot after Rev
         undefined,
         undefined,
         "host",
-        undefined,
         () => {
             input.command = "echo changed";
             input.nested.value = "changed";

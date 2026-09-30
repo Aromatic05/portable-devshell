@@ -238,7 +238,7 @@ test("Extension sandbox bridges a Secret interface scoped to one toolcall.rewrit
 export function activate(context) {
     context.register({ id: "toolcall.rewrite" }, "secret", async (input, invocation) => {
         const environment = await invocation.requestInterface("secret.environment");
-        return input.text.replace("\${SECRET:TOKEN}", environment.TOKEN);
+        return input.payload.replace("\${SECRET:TOKEN}", environment.TOKEN);
     });
 }
 `,
@@ -256,6 +256,7 @@ export function activate(context) {
     assert.equal(
         await binding(
             {
+                callId: "call-secret",
                 context: {
                     ctxId: "ctx-secret",
                     instance: "demo",
@@ -263,9 +264,8 @@ export function activate(context) {
                 },
                 direction: "inbound",
                 kind: "call",
-                path: ["command"],
                 signal: new AbortController().signal,
-                text: "echo ${SECRET:TOKEN}",
+                payload: "echo ${SECRET:TOKEN}",
                 toolName: "bash_run",
             },
             {
