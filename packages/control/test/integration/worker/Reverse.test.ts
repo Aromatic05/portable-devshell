@@ -41,7 +41,7 @@ import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
     readRelativeMarkerCommand,
-    terminalDelayedPrintCommand,
+    terminalGatedPrintCommand,
     terminalExpectedSize,
     terminalPrintCommand,
     terminalSizeProbeCommand,
@@ -499,12 +499,13 @@ test(
         outputSeq = Math.max(outputSeq, resumedOutput.lastOutputSeq);
         const restartInputSeq = terminalClientSeq++;
         const restartStartedMarker = "reverse-control-restart-started";
+        const restartGateName = "reverse-control-restart-release";
         await terminalStream.send("input", {
             clientSeq: restartInputSeq,
-            data: terminalDelayedPrintCommand(
+            data: terminalGatedPrintCommand(
                 restartStartedMarker,
+                restartGateName,
                 "reverse-after-control-restart",
-                2_000,
             ),
             generation: opened.generation,
             terminalId: opened.terminalId,
@@ -567,6 +568,7 @@ test(
             },
         );
         terminalStream = recovered.stream;
+        await writeFile(join(workspace, restartGateName), "release", "utf8");
         await waitForTerminal(
             terminalStream,
             (_event, output) =>

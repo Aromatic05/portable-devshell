@@ -134,21 +134,21 @@ export function terminalPrintCommand(marker: string, delayMs = 0): string {
     return `${delay}printf '%s%s\\n' '${left}' '${right}'\r`;
 }
 
-export function terminalDelayedPrintCommand(
+export function terminalGatedPrintCommand(
     startedMarker: string,
+    gateFileName: string,
     completedMarker: string,
-    delayMs: number,
 ): string {
     const [startedLeft, startedRight] = splitTerminalMarker(startedMarker);
     const [completedLeft, completedRight] =
         splitTerminalMarker(completedMarker);
-    if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
-        throw new Error(`invalid terminal delay: ${delayMs}`);
+    if (!/^[A-Za-z0-9._-]+$/u.test(gateFileName)) {
+        throw new Error(`invalid terminal gate file: ${gateFileName}`);
     }
     if (process.platform === "win32") {
-        return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${startedLeft}' + '${startedRight}')); Start-Sleep -Milliseconds ${delayMs}; [Console]::WriteLine(('${completedLeft}' + '${completedRight}'))"\r`;
+        return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "[Console]::WriteLine(('${startedLeft}' + '${startedRight}')); while (!(Test-Path -LiteralPath '.\\${gateFileName}')) { Start-Sleep -Milliseconds 50 }; [Console]::WriteLine(('${completedLeft}' + '${completedRight}'))"\r`;
     }
-    return `printf '%s%s\\n' '${startedLeft}' '${startedRight}'; sleep ${(delayMs / 1000).toFixed(3)}; printf '%s%s\\n' '${completedLeft}' '${completedRight}'\r`;
+    return `printf '%s%s\\n' '${startedLeft}' '${startedRight}'; while [ ! -f './${gateFileName}' ]; do sleep 0.050; done; printf '%s%s\\n' '${completedLeft}' '${completedRight}'\r`;
 }
 
 export function terminalSizeProbeCommand(): string {
