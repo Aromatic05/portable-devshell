@@ -7,61 +7,76 @@ import type { ControlConfig } from "@portable-devshell/shared";
 
 import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
 
+const signal = new AbortController().signal;
+const tokenReference = "$" + "{SECRET:TOKEN}";
+const otherReference = "$" + "{SECRET:OTHER}";
 const inbound: ToolCallRewriteInvocation = {
     callId: "call-secret",
-    context: {
-        ctxId: "ctx-secret",
-        instance: "demo",
-        source: "mcp",
-    },
     direction: "inbound",
-    kind: "call",
-    signal: new AbortController().signal,
-    payload: "echo ${SECRET:TOKEN}",
-    toolName: "bash_run",
+    value: {
+        context: {
+            ctxId: "ctx-secret",
+            instance: "demo",
+            source: "mcp",
+        },
+        kind: "call",
+        payload: "echo " + tokenReference,
+        toolName: "bash_run",
+    },
 };
 const outbound: ToolCallRewriteInvocation = {
     ...inbound,
     direction: "outbound",
-    kind: "result",
-    payload: "result",
+    value: {
+        ...inbound.value,
+        kind: "result",
+        payload: "result",
+    },
 };
 
-function config(env: Record<string, string>): ControlConfig {
-    return {
-        instances: [{ env, name: "demo" }],
-    } as unknown as ControlConfig;
+function config(instances: Array<{ env?: Record<string, string>; name: string }>): ControlConfig {
+    return { instances } as unknown as ControlConfig;
 }
 
-test("ToolCall Secret interface pins one env snapshot and exposes only names resolved in this Boundary lease", async () => {
-    let current = config({ TOKEN: "first", NO_COLOR: "1" });
+test("ToolCall Secret interface follows the current rewritten instance and exposes only names used by the scope", async () => {
+    let current = config([
+        { env: { TOKEN: "first" }, name: "demo" },
+        { env: { TOKEN: "second", OTHER: "value" }, name: "other" },
+    ]);
     const secret = new ToolCallSecretRewrite(() => current);
-    const firstScope = secret.scope("secret", "demo");
+    const scope = secret.scope("secret");
 
     assert.deepEqual(
-        await firstScope
-            .context(inbound)
+        await scope
+            .context(inbound, signal)
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["TOKEN"],
             }),
         { TOKEN: "first" },
     );
-    current = config({ TOKEN: "second", OTHER: "value", NO_COLOR: "0" });
+
+    current = config([
+        { env: { TOKEN: "changed" }, name: "demo" },
+        { env: { TOKEN: "second", OTHER: "value" }, name: "other" },
+    ]);
     assert.deepEqual(
-        await firstScope
-            .context(outbound)
+        await scope
+            .context(outbound, signal)
             .requestInterface(secretRewriteInterfaceOperation),
-        { TOKEN: "first" },
+        { TOKEN: "changed" },
     );
 
-    const nextScope = secret.scope("secret", "demo");
-    const nextInbound = {
+    const otherInbound: ToolCallRewriteInvocation = {
         ...inbound,
-        payload: "echo ${SECRET:OTHER}",
-    } satisfies ToolCallRewriteInvocation;
+        value: {
+            ...inbound.value,
+            context: { ...inbound.value.context, instance: "other" },
+            payload: "echo " + otherReference,
+        },
+    };
     assert.deepEqual(
-        await nextScope
-            .context(nextInbound)
+        await scope
+            .context(otherInbound, signal)
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["OTHER"],
             }),
@@ -69,15 +84,15 @@ test("ToolCall Secret interface pins one env snapshot and exposes only names res
     );
 });
 
-test("ToolCall Secret interface rejects other Extensions, wrong-direction requests, and names absent from the current leaf", async () => {
+test("ToolCall Secret interface rejects unsupported requests and names absent from the current value", async () => {
     const secret = new ToolCallSecretRewrite(() =>
-        config({ TOKEN: "value", OTHER: "other" }),
+        config([{ env: { TOKEN: "value", OTHER: "other" }, name: "demo" }]),
     );
 
     await assert.rejects(
         secret
-            .scope("other", "demo")
-            .context(inbound)
+            .scope("other")
+            .context(inbound, signal)
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["TOKEN"],
             }),
@@ -85,22 +100,22 @@ test("ToolCall Secret interface rejects other Extensions, wrong-direction reques
     );
     await assert.rejects(
         secret
-            .scope("secret", "demo")
-            .context(inbound)
+            .scope("secret")
+            .context(inbound, signal)
             .requestInterface("secret.other"),
         /Unsupported ToolCall rewrite interface operation/u,
     );
     await assert.rejects(
         secret
-            .scope("secret", "demo")
-            .context(inbound)
+            .scope("secret")
+            .context(inbound, signal)
             .requestInterface(secretRewriteInterfaceOperation),
         /requires referenced secret names/u,
     );
     await assert.rejects(
         secret
-            .scope("secret", "demo")
-            .context(inbound)
+            .scope("secret")
+            .context(inbound, signal)
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["OTHER"],
             }),
@@ -108,8 +123,8 @@ test("ToolCall Secret interface rejects other Extensions, wrong-direction reques
     );
     await assert.rejects(
         secret
-            .scope("secret", "demo")
-            .context(outbound)
+            .scope("secret")
+            .context(outbound, signal)
             .requestInterface(secretRewriteInterfaceOperation, {
                 names: ["TOKEN"],
             }),

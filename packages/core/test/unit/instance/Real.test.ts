@@ -49,7 +49,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
-import { ToolCallBoundarySequence } from "../../../src/toolcall/boundary/Sequence.ts";
+import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
 const execFileAsync = promisify(execFile);
@@ -58,6 +58,25 @@ const rsyncAvailable =
     spawnSync("rsync", ["--version"], { stdio: "ignore" }).status === 0;
 
 const cliToolCallContext = { source: "cli" } as const;
+
+function bindToolCallApproval(instance: WorkerInstance): void {
+    instance.bindToolCallHooks(
+        async (_context, signal, recording) => ({
+            release() {},
+            sequence: new ToolCallHookSequence({
+                reviews: [
+                    async (input) =>
+                        await instance.reviewToolCallApproval(
+                            input,
+                            signal,
+                            recording,
+                        ),
+                ],
+            }),
+        }),
+        () => instance.toolCallTarget(),
+    );
+}
 
 async function readServiceStream(stream: FrameStream): Promise<Buffer> {
     const chunks: Buffer[] = [];
@@ -737,7 +756,7 @@ test("WorkerInstance serializes start and stop lifecycle operations", async () =
     }
 });
 
-test("WorkerInstance runs control-owned tool operations through ToolCall Boundary while the worker is stopped", async () => {
+test("WorkerInstance runs control-owned tool operations through ToolCall Hooks while the worker is stopped", async () => {
     const homeDirectory = await createTestTempDirectory("control-audit");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
@@ -886,7 +905,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Boundar
     }
 });
 
-test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall Boundary", async () => {
+test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall Hooks", async () => {
     const homeDirectory = await createTestTempDirectory("internal-boundary");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
@@ -898,22 +917,22 @@ test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall
     let reviews = 0;
     let rewrites = 0;
 
-    instance.bindToolCallBoundary(async () => {
+    instance.bindToolCallHooks(async () => {
         boundaryAcquires += 1;
         return {
             release() {},
-            sequence: new ToolCallBoundarySequence({
+            sequence: new ToolCallHookSequence({
                 reviews: [async () => {
                     reviews += 1;
-                    return { decision: "accept" };
+                    return { decision: "continue" };
                 }],
                 rewrites: [async (input) => {
                     rewrites += 1;
-                    return input.payload;
+                    return input.value;
                 }],
             }),
         };
-    });
+    }, () => instance.toolCallTarget());
 
     try {
         await instance.start();
@@ -1176,6 +1195,7 @@ test("WorkerInstance waits for approval before invoking tools and records approv
         name: asInstanceName("task-6-approval"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1201,20 +1221,8 @@ test("WorkerInstance waits for approval before invoking tools and records approv
             "pending",
         );
         assert.deepEqual(
-            (await instance.readToolCalls({ status: "pendingApproval" })).map(
-                (record) => ({
-                    approvalId: record.approvalId,
-                    status: record.status,
-                    toolName: record.toolName,
-                }),
-            ),
-            [
-                {
-                    approvalId,
-                    status: "pendingApproval",
-                    toolName: "bash_run",
-                },
-            ],
+            await instance.readToolCalls({ status: "pendingApproval" }),
+            [],
         );
 
         const pendingReplay = instance.subscribe(1);
@@ -1255,8 +1263,8 @@ test("WorkerInstance waits for approval before invoking tools and records approv
 
         const records = await instance.readToolCalls();
         assert.equal(records[0]?.status, "completed");
-        assert.equal(records[0]?.decision, "approved");
-        assert.equal(records[0]?.approvalId, approvalId);
+        assert.equal(records[0]?.decision, undefined);
+        assert.equal(records[0]?.approvalId, undefined);
 
         const approved = await instance.getApproval(approvalId);
         assert.equal(approved.status, "approved");
@@ -1288,6 +1296,7 @@ test("caller-recorded Worker calls keep approval enforcement without host tool a
         name: asInstanceName("task-6-delegated-approval"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1378,6 +1387,7 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         name: asInstanceName("task-6-approval-cancel"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1414,7 +1424,7 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         await assert.rejects(callPromise, (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolCallCancelled,
+                errorCodes.coreToolCallRejected,
             );
             return true;
         });
@@ -1425,14 +1435,14 @@ test("WorkerInstance cancels a pending approval when the caller aborts", async (
         );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
-            ["cancelled"],
+            ["denied"],
         );
 
         const replay = instance.subscribe(1);
         assert.equal(replay.kind, "events");
         const eventTypes = replay.events.map((event) => event.type);
         assert.equal(eventTypes.includes("approval.cancelled"), true);
-        assert.equal(eventTypes.includes("toolCall.cancelled"), true);
+        assert.equal(eventTypes.includes("toolCall.denied"), true);
         assert.equal(eventTypes.includes("toolCall.running"), false);
     } finally {
         await instance.close();
@@ -1451,6 +1461,7 @@ test("WorkerInstance stop cancels pending approvals before stopping the worker",
         name: asInstanceName("task-6-stop-pending-approval"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1470,7 +1481,7 @@ test("WorkerInstance stop cancels pending approvals before stopping the worker",
         await assert.rejects(callPromise, (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolCallCancelled,
+                errorCodes.coreToolCallRejected,
             );
             return true;
         });
@@ -1480,7 +1491,7 @@ test("WorkerInstance stop cancels pending approvals before stopping the worker",
         );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
-            ["cancelled"],
+            ["denied"],
         );
     } finally {
         await instance.close();
@@ -1499,6 +1510,7 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
         name: asInstanceName("task-6-approval-admin-cancel"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1522,7 +1534,7 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
         await assert.rejects(callPromise, (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreToolCallCancelled,
+                errorCodes.coreToolCallRejected,
             );
             return true;
         });
@@ -1533,7 +1545,7 @@ test("WorkerInstance cancellation API terminates a pending approval before tool 
         );
         assert.deepEqual(
             (await instance.readToolCalls()).map((record) => record.status),
-            ["cancelled"],
+            ["denied"],
         );
     } finally {
         await instance.close();
@@ -1553,6 +1565,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         name: asInstanceName("task-6-approval-fail"),
         transport: harness.transport,
     });
+    bindToolCallApproval(instance);
 
     try {
         await instance.start();
@@ -1574,7 +1587,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         await assert.rejects(deniedPromise, (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreApprovalDenied,
+                errorCodes.coreToolCallRejected,
             );
             return true;
         });
@@ -1583,7 +1596,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         const afterDenied = await instance.readToolCalls();
         assert.equal(afterDenied[0]?.status, "denied");
         assert.equal(afterDenied[0]?.source, "mcp");
-        assert.equal(afterDenied[0]?.decision, "denied");
+        assert.equal(afterDenied[0]?.decision, undefined);
 
         const beforeExpiredInvokeCount = harness.requestedMethods();
         const expiredPromise = instance.callTool(
@@ -1594,7 +1607,7 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         await assert.rejects(expiredPromise, (error: unknown) => {
             assert.equal(
                 (error as { code?: string }).code,
-                errorCodes.coreApprovalExpired,
+                errorCodes.coreToolCallRejected,
             );
             return true;
         });
@@ -1603,11 +1616,11 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         const records = await instance.readToolCalls();
         assert.deepEqual(
             records.map((record) => record.status),
-            ["denied", "expired"],
+            ["denied", "denied"],
         );
         assert.deepEqual(
             records.map((record) => record.decision),
-            ["denied", "expired"],
+            [undefined, undefined],
         );
 
         const replay = instance.subscribe(1);
@@ -1616,7 +1629,6 @@ test("WorkerInstance denies and expires approval-gated calls without invoking to
         assert.equal(eventTypes.includes("approval.denied"), true);
         assert.equal(eventTypes.includes("approval.expired"), true);
         assert.equal(eventTypes.includes("toolCall.denied"), true);
-        assert.equal(eventTypes.includes("toolCall.expired"), true);
         assert.equal(eventTypes.includes("toolCall.running"), false);
     } finally {
         await instance.close();

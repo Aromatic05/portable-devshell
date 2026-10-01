@@ -238,7 +238,10 @@ test("Extension sandbox bridges a Secret interface scoped to one toolcall.rewrit
 export function activate(context) {
     context.register({ id: "toolcall.rewrite" }, "secret", async (input, invocation) => {
         const environment = await invocation.requestInterface("secret.environment");
-        return input.payload.replace("\${SECRET:TOKEN}", environment.TOKEN);
+        return {
+            ...input.value,
+            payload: input.value.payload.replace("$" + "{SECRET:TOKEN}", environment.TOKEN),
+        };
     });
 }
 `,
@@ -253,29 +256,40 @@ export function activate(context) {
         sandbox,
     );
     const calls: unknown[] = [];
-    assert.equal(
+    assert.deepEqual(
         await binding(
             {
                 callId: "call-secret",
-                context: {
-                    ctxId: "ctx-secret",
-                    instance: "demo",
-                    source: "mcp",
-                },
                 direction: "inbound",
-                kind: "call",
-                signal: new AbortController().signal,
-                payload: "echo ${SECRET:TOKEN}",
-                toolName: "bash_run",
+                value: {
+                    context: {
+                        ctxId: "ctx-secret",
+                        instance: "demo",
+                        source: "mcp",
+                    },
+                    kind: "call",
+                    payload: "echo " + "$" + "{SECRET:TOKEN}",
+                    toolName: "bash_run",
+                },
             },
             {
+                signal: new AbortController().signal,
                 async requestInterface(operation, input) {
                     calls.push({ input, operation });
                     return { TOKEN: "real-token" };
                 },
             },
         ),
-        "echo real-token",
+        {
+            context: {
+                ctxId: "ctx-secret",
+                instance: "demo",
+                source: "mcp",
+            },
+            kind: "call",
+            payload: "echo real-token",
+            toolName: "bash_run",
+        },
     );
     assert.deepEqual(calls, [
         { input: undefined, operation: "secret.environment" },

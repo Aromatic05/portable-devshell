@@ -37,7 +37,7 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import { ToolCallBoundarySequence } from "@portable-devshell/core";
+import { ToolCallHookSequence } from "@portable-devshell/core";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -276,9 +276,9 @@ test(
                 );
             },
         };
-        instance.bindToolCallBoundary(() => ({
+        instance.bindToolCallHooks(() => ({
             release() {},
-            sequence: new ToolCallBoundarySequence({
+            sequence: new ToolCallHookSequence({
                 reviews: [
                     async (input) =>
                         await commentGate(input as never, unsupportedInvocation),
@@ -303,7 +303,7 @@ test(
                         ),
                 ],
             }),
-        }));
+        }), () => instance.toolCallTarget());
         cleanupDirs.push(contextRoot);
 
         try {

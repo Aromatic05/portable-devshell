@@ -4,80 +4,76 @@ import test from "node:test";
 import {
     ApprovalManager,
     ApprovalStore,
-    AuditToolCallHistory,
 } from "@portable-devshell/core/testing";
-import {
-    asInstanceName,
-    type ApprovalRequest,
-    type ToolCallRecord,
-} from "@portable-devshell/shared";
+import { asInstanceName, type ApprovalRequest } from "@portable-devshell/shared";
 
 import { ToolCallApproval } from "../../../../src/toolcall/Approval.ts";
 
-test("ToolCallApproval cancels a durable pending approval when setup fails", async () => {
-    const approvalRecords: ApprovalRequest[] = [];
-    const toolCallRecords: ToolCallRecord[] = [];
-    const instanceName = asInstanceName("approval-setup-failure");
+function approval(mode: "allow" | "deny") {
+    const records: ApprovalRequest[] = [];
     const manager = new ApprovalManager({
-        instanceName,
-        policy: { mode: "ask" },
+        instanceName: asInstanceName("approval-review"),
+        policy: { mode },
         store: new ApprovalStore({
             async append(request: ApprovalRequest) {
-                approvalRecords.push(structuredClone(request));
+                records.push(structuredClone(request));
             },
             async readAll() {
-                return approvalRecords.map((request) =>
-                    structuredClone(request),
-                );
+                return records.map((request) => structuredClone(request));
             },
         }),
         timeout: { ms: 60_000 },
     });
-    const history = new AuditToolCallHistory(instanceName, {
-        async append(record: ToolCallRecord) {
-            toolCallRecords.push(structuredClone(record));
-        },
-        async readAll() {
-            return toolCallRecords.map((record) => structuredClone(record));
-        },
-    });
-    const callId = "call-setup-failure";
-    const context = { ctxId: "ctx-setup-failure", source: "mcp" as const };
-    const startedAt = new Date().toISOString();
-    await history.started(
-        callId,
-        "bash_run",
-        "{}",
-        context,
-        startedAt,
-        "queued",
-    );
-
-    const approval = new ToolCallApproval({
+    return new ToolCallApproval({
         approvalManager: manager,
-        async appendEvent(type) {
-            if (type === "approval.requested")
-                throw new Error("event store unavailable");
-        },
-        toolCallHistory: history,
+        async appendEvent() {},
     });
-    let markedPending = false;
+}
 
-    await assert.rejects(
-        approval.prepare({
-            callId,
-            context,
-            inputSummary: "{}",
-            onPendingApproval() {
-                markedPending = true;
+const input = {
+    callId: "call-approval",
+    direction: "inbound" as const,
+    value: {
+        context: {
+            ctxId: "ctx-approval",
+            instance: asInstanceName("approval-review"),
+            source: "mcp" as const,
+        },
+        kind: "call" as const,
+        payload: { command: "echo ok" },
+        toolName: "bash_run",
+    },
+};
+
+test("ToolCallApproval is an inbound call review", async () => {
+    const allow = approval("allow");
+    const signal = new AbortController().signal;
+
+    assert.deepEqual(await allow.review(input, signal, "host"), {
+        decision: "continue",
+    });
+    assert.deepEqual(
+        await allow.review(
+            {
+                ...input,
+                direction: "outbound",
+                value: { ...input.value, kind: "result" },
             },
-            startedAt,
-            toolName: "bash_run",
-        }),
-        /event store unavailable/u,
+            signal,
+            "host",
+        ),
+        { decision: "continue" },
     );
-    assert.equal(markedPending, true);
-    const approvals = await manager.listApprovals();
-    assert.equal(approvals.length, 1);
-    assert.equal(approvals[0]?.status, "cancelled");
+});
+
+test("ToolCallApproval maps policy denial to review rejection", async () => {
+    const deny = approval("deny");
+    const result = await deny.review(
+        input,
+        new AbortController().signal,
+        "host",
+    );
+
+    assert.equal(result.decision, "reject");
+    assert.equal(result.error?.code, "core.approvalDenied");
 });

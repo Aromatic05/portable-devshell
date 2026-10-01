@@ -24,8 +24,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
-import { ToolCallExecution } from "../../../../../packages/core/src/toolcall/Execution.ts";
-import type { ToolCallBoundaryContext } from "../../../../../packages/core/src/toolcall/boundary/Review.ts";
+import { ToolCallPipeline } from "../../../../../packages/core/src/toolcall/Pipeline.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -45,7 +44,7 @@ const bashTool: ToolDefinition = {
     outputSchema: { type: "object" },
 };
 
-test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boundary", async (t) => {
+test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hooks", async (t) => {
     const root = await createTestTempDirectory("comment-mcp-boundary");
     const workspace = join(root, "workspace");
     const comment = new CommentExtension({
@@ -71,20 +70,16 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
         commentReviewRegistrationHost(comment.comment),
     );
     let executions = 0;
-    const execution = new ToolCallExecution({
-        approval: {
-            async prepare() {
-                return {};
-            },
-        },
+    const execution = new ToolCallPipeline({
         assertReady() {},
         audit: {
             createScope(
+                callId: string,
                 toolName: string,
                 input: JsonValue,
                 context: ToolCallContext,
             ) {
-                return createToolCallScope(toolName, input, context);
+                return createToolCallScope(callId, toolName, input, context);
             },
             async requested() {},
             async queued() {},
@@ -98,8 +93,8 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Boun
             async failActive() {},
             async nonRunning() {},
         },
-        boundary: async (context: ToolCallBoundaryContext) =>
-            await binding.acquire(context),
+        hooks: async (context, signal, recording) =>
+            await binding.acquire(context, signal, recording),
         instanceName,
         log: { async append() {} },
         toolCallScheduler: {
@@ -324,7 +319,7 @@ function commentReviewRegistrationHost(comment: CommentPort) {
     } as never;
 }
 
-function createWorker(execution: ToolCallExecution, workspace: string) {
+function createWorker(execution: ToolCallPipeline, workspace: string) {
     const handshake = {
         homeDirectory: "/home/comment-boundary",
         instance: instanceName,

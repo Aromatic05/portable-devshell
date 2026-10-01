@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
+import type {
+    ToolCallRewriteContext,
+    ToolCallRewriteInvocation,
+} from "@portable-devshell/extension/toolcall";
 
 import { createSecretRewrite } from "../../src/builtin/rewrite/SecretRewrite.ts";
 
@@ -10,20 +14,29 @@ const signal = new AbortController().signal;
 function invocation(
     direction: "inbound" | "outbound",
     payload: ExtensionJsonValue,
-) {
+): ToolCallRewriteInvocation {
     return {
         callId: "call-secret",
-        context: {
-            ctxId: "ctx-secret",
-            instance: "demo",
-            source: "mcp" as const,
-        },
         direction,
-        kind: direction === "inbound" ? ("call" as const) : ("result" as const),
-        payload,
-        signal,
-        toolName: "bash_run",
+        value: {
+            context: {
+                ctxId: "ctx-secret",
+                instance: "demo",
+                source: "mcp",
+            },
+            kind: direction === "inbound" ? "call" : "result",
+            payload,
+            toolName: "bash_run",
+        },
     };
+}
+
+function createPayloadRewrite() {
+    const rewrite = createSecretRewrite();
+    return async (
+        input: ToolCallRewriteInvocation,
+        context: ToolCallRewriteContext,
+    ): Promise<ExtensionJsonValue> => (await rewrite(input, context)).payload;
 }
 
 function rewriteContext(environment: Record<string, string>) {
@@ -32,6 +45,7 @@ function rewriteContext(environment: Record<string, string>) {
     return {
         calls,
         context: {
+            signal,
             async requestInterface(operation: string, input?: unknown) {
                 calls.push({ input, operation });
                 if (input !== undefined) {
@@ -55,8 +69,20 @@ function rewriteContext(environment: Record<string, string>) {
     };
 }
 
-test("Secret rewrite requests and expands only references present in inbound text", async () => {
+test("Secret rewrite preserves the ToolCall value while rewriting payload", async () => {
     const rewrite = createSecretRewrite();
+    const host = rewriteContext({ TOKEN: "real-token" });
+    const reference = "$" + "{SECRET:TOKEN}";
+    const input = invocation("inbound", `echo ${reference}`);
+    const result = await rewrite(input, host.context);
+
+    assert.equal(result.payload, "echo real-token");
+    assert.deepEqual(result.context, input.value.context);
+    assert.equal(result.toolName, input.value.toolName);
+});
+
+test("Secret rewrite requests and expands only references present in inbound text", async () => {
+    const rewrite = createPayloadRewrite();
     const host = rewriteContext({
         GITHUB_TOKEN: "real-github-token",
         OPENAI_API_KEY: "real-openai-key",
@@ -82,7 +108,7 @@ test("Secret rewrite requests and expands only references present in inbound tex
 });
 
 test("Secret rewrite masks only secrets resolved inbound and leaves ordinary env values untouched", async () => {
-    const rewrite = createSecretRewrite();
+    const rewrite = createPayloadRewrite();
     const host = rewriteContext({
         LONG: "token-value",
         SHORT: "token",
@@ -110,8 +136,11 @@ test("Secret rewrite masks only secrets resolved inbound and leaves ordinary env
 });
 
 test("Secret rewrite picks a deterministic canonical key when referenced env names share one value", async () => {
-    const rewrite = createSecretRewrite();
-    const host = rewriteContext({ Z_TOKEN: "same-value", A_TOKEN: "same-value" });
+    const rewrite = createPayloadRewrite();
+    const host = rewriteContext({
+        Z_TOKEN: "same-value",
+        A_TOKEN: "same-value",
+    });
 
     await rewrite(
         invocation("inbound", "${SECRET:Z_TOKEN} ${SECRET:A_TOKEN}"),
@@ -124,7 +153,7 @@ test("Secret rewrite picks a deterministic canonical key when referenced env nam
 });
 
 test("Secret rewrite does not let an unknown placeholder shield a resolved raw secret", async () => {
-    const rewrite = createSecretRewrite();
+    const rewrite = createPayloadRewrite();
     const host = rewriteContext({ TOKEN: "real-token" });
 
     await rewrite(invocation("inbound", "echo ${SECRET:TOKEN}"), host.context);
@@ -137,7 +166,7 @@ test("Secret rewrite does not let an unknown placeholder shield a resolved raw s
 });
 
 test("Secret rewrite rejects an inbound reference missing from the current instance env", async () => {
-    const rewrite = createSecretRewrite();
+    const rewrite = createPayloadRewrite();
     const host = rewriteContext({ GITHUB_TOKEN: "real-github-token" });
 
     await assert.rejects(

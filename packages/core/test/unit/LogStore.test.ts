@@ -504,14 +504,14 @@ test("AuditToolCallHistory persists post-execution failure metadata", async () =
         "2026-09-22T00:00:01.000Z",
         {
             executionCompleted: true,
-            failureStage: "outboundBoundary",
+            failureStage: "outboundHook",
         },
     );
 
     assert.equal(records.length, 1);
     assert.equal(records[0]?.status, "failed");
     assert.equal(records[0]?.executionCompleted, true);
-    assert.equal(records[0]?.failureStage, "outboundBoundary");
+    assert.equal(records[0]?.failureStage, "outboundHook");
 });
 
 test("AuditToolCallHistory keeps active calls when bounded history is already full", async () => {

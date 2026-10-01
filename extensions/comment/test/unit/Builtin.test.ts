@@ -64,24 +64,26 @@ test("Comment Extension activates its review from instanceRuntime without a Comm
         await binding(
             {
                 callId: "call-1",
-                context: {
-                    ctxId: "ctx-1",
-                    instance: "demo",
-                    source: "cli",
-                },
                 direction: "inbound",
-                kind: "call",
-                payload: {},
-                signal: new AbortController().signal,
-                toolName: "bash_run",
+                value: {
+                    context: {
+                        ctxId: "ctx-1",
+                        instance: "demo",
+                        source: "cli",
+                    },
+                    kind: "call",
+                    payload: {},
+                    toolName: "bash_run",
+                },
             },
             {
+                signal: new AbortController().signal,
                 async requestInterface() {
                     throw new Error("Comment review must not request a host interface");
                 },
             },
         ),
-        { decision: "accept" },
+        { decision: "continue" },
     );
     assert.equal(lists, 2);
 });

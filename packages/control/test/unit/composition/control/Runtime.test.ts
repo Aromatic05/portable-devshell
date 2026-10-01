@@ -1002,18 +1002,29 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
-test("runtime binds dynamic ToolCall Extension Boundary to existing and newly added Workers", async (t) => {
-    const runtimeDir = await createTestTempDirectory("runtime-toolcall-boundary");
+test("runtime binds dynamic ToolCall Hooks and target resolution to existing and newly added Workers", async (t) => {
+    const runtimeDir = await createTestTempDirectory("runtime-toolcall-hooks");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const listeners = new Set<() => void>();
     const descriptors: Array<{ name: string; worker: unknown }> = [];
-    const providers = new Map<string, () => unknown>();
-    let reviewDecision: "accept" | "reject" = "accept";
+    const providers = new Map<string, (...args: never[]) => unknown>();
+    const resolvers = new Map<string, (instance: string) => unknown>();
+    let reviewDecision: "continue" | "reject" = "continue";
 
     const worker = (name: string) => ({
-        bindToolCallBoundary(provider: () => unknown) {
+        bindToolCallHooks(
+            provider: (...args: never[]) => unknown,
+            resolveTarget: (instance: string) => unknown,
+        ) {
             assert.equal(providers.has(name), false);
             providers.set(name, provider);
+            resolvers.set(name, resolveTarget);
+        },
+        async reviewToolCallApproval() {
+            return { decision: "continue" as const };
+        },
+        toolCallTarget() {
+            return { name };
         },
         onCommandSessionClose() {
             return () => undefined;
@@ -1048,8 +1059,8 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
         },
     };
     const instances = {
-        get() {
-            return undefined;
+        get(name: string) {
+            return descriptors.find((descriptor) => descriptor.name === name);
         },
         list() {
             return descriptors;
@@ -1088,39 +1099,51 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
 
     assert.equal(providers.has("existing"), true);
     const existingProvider = providers.get("existing")!;
-    const firstLease = await existingProvider() as {
+    const firstLease = await existingProvider(
+        { instance: "existing", source: "mcp" },
+        new AbortController().signal,
+        "host",
+    ) as {
         release(): void;
         sequence: { review(input: unknown): Promise<{ decision: string }> };
     };
     assert.equal(
         (
             await firstLease.sequence.review({
-                context: { source: "mcp" },
+                callId: "call-1",
                 direction: "inbound",
-                kind: "call",
-                payload: {},
-                signal: new AbortController().signal,
-                toolName: "bash_run",
+                value: {
+                    context: { instance: "existing", source: "mcp" },
+                    kind: "call",
+                    payload: {},
+                    toolName: "bash_run",
+                },
             })
         ).decision,
-        "accept",
+        "continue",
     );
     firstLease.release();
 
     reviewDecision = "reject";
-    const secondLease = await existingProvider() as {
+    const secondLease = await existingProvider(
+        { instance: "existing", source: "mcp" },
+        new AbortController().signal,
+        "host",
+    ) as {
         release(): void;
         sequence: { review(input: unknown): Promise<{ decision: string }> };
     };
     assert.equal(
         (
             await secondLease.sequence.review({
-                context: { source: "mcp" },
+                callId: "call-2",
                 direction: "inbound",
-                kind: "call",
-                payload: {},
-                signal: new AbortController().signal,
-                toolName: "bash_run",
+                value: {
+                    context: { instance: "existing", source: "mcp" },
+                    kind: "call",
+                    payload: {},
+                    toolName: "bash_run",
+                },
             })
         ).decision,
         "reject",
@@ -1130,4 +1153,5 @@ test("runtime binds dynamic ToolCall Extension Boundary to existing and newly ad
     descriptors.push({ name: "added", worker: worker("added") });
     for (const listener of [...listeners]) listener();
     assert.equal(providers.has("added"), true);
+    assert.deepEqual(resolvers.get("existing")?.("added"), { name: "added" });
 });

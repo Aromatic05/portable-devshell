@@ -13,17 +13,18 @@ import {
 
 const base = {
     callId: "call-comment",
-    context: {
-        ctxId: "ctx-comment",
-        instance: "demo",
-        requestId: "request-comment",
-        source: "mcp" as const,
-    },
     direction: "inbound" as const,
-    kind: "call" as const,
-    payload: { command: "pwd" },
-    signal: new AbortController().signal,
-    toolName: "bash_run",
+    value: {
+        context: {
+            ctxId: "ctx-comment",
+            instance: "demo",
+            requestId: "request-comment",
+            source: "mcp" as const,
+        },
+        kind: "call" as const,
+        payload: { command: "pwd" },
+        toolName: "bash_run",
+    },
 };
 
 type Ports = Pick<
@@ -35,6 +36,7 @@ type Ports = Pick<
 >;
 
 const unusedInvocation = {
+    signal: new AbortController().signal,
     async requestInterface(): Promise<never> {
         throw new Error("Comment hooks must not request a host interface");
     },
@@ -65,25 +67,39 @@ test("Comment toolcall gate applies model control only to inbound MCP calls with
         }),
     );
 
-    assert.deepEqual(await gate(base, unusedInvocation), { decision: "accept" });
+    assert.deepEqual(await gate(base, unusedInvocation), {
+        decision: "continue",
+    });
     assert.deepEqual(calls, ["review:bash_run"]);
     assert.deepEqual(
         await gate({ ...base, direction: "outbound" }, unusedInvocation),
-        { decision: "accept" },
+        { decision: "continue" },
     );
     assert.deepEqual(
         await gate(
-            { ...base, context: { ...base.context, source: "cli" } },
+            {
+                ...base,
+                value: {
+                    ...base.value,
+                    context: { ...base.value.context, source: "cli" as const },
+                },
+            },
             unusedInvocation,
         ),
-        { decision: "accept" },
+        { decision: "continue" },
     );
     assert.deepEqual(
         await gate(
-            { ...base, context: { instance: "demo", source: "mcp" } },
+            {
+                ...base,
+                value: {
+                    ...base.value,
+                    context: { instance: "demo", source: "mcp" as const },
+                },
+            },
             unusedInvocation,
         ),
-        { decision: "accept" },
+        { decision: "continue" },
     );
     assert.deepEqual(calls, ["review:bash_run"]);
 });
@@ -98,25 +114,43 @@ test("Comment todo-access hook consumes Todo access on admitted inbound MCP call
         }),
     );
 
-    assert.deepEqual(await access(base, unusedInvocation), base.payload);
+    assert.deepEqual(await access(base, unusedInvocation), base.value);
     assert.deepEqual(calls, ["before:bash_run"]);
     assert.deepEqual(
         await access({ ...base, direction: "outbound" }, unusedInvocation),
-        base.payload,
+        base.value,
     );
     assert.deepEqual(
         await access(
-            { ...base, context: { ...base.context, source: "cli" } },
+            {
+                ...base,
+                value: {
+                    ...base.value,
+                    context: { ...base.value.context, source: "cli" as const },
+                },
+            },
             unusedInvocation,
         ),
-        base.payload,
+        {
+            ...base.value,
+            context: { ...base.value.context, source: "cli" },
+        },
     );
     assert.deepEqual(
         await access(
-            { ...base, context: { instance: "demo", source: "mcp" } },
+            {
+                ...base,
+                value: {
+                    ...base.value,
+                    context: { instance: "demo", source: "mcp" as const },
+                },
+            },
             unusedInvocation,
         ),
-        base.payload,
+        {
+            ...base.value,
+            context: { instance: "demo", source: "mcp" },
+        },
     );
     assert.deepEqual(calls, ["before:bash_run"]);
 });
@@ -137,23 +171,26 @@ test("Comment delivery hook writes the queued Comment and the advice hook append
     const resultInput = {
         ...base,
         direction: "outbound" as const,
-        kind: "result" as const,
-        payload: {
-            exitCode: 7,
-            stderr: "",
-            stdout: "",
-            termination: "exited",
+        value: {
+            ...base.value,
+            kind: "result" as const,
+            payload: {
+                exitCode: 7,
+                stderr: "",
+                stdout: "",
+                termination: "exited",
+            },
         },
     };
 
-    assert.deepEqual(await delivery(resultInput, unusedInvocation), {
+    assert.deepEqual((await delivery(resultInput, unusedInvocation)).payload, {
         comment: ["User Comment"],
         exitCode: 7,
         stderr: "",
         stdout: "",
         termination: "exited",
     });
-    assert.deepEqual(await advice(resultInput, unusedInvocation), {
+    assert.deepEqual((await advice(resultInput, unusedInvocation)).payload, {
         comment: ["[bash.nonZeroExit] Exited with code 7; inspect output."],
         exitCode: 7,
         stderr: "",
@@ -228,21 +265,24 @@ test("Comment todo-invalid hook records invalid todo_write failures and the advi
     const errorInput = {
         ...base,
         direction: "outbound" as const,
-        kind: "error" as const,
-        payload: {
-            error: {
-                code: "todo.invalid",
-                message: "invalid",
-                retryable: false,
+        value: {
+            ...base.value,
+            kind: "error" as const,
+            payload: {
+                error: {
+                    code: "todo.invalid",
+                    message: "invalid",
+                    retryable: false,
+                },
             },
+            toolName: "todo_write",
         },
-        toolName: "todo_write",
     };
 
     const recorded = await todoInvalid(errorInput, unusedInvocation);
-    assert.deepEqual(recorded, errorInput.payload);
+    assert.deepEqual(recorded, errorInput.value);
     assert.deepEqual(invalid, ["demo:ctx-comment"]);
-    assert.deepEqual(await advice({ ...errorInput, payload: recorded }, unusedInvocation), {
+    assert.deepEqual((await advice(errorInput, unusedInvocation)).payload, {
         comment: [
             "[todo.invalid] Fix the reported invariant and resubmit the full plan.",
         ],

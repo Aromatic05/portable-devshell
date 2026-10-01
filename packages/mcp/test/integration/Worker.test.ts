@@ -21,8 +21,9 @@ import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
+    type WorkerInstance,
 } from "@portable-devshell/core/testing";
-import { ToolCallBoundarySequence } from "../../../core/src/toolcall/boundary/Sequence.ts";
+import { ToolCallHookSequence } from "../../../core/src/toolcall/hook/Sequence.ts";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
     commandAvailable,
@@ -68,6 +69,25 @@ import { tmpdir } from "node:os";
         return typeof value === "object" && value !== null && !Array.isArray(value)
             ? value
             : undefined;
+    }
+
+    function bindToolCallApproval(instance: WorkerInstance): void {
+        instance.bindToolCallHooks(
+            async (_context, signal, recording) => ({
+                release() {},
+                sequence: new ToolCallHookSequence({
+                    reviews: [
+                        async (input) =>
+                            await instance.reviewToolCallApproval(
+                                input,
+                                signal,
+                                recording,
+                            ),
+                    ],
+                }),
+            }),
+            () => instance.toolCallTarget(),
+        );
     }
 
     test(
@@ -456,22 +476,22 @@ import { tmpdir } from "node:os";
                     workerBinary: new WorkerBinary(workerBinaryPath!),
                 }),
             });
-            instance.bindToolCallBoundary(async () => ({
+            instance.bindToolCallHooks(async () => ({
                 release() {},
-                sequence: new ToolCallBoundarySequence({
+                sequence: new ToolCallHookSequence({
                     reviews: [
                         async (input) =>
                             input.direction === "inbound" &&
-                            input.kind === "call" &&
-                            input.toolName === "bash_run"
+                            input.value.kind === "call" &&
+                            input.value.toolName === "bash_run"
                                 ? {
                                       decision: "reject" as const,
                                       reason: "blocked by review",
                                   }
-                                : { decision: "accept" as const },
+                                : { decision: "continue" as const },
                     ],
                 }),
-            }));
+            }), () => instance.toolCallTarget());
             const host = new McpHost({
                 instances: [
                     {
@@ -560,7 +580,7 @@ import { tmpdir } from "node:os";
     );
 
     test(
-        "MCP control and worker tool calls share the approval boundary",
+        "MCP control and worker tool calls share the approval review",
         realWorkerTestOptions(workerBinaryPath),
         async () => {
             const instanceName = "aromatic-pc-mcp-approval";
@@ -579,6 +599,7 @@ import { tmpdir } from "node:os";
                     workerBinary: new WorkerBinary(workerBinaryPath!),
                 }),
             });
+            bindToolCallApproval(instance);
             const host = new McpHost({
                 instances: [
                     {
@@ -655,7 +676,7 @@ import { tmpdir } from "node:os";
                             record.source === "mcp" &&
                             record.status === "pendingApproval",
                     ),
-                    true,
+                    false,
                 );
 
                 await instance.decideApproval(pendingApproval.approvalId, {
@@ -674,7 +695,7 @@ import { tmpdir } from "node:os";
                     (record) => record.toolName === "bash_run",
                 );
                 assert.equal(approvedToolCall?.source, "mcp");
-                assert.equal(approvedToolCall?.decision, "approved");
+                assert.equal(approvedToolCall?.decision, undefined);
                 assert.equal(approvedToolCall?.status, "completed");
 
                 deniedPromise = postJson(
@@ -697,7 +718,7 @@ import { tmpdir } from "node:os";
                 deniedPromise = undefined;
                 assert.equal(
                     denied.error?.data?.code,
-                    errorCodes.coreApprovalDenied,
+                    errorCodes.coreToolCallRejected,
                 );
 
                 const replay = instance.subscribe(1);

@@ -1,582 +1,334 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { asInstanceName } from "@portable-devshell/shared";
-import { readSecretEnvironment } from "@portable-devshell/extension/secret";
 import type {
-    ToolCallReviewInvocation,
-    ToolCallRewriteInvocation,
+    ToolCallReviewBinding,
+    ToolCallRewriteBinding,
 } from "@portable-devshell/extension/toolcall";
+import { asInstanceName } from "@portable-devshell/shared";
 
 import { ToolCallExtensionBinding } from "../../../../src/control/extension/toolcall/Binding.ts";
-import { ToolCallSecretRewrite } from "../../../../src/control/extension/toolcall/interface/Secret.ts";
 import {
-    createToolCallReviewSandboxBinding,
-    createToolCallRewriteSandboxBinding,
     toolCallReviewSandboxCodec,
     toolCallRewriteSandboxCodec,
 } from "../../../../src/control/extension/toolcall/Sandbox.ts";
 
-const validationContext = Object.freeze({
-    codeDirectory: "/extension",
-    extensionId: "example",
-    id: "entry",
-});
-
-const toolCallContext = Object.freeze({
-    ctxId: "ctx-1",
-    instance: asInstanceName("demo"),
+const context = {
+    instance: asInstanceName("instance-a"),
     source: "mcp" as const,
-    workspace: "/repo",
-});
+};
 
-test("ToolCall Extension binding acquires registrations once and releases them with the Boundary lease", async () => {
-    const events: string[] = [];
-    const bindings = new ToolCallExtensionBinding({
+const value = {
+    context,
+    kind: "call" as const,
+    payload: { command: "echo ok" },
+    toolName: "bash_run",
+};
+
+function host(options: {
+    reviews?: Array<{
+        binding: ToolCallReviewBinding;
+        extensionId?: string;
+        hook: string;
+        id: string;
+    }>;
+    rewrites?: Array<{
+        binding: ToolCallRewriteBinding;
+        extensionId?: string;
+        hook: string;
+        id: string;
+    }>;
+    releases?: string[];
+}) {
+    const reviews = options.reviews ?? [];
+    const rewrites = options.rewrites ?? [];
+    return {
         listDeclarations(pointId: string) {
-            return pointId === "toolcall.review"
-                ? [
-                      {
-                          declaration: { hook: "500-comment", id: "comment" },
-                          id: "comment",
-                      },
-                  ]
-                : pointId === "toolcall.rewrite"
-                  ? [
-                        {
-                            declaration: { hook: "100-secret", id: "secret" },
-                            id: "secret",
-                        },
-                    ]
-                  : [];
+            const entries = pointId === "toolcall.review" ? reviews : rewrites;
+            return entries.map(({ extensionId, hook, id }) => ({
+                declaration: { hook, id },
+                extensionId,
+                id,
+            }));
         },
         async acquireRegistration(pointId: string, id: string) {
-            events.push(`acquire:${pointId}:${id}`);
+            const entries = pointId === "toolcall.review" ? reviews : rewrites;
+            const entry = entries.find((candidate) => candidate.id === id);
+            assert.ok(entry);
             return {
+                extensionId: entry.extensionId,
                 lease: {
                     release() {
-                        events.push(`release:${pointId}:${id}`);
+                        options.releases?.push(id);
                     },
                 },
-                registration: {
-                    binding:
-                        pointId === "toolcall.review"
-                            ? async () => ({ decision: "approve" as const })
-                            : async (input: { payload: unknown }) =>
-                                  `masked(${String(input.payload)})`,
-                },
-            } as never;
+                registration: { binding: entry.binding },
+            };
         },
-    } as never);
-    const lease = await bindings.acquire(toolCallContext);
-    const signal = new AbortController().signal;
+    };
+}
+
+test("ToolCall review pipeline places builtin approval at 500-approval", async () => {
+    const calls: string[] = [];
+    const binding = new ToolCallExtensionBinding(
+        host({
+            reviews: [
+                {
+                    hook: "900-late",
+                    id: "late",
+                    binding: async () => {
+                        calls.push("late");
+                        return { decision: "continue" };
+                    },
+                },
+                {
+                    hook: "100-early",
+                    id: "early",
+                    binding: async () => {
+                        calls.push("early");
+                        return { decision: "continue" };
+                    },
+                },
+            ],
+        }) as never,
+        undefined,
+        async () => {
+            calls.push("approval");
+            return { decision: "continue" };
+        },
+    );
+    const lease = await binding.acquire(
+        context,
+        new AbortController().signal,
+        "host",
+    );
 
     assert.deepEqual(
         await lease.sequence.review({
             callId: "call-1",
-            context: toolCallContext,
             direction: "inbound",
-            kind: "call",
-            payload: { command: "echo ok" },
-            signal,
-            toolName: "bash_run",
+            value,
         }),
-        { decision: "approve" },
+        { decision: "continue" },
     );
-    assert.equal(
-        await lease.sequence.rewrite({
-            callId: "call-rewrite",
-            context: toolCallContext,
-            direction: "outbound",
-            kind: "result",
-            payload: "secret",
-            signal,
-            toolName: "bash_run",
-        }),
-        "masked(secret)",
-    );
-    assert.deepEqual(events, [
-        "acquire:toolcall.review:comment",
-        "acquire:toolcall.rewrite:secret",
-    ]);
-    lease.release();
-    assert.deepEqual(events, [
-        "acquire:toolcall.review:comment",
-        "acquire:toolcall.rewrite:secret",
-        "release:toolcall.rewrite:secret",
-        "release:toolcall.review:comment",
-    ]);
-});
-
-test("ToolCall Extension binding orders stage hooks by hook name independently of registration id", async () => {
-    const events: string[] = [];
-    const bindings = new ToolCallExtensionBinding({
-        listDeclarations(pointId: string) {
-            return pointId === "toolcall.review"
-                ? [
-                      {
-                          declaration: { hook: "900-last", id: "alpha" },
-                          extensionId: "alpha-extension",
-                          id: "alpha",
-                      },
-                      {
-                          declaration: { hook: "001-first", id: "zeta" },
-                          extensionId: "zeta-extension",
-                          id: "zeta",
-                      },
-                  ]
-                : [];
-        },
-        async acquireRegistration(_pointId: string, id: string) {
-            events.push(id);
-            return {
-                extensionId: `${id}-extension`,
-                lease: { release() {} },
-                registration: {
-                    binding: async () => ({ decision: "accept" as const }),
-                },
-            } as never;
-        },
-    } as never);
-
-    const lease = await bindings.acquire(toolCallContext);
-    assert.deepEqual(events, ["zeta", "alpha"]);
+    assert.deepEqual(calls, ["early", "approval", "late"]);
     lease.release();
 });
 
-test("ToolCall Extension binding does not expose builtin-specific review interfaces", async () => {
-    const bindings = new ToolCallExtensionBinding({
-        listDeclarations(pointId: string) {
-            return pointId === "toolcall.review"
-                ? [
-                      {
-                          declaration: { hook: "500-review", id: "review" },
-                          extensionId: "example",
-                          id: "review",
-                      },
-                  ]
-                : [];
-        },
-        async acquireRegistration() {
-            return {
-                extensionId: "example",
-                lease: { release() {} },
-                registration: {
-                    binding: async (_input: unknown, context: {
-                        requestInterface(operation: string): Promise<unknown>;
-                    }) => {
-                        await context.requestInterface("example.private");
-                        return { decision: "accept" as const };
+test("approval rejection short-circuits later reviews", async () => {
+    const calls: string[] = [];
+    const binding = new ToolCallExtensionBinding(
+        host({
+            reviews: [
+                {
+                    hook: "100-early",
+                    id: "early",
+                    binding: async () => {
+                        calls.push("early");
+                        return { decision: "continue" };
                     },
                 },
-            } as never;
+                {
+                    hook: "900-late",
+                    id: "late",
+                    binding: async () => {
+                        calls.push("late");
+                        return { decision: "continue" };
+                    },
+                },
+            ],
+        }) as never,
+        undefined,
+        async () => {
+            calls.push("approval");
+            return { decision: "reject", reason: "denied" };
         },
-    } as never);
-    const lease = await bindings.acquire(toolCallContext);
-    try {
-        await assert.rejects(
-            lease.sequence.review({
-                callId: "call-2",
-                context: toolCallContext,
-                direction: "inbound",
-                kind: "call",
-                payload: { command: "pwd" },
-                signal: new AbortController().signal,
-                toolName: "bash_run",
-            }),
-            /Unsupported ToolCall review interface operation/u,
-        );
-    } finally {
-        lease.release();
-    }
+    );
+    const lease = await binding.acquire(
+        context,
+        new AbortController().signal,
+        "host",
+    );
+
+    assert.deepEqual(
+        await lease.sequence.review({
+            callId: "call-1",
+            direction: "inbound",
+            value,
+        }),
+        { decision: "reject", reason: "denied" },
+    );
+    assert.deepEqual(calls, ["early", "approval"]);
+    lease.release();
 });
 
-test("ToolCall Extension binding pins one Secret env snapshot for inbound and outbound", async () => {
-    let token = "real-token";
-    const secret = new ToolCallSecretRewrite(
-        () =>
-            ({
-                instances: [
-                    {
-                        env: { TOKEN: token },
-                        name: "demo",
-                    },
+test("review and rewrite ordering are independent", async () => {
+    const reviewCalls: string[] = [];
+    const rewriteCalls: string[] = [];
+    const rewrite = (name: string): ToolCallRewriteBinding => async (input) => {
+        rewriteCalls.push(name);
+        return {
+            ...input.value,
+            payload: {
+                trace: [
+                    ...((input.value.payload as { trace?: string[] }).trace ?? []),
+                    name,
                 ],
-            }) as never,
-    );
-    const bindings = new ToolCallExtensionBinding(
-        {
-            listDeclarations(pointId: string) {
-                return pointId === "toolcall.rewrite"
-                    ? [
-                          {
-                              declaration: { hook: "100-secret", id: "secret" },
-                              extensionId: "secret",
-                              id: "secret",
-                          },
-                      ]
-                    : [];
             },
-            async acquireRegistration() {
-                return {
-                    extensionId: "secret",
-                    lease: { release() {} },
-                    registration: {
-                        binding: async (
-                            input: ToolCallRewriteInvocation,
-                            context: Parameters<typeof readSecretEnvironment>[0],
-                        ) => {
-                            const environment = await readSecretEnvironment(
-                                context,
-                                input.direction === "inbound" ? ["TOKEN"] : undefined,
-                            );
-                            const text = input.payload as string;
-                            return input.direction === "inbound"
-                                ? text.replace("${SECRET:TOKEN}", environment.TOKEN!)
-                                : text.replace(environment.TOKEN!, "${SECRET:TOKEN}");
-                        },
-                    },
-                } as never;
-            },
-        } as never,
-        secret,
-    );
-    const lease = await bindings.acquire(toolCallContext);
-    try {
-        const signal = new AbortController().signal;
-        assert.equal(
-            await lease.sequence.rewrite({
-                callId: "call-secret",
-                context: toolCallContext,
-                direction: "inbound",
-                kind: "call",
-                payload: "echo ${SECRET:TOKEN}",
-                signal,
-                toolName: "bash_run",
-            }),
-            "echo real-token",
-        );
-        token = "new-token";
-        assert.equal(
-            await lease.sequence.rewrite({
-                callId: "call-secret",
-                context: toolCallContext,
-                direction: "outbound",
-                kind: "result",
-                payload: "result real-token",
-                signal,
-                toolName: "bash_run",
-            }),
-            "result ${SECRET:TOKEN}",
-        );
-    } finally {
-        lease.release();
-    }
-
-    const nextLease = await bindings.acquire(toolCallContext);
-    try {
-        assert.equal(
-            await nextLease.sequence.rewrite({
-                callId: "call-secret-next",
-                context: toolCallContext,
-                direction: "inbound",
-                kind: "call",
-                payload: "echo ${SECRET:TOKEN}",
-                signal: new AbortController().signal,
-                toolName: "bash_run",
-            }),
-            "echo new-token",
-        );
-    } finally {
-        nextLease.release();
-    }
-});
-
-test("ToolCall Extension binding rolls back acquired generation leases when acquisition fails", async () => {
-    const events: string[] = [];
-    const bindings = new ToolCallExtensionBinding({
-        listDeclarations(pointId: string) {
-            return pointId === "toolcall.review"
-                ? [
-                      {
-                          declaration: { hook: "001-one", id: "one" },
-                          id: "one",
-                      },
-                      {
-                          declaration: { hook: "002-two", id: "two" },
-                          id: "two",
-                      },
-                  ]
-                : [];
-        },
-        async acquireRegistration(_pointId: string, id: string) {
-            if (id === "two") throw new Error("acquire failed");
-            return {
-                lease: {
-                    release() {
-                        events.push("release:one");
+        };
+    };
+    const binding = new ToolCallExtensionBinding(
+        host({
+            reviews: [
+                {
+                    hook: "900-review",
+                    id: "review-late",
+                    binding: async () => {
+                        reviewCalls.push("900");
+                        return { decision: "continue" };
                     },
                 },
-                registration: { binding: async () => ({ decision: "accept" }) },
-            } as never;
-        },
-    } as never);
-
-    await assert.rejects(bindings.acquire(toolCallContext), /acquire failed/u);
-    assert.deepEqual(events, ["release:one"]);
-});
-
-test("ToolCall sandbox review binding preserves outer invocation fields and AbortSignal", async () => {
-    const signal = new AbortController().signal;
-    const calls: unknown[] = [];
-    const binding = createToolCallReviewSandboxBinding(
-        { kind: "review" },
-        validationContext,
-        {
-            async invokeBinding(pointId, id, input, options) {
-                calls.push({ id, input, pointId, signal: options?.signal });
-                return {
-                    decision: "reject",
-                    error: {
-                        code: "control.modelStopped",
-                        details: { commentId: "stop-1" },
-                    },
-                    reason: "blocked",
-                };
-            },
-        },
-    );
-
-    assert.deepEqual(
-        await binding(
-            {
-                callId: "call-3",
-                context: toolCallContext,
-                direction: "inbound",
-                kind: "call",
-                payload: { command: "echo ok" },
-                signal,
-                toolName: "bash_run",
-            },
-            {
-                async requestInterface() {
-                    throw new Error("not used");
-                },
-            },
-        ),
-        {
-            decision: "reject",
-            error: {
-                code: "control.modelStopped",
-                details: { commentId: "stop-1" },
-            },
-            reason: "blocked",
-        },
-    );
-    assert.deepEqual(calls, [
-        {
-            id: "entry",
-            input: {
-                callId: "call-3",
-                context: {
-                    ctxId: "ctx-1",
-                    instance: "demo",
-                    source: "mcp",
-                    workspace: "/repo",
-                },
-                direction: "inbound",
-                kind: "call",
-                payload: { command: "echo ok" },
-                toolName: "bash_run",
-            },
-            pointId: "toolcall.review",
-            signal,
-        },
-    ]);
-});
-
-test("ToolCall sandbox codecs decode review and rewrite invocations without exposing transport details", async () => {
-    const signal = new AbortController().signal;
-    let reviewSignal: AbortSignal | undefined;
-    let rewriteSignal: AbortSignal | undefined;
-
-    assert.deepEqual(
-        await toolCallReviewSandboxCodec.invokeBinding(
-            async (input: ToolCallReviewInvocation) => {
-                assert.equal(input.callId, "call-4");
-                reviewSignal = input.signal;
-                assert.deepEqual(input.payload, { output: "safe" });
-                return {
-                    decision: "reject",
-                    error: {
-                        code: "control.modelReplyRequired",
-                        details: { commentId: "push-1", toolCallBudget: 5 },
-                    },
-                    reason: "reply first",
-                };
-            },
-            {
-                callId: "call-4",
-                context: { instance: "demo", source: "mcp" },
-                direction: "outbound",
-                kind: "result",
-                payload: { output: "safe" },
-                toolName: "bash_run",
-            },
-            signal,
-            {
-                ...validationContext,
-                async requestInterface() {
-                    throw new Error("not used");
-                },
-            },
-        ),
-        {
-            decision: "reject",
-            error: {
-                code: "control.modelReplyRequired",
-                details: { commentId: "push-1", toolCallBudget: 5 },
-            },
-            reason: "reply first",
-        },
-    );
-
-    assert.deepEqual(
-        await toolCallRewriteSandboxCodec.invokeBinding(
-            async (input: ToolCallRewriteInvocation) => {
-                rewriteSignal = input.signal;
-                assert.deepEqual(input.payload, { stdout: ["secret"] });
-                return { stdout: ["masked"] };
-            },
-            {
-                callId: "call-rewrite",
-                context: { instance: "demo", source: "mcp" },
-                direction: "outbound",
-                kind: "progress",
-                payload: { stdout: ["secret"] },
-                toolName: "bash_run",
-            },
-            signal,
-            {
-                ...validationContext,
-                async requestInterface() {
-                    throw new Error("not used");
-                },
-            },
-        ),
-        { stdout: ["masked"] },
-    );
-    assert.equal(reviewSignal, signal);
-    assert.equal(rewriteSignal, signal);
-
-    const rewriteBinding = createToolCallRewriteSandboxBinding(
-        { kind: "rewrite" },
-        validationContext,
-        {
-            async invokeBinding(pointId, id, input, options) {
-                assert.equal(pointId, "toolcall.rewrite");
-                assert.equal(id, "entry");
-                assert.equal(options?.signal, signal);
-                assert.deepEqual(input, {
-                    callId: "call-binding",
-                    context: {
-                        ctxId: "ctx-1",
-                        instance: "demo",
-                        source: "mcp",
-                        workspace: "/repo",
-                    },
-                    direction: "inbound",
-                    kind: "call",
-                    payload: { command: "secret-ref" },
-                    toolName: "bash_run",
-                });
-                return { command: "expanded" };
-            },
-        },
-    );
-    assert.deepEqual(
-        await rewriteBinding(
-            {
-                callId: "call-binding",
-                context: toolCallContext,
-                direction: "inbound",
-                kind: "call",
-                payload: { command: "secret-ref" },
-                signal,
-                toolName: "bash_run",
-            },
-            {
-                async requestInterface() {
-                    throw new Error("not used");
-                },
-            },
-        ),
-        { command: "expanded" },
-    );
-});
-
-test("ToolCall Boundary holds exact Extension generation leases for the whole call", async () => {
-    const events: string[] = [];
-    let generation = "g1";
-    const bindings = new ToolCallExtensionBinding({
-        listDeclarations(pointId: string) {
-            return pointId === "toolcall.rewrite"
-                ? [
-                      {
-                          declaration: { hook: "100-secret", id: "secret" },
-                          id: "secret",
-                      },
-                  ]
-                : [];
-        },
-        async acquireRegistration(pointId: string, id: string) {
-            const acquired = generation;
-            events.push(`acquire:${pointId}:${id}:${acquired}`);
-            return {
-                lease: {
-                    release() {
-                        events.push(`release:${pointId}:${id}:${acquired}`);
+                {
+                    hook: "100-review",
+                    id: "review-early",
+                    binding: async () => {
+                        reviewCalls.push("100");
+                        return { decision: "continue" };
                     },
                 },
-                registration: {
-                    binding: async (input: { payload: unknown }) =>
-                        `${acquired}(${String(input.payload)})`,
-                },
-            } as never;
-        },
-    } as never);
+            ],
+            rewrites: [
+                { hook: "900-rewrite", id: "rewrite-late", binding: rewrite("900") },
+                { hook: "100-rewrite", id: "rewrite-early", binding: rewrite("100") },
+            ],
+        }) as never,
+    );
+    const lease = await binding.acquire(
+        context,
+        new AbortController().signal,
+        "host",
+    );
 
-    const lease = await bindings.acquire(toolCallContext);
-    generation = "g2";
-    const signal = new AbortController().signal;
-    assert.deepEqual(
-        await lease.sequence.rewrite({
-            callId: "call-rewrite",
-            context: toolCallContext,
-            direction: "inbound",
-            kind: "call",
-            payload: "secret",
-            signal,
-            toolName: "bash_run",
-        }),
-        "g1(secret)",
-    );
-    assert.deepEqual(
-        await lease.sequence.rewrite({
-            callId: "call-rewrite",
-            context: toolCallContext,
-            direction: "outbound",
-            kind: "result",
-            payload: "secret",
-            signal,
-            toolName: "bash_run",
-        }),
-        "g1(secret)",
-    );
-    assert.deepEqual(events, ["acquire:toolcall.rewrite:secret:g1"]);
+    await lease.sequence.review({
+        callId: "call-1",
+        direction: "inbound",
+        value,
+    });
+    const rewritten = await lease.sequence.rewrite({
+        callId: "call-1",
+        direction: "inbound",
+        value: { ...value, payload: { trace: [] } },
+    });
+
+    assert.deepEqual(reviewCalls, ["100", "900"]);
+    assert.deepEqual(rewriteCalls, ["100", "900"]);
+    assert.deepEqual(rewritten.payload, { trace: ["100", "900"] });
     lease.release();
-    assert.deepEqual(events, [
-        "acquire:toolcall.rewrite:secret:g1",
-        "release:toolcall.rewrite:secret:g1",
-    ]);
+});
+
+test("ToolCall binding holds exact registration leases for the call", async () => {
+    const releases: string[] = [];
+    const binding = new ToolCallExtensionBinding(
+        host({
+            releases,
+            reviews: [
+                {
+                    hook: "100-review",
+                    id: "review",
+                    binding: async () => ({ decision: "continue" }),
+                },
+            ],
+            rewrites: [
+                {
+                    hook: "100-rewrite",
+                    id: "rewrite",
+                    binding: async (input) => input.value,
+                },
+            ],
+        }) as never,
+    );
+
+    const lease = await binding.acquire(
+        context,
+        new AbortController().signal,
+        "host",
+    );
+    assert.deepEqual(releases, []);
+    lease.release();
+    assert.deepEqual(releases, ["rewrite", "review"]);
+});
+
+test("ToolCall sandbox codecs expose only callId direction value and context signal", async () => {
+    const signal = new AbortController().signal;
+    const review = await toolCallReviewSandboxCodec.invokeBinding(
+        async (input, invocation) => {
+            assert.deepEqual(Object.keys(input).sort(), [
+                "callId",
+                "direction",
+                "value",
+            ]);
+            assert.equal(invocation.signal, signal);
+            assert.deepEqual(input.value, {
+                context: {
+                    instance: "instance-a",
+                    source: "mcp",
+                },
+                kind: "call",
+                payload: { command: "echo ok" },
+                toolName: "bash_run",
+            });
+            return { decision: "continue" };
+        },
+        {
+            callId: "call-1",
+            direction: "inbound",
+            value: {
+                context: { instance: "instance-a", source: "mcp" },
+                kind: "call",
+                payload: { command: "echo ok" },
+                toolName: "bash_run",
+            },
+        },
+        signal,
+        { requestInterface: async () => undefined } as never,
+    );
+    assert.deepEqual(review, { decision: "continue" });
+
+    const rewritten = await toolCallRewriteSandboxCodec.invokeBinding(
+        async (input, invocation) => {
+            assert.deepEqual(Object.keys(input).sort(), [
+                "callId",
+                "direction",
+                "value",
+            ]);
+            assert.equal(invocation.signal, signal);
+            return {
+                context: {
+                    ...input.value.context,
+                    instance: "instance-b",
+                },
+                kind: "error",
+                payload: { rewritten: true },
+                toolName: "file_read",
+            };
+        },
+        {
+            callId: "call-1",
+            direction: "outbound",
+            value: {
+                context: { instance: "instance-a", source: "mcp" },
+                kind: "result",
+                payload: { ok: true },
+                toolName: "bash_run",
+            },
+        },
+        signal,
+        { requestInterface: async () => undefined } as never,
+    );
+    assert.deepEqual(rewritten, {
+        context: { instance: "instance-b", source: "mcp" },
+        kind: "error",
+        payload: { rewritten: true },
+        toolName: "file_read",
+    });
 });
