@@ -83,25 +83,25 @@
         ],
         "toolcall.review": [
             {
-                "hook": "500-toolcall-gate",
+                "hook": "000-toolcall-gate",
                 "id": "toolcall-gate"
             }
         ],
         "toolcall.rewrite": [
             {
-                "hook": "500-todo-access",
+                "hook": "001-todo-access",
                 "id": "todo-access"
             },
             {
-                "hook": "500-todo-invalid",
+                "hook": "002-todo-invalid",
                 "id": "todo-invalid"
             },
             {
-                "hook": "501-tool-advice",
+                "hook": "900-tool-advice",
                 "id": "tool-advice"
             },
             {
-                "hook": "502-comment-delivery",
+                "hook": "999-comment-delivery",
                 "id": "comment-delivery"
             }
         ]

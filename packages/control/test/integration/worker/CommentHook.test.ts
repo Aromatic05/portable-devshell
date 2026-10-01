@@ -281,19 +281,19 @@ function commentReviewRegistrationHost(comment: CommentPort) {
     };
     const declarations = [
         {
-            hook: "500-toolcall-gate",
+            hook: "000-toolcall-gate",
             id: "toolcall-gate",
             pointId: "toolcall.review",
         },
-        { hook: "500-todo-access", id: "todo-access", pointId: "toolcall.rewrite" },
+        { hook: "001-todo-access", id: "todo-access", pointId: "toolcall.rewrite" },
         {
-            hook: "500-todo-invalid",
+            hook: "002-todo-invalid",
             id: "todo-invalid",
             pointId: "toolcall.rewrite",
         },
-        { hook: "501-tool-advice", id: "tool-advice", pointId: "toolcall.rewrite" },
+        { hook: "900-tool-advice", id: "tool-advice", pointId: "toolcall.rewrite" },
         {
-            hook: "502-comment-delivery",
+            hook: "999-comment-delivery",
             id: "comment-delivery",
             pointId: "toolcall.rewrite",
         },

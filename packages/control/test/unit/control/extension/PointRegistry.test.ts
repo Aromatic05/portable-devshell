@@ -72,10 +72,10 @@ test("Control domain point definitions own declaration schema validation", () =>
     assert.deepEqual(
         points.parseDeclaration(
             "toolcall.review",
-            { hook: "500-comment", id: "comment" },
+            { hook: "000-comment", id: "comment" },
             "example",
         ),
-        { hook: "500-comment", id: "comment" },
+        { hook: "000-comment", id: "comment" },
     );
     assert.deepEqual(
         points.parseDeclaration(

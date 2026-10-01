@@ -1,9 +1,34 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { ExtensionContext } from "@portable-devshell/extension";
 
 import { activate, deactivate } from "../../src/index.ts";
+
+test("Comment Extension declares a total ToolCall hook order", () => {
+    const manifest = JSON.parse(
+        readFileSync(
+            new URL("../../src/devshell-extension.json", import.meta.url),
+            "utf8",
+        ),
+    ) as {
+        extensions?: Record<
+            string,
+            Array<{ hook?: string; id?: string }>
+        >;
+    };
+
+    assert.deepEqual(manifest.extensions?.["toolcall.review"], [
+        { hook: "000-toolcall-gate", id: "toolcall-gate" },
+    ]);
+    assert.deepEqual(manifest.extensions?.["toolcall.rewrite"], [
+        { hook: "001-todo-access", id: "todo-access" },
+        { hook: "002-todo-invalid", id: "todo-invalid" },
+        { hook: "900-tool-advice", id: "tool-advice" },
+        { hook: "999-comment-delivery", id: "comment-delivery" },
+    ]);
+});
 
 test("Comment Extension activates its review from instanceRuntime without a Comment host interface", async (t) => {
     const registrations: Array<{ id: string; pointId: string; binding: unknown }> = [];
