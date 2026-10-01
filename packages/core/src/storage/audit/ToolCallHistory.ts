@@ -98,14 +98,10 @@ export class AuditToolCallHistory {
         activeCall.status = "pendingApproval";
     }
 
-    async running(
-        callId: string,
-        decision?: ToolCallApprovalDecision,
-    ): Promise<void> {
+    async running(callId: string): Promise<void> {
         await this.#initialize();
         const activeCall = this.#readActiveCall(callId);
         activeCall.status = "running";
-        activeCall.decision = decision;
     }
 
     async completed(

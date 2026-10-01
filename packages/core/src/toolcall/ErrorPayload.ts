@@ -1,6 +1,6 @@
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { snapshotJson } from "./boundary/Snapshot.js";
+import { snapshotJson } from "./hook/Snapshot.js";
 
 const payloads = new WeakMap<object, JsonValue>();
 

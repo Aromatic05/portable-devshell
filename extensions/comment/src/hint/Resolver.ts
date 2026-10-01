@@ -103,11 +103,16 @@ export function resolveToolCallHints(
     input: ToolCallRewriteInvocation,
 ): ToolDiagnosticHint[] {
     if (input.direction !== "outbound") return [];
-    if (input.kind === "result")
-        return resolveResultHints(input.toolName, input.payload as JsonValue);
-    if (input.kind !== "error") return [];
-    const body = readErrorBody(input.payload as JsonValue);
-    return body === undefined ? [] : resolveErrorHints(input.toolName, body);
+    if (input.value.kind === "result")
+        return resolveResultHints(
+            input.value.toolName,
+            input.value.payload as JsonValue,
+        );
+    if (input.value.kind !== "error") return [];
+    const body = readErrorBody(input.value.payload as JsonValue);
+    return body === undefined
+        ? []
+        : resolveErrorHints(input.value.toolName, body);
 }
 
 function readErrorBody(value: JsonValue): ControlErrorBody | undefined {

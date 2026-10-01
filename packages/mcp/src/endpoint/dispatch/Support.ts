@@ -108,7 +108,7 @@ export function requireMcpEndpointGateway(
 }
 
 export async function callMcpEndpointToolOperation<T extends JsonValue>(options: {
-    afterReview?: (callId: string) => Promise<void> | void;
+    afterReview?: (callId: string, instance: string) => Promise<void> | void;
     context: ToolCallContext;
     gateway?: McpInstanceGateway;
     input: JsonValue;

@@ -61,13 +61,8 @@ export class McpEndpointHandlerWorker {
                 undefined,
                 undefined,
                 "host",
-                async (callId) => {
-                    await waitForMcpEndpointReady(
-                        this.options.worker,
-                        this.options.instanceName,
-                        signal,
-                        { timeoutMs: this.options.readyWaitMs },
-                    );
+                async (callId, instance) => {
+                    await this.#waitForReady(instance, signal);
                     await afterReview?.(callId);
                 },
             );
@@ -92,12 +87,34 @@ export class McpEndpointHandlerWorker {
             signal,
             transformResult,
             undefined,
-            async (callId) => {
-                await waitForMcpGatewayReady(gateway, routed.instance, signal, {
-                    timeoutMs: this.options.readyWaitMs,
-                });
+            async (callId, instance) => {
+                await this.#waitForReady(instance, signal);
                 await afterReview?.(callId);
             },
+        );
+    }
+
+    async #waitForReady(
+        instance: string,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        if (instance === this.options.instanceName) {
+            await waitForMcpEndpointReady(
+                this.options.worker,
+                instance,
+                signal,
+                { timeoutMs: this.options.readyWaitMs },
+            );
+            return;
+        }
+        await waitForMcpGatewayReady(
+            requireMcpEndpointGateway(
+                this.options.gateway,
+                this.options.instanceName,
+            ),
+            instance,
+            signal,
+            { timeoutMs: this.options.readyWaitMs },
         );
     }
 }

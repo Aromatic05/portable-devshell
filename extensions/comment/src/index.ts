@@ -495,17 +495,17 @@ export function createCommentToolCallGate(
     ): Promise<ToolCallReviewResult> => {
         if (
             input.direction !== "inbound" ||
-            input.kind !== "call" ||
-            input.context.source !== "mcp" ||
-            input.context.ctxId === undefined
+            input.value.kind !== "call" ||
+            input.value.context.source !== "mcp" ||
+            input.value.context.ctxId === undefined
         ) {
-            return { decision: "accept" };
+            return { decision: "continue" };
         }
         const decision = await comment.reviewToolCall(
-            input.context.instance,
-            input.context.ctxId,
-            input.toolName,
-            input.callId ?? input.context.requestId,
+            input.value.context.instance,
+            input.value.context.ctxId,
+            input.value.toolName,
+            input.callId,
         );
         return reviewDecision(decision);
     };
@@ -514,76 +514,80 @@ export function createCommentToolCallGate(
 export function createCommentTodoAccess(
     comment: Pick<CommentPort, "beforeTodoToolCall">,
 ): ToolCallRewriteBinding {
-    return async (
-        input: ToolCallRewriteInvocation,
-    ): Promise<ExtensionJsonValue> => {
+    return async (input: ToolCallRewriteInvocation) => {
         if (
             input.direction !== "inbound" ||
-            input.kind !== "call" ||
-            input.context.source !== "mcp" ||
-            input.context.ctxId === undefined
+            input.value.kind !== "call" ||
+            input.value.context.source !== "mcp" ||
+            input.value.context.ctxId === undefined
         ) {
-            return input.payload;
+            return input.value;
         }
         await comment.beforeTodoToolCall(
-            input.context.instance,
-            input.context.ctxId,
-            input.toolName,
+            input.value.context.instance,
+            input.value.context.ctxId,
+            input.value.toolName,
         );
-        return input.payload;
+        return input.value;
     };
 }
 
 export function createCommentDelivery(
     comment: Pick<CommentPort, "consumePending">,
 ): ToolCallRewriteBinding {
-    return async (
-        input: ToolCallRewriteInvocation,
-    ): Promise<ExtensionJsonValue> => {
+    return async (input: ToolCallRewriteInvocation) => {
         if (
             input.direction !== "outbound" ||
-            input.kind !== "result" ||
-            input.context.ctxId === undefined
+            input.value.kind !== "result" ||
+            input.value.context.ctxId === undefined
         ) {
-            return input.payload;
+            return input.value;
         }
         const delivered = await comment.consumePending(
-            input.context.instance,
-            input.context.ctxId,
+            input.value.context.instance,
+            input.value.context.ctxId,
             input.callId,
         );
         return delivered.comment === undefined
-            ? input.payload
-            : appendOutputComments(input.payload, [delivered.comment]);
+            ? input.value
+            : {
+                  ...input.value,
+                  payload: appendOutputComments(input.value.payload, [
+                      delivered.comment,
+                  ]),
+              };
     };
 }
 
 export function createCommentAdvice(): ToolCallRewriteBinding {
-    return (input: ToolCallRewriteInvocation): ExtensionJsonValue => {
+    return (input: ToolCallRewriteInvocation) => {
         const comments = mergeComments([], resolveToolCallHints(input));
         return comments.length === 0
-            ? input.payload
-            : appendOutputComments(input.payload, comments);
+            ? input.value
+            : {
+                  ...input.value,
+                  payload: appendOutputComments(input.value.payload, comments),
+              };
     };
 }
 
 export function createCommentTodoInvalid(
     comment: Pick<CommentPort, "recordTodoInvalid">,
 ): ToolCallRewriteBinding {
-    return (input: ToolCallRewriteInvocation): ExtensionJsonValue => {
+    return (input: ToolCallRewriteInvocation) => {
         if (
             input.direction === "outbound" &&
-            input.kind === "error" &&
-            input.toolName === "todo_write" &&
-            input.context.ctxId !== undefined &&
-            readToolErrorCode(input.payload) === "todo.invalid"
+            input.value.kind === "error" &&
+            input.value.toolName === "todo_write" &&
+            input.value.context.ctxId !== undefined &&
+            readToolErrorCode(input.value.payload) === "todo.invalid"
         ) {
             comment.recordTodoInvalid(
-                input.context.instance,
-                input.context.ctxId,
+                input.value.context.instance,
+                input.value.context.ctxId,
             );
         }
-        return input.payload;
+        return input.value;
     };
 }
 
@@ -857,7 +861,7 @@ function reviewDecision(
 ): ToolCallReviewResult {
     switch (decision.kind) {
         case "allow":
-            return { decision: "accept" };
+            return { decision: "continue" };
         case "push":
             return {
                 decision: "reject",

@@ -11,7 +11,10 @@ import {
 } from "@portable-devshell/shared";
 
 export interface ToolCallSecretRewriteScope {
-    context(input: ToolCallRewriteInvocation): ToolCallRewriteContext;
+    context(
+        input: ToolCallRewriteInvocation,
+        signal: AbortSignal,
+    ): ToolCallRewriteContext;
 }
 
 export class ToolCallSecretRewrite {
@@ -21,18 +24,15 @@ export class ToolCallSecretRewrite {
         this.#config = config;
     }
 
-    scope(
-        extensionId: string | undefined,
-        instanceName: string,
-    ): ToolCallSecretRewriteScope {
-        const environment =
-            extensionId === "secret" && this.#config !== undefined
-                ? this.#environment(instanceName)
-                : undefined;
+    scope(extensionId: string | undefined): ToolCallSecretRewriteScope {
         const used = new Set<string>();
         return Object.freeze({
-            context: (input: ToolCallRewriteInvocation): ToolCallRewriteContext =>
+            context: (
+                input: ToolCallRewriteInvocation,
+                signal: AbortSignal,
+            ): ToolCallRewriteContext =>
                 Object.freeze({
+                    signal,
                     requestInterface: async (
                         operation: string,
                         requestInput?: ExtensionJsonValue,
@@ -45,11 +45,10 @@ export class ToolCallSecretRewrite {
                                 `Unsupported ToolCall rewrite interface operation for Extension ${extensionId ?? "unknown"}: ${operation}.`,
                             );
                         }
-                        if (input.context.instance !== instanceName) {
-                            throw new TypeError(
-                                "ToolCall Secret rewrite invocation instance changed within one Boundary lease.",
-                            );
-                        }
+                        const environment =
+                            this.#config === undefined
+                                ? undefined
+                                : this.#environment(input.value.context.instance);
                         if (environment === undefined) {
                             throw new Error(
                                 "ToolCall Secret rewrite interface is unavailable.",
@@ -59,7 +58,7 @@ export class ToolCallSecretRewrite {
                             const names = readRequestedNames(requestInput);
                             const selected: Record<string, string> = {};
                             for (const name of names) {
-                                if (!payloadContainsReference(input.payload, name)) {
+                                if (!payloadContainsReference(input.value.payload, name)) {
                                     throw new TypeError(
                                         `Secret ${name} is not present in the current ToolCall payload.`,
                                     );

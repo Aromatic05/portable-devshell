@@ -1,18 +1,25 @@
 import {
     errorCodes,
+    errorMessage,
     type ApprovalDecision,
     type ApprovalRequest,
     type JsonValue,
-    type ToolCallApprovalDecision,
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
 import type { ApprovalManager } from "../approval/Manager.js";
-import { readWorkerAbortReason } from "../worker/AbortReason.js";
 import type { InstanceEventInput } from "../instance/EventBuffer.js";
-import type { AuditToolCallHistory } from "../storage/audit/ToolCallHistory.js";
+import { readWorkerAbortReason } from "../worker/AbortReason.js";
 import { getErrorCode } from "../worker/instance/state/Error.js";
-import { toApprovalEventData, toEventData } from "../worker/instance/state/Event.js";
+import {
+    toApprovalEventData,
+    toEventData,
+} from "../worker/instance/state/Event.js";
+import { summarizeToolCallInput } from "./Context.js";
+import type {
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+} from "./hook/Review.js";
 
 interface ToolCallApprovalOptions {
     approvalManager: ApprovalManager;
@@ -20,18 +27,15 @@ interface ToolCallApprovalOptions {
         type: InstanceEventInput["type"],
         data?: JsonValue,
     ): Promise<unknown>;
-    toolCallHistory: AuditToolCallHistory;
 }
 
 export class ToolCallApproval {
     readonly #approvalManager: ApprovalManager;
     readonly #appendEvent: ToolCallApprovalOptions["appendEvent"];
-    readonly #toolCallHistory: AuditToolCallHistory;
 
     constructor(options: ToolCallApprovalOptions) {
         this.#approvalManager = options.approvalManager;
         this.#appendEvent = options.appendEvent;
-        this.#toolCallHistory = options.toolCallHistory;
     }
 
     async listApprovals(): Promise<ApprovalRequest[]> {
@@ -66,351 +70,124 @@ export class ToolCallApproval {
         return await this.#approvalManager.cancel(approvalId, reason);
     }
 
-    async prepare(input: {
-        callId: string;
-        context: ToolCallContext;
-        inputSummary: string;
-        onPendingApproval(): void;
-        recording?: "caller" | "host";
-        required?: boolean;
-        signal?: AbortSignal;
-        startedAt: string;
-        toolName: string;
-    }): Promise<{ approvalId?: string; decision?: ToolCallApprovalDecision }> {
-        const {
-            callId,
+    async review(
+        input: ToolCallReviewInput,
+        signal: AbortSignal,
+        recording: "caller" | "host",
+    ): Promise<ToolCallReviewResult> {
+        if (input.direction !== "inbound" || input.value.kind !== "call")
+            return { decision: "continue" };
+
+        const { instance: _instance, ...context } = input.value.context;
+        const startedAt = new Date().toISOString();
+        const inputSummary = summarizeToolCallInput(input.value.payload);
+        const evaluation = await this.#approvalManager.evaluate({
+            callId: input.callId,
             context,
             inputSummary,
-            onPendingApproval,
-            signal,
-            startedAt,
-            toolName,
-        } = input;
-        const recording = input.recording ?? "host";
-        let evaluation: Awaited<ReturnType<ApprovalManager["evaluate"]>>;
+            recording,
+            toolName: input.value.toolName,
+        });
 
-        try {
-            evaluation = await this.#approvalManager.evaluate({
-                callId,
-                context,
-                inputSummary,
-                recording,
-                required: input.required === true,
-                toolName,
-            });
-        } catch (error) {
-            return await this.#failBeforeInvoke(
-                callId,
-                toolName,
-                context,
-                startedAt,
-                error,
-                recording,
-            );
-        }
-
-        if (evaluation.decision === "allow") {
-            return {};
-        }
-
-        if (evaluation.decision === "deny") {
-            return await this.#denyToolCall(
-                callId,
-                toolName,
-                context,
-                startedAt,
+        if (evaluation.decision === "allow")
+            return { decision: "continue" };
+        if (evaluation.decision === "deny")
+            return rejection(
                 evaluation.error,
-                undefined,
-                recording,
+                errorCodes.coreApprovalDenied,
             );
-        }
 
-        try {
-            onPendingApproval();
-            if (recording === "host") {
-                await this.#toolCallHistory.pendingApproval(
-                    callId,
-                    evaluation.request.approvalId,
-                );
-            }
+        await this.#appendEvent(
+            "approval.requested",
+            toApprovalEventData(evaluation.request),
+        );
+        if (recording === "host") {
             await this.#appendEvent(
-                "approval.requested",
-                toApprovalEventData(evaluation.request),
+                "toolCall.pendingApproval",
+                toEventData({
+                    approvalId: evaluation.request.approvalId,
+                    callId: input.callId,
+                    createdAt: evaluation.request.createdAt,
+                    expiresAt: evaluation.request.expiresAt,
+                    inputSummary,
+                    reason: evaluation.request.reason,
+                    requestId: context.requestId,
+                    ctxId: context.ctxId,
+                    extensionId: context.extensionId,
+                    source: context.source,
+                    startedAt,
+                    status: "pendingApproval",
+                    toolName: input.value.toolName,
+                }),
             );
-            if (recording === "host") {
-                await this.#appendEvent(
-                    "toolCall.pendingApproval",
-                    toEventData({
-                        approvalId: evaluation.request.approvalId,
-                        callId,
-                        createdAt: evaluation.request.createdAt,
-                        expiresAt: evaluation.request.expiresAt,
-                        inputSummary,
-                        reason: evaluation.request.reason,
-                        requestId: context.requestId,
-                        riskLevel: evaluation.request.riskLevel,
-                        ctxId: context.ctxId,
-                        extensionId: context.extensionId,
-                        source: context.source,
-                        startedAt,
-                        status: "pendingApproval",
-                        toolName,
-                    }),
-                );
-            }
-        } catch (error) {
-            try {
-                await this.#approvalManager.cancel(
-                    evaluation.request.approvalId,
-                    "Approval setup failed before the tool call could wait for a decision.",
-                );
-            } catch (cleanupError) {
-                throw new AggregateError(
-                    [error, cleanupError],
-                    `Approval ${evaluation.request.approvalId} setup failed and could not be cancelled.`,
-                );
-            }
-            throw error;
         }
 
         const onAbort = () => {
             void this.#approvalManager
                 .cancel(
                     evaluation.request.approvalId,
-                    readWorkerAbortReason(signal?.reason),
+                    readWorkerAbortReason(signal.reason),
                 )
                 .catch(() => undefined);
         };
-        if (signal?.aborted === true) {
-            await this.#approvalManager.cancel(
-                evaluation.request.approvalId,
-                readWorkerAbortReason(signal.reason),
-            );
-        } else {
-            signal?.addEventListener("abort", onAbort, { once: true });
-        }
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
 
         let resolution: Awaited<typeof evaluation.awaitDecision>;
         try {
             resolution = await evaluation.awaitDecision;
         } finally {
-            signal?.removeEventListener("abort", onAbort);
+            signal.removeEventListener("abort", onAbort);
         }
 
+        const request = await this.#approvalManager.getApproval(
+            evaluation.request.approvalId,
+        );
         if (resolution.status === "approved") {
-            const approvedRequest = await this.#approvalManager.getApproval(
-                evaluation.request.approvalId,
-            );
             await this.#appendEvent(
                 "approval.approved",
-                toApprovalEventData(approvedRequest, resolution.decision),
+                toApprovalEventData(request, resolution.decision),
             );
-            return {
-                approvalId: evaluation.request.approvalId,
-                decision: "approved",
-            };
+            return { decision: "continue" };
         }
-
         if (resolution.status === "denied") {
-            const deniedRequest = await this.#approvalManager.getApproval(
-                evaluation.request.approvalId,
-            );
             await this.#appendEvent(
                 "approval.denied",
-                toApprovalEventData(deniedRequest, resolution.decision),
+                toApprovalEventData(request, resolution.decision),
             );
-            return await this.#denyToolCall(
-                callId,
-                toolName,
-                context,
-                startedAt,
+            return rejection(
                 resolution.error,
-                evaluation.request.approvalId,
-                recording,
+                errorCodes.coreApprovalDenied,
             );
         }
-
         if (resolution.status === "cancelled") {
-            const cancelledRequest = await this.#approvalManager.getApproval(
-                evaluation.request.approvalId,
-            );
             await this.#appendEvent(
                 "approval.cancelled",
-                toApprovalEventData(cancelledRequest),
+                toApprovalEventData(request),
             );
-            return await this.#cancelToolCall(
-                callId,
-                toolName,
-                context,
-                startedAt,
+            return rejection(
                 resolution.error,
-                evaluation.request.approvalId,
-                recording,
+                errorCodes.coreToolCallCancelled,
             );
         }
-
-        const expiredRequest = await this.#approvalManager.getApproval(
-            evaluation.request.approvalId,
-        );
         await this.#appendEvent(
             "approval.expired",
-            toApprovalEventData(expiredRequest),
+            toApprovalEventData(request),
         );
-        return await this.#expireToolCall(
-            callId,
-            toolName,
-            context,
-            startedAt,
+        return rejection(
             resolution.error,
-            evaluation.request.approvalId,
-            recording,
+            errorCodes.coreApprovalExpired,
         );
     }
+}
 
-    async #failBeforeInvoke(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        recording: "caller" | "host",
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreProviderFailed);
-
-        if (recording === "host") {
-            await this.#toolCallHistory.failed(callId, errorCode, completedAt);
-            await this.#appendEvent(
-                "toolCall.failed",
-                toEventData({
-                    callId,
-                    completedAt,
-                    errorCode,
-                    requestId: context.requestId,
-                    ctxId: context.ctxId,
-                    extensionId: context.extensionId,
-                    source: context.source,
-                    startedAt,
-                    status: "failed",
-                    toolName,
-                }),
-            );
-        }
-
-        throw error;
-    }
-
-    async #denyToolCall(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        approvalId: string | undefined,
-        recording: "caller" | "host",
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreApprovalDenied);
-
-        if (recording === "host") {
-            await this.#toolCallHistory.denied(
-                callId,
-                errorCode,
-                completedAt,
-                "denied",
-            );
-            await this.#appendEvent(
-                "toolCall.denied",
-                toEventData({
-                    ...(approvalId === undefined ? {} : { approvalId }),
-                    callId,
-                    completedAt,
-                    errorCode,
-                    requestId: context.requestId,
-                    ctxId: context.ctxId,
-                    extensionId: context.extensionId,
-                    source: context.source,
-                    startedAt,
-                    status: "denied",
-                    toolName,
-                }),
-            );
-        }
-
-        throw error;
-    }
-
-    async #cancelToolCall(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        approvalId: string,
-        recording: "caller" | "host",
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreToolCallCancelled);
-
-        if (recording === "host") {
-            await this.#toolCallHistory.cancelled(
-                callId,
-                errorCode,
-                completedAt,
-            );
-            await this.#appendEvent(
-                "toolCall.cancelled",
-                toEventData({
-                    approvalId,
-                    callId,
-                    completedAt,
-                    errorCode,
-                    requestId: context.requestId,
-                    ctxId: context.ctxId,
-                    extensionId: context.extensionId,
-                    source: context.source,
-                    startedAt,
-                    status: "cancelled",
-                    toolName,
-                }),
-            );
-        }
-
-        throw error;
-    }
-
-    async #expireToolCall(
-        callId: string,
-        toolName: string,
-        context: ToolCallContext,
-        startedAt: string,
-        error: unknown,
-        approvalId: string,
-        recording: "caller" | "host",
-    ): Promise<never> {
-        const completedAt = new Date().toISOString();
-        const errorCode = getErrorCode(error, errorCodes.coreApprovalExpired);
-
-        if (recording === "host") {
-            await this.#toolCallHistory.expired(callId, errorCode, completedAt);
-            await this.#appendEvent(
-                "toolCall.expired",
-                toEventData({
-                    approvalId,
-                    callId,
-                    completedAt,
-                    errorCode,
-                    requestId: context.requestId,
-                    ctxId: context.ctxId,
-                    extensionId: context.extensionId,
-                    source: context.source,
-                    startedAt,
-                    status: "expired",
-                    toolName,
-                }),
-            );
-        }
-
-        throw error;
-    }
+function rejection(
+    error: unknown,
+    fallbackCode: string,
+): ToolCallReviewResult {
+    return {
+        decision: "reject",
+        error: { code: getErrorCode(error, fallbackCode) },
+        reason: errorMessage(error),
+    };
 }

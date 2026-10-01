@@ -34,7 +34,7 @@ export type ToolCallStatus =
     | "cancelled";
 
 export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
-export type ToolCallFailureStage = "postExecution" | "outboundBoundary";
+export type ToolCallFailureStage = "postExecution" | "outboundHook";
 
 export interface ToolCallQuery {
     after?: string;

@@ -1,6 +1,7 @@
 import {
     type ApprovalDecision,
     type Endpoint,
+    type InstanceName,
     type MessageStream,
     type ApprovalRequest,
     createError,
@@ -76,7 +77,15 @@ import type { InstanceEventBuffer } from "../../instance/EventBuffer.js";
 import type { LogStoreInstance } from "../../storage/log/Store.js";
 import type { ResolvedWorkerInstanceConfig } from "./Config.js";
 import { WorkerInstanceTool } from "./tool/Tool.js";
-import type { ToolCallBoundaryProvider } from "../../toolcall/boundary/Sequence.js";
+import type { ToolCallHookProvider } from "../../toolcall/hook/Sequence.js";
+import type {
+    ToolCallTarget,
+    ToolCallTargetResolver,
+} from "../../toolcall/Pipeline.js";
+import type {
+    ToolCallReviewInput,
+    ToolCallReviewResult,
+} from "../../toolcall/hook/Review.js";
 import { WorkerInstanceConnection } from "./lifecycle/Connection.js";
 import { WorkerInstanceLifecycle } from "./lifecycle/Lifecycle.js";
 import { WorkerInstanceArtifact } from "./capability/Artifact.js";
@@ -451,8 +460,24 @@ export class WorkerInstance {
         return await this.#lifecycle.refreshStatus();
     }
 
-    bindToolCallBoundary(boundary: ToolCallBoundaryProvider): void {
-        this.#tool.bindBoundary(boundary);
+    bindToolCallHooks(
+        hooks: ToolCallHookProvider,
+        resolveTarget: ToolCallTargetResolver,
+    ): void {
+        this.#tool.bindHooks(hooks);
+        this.#tool.bindTargetResolver(resolveTarget);
+    }
+
+    toolCallTarget(): ToolCallTarget {
+        return this.#tool.target();
+    }
+
+    async reviewToolCallApproval(
+        input: ToolCallReviewInput,
+        signal: AbortSignal,
+        recording: "caller" | "host",
+    ): Promise<ToolCallReviewResult> {
+        return await this.#tool.reviewApproval(input, signal, recording);
     }
 
     async callTool(
@@ -467,7 +492,10 @@ export class WorkerInstance {
         invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
-        afterReview?: (callId: string) => Promise<void> | void,
+        afterReview?: (
+            callId: string,
+            instance: InstanceName,
+        ) => Promise<void> | void,
     ): Promise<JsonValue> {
         return await this.#tool.call(
             toolName,
@@ -520,7 +548,10 @@ export class WorkerInstance {
         context: ToolCallContext,
         operation: (callId: string, input: JsonValue) => Promise<T>,
         signal?: AbortSignal,
-        afterReview?: (callId: string) => Promise<void> | void,
+        afterReview?: (
+            callId: string,
+            instance: InstanceName,
+        ) => Promise<void> | void,
     ): Promise<T> {
         return await this.#tool.callOperation(
             toolName,

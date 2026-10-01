@@ -4,6 +4,7 @@ import type {
     ToolCallRewriteBinding,
     ToolCallRewriteContext,
     ToolCallRewriteInvocation,
+    ToolCallValue,
 } from "@portable-devshell/extension/toolcall";
 
 import {
@@ -22,26 +23,32 @@ export function createSecretRewrite(): ToolCallRewriteBinding {
     return async (
         input: ToolCallRewriteInvocation,
         context: ToolCallRewriteContext,
-    ): Promise<ExtensionJsonValue> => {
+    ): Promise<ToolCallValue> => {
         if (input.direction === "inbound") {
-            const names = secretNames(input.payload);
-            if (names.length === 0) return input.payload;
+            const names = secretNames(input.value.payload);
+            if (names.length === 0) return input.value;
             const environment = await readSecretEnvironment(context, names);
-            return mapStrings(
-                input.payload,
-                (text) =>
-                    expandSecretReferences(
-                        text,
-                        environment,
-                        input.context.instance,
-                    ),
-            );
+            return {
+                ...input.value,
+                payload: mapStrings(
+                    input.value.payload,
+                    (text) =>
+                        expandSecretReferences(
+                            text,
+                            environment,
+                            input.value.context.instance,
+                        ),
+                ),
+            };
         }
         const environment = await readSecretEnvironment(context);
-        return mapStrings(
-            input.payload,
-            (text) => maskSecretValues(text, environment),
-        );
+        return {
+            ...input.value,
+            payload: mapStrings(
+                input.value.payload,
+                (text) => maskSecretValues(text, environment),
+            ),
+        };
     };
 }
 

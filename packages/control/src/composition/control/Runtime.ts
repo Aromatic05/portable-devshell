@@ -106,10 +106,24 @@ export class ControlRuntime {
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
             new ToolCallSecretRewrite(options.config),
+            async (input, signal, recording) => {
+                const descriptor = this.#instances.get(
+                    input.value.context.instance,
+                );
+                if (descriptor === undefined)
+                    throw new Error(
+                        `Instance ${input.value.context.instance} was not found.`,
+                    );
+                return await descriptor.worker.reviewToolCallApproval(
+                    input,
+                    signal,
+                    recording,
+                );
+            },
         );
-        this.#bindToolCallBoundaries();
+        this.#bindToolCallHooks();
         this.#toolCallInstanceUnsubscribe = this.#instances.onChange(() =>
-            this.#bindToolCallBoundaries(),
+            this.#bindToolCallHooks(),
         );
         this.#mcp = options.mcp;
         this.#mcp.instanceGateway.setExtensionService(
@@ -306,11 +320,18 @@ export class ControlRuntime {
         }
     }
 
-    #bindToolCallBoundaries(): void {
+    #bindToolCallHooks(): void {
         for (const descriptor of this.#instances.list()) {
             if (this.#toolCallBoundWorkers.has(descriptor.worker)) continue;
-            descriptor.worker.bindToolCallBoundary((context) =>
-                this.#toolCallBinding.acquire(context),
+            descriptor.worker.bindToolCallHooks(
+                (context, signal, recording) =>
+                    this.#toolCallBinding.acquire(context, signal, recording),
+                (instance) => {
+                    const target = this.#instances.get(instance);
+                    if (target === undefined)
+                        throw new Error(`Instance ${instance} was not found.`);
+                    return target.worker.toolCallTarget();
+                },
             );
             this.#toolCallBoundWorkers.add(descriptor.worker);
         }

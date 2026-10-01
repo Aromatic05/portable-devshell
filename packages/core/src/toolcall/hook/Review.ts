@@ -12,10 +12,17 @@ export interface ToolCallHookValue {
     toolName: string;
 }
 
+export interface ToolCallReviewValue {
+    readonly context: Readonly<ToolCallHookContext>;
+    readonly kind: ToolCallHookKind;
+    readonly payload: JsonValue;
+    readonly toolName: string;
+}
+
 export interface ToolCallReviewInput {
     readonly callId: string;
     readonly direction: ToolCallHookDirection;
-    readonly value: Readonly<ToolCallHookValue>;
+    readonly value: ToolCallReviewValue;
 }
 
 export interface ToolCallReviewError {
@@ -47,6 +54,6 @@ export async function reviewToolCall(
 
 export function snapshotToolCallValue(
     value: Readonly<ToolCallHookValue>,
-): ToolCallHookValue {
-    return snapshotJson(value as unknown as JsonValue) as unknown as ToolCallHookValue;
+): ToolCallReviewValue {
+    return snapshotJson(value as unknown as JsonValue) as unknown as ToolCallReviewValue;
 }

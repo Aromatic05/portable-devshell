@@ -10,28 +10,31 @@ export interface ToolCallExtensionDeclaration extends ExtensionPointDeclaration 
 }
 
 export type ToolCallDirection = "inbound" | "outbound";
-export type ToolCallPayloadKind = "call" | "error" | "progress" | "result";
-export type ToolCallReviewDecision = "accept" | "approve" | "reject";
+export type ToolCallKind = "call" | "error" | "progress" | "result";
+export type ToolCallReviewDecision = "continue" | "reject";
 export type ToolCallSource = "cli" | "extension" | "mcp" | "tui" | "web";
 
 export interface ToolCallContext {
-    readonly ctxId?: string;
-    readonly instance: string;
-    readonly extensionId?: string;
-    readonly operationId?: string;
-    readonly requestId?: string;
-    readonly source: ToolCallSource;
-    readonly workspace?: string;
+    ctxId?: string;
+    instance: string;
+    extensionId?: string;
+    operationId?: string;
+    requestId?: string;
+    source: ToolCallSource;
+    workspace?: string;
+}
+
+export interface ToolCallValue {
+    context: ToolCallContext;
+    kind: ToolCallKind;
+    payload: ExtensionJsonValue;
+    toolName: string;
 }
 
 export interface ToolCallReviewInvocation {
     readonly callId: string;
-    readonly context: ToolCallContext;
     readonly direction: ToolCallDirection;
-    readonly kind: ToolCallPayloadKind;
-    readonly payload: ExtensionJsonValue;
-    readonly signal: AbortSignal;
-    readonly toolName: string;
+    readonly value: Readonly<ToolCallValue>;
 }
 
 export interface ToolCallReviewError {
@@ -40,17 +43,13 @@ export interface ToolCallReviewError {
 }
 
 export interface ToolCallReviewResult {
-    /**
-     * Admission decision for inbound calls. An outbound review decision does
-     * not change an already-established ToolCall outcome.
-     */
     readonly decision: ToolCallReviewDecision;
     readonly error?: ToolCallReviewError;
     readonly reason?: string;
 }
 
-/** Host interfaces scoped to exactly one toolcall.review invocation. */
 export interface ToolCallReviewContext {
+    readonly signal: AbortSignal;
     requestInterface(
         operation: string,
         input?: ExtensionJsonValue,
@@ -62,8 +61,8 @@ export type ToolCallReviewBinding = (
     context: ToolCallReviewContext,
 ) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
 
-/** Host interfaces scoped to exactly one toolcall.rewrite invocation. */
 export interface ToolCallRewriteContext {
+    readonly signal: AbortSignal;
     requestInterface(
         operation: string,
         input?: ExtensionJsonValue,
@@ -72,18 +71,14 @@ export interface ToolCallRewriteContext {
 
 export interface ToolCallRewriteInvocation {
     readonly callId: string;
-    readonly context: ToolCallContext;
     readonly direction: ToolCallDirection;
-    readonly kind: ToolCallPayloadKind;
-    readonly payload: ExtensionJsonValue;
-    readonly signal: AbortSignal;
-    readonly toolName: string;
+    readonly value: ToolCallValue;
 }
 
 export type ToolCallRewriteBinding = (
     input: ToolCallRewriteInvocation,
     context: ToolCallRewriteContext,
-) => Promise<ExtensionJsonValue> | ExtensionJsonValue;
+) => Promise<ToolCallValue> | ToolCallValue;
 
 export const review = defineExtensionPoint<
     ToolCallExtensionDeclaration,

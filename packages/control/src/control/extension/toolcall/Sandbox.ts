@@ -4,7 +4,7 @@ import {
     rewrite,
     type ToolCallContext,
     type ToolCallDirection,
-    type ToolCallPayloadKind,
+    type ToolCallKind,
     type ToolCallReviewBinding,
     type ToolCallReviewContext,
     type ToolCallReviewInvocation,
@@ -12,6 +12,7 @@ import {
     type ToolCallRewriteBinding,
     type ToolCallRewriteContext,
     type ToolCallRewriteInvocation,
+    type ToolCallValue,
 } from "@portable-devshell/extension/toolcall";
 
 import type {
@@ -41,8 +42,8 @@ export const toolCallReviewSandboxCodec: ExtensionSandboxPointCodec =
             validateToolCallReviewBinding(binding, context);
             return encodeReviewResult(
                 await (binding as ToolCallReviewBinding)(
-                    decodeReviewInvocation(input, signal),
-                    createSandboxReviewContext(context),
+                    decodeReviewInvocation(input),
+                    createSandboxReviewContext(context, signal),
                 ),
             );
         },
@@ -65,11 +66,12 @@ export const toolCallRewriteSandboxCodec: ExtensionSandboxPointCodec =
             context: ExtensionPointSandboxInvocationContext,
         ): Promise<unknown> {
             validateToolCallRewriteBinding(binding, context);
-            const result = await (binding as ToolCallRewriteBinding)(
-                decodeRewriteInvocation(input, signal),
-                createSandboxRewriteContext(context),
+            return encodeToolCallValue(
+                await (binding as ToolCallRewriteBinding)(
+                    decodeRewriteInvocation(input),
+                    createSandboxRewriteContext(context, signal),
+                ),
             );
-            return readJson(result, "rewrite result");
         },
     });
 
@@ -90,7 +92,7 @@ export function createToolCallReviewSandboxBinding(
                 encodeReviewInvocation(input),
                 {
                     interfacePort: createReviewInterfacePort(invocation),
-                    signal: input.signal,
+                    signal: invocation.signal,
                 },
             ),
         );
@@ -105,18 +107,19 @@ export function createToolCallRewriteSandboxBinding(
     return async (
         input: ToolCallRewriteInvocation,
         invocation: ToolCallRewriteContext,
-    ): Promise<ExtensionJsonValue> => {
-        const result = await bridge.invokeBinding(
-            rewrite.id,
-            context.id,
-            encodeRewriteInvocation(input),
-            {
-                interfacePort: createRewriteInterfacePort(invocation),
-                signal: input.signal,
-            },
+    ): Promise<ToolCallValue> =>
+        decodeToolCallValue(
+            (await bridge.invokeBinding(
+                rewrite.id,
+                context.id,
+                encodeRewriteInvocation(input),
+                {
+                    interfacePort: createRewriteInterfacePort(invocation),
+                    signal: invocation.signal,
+                },
+            )) as ExtensionJsonValue | undefined,
+            "ToolCall rewrite result",
         );
-        return readJson(result as ExtensionJsonValue | undefined, "rewrite result");
-    };
 }
 
 export function validateToolCallReviewBinding(
@@ -133,114 +136,114 @@ export function validateToolCallRewriteBinding(
     assertFunctionBinding(binding, context, rewrite.id);
 }
 
-function encodeReviewInvocation(input: ToolCallReviewInvocation): ExtensionJsonValue {
+function encodeReviewInvocation(
+    input: ToolCallReviewInvocation,
+): ExtensionJsonValue {
     return {
         callId: input.callId,
-        context: encodeContext(input.context),
         direction: input.direction,
-        kind: input.kind,
-        payload: input.payload,
-        toolName: input.toolName,
+        value: encodeToolCallValue(input.value),
     };
 }
 
 function decodeReviewInvocation(
     input: ExtensionJsonValue | undefined,
-    signal: AbortSignal,
 ): ToolCallReviewInvocation {
-    const value = readRecord(input, "ToolCall review invocation");
+    const record = readRecord(input, "ToolCall review invocation");
     return Object.freeze({
-        callId: readString(value.callId, "callId"),
-        context: decodeContext(value.context),
-        direction: readDirection(value.direction),
-        kind: readKind(value.kind),
-        payload: readJson(value.payload, "payload"),
-        signal,
-        toolName: readString(value.toolName, "toolName"),
+        callId: readString(record.callId, "callId"),
+        direction: readDirection(record.direction),
+        value: decodeToolCallValue(record.value, "ToolCall review value"),
     });
 }
 
-function encodeRewriteInvocation(input: ToolCallRewriteInvocation): ExtensionJsonValue {
+function encodeRewriteInvocation(
+    input: ToolCallRewriteInvocation,
+): ExtensionJsonValue {
     return {
         callId: input.callId,
-        context: encodeContext(input.context),
         direction: input.direction,
-        kind: input.kind,
-        payload: input.payload,
-        toolName: input.toolName,
+        value: encodeToolCallValue(input.value),
     };
 }
 
 function decodeRewriteInvocation(
     input: ExtensionJsonValue | undefined,
-    signal: AbortSignal,
 ): ToolCallRewriteInvocation {
-    const value = readRecord(input, "ToolCall rewrite invocation");
+    const record = readRecord(input, "ToolCall rewrite invocation");
     return Object.freeze({
-        callId: readString(value.callId, "callId"),
-        context: decodeContext(value.context),
-        direction: readDirection(value.direction),
-        kind: readKind(value.kind),
-        payload: readJson(value.payload, "payload"),
-        signal,
-        toolName: readString(value.toolName, "toolName"),
+        callId: readString(record.callId, "callId"),
+        direction: readDirection(record.direction),
+        value: decodeToolCallValue(record.value, "ToolCall rewrite value"),
     });
 }
 
-function encodeReviewResult(result: ToolCallReviewResult): ExtensionJsonValue {
-    const decoded = decodeReviewResult(result);
+function encodeToolCallValue(value: Readonly<ToolCallValue>): ExtensionJsonValue {
     return {
-        decision: decoded.decision,
-        ...(decoded.error === undefined
+        context: encodeContext(value.context),
+        kind: value.kind,
+        payload: value.payload,
+        toolName: value.toolName,
+    };
+}
+
+function decodeToolCallValue(
+    value: ExtensionJsonValue | undefined,
+    label: string,
+): ToolCallValue {
+    const record = readRecord(value, label);
+    return {
+        context: decodeContext(record.context),
+        kind: readKind(record.kind),
+        payload: readJson(record.payload, `${label}.payload`),
+        toolName: readString(record.toolName, `${label}.toolName`),
+    };
+}
+
+function encodeReviewResult(result: ToolCallReviewResult): ExtensionJsonValue {
+    return {
+        decision: result.decision,
+        ...(result.error === undefined
             ? {}
             : {
                   error: {
-                      code: decoded.error.code,
-                      ...(decoded.error.details === undefined
+                      code: result.error.code,
+                      ...(result.error.details === undefined
                           ? {}
-                          : { details: decoded.error.details }),
+                          : { details: result.error.details }),
                   },
               }),
-        ...(decoded.reason === undefined ? {} : { reason: decoded.reason }),
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
     };
 }
 
 function decodeReviewResult(value: unknown): ToolCallReviewResult {
     const record = readUnknownRecord(value, "ToolCall review result");
     const decision = record.decision;
-    if (decision !== "accept" && decision !== "approve" && decision !== "reject")
+    if (decision !== "continue" && decision !== "reject")
         throw new TypeError("ToolCall review decision is invalid.");
-    const reason = record.reason;
-    if (reason !== undefined && typeof reason !== "string")
-        throw new TypeError("ToolCall review reason must be a string.");
     const errorValue = record.error;
-    let error: ToolCallReviewResult["error"];
-    if (errorValue !== undefined) {
-        const errorRecord = readUnknownRecord(
-            errorValue,
-            "ToolCall review error",
-        );
-        if (typeof errorRecord.code !== "string" || errorRecord.code.length === 0)
-            throw new TypeError(
-                "ToolCall review error code must be a non-empty string.",
-            );
-        error = Object.freeze({
-            code: errorRecord.code,
-            ...(errorRecord.details === undefined
-                ? {}
-                : {
-                      details: readJson(
-                          errorRecord.details as ExtensionJsonValue,
-                          "review error details",
-                      ),
-                  }),
-        });
-    }
-    return Object.freeze({
+    return {
         decision,
-        ...(error === undefined ? {} : { error }),
-        ...(reason === undefined ? {} : { reason }),
-    });
+        ...(errorValue === undefined
+            ? {}
+            : {
+                  error: decodeReviewError(errorValue),
+              }),
+        ...(record.reason === undefined
+            ? {}
+            : { reason: readUnknownString(record.reason, "review reason") }),
+    };
+}
+
+function decodeReviewError(value: unknown) {
+    const record = readUnknownRecord(value, "ToolCall review error");
+    return {
+        code: readUnknownString(record.code, "review error code"),
+        ...(record.details === undefined
+            ? {}
+            : { details: record.details as ExtensionJsonValue }),
+    };
 }
 
 function encodeContext(context: ToolCallContext): ExtensionJsonValue {
@@ -253,45 +256,84 @@ function encodeContext(context: ToolCallContext): ExtensionJsonValue {
         ...(context.operationId === undefined
             ? {}
             : { operationId: context.operationId }),
-        ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
+        ...(context.requestId === undefined
+            ? {}
+            : { requestId: context.requestId }),
         source: context.source,
-        ...(context.workspace === undefined ? {} : { workspace: context.workspace }),
+        ...(context.workspace === undefined
+            ? {}
+            : { workspace: context.workspace }),
     };
 }
 
 function decodeContext(value: ExtensionJsonValue | undefined): ToolCallContext {
     const record = readRecord(value, "ToolCall context");
-    const source = readString(record.source, "context.source");
-    if (!new Set(["cli", "extension", "mcp", "tui", "web"]).has(source))
-        throw new TypeError("ToolCall context.source is invalid.");
-    return Object.freeze({
-        ...(record.ctxId === undefined ? {} : { ctxId: readString(record.ctxId, "context.ctxId") }),
+    return {
+        ...(record.ctxId === undefined
+            ? {}
+            : { ctxId: readString(record.ctxId, "context.ctxId") }),
         instance: readString(record.instance, "context.instance"),
-        ...(record.extensionId === undefined ? {} : { extensionId: readString(record.extensionId, "context.extensionId") }),
-        ...(record.operationId === undefined ? {} : { operationId: readString(record.operationId, "context.operationId") }),
-        ...(record.requestId === undefined ? {} : { requestId: readString(record.requestId, "context.requestId") }),
-        source: source as ToolCallContext["source"],
-        ...(record.workspace === undefined ? {} : { workspace: readString(record.workspace, "context.workspace") }),
-    });
+        ...(record.extensionId === undefined
+            ? {}
+            : {
+                  extensionId: readString(
+                      record.extensionId,
+                      "context.extensionId",
+                  ),
+              }),
+        ...(record.operationId === undefined
+            ? {}
+            : {
+                  operationId: readString(
+                      record.operationId,
+                      "context.operationId",
+                  ),
+              }),
+        ...(record.requestId === undefined
+            ? {}
+            : { requestId: readString(record.requestId, "context.requestId") }),
+        source: readString(record.source, "context.source") as ToolCallContext["source"],
+        ...(record.workspace === undefined
+            ? {}
+            : { workspace: readString(record.workspace, "context.workspace") }),
+    };
 }
 
-function readDirection(value: ExtensionJsonValue | undefined): ToolCallDirection {
+function readDirection(
+    value: ExtensionJsonValue | undefined,
+): ToolCallDirection {
     if (value === "inbound" || value === "outbound") return value;
     throw new TypeError("ToolCall direction is invalid.");
 }
 
-function readKind(value: ExtensionJsonValue | undefined): ToolCallPayloadKind {
-    if (value === "call" || value === "error" || value === "progress" || value === "result")
+function readKind(value: ExtensionJsonValue | undefined): ToolCallKind {
+    if (
+        value === "call" ||
+        value === "error" ||
+        value === "progress" ||
+        value === "result"
+    )
         return value;
-    throw new TypeError("ToolCall payload kind is invalid.");
+    throw new TypeError("ToolCall kind is invalid.");
 }
 
-function readJson(value: ExtensionJsonValue | undefined, field: string): ExtensionJsonValue {
+function readJson(
+    value: ExtensionJsonValue | undefined,
+    field: string,
+): ExtensionJsonValue {
     if (value === undefined) throw new TypeError(`ToolCall ${field} is required.`);
     return value;
 }
 
-function readString(value: ExtensionJsonValue | undefined, field: string): string {
+function readString(
+    value: ExtensionJsonValue | undefined,
+    field: string,
+): string {
+    if (typeof value === "string") return value;
+    throw new TypeError(`ToolCall ${field} must be a string.`);
+}
+
+function readUnknownString(value: unknown, field: string): string {
     if (typeof value === "string") return value;
     throw new TypeError(`ToolCall ${field} must be a string.`);
 }
@@ -305,7 +347,10 @@ function readRecord(
     throw new TypeError(`${label} must be an object.`);
 }
 
-function readUnknownRecord(value: unknown, label: string): Record<string, unknown> {
+function readUnknownRecord(
+    value: unknown,
+    label: string,
+): Record<string, unknown> {
     if (typeof value === "object" && value !== null && !Array.isArray(value))
         return value as Record<string, unknown>;
     throw new TypeError(`${label} must be an object.`);
@@ -313,46 +358,50 @@ function readUnknownRecord(value: unknown, label: string): Record<string, unknow
 
 function createSandboxRewriteContext(
     context: ExtensionPointSandboxInvocationContext,
+    signal: AbortSignal,
 ): ToolCallRewriteContext {
-    return Object.freeze({
+    return {
+        signal,
         requestInterface: async (
             operation: string,
             input?: ExtensionJsonValue,
         ) => await context.requestInterface(operation, input),
-    });
+    };
 }
 
 function createRewriteInterfacePort(
     context: ToolCallRewriteContext,
 ): ExtensionPointSandboxInterfacePort {
-    return Object.freeze({
+    return {
         request: async (
             operation: string,
             input?: ExtensionJsonValue,
         ) => await context.requestInterface(operation, input),
-    });
+    };
 }
 
 function createSandboxReviewContext(
     context: ExtensionPointSandboxInvocationContext,
+    signal: AbortSignal,
 ): ToolCallReviewContext {
-    return Object.freeze({
+    return {
+        signal,
         requestInterface: async (
             operation: string,
             input?: ExtensionJsonValue,
         ) => await context.requestInterface(operation, input),
-    });
+    };
 }
 
 function createReviewInterfacePort(
     context: ToolCallReviewContext,
 ): ExtensionPointSandboxInterfacePort {
-    return Object.freeze({
+    return {
         request: async (
             operation: string,
             input?: ExtensionJsonValue,
         ) => await context.requestInterface(operation, input),
-    });
+    };
 }
 
 function assertDescriptor(

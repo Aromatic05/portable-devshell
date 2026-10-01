@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type {
     JsonValue,
     ToolCallAssociation,
@@ -31,13 +29,13 @@ export interface ToolCallScope {
 }
 
 export function createToolCallScope(
+    callId: string,
     toolName: string,
     input: JsonValue,
     context: ToolCallContext,
     association?: ToolCallAssociation,
 ): ToolCallScope {
-    const callId = randomUUID();
-    const inputSummary = toInputSummary(input);
+    const inputSummary = summarizeToolCallInput(input);
     const startedAt = new Date().toISOString();
 
     return {
@@ -63,7 +61,7 @@ export function createToolCallScope(
     };
 }
 
-function toInputSummary(input: JsonValue): string {
+export function summarizeToolCallInput(input: JsonValue): string {
     const summary = serializeInput(input);
     if (summary.length <= LIVE_INPUT_SUMMARY_MAX_LENGTH) {
         return summary;

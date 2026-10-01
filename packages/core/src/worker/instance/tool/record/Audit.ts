@@ -2,7 +2,6 @@ import {
     errorCodes,
     type CommandResult,
     type JsonValue,
-    type ToolCallApprovalDecision,
     type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallFailureStage,
@@ -36,15 +35,7 @@ interface WorkerInstanceToolAuditOptions {
     toolCallHistory: AuditToolCallHistory;
 }
 
-export type ToolCallApprovalState = {
-    approvalId?: string;
-    decision?: ToolCallApprovalDecision;
-};
-
-export type ToolCallRunningContext =
-    ToolCallScope["eventContext"] & {
-        approvalId?: string;
-    };
+export type ToolCallRunningContext = ToolCallScope["eventContext"];
 
 export class WorkerInstanceToolAudit {
     readonly #appendEvent: WorkerInstanceToolAuditOptions["appendEvent"];
@@ -60,11 +51,13 @@ export class WorkerInstanceToolAudit {
     }
 
     createScope(
+        callId: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
     ): ToolCallScope {
         return createToolCallScope(
+            callId,
             toolName,
             input,
             context,
@@ -72,16 +65,8 @@ export class WorkerInstanceToolAudit {
         );
     }
 
-    runningContext(
-        scope: ToolCallScope,
-        approvalState: ToolCallApprovalState,
-    ): ToolCallRunningContext {
-        return {
-            ...scope.eventContext,
-            ...(approvalState.approvalId === undefined
-                ? {}
-                : { approvalId: approvalState.approvalId }),
-        };
+    runningContext(scope: ToolCallScope): ToolCallRunningContext {
+        return scope.eventContext;
     }
 
     async requested(scope: ToolCallScope): Promise<void> {
@@ -134,19 +119,12 @@ export class WorkerInstanceToolAudit {
     async running(
         scope: ToolCallScope,
         runningContext: ToolCallRunningContext,
-        approvalState: ToolCallApprovalState,
     ): Promise<void> {
-        await this.#toolCallHistory.running(
-            scope.callId,
-            approvalState.decision,
-        );
+        await this.#toolCallHistory.running(scope.callId);
         await this.#appendEvent(
             "toolCall.running",
             toEventData({
                 ...runningContext,
-                ...(approvalState.decision === undefined
-                    ? {}
-                    : { decision: approvalState.decision }),
                 startedAt: scope.startedAt,
                 status: "running",
             }),
@@ -156,7 +134,6 @@ export class WorkerInstanceToolAudit {
     async completed(
         scope: ToolCallScope,
         runningContext: ToolCallRunningContext,
-        approvalState: ToolCallApprovalState,
         result: JsonValue,
         bashResult: WorkerInstanceBashToolResult | undefined,
         appendLogs: () => Promise<void>,
@@ -181,9 +158,6 @@ export class WorkerInstanceToolAudit {
             toEventData({
                 ...runningContext,
                 completedAt,
-                ...(approvalState.decision === undefined
-                    ? {}
-                    : { decision: approvalState.decision }),
                 exitCode: bashResult?.exitCode,
                 startedAt: scope.startedAt,
                 status: "completed",
@@ -198,7 +172,6 @@ export class WorkerInstanceToolAudit {
     async nonRunning(
         scope: ToolCallScope,
         runningContext: ToolCallRunningContext,
-        approvalState: ToolCallApprovalState,
         status: "queueTimeout" | "cancelled",
         errorCode: string,
     ): Promise<void> {
@@ -224,9 +197,6 @@ export class WorkerInstanceToolAudit {
                 ...runningContext,
                 completedAt,
                 errorCode,
-                ...(approvalState.decision === undefined
-                    ? {}
-                    : { decision: approvalState.decision }),
                 startedAt: scope.startedAt,
                 status,
             }),
@@ -236,7 +206,6 @@ export class WorkerInstanceToolAudit {
     async failed(
         scope: ToolCallScope,
         runningContext: ToolCallRunningContext,
-        approvalState: ToolCallApprovalState,
         errorCode: string,
         result: CommandResult | undefined,
         appendLogs: () => Promise<void>,
@@ -274,9 +243,6 @@ export class WorkerInstanceToolAudit {
             toEventData({
                 ...runningContext,
                 completedAt,
-                ...(approvalState.decision === undefined
-                    ? {}
-                    : { decision: approvalState.decision }),
                 errorCode,
                 executionCompleted: failure?.executionCompleted,
                 exitCode: result?.exitCode,

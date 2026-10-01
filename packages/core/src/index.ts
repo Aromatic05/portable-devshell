@@ -1,6 +1,9 @@
-export { ToolCallBoundarySequence } from "./toolcall/boundary/Sequence.js";
-export type { ToolCallBoundaryLease, ToolCallBoundaryProvider } from "./toolcall/boundary/Sequence.js";
-export type { ToolCallBoundaryContext } from "./toolcall/boundary/Review.js";
+export { ToolCallHookSequence } from "./toolcall/hook/Sequence.js";
+export type { ToolCallHookLease, ToolCallHookProvider } from "./toolcall/hook/Sequence.js";
+export type {
+    ToolCallHookContext,
+    ToolCallHookValue,
+} from "./toolcall/hook/Review.js";
 export {
     attachToolCallErrorPayload,
     readToolCallErrorPayload,
@@ -9,11 +12,17 @@ export type {
     ToolCallReview,
     ToolCallReviewInput,
     ToolCallReviewResult,
-} from "./toolcall/boundary/Review.js";
+} from "./toolcall/hook/Review.js";
 export type {
     ToolCallRewrite,
     ToolCallRewriteInput,
-} from "./toolcall/boundary/Rewrite.js";
+} from "./toolcall/hook/Rewrite.js";
+export { ToolCallPipeline } from "./toolcall/Pipeline.js";
+export type {
+    ToolCallDispatchRequest,
+    ToolCallTarget,
+    ToolCallTargetResolver,
+} from "./toolcall/Pipeline.js";
 export { InstancePaths } from "./instance/Paths.js";
 export {
     assertSqliteSchemaVersionSupported,

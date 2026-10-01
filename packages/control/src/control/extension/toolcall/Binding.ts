@@ -1,8 +1,11 @@
 import {
-    ToolCallBoundarySequence,
-    type ToolCallBoundaryContext,
-    type ToolCallBoundaryLease,
+    ToolCallHookSequence,
+    type ToolCallHookContext,
+    type ToolCallHookLease,
+    type ToolCallHookValue,
     type ToolCallReview,
+    type ToolCallReviewInput,
+    type ToolCallReviewResult,
     type ToolCallRewrite,
 } from "@portable-devshell/core";
 import {
@@ -14,12 +17,28 @@ import {
     type ToolCallReviewInvocation,
     type ToolCallRewriteBinding,
     type ToolCallRewriteInvocation,
+    type ToolCallValue,
 } from "@portable-devshell/extension/toolcall";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import type { ExtensionHost } from "../Host.js";
 import { ToolCallSecretRewrite } from "./interface/index.js";
 
+type ToolCallApprovalReview = (
+    input: ToolCallReviewInput,
+    signal: AbortSignal,
+    recording: "caller" | "host",
+) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
+
+interface ReviewEntry {
+    extensionId?: string;
+    hook: string;
+    id: string;
+    review: ToolCallReview;
+}
+
 export class ToolCallExtensionBinding {
+    readonly #approval?: ToolCallApprovalReview;
     readonly #secret: ToolCallSecretRewrite;
     readonly #extensions: Pick<
         ExtensionHost,
@@ -32,24 +51,29 @@ export class ToolCallExtensionBinding {
             "acquireRegistration" | "listDeclarations"
         >,
         secret: ToolCallSecretRewrite = new ToolCallSecretRewrite(),
+        approval?: ToolCallApprovalReview,
     ) {
         this.#secret = secret;
         this.#extensions = extensions;
+        this.#approval = approval;
     }
 
     async acquire(
-        context: ToolCallBoundaryContext,
-    ): Promise<ToolCallBoundaryLease> {
+        _context: ToolCallHookContext,
+        signal: AbortSignal,
+        recording: "caller" | "host",
+    ): Promise<ToolCallHookLease> {
         const releases: Array<() => void> = [];
         try {
-            const reviews = await this.#acquireReviews(releases);
-            const rewrites = await this.#acquireRewrites(releases, context);
-            let released = false;
+            const reviews = await this.#acquireReviews(
+                releases,
+                signal,
+                recording,
+            );
+            const rewrites = await this.#acquireRewrites(releases, signal);
             return {
-                sequence: new ToolCallBoundarySequence({ reviews, rewrites }),
+                sequence: new ToolCallHookSequence({ reviews, rewrites }),
                 release() {
-                    if (released) return;
-                    released = true;
                     for (const release of [...releases].reverse()) release();
                 },
             };
@@ -61,29 +85,58 @@ export class ToolCallExtensionBinding {
 
     async #acquireReviews(
         releases: Array<() => void>,
+        signal: AbortSignal,
+        recording: "caller" | "host",
     ): Promise<readonly ToolCallReview[]> {
-        const bindings: ToolCallReview[] = [];
-        for (const { id } of orderedHooks(
-            this.#extensions.listDeclarations(review.id),
-        )) {
+        const entries: ReviewEntry[] = [];
+        for (const declaration of this.#extensions.listDeclarations(review.id)) {
+            const { id } = declaration;
             const { extensionId, lease, registration } =
                 await this.#extensions.acquireRegistration(review.id, id);
             releases.push(() => lease.release());
             const binding = registration.binding as ToolCallReviewBinding;
-            bindings.push(async (input) => {
-                const invocation = input as ToolCallReviewInvocation;
-                return await binding(
-                    invocation,
-                    unsupportedReviewContext(extensionId),
-                );
+            entries.push({
+                extensionId,
+                hook: (
+                    declaration.declaration as ToolCallExtensionDeclaration
+                ).hook,
+                id,
+                review: async (input) => {
+                    const invocation: ToolCallReviewInvocation = {
+                        callId: input.callId,
+                        direction: input.direction,
+                        value: extensionValue(input.value),
+                    };
+                    return await binding(
+                        invocation,
+                        reviewContext(extensionId, signal),
+                    );
+                },
             });
         }
-        return bindings;
+        if (this.#approval !== undefined) {
+            entries.push({
+                hook: "500-approval",
+                id: "approval",
+                review: async (input) =>
+                    await this.#approval!(input, signal, recording),
+            });
+        }
+        return entries
+            .sort(
+                (left, right) =>
+                    left.hook.localeCompare(right.hook) ||
+                    left.id.localeCompare(right.id) ||
+                    (left.extensionId ?? "").localeCompare(
+                        right.extensionId ?? "",
+                    ),
+            )
+            .map((entry) => entry.review);
     }
 
     async #acquireRewrites(
         releases: Array<() => void>,
-        context: ToolCallBoundaryContext,
+        signal: AbortSignal,
     ): Promise<readonly ToolCallRewrite[]> {
         const bindings: ToolCallRewrite[] = [];
         for (const { id } of orderedHooks(
@@ -93,14 +146,41 @@ export class ToolCallExtensionBinding {
                 await this.#extensions.acquireRegistration(rewrite.id, id);
             releases.push(() => lease.release());
             const binding = registration.binding as ToolCallRewriteBinding;
-            const secret = this.#secret.scope(extensionId, context.instance);
+            const secret = this.#secret.scope(extensionId);
             bindings.push(async (input) => {
-                const invocation = input as ToolCallRewriteInvocation;
-                return await binding(invocation, secret.context(invocation));
+                const invocation: ToolCallRewriteInvocation = {
+                    callId: input.callId,
+                    direction: input.direction,
+                    value: extensionValue(input.value),
+                };
+                return hookValue(
+                    await binding(
+                        invocation,
+                        secret.context(invocation, signal),
+                    ),
+                );
             });
         }
         return bindings;
     }
+}
+
+function extensionValue(value: Readonly<ToolCallHookValue>): ToolCallValue {
+    return {
+        context: { ...value.context },
+        kind: value.kind,
+        payload: value.payload,
+        toolName: value.toolName,
+    };
+}
+
+function hookValue(value: ToolCallValue): ToolCallHookValue {
+    return {
+        context: value.context as ToolCallHookValue["context"],
+        kind: value.kind,
+        payload: value.payload as JsonValue,
+        toolName: value.toolName,
+    };
 }
 
 function orderedHooks(
@@ -117,14 +197,16 @@ function orderedHooks(
     });
 }
 
-function unsupportedReviewContext(
+function reviewContext(
     extensionId: string | undefined,
+    signal: AbortSignal,
 ): ToolCallReviewContext {
-    return Object.freeze({
+    return {
+        signal,
         requestInterface: async (operation: string): Promise<never> => {
             throw new TypeError(
                 `Unsupported ToolCall review interface operation for Extension ${extensionId ?? "unknown"}: ${operation}.`,
             );
         },
-    });
+    };
 }
