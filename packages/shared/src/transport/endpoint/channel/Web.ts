@@ -1,12 +1,11 @@
 import {
-    CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,
-    CONTROL_REMOTE_RPC_SUBPROTOCOL,
-} from "../../protocol/control/ControlProtocol.js";
-import {
     ChannelBase,
     asChannelError,
     type Channel,
-} from "../protocol/Channel.js";
+} from "./Channel.js";
+
+const CONTROL_REMOTE_RPC_SUBPROTOCOL = "devshell-control-rpc.v1";
+const CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX = "devshell-bearer.";
 
 export interface WebSocketClientLike {
     binaryType: string;
@@ -38,7 +37,7 @@ export interface WebSocketClientLike {
     ): void;
 }
 
-export interface WebSocketChannelConnectOptions {
+export interface WebChannelConnectOptions {
     subprotocol?: string;
     token?: string;
     url: string;
@@ -51,7 +50,7 @@ export interface WebSocketChannelConnectOptions {
 const CONNECTING = 0;
 const OPEN = 1;
 
-export class WebSocketChannel implements Channel {
+export class WebChannel implements Channel {
     readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     readonly #socket: WebSocketClientLike;
@@ -61,9 +60,9 @@ export class WebSocketChannel implements Channel {
     #sendTail: Promise<void> = Promise.resolve();
 
     static async connect(
-        options: WebSocketChannelConnectOptions,
+        options: WebChannelConnectOptions,
         signal?: AbortSignal,
-    ): Promise<WebSocketChannel> {
+    ): Promise<WebChannel> {
         if (signal?.aborted === true) throw abortError(signal);
         const protocols = [
             options.subprotocol ?? CONTROL_REMOTE_RPC_SUBPROTOCOL,
@@ -79,8 +78,8 @@ export class WebSocketChannel implements Channel {
             options.url,
             protocols,
         );
-        const channel = new WebSocketChannel(socket);
-        return await new Promise<WebSocketChannel>((resolve, reject) => {
+        const channel = new WebChannel(socket);
+        return await new Promise<WebChannel>((resolve, reject) => {
             let settled = false;
             const cleanup = () => {
                 signal?.removeEventListener("abort", aborted);
@@ -337,13 +336,13 @@ export interface WebSocketServerLike {
     terminate(): void;
 }
 
-export interface WebSocketServerChannelOptions {
+export interface WebServerChannelOptions {
     deadConnectionMs?: number;
     heartbeatIntervalMs?: number;
     now?: () => number;
 }
 
-export class WebSocketServerChannel extends ChannelBase {
+export class WebServerChannel extends ChannelBase {
     readonly #socket: WebSocketServerLike;
     readonly #deadConnectionMs: number;
     readonly #heartbeat: NodeJS.Timeout;
@@ -353,7 +352,7 @@ export class WebSocketServerChannel extends ChannelBase {
 
     constructor(
         socket: WebSocketServerLike,
-        options: WebSocketServerChannelOptions = {},
+        options: WebServerChannelOptions = {},
     ) {
         super();
         this.#socket = socket;

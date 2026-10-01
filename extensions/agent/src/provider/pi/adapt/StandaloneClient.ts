@@ -7,10 +7,9 @@ import {
 
 import {
     CONTROL_PROTOCOL_VERSION,
-    ClientConnection,
-    connectControlClientChannel,
+    Endpoint,
+    connectControlChannel,
     createControlClients,
-    createError,
     type ControlClients,
 } from "@portable-devshell/shared";
 
@@ -233,9 +232,9 @@ async function connectStandaloneControl(
 function createStandaloneControlClients(
     environment?: NodeJS.ProcessEnv,
 ): StandaloneControlSession {
-    const connection = new ClientConnection({
+    const endpoint = new Endpoint({
         connectChannel: async (signal) =>
-            await connectControlClientChannel(
+            await connectControlChannel(
                 {
                     controlUrl: "",
                     ...(environment?.XDG_RUNTIME_DIR === undefined
@@ -244,14 +243,10 @@ function createStandaloneControlClients(
                 },
                 signal,
             ),
-        mapError: toClientError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "cli",
     });
     return {
-        clients: createControlClients(connection, { clientKind: "cli" }),
-        close: () => connection.close(),
+        clients: createControlClients(endpoint, { clientKind: "cli" }),
+        close: () => endpoint.close(),
     };
 }
 
@@ -353,6 +348,3 @@ function isControlUnavailable(error: unknown): boolean {
     return false;
 }
 
-function toClientError(error: unknown): Error {
-    return error instanceof Error ? error : new Error(String(error));
-}

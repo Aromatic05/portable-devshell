@@ -1,4 +1,5 @@
 import {
+    Endpoint,
     createError,
     errorCodes,
     type JsonValue,
@@ -14,7 +15,6 @@ import type {
     WorkerProtocolClient,
     WorkerHandshakeResult,
 } from "../../protocol/Client.js";
-import type { WorkerRpcBridge } from "../../protocol/rpc/Bridge.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../../tool/Catalog.js";
 import type { WorkerTransportConnection } from "../../transport/Transport.js";
@@ -38,7 +38,7 @@ interface WorkerInstanceConnectionOptions {
     catalog: WorkerToolCatalog;
     config: ResolvedWorkerInstanceConfig;
     protocolClient: WorkerProtocolClient;
-    rpcBridge: WorkerRpcBridge;
+    endpoint: Endpoint;
     snapshot(): InstanceSnapshot;
     transportConnection: WorkerTransportConnection;
 }
@@ -49,12 +49,12 @@ export class WorkerInstanceConnection {
     readonly #catalog: WorkerToolCatalog;
     readonly #config: ResolvedWorkerInstanceConfig;
     readonly #protocolClient: WorkerProtocolClient;
-    readonly #rpcBridge: WorkerRpcBridge;
+    readonly #endpoint: Endpoint;
     readonly #snapshot: WorkerInstanceConnectionOptions["snapshot"];
     readonly #transportConnection: WorkerTransportConnection;
     #closed = false;
     #handshake?: WorkerHandshakeResult;
-    #intentionalRpcCloseDepth = 0;
+    #intentionalTransportCloseDepth = 0;
     #reconnectPromise?: Promise<InstanceSnapshot>;
     #reverseStatus?: ReverseInstanceStatus;
 
@@ -64,7 +64,7 @@ export class WorkerInstanceConnection {
         this.#catalog = options.catalog;
         this.#config = options.config;
         this.#protocolClient = options.protocolClient;
-        this.#rpcBridge = options.rpcBridge;
+        this.#endpoint = options.endpoint;
         this.#snapshot = options.snapshot;
         this.#transportConnection = options.transportConnection;
         if (this.#config.managementMode === "selfManaged") {
@@ -74,13 +74,15 @@ export class WorkerInstanceConnection {
                 managementMode: "selfManaged",
             };
         }
-        this.#rpcBridge.onDisconnect((error) => {
-            void this.#handleRpcDisconnect(error).catch(() => undefined);
+        this.#endpoint.onTransportClose((error) => {
+            void this.#handleTransportDisconnect(
+                error ?? new Error("Worker transport closed."),
+            ).catch(() => undefined);
         });
     }
 
     get connected(): boolean {
-        return this.#rpcBridge.connected;
+        return this.#endpoint.connected;
     }
 
     get handshake(): WorkerHandshakeResult | undefined {
@@ -99,14 +101,14 @@ export class WorkerInstanceConnection {
 
     async connectStarted(): Promise<InstanceSnapshot> {
         try {
-            await this.#rpcBridge.connect();
+            await this.#endpoint.reconnect();
             await this.#protocolClient.ping();
             this.#handshake = await this.#protocolClient.handshake(
                 this.#config.handshake,
             );
             const tools = await this.#protocolClient.listTools();
             const refreshedTools = this.#catalog.refresh(tools.tools);
-            await this.#appendEvent("worker.rpcConnected");
+            await this.#appendEvent("worker.transportConnected");
             await this.#appendEvent(
                 "worker.schemaRefreshed",
                 toEventData({ toolCount: refreshedTools.length }),
@@ -129,7 +131,7 @@ export class WorkerInstanceConnection {
                 `Worker handshake failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
-            this.closeBridge();
+            this.closeTransport();
             this.#handshake = undefined;
             await this.#applyStateUpdate({
                 connectionState: "disconnected",
@@ -154,7 +156,7 @@ export class WorkerInstanceConnection {
 
     async close(): Promise<void> {
         this.#closed = true;
-        this.closeBridge();
+        this.closeTransport();
         this.#handshake = undefined;
         if (this.#config.managementMode === "selfManaged") {
             this.markReverseOffline();
@@ -213,8 +215,7 @@ export class WorkerInstanceConnection {
 
         const connectedAt = input.connectedAt ?? new Date().toISOString();
         this.#transportConnection.attach(channel);
-        const rpcChannel = await this.#transportConnection.openService("worker.rpc");
-        await this.#rpcBridge.replaceChannel(rpcChannel);
+        await this.#endpoint.reconnect();
         this.#reverseStatus = {
             availability: "online",
             connectedAt,
@@ -241,10 +242,10 @@ export class WorkerInstanceConnection {
         return await this.refreshRunningStatus(undefined, "connecting");
     }
 
-    async reconnectRpc(): Promise<InstanceSnapshot> {
+    async reconnectTransport(): Promise<InstanceSnapshot> {
         if (
             this.#config.managementMode === "selfManaged" &&
-            !this.#rpcBridge.connected
+            !this.#endpoint.connected
         ) {
             throw createError({
                 code: errorCodes.reverseTransportUnavailable,
@@ -276,7 +277,7 @@ export class WorkerInstanceConnection {
               ? "connecting"
               : "reconnecting",
     ): Promise<InstanceSnapshot> {
-        const shouldEmitRpcLifecycleEvents = connectionState !== "connected";
+        const shouldEmitTransportLifecycleEvents = connectionState !== "connected";
 
         await this.#applyStateUpdate({
             connectionState,
@@ -287,7 +288,7 @@ export class WorkerInstanceConnection {
         });
 
         try {
-            await this.#rpcBridge.connect();
+            if (!this.#endpoint.connected) await this.#endpoint.reconnect();
             await this.#protocolClient.ping();
             this.#handshake = await this.#protocolClient.handshake(
                 this.#config.handshake,
@@ -304,8 +305,8 @@ export class WorkerInstanceConnection {
                 };
             }
 
-            if (shouldEmitRpcLifecycleEvents) {
-                await this.#appendEvent("worker.rpcConnected");
+            if (shouldEmitTransportLifecycleEvents) {
+                await this.#appendEvent("worker.transportConnected");
                 await this.#appendEvent(
                     "worker.schemaRefreshed",
                     toEventData({ toolCount: refreshedTools.length }),
@@ -326,7 +327,7 @@ export class WorkerInstanceConnection {
                 `Worker handshake failed for instance ${this.#config.name}.`,
                 this.#config.name,
             );
-            this.closeBridge();
+            this.closeTransport();
             this.#handshake = undefined;
             if (this.#config.managementMode === "selfManaged") {
                 this.markReverseOffline(wrappedError);
@@ -362,7 +363,7 @@ export class WorkerInstanceConnection {
 
     async stopSelfManaged(): Promise<InstanceSnapshot> {
         this.#requireSelfManaged();
-        if (!this.#rpcBridge.connected) {
+        if (!this.#endpoint.connected) {
             throw createError({
                 code: errorCodes.reverseSelfManagedOffline,
                 details: { instance: this.#config.name },
@@ -392,7 +393,7 @@ export class WorkerInstanceConnection {
             });
             throw error;
         } finally {
-            this.closeBridge();
+            this.closeTransport();
             this.#handshake = undefined;
             this.markReverseOffline();
         }
@@ -420,7 +421,7 @@ export class WorkerInstanceConnection {
                 : {
                       lastErrorCode: getErrorCode(
                           error,
-                          errorCodes.coreWorkerRpcDisconnected,
+                          errorCodes.coreWorkerTransportDisconnected,
                       ),
                       lastErrorMessage: readErrorMessage(error),
                   }),
@@ -442,19 +443,19 @@ export class WorkerInstanceConnection {
         });
     }
 
-    async #handleRpcDisconnect(error: unknown): Promise<void> {
-        if (this.#intentionalRpcCloseDepth > 0) {
+    async #handleTransportDisconnect(error: unknown): Promise<void> {
+        if (this.#intentionalTransportCloseDepth > 0) {
             return;
         }
         if (this.#config.managementMode === "selfManaged") {
             this.markReverseOffline(error);
             this.#handshake = undefined;
             await this.#appendEvent(
-                "worker.rpcDisconnected",
+                "worker.transportDisconnected",
                 toEventData({
                     errorCode: getErrorCode(
                         error,
-                        errorCodes.coreWorkerRpcDisconnected,
+                        errorCodes.coreWorkerTransportDisconnected,
                     ),
                 }),
             );
@@ -463,7 +464,7 @@ export class WorkerInstanceConnection {
                 toEventData({
                     errorCode: getErrorCode(
                         error,
-                        errorCodes.coreWorkerRpcDisconnected,
+                        errorCodes.coreWorkerTransportDisconnected,
                     ),
                 }),
             );
@@ -472,7 +473,7 @@ export class WorkerInstanceConnection {
                 daemonState: "stopped",
                 lastErrorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerRpcDisconnected,
+                    errorCodes.coreWorkerTransportDisconnected,
                 ),
                 lastErrorMessage: readErrorMessage(error),
                 pid: undefined,
@@ -482,11 +483,11 @@ export class WorkerInstanceConnection {
 
         const daemonState = this.#snapshot().daemonState;
         await this.#appendEvent(
-            "worker.rpcDisconnected",
+            "worker.transportDisconnected",
             toEventData({
                 errorCode: getErrorCode(
                     error,
-                    errorCodes.coreWorkerRpcDisconnected,
+                    errorCodes.coreWorkerTransportDisconnected,
                 ),
             }),
         );
@@ -498,7 +499,7 @@ export class WorkerInstanceConnection {
             daemonState,
             lastErrorCode: getErrorCode(
                 error,
-                errorCodes.coreWorkerRpcDisconnected,
+                errorCodes.coreWorkerTransportDisconnected,
             ),
             lastErrorMessage: readErrorMessage(error),
         });
@@ -509,7 +510,7 @@ export class WorkerInstanceConnection {
 
         while (!this.#closed && this.#snapshot().daemonState === "running") {
             try {
-                await this.reconnectRpc();
+                await this.reconnectTransport();
                 return;
             } catch {
                 if (this.#closed || this.#snapshot().daemonState !== "running")
@@ -519,14 +520,14 @@ export class WorkerInstanceConnection {
         }
     }
 
-    closeBridge(): void {
-        this.#intentionalRpcCloseDepth += 1;
+    closeTransport(): void {
+        this.#intentionalTransportCloseDepth += 1;
 
         try {
-            this.#rpcBridge.close();
+            this.#endpoint.disconnect();
             this.#transportConnection.close();
         } finally {
-            this.#intentionalRpcCloseDepth -= 1;
+            this.#intentionalTransportCloseDepth -= 1;
         }
     }
 }

@@ -3,8 +3,8 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type PrefixRouteContext,
-    type PrefixRouteModuleDefinition,
+    type ControlPortContext,
+    type ControlPortDefinition,
     type WebApplicationDescriptor,
     type WebPageDescriptor,
     type WebPageSnapshot,
@@ -28,7 +28,7 @@ export interface WebPagePort {
 export function createWebApplicationRouteModule(
     port: WebApplicationCatalogPort,
     pages?: WebPagePort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("web", {
         applications: (_request, context) => {
             requireWeb(context);
@@ -73,7 +73,7 @@ function readPageRequest(payload: JsonValue | undefined): {
     throw invalid("web.page kind must be read or action.");
 }
 
-function requireWeb(context: PrefixRouteContext): void {
+function requireWeb(context: ControlPortContext): void {
     if (context.peer === "web") return;
     throw createError({
         code: errorCodes.controlWebAccessDenied,

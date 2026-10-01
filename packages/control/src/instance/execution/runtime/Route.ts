@@ -3,7 +3,8 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     ActiveTodoSummary,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
+    ControlStreamMessage,
 } from "@portable-devshell/shared";
 import { routeModule } from "../../../server/Route.js";
 import { RuntimeInteractiveSession } from "./InteractiveSession.js";
@@ -34,7 +35,7 @@ export function createRuntimeRouteModule(
     instance: RuntimeRouteInstancePort,
     ownership: RuntimeRouteOwnershipPort,
     subscriptions: RuntimeSubscriptionManager,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("runtime", {
         snapshot: () => {
             const snapshot = withTodoSummaries(
@@ -56,38 +57,6 @@ export function createRuntimeRouteModule(
                 snapshot,
             } as unknown as JsonValue;
         },
-        start: async (request, context) => {
-            if (!instance.enabled) {
-                throw createError({
-                    code: errorCodes.instanceConflict,
-                    details: { instance: instance.name, operation: "start" },
-                    message: `Instance ${instance.name} is disabled.`,
-                    retryable: false,
-                });
-            }
-            const relay = new RuntimeInteractiveSession();
-            const stream = await context.openStream(
-                { accepted: true },
-                {
-                    onClose: () => relay.closeInput(),
-                    onEvent: (event) => relay.accept(event),
-                },
-            );
-            relay.bindOutput(
-                async (chunk) => await stream.emit("output", { chunk }),
-            );
-            try {
-                const result = withTodoSummaries(
-                    await instance.worker.startInteractive(relay),
-                    instance.todoSummaries(),
-                );
-                ownership.markOwned(instance.name);
-                await stream.complete(result as unknown as JsonValue);
-            } finally {
-                relay.closeInput();
-            }
-            return undefined;
-        },
         stop: async () => {
             const result = withTodoSummaries(
                 await instance.worker.stop(),
@@ -106,15 +75,46 @@ export function createRuntimeRouteModule(
                 query.fromSeq === undefined,
             ) as unknown as JsonValue;
         },
-        subscribe: async (request, context) => {
+    }, {
+        start: async (stream) => {
+            if (!instance.enabled)
+                throw createError({
+                    code: errorCodes.instanceConflict,
+                    details: { instance: instance.name, operation: "start" },
+                    message: `Instance ${instance.name} is disabled.`,
+                    retryable: false,
+                });
+            const relay = new RuntimeInteractiveSession();
+            const offData = stream.onData((message) =>
+                relay.accept(message as ControlStreamMessage),
+            );
+            const offClose = stream.onClose(() => relay.closeInput());
+            const offCancel = stream.onCancel(() => relay.closeInput());
+            relay.bindOutput((chunk) =>
+                stream.send({ name: "output", payload: { chunk } }),
+            );
+            try {
+                const result = withTodoSummaries(
+                    await instance.worker.startInteractive(relay),
+                    instance.todoSummaries(),
+                );
+                ownership.markOwned(instance.name);
+                await stream.close(result as unknown as JsonValue);
+            } finally {
+                offData();
+                offClose();
+                offCancel();
+                relay.closeInput();
+            }
+        },
+        subscribe: async (stream, request, context) =>
             await subscriptions.subscribe(
+                stream,
                 context,
                 instance.name,
                 instance.worker,
                 readRuntimeSubscriptionFromSeq(request.payload),
-            );
-            return undefined;
-        },
+            ),
     });
 }
 

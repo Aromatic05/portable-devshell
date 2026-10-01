@@ -1,6 +1,6 @@
 import {
     CONTROL_WEB_RPC_SUBPROTOCOL,
-    WebSocketChannel,
+    WebChannel,
     type Channel,
     type WebSocketClientLike,
 } from "@portable-devshell/shared/browser";
@@ -12,13 +12,13 @@ export type BrowserWebSocketFactory = (
     protocols: string[],
 ) => WebSocket;
 
-export async function connectBrowserWebSocketChannel(
+export async function connectBrowserWebChannel(
     signal?: AbortSignal,
     url = rpcUrl(),
     factory: BrowserWebSocketFactory = (value, protocols) =>
         new WebSocket(value, protocols),
 ): Promise<Channel> {
-    return await WebSocketChannel.connect(
+    return await WebChannel.connect(
         {
             subprotocol: CONTROL_WEB_RPC_SUBPROTOCOL,
             url,

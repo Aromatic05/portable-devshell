@@ -21,9 +21,7 @@ import {
     toControlErrorBody,
     type ControlErrorBody,
 } from "@portable-devshell/shared";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
-
-export const EXTENSION_SANDBOX_MAX_MESSAGE_BYTES = TRANSPORT_MAX_FRAME_SIZE;
+export const EXTENSION_SANDBOX_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 const EXTENSION_SANDBOX_MAX_MESSAGE_DEPTH = 128;
 const EXTENSION_SANDBOX_MAX_MESSAGE_NODES = 100_000;
 

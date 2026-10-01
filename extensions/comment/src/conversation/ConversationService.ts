@@ -3,7 +3,7 @@ import type {
     ConversationEntry,
     ConversationListInput,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -114,7 +114,7 @@ function retiredConversationService(instance: string): Error {
 
 export function createConversationRouteModule(
     service: Pick<ConversationService, "list">,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return {
         name: "conversation",
         operations: [

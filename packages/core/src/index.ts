@@ -52,7 +52,6 @@ export type {
     WorkerArtifactReceiveWriteResult,
 } from "./worker/protocol/Client.js";
 export { WORKER_PROTOCOL_RANGE } from "./worker/protocol/Client.js";
-export type { WorkerRpcConnector } from "./worker/protocol/rpc/Bridge.js";
 export { WorkerTransportFactory } from "./worker/transport/Factory.js";
 export type { WorkerTransportFactoryOptions } from "./worker/transport/Factory.js";
 export { WorkerTransportServiceClient } from "./worker/transport/service/Client.js";
@@ -70,4 +69,3 @@ export type {
     WorkerTerminalOutputFrame,
 } from "./worker/protocol/Terminal.js";
 
-export { WorkerRpcError } from "./worker/protocol/rpc/Message.js";

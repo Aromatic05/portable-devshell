@@ -1,6 +1,4 @@
-import type { Channel } from "../protocol/Channel.js";
-import type { ErrorCode } from "../../protocol/Error.js";
-import { createError } from "../../protocol/Error.js";
+import type { Channel } from "../endpoint/channel/Channel.js";
 import {
     FRAME_MAX_DATA_SIZE,
     FrameBuffer,
@@ -21,7 +19,6 @@ const UINT32_MAX = 0xffff_ffff;
 
 export interface FrameProtocolOptions {
     role: "opener" | "acceptor";
-    maxDataSize?: number;
     maxStreams?: number;
     receiveWindow?: number;
 }
@@ -53,7 +50,6 @@ export class FrameProtocol implements FrameStreamHost {
     readonly #channel: Channel;
     readonly #frames = new FrameBuffer();
     readonly #role: FrameProtocolOptions["role"];
-    readonly #maxDataSize: number;
     readonly #maxStreams: number;
     readonly #defaultReceiveWindow: number;
     readonly #streams = new Map<number, FrameStreamState>();
@@ -70,21 +66,11 @@ export class FrameProtocol implements FrameStreamHost {
     constructor(channel: Channel, options: FrameProtocolOptions) {
         this.#channel = channel;
         this.#role = options.role;
-        this.#maxDataSize = options.maxDataSize ?? FRAME_MAX_DATA_SIZE;
         this.#maxStreams = options.maxStreams ?? DEFAULT_MAX_ACTIVE_STREAMS;
         this.#defaultReceiveWindow =
             options.receiveWindow ?? DEFAULT_RECEIVE_WINDOW;
         assertPositiveU32(this.#defaultReceiveWindow, "receiveWindow");
         assertPositiveU32(this.#maxStreams, "maxStreams");
-        if (
-            !Number.isInteger(this.#maxDataSize) ||
-            this.#maxDataSize <= 0 ||
-            this.#maxDataSize > FRAME_MAX_DATA_SIZE
-        ) {
-            throw new Error(
-                `maxDataSize must be between 1 and ${FRAME_MAX_DATA_SIZE}.`,
-            );
-        }
 
         channel.onData((data) => this.#acceptData(data));
         channel.onClose((error) =>
@@ -184,7 +170,7 @@ export class FrameProtocol implements FrameStreamHost {
             await stream.waitForSendCredit();
             this.#assertCurrent(stream);
             const byteLength = stream.takeSendCredit(
-                Math.min(this.#maxDataSize, data.byteLength - offset),
+                Math.min(FRAME_MAX_DATA_SIZE, data.byteLength - offset),
             );
             if (byteLength <= 0) continue;
             const chunk = data.slice(offset, offset + byteLength);
@@ -571,9 +557,8 @@ function assertPositiveU32(value: number, label: string): void {
 }
 
 function protocolError(message: string): Error {
-    return createError({
-        code: "protocol.invalidFrame" as ErrorCode,
-        message,
+    return Object.assign(new Error(message), {
+        code: "protocol.invalidFrame",
         retryable: false,
     });
 }
@@ -584,17 +569,14 @@ function normalizeError(error: unknown): Error {
 
 export {
     FRAME_MAX_DATA_SIZE,
-    FRAME_MAX_OPEN_METADATA_SIZE,
-    FRAME_MAX_OPEN_SERVICE_SIZE,
+    FRAME_MAX_ERROR_SIZE,
+    FRAME_MAX_METADATA_SIZE,
+    FRAME_MAX_SERVICE_SIZE,
     FRAME_PROTOCOL_RANGE,
     FRAME_PROTOCOL_VERSION,
     FrameBuffer,
-    PacketBuffer,
-    TRANSPORT_MAX_FRAME_SIZE,
     decodeFrame,
-    decodePacket,
     encodeFrame,
-    encodePacket,
     frameResetCodes,
 } from "./Codec.js";
 export type { Frame, FrameResetCode } from "./Codec.js";

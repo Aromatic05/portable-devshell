@@ -1,4 +1,4 @@
-import { ChannelBase, asChannelError } from "../protocol/Channel.js";
+import { ChannelBase, asChannelError } from "../endpoint/channel/Channel.js";
 import { frameResetCodes } from "./Codec.js";
 
 export interface FrameStream {

@@ -1,16 +1,10 @@
 import type { ControlErrorBody } from "../../protocol/Error.js";
-import { createError } from "../../protocol/Error.js";
 import type { InstanceEvent } from "../../protocol/instance/activity/Event.js";
 import type { JsonValue } from "../../protocol/JsonValue.js";
-import {
-    asInstanceName,
-    type InstanceName,
-} from "../../protocol/instance/Identity.js";
-import type {
-    ClientEvent,
-    ClientStream,
-    OpenedClientStream,
-} from "../../transport/ClientConnection.js";
+import type { InstanceName } from "../../protocol/instance/Identity.js";
+import type { ControlStreamMessage } from "../../protocol/control/Port.js";
+import type { MessageStream, StreamError } from "../../transport/packet/Stream.js";
+import { asInstanceName } from "../../protocol/instance/Identity.js";
 
 export type InstanceStreamMessage =
     | { event: InstanceEvent; kind: "event" }
@@ -30,91 +24,85 @@ export interface InstanceEventStreamPort {
 }
 
 export class InstanceEventStream implements InstanceEventStreamPort {
-    readonly #initial: InstanceEvent[];
-    readonly #stream: ClientStream;
+    readonly #instance: InstanceName;
+    readonly #stream: MessageStream;
+    readonly #queue: ControlStreamMessage[] = [];
+    readonly #waiters: Array<(message: ControlStreamMessage | undefined) => void> = [];
+    #error?: StreamError;
     #closed = false;
 
-    constructor(instance: InstanceName, opened: OpenedClientStream) {
-        this.#stream = opened.stream;
-        this.#initial = readInitialEvents(
-            instance,
-            opened.acknowledgement.payload,
-        );
+    constructor(instance: InstanceName, stream: MessageStream) {
+        this.#instance = instance;
+        this.#stream = stream;
+        stream.onData((message) => this.#push(message as ControlStreamMessage));
+        stream.onClose(() => this.#finish());
+        stream.onCancel((error) => {
+            this.#error = error;
+            this.#finish();
+        });
     }
 
     async next(): Promise<InstanceStreamMessage> {
-        const initial = this.#initial.shift();
-        if (initial !== undefined) {
-            return { event: initial, kind: "event" };
-        }
-        if (this.#closed) {
-            return { kind: "closed" };
-        }
-        let event: ClientEvent;
-        try {
-            event = await this.#stream.nextEvent();
-        } catch (error) {
-            this.#closed = true;
+        const message = await this.#nextMessage();
+        if (message === undefined)
             return {
-                error:
-                    error instanceof Error ? error : new Error(String(error)),
+                ...(this.#error === undefined
+                    ? {}
+                    : { error: Object.assign(new Error(this.#error.message), this.#error) }),
                 kind: "closed",
             };
+        if (message.name === "seed") {
+            const value = record(message.payload);
+            const events = Array.isArray(value?.events) ? value.events : [];
+            for (const event of events.reverse())
+                this.#queue.unshift({ name: "event", payload: event });
+            return await this.next();
         }
-        if (event.name === "stream.gap") {
-            const value = record(event.payload);
+        if (message.name === "gap") {
+            const value = record(message.payload);
             return {
-                ...(event.payload === undefined
+                ...(message.payload === undefined ? {} : { details: message.payload }),
+                ...(readNumber(value, "requestedFromSeq") === undefined
                     ? {}
-                    : { details: event.payload }),
-                ...(event.error === undefined ? {} : { error: event.error }),
-                ...(readNumber(value, "requestedFromSeq", "fromSeq") ===
-                undefined
-                    ? {}
-                    : {
-                          fromSeq: readNumber(
-                              value,
-                              "requestedFromSeq",
-                              "fromSeq",
-                          ),
-                      }),
+                    : { fromSeq: readNumber(value, "requestedFromSeq") }),
                 kind: "gap",
-                ...(readNumber(value, "latestSeq", "lastSeq") === undefined
+                ...(readNumber(value, "latestSeq") === undefined
                     ? {}
-                    : {
-                          lastSeq: readNumber(value, "latestSeq", "lastSeq"),
-                      }),
-                ...(readNumber(value, "oldestAvailableSeq", "nextSeq") ===
-                undefined
+                    : { lastSeq: readNumber(value, "latestSeq") }),
+                ...(readNumber(value, "oldestAvailableSeq") === undefined
                     ? {}
-                    : {
-                          nextSeq: readNumber(
-                              value,
-                              "oldestAvailableSeq",
-                              "nextSeq",
-                          ),
-                      }),
+                    : { nextSeq: readNumber(value, "oldestAvailableSeq") }),
             };
         }
-        if (
-            event.name === "stream.completed" ||
-            event.name === "stream.cancelled"
-        ) {
-            this.#closed = true;
-            return {
-                ...(event.error === undefined
-                    ? {}
-                    : { error: createError(event.error) }),
-                kind: "closed",
-            };
-        }
-        return { event: readInstanceEvent(event.payload), kind: "event" };
+        const event = readInstanceEvent(message.payload);
+        if (event.instanceName !== this.#instance)
+            throw new Error("Subscription contains another instance.");
+        return { event, kind: "event" };
     }
 
     close(): void {
         if (this.#closed) return;
         this.#closed = true;
-        this.#stream.close();
+        void this.#stream.close();
+        this.#finish();
+    }
+
+    #push(message: ControlStreamMessage): void {
+        const waiter = this.#waiters.shift();
+        if (waiter !== undefined) waiter(message);
+        else this.#queue.push(message);
+    }
+
+    #finish(): void {
+        this.#closed = true;
+        for (const waiter of this.#waiters.splice(0)) waiter(undefined);
+    }
+
+    async #nextMessage(): Promise<ControlStreamMessage | undefined> {
+        const message = this.#queue.shift();
+        if (message !== undefined) return message;
+        if (this.#closed) return undefined;
+        return await new Promise((resolve) => this.#waiters.push(resolve));
     }
 }
 
@@ -126,9 +114,8 @@ export function readInstanceEvent(value: JsonValue | undefined): InstanceEvent {
         typeof event.instanceName !== "string" ||
         typeof event.seq !== "number" ||
         typeof event.type !== "string"
-    ) {
+    )
         throw new Error("Invalid instance event.");
-    }
     return {
         at: event.at,
         ...(event.data === undefined ? {} : { data: event.data }),
@@ -138,56 +125,7 @@ export function readInstanceEvent(value: JsonValue | undefined): InstanceEvent {
     };
 }
 
-export function readClientSubscriptionEvents(
-    destination: InstanceName,
-    payload: JsonValue | undefined,
-): ClientEvent[] {
-    return readInitialEvents(destination, payload).map((event) => ({
-        destination,
-        id: `initial-${event.seq}`,
-        name: event.type,
-        payload: event as unknown as JsonValue,
-        seq: event.seq,
-    }));
-}
-
-export function normalizeInstanceClientEvent(event: ClientEvent): ClientEvent {
-    if (event.name !== "instanceEvent.published") return event;
-    const published = readInstanceEvent(event.payload);
-    return {
-        ...event,
-        destination: published.instanceName,
-        name: published.type,
-        payload: published as unknown as JsonValue,
-        seq: published.seq,
-    };
-}
-
-function readInitialEvents(
-    instance: InstanceName,
-    value: JsonValue | undefined,
-): InstanceEvent[] {
-    const acknowledgement = record(value);
-    if (
-        acknowledgement === undefined ||
-        !Array.isArray(acknowledgement.events)
-    ) {
-        throw new Error("Invalid subscription acknowledgement.");
-    }
-    return acknowledgement.events.map((event) => {
-        const decoded = readInstanceEvent(event);
-        if (decoded.instanceName !== instance) {
-            throw new Error(
-                "Subscription acknowledgement contains another instance.",
-            );
-        }
-        return decoded;
-    });
-}
-
-function record(
-    value: JsonValue | undefined,
-): Record<string, JsonValue> | undefined {
+function record(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
@@ -195,9 +133,7 @@ function record(
 
 function readNumber(
     value: Record<string, JsonValue> | undefined,
-    primary: string,
-    fallback: string,
+    key: string,
 ): number | undefined {
-    const candidate = value?.[primary] ?? value?.[fallback];
-    return typeof candidate === "number" ? candidate : undefined;
+    return typeof value?.[key] === "number" ? value[key] : undefined;
 }

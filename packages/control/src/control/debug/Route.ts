@@ -5,8 +5,8 @@ import {
     type DebugPatchSummary,
     type DebugTargetSummary,
     type JsonValue,
-    type PrefixRouteContext,
-    type PrefixRouteModuleDefinition,
+    type ControlPortContext,
+    type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../server/Route.js";
@@ -21,7 +21,7 @@ export interface DebugPatchPort {
 
 export function createDebugRouteModule(
     port: DebugPatchPort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("debug", {
         list: (_request, context) => {
             requireLocalDebug(context);
@@ -52,7 +52,7 @@ export function createDebugRouteModule(
     });
 }
 
-function requireLocalDebug(context: PrefixRouteContext): void {
+function requireLocalDebug(context: ControlPortContext): void {
     if (context.peer === "cli" && context.subject?.kind === "local-owner")
         return;
     throw createError({

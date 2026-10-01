@@ -12,8 +12,9 @@ import {
     type CliCommandDescriptor,
     type CliCommandWireResult,
     type JsonValue,
-    type PrefixRouteContext,
-    type PrefixRouteModuleDefinition,
+    type ControlPortContext,
+    type ControlPortDefinition,
+    type ControlStreamMessage,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../server/Route.js";
@@ -31,7 +32,7 @@ export interface CliCommandPort {
 
 export function createCliRouteModule(
     port: CliCommandPort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("cli", {
         commands: (_request, context) => {
             requireCli(context);
@@ -49,37 +50,28 @@ export function createCliRouteModule(
                 input.commandId,
             ) as unknown as JsonValue;
         },
-        commandStream: async (request, context) => {
+    }, {
+        commandStream: async (stream, request, context) => {
             requireCli(context);
             const input = readAuthorizedCommand(request.payload, context);
             const io = new CliCommandStreamIo();
-            const streamAbort = new AbortController();
-            const stream = await context.openStream(
-                { accepted: true },
-                {
-                    onClose: () => {
-                        io.closeInput();
-                        streamAbort.abort(
-                            new Error(
-                                "CLI command stream was closed by the client.",
-                            ),
-                        );
-                    },
-                    onEvent: (event) => io.accept(event),
-                },
+            const offData = stream.onData((message) =>
+                io.accept(message as ControlStreamMessage),
             );
+            const offClose = stream.onClose(() => io.closeInput());
+            const offCancel = stream.onCancel(() => io.closeInput());
             io.bind(stream);
             try {
                 const result = assertCommandResult(
                     await port.command(
                         input.commandId,
                         input.argv,
-                        invocationContext(input, context, streamAbort.signal),
+                        invocationContext(input, context),
                         io,
                     ),
                     input.commandId,
                 );
-                await stream.complete(result as unknown as JsonValue);
+                await stream.close(result as unknown as JsonValue);
             } catch (error) {
                 const body =
                     toControlErrorBody(error) ??
@@ -89,18 +81,20 @@ export function createCliRouteModule(
                         message: `CLI command ${input.commandId} failed.`,
                         retryable: false,
                     }).toBody();
-                await stream.cancel(body).catch(() => undefined);
+                await stream.cancel(body);
             } finally {
+                offData();
+                offClose();
+                offCancel();
                 io.closeInput();
             }
-            return undefined;
         },
     });
 }
 
 function readAuthorizedCommand(
     payload: JsonValue | undefined,
-    context: PrefixRouteContext,
+    context: ControlPortContext,
 ): ReturnType<typeof readCommand> {
     const input = readCommand(payload);
     const localOwner = isLocalOwnerCli(context);
@@ -117,7 +111,7 @@ function readAuthorizedCommand(
 
 function invocationContext(
     input: ReturnType<typeof readCommand>,
-    context: PrefixRouteContext,
+    context: ControlPortContext,
     streamSignal?: AbortSignal,
 ): CliNativeCommandInvocationContext {
     return Object.freeze({
@@ -135,7 +129,7 @@ function invocationContext(
     });
 }
 
-function requireCli(context: PrefixRouteContext): void {
+function requireCli(context: ControlPortContext): void {
     if (context.peer === "cli") return;
     throw createError({
         code: errorCodes.controlCliAccessDenied,
@@ -144,7 +138,7 @@ function requireCli(context: PrefixRouteContext): void {
     });
 }
 
-function isLocalOwnerCli(context: PrefixRouteContext): boolean {
+function isLocalOwnerCli(context: ControlPortContext): boolean {
     return context.peer === "cli" && context.subject?.kind === "local-owner";
 }
 

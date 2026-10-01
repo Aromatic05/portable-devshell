@@ -3,7 +3,7 @@ import type {
     ConversationPreferencesPatch,
     ConversationPreferencesSnapshot,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { parseConversationPreferencesPatch } from "./Model.js";
@@ -17,7 +17,7 @@ export interface ConversationPreferencePort {
 
 export function createConversationPreferenceRouteModule(
     port: ConversationPreferencePort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return {
         name: "conversation",
         operations: [

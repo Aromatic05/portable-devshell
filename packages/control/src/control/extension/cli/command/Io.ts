@@ -2,8 +2,8 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type PrefixRouteEvent,
-    type PrefixRouteStream,
+    type ControlStreamMessage,
+    type MessageStream,
 } from "@portable-devshell/shared";
 import type {
     CliCommandInputOptions,
@@ -14,16 +14,16 @@ export class CliCommandStreamIo implements CliCommandIo {
     readonly #queue: Buffer[] = [];
     readonly #waiters: Array<(chunk: Buffer | undefined) => void> = [];
     #closed = false;
-    #stream?: PrefixRouteStream;
+    #stream?: MessageStream;
 
-    bind(stream: PrefixRouteStream): void {
+    bind(stream: MessageStream): void {
         if (this.#stream !== undefined) {
             throw new Error("CLI command stream I/O is already bound.");
         }
         this.#stream = stream;
     }
 
-    accept(event: PrefixRouteEvent): void {
+    accept(event: ControlStreamMessage): void {
         if (this.#closed) return;
         if (event.name === "eof") {
             this.closeInput();
@@ -63,9 +63,9 @@ export class CliCommandStreamIo implements CliCommandIo {
     }
 
     async requestInput(options: CliCommandInputOptions = {}): Promise<void> {
-        await this.#requireStream().emit("terminal", {
+        await this.#requireStream().send({ name: "terminal", payload: {
             raw: options.raw === true,
-        });
+        } });
     }
 
     async writeStderr(chunk: string): Promise<void> {
@@ -78,7 +78,7 @@ export class CliCommandStreamIo implements CliCommandIo {
 
     async #write(name: "stderr" | "stdout", chunk: string): Promise<void> {
         if (chunk.length === 0) return;
-        await this.#requireStream().emit(name, { chunk });
+        await this.#requireStream().send({ name, payload: { chunk } });
     }
 
     #push(chunk: Buffer): void {
@@ -87,7 +87,7 @@ export class CliCommandStreamIo implements CliCommandIo {
         else this.#queue.push(chunk);
     }
 
-    #requireStream(): PrefixRouteStream {
+    #requireStream(): MessageStream {
         if (this.#stream === undefined)
             throw new Error("CLI command stream I/O is not bound.");
         return this.#stream;

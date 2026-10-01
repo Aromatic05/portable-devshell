@@ -1,7 +1,7 @@
 import type { WorkerInstance } from "@portable-devshell/core";
 import type {
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../server/Route.js";
@@ -14,7 +14,7 @@ export interface GoalRouteInstancePort {
 
 export function createGoalRouteModule(
     instance: GoalRouteInstancePort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("goal", {
         get: async () =>
             ({

@@ -6,11 +6,12 @@ import {
     CONTROL_REMOTE_RPC_PATH,
     CONTROL_REMOTE_RPC_SUBPROTOCOL,
     CONTROL_WEB_BASE_PATH,
-    WebSocketServerChannel,
+    WebServerChannel,
     type Channel,
 } from "@portable-devshell/shared";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { WebSocketServer } from "ws";
+
+const WEB_SOCKET_MAX_MESSAGE_SIZE = 16 * 1024 * 1024;
 
 import type {
     ControlAcceptedChannel,
@@ -144,7 +145,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
                 protocols.has(CONTROL_REMOTE_RPC_SUBPROTOCOL)
                     ? CONTROL_REMOTE_RPC_SUBPROTOCOL
                     : false,
-            maxPayload: TRANSPORT_MAX_FRAME_SIZE,
+            maxPayload: WEB_SOCKET_MAX_MESSAGE_SIZE,
             noServer: true,
         });
         this.#started = true;
@@ -205,7 +206,7 @@ export class ControlWebSocketListener implements ControlChannelListener {
             return;
         }
         server.handleUpgrade(request, socket, head, (webSocket) => {
-            const channel = new WebSocketServerChannel(webSocket as never);
+            const channel = new WebServerChannel(webSocket as never);
             this.#registerAccessChannel(access, channel);
             accept({
                 admission: {

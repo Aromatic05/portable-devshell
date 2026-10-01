@@ -1995,7 +1995,7 @@ function isRetryableTmuxObservationError(error: unknown): boolean {
     return (
         body?.retryable === true ||
         body?.code === errorCodes.coreInstanceNotReady ||
-        body?.code === errorCodes.coreWorkerRpcDisconnected ||
+        body?.code === errorCodes.coreWorkerTransportDisconnected ||
         body?.code === errorCodes.reverseTransportUnavailable
     );
 }

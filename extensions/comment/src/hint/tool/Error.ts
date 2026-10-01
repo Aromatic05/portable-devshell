@@ -23,7 +23,7 @@ const crossToolHints: Record<string, string> = {
     "core.workerHandshakeFailed":
         "Check worker logs and protocol version.",
     "core.workerProvisionFailed": "Inspect provisioning diagnostics.",
-    "core.workerRpcDisconnected":
+    "core.workerTransportDisconnected":
         "Verify target state before retrying.",
     "core.workerRpcSpawnFailed": "Check the worker runtime.",
     "core.workerStartFailed":

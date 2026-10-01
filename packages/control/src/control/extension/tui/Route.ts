@@ -6,8 +6,8 @@ import {
 } from "@portable-devshell/extension/tui";
 import type {
     JsonValue,
-    PrefixRouteContext,
-    PrefixRouteModuleDefinition,
+    ControlPortContext,
+    ControlPortDefinition,
     TuiPageDescriptor,
     TuiPageSnapshot,
 } from "@portable-devshell/shared";
@@ -88,7 +88,7 @@ export class TuiExtensionPageService implements TuiPagePort {
 
 export function createTuiPageRouteModule(
     port: TuiPagePort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("tui", {
         page: async (request, context) => {
             requireTui(context);
@@ -129,7 +129,7 @@ function readPageRequest(payload: JsonValue | undefined): {
     throw new TypeError("tui.page kind must be read or action.");
 }
 
-function requireTui(context: PrefixRouteContext): void {
+function requireTui(context: ControlPortContext): void {
     if (context.peer !== "tui")
         throw new TypeError("TUI page access is available only to TUI clients.");
 }

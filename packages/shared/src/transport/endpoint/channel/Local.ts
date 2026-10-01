@@ -1,12 +1,12 @@
 import { createConnection, type Socket } from "node:net";
-import type { Channel } from "../protocol/Channel.js";
+import type { Channel } from "./Channel.js";
 
-export interface SocketChannelOptions {
+export interface LocalChannelOptions {
     signal?: AbortSignal;
     socketFactory?: (path: string) => Socket;
 }
 
-export class SocketChannel implements Channel {
+export class LocalChannel implements Channel {
     readonly #socket: Socket;
     readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     readonly #closeListeners = new Set<(error?: Error) => void>();
@@ -17,14 +17,14 @@ export class SocketChannel implements Channel {
 
     static async connect(
         socketPath: string,
-        options: SocketChannelOptions = {},
-    ): Promise<SocketChannel> {
+        options: LocalChannelOptions = {},
+    ): Promise<LocalChannel> {
         if (options.signal?.aborted === true) {
             throw abortError(options.signal);
         }
         const socket =
             options.socketFactory?.(socketPath) ?? createConnection(socketPath);
-        return await new Promise<SocketChannel>((resolve, reject) => {
+        return await new Promise<LocalChannel>((resolve, reject) => {
             let settled = false;
             const cleanup = () => {
                 options.signal?.removeEventListener("abort", onAbort);
@@ -46,7 +46,7 @@ export class SocketChannel implements Channel {
                 if (settled) return;
                 settled = true;
                 cleanup();
-                resolve(new SocketChannel(socket));
+                resolve(new LocalChannel(socket));
             };
             const onError = (error: Error) => {
                 if (settled) return;
@@ -68,9 +68,9 @@ export class SocketChannel implements Channel {
 
     static accept(
         socket: Socket,
-        _options: Omit<SocketChannelOptions, "socketFactory"> = {},
-    ): SocketChannel {
-        return new SocketChannel(socket);
+        _options: Omit<LocalChannelOptions, "socketFactory"> = {},
+    ): LocalChannel {
+        return new LocalChannel(socket);
     }
 
     private constructor(socket: Socket) {

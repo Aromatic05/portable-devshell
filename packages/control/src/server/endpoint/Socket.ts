@@ -8,13 +8,13 @@ import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { chmod } from "node:fs/promises";
 import {
-    SocketChannel,
+    LocalChannel,
     isWindowsNamedPipePath,
     removeControlIpcEndpoint,
 } from "@portable-devshell/shared";
 import type {
     ControlClientKind,
-    PrefixRouteSubject,
+    ControlPeerSubject,
 } from "@portable-devshell/shared";
 
 export type ControlRouteProvider = ControlChannelRouteProvider;
@@ -59,13 +59,13 @@ export class ControlSocketServer {
 export interface ControlSocketListenerOptions {
     allowedPeers?: readonly ControlClientKind[];
     socketPath: string;
-    subject?: PrefixRouteSubject;
+    subject?: ControlPeerSubject;
 }
 
 export class ControlSocketListener implements ControlChannelListener {
     readonly #allowedPeers: readonly ControlClientKind[];
     readonly #socketPath: string;
-    readonly #subject: PrefixRouteSubject;
+    readonly #subject: ControlPeerSubject;
     #server?: Server;
 
     constructor(options: ControlSocketListenerOptions) {
@@ -124,14 +124,14 @@ export class ControlSocketListener implements ControlChannelListener {
                 allowedPeers: this.#allowedPeers,
                 subject: this.#subject,
             },
-            channel: SocketChannel.accept(socket),
+            channel: LocalChannel.accept(socket),
         };
     }
 }
 
 function localControlSubject(
     environment: NodeJS.ProcessEnv = process.env,
-): PrefixRouteSubject {
+): ControlPeerSubject {
     const identity =
         typeof process.getuid === "function"
             ? `uid:${process.getuid()}`

@@ -1,19 +1,24 @@
 import {
+    Endpoint,
+    Event,
+    Rpc,
     createError,
     errorCodes,
     type JsonValue,
     type ToolCallContext,
 } from "@portable-devshell/shared";
+import { randomUUID } from "node:crypto";
 
-import { WorkerRpcClient } from "../protocol/rpc/Client.js";
 import { WorkerToolCatalog } from "./Catalog.js";
 
 export class WorkerToolInvoker {
-    readonly #rpcClient: WorkerRpcClient;
     readonly #catalog: WorkerToolCatalog;
+    readonly #endpoint: Endpoint;
+    readonly #workerHost: string;
 
-    constructor(rpcClient: WorkerRpcClient, catalog: WorkerToolCatalog) {
-        this.#rpcClient = rpcClient;
+    constructor(endpoint: Endpoint, workerHost: string, catalog: WorkerToolCatalog) {
+        this.#endpoint = endpoint;
+        this.#workerHost = workerHost;
         this.#catalog = catalog;
     }
 
@@ -24,23 +29,51 @@ export class WorkerToolInvoker {
         signal?: AbortSignal,
         onProgress?: (progress: JsonValue) => void,
     ): Promise<JsonValue> {
-        const tool = this.#catalog.getTool(toolName);
-
-        if (tool === undefined) {
+        if (this.#catalog.getTool(toolName) === undefined)
             throw createError({
                 code: errorCodes.coreToolSchemaUnavailable,
                 message: `Tool ${toolName} is not available for this instance.`,
                 retryable: false,
                 details: { toolName },
             });
-        }
 
-        return await this.#rpcClient.request(
-            toolName,
-            input,
-            context,
+        const operationId = context?.operationId ?? randomUUID();
+        const connection = await this.#endpoint.connect(
+            this.#workerHost,
+            "tool",
             signal,
-            onProgress,
         );
+        const rpc = new Rpc(connection);
+        const events = new Event(connection);
+        const off =
+            onProgress === undefined
+                ? undefined
+                : events.onEvent((name, message) => {
+                      if (
+                          name === "progress" &&
+                          isRecord(message) &&
+                          message.operationId === operationId &&
+                          message.value !== undefined
+                      )
+                          onProgress(message.value as JsonValue);
+                  });
+        try {
+            return (await rpc.request(
+                toolName,
+                {
+                    context: { ...(context ?? {}), operationId },
+                    input,
+                },
+                signal,
+            )) as JsonValue;
+        } finally {
+            off?.();
+            events.close();
+            rpc.close();
+        }
     }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

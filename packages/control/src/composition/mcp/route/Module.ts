@@ -1,7 +1,7 @@
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import type {
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../../server/Route.js";
@@ -14,7 +14,7 @@ export interface McpRouteModuleOptions {
 
 export function createMcpRouteModule(
     options: McpRouteModuleOptions,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     const approvals = () =>
         requirePort(
             options.approvals(),

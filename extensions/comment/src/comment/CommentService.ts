@@ -5,7 +5,7 @@ import type {
     ContextMessageRecord,
     InstanceEventType,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 import { ExtensionError } from "@portable-devshell/extension";
 import { randomUUID } from "node:crypto";
@@ -344,7 +344,7 @@ function eventData(record: ContextMessageRecord): Record<string, JsonValue> {
 
 export function createCommentRouteModule(
     service: Pick<CommentService, "list" | "queue">,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return {
         name: "contextMessage",
         operations: [

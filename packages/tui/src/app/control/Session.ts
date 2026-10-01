@@ -431,7 +431,7 @@ export class TuiControlSession {
         if (!this.#started || !isTuiPresentationEvent(event.type)) return;
         this.#store.applyInstanceEvent(event);
         if (
-            event.type === "worker.rpcConnected" ||
+            event.type === "worker.transportConnected" ||
             event.type === "instance.readyChanged" ||
             event.type === "instance.stopped"
         ) {
@@ -623,8 +623,8 @@ function isInstanceHealthEvent(name: string): boolean {
         "instance.statusChanged",
         "instance.connectionChanged",
         "instance.readyChanged",
-        "worker.rpcConnected",
-        "worker.rpcDisconnected",
+        "worker.transportConnected",
+        "worker.transportDisconnected",
         "reverse.connected",
         "reverse.disconnected",
         "reverse.enrollmentChanged",

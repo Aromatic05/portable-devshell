@@ -1,7 +1,8 @@
-import type {
-    InstanceEvent,
-    ToolCallAssociation,
-    ToolCallContext,
+import {
+    Endpoint,
+    type InstanceEvent,
+    type ToolCallAssociation,
+    type ToolCallContext,
 } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 
@@ -12,8 +13,6 @@ import { LogStoreInstance } from "../../storage/log/Store.js";
 import { AuditToolCallHistory } from "../../storage/audit/ToolCallHistory.js";
 import { WorkerCommandClient } from "../transport/command/Client.js";
 import { WorkerProtocolClient } from "../protocol/Client.js";
-import { WorkerRpcBridge } from "../protocol/rpc/Bridge.js";
-import { WorkerRpcClient } from "../protocol/rpc/Client.js";
 import { WorkerToolCatalog } from "../tool/Catalog.js";
 import { WorkerToolInvoker } from "../tool/Invoker.js";
 import { WorkerToolCallScheduler } from "../tool/Scheduler.js";
@@ -41,8 +40,12 @@ export class WorkerInstanceFactory {
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
         const catalog = new WorkerToolCatalog();
         const transportConnection = this.#createTransportConnection(resolved);
-        const rpcBridge = this.#createRpcBridge(resolved, transportConnection);
-        const rpcClient = new WorkerRpcClient(rpcBridge);
+        const workerHost = `${resolved.name}-worker`;
+        const endpoint = new Endpoint({
+            host: resolved.name,
+            connectChannel: (signal) => transportConnection.connect(signal),
+        });
+        const protocolClient = new WorkerProtocolClient(endpoint, workerHost);
         const auditDatabase = new AuditDatabase(
             paths.auditDatabaseFile,
             resolved.auditStorage,
@@ -86,8 +89,8 @@ export class WorkerInstanceFactory {
                 eventStore,
             ),
             logStore: new LogStoreInstance(resolved.name, logStore),
-            protocolClient: new WorkerProtocolClient(rpcClient),
-            rpcBridge,
+            protocolClient,
+            endpoint,
             stateMachine: new InstanceStateMachine(resolved.name),
             approvalManager: new ApprovalManager({
                 instanceName: resolved.name,
@@ -100,12 +103,12 @@ export class WorkerInstanceFactory {
                 resolved.name,
                 toolCallStore,
             ),
-            terminalClient: new WorkerTerminalClient(rpcClient, rpcBridge),
+            terminalClient: new WorkerTerminalClient(endpoint, workerHost),
             transportConnection,
             toolCallScheduler: new WorkerToolCallScheduler(
                 resolved.toolScheduler,
             ),
-            toolInvoker: new WorkerToolInvoker(rpcClient, catalog),
+            toolInvoker: new WorkerToolInvoker(endpoint, workerHost, catalog),
         });
     }
 
@@ -121,20 +124,4 @@ export class WorkerInstanceFactory {
         });
     }
 
-    #createRpcBridge(
-        config: ResolvedWorkerInstanceConfig,
-        connection: WorkerTransportConnection,
-    ): WorkerRpcBridge {
-        const rpcOptions = {
-            env: config.env,
-            instanceName: config.name,
-        };
-
-        return new WorkerRpcBridge({
-            connection,
-            preservePendingOnDisconnect:
-                config.managementMode === "selfManaged",
-            rpcOptions,
-        });
-    }
 }

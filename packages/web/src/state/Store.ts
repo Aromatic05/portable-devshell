@@ -105,7 +105,7 @@ export class WebStore {
         this.#refreshScheduler.start();
         this.#model.subscribe(() => this.#syncModel());
         this.#offTransportClose = clients.onTransportClose((error) =>
-            this.#transportClosed(error),
+            this.#transportClosed(error ?? new Error("Control transport closed.")),
         );
     }
 

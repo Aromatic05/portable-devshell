@@ -1,6 +1,6 @@
 import type {
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
@@ -19,7 +19,7 @@ export interface ConfigEditorPort {
 
 export function createConfigRouteModule(
     service?: ConfigEditorPort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     const config = () =>
         requirePort(service, "Config editing is not available.");
     return routeModule("config", {

@@ -1,4 +1,4 @@
-import type { PrefixRouteModuleDefinition } from "@portable-devshell/shared";
+import type { ControlPortDefinition } from "@portable-devshell/shared";
 
 import { requirePort, routeModule } from "../../server/Route.js";
 import { readReverseInstanceName } from "./Input.js";
@@ -6,7 +6,7 @@ import type { ReverseCredentialService } from "./credential/Service.js";
 
 export function createReverseRouteModule(
     service?: ReverseCredentialService,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     const reverse = () =>
         requirePort(service, "Reverse connection management is not available.");
     return routeModule("reverse", {

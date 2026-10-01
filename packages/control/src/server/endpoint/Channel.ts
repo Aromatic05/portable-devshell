@@ -1,26 +1,29 @@
 import {
     CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_VERSION,
-    Codec,
-    PrefixRoute,
+    Endpoint,
+    Rpc,
+    Stream,
     createError,
     errorCodes,
-} from "@portable-devshell/shared";
-import type {
-    Channel,
-    ControlClientKind,
-    ControlProtocolHelloResponse,
-    JsonValue,
-    PrefixRouteIncoming,
-    PrefixRouteModuleDefinition,
-    PrefixRouteSnapshot,
-    PrefixRouteSubject,
+    type Channel,
+    type ControlClientKind,
+    type ControlHostDefinition,
+    type ControlPeerSubject,
+    type ControlPortContext,
+    type ControlPortDefinition,
+    type ControlProtocolHelloResponse,
+    type JsonValue,
+    type MessageStream,
+    type Port,
+    type RpcContext,
 } from "@portable-devshell/shared";
 import { routeModule } from "../Route.js";
 
 export interface ControlChannelRouteProvider {
     connectionClosed(connectionId: string): void;
-    snapshot(): PrefixRouteSnapshot;
+    hosts(): readonly ControlHostDefinition[];
+    onChange(listener: () => void): () => void;
 }
 
 export interface ControlChannelListener {
@@ -30,7 +33,7 @@ export interface ControlChannelListener {
 
 export interface ControlChannelAdmission {
     readonly allowedPeers: readonly ControlClientKind[];
-    readonly subject: PrefixRouteSubject;
+    readonly subject: ControlPeerSubject;
 }
 
 export interface ControlAcceptedChannel {
@@ -43,314 +46,264 @@ export interface ControlChannelServerOptions {
     routes: ControlChannelRouteProvider;
 }
 
+interface Session {
+    readonly admission: ControlChannelAdmission;
+    peer?: ControlClientKind;
+    protocolVersion?: string;
+}
+
+interface BoundPort {
+    readonly port: Port;
+    readonly rpc: Rpc;
+    readonly stream: Stream;
+    readonly offOpen: () => void;
+}
+
+interface ActiveConnection {
+    readonly channel: Channel;
+    detach?: () => void;
+}
+
 export class ControlChannelServer {
-    #listeners: ControlChannelListener[];
+    readonly #endpoint = new Endpoint({ host: "server" });
+    readonly #ports = new Map<string, BoundPort>();
+    readonly #sessions = new Map<string, Session>();
+    readonly #connections = new Set<ActiveConnection>();
     readonly #routes: ControlChannelRouteProvider;
-    readonly #connections = new Map<string, PrefixRoute>();
+    readonly #unsubscribeRoutes: () => void;
+    #listeners: ControlChannelListener[];
     readonly #startedListeners: ControlChannelListener[] = [];
-    #closePromise?: Promise<void>;
-    #startPromise?: Promise<void>;
     #started = false;
-    #stopping = false;
 
     constructor(options: ControlChannelServerOptions) {
-        if (options.listeners.length === 0) {
-            throw new Error(
-                "Control channel server requires at least one listener.",
-            );
-        }
         this.#listeners = [...options.listeners];
         this.#routes = options.routes;
+        this.#syncPorts();
+        this.#unsubscribeRoutes = options.routes.onChange(() => this.#syncPorts());
     }
 
     async start(): Promise<void> {
-        if (this.#startPromise !== undefined) {
-            return await this.#startPromise;
+        if (this.#started) return;
+        for (const listener of this.#listeners) {
+            await listener.start((connection) => void this.#accept(connection));
+            this.#startedListeners.push(listener);
         }
-        const start = this.#startAfterClose();
-        this.#startPromise = start;
-        try {
-            await start;
-        } finally {
-            if (this.#startPromise === start) {
-                this.#startPromise = undefined;
-            }
-        }
-    }
-
-    async #startAfterClose(): Promise<void> {
-        const close = this.#closePromise;
-        if (close !== undefined) {
-            await close;
-        }
-        if (this.#started) {
-            return;
-        }
-        if (this.#startedListeners.length > 0) {
-            await this.#closeListeners();
-        }
-        await this.#startInternal();
+        this.#started = true;
     }
 
     async close(): Promise<void> {
-        this.#stopping = true;
-        if (this.#closePromise !== undefined) {
-            return await this.#closePromise;
+        if (!this.#started) return;
+        for (const connection of this.#connections) {
+            connection.detach?.();
+            connection.channel.close();
         }
-        const close = this.#closeAfterStart();
-        this.#closePromise = close;
-        try {
-            await close;
-        } finally {
-            if (this.#closePromise === close) {
-                this.#closePromise = undefined;
-            }
-        }
+        this.#connections.clear();
+        for (const listener of [...this.#startedListeners].reverse())
+            await listener.close();
+        this.#startedListeners.length = 0;
+        this.#started = false;
     }
 
     async replaceListener(
         previous: ControlChannelListener,
         next: ControlChannelListener,
     ): Promise<void> {
-        if (!this.#started) {
-            throw new Error("Control channel server is not started.");
-        }
         const index = this.#listeners.indexOf(previous);
-        if (index < 0 || !this.#startedListeners.includes(previous)) {
-            throw new Error("Control channel listener is not active.");
-        }
-
-        const accept = (connection: ControlAcceptedChannel) =>
-            this.#accept(connection);
-        await next.start(accept);
-        try {
-            await previous.close();
-        } catch (error) {
-            const rollbackFailures: unknown[] = [];
-            await next.close().catch((rollbackError) => {
-                rollbackFailures.push(rollbackError);
-                if (!this.#startedListeners.includes(next)) {
-                    this.#startedListeners.push(next);
-                }
-            });
-            await previous.start(accept).catch((rollbackError) => {
-                rollbackFailures.push(rollbackError);
-            });
-            if (rollbackFailures.length > 0) {
-                throw new AggregateError(
-                    [error, ...rollbackFailures],
-                    "Control channel listener replacement failed and rollback was incomplete.",
-                );
-            }
-            throw error;
-        }
+        await next.start((connection) => void this.#accept(connection));
+        await previous.close();
         this.#listeners[index] = next;
-        const startedIndex = this.#startedListeners.indexOf(previous);
-        this.#startedListeners[startedIndex] = next;
+        this.#startedListeners[this.#startedListeners.indexOf(previous)] = next;
     }
 
-    async #startInternal(): Promise<void> {
-        this.#stopping = false;
+    async #accept({ admission, channel }: ControlAcceptedChannel): Promise<void> {
+        const active: ActiveConnection = { channel };
+        this.#connections.add(active);
         try {
-            for (const listener of this.#listeners) {
-                await listener.start((connection) => this.#accept(connection));
-                this.#startedListeners.push(listener);
-            }
-            this.#started = true;
+            active.detach = await this.#endpoint.accept(channel, {
+                attached: (host) => this.#sessions.set(host, { admission }),
+                detached: (host) => {
+                    this.#sessions.delete(host);
+                    this.#routes.connectionClosed(host);
+                },
+            });
         } catch (error) {
-            this.#stopping = true;
-            this.#closeConnections();
-            try {
-                await this.#closeListeners();
-            } catch (closeError) {
-                throw new AggregateError(
-                    [error, closeError],
-                    "Control channel server failed to start and clean up.",
-                );
-            }
-            throw error;
-        }
-    }
-
-    async #closeAfterStart(): Promise<void> {
-        await this.#startPromise?.catch(() => undefined);
-        await this.#closeInternal();
-    }
-
-    #accept(connection: ControlAcceptedChannel): void {
-        const { admission, channel } = connection;
-        if (this.#stopping) {
-            channel.close(new Error("Control channel server is stopping."));
+            this.#connections.delete(active);
+            channel.close(error instanceof Error ? error : new Error(String(error)));
             return;
         }
-        try {
-            let negotiated:
-                | { peer: ControlClientKind; protocolVersion: string }
-                | undefined;
-            let pending:
-                | {
-                      peer: ControlClientKind;
-                      protocolVersion: string;
-                      requestId: string;
-                  }
-                | undefined;
-            const route = new PrefixRoute(
-                new Codec(channel, { local: "server" }),
-                {
-                    authorizeRequest: (incoming) => {
-                        if (negotiated === undefined) {
-                            assertHelloRequest(incoming);
-                            if (pending !== undefined) {
-                                throw createError({
-                                    code: errorCodes.controlClientIdentityInvalid,
-                                    message:
-                                        "Control connection identity negotiation is already in progress.",
-                                    retryable: false,
-                                });
-                            }
-                            const peer = readClientPeer(incoming.peer);
-                            if (!admission.allowedPeers.includes(peer)) {
-                                throw createError({
-                                    code: errorCodes.controlClientIdentityInvalid,
-                                    details: {
-                                        allowedPeers: [
-                                            ...admission.allowedPeers,
-                                        ],
-                                        requestedPeer: peer,
-                                        subject: admission.subject.id,
-                                    },
-                                    message: `Control transport subject ${admission.subject.id} cannot connect as ${peer}.`,
-                                    retryable: false,
-                                });
-                            }
-                            negotiateControlProtocol(incoming.event.payload, peer);
-                            pending = {
-                                peer,
-                                protocolVersion: CONTROL_PROTOCOL_VERSION,
-                                requestId: incoming.event.id,
-                            };
-                            return;
-                        }
-                        if (isHelloRequest(incoming)) {
-                            throw createError({
-                                code: errorCodes.controlClientIdentityInvalid,
-                                message:
-                                    "Control connection identity is already negotiated.",
-                                retryable: false,
-                            });
-                        }
-                        if (incoming.peer !== negotiated.peer) {
-                            throw createError({
-                                code: errorCodes.controlClientIdentityInvalid,
-                                message: `Control connection is negotiated as ${negotiated.peer}, not ${incoming.peer}.`,
-                                retryable: false,
-                            });
-                        }
+        channel.onClose(() => this.#connections.delete(active));
+    }
+
+    #syncPorts(): void {
+        const definitions = new Map<string, { host: string; port: ControlPortDefinition }>();
+        for (const host of this.#routes.hosts())
+            for (const port of host.ports)
+                definitions.set(`${host.host}\u0000${port.name}`, {
+                    host: host.host,
+                    port,
+                });
+
+        for (const [key, bound] of this.#ports)
+            if (!definitions.has(key)) {
+                bound.offOpen();
+                bound.stream.close();
+                bound.rpc.close();
+                bound.port.close();
+                this.#ports.delete(key);
+            }
+
+        for (const [key, definition] of definitions) {
+            if (this.#ports.has(key)) continue;
+            const port = this.#endpoint.bind(definition.port.name, definition.host);
+            const handlers = Object.fromEntries(
+                definition.port.operations.map((operation) => [
+                    operation.name,
+                    async (payload: unknown, rpc: RpcContext) => {
+                        const context = this.#context(
+                            definition.host,
+                            definition.port.name,
+                            operation.name,
+                            payload as JsonValue | undefined,
+                            rpc,
+                        );
+                        return await operation.handle(
+                            {
+                                id: rpc.requestId,
+                                name: operation.name,
+                                ...(payload === undefined
+                                    ? {}
+                                    : { payload: payload as JsonValue }),
+                            },
+                            context,
+                        );
                     },
-                    eventIdPrefix: "server",
-                    getConnectionContext: () => ({
-                        protocolVersion:
-                            negotiated?.protocolVersion ??
-                            pending?.protocolVersion,
-                        subject: admission.subject,
-                    }),
-                    getSnapshot: () => this.#routes.snapshot(),
-                    onRequestResult: (incoming, result) => {
-                        if (pending?.requestId !== incoming.event.id) return;
-                        if (result.ok) {
-                            negotiated = {
-                                peer: pending.peer,
-                                protocolVersion: pending.protocolVersion,
-                            };
-                        }
-                        pending = undefined;
-                    },
+                ]),
+            );
+            const rpc = new Rpc(port, handlers);
+            const stream = new Stream(port);
+            const streamHandlers = new Map(
+                (definition.port.streams ?? []).map((operation) => [
+                    operation.name,
+                    operation.handle,
+                ]),
+            );
+            const offOpen = stream.onOpen(
+                async (messageStream, name, payload, peer) => {
+                    const handle = streamHandlers.get(name);
+                    if (handle === undefined) {
+                        await messageStream.cancel({
+                            code: "method_not_found",
+                            message: `Stream method ${name} was not found.`,
+                        });
+                        return;
+                    }
+                    const controller = new AbortController();
+                    messageStream.onClose(() => controller.abort());
+                    messageStream.onCancel(() => controller.abort());
+                    const context = this.#streamContext(
+                        definition.host,
+                        peer.host,
+                        messageStream,
+                        controller.signal,
+                    );
+                    try {
+                        await handle(
+                            messageStream,
+                            {
+                                id: messageStream.id,
+                                name,
+                                ...(payload === undefined
+                                    ? {}
+                                    : { payload: payload as JsonValue }),
+                            },
+                            context,
+                        );
+                    } catch (error) {
+                        await messageStream.cancel({
+                            message:
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error),
+                        });
+                    }
                 },
             );
-            this.#connections.set(route.connectionId, route);
-            channel.onClose(() => {
-                this.#connections.delete(route.connectionId);
-                this.#routes.connectionClosed(route.connectionId);
-            });
-        } catch (error) {
-            channel.close(
-                error instanceof Error ? error : new Error(String(error)),
-            );
+            this.#ports.set(key, { port, rpc, stream, offOpen });
         }
     }
 
-    async #closeInternal(): Promise<void> {
-        this.#stopping = true;
-        this.#closeConnections();
-        try {
-            await this.#closeListeners();
-        } finally {
-            this.#started = false;
-        }
-    }
-
-    #closeConnections(): void {
-        for (const route of this.#connections.values()) {
-            route.close();
-        }
-        this.#connections.clear();
-    }
-
-    async #closeListeners(): Promise<void> {
-        const failures: unknown[] = [];
-        const listeners = this.#startedListeners.splice(0);
-        const failed = new Set<ControlChannelListener>();
-        for (const listener of [...listeners].reverse()) {
-            await listener.close().catch((error) => {
-                failed.add(listener);
-                failures.push(error);
+    #context(
+        host: string,
+        port: string,
+        operation: string,
+        payload: JsonValue | undefined,
+        rpc: RpcContext,
+    ): ControlPortContext {
+        const session = this.#sessions.get(rpc.peer.host)!;
+        if (host === "@control" && port === "service" && operation === "hello") {
+            if (session.peer !== undefined)
+                throw createError({
+                    code: errorCodes.controlClientIdentityInvalid,
+                    message: "Control connection identity is already negotiated.",
+                    retryable: false,
+                });
+            const request = readHelloRequest(payload);
+            if (!session.admission.allowedPeers.includes(request.clientKind))
+                throw createError({
+                    code: errorCodes.controlClientIdentityInvalid,
+                    message: `Control transport subject ${session.admission.subject.id} cannot connect as ${request.clientKind}.`,
+                    retryable: false,
+                });
+            const negotiated = negotiateControlProtocol(payload, request.clientKind);
+            session.peer = request.clientKind;
+            session.protocolVersion = String(negotiated.protocolVersion);
+        } else if (session.peer === undefined) {
+            throw createError({
+                code: errorCodes.controlClientIdentityRequired,
+                message: "service.hello must be the first request on a Control connection.",
+                retryable: false,
             });
         }
-        for (const listener of listeners) {
-            if (failed.has(listener)) {
-                this.#startedListeners.push(listener);
-            }
-        }
-        if (failures.length > 0) {
-            throw new AggregateError(
-                failures,
-                "Control channel listeners failed to close.",
-            );
-        }
+        return {
+            afterReply: rpc.afterReply,
+            connectionId: rpc.peer.host,
+            host,
+            peer: session.peer!,
+            ...(session.protocolVersion === undefined
+                ? {}
+                : { protocolVersion: session.protocolVersion }),
+            requestId: rpc.requestId,
+            signal: rpc.signal,
+            subject: session.admission.subject,
+        };
     }
-}
 
-function assertHelloRequest(incoming: PrefixRouteIncoming): void {
-    if (isHelloRequest(incoming)) return;
-    throw createError({
-        code: errorCodes.controlClientIdentityRequired,
-        details: {
-            destination: incoming.destination,
-            module: incoming.module,
-            operation: incoming.event.name,
-        },
-        message:
-            "service.hello must be the first request on a Control connection.",
-        retryable: false,
-    });
-}
-
-function isHelloRequest(incoming: PrefixRouteIncoming): boolean {
-    return (
-        incoming.destination === "@control" &&
-        incoming.module === "service" &&
-        incoming.event.name === "hello" &&
-        incoming.event.streamId === undefined
-    );
-}
-
-function readClientPeer(peer: PrefixRouteIncoming["peer"]): ControlClientKind {
-    if (peer === "cli" || peer === "tui" || peer === "web") return peer;
-    throw createError({
-        code: errorCodes.controlClientIdentityInvalid,
-        message: "Server peer cannot initiate a Control client connection.",
-        retryable: false,
-    });
+    #streamContext(
+        host: string,
+        peerHost: string,
+        stream: MessageStream,
+        signal: AbortSignal,
+    ): ControlPortContext {
+        const session = this.#sessions.get(peerHost)!;
+        if (session.peer === undefined)
+            throw createError({
+                code: errorCodes.controlClientIdentityRequired,
+                message: "service.hello must be the first request on a Control connection.",
+                retryable: false,
+            });
+        return {
+            afterReply: (action) => queueMicrotask(() => void action()),
+            connectionId: peerHost,
+            host,
+            peer: session.peer,
+            ...(session.protocolVersion === undefined
+                ? {}
+                : { protocolVersion: session.protocolVersion }),
+            requestId: stream.id,
+            signal,
+            subject: session.admission.subject,
+        };
+    }
 }
 
 export interface ServiceRouteModuleOptions {
@@ -361,7 +314,7 @@ export interface ServiceRouteModuleOptions {
 
 export function createServiceRouteModule(
     options: ServiceRouteModuleOptions,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("service", {
         hello: (request, context) =>
             negotiateControlProtocol(

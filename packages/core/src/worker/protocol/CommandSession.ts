@@ -1,8 +1,6 @@
-import type { JsonValue } from "@portable-devshell/shared";
+import { Endpoint, Event, type JsonValue } from "@portable-devshell/shared";
 
 import type { WorkerProtocolClient } from "./Client.js";
-import type { WorkerRpcBridge } from "./rpc/Bridge.js";
-import type { WorkerRpcNotificationEnvelope } from "./rpc/Message.js";
 
 export interface WorkerCommandSessionOpen {
     argv: readonly string[];
@@ -42,11 +40,17 @@ export class WorkerCommandSessionBridge {
     readonly #protocol: WorkerProtocolClient;
     readonly #unsubscribe: () => void;
 
-    constructor(rpc: WorkerRpcBridge, protocol: WorkerProtocolClient) {
+    constructor(
+        endpoint: Endpoint,
+        workerHost: string,
+        protocol: WorkerProtocolClient,
+    ) {
         this.#protocol = protocol;
-        this.#unsubscribe = rpc.onNotification((notification) =>
-            this.#onNotification(notification),
-        );
+        const events = new Event(endpoint.bind("core"));
+        this.#unsubscribe = events.onEvent((name, message, peer) => {
+            if (peer.host === workerHost)
+                this.#onEvent(name, (message ?? null) as JsonValue);
+        });
     }
 
     close(): void {
@@ -75,15 +79,15 @@ export class WorkerCommandSessionBridge {
         await this.#protocol.completeCommandSession(completion);
     }
 
-    #onNotification(notification: WorkerRpcNotificationEnvelope): void {
-        if (notification.method === "devshell.command.open") {
-            const request = readOpen(notification.params);
+    #onEvent(name: string, message: JsonValue): void {
+        if (name === "command.open") {
+            const request = readOpen(message);
             if (request === undefined) return;
             this.#notify(this.#openListeners, request);
             return;
         }
-        if (notification.method === "devshell.command.close") {
-            const request = readClose(notification.params);
+        if (name === "command.close") {
+            const request = readClose(message);
             if (request === undefined) return;
             this.#notify(this.#closeListeners, request);
         }

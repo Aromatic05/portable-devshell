@@ -1,7 +1,7 @@
 import type {
     McpContextRecord,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
@@ -23,7 +23,7 @@ export interface ContextAdminPort {
 
 export function createContextRouteModule(
     port: ContextAdminPort | (() => ContextAdminPort | undefined) | undefined,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     const admin = () =>
         requirePort(
             typeof port === "function" ? port() : port,

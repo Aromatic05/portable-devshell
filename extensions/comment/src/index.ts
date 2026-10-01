@@ -33,7 +33,7 @@ import type {
     ConversationListInput,
     InstanceEventType,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
     ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -150,8 +150,8 @@ export interface ConversationPort {
 }
 
 export interface CommentRoutePort {
-    control(): readonly PrefixRouteModuleDefinition[];
-    instance(instance: string): readonly PrefixRouteModuleDefinition[];
+    control(): readonly ControlPortDefinition[];
+    instance(instance: string): readonly ControlPortDefinition[];
 }
 
 interface CommentExtensionInstanceState {

@@ -1,41 +1,56 @@
-import type { FrameStream } from "@portable-devshell/shared/transport/frame";
-
-import type { WorkerTransportConnection } from "../Transport.js";
 import {
-    encodeExecServiceMetadata,
-    encodeTcpServiceMetadata,
-} from "./Codec.js";
+    Endpoint,
+    Stream,
+    type MessageStream,
+} from "@portable-devshell/shared";
+
 import type {
     WorkerExecProcessInput,
     WorkerTcpConnectInput,
 } from "./Model.js";
 
 export class WorkerTransportServiceClient {
-    readonly #connection: WorkerTransportConnection;
+    readonly #endpoint: Endpoint;
+    readonly #workerHost: string;
 
-    constructor(connection: WorkerTransportConnection) {
-        this.#connection = connection;
+    constructor(endpoint: Endpoint, workerHost: string) {
+        this.#endpoint = endpoint;
+        this.#workerHost = workerHost;
     }
 
-    async connectTcp(
+    connectTcp(
         input: WorkerTcpConnectInput,
         signal?: AbortSignal,
-    ): Promise<FrameStream> {
-        return await this.#connection.openStream(
-            "network.tcp",
-            encodeTcpServiceMetadata(input),
-            signal,
-        );
+    ): Promise<MessageStream> {
+        return this.#open("network", "tcp", input, signal);
     }
 
-    async execProcess(
+    execProcess(
         input: WorkerExecProcessInput,
         signal?: AbortSignal,
-    ): Promise<FrameStream> {
-        return await this.#connection.openStream(
-            "process.exec",
-            encodeExecServiceMetadata(input),
-            signal,
+    ): Promise<MessageStream> {
+        return this.#open("process", "exec", input, signal);
+    }
+
+    async #open(
+        port: string,
+        name: string,
+        input: object,
+        signal?: AbortSignal,
+    ): Promise<MessageStream> {
+        const protocol = new Stream(
+            await this.#endpoint.connect(this.#workerHost, port, signal),
         );
+        const stream = await protocol.open(name, input);
+        const close = () => protocol.close();
+        stream.onClose(close);
+        stream.onCancel(close);
+        if (signal !== undefined)
+            signal.addEventListener(
+                "abort",
+                () => void stream.cancel({ message: String(signal.reason) }),
+                { once: true },
+            );
+        return stream;
     }
 }

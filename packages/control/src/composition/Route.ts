@@ -1,11 +1,9 @@
 import type { McpOAuthApprovalService } from "@portable-devshell/mcp";
 import {
     asInstanceName,
-    PrefixRoute,
+    type ControlHostDefinition,
+    type ControlPortDefinition,
     type JsonValue,
-    type PrefixRouteDestinationDefinition,
-    type PrefixRouteModuleDefinition,
-    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../control/artifact/Service.js";
@@ -60,7 +58,7 @@ import {
 } from "../server/web/extension/application/Route.js";
 
 export interface ControlRouteExtensionPort {
-    modules(scope: "control" | "instance"): readonly PrefixRouteModuleDefinition[];
+    modules(scope: "control" | "instance"): readonly ControlPortDefinition[];
     onChange(listener: () => void): () => void;
 }
 
@@ -96,7 +94,8 @@ export class ControlRouteComposition {
     readonly #terminals = new TerminalSessionService();
     readonly #unsubscribeExtensions: () => void;
     readonly #unsubscribeInstances: () => void;
-    #snapshot: PrefixRouteSnapshot;
+    readonly #listeners = new Set<() => void>();
+    #hosts: readonly ControlHostDefinition[];
 
     constructor(options: ControlRouteCompositionOptions) {
         this.#options = options;
@@ -108,18 +107,22 @@ export class ControlRouteComposition {
                 instances: options.instances,
                 oauthApprovals: options.oauthApprovals,
             });
-        this.#snapshot = this.#build();
+        this.#hosts = this.#build();
         this.#unsubscribeExtensions =
-            options.extensionRoutes?.onChange(() => {
-                this.#snapshot = this.#build();
-            }) ?? (() => undefined);
-        this.#unsubscribeInstances = options.instances.onChange(() => {
-            this.#snapshot = this.#build();
-        });
+            options.extensionRoutes?.onChange(() => this.#rebuild()) ??
+            (() => undefined);
+        this.#unsubscribeInstances = options.instances.onChange(() =>
+            this.#rebuild(),
+        );
     }
 
-    snapshot(): PrefixRouteSnapshot {
-        return this.#snapshot;
+    hosts(): readonly ControlHostDefinition[] {
+        return this.#hosts;
+    }
+
+    onChange(listener: () => void): () => void {
+        this.#listeners.add(listener);
+        return () => this.#listeners.delete(listener);
     }
 
     connectionClosed(connectionId: string): void {
@@ -136,12 +139,17 @@ export class ControlRouteComposition {
         this.#terminals.close();
     }
 
-    #build(): PrefixRouteSnapshot {
+    #rebuild(): void {
+        this.#hosts = this.#build();
+        for (const listener of this.#listeners) listener();
+    }
+
+    #build(): readonly ControlHostDefinition[] {
         const descriptors = this.#options.instances.list();
-        const definitions: PrefixRouteDestinationDefinition[] = [
+        const definitions: ControlHostDefinition[] = [
             {
-                destination: "@control",
-                modules: [
+                host: "@control",
+                ports: [
                     createServiceRouteModule({
                         instanceCount: () =>
                             this.#options.instances.list().length,
@@ -199,7 +207,7 @@ export class ControlRouteComposition {
         ];
 
         for (const descriptor of descriptors) {
-            const modules: PrefixRouteModuleDefinition[] = [
+            const modules: ControlPortDefinition[] = [
                 createRuntimeRouteModule(
                     {
                         enabled: descriptor.enabled,
@@ -236,8 +244,8 @@ export class ControlRouteComposition {
                       ]),
             ];
             definitions.push({
-                destination: asInstanceName(descriptor.name),
-                modules: fenceInstanceGeneration(
+                host: asInstanceName(descriptor.name),
+                ports: fenceInstanceGeneration(
                     modules,
                     this.#options.instances,
                     descriptor,
@@ -245,15 +253,15 @@ export class ControlRouteComposition {
             });
         }
 
-        return PrefixRoute.snapshot(definitions);
+        return definitions;
     }
 }
 
 function fenceInstanceGeneration(
-    modules: readonly PrefixRouteModuleDefinition[],
+    modules: readonly ControlPortDefinition[],
     registry: InstanceRegistry,
     descriptor: NonNullable<ReturnType<InstanceRegistry["get"]>>,
-): PrefixRouteModuleDefinition[] {
+): ControlPortDefinition[] {
     return modules.map((module) => ({
         ...module,
         operations: module.operations.map((operation) => ({
@@ -270,5 +278,27 @@ function fenceInstanceGeneration(
                 }
             },
         })),
+        ...(module.streams === undefined
+            ? {}
+            : {
+                  streams: module.streams.map((operation) => ({
+                      ...operation,
+                      handle: async (stream, request, context) => {
+                          const generation = registry.acquireGeneration(
+                              descriptor.name,
+                              descriptor,
+                          );
+                          try {
+                              return await operation.handle(
+                                  stream,
+                                  request,
+                                  context,
+                              );
+                          } finally {
+                              generation.release();
+                          }
+                      },
+                  })),
+              }),
     }));
 }

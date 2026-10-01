@@ -1,30 +1,22 @@
-import type {
-    ArtifactPayloadDescriptor,
-    ControlInstanceAlertsConfig,
-    JsonValue,
+import {
+    Endpoint,
+    Rpc,
+    type ArtifactPayloadDescriptor,
+    type ControlInstanceAlertsConfig,
+    type JsonValue,
 } from "@portable-devshell/shared";
-
-import type { WorkerRpcClient } from "./rpc/Client.js";
 
 export const WORKER_PROTOCOL_VERSION = "1.0.0";
 export const WORKER_PROTOCOL_RANGE = Object.freeze({
     max: WORKER_PROTOCOL_VERSION,
     min: WORKER_PROTOCOL_VERSION,
 });
-/**
- * @compat worker-protocol-7
- * @removeAt 0.7.10
- */
-export const WORKER_LEGACY_PROTOCOL_VERSION = 7;
-
 export interface WorkerProtocolRange {
     min: string;
     max: string;
 }
 
 export interface WorkerHandshakeParams {
-    minProtocolVersion: number;
-    maxProtocolVersion: number;
     protocolRange: WorkerProtocolRange;
     clientName: string;
     clientVersion: string;
@@ -61,7 +53,6 @@ export interface WorkerHandshakeResult {
     workerVersion: string;
     workerSha256?: string;
     protocolVersion: string;
-    legacyProtocolVersion?: number;
     platform: {
         os: string;
         arch: string;
@@ -198,15 +189,17 @@ export interface WorkerArtifactDirectPushResult {
 }
 
 export class WorkerProtocolClient {
-    readonly #rpcClient: WorkerRpcClient;
+    readonly #endpoint: Endpoint;
+    readonly #workerHost: string;
 
-    constructor(rpcClient: WorkerRpcClient) {
-        this.#rpcClient = rpcClient;
+    constructor(endpoint: Endpoint, workerHost: string) {
+        this.#endpoint = endpoint;
+        this.#workerHost = workerHost;
     }
 
     async ping(): Promise<WorkerPingResult> {
         return asObjectResult<WorkerPingResult>(
-            await this.#rpcClient.request("worker.ping", {}),
+            await this.#request("core", "worker.ping", {}),
         );
     }
 
@@ -218,18 +211,12 @@ export class WorkerProtocolClient {
                 protocolVersion: string | number;
             }
         >(
-            await this.#rpcClient.request(
+            await this.#request(
+                "core",
                 "worker.handshake",
                 params as unknown as JsonValue,
             ),
         );
-        if (result.protocolVersion === WORKER_LEGACY_PROTOCOL_VERSION) {
-            return {
-                ...result,
-                legacyProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
-                protocolVersion: WORKER_PROTOCOL_VERSION,
-            };
-        }
         if (typeof result.protocolVersion !== "string") {
             throw new TypeError(
                 `Unsupported Worker protocol version ${String(result.protocolVersion)}.`,
@@ -247,7 +234,7 @@ export class WorkerProtocolClient {
 
     async listTools(): Promise<WorkerToolsListResult> {
         return asObjectResult<WorkerToolsListResult>(
-            await this.#rpcClient.request("tools.list", {}),
+            await this.#request("tool", "tools.list", {}),
         );
     }
 
@@ -255,12 +242,12 @@ export class WorkerProtocolClient {
         workspace: string,
     ): Promise<WorkerWorkspacePrepareResult> {
         return asObjectResult<WorkerWorkspacePrepareResult>(
-            await this.#rpcClient.request("workspace.prepare", { workspace }),
+            await this.#request("core", "workspace.prepare", { workspace }),
         );
     }
 
     async touchTemporaryDirectory(temporaryDirectory: string): Promise<void> {
-        await this.#rpcClient.request("workspace.touchTemporary", {
+        await this.#request("core", "workspace.touchTemporary", {
             temporaryDirectory,
         });
     }
@@ -270,7 +257,7 @@ export class WorkerProtocolClient {
         config: ControlInstanceAlertsConfig | undefined,
     ): Promise<WorkerAlertsReadResult> {
         return asObjectResult<WorkerAlertsReadResult>(
-            await this.#rpcClient.request("alerts.read", {
+            await this.#request("core", "alerts.read", {
                 config,
                 workspace,
             } as unknown as JsonValue),
@@ -280,7 +267,7 @@ export class WorkerProtocolClient {
     async configureAlerts(
         config: ControlInstanceAlertsConfig | undefined,
     ): Promise<void> {
-        await this.#rpcClient.request("alerts.configure", {
+        await this.#request("core", "alerts.configure", {
             config,
         } as unknown as JsonValue);
     }
@@ -289,24 +276,25 @@ export class WorkerProtocolClient {
         workspace: string,
         config: ControlInstanceAlertsConfig | undefined,
     ): Promise<void> {
-        await this.#rpcClient.request("alerts.touch", {
+        await this.#request("core", "alerts.touch", {
             config,
             workspace,
         } as unknown as JsonValue);
     }
 
     async releaseAlerts(workspace: string): Promise<void> {
-        await this.#rpcClient.request("alerts.touch", { workspace });
+        await this.#request("core", "alerts.touch", { workspace });
     }
 
     async closeToolSession(sessionId: string): Promise<void> {
-        await this.#rpcClient.request("tool.session.close", { sessionId });
+        await this.#request("tool", "tool.session.close", { sessionId });
     }
 
     async writeCommandSessionOutput(
         input: WorkerCommandSessionOutputInput,
     ): Promise<void> {
-        await this.#rpcClient.request(
+        await this.#request(
+            "core",
             "devshell.command.output",
             input as unknown as JsonValue,
         );
@@ -315,7 +303,8 @@ export class WorkerProtocolClient {
     async completeCommandSession(
         input: WorkerCommandSessionCompleteInput,
     ): Promise<void> {
-        await this.#rpcClient.request(
+        await this.#request(
+            "core",
             "devshell.command.complete",
             input as unknown as JsonValue,
         );
@@ -325,7 +314,8 @@ export class WorkerProtocolClient {
         input: WorkerExtensionResourcePrepareInput,
     ): Promise<WorkerExtensionResourcePrepareResult> {
         return asObjectResult<WorkerExtensionResourcePrepareResult>(
-            await this.#rpcClient.request(
+            await this.#request(
+                "core",
                 "extension.resource.prepare",
                 input as unknown as JsonValue,
             ),
@@ -337,17 +327,31 @@ export class WorkerProtocolClient {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactPayloadOpenResult> {
         return asObjectResult<WorkerArtifactPayloadOpenResult>(
-            await this.#rpcClient.request(
+            await this.#request(
+                "artifact",
                 "artifact.payload.open",
                 input as unknown as JsonValue,
-                undefined,
                 signal,
             ),
         );
     }
 
     async closeArtifactPayload(payloadId: string): Promise<void> {
-        await this.#rpcClient.request("artifact.payload.close", { payloadId });
+        await this.#request("artifact", "artifact.payload.close", { payloadId });
+    }
+
+    async readArtifactPayload(
+        input: WorkerArtifactPayloadReadInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactPayloadReadResult> {
+        return asObjectResult<WorkerArtifactPayloadReadResult>(
+            await this.#request(
+                "artifact",
+                "artifact.payload.read",
+                input as unknown as JsonValue,
+                signal,
+            ),
+        );
     }
 
     async beginArtifactReceive(
@@ -355,10 +359,10 @@ export class WorkerProtocolClient {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactReceiveBeginResult> {
         return asObjectResult<WorkerArtifactReceiveBeginResult>(
-            await this.#rpcClient.request(
+            await this.#request(
+                "artifact",
                 "artifact.receive.begin",
                 input as unknown as JsonValue,
-                undefined,
                 signal,
             ),
         );
@@ -368,14 +372,28 @@ export class WorkerProtocolClient {
         receiveId: string,
     ): Promise<WorkerArtifactReceiveFinishResult> {
         return asObjectResult<WorkerArtifactReceiveFinishResult>(
-            await this.#rpcClient.request("artifact.receive.finish", {
+            await this.#request("artifact", "artifact.receive.finish", {
                 receiveId,
             }),
         );
     }
 
     async abortArtifactReceive(receiveId: string): Promise<void> {
-        await this.#rpcClient.request("artifact.receive.abort", { receiveId });
+        await this.#request("artifact", "artifact.receive.abort", { receiveId });
+    }
+
+    async writeArtifactReceive(
+        input: WorkerArtifactReceiveWriteInput,
+        signal?: AbortSignal,
+    ): Promise<WorkerArtifactReceiveWriteResult> {
+        return asObjectResult<WorkerArtifactReceiveWriteResult>(
+            await this.#request(
+                "artifact",
+                "artifact.receive.write",
+                input as unknown as JsonValue,
+                signal,
+            ),
+        );
     }
 
     async openArtifactDirectReceive(
@@ -383,17 +401,17 @@ export class WorkerProtocolClient {
         signal?: AbortSignal,
     ): Promise<WorkerArtifactDirectReceiveOpenResult> {
         return asObjectResult<WorkerArtifactDirectReceiveOpenResult>(
-            await this.#rpcClient.request(
+            await this.#request(
+                "artifact",
                 "artifact.receive.direct.open",
                 input as unknown as JsonValue,
-                undefined,
                 signal,
             ),
         );
     }
 
     async closeArtifactDirectReceive(receiverId: string): Promise<void> {
-        await this.#rpcClient.request("artifact.receive.direct.close", {
+        await this.#request("artifact", "artifact.receive.direct.close", {
             receiverId,
         });
     }
@@ -402,7 +420,8 @@ export class WorkerProtocolClient {
         input: WorkerArtifactDirectPushInput,
     ): Promise<WorkerArtifactDirectPushResult> {
         return asObjectResult<WorkerArtifactDirectPushResult>(
-            await this.#rpcClient.request(
+            await this.#request(
+                "artifact",
                 "artifact.payload.direct.push",
                 input as unknown as JsonValue,
             ),
@@ -411,8 +430,22 @@ export class WorkerProtocolClient {
 
     async stop(): Promise<WorkerStopResult> {
         return asObjectResult<WorkerStopResult>(
-            await this.#rpcClient.request("worker.stop", {}),
+            await this.#request("core", "worker.stop", {}),
         );
+    }
+
+    async #request(
+        port: string,
+        method: string,
+        message?: JsonValue,
+        signal?: AbortSignal,
+    ): Promise<JsonValue> {
+        const rpc = new Rpc(await this.#endpoint.connect(this.#workerHost, port, signal));
+        try {
+            return ((await rpc.request(method, message, signal)) ?? null) as JsonValue;
+        } finally {
+            rpc.close();
+        }
     }
 }
 

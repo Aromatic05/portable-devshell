@@ -1,8 +1,4 @@
-import type { JsonValue } from "@portable-devshell/shared";
-
-import type { WorkerRpcBridge } from "./rpc/Bridge.js";
-import type { WorkerRpcClient } from "./rpc/Client.js";
-import type { WorkerRpcError } from "./rpc/Message.js";
+import { Endpoint, Event, Rpc, type JsonValue } from "@portable-devshell/shared";
 
 export interface WorkerTerminalDescriptor {
     cols: number;
@@ -63,23 +59,20 @@ export type WorkerTerminalNotification =
       };
 
 export class WorkerTerminalClient {
-    readonly #bridge: WorkerRpcBridge;
-    readonly #rpcClient: WorkerRpcClient;
+    readonly #endpoint: Endpoint;
+    readonly #events: Event;
+    readonly #workerHost: string;
 
-    constructor(rpcClient: WorkerRpcClient, bridge: WorkerRpcBridge) {
-        this.#bridge = bridge;
-        this.#rpcClient = rpcClient;
+    constructor(endpoint: Endpoint, workerHost: string) {
+        this.#endpoint = endpoint;
+        this.#workerHost = workerHost;
+        this.#events = new Event(endpoint.bind("terminal"));
     }
 
     async open(
         input: WorkerTerminalOpenInput,
     ): Promise<WorkerTerminalDescriptor> {
-        return asResult<WorkerTerminalDescriptor>(
-            await this.#rpcClient.request(
-                "terminal.open",
-                input as unknown as JsonValue,
-            ),
-        );
+        return await this.#request("terminal.open", input);
     }
 
     async attach(input: {
@@ -87,71 +80,63 @@ export class WorkerTerminalClient {
         generation: number;
         terminalId: string;
     }): Promise<WorkerTerminalAttachResult> {
-        return asResult<WorkerTerminalAttachResult>(
-            await this.#rpcClient.request(
-                "terminal.attach",
-                input as unknown as JsonValue,
-            ),
-        );
+        return await this.#request("terminal.attach", input);
     }
 
     async write(
         input: WorkerTerminalIdentity & { data: string },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
-        return asResult<WorkerTerminalIdentity & { accepted: boolean }>(
-            await this.#rpcClient.request(
-                "terminal.write",
-                input as unknown as JsonValue,
-            ),
-        );
+        return await this.#request("terminal.write", input);
     }
 
     async resize(
         input: WorkerTerminalIdentity & { cols: number; rows: number },
     ): Promise<WorkerTerminalIdentity & { accepted: boolean }> {
-        return asResult<WorkerTerminalIdentity & { accepted: boolean }>(
-            await this.#rpcClient.request(
-                "terminal.resize",
-                input as unknown as JsonValue,
-            ),
-        );
+        return await this.#request("terminal.resize", input);
     }
 
     async kill(
         input: WorkerTerminalIdentity,
     ): Promise<WorkerTerminalDescriptor> {
-        return asResult<WorkerTerminalDescriptor>(
-            await this.#rpcClient.request(
-                "terminal.kill",
-                input as unknown as JsonValue,
-            ),
-        );
+        return await this.#request("terminal.kill", input);
     }
 
     async list(): Promise<WorkerTerminalDescriptor[]> {
-        return asResult<WorkerTerminalDescriptor[]>(
-            await this.#rpcClient.request("terminal.list", {}),
-        );
+        return await this.#request("terminal.list", {});
     }
 
     onNotification(
         listener: (notification: WorkerTerminalNotification) => void,
     ): () => void {
-        return this.#bridge.onNotification((notification) => {
-            const parsed = parseNotification(
-                notification.method,
-                notification.params,
+        return this.#events.onEvent((name, message, peer) => {
+            if (peer.host !== this.#workerHost) return;
+            const notification = parseNotification(
+                `terminal.${name}`,
+                (message ?? null) as JsonValue,
             );
-            if (parsed !== undefined) listener(parsed);
+            if (notification !== undefined) listener(notification);
         });
     }
 
     onConnected(listener: () => void): () => void {
-        return this.#bridge.onConnected(listener);
+        return this.#endpoint.onTransportOpen(listener);
     }
 
-    onDisconnected(listener: (error: WorkerRpcError) => void): () => void {
-        return this.#bridge.onDisconnect(listener);
+    onDisconnected(listener: (error: Error) => void): () => void {
+        return this.#endpoint.onTransportClose((error) =>
+            listener(error ?? new Error("Worker transport closed.")),
+        );
+    }
+
+    async #request<T>(method: string, message: unknown): Promise<T> {
+        const rpc = new Rpc(
+            await this.#endpoint.connect(this.#workerHost, "terminal"),
+        );
+        try {
+            return (await rpc.request(method, message)) as T;
+        } finally {
+            rpc.close();
+        }
     }
 }
 

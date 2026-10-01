@@ -96,14 +96,11 @@ import type {
 import type { ToolCallQuery, ToolCallRecord } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 import { asInstanceName } from "../protocol/instance/Identity.js";
-import {
-    controlClientModule,
-    instanceClientModule,
-    type ClientConnection,
-    type OpenedClientStream,
-} from "../transport/ClientConnection.js";
+import { Endpoint } from "../transport/endpoint/Endpoint.js";
+import { Rpc } from "../transport/packet/Rpc.js";
+import { Stream, type MessageStream } from "../transport/packet/Stream.js";
+import type { ControlStreamMessage } from "../protocol/control/Port.js";
 import { InstanceEventStream } from "./connection/InstanceEventStream.js";
-import { getRequestCanceller } from "./connection/RequestTimeout.js";
 
 export interface ControlServiceStatus {
     instanceCount: number;
@@ -248,7 +245,7 @@ export interface ControlClients {
         ): Promise<{ deviceToken: string; instance: string }>;
     };
     runtime: {
-        openStart(instance: string): Promise<OpenedClientStream>;
+        openStart(instance: string): Promise<MessageStream>;
         readLogs(
             instance: string,
             query?: {
@@ -279,7 +276,7 @@ export interface ControlClients {
         attach(
             instance: string,
             input: TerminalAttachInput,
-        ): Promise<OpenedClientStream>;
+        ): Promise<MessageStream>;
         get(
             instance: string,
             identity: Pick<
@@ -378,33 +375,93 @@ export interface ControlClients {
     };
 }
 
+
+interface ModulePort {
+    request<T>(operation: string, payload?: unknown, signal?: AbortSignal): Promise<T>;
+    open(operation: string, payload?: unknown): Promise<MessageStream>;
+}
+
+interface InstanceModulePort {
+    request<T>(instance: string, operation: string, payload?: unknown, signal?: AbortSignal): Promise<T>;
+    open(instance: string, operation: string, payload?: unknown): Promise<MessageStream>;
+}
+
+function controlModule(endpoint: Endpoint, port: string): ModulePort {
+    return {
+        request: (operation, payload, signal) =>
+            request(endpoint, "@control", port, operation, payload, signal),
+        open: (operation, payload) =>
+            open(endpoint, "@control", port, operation, payload),
+    };
+}
+
+function instanceModule(endpoint: Endpoint, port: string): InstanceModulePort {
+    return {
+        request: (instance, operation, payload, signal) =>
+            request(endpoint, asInstanceName(instance), port, operation, payload, signal),
+        open: (instance, operation, payload) =>
+            open(endpoint, asInstanceName(instance), port, operation, payload),
+    };
+}
+
+async function request<T>(
+    endpoint: Endpoint,
+    host: string,
+    port: string,
+    operation: string,
+    payload?: unknown,
+    signal?: AbortSignal,
+): Promise<T> {
+    const rpc = new Rpc(await endpoint.connect(host, port));
+    try {
+        return await rpc.request<T>(operation, payload, signal);
+    } finally {
+        rpc.close();
+    }
+}
+
+async function open(
+    endpoint: Endpoint,
+    host: string,
+    port: string,
+    operation: string,
+    payload?: unknown,
+): Promise<MessageStream> {
+    const protocol = new Stream(await endpoint.connect(host, port));
+    const stream = await protocol.open(operation, payload);
+    const close = () => protocol.close();
+    stream.onClose(close);
+    stream.onCancel(close);
+    return stream;
+}
+
 export function createControlClients(
-    connection: ClientConnection,
+    endpoint: Endpoint,
     options: { clientKind: ControlClientKind },
 ): ControlClients {
-    const artifact = controlClientModule(connection, "artifact");
-    const cli = controlClientModule(connection, "cli");
-    const config = controlClientModule(connection, "config");
-    const context = controlClientModule(connection, "context");
-    const debug = controlClientModule(connection, "debug");
-    const extension = controlClientModule(connection, "extension");
-    const instance = controlClientModule(connection, "instance");
-    const mcp = controlClientModule(connection, "mcp");
-    const overview = controlClientModule(connection, "overview");
-    const reverse = controlClientModule(connection, "reverse");
-    const service = controlClientModule(connection, "service");
-    const contextMessage = instanceClientModule(connection, "contextMessage");
-    const conversation = instanceClientModule(connection, "conversation");
-    const conversationControl = controlClientModule(connection, "conversation");
-    const goal = instanceClientModule(connection, "goal");
-    const runtime = instanceClientModule(connection, "runtime");
-    const terminal = instanceClientModule(connection, "terminal");
-    const todo = instanceClientModule(connection, "todo");
-    const tool = instanceClientModule(connection, "tool");
-    const tui = controlClientModule(connection, "tui");
-    const web = controlClientModule(connection, "web");
-    const openRuntimeStart = (name: string): Promise<OpenedClientStream> =>
-        runtime.openStream(name, "start");
+    const artifact = controlModule(endpoint, "artifact");
+    const cli = controlModule(endpoint, "cli");
+    const config = controlModule(endpoint, "config");
+    const context = controlModule(endpoint, "context");
+    const debug = controlModule(endpoint, "debug");
+    const extension = controlModule(endpoint, "extension");
+    const instance = controlModule(endpoint, "instance");
+    const mcp = controlModule(endpoint, "mcp");
+    const overview = controlModule(endpoint, "overview");
+    const reverse = controlModule(endpoint, "reverse");
+    const service = controlModule(endpoint, "service");
+    const contextMessage = instanceModule(endpoint, "contextMessage");
+    const conversation = instanceModule(endpoint, "conversation");
+    const conversationControl = controlModule(endpoint, "conversation");
+    const goal = instanceModule(endpoint, "goal");
+    const runtime = instanceModule(endpoint, "runtime");
+    const terminal = instanceModule(endpoint, "terminal");
+    const todo = instanceModule(endpoint, "todo");
+    const tool = instanceModule(endpoint, "tool");
+    const tui = controlModule(endpoint, "tui");
+    const web = controlModule(endpoint, "web");
+    const openRuntimeStart = (name: string): Promise<MessageStream> =>
+        runtime.open(name, "start");
 
     return {
         artifact: {
@@ -429,9 +486,10 @@ export function createControlClients(
                 artifact.request("viewImage", { ...input, defaultInstance }),
         },
         cli: {
-            command: async (commandId, argv, commandOptions = {}) =>
-                await requestWithAbort(
-                    connection.request("@control", "cli", "command", {
+            command: (commandId, argv, commandOptions = {}) =>
+                cli.request(
+                    "command",
+                    {
                         commandId,
                         argv: [...argv],
                         ...(commandOptions.workingDirectory === undefined
@@ -440,9 +498,8 @@ export function createControlClients(
                                   workingDirectory:
                                       commandOptions.workingDirectory,
                               }),
-                    }),
+                    },
                     commandOptions.signal,
-                    "CLI command was aborted.",
                 ),
             commands: () => cli.request("commands"),
         },
@@ -539,7 +596,6 @@ export function createControlClients(
             snapshot: (name) => runtime.request(name, "snapshot"),
             start: async (name, startOptions = {}) =>
                 await startRuntime(
-                    connection,
                     openRuntimeStart,
                     name,
                     startOptions,
@@ -548,7 +604,7 @@ export function createControlClients(
             subscribe: async (name, fromSeq) =>
                 new InstanceEventStream(
                     asInstanceName(name),
-                    await runtime.openStream(name, "subscribe", { fromSeq }),
+                    await runtime.open(name, "subscribe", { fromSeq }),
                 ),
         },
         service: {
@@ -562,7 +618,7 @@ export function createControlClients(
             status: () => service.request("status"),
         },
         terminal: {
-            attach: (name, input) => terminal.openStream(name, "attach", input),
+            attach: (name, input) => terminal.open(name, "attach", input),
             get: (name, identity) => terminal.request(name, "get", identity),
             kill: (name, identity) => terminal.request(name, "kill", identity),
             list: (name) => terminal.request(name, "list"),
@@ -574,7 +630,7 @@ export function createControlClients(
             subscribe: async (name, fromSeq) =>
                 new InstanceEventStream(
                     asInstanceName(name),
-                    await todo.openStream(name, "subscribe", { fromSeq }),
+                    await todo.open(name, "subscribe", { fromSeq }),
                 ),
         },
         tool: {
@@ -588,9 +644,8 @@ export function createControlClients(
                 callOptions = {},
             ) =>
                 await streamToolCall(
-                    connection,
                     async () =>
-                        await tool.openStream(name, "callStream", {
+                        await tool.open(name, "callStream", {
                             input,
                             ...(callOptions.operationId === undefined
                                 ? {}
@@ -650,97 +705,59 @@ export function createControlClients(
 }
 
 async function streamToolCall(
-    connection: ClientConnection,
-    open: () => Promise<OpenedClientStream>,
+    openStream: () => Promise<MessageStream>,
     options: { onProgress?(progress: JsonValue): void; signal?: AbortSignal },
 ): Promise<JsonValue> {
-    let stream:
-        import("../transport/ClientConnection.js").ClientStream | undefined;
+    const stream = await openStream();
+    const offData = stream.onData((message) => {
+        const event = message as ControlStreamMessage;
+        if (event.name === "progress") options.onProgress?.(event.payload ?? null);
+    });
+    const aborted = () =>
+        void stream.cancel({ message: abortError(options.signal!, "Tool call was aborted.").message });
+    options.signal?.addEventListener("abort", aborted, { once: true });
     try {
-        const opened = await open();
-        stream = opened.stream;
-        const aborted = () => stream?.close();
-        options.signal?.addEventListener("abort", aborted, { once: true });
-        try {
-            if (options.signal?.aborted === true) {
-                stream.close();
-                throw abortError(options.signal, "Tool call was aborted.");
-            }
-            while (true) {
-                const event = await stream.nextEvent();
-                if (event.name === "tool.progress") {
-                    try {
-                        options.onProgress?.(event.payload ?? null);
-                    } catch (error) {
-                        console.warn(
-                            error instanceof Error
-                                ? error
-                                : new Error(String(error)),
-                        );
-                    }
-                    continue;
-                }
-                if (event.name === "stream.completed")
-                    return event.payload ?? null;
-                if (event.name === "stream.cancelled") {
-                    connection.throwRemoteError(event.error);
-                    throw new Error("Tool call stream was cancelled.");
-                }
-            }
-        } finally {
-            options.signal?.removeEventListener("abort", aborted);
-        }
-    } catch (error) {
-        throw connection.mapError(error);
+        return (await streamTerminal(stream)) as JsonValue;
     } finally {
-        stream?.close();
+        offData();
+        options.signal?.removeEventListener("abort", aborted);
     }
 }
 
 async function startRuntime(
-    connection: ClientConnection,
-    openStart: (instance: string) => Promise<OpenedClientStream>,
+    openStart: (instance: string) => Promise<MessageStream>,
     instance: string,
     options: RuntimeStartOptions,
 ): Promise<InstanceSnapshot> {
-    let stream:
-        import("../transport/ClientConnection.js").ClientStream | undefined;
+    const stream = await openStart(instance);
+    options.onRequestId?.(stream.id);
+    const offData = stream.onData((message) => {
+        const event = message as ControlStreamMessage;
+        if (event.name !== "output") return;
+        const payload = record(event.payload);
+        if (typeof payload?.chunk === "string") options.onOutput?.(payload.chunk);
+    });
+    const aborted = () =>
+        void stream.cancel({ message: abortError(options.signal!, "Runtime start was aborted.").message });
+    options.signal?.addEventListener("abort", aborted, { once: true });
     try {
-        const opened = await openStart(instance);
-        stream = opened.stream;
-        options.onRequestId?.(stream.id);
-        const aborted = () => stream?.close();
-        options.signal?.addEventListener("abort", aborted, { once: true });
-        try {
-            if (options.signal?.aborted === true) {
-                stream.close();
-                throw abortError(options.signal, "Runtime start was aborted.");
-            }
-            while (true) {
-                const event = await stream.nextEvent();
-                if (event.name === "runtime.output") {
-                    const payload = record(event.payload);
-                    if (typeof payload?.chunk === "string") {
-                        options.onOutput?.(payload.chunk);
-                    }
-                    continue;
-                }
-                if (event.name === "stream.completed") {
-                    return readInstanceSnapshot(event.payload);
-                }
-                if (event.name === "stream.cancelled") {
-                    connection.throwRemoteError(event.error);
-                    throw new Error("Runtime start was cancelled.");
-                }
-            }
-        } finally {
-            options.signal?.removeEventListener("abort", aborted);
-        }
-    } catch (error) {
-        throw connection.mapError(error);
+        return readInstanceSnapshot(
+            (await streamTerminal(stream)) as JsonValue | undefined,
+        );
     } finally {
-        stream?.close();
+        offData();
+        options.signal?.removeEventListener("abort", aborted);
     }
+}
+
+function streamTerminal(stream: MessageStream): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+        stream.onClose(resolve);
+        stream.onCancel((error) => reject(Object.assign(
+            new Error(error?.message ?? "Stream cancelled."),
+            error?.code === undefined ? {} : { code: error.code },
+        )));
+    });
 }
 
 export function readInstanceSnapshot(
@@ -799,32 +816,4 @@ function abortError(signal: AbortSignal, fallbackMessage: string): Error {
     return signal.reason instanceof Error
         ? signal.reason
         : new Error(fallbackMessage);
-}
-async function requestWithAbort<T>(
-    request: Promise<T>,
-    signal: AbortSignal | undefined,
-    fallbackMessage: string,
-): Promise<T> {
-    if (signal === undefined) return await request;
-    if (signal.aborted) {
-        const reason =
-            signal.reason instanceof Error
-                ? signal.reason
-                : new Error(fallbackMessage);
-        getRequestCanceller(request)?.(reason);
-        throw reason;
-    }
-    const cancel = getRequestCanceller(request);
-    const aborted = () =>
-        cancel?.(
-            signal.reason instanceof Error
-                ? signal.reason
-                : new Error(fallbackMessage),
-        );
-    signal.addEventListener("abort", aborted, { once: true });
-    try {
-        return await request;
-    } finally {
-        signal.removeEventListener("abort", aborted);
-    }
 }

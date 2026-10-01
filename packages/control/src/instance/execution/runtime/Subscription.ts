@@ -3,8 +3,8 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     InstanceEvent,
     JsonValue,
-    PrefixRouteContext,
-    PrefixRouteStream,
+    ControlPortContext,
+    MessageStream,
 } from "@portable-devshell/shared";
 
 export interface RuntimeSubscription {
@@ -14,7 +14,7 @@ export interface RuntimeSubscription {
     instanceName: string;
     nextSeq: number;
     requestId: string;
-    stream: PrefixRouteStream;
+    stream: MessageStream;
 }
 
 interface RuntimeEventWatch {
@@ -45,7 +45,8 @@ export class RuntimeSubscriptionManager {
     }
 
     async subscribe(
-        context: PrefixRouteContext,
+        stream: MessageStream,
+        context: ControlPortContext,
         instanceName: string,
         instance: RuntimeSubscription["instance"],
         fromSeq: number,
@@ -68,20 +69,21 @@ export class RuntimeSubscriptionManager {
         }
 
         const key = this.#key(context.connectionId, context.requestId);
-        const stream = await context.openStream(
-            {
+        await stream.send({
+            name: "seed",
+            payload: {
                 events: (eventFilter === undefined
                     ? slice.events
                     : slice.events.filter(eventFilter)) as unknown as JsonValue,
                 lastSeq: slice.lastSeq,
             },
-            {
-                onClose: () => {
-                    this.#subscriptions.delete(key);
-                    this.#stopPollingWhenIdle();
-                },
-            },
-        );
+        });
+        const close = () => {
+            this.#subscriptions.delete(key);
+            this.#stopPollingWhenIdle();
+        };
+        stream.onClose(close);
+        stream.onCancel(close);
 
         this.#subscriptions.set(key, {
             connectionId: context.connectionId,
@@ -180,17 +182,16 @@ export class RuntimeSubscriptionManager {
                     subscription.nextSeq,
                 );
                 if (slice.kind === "gap") {
-                    await subscription.stream.emit(
-                        "gap",
-                        {
+                    await subscription.stream.send({
+                        name: "gap",
+                        payload: {
                             instance: subscription.instanceName,
                             latestSeq: slice.lastSeq,
                             oldestAvailableSeq: slice.nextSeq,
                             requestedFromSeq: subscription.nextSeq,
                         },
-                        slice.lastSeq,
-                        "stream",
-                    );
+                        seq: slice.lastSeq,
+                    });
                     subscription.nextSeq = slice.nextSeq;
                     continue;
                 }
@@ -201,13 +202,11 @@ export class RuntimeSubscriptionManager {
                         !subscription.eventFilter(event)
                     )
                         continue;
-                    const [module, operation] = splitEventType(event.type);
-                    await subscription.stream.emit(
-                        operation,
-                        event as unknown as JsonValue,
-                        event.seq,
-                        module,
-                    );
+                    await subscription.stream.send({
+                        name: "event",
+                        payload: event as unknown as JsonValue,
+                        seq: event.seq,
+                    });
                 }
                 subscription.nextSeq = slice.lastSeq + 1;
             } catch {
@@ -263,16 +262,4 @@ export class RuntimeSubscriptionManager {
         clearInterval(this.#timer);
         this.#timer = undefined;
     }
-}
-
-function splitEventType(type: string): [module: string, operation: string] {
-    const segments = type.split(".");
-    if (
-        segments.length < 2 ||
-        segments.some((segment) => !/^[A-Za-z][A-Za-z0-9]*$/u.test(segment))
-    ) {
-        throw new Error(`Invalid instance event type: ${type}`);
-    }
-    if (segments.length === 2) return [segments[0]!, segments[1]!];
-    return ["instanceEvent", "published"];
 }

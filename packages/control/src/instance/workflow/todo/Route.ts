@@ -3,8 +3,9 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     InstanceEvent,
     JsonValue,
-    PrefixRouteContext,
-    PrefixRouteModuleDefinition,
+    ControlPortContext,
+    ControlPortDefinition,
+    MessageStream,
     TodoReadInput,
 } from "@portable-devshell/shared";
 import { routeModule } from "../../../server/Route.js";
@@ -12,7 +13,8 @@ import type { TodoService } from "./Service.js";
 
 export interface TodoRouteSubscriptionPort {
     subscribe(
-        context: PrefixRouteContext,
+        stream: MessageStream,
+        context: ControlPortContext,
         instanceName: string,
         instance: Pick<WorkerInstance, "subscribe">,
         fromSeq: number,
@@ -29,7 +31,7 @@ export interface TodoRouteInstancePort {
 export function createTodoRouteModule(
     instance: TodoRouteInstancePort,
     subscriptions: TodoRouteSubscriptionPort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("todo", {
         get: async (request) =>
             ({
@@ -40,16 +42,16 @@ export function createTodoRouteModule(
             await instance.todo.delete(readTodoTaskId(request.payload));
             return {};
         },
-        subscribe: async (request, context) => {
+    }, {
+        subscribe: async (stream, request, context) =>
             await subscriptions.subscribe(
+                stream,
                 context,
                 instance.name,
                 instance.worker,
                 readTodoSubscriptionFromSeq(request.payload),
                 (event) => event.type.startsWith("todo."),
-            );
-            return undefined;
-        },
+            ),
     });
 }
 

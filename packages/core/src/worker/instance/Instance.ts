@@ -1,5 +1,7 @@
 import {
     type ApprovalDecision,
+    type Endpoint,
+    type MessageStream,
     type ApprovalRequest,
     createError,
     errorCodes,
@@ -55,7 +57,6 @@ import type {
     WorkerHandshakeResult,
     WorkerProtocolClient,
 } from "../protocol/Client.js";
-import type { WorkerRpcBridge } from "../protocol/rpc/Bridge.js";
 import type { Channel } from "@portable-devshell/shared";
 import type { WorkerToolCatalog } from "../tool/Catalog.js";
 import type { WorkerToolInvoker } from "../tool/Invoker.js";
@@ -68,8 +69,6 @@ import type {
     WorkerTerminalNotification,
     WorkerTerminalOpenInput,
 } from "../protocol/Terminal.js";
-import type { WorkerRpcError } from "../protocol/rpc/Message.js";
-import type { FrameStream } from "@portable-devshell/shared/transport/frame";
 import type { AuditToolCallHistory } from "../../storage/audit/ToolCallHistory.js";
 import type { InstanceStateMachine } from "../../instance/state/Machine.js";
 import type { InstanceSnapshot } from "../../instance/state/Snapshot.js";
@@ -93,7 +92,7 @@ interface WorkerInstanceDependencies {
     eventBuffer: InstanceEventBuffer;
     logStore: LogStoreInstance;
     protocolClient: WorkerProtocolClient;
-    rpcBridge: WorkerRpcBridge;
+    endpoint: Endpoint;
     stateMachine: InstanceStateMachine;
     terminalClient: WorkerTerminalClient;
     transportConnection: WorkerTransportConnection;
@@ -138,16 +137,19 @@ export class WorkerInstance {
             catalog: this.#catalog,
             config: this.#config,
             protocolClient: dependencies.protocolClient,
-            rpcBridge: dependencies.rpcBridge,
+            endpoint: dependencies.endpoint,
             snapshot: () => this.snapshot(),
             transportConnection: dependencies.transportConnection,
         });
+        const workerHost = `${this.#config.name}-worker`;
         this.#commandSessions = new WorkerCommandSessionBridge(
-            dependencies.rpcBridge,
+            dependencies.endpoint,
+            workerHost,
             dependencies.protocolClient,
         );
         this.#services = new WorkerTransportServiceClient(
-            dependencies.transportConnection,
+            dependencies.endpoint,
+            workerHost,
         );
         this.#terminalClient = dependencies.terminalClient;
         this.#lifecycle = new WorkerInstanceLifecycle({
@@ -161,7 +163,6 @@ export class WorkerInstance {
         this.#artifact = new WorkerInstanceArtifact({
             assertReady: () => this.#assertReady(),
             protocolClient: dependencies.protocolClient,
-            transportConnection: dependencies.transportConnection,
         });
         this.#audit = new WorkerInstanceAudit({
             appendEvent: (type, data) => this.#state.appendEvent(type, data),
@@ -222,7 +223,7 @@ export class WorkerInstance {
     async connectTcp(
         input: WorkerTcpConnectInput,
         signal?: AbortSignal,
-    ): Promise<FrameStream> {
+    ): Promise<MessageStream> {
         this.#assertReady();
         return await this.#services.connectTcp(input, signal);
     }
@@ -230,7 +231,7 @@ export class WorkerInstance {
     async execProcess(
         input: WorkerExecProcessInput,
         signal?: AbortSignal,
-    ): Promise<FrameStream> {
+    ): Promise<MessageStream> {
         this.#assertReady();
         return await this.#services.execProcess(input, signal);
     }
@@ -309,11 +310,11 @@ export class WorkerInstance {
         return this.#terminalClient.onNotification(listener);
     }
 
-    onRpcConnected(listener: () => void): () => void {
+    onTransportConnected(listener: () => void): () => void {
         return this.#terminalClient.onConnected(listener);
     }
 
-    onRpcDisconnected(listener: (error: WorkerRpcError) => void): () => void {
+    onTransportDisconnected(listener: (error: Error) => void): () => void {
         return this.#terminalClient.onDisconnected(listener);
     }
 
@@ -631,8 +632,8 @@ export class WorkerInstance {
         return this.#connection.handshake;
     }
 
-    async reconnectRpc(): Promise<InstanceSnapshot> {
-        return await this.#lifecycle.reconnectRpc();
+    async reconnectTransport(): Promise<InstanceSnapshot> {
+        return await this.#lifecycle.reconnectTransport();
     }
 
     #assertReady(): void {

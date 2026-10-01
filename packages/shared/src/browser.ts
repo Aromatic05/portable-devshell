@@ -68,22 +68,21 @@ export type {
 } from "./client/connection/InstanceEventStream.js";
 export { createError, errorMessage, toControlError } from "./protocol/Error.js";
 export type { ControlErrorBody } from "./protocol/Error.js";
-export {
-    ClientConnection,
-    ClientStream,
-    controlClientModule,
-    instanceClientModule,
-} from "./transport/ClientConnection.js";
+export { Endpoint } from "./transport/endpoint/Endpoint.js";
+export type { EndpointOptions } from "./transport/endpoint/Endpoint.js";
+export type { Channel } from "./transport/endpoint/channel/Channel.js";
+export { WebChannel } from "./transport/endpoint/channel/Web.js";
 export type {
-    ClientConnectionOptions,
-    ClientEvent,
-} from "./transport/ClientConnection.js";
-export type { Channel } from "./transport/protocol/Channel.js";
-export { WebSocketChannel } from "./transport/websocket/WebSocketChannel.js";
-export type {
-    WebSocketChannelConnectOptions,
+    WebChannelConnectOptions,
     WebSocketClientLike,
-} from "./transport/websocket/WebSocketChannel.js";
+} from "./transport/endpoint/channel/Web.js";
+export { Connection, Port, Route } from "./transport/endpoint/route/Route.js";
+export type { Address, Envelope, Host, Packet, PortName } from "./transport/envelope/Codec.js";
+export { Rpc } from "./transport/packet/Rpc.js";
+export type { RpcContext, RpcError, RpcHandler, RpcPacket } from "./transport/packet/Rpc.js";
+export { Event } from "./transport/packet/Event.js";
+export { MessageStream, Stream } from "./transport/packet/Stream.js";
+export type { Message } from "./transport/packet/Packet.js";
 export {
     CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_RANGE,

@@ -5,7 +5,7 @@ import type {
     InstanceCreateSummary,
     InstanceListEntry,
     JsonValue,
-    PrefixRouteModuleDefinition,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
 
@@ -33,7 +33,7 @@ export interface InstanceRouteModuleOptions {
 
 export function createInstanceRouteModule(
     options: InstanceRouteModuleOptions,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     const create = () =>
         requirePort(options.create, "Instance creation is not available.");
     const editor = () =>

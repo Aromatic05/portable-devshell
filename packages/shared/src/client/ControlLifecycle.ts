@@ -18,16 +18,14 @@ import { createConnection } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { createError } from "../../protocol/Error.js";
-import { CONTROL_PROTOCOL_RANGE } from "../../protocol/control/ControlProtocol.js";
-import type { JsonValue } from "../../protocol/JsonValue.js";
-import { ClientConnection } from "../ClientConnection.js";
-import { SocketChannel } from "./SocketChannel.js";
+import { Endpoint } from "../transport/endpoint/Endpoint.js";
+import { LocalChannel } from "../transport/endpoint/channel/Local.js";
+import { Rpc } from "../transport/packet/Rpc.js";
 import {
     ControlPathHome,
     ControlSocketFile,
     type ControlSocketFilePort,
-} from "./Endpoint.js";
+} from "./connection/LocalPath.js";
 
 export interface ControlDaemonLaunchOptions {
     daemonModulePath: string;
@@ -56,7 +54,7 @@ interface ControlLifecycleProbe {
 }
 
 export interface ControlLifecycleRpcClient {
-    request(operation: "shutdown" | "status"): Promise<JsonValue>;
+    request(operation: "shutdown" | "status"): Promise<unknown>;
 }
 
 export interface ControlLoggerPort {
@@ -393,7 +391,7 @@ export class ControlLifecycleManager {
                 !isJsonRecord(result) ||
                 typeof result.instanceCount !== "number"
             ) {
-                throw new Error("Invalid service.status response.");
+                throw new Error("Invalid core.status response.");
             }
             const reportedPid = isPositiveInteger(result.pid)
                 ? result.pid
@@ -567,9 +565,9 @@ function createSocketControlLifecycleRpcClient(
 ): ControlLifecycleRpcClient {
     return {
         request: async (operation) => {
-            const connection = new ClientConnection({
+            const endpoint = new Endpoint({
                 connectChannel: async (signal) =>
-                    await SocketChannel.connect(socketPath, {
+                    await LocalChannel.connect(socketPath, {
                         signal,
                         socketFactory: (path) => {
                             const socket = createConnection(path);
@@ -583,23 +581,13 @@ function createSocketControlLifecycleRpcClient(
                             return socket;
                         },
                     }),
-                mapError: toError,
-                mapRemoteError: (error) => createError(error),
-                mode: "persistent",
-                peer: "cli",
             });
+            const rpc = new Rpc(await endpoint.connect("@control", "core"));
             try {
-                await connection.request("@control", "service", "hello", {
-                    clientKind: "cli",
-                    protocolRange: CONTROL_PROTOCOL_RANGE,
-                });
-                return await connection.request(
-                    "@control",
-                    "service",
-                    operation,
-                );
+                return (await rpc.request(operation)) ?? null;
             } finally {
-                connection.close();
+                rpc.close();
+                endpoint.close();
             }
         },
     };
@@ -670,11 +658,11 @@ function isFileMissingError(error: unknown): error is NodeJS.ErrnoException {
     );
 }
 
-function isJsonRecord(value: JsonValue): value is { [key: string]: JsonValue } {
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isPositiveInteger(value: JsonValue | undefined): value is number {
+function isPositiveInteger(value: unknown): value is number {
     return (
         typeof value === "number" && Number.isSafeInteger(value) && value > 0
     );
@@ -798,8 +786,4 @@ function tailLines(source: string, limit: number): string {
         .split("\n")
         .filter((line) => line.length > 0);
     return lines.length === 0 ? "" : lines.slice(-limit).join("\n");
-}
-
-function toError(error: unknown): Error {
-    return error instanceof Error ? error : new Error(String(error));
 }

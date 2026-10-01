@@ -3,7 +3,7 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type PrefixRouteEvent,
+    type ControlStreamMessage,
 } from "@portable-devshell/shared";
 
 export class RuntimeInteractiveSession implements WorkerCommandInteractiveSession {
@@ -16,7 +16,7 @@ export class RuntimeInteractiveSession implements WorkerCommandInteractiveSessio
         this.#writeOutput = writeOutput;
     }
 
-    accept(event: PrefixRouteEvent): void {
+    accept(event: ControlStreamMessage): void {
         if (this.#closed) {
             return;
         }

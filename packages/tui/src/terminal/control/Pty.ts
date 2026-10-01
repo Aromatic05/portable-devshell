@@ -1,5 +1,6 @@
 import type {
-    ClientEvent,
+    ControlStreamMessage,
+    MessageStream,
     TerminalAttachInput,
     TerminalOpenInput,
     TerminalOpenResult,
@@ -16,25 +17,11 @@ import type {
 
 const OPERATION_ACK_TIMEOUT_MS = 30_000;
 
-export interface TuiControlTerminalStream {
-    close(): void;
-    nextEvent(): Promise<ClientEvent>;
-    send(
-        operation: string,
-        payload?: import("@portable-devshell/shared").JsonValue,
-    ): Promise<void>;
-}
-
-export interface TuiOpenedTerminalStream {
-    acknowledgement: ClientEvent;
-    stream: TuiControlTerminalStream;
-}
-
 export interface TuiControlTerminalClient {
     attach(
         instance: string,
         input: TerminalAttachInput,
-    ): Promise<TuiOpenedTerminalStream>;
+    ): Promise<MessageStream>;
     kill(
         instance: string,
         identity: TerminalVersionedIdentity,
@@ -141,7 +128,7 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     #closed = false;
     #exited = false;
     #operationTail = Promise.resolve();
-    #stream?: TuiControlTerminalStream;
+    #stream?: MessageStream;
 
     constructor(options: {
         client: TuiControlTerminalClient;
@@ -208,19 +195,23 @@ class TuiControlTerminalPty implements TuiTerminalPty {
         // durable server output from the beginning so reopening the terminal
         // restores the screen instead of resuming after unseen output.
         const fromSeq = 0;
-        const opened = await this.#client.attach(this.#instance, {
+        const stream = await this.#client.attach(this.#instance, {
             fromSeq,
             generation: identity.generation,
             terminalId: identity.terminalId,
         });
         if (this.#closed) {
-            opened.stream.close();
+            void stream.close();
             return;
         }
-        const acknowledged = readSession(opened.acknowledgement);
+        const seed = await stream.readMessage();
+        if (seed.type !== "data") throw new Error("Terminal stream closed before seed.");
+        const event = seed.message as ControlStreamMessage;
+        if (event.name !== "seed") throw new Error("Terminal stream seed is missing.");
+        const acknowledged = readSession(event);
         this.#writeIdentity({ ...acknowledged, latestSeq: fromSeq });
-        this.#stream = opened.stream;
-        void this.#consume(opened.stream).catch((error: unknown) => {
+        this.#stream = stream;
+        void this.#consume(stream).catch((error: unknown) => {
             if (!this.#closed)
                 this.#fail(asError(error), this.#pending.size > 0);
         });
@@ -254,12 +245,15 @@ class TuiControlTerminalPty implements TuiTerminalPty {
                     this.#pending.set(clientSeq, { reject, resolve, timer });
                 });
                 try {
-                    await stream.send(operation, {
-                        clientSeq,
-                        generation: identity.generation,
-                        terminalId: identity.terminalId,
-                        version: identity.version,
-                        ...payload,
+                    await stream.send({
+                        name: operation,
+                        payload: {
+                            clientSeq,
+                            generation: identity.generation,
+                            terminalId: identity.terminalId,
+                            version: identity.version,
+                            ...payload,
+                        },
                     });
                     await acknowledged;
                 } catch (error) {
@@ -277,61 +271,52 @@ class TuiControlTerminalPty implements TuiTerminalPty {
             });
     }
 
-    async #consume(stream: TuiControlTerminalStream): Promise<void> {
+    async #consume(stream: MessageStream): Promise<void> {
         while (!this.#closed && this.#stream === stream) {
-            const event = await stream.nextEvent();
-            if (event.name === "terminal.output") {
+            const next = await stream.readMessage();
+            if (next.type === "close") {
+                this.#writeIdentity(readCompletedSession(next.message));
+                this.#stream = undefined;
+                return;
+            }
+            if (next.type === "fin") continue;
+            const event = next.message as ControlStreamMessage;
+            if (event.name === "output") {
                 const frame = readOutput(event);
                 const identity = this.#requireIdentity();
                 if (frame.seq <= identity.latestSeq) continue;
-                if (frame.seq !== identity.latestSeq + 1) {
+                if (frame.seq !== identity.latestSeq + 1)
                     throw new Error(
                         `Terminal output gap: expected ${identity.latestSeq + 1}, received ${frame.seq}.`,
                     );
-                }
                 const updated = { ...identity, latestSeq: frame.seq };
                 this.#writeIdentity(updated);
                 this.#emitData(frame.data);
-                await stream.send("ack", {
-                    generation: updated.generation,
-                    terminalId: updated.terminalId,
-                    throughSeq: frame.seq,
-                    version: updated.version,
+                await stream.send({
+                    name: "ack",
+                    payload: {
+                        generation: updated.generation,
+                        terminalId: updated.terminalId,
+                        throughSeq: frame.seq,
+                        version: updated.version,
+                    },
                 });
                 continue;
             }
-            if (
-                event.name === "terminal.inputAccepted" ||
-                event.name === "terminal.resized"
-            ) {
+            if (event.name === "inputAccepted" || event.name === "resized") {
                 this.#acceptOperation(event);
                 continue;
             }
-            if (event.name === "terminal.exit") {
+            if (event.name === "exit") {
                 const exit = readExit(event);
                 const identity = this.#requireIdentity();
-                this.#writeIdentity({
-                    ...identity,
-                    state: "exited",
-                });
+                this.#writeIdentity({ ...identity, state: "exited" });
                 this.#emitExit(exit);
-                continue;
-            }
-            if (event.name === "stream.completed") {
-                this.#writeIdentity(readCompletedSession(event));
-                this.#stream = undefined;
-                stream.close();
-                return;
-            }
-            if (event.name === "stream.cancelled") {
-                throw new Error(
-                    event.error?.message ?? "Terminal stream was cancelled.",
-                );
             }
         }
     }
 
-    #acceptOperation(event: ClientEvent): void {
+    #acceptOperation(event: ControlStreamMessage): void {
         const payload = readRecord(event.payload);
         const clientSeq = readInteger(payload.clientSeq, "clientSeq");
         const identity = this.#requireIdentity();
@@ -392,13 +377,13 @@ class TuiControlTerminalPty implements TuiTerminalPty {
     }
 }
 
-function readSession(event: ClientEvent): TerminalSessionDescriptor {
+function readSession(event: ControlStreamMessage): TerminalSessionDescriptor {
     const payload = readRecord(event.payload);
     return payload.session as unknown as TerminalSessionDescriptor;
 }
 
-function readCompletedSession(event: ClientEvent): TerminalSessionDescriptor {
-    const payload = readRecord(event.payload);
+function readCompletedSession(value: unknown): TerminalSessionDescriptor {
+    const payload = readRecord(value);
     return {
         cols: readInteger(payload.cols, "cols"),
         createdAt: readString(payload.createdAt, "createdAt"),
@@ -412,7 +397,7 @@ function readCompletedSession(event: ClientEvent): TerminalSessionDescriptor {
     };
 }
 
-function readOutput(event: ClientEvent): { data: string; seq: number } {
+function readOutput(event: ControlStreamMessage): { data: string; seq: number } {
     const payload = readRecord(event.payload);
     return {
         data: readString(payload.data, "data"),
@@ -420,7 +405,7 @@ function readOutput(event: ClientEvent): { data: string; seq: number } {
     };
 }
 
-function readExit(event: ClientEvent): { exitCode: number; signal?: number } {
+function readExit(event: ControlStreamMessage): { exitCode: number; signal?: number } {
     const payload = readRecord(event.payload);
     const signal = payload.signal;
     return {

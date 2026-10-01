@@ -11,7 +11,6 @@ import type {
     WorkerTransportConnection,
 } from "../transport/Transport.js";
 import {
-    WORKER_LEGACY_PROTOCOL_VERSION,
     WORKER_PROTOCOL_RANGE,
     type WorkerHandshakeParams,
 } from "../protocol/Client.js";
@@ -91,8 +90,6 @@ export function resolveWorkerInstanceConfig(
         effectiveSecurityMode: config.effectiveSecurityMode ?? "disabled",
         eventBufferSize: config.eventBufferSize ?? 100,
         handshake: {
-            minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
-            maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
             protocolRange: WORKER_PROTOCOL_RANGE,
             clientName: "portable-devshell",
             clientVersion: "0.0.0",

@@ -13,7 +13,6 @@ import express, {
     type Response,
 } from "express";
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 
 import type { McpAuthConfig } from "../auth/Config.js";
 import { McpAuthProviderToken } from "../auth/Provider.js";
@@ -37,7 +36,7 @@ export interface HttpHostOptions {
     shutdownGraceMs?: number;
 }
 
-const MCP_MAX_REQUEST_BODY_BYTES = TRANSPORT_MAX_FRAME_SIZE;
+const MCP_MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
 const MCP_HEADERS_TIMEOUT_MS = 10_000;
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_KEEP_ALIVE_TIMEOUT_MS = 5_000;

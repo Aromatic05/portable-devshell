@@ -4,8 +4,8 @@ import {
     type ExtensionRemoveResult,
     type ExtensionRuntimeRecord,
     type JsonValue,
-    type PrefixRouteContext,
-    type PrefixRouteModuleDefinition,
+    type ControlPortContext,
+    type ControlPortDefinition,
 } from "@portable-devshell/shared";
 import type {
     ExtensionJsonValue,
@@ -119,7 +119,7 @@ export class ControlExtensionRouteService {
         this.#extensions = extensions;
     }
 
-    modules(scope: ControlRouteScope): readonly PrefixRouteModuleDefinition[] {
+    modules(scope: ControlRouteScope): readonly ControlPortDefinition[] {
         const grouped = new Map<
             string,
             Map<string, { declaration: ControlRouteDeclaration; id: string }>
@@ -176,7 +176,7 @@ export class ControlExtensionRouteService {
     async #invoke(
         id: string,
         request: { payload?: JsonValue; seq?: number },
-        context: PrefixRouteContext,
+        context: ControlPortContext,
     ): Promise<JsonValue | undefined> {
         const { lease, registration } =
             await this.#extensions.acquireRegistration(routes.id, id);
@@ -197,7 +197,7 @@ export class ControlExtensionRouteService {
                     ...(request.seq === undefined ? {} : { seq: request.seq }),
                 }),
                 Object.freeze({
-                    destination: context.destination,
+                    destination: context.host,
                     peer: context.peer,
                     ...(context.protocolVersion === undefined
                         ? {}
@@ -270,7 +270,7 @@ export function validateControlRouteBinding(
 
 export function createExtensionRouteModule(
     port: ExtensionControlPort,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("extension", {
         list: async () => (await port.list()) as unknown as JsonValue,
         get: async (request) =>
@@ -327,7 +327,7 @@ async function requireRecord(
     });
 }
 
-function requireLocalManagement(context: PrefixRouteContext): void {
+function requireLocalManagement(context: ControlPortContext): void {
     if (isLocalOwnerCli(context)) return;
     throw createError({
         code: errorCodes.controlExtensionAccessDenied,
@@ -337,7 +337,7 @@ function requireLocalManagement(context: PrefixRouteContext): void {
     });
 }
 
-function isLocalOwnerCli(context: PrefixRouteContext): boolean {
+function isLocalOwnerCli(context: ControlPortContext): boolean {
     return context.peer === "cli" && context.subject?.kind === "local-owner";
 }
 

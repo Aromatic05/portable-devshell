@@ -130,7 +130,7 @@ export class WorkerInstanceLifecycle {
             lastErrorCode: undefined,
             lastErrorMessage: undefined,
         });
-        this.#connection.closeBridge();
+        this.#connection.closeTransport();
         this.#connection.clearHandshake();
         try {
             const result = await this.#requireCommandClient().stop();
@@ -177,9 +177,9 @@ export class WorkerInstanceLifecycle {
         );
     }
 
-    async reconnectRpc(): Promise<InstanceSnapshot> {
+    async reconnectTransport(): Promise<InstanceSnapshot> {
         return await this.#runExclusive(
-            async () => await this.#connection.reconnectRpc(),
+            async () => await this.#connection.reconnectTransport(),
         );
     }
 
@@ -232,7 +232,7 @@ export class WorkerInstanceLifecycle {
         switch (status.daemonState) {
             case "stopped":
             case "stale":
-                this.#connection.closeBridge();
+                this.#connection.closeTransport();
                 this.#connection.clearHandshake();
                 return await this.#applyStateUpdate({
                     connectionState: "disconnected",

@@ -54,7 +54,7 @@ export const errorCodes = {
     coreWorkerAssetUnavailable: "core.workerAssetUnavailable",
     coreWorkerHandshakeFailed: "core.workerHandshakeFailed",
     coreWorkerProvisionFailed: "core.workerProvisionFailed",
-    coreWorkerRpcDisconnected: "core.workerRpcDisconnected",
+    coreWorkerTransportDisconnected: "core.workerTransportDisconnected",
     coreWorkerRpcSpawnFailed: "core.workerRpcSpawnFailed",
     coreWorkerStartFailed: "core.workerStartFailed",
     coreWorkerStatusFailed: "core.workerStatusFailed",

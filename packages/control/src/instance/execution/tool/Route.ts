@@ -7,7 +7,7 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type PrefixRouteModuleDefinition,
+    type ControlPortDefinition,
 } from "@portable-devshell/shared";
 
 import { routeModule } from "../../../server/Route.js";
@@ -41,7 +41,7 @@ export interface ToolRouteInstancePort {
 export function createToolRouteModule(
     instance: ToolRouteInstancePort,
     provenance?: ToolCallProvenanceStore,
-): PrefixRouteModuleDefinition {
+): ControlPortDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
             const { input, recording, toolName, workspace } = readToolCall(
@@ -86,81 +86,6 @@ export function createToolRouteModule(
                     result: null,
                 } as unknown as JsonValue;
             }
-        },
-        callStream: async (request, context) => {
-            const { input, operationId, recording, toolName, workspace } =
-                readToolCall(request.payload);
-            const controller = new AbortController();
-            let closed = false;
-            let sendTail = Promise.resolve();
-            const stream = await context.openStream(
-                { accepted: true },
-                {
-                    onClose: () => {
-                        closed = true;
-                        controller.abort(
-                            new Error(
-                                "Tool progress stream was closed by the client.",
-                            ),
-                        );
-                    },
-                },
-            );
-            const emitProgress = (progress: JsonValue) => {
-                if (closed) return;
-                sendTail = sendTail
-                    .then(async () => {
-                        if (!closed) await stream.emit("progress", progress);
-                    })
-                    .catch((error) => {
-                        closed = true;
-                        controller.abort(error);
-                    });
-            };
-            let result: JsonValue;
-            try {
-                const raw = await instance.worker.callTool(
-                    toolName,
-                    input,
-                    {
-                        requestId: context.requestId,
-                        ...(operationId === undefined ? {} : { operationId }),
-                        ctxId: context.connectionId,
-                        source: context.peer,
-                        workspace,
-                    },
-                    controller.signal,
-                    undefined,
-                    undefined,
-                    emitProgress,
-                    recording,
-                );
-                result = raw;
-            } catch (error) {
-                const failure =
-                    error instanceof ControlError
-                        ? error
-                        : createError({
-                              code: errorCodes.targetInvalid,
-                              message:
-                                  error instanceof Error
-                                      ? error.message
-                                      : String(error),
-                              retryable: false,
-                          });
-                result = {
-                    ...toolCallErrorComment(error),
-                    error: {
-                        code: failure.code,
-                        message: failure.message,
-                        retryable: failure.retryable,
-                    },
-                    result: null,
-                } as unknown as JsonValue;
-            }
-            await sendTail;
-            if (!closed) await stream.complete(result);
-            return undefined;
         },
         openSession: async (request) => {
             const prepared = await instance.worker.prepareWorkspace(
@@ -209,6 +134,59 @@ export function createToolRouteModule(
                     decidedBy: context.peer,
                 },
             )) as unknown as JsonValue,
+    }, {
+        callStream: async (stream, request, context) => {
+            const { input, operationId, recording, toolName, workspace } =
+                readToolCall(request.payload);
+            let sendTail = Promise.resolve();
+            const emitProgress = (progress: JsonValue) => {
+                sendTail = sendTail.then(() =>
+                    stream.send({ name: "progress", payload: progress }),
+                );
+            };
+            let result: JsonValue;
+            try {
+                result = await instance.worker.callTool(
+                    toolName,
+                    input,
+                    {
+                        requestId: context.requestId,
+                        ...(operationId === undefined ? {} : { operationId }),
+                        ctxId: context.connectionId,
+                        source: context.peer,
+                        workspace,
+                    },
+                    context.signal,
+                    undefined,
+                    undefined,
+                    emitProgress,
+                    recording,
+                );
+            } catch (error) {
+                const failure =
+                    error instanceof ControlError
+                        ? error
+                        : createError({
+                              code: errorCodes.targetInvalid,
+                              message:
+                                  error instanceof Error
+                                      ? error.message
+                                      : String(error),
+                              retryable: false,
+                          });
+                result = {
+                    ...toolCallErrorComment(error),
+                    error: {
+                        code: failure.code,
+                        message: failure.message,
+                        retryable: failure.retryable,
+                    },
+                    result: null,
+                } as unknown as JsonValue;
+            }
+            await sendTail;
+            await stream.close(result);
+        },
     });
 }
 

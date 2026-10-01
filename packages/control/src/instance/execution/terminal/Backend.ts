@@ -11,8 +11,8 @@ export type WorkerTerminalPort = Pick<
     | "attachTerminal"
     | "killTerminal"
     | "listTerminals"
-    | "onRpcConnected"
-    | "onRpcDisconnected"
+    | "onTransportConnected"
+    | "onTransportDisconnected"
     | "onTerminalNotification"
     | "openTerminal"
     | "resizeTerminal"
@@ -91,10 +91,10 @@ class WorkerTerminalProcess implements TerminalProcess {
                 this.#acceptNotification(notification);
             },
         );
-        this.#unsubscribeConnected = worker.onRpcConnected(() => {
+        this.#unsubscribeConnected = worker.onTransportConnected(() => {
             if (!this.#closed) this.#scheduleResume();
         });
-        this.#unsubscribeDisconnected = worker.onRpcDisconnected(() => {
+        this.#unsubscribeDisconnected = worker.onTransportDisconnected(() => {
             // The remote PTY remains owned by the worker process. Reattach after the
             // next authenticated reverse channel activation instead of fabricating exit.
         });
