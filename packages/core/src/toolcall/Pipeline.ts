@@ -305,10 +305,15 @@ export class ToolCallPipeline implements ToolCallTarget {
             executionContext(hookValue.context),
         );
 
-        await afterReview?.(callId, hookValue.context.instance);
-        this.#assertReady();
-
         if (hostRecorded) await this.#audit.requested(scope);
+
+        try {
+            await afterReview?.(callId, hookValue.context.instance);
+            if (operation === undefined) this.#assertReady();
+        } catch (error) {
+            if (hostRecorded) await this.#audit.failActive(scope, error);
+            throw error;
+        }
 
         let reservation: WorkerToolSchedulerReservation;
         try {
