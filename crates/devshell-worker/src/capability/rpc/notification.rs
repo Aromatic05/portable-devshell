@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn bounded_queue_drops_oldest_notifications() {
-        let queue = WorkerNotificationQueue::new(12);
+        let queue = WorkerNotificationQueue::new(15);
         queue.push(Value::String("first".into()), false).unwrap();
         queue.push(Value::String("second".into()), false).unwrap();
         queue.push(Value::String("third".into()), false).unwrap();
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn lossy_progress_is_evicted_before_terminal_notifications() {
-        let queue = WorkerNotificationQueue::new(12);
+        let queue = WorkerNotificationQueue::new(18);
         queue.push(Value::String("term-a".into()), false).unwrap();
         queue.push(Value::String("progress".into()), true).unwrap();
         queue.push(Value::String("term-b".into()), false).unwrap();

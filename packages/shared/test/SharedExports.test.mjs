@@ -8,7 +8,6 @@ const {
     parseConfigInstanceDraft,
     parseConfigInstancePatch,
     validateConfigSemantics,
-    validateEvent,
 } = await import("@portable-devshell/shared");
 
 test("config patch has explicit null clearing and strict unknown-field parsing", () => {
@@ -54,32 +53,4 @@ test("semantic validation accepts normalized canonical config", () => {
     );
 
     assert.equal(validateConfigSemantics(config), config);
-});
-
-test("validateEvent accepts the Event contract and rejects old envelopes", () => {
-    assert.deepEqual(
-        validateEvent({
-            id: "req-1",
-            from: "cli",
-            to: "server",
-            destination: "@control",
-            name: "service.ping",
-        }),
-        {
-            id: "req-1",
-            from: "cli",
-            to: "server",
-            destination: "@control",
-            name: "service.ping",
-        },
-    );
-
-    assert.throws(() =>
-        validateEvent({
-            id: "req-1",
-            method: "control.ping",
-            target: { kind: "control" },
-            type: "request",
-        }),
-    );
 });

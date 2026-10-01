@@ -1,7 +1,7 @@
 mod support;
 
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -11,7 +11,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use serde_json::Value;
 use support::TestEnv;
-use support::frame::{TransportRpcReader, TransportRpcWriter};
+use support::frame::{TransportEndpointReader, TransportEndpointWriter};
 
 #[test]
 fn start_is_workspace_neutral_and_keeps_config_minimal() {
@@ -134,49 +134,50 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
 
     let handshake = env.rpc(
         instance,
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "1",
             "method": "worker.handshake",
-            "params": {
-                "minProtocolVersion": 7,
-                "maxProtocolVersion": 7,
+            "message": {
                 "protocolRange": { "min": "0.9.0", "max": "1.2.0" },
                 "clientName": "portable-devshell",
                 "clientVersion": "0.1.0"
             }
         }),
     );
-    assert_eq!(handshake["type"], "response");
-    assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], "1.0.0");
-    assert_eq!(handshake["result"]["legacyProtocolVersion"], 7);
+    assert_eq!(handshake["type"], "reply");
+    assert_eq!(handshake["type"], "reply");
+    assert_eq!(handshake["message"]["protocolVersion"], "1.0.0");
     assert_eq!(
-        handshake["result"]["workerVersion"],
+        handshake["message"]["workerVersion"],
         env!("CARGO_PKG_VERSION")
     );
-    assert!(handshake["result"]["workerSha256"].is_null());
+    assert!(handshake["message"]["workerSha256"].is_null());
     assert!(
-        handshake["result"].get("workspace").is_none(),
+        handshake["message"].get("workspace").is_none(),
         "{handshake}"
     );
     assert!(
-        handshake["result"].get("skillsDirectory").is_none(),
+        handshake["message"].get("skillsDirectory").is_none(),
         "{handshake}"
     );
-    assert!(handshake["result"].get("tools").is_none());
+    assert!(handshake["message"].get("tools").is_none());
 
     let tools = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "2",
             "method": "tools.list",
-            "params": {}
+            "message": {}
         }),
     );
-    assert_eq!(tools["ok"], true);
-    let catalog = tools["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools["type"], "reply");
+    let catalog = tools["message"]["tools"].as_array().unwrap();
     let mut expected_tools = vec![
         "bash_run",
         "file_edit",
@@ -445,38 +446,40 @@ fn handshake_tools_and_bash_run_flow_work_over_framed_rpc() {
 
     let missing_workspace = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "missing-workspace",
             "method": "bash_run",
-            "params": { "command": command, "timeoutMs": 30_000 },
-            "context": { "ctxId": "ctx-explicit", "source": "mcp" }
+            "message": { "input": { "command": command, "timeoutMs": 30_000 }, "context": { "ctxId": "ctx-explicit", "source": "mcp" } }
         }),
     );
-    assert_eq!(missing_workspace["ok"], false, "{missing_workspace}");
+    assert_eq!(missing_workspace["type"], "error", "{missing_workspace}");
     assert_eq!(missing_workspace["error"]["code"], "rpc.invalidContext");
 
     let bash_run = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "3",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": command,
                 "timeoutMs": 30_000
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(bash_run["ok"], true);
-    assert_eq!(bash_run["result"]["exitCode"], 0);
-    assert_eq!(bash_run["result"]["termination"], "exited");
-    assert_eq!(bash_run["result"]["stdoutTruncated"], false);
-    assert_eq!(bash_run["result"]["stderrTruncated"], false);
-    assert_eq!(bash_run["result"]["stdout"], "ready");
-    assert!(bash_run["result"].get("timedOut").is_none());
-    assert!(bash_run["result"].get("artifactWarnings").is_none());
+    assert_eq!(bash_run["type"], "reply");
+    assert_eq!(bash_run["message"]["exitCode"], 0);
+    assert_eq!(bash_run["message"]["termination"], "exited");
+    assert_eq!(bash_run["message"]["stdoutTruncated"], false);
+    assert_eq!(bash_run["message"]["stderrTruncated"], false);
+    assert_eq!(bash_run["message"]["stdout"], "ready");
+    assert!(bash_run["message"].get("timedOut").is_none());
+    assert!(bash_run["message"].get("artifactWarnings").is_none());
 
     let stopped = env.json_command(&["stop", "--instance", instance]);
     assert_eq!(stopped["stopped"], true);
@@ -511,26 +514,27 @@ fn bash_run_accepts_bare_workspace_relative_cwd() {
 
     let response = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "bare-cwd",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": command,
                 "cwd": "extensions/stats",
                 "timeoutMs": 30_000
-            },
-            "context": {
+            }, "context": {
                 "ctxId": "ctx-bare-cwd",
                 "source": "mcp",
                 "workspace": env.workspace()
-            }
+            } }
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["exitCode"], 0, "{response}");
-    assert_eq!(response["result"]["stdout"], "ready", "{response}");
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["exitCode"], 0, "{response}");
+    assert_eq!(response["message"]["stdout"], "ready", "{response}");
 
     #[cfg(unix)]
     let root_command = "test -f root-marker.txt && printf root";
@@ -539,44 +543,46 @@ fn bash_run_accepts_bare_workspace_relative_cwd() {
         "if (Test-Path root-marker.txt) { [Console]::Out.Write('root') } else { exit 7 }";
     let root = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "dot-cwd",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": root_command,
                 "cwd": ".",
                 "timeoutMs": 30_000
-            },
-            "context": {
+            }, "context": {
                 "ctxId": "ctx-dot-cwd",
                 "source": "mcp",
                 "workspace": env.workspace()
-            }
+            } }
         }),
     );
-    assert_eq!(root["ok"], true, "{root}");
-    assert_eq!(root["result"]["stdout"], "root", "{root}");
+    assert_eq!(root["type"], "reply", "{root}");
+    assert_eq!(root["message"]["stdout"], "root", "{root}");
 
     let home = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "home-cwd",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": command,
                 "cwd": "~/extensions/stats",
                 "timeoutMs": 30_000
-            },
-            "context": {
+            }, "context": {
                 "ctxId": "ctx-home-cwd",
                 "source": "mcp",
                 "workspace": env.workspace()
-            }
+            } }
         }),
     );
-    assert_eq!(home["ok"], false, "{home}");
+    assert_eq!(home["type"], "error", "{home}");
     assert_eq!(home["error"]["code"], "bash.invalidCwd", "{home}");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -595,18 +601,18 @@ fn handshake_rejects_unsupported_protocol_versions() {
 
     let handshake = env.rpc(
         instance,
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "4",
             "method": "worker.handshake",
-            "params": {
-                "minProtocolVersion": 7,
-                "maxProtocolVersion": 7,
+            "message": {
                 "protocolRange": { "min": "1.1.0", "max": "2.0.0" }
             }
         }),
     );
-    assert_eq!(handshake["ok"], false);
+    assert_eq!(handshake["type"], "error");
     assert_eq!(
         handshake["error"]["code"],
         "worker.protocolVersionUnsupported"
@@ -616,43 +622,10 @@ fn handshake_rejects_unsupported_protocol_versions() {
         handshake["error"]["details"]["workerProtocolVersion"],
         "1.0.0"
     );
-    assert_eq!(handshake["error"]["details"]["legacyProtocolVersion"], 7);
 
     env.json_command(&["stop", "--instance", instance]);
 }
 
-#[test]
-fn handshake_accepts_legacy_protocol_7_client() {
-    let env = TestEnv::new();
-    let instance = "legacy-control";
-
-    env.command()
-        .current_dir(env.workspace())
-        .args(["start", "--instance", instance])
-        .assert()
-        .success();
-
-    let handshake = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "request",
-            "id": "legacy-handshake",
-            "method": "worker.handshake",
-            "params": {
-                "minProtocolVersion": 7,
-                "maxProtocolVersion": 7,
-                "clientName": "portable-devshell",
-                "clientVersion": "0.7.5"
-            }
-        }),
-    );
-
-    assert_eq!(handshake["ok"], true);
-    assert_eq!(handshake["result"]["protocolVersion"], 7);
-    assert_eq!(handshake["result"]["legacyProtocolVersion"], 7);
-
-    env.json_command(&["stop", "--instance", instance]);
-}
 
 #[cfg(unix)]
 #[test]
@@ -671,18 +644,20 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
 
     let prepare = |id: &str| {
         env.rpc(
-            instance,
-            &serde_json::json!({
-                "type": "request",
-                "id": id,
-                "method": "workspace.prepare",
-                "params": { "workspace": env.protocol_workspace() }
-            }),
-        )
+        instance,
+        "core",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": id,
+            "method": "workspace.prepare",
+            "message": { "workspace": env.protocol_workspace() }
+        }),
+    )
     };
 
     let first = prepare("workspace-prepare-1");
-    assert_eq!(first["ok"], true);
+    assert_eq!(first["type"], "reply");
     assert!(
         fs::symlink_metadata(&context_temp_link)
             .unwrap()
@@ -694,7 +669,7 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
         env.context_temp_target()
     );
     let first_temporary =
-        std::path::PathBuf::from(first["result"]["temporaryDirectory"].as_str().unwrap());
+        std::path::PathBuf::from(first["message"]["temporaryDirectory"].as_str().unwrap());
     assert!(first_temporary.starts_with(&context_temp_link));
     assert!(
         first_temporary
@@ -705,9 +680,9 @@ fn workspace_temporary_storage_migrates_to_runtime_and_recovers_after_runtime_lo
 
     fs::remove_dir_all(env.context_temp_target()).unwrap();
     let second = prepare("workspace-prepare-2");
-    assert_eq!(second["ok"], true);
+    assert_eq!(second["type"], "reply");
     let second_temporary =
-        std::path::PathBuf::from(second["result"]["temporaryDirectory"].as_str().unwrap());
+        std::path::PathBuf::from(second["message"]["temporaryDirectory"].as_str().unwrap());
     assert!(second_temporary.starts_with(&context_temp_link));
     assert!(
         second_temporary
@@ -732,18 +707,20 @@ fn workspace_temporary_storage_without_xdg_runtime_uses_shared_memory() {
 
     let prepared = env.rpc_without_runtime_dir(
         instance,
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "workspace-prepare-no-xdg",
             "method": "workspace.prepare",
-            "params": { "workspace": env.protocol_workspace() }
+            "message": { "workspace": env.protocol_workspace() }
         }),
     );
-    assert_eq!(prepared["ok"], true);
+    assert_eq!(prepared["type"], "reply");
     let target = fs::read_link(env.context_temp_link()).unwrap();
     assert!(target.starts_with("/dev/shm"));
     assert!(
-        std::path::Path::new(prepared["result"]["temporaryDirectory"].as_str().unwrap())
+        std::path::Path::new(prepared["message"]["temporaryDirectory"].as_str().unwrap())
             .canonicalize()
             .unwrap()
             .starts_with(target.canonicalize().unwrap())
@@ -773,15 +750,16 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
 
     let missing_timeout = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "5-required",
             "method": "bash_run",
-            "params": { "command": "true" },
-            "context": { "workspace": env.workspace() }
+            "message": { "input": { "command": "true" }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(missing_timeout["ok"], false, "{missing_timeout}");
+    assert_eq!(missing_timeout["type"], "error", "{missing_timeout}");
     assert_eq!(missing_timeout["error"]["code"], "tool.invalidArguments");
     assert!(
         missing_timeout["error"]["message"]
@@ -791,41 +769,43 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
 
     let timed_out = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "5",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": timeout_command,
                 "timeoutMs": 10
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(timed_out["ok"], true);
-    assert_eq!(timed_out["result"]["termination"], "timeout");
-    assert_eq!(timed_out["result"]["timedOut"], true);
-    assert!(timed_out["result"].get("exitCode").is_none());
+    assert_eq!(timed_out["type"], "reply");
+    assert_eq!(timed_out["message"]["termination"], "timeout");
+    assert_eq!(timed_out["message"]["timedOut"], true);
+    assert!(timed_out["message"].get("exitCode").is_none());
     #[cfg(unix)]
-    assert!(timed_out["result"]["termSignal"].as_i64().is_some());
+    assert!(timed_out["message"]["termSignal"].as_i64().is_some());
     #[cfg(windows)]
-    assert!(timed_out["result"].get("termSignal").is_none());
-    assert!(timed_out["result"].get("artifactWarnings").is_none());
+    assert!(timed_out["message"].get("termSignal").is_none());
+    assert!(timed_out["message"].get("artifactWarnings").is_none());
 
     let too_long = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "5-limit",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "true",
                 "timeoutMs": 100001
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(too_long["ok"], false);
+    assert_eq!(too_long["type"], "error");
     assert_eq!(too_long["error"]["code"], "tool.invalidArguments");
     assert!(
         too_long["error"]["message"]
@@ -841,31 +821,32 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
 
     let output_limited = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "6",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": output_command,
                 "timeoutMs": 30_000,
                 "maxCaptureBytes": 128
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(output_limited["ok"], true);
-    assert_eq!(output_limited["result"]["termination"], "exited");
-    assert_eq!(output_limited["result"]["stdoutTruncated"], true);
-    assert_eq!(output_limited["result"]["stderrTruncated"], false);
+    assert_eq!(output_limited["type"], "reply");
+    assert_eq!(output_limited["message"]["termination"], "exited");
+    assert_eq!(output_limited["message"]["stdoutTruncated"], true);
+    assert_eq!(output_limited["message"]["stderrTruncated"], false);
     assert!(
-        output_limited["result"]["stdout"]
+        output_limited["message"]["stdout"]
             .as_str()
             .unwrap()
             .contains("... [output omitted] ...")
     );
-    assert!(output_limited["result"].get("timedOut").is_none());
-    assert!(output_limited["result"].get("artifactWarnings").is_none());
-    assert!(output_limited["result"].get("stderrArtifact").is_none());
+    assert!(output_limited["message"].get("timedOut").is_none());
+    assert!(output_limited["message"].get("artifactWarnings").is_none());
+    assert!(output_limited["message"].get("stderrArtifact").is_none());
 
     #[cfg(unix)]
     let exact_output_command = "awk 'BEGIN { for (i = 0; i < 128; i++) printf \"x\" }'";
@@ -873,72 +854,74 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
     let exact_output_command = "[Console]::Out.Write([string]::new([char]'x', 128))";
     let exact_output = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "6-exact",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": exact_output_command,
                 "timeoutMs": 30_000,
                 "maxCaptureBytes": 128
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(exact_output["ok"], true, "{exact_output}");
-    assert_eq!(exact_output["result"]["stdoutBytes"], 128, "{exact_output}");
+    assert_eq!(exact_output["type"], "reply", "{exact_output}");
+    assert_eq!(exact_output["message"]["stdoutBytes"], 128, "{exact_output}");
     assert_eq!(
-        exact_output["result"]["stdoutTruncated"], false,
+        exact_output["message"]["stdoutTruncated"], false,
         "{exact_output}"
     );
     assert_eq!(
-        exact_output["result"]["stdout"],
+        exact_output["message"]["stdout"],
         "x".repeat(128),
         "{exact_output}"
     );
 
     assert!(
-        output_limited["result"]["stdoutArtifact"]["handle"]
+        output_limited["message"]["stdoutArtifact"]["handle"]
             .as_str()
             .is_some(),
         "truncated stdout must expose an artifact handle"
     );
     assert_eq!(
-        output_limited["result"]["stdoutArtifact"]["sourceBytes"],
+        output_limited["message"]["stdoutArtifact"]["sourceBytes"],
         2000
     );
     assert_eq!(
-        output_limited["result"]["stdoutArtifact"]["storedBytes"],
+        output_limited["message"]["stdoutArtifact"]["storedBytes"],
         2000
     );
     assert_eq!(
-        output_limited["result"]["stdoutArtifact"]["artifactTruncated"],
+        output_limited["message"]["stdoutArtifact"]["artifactTruncated"],
         false
     );
-    let truncated_path = output_limited["result"]["stdoutPath"]
+    let truncated_path = output_limited["message"]["stdoutPath"]
         .as_str()
         .expect("truncated stdout must expose a file_read recovery path");
     assert!(truncated_path.starts_with("/.devshell/tool-results/"));
     assert!(truncated_path.ends_with("/stdout"));
     let recovered = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "6-recover",
             "method": "file_read",
-            "params": {
+            "message": { "input": {
                 "files": [{
                     "path": truncated_path,
                     "view": "content",
                     "selector": "1-1:raw"
                 }]
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(recovered["ok"], true, "{recovered}");
+    assert_eq!(recovered["type"], "reply", "{recovered}");
     assert_eq!(
-        recovered["result"]["files"][0]["content"],
+        recovered["message"]["files"][0]["content"],
         format!("1:{}", "x".repeat(2000))
     );
 
@@ -949,38 +932,40 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
         "1..4000 | ForEach-Object { [Console]::Out.WriteLine(('line-{0:D4}' -f $_)) }";
     let recovery = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "7-recovery",
             "method": "bash_run",
-            "params": { "command": recovery_command, "timeoutMs": 30_000 },
-            "context": { "workspace": env.workspace() }
+            "message": { "input": { "command": recovery_command, "timeoutMs": 30_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(recovery["ok"], true, "{recovery}");
-    assert_eq!(recovery["result"]["stdoutTruncated"], false, "{recovery}");
-    let recovery_path = recovery["result"]["stdoutPath"]
+    assert_eq!(recovery["type"], "reply", "{recovery}");
+    assert_eq!(recovery["message"]["stdoutTruncated"], false, "{recovery}");
+    let recovery_path = recovery["message"]["stdoutPath"]
         .as_str()
         .expect("large inline stdout must expose a recovery path");
     let middle = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "7-recover-middle",
             "method": "file_read",
-            "params": {
+            "message": { "input": {
                 "files": [{
                     "path": recovery_path,
                     "view": "content",
                     "selector": "2000-2002:raw"
                 }]
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(middle["ok"], true, "{middle}");
+    assert_eq!(middle["type"], "reply", "{middle}");
     assert_eq!(
-        middle["result"]["files"][0]["content"],
+        middle["message"]["files"][0]["content"],
         "2000:line-2000\n2001:line-2001\n2002:line-2002"
     );
 
@@ -991,19 +976,20 @@ fn bash_run_returns_success_for_timeout_and_capture_truncation() {
 
     let compact = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "9",
             "method": "bash_run",
-            "params": { "command": compact_command, "timeoutMs": 30_000 },
-            "context": { "workspace": env.workspace() }
+            "message": { "input": { "command": compact_command, "timeoutMs": 30_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(compact["ok"], true, "{compact}");
-    assert!(compact["result"].get("stdoutArtifact").is_none());
-    assert!(compact["result"].get("stderrArtifact").is_none());
-    assert!(compact["result"].get("stdoutPath").is_none());
-    assert!(compact["result"].get("stderrPath").is_none());
+    assert_eq!(compact["type"], "reply", "{compact}");
+    assert!(compact["message"].get("stdoutArtifact").is_none());
+    assert!(compact["message"].get("stderrArtifact").is_none());
+    assert!(compact["message"].get("stdoutPath").is_none());
+    assert!(compact["message"].get("stderrPath").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1024,17 +1010,18 @@ fn bash_run_closes_omitted_stdin_and_handles_bidirectional_pipe_pressure() {
     let eof_command = "$null = [Console]::In.ReadToEnd(); [Console]::Out.Write('done')";
     let eof = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "stdin-eof",
             "method": "bash_run",
-            "params": { "command": eof_command, "timeoutMs": 2_000 },
-            "context": { "workspace": env.workspace() }
+            "message": { "input": { "command": eof_command, "timeoutMs": 2_000 }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(eof["ok"], true, "{eof}");
-    assert_eq!(eof["result"]["termination"], "exited", "{eof}");
-    assert_eq!(eof["result"]["stdout"], "done", "{eof}");
+    assert_eq!(eof["type"], "reply", "{eof}");
+    assert_eq!(eof["message"]["termination"], "exited", "{eof}");
+    assert_eq!(eof["message"]["stdout"], "done", "{eof}");
 
     let stdin = "i".repeat(512 * 1024);
     #[cfg(unix)]
@@ -1043,23 +1030,24 @@ fn bash_run_closes_omitted_stdin_and_handles_bidirectional_pipe_pressure() {
     let pressure_command = "[Console]::Out.Write('o' * 524288); $null = [Console]::In.ReadToEnd(); [Console]::Error.Write('done')";
     let pressure = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "stdio-pressure",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": pressure_command,
                 "stdin": stdin,
                 "timeoutMs": 5_000,
                 "maxCaptureBytes": 1024
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(pressure["ok"], true, "{pressure}");
-    assert_eq!(pressure["result"]["termination"], "exited", "{pressure}");
-    assert_eq!(pressure["result"]["stderr"], "done", "{pressure}");
-    assert_eq!(pressure["result"]["stdoutBytes"], 524288, "{pressure}");
+    assert_eq!(pressure["type"], "reply", "{pressure}");
+    assert_eq!(pressure["message"]["termination"], "exited", "{pressure}");
+    assert_eq!(pressure["message"]["stderr"], "done", "{pressure}");
+    assert_eq!(pressure["message"]["stdoutBytes"], 524288, "{pressure}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1087,19 +1075,20 @@ fn bash_run_does_not_load_login_or_interactive_shell_profiles() {
 
     let response = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "clean-profile",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "printf '%s/%s' \"${DEVSHELL_PROFILE_MARKER:-unset}\" \"${DEVSHELL_RC_MARKER:-unset}\"",
                 "timeoutMs": 2_000
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["stdout"], "unset/unset", "{response}");
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["stdout"], "unset/unset", "{response}");
     env.json_command(&["stop", "--instance", instance]);
 }
 
@@ -1118,36 +1107,38 @@ fn bash_run_ignores_inherited_bash_env_but_allows_an_explicit_override() {
 
     let inherited = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "inherited-bash-env",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
                 "timeoutMs": 2_000
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(inherited["ok"], true, "{inherited}");
-    assert_eq!(inherited["result"]["stdout"], "unset", "{inherited}");
+    assert_eq!(inherited["type"], "reply", "{inherited}");
+    assert_eq!(inherited["message"]["stdout"], "unset", "{inherited}");
 
     let explicit = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "explicit-bash-env",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "printf '%s' \"${DEVSHELL_BASH_ENV_MARKER:-unset}\"",
                 "env": { "BASH_ENV": bash_env },
                 "timeoutMs": 2_000
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(explicit["ok"], true, "{explicit}");
-    assert_eq!(explicit["result"]["stdout"], "loaded", "{explicit}");
+    assert_eq!(explicit["type"], "reply", "{explicit}");
+    assert_eq!(explicit["message"]["stdout"], "loaded", "{explicit}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1165,23 +1156,24 @@ fn bash_run_cleans_background_processes_after_the_shell_exits() {
 
     let response = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "background-child",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "sleep 2 & printf done",
                 "timeoutMs": 500
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["termination"], "exited", "{response}");
-    assert_eq!(response["result"]["stdout"], "done", "{response}");
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["termination"], "exited", "{response}");
+    assert_eq!(response["message"]["stdout"], "done", "{response}");
     assert!(
-        response["result"]["durationMs"].as_u64().unwrap() < 500,
+        response["message"]["durationMs"].as_u64().unwrap() < 500,
         "background child kept bash_run alive: {response}"
     );
     env.json_command(&["stop", "--instance", instance]);
@@ -1200,29 +1192,30 @@ fn bash_run_keeps_legal_large_capture_within_the_rpc_frame() {
 
     let response = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "large-capture",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "head -c 7340032 /dev/zero | tr '\\0' x",
                 "timeoutMs": 30_000,
                 "maxCaptureBytes": 16_777_216
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["termination"], "exited", "{response}");
-    assert_eq!(response["result"]["stdoutBytes"], 7_340_032, "{response}");
-    assert_eq!(response["result"]["stdoutTruncated"], true, "{response}");
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["termination"], "exited", "{response}");
+    assert_eq!(response["message"]["stdoutBytes"], 7_340_032, "{response}");
+    assert_eq!(response["message"]["stdoutTruncated"], true, "{response}");
     assert!(
-        response["result"]["stdout"].as_str().unwrap().len() <= 512 * 1024,
+        response["message"]["stdout"].as_str().unwrap().len() <= 512 * 1024,
         "{response}"
     );
     assert_eq!(
-        response["result"]["stdoutArtifact"]["sourceBytes"], 7_340_032,
+        response["message"]["stdoutArtifact"]["sourceBytes"], 7_340_032,
         "{response}"
     );
     env.json_command(&["stop", "--instance", instance]);
@@ -1287,7 +1280,7 @@ fn independent_test_envs_isolate_same_named_worker_lifecycles() {
 }
 
 #[test]
-fn invalid_rpc_requests_return_structured_errors() {
+fn missing_tool_returns_structured_error() {
     let env = TestEnv::new();
     let instance = "aromatic-errors";
 
@@ -1297,37 +1290,18 @@ fn invalid_rpc_requests_return_structured_errors() {
         .assert()
         .success();
 
-    let wrong_type = env.rpc(
-        instance,
-        &serde_json::json!({
-            "type": "response",
-            "id": "bad-1",
-            "method": "worker.ping",
-            "params": {}
-        }),
-    );
-    assert_eq!(wrong_type["ok"], false);
-    assert_eq!(wrong_type["error"]["code"], "rpc.invalidRequest");
-    assert_eq!(wrong_type["id"], "bad-1");
-
-    let invalid_json = env.raw_rpc(
-        instance,
-        br#"{"type":"request","id":"bad-2","method":"worker.ping","params":"#,
-    );
-    assert_eq!(invalid_json["ok"], false);
-    assert_eq!(invalid_json["error"]["code"], "rpc.invalidRequest");
-    assert_eq!(invalid_json["id"], "");
-
     let missing_tool = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "bad-3",
             "method": "missing_tool",
-            "params": {}
+            "message": { "input": {} }
         }),
     );
-    assert_eq!(missing_tool["ok"], false);
+    assert_eq!(missing_tool["type"], "error");
     assert_eq!(missing_tool["error"]["code"], "tool.notFound");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1391,19 +1365,20 @@ fn workspace_security_mode_rejects_absolute_bash_cwd() {
 
     let escaped = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "7",
             "method": "bash_run",
-            "params": {
+            "message": { "input": {
                 "command": "pwd",
                 "cwd": outside.to_string_lossy(),
                 "timeoutMs": 30_000
-            },
-            "context": { "workspace": env.workspace() }
+            }, "context": { "workspace": env.workspace() } }
         }),
     );
-    assert_eq!(escaped["ok"], false);
+    assert_eq!(escaped["type"], "error");
     assert_eq!(escaped["error"]["code"], "security.denied");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1424,11 +1399,13 @@ fn workspace_security_mode_rejects_absolute_terminal_cwd() {
 
     let escaped = env.rpc(
         instance,
+        "terminal",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "terminal-security",
             "method": "terminal.open",
-            "params": {
+            "message": {
                 "cols": 80,
                 "rows": 24,
                 "cwd": outside.to_string_lossy(),
@@ -1437,7 +1414,7 @@ fn workspace_security_mode_rejects_absolute_terminal_cwd() {
             }
         }),
     );
-    assert_eq!(escaped["ok"], false);
+    assert_eq!(escaped["type"], "error");
     assert_eq!(escaped["error"]["code"], "security.denied");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1475,9 +1452,9 @@ fn status_reports_stale_and_start_recovers_from_stale_runtime_files() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let rpc = TransportRpcWriter::new(transport.stdin.take().unwrap()).unwrap();
+    let rpc = TransportEndpointWriter::new(transport.stdin.take().unwrap(), instance).unwrap();
     drop(rpc);
-    let mut output = TransportRpcReader::new(transport.stdout.take().unwrap());
+    let mut output = TransportEndpointReader::new(transport.stdout.take().unwrap());
     assert_eq!(output.read_to_end(&mut Vec::new()).unwrap(), 0);
     assert!(!transport.wait().unwrap().success());
 
@@ -1778,8 +1755,8 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
-    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    let mut stdin = TransportEndpointWriter::new(bridge.stdin.take().unwrap(), instance).unwrap();
+    let mut stdout = TransportEndpointReader::new(bridge.stdout.take().unwrap());
     stdout.wait_ready().unwrap();
 
     #[cfg(unix)]
@@ -1787,38 +1764,46 @@ fn long_tool_call_does_not_block_control_requests_on_the_same_rpc_connection() {
     #[cfg(windows)]
     let long_command = "Start-Sleep -Seconds 2; [Console]::Out.Write('done')";
 
-    write_rpc_frame(
-        &mut stdin,
+    stdin
+        .send(
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "long-tool",
             "method": "bash_run",
-            "params": {
-                "command": long_command,
-                "timeoutMs": 5000
-            },
-            "context": { "workspace": env.workspace() }
+            "message": {
+                "input": {
+                    "command": long_command,
+                    "timeoutMs": 5000
+                },
+                "context": { "workspace": env.workspace() }
+            }
         }),
-    );
-    write_rpc_frame(
-        &mut stdin,
+    )
+        .unwrap();
+    stdin
+        .send(
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "ping-during-tool",
             "method": "worker.ping",
-            "params": {}
+            "message": {}
         }),
-    );
+    )
+        .unwrap();
 
     let responses = read_rpc_responses(&mut stdout, &["ping-during-tool", "long-tool"]);
     let first = &responses[0];
     assert_eq!(first["id"], "ping-during-tool");
-    assert_eq!(first["ok"], true);
+    assert_eq!(first["type"], "reply");
 
     let second = &responses[1];
     assert_eq!(second["id"], "long-tool");
-    assert_eq!(second["ok"], true);
-    assert_eq!(second["result"]["stdout"], "done");
+    assert_eq!(second["type"], "reply");
+    assert_eq!(second["message"]["stdout"], "done");
 
     drop(stdin);
     bridge.wait().unwrap();
@@ -1843,44 +1828,49 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
-    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    let mut stdin = TransportEndpointWriter::new(bridge.stdin.take().unwrap(), instance).unwrap();
+    let mut stdout = TransportEndpointReader::new(bridge.stdout.take().unwrap());
     stdout.wait_ready().unwrap();
     let (frames, received) = mpsc::channel();
     let reader = thread::spawn(move || {
-        while let Ok(frame) = try_read_rpc_frame(&mut stdout) {
+        while let Ok(frame) = stdout.read_packet() {
             if frames.send(frame).is_err() {
                 return;
             }
         }
     });
 
-    write_rpc_frame(
-        &mut stdin,
+    stdin
+        .send(
+        "terminal",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "terminal-open",
             "method": "terminal.open",
-            "params": { "cols": 80, "rows": 24, "workspace": env.workspace() }
+            "message": { "cols": 80, "rows": 24, "workspace": env.workspace() }
         }),
-    );
+    )
+        .unwrap();
     let opened = receive_response(&received, "terminal-open");
-    assert_eq!(opened["ok"], true, "{opened}");
-    let terminal_id = opened["result"]["terminalId"].as_str().unwrap();
-    let generation = opened["result"]["generation"].as_u64().unwrap();
-    let version = opened["result"]["version"].as_u64().unwrap();
+    assert_eq!(opened["type"], "reply", "{opened}");
+    let terminal_id = opened["message"]["terminalId"].as_str().unwrap();
+    let generation = opened["message"]["generation"].as_u64().unwrap();
+    let version = opened["message"]["version"].as_u64().unwrap();
 
     #[cfg(unix)]
     let command = "printf '%s\\n' 'forward-notification-ready'\\r";
     #[cfg(windows)]
     let command = "powershell.exe -NoLogo -NoProfile -NonInteractive -Command \"[Console]::WriteLine('forward-notification-ready')\"\\r";
-    write_rpc_frame(
-        &mut stdin,
+    stdin
+        .send(
+        "terminal",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "terminal-write",
             "method": "terminal.write",
-            "params": {
+            "message": {
                 "clientSeq": 1,
                 "generation": generation,
                 "terminalId": terminal_id,
@@ -1888,7 +1878,8 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
                 "data": BASE64.encode(command.as_bytes())
             }
         }),
-    );
+    )
+        .unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut write_accepted = false;
@@ -1902,13 +1893,12 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
         let frame = received
             .recv_timeout(remaining)
             .expect("persistent RPC bridge did not forward terminal response/notification");
-        if frame["type"] == "response" && frame["id"] == "terminal-write" {
-            assert_eq!(frame["ok"], true, "{frame}");
+        if frame["type"] == "reply" && frame["id"] == "terminal-write" {
             write_accepted = true;
         }
-        if frame["type"] == "notification"
-            && frame["method"] == "terminal.output"
-            && let Some(data) = frame["params"]["dataBase64"].as_str()
+        if frame["protocol"] == "event"
+            && frame["name"] == "output"
+            && let Some(data) = frame["message"]["dataBase64"].as_str()
         {
             let decoded = BASE64.decode(data).unwrap();
             output.push_str(&String::from_utf8_lossy(&decoded));
@@ -1917,13 +1907,15 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
                 let cursor_queries = output.matches("\u{1b}[6n").count();
                 while cursor_queries_answered < cursor_queries {
                     let client_seq = 2 + cursor_queries_answered as u64;
-                    write_rpc_frame(
-                        &mut stdin,
+                    stdin
+                        .send(
+                        "terminal",
                         &serde_json::json!({
+                            "protocol": "rpc",
                             "type": "request",
                             "id": format!("terminal-cursor-response-{client_seq}"),
                             "method": "terminal.write",
-                            "params": {
+                            "message": {
                                 "clientSeq": client_seq,
                                 "generation": generation,
                                 "terminalId": terminal_id,
@@ -1931,7 +1923,8 @@ fn persistent_rpc_bridge_forwards_terminal_notifications() {
                                 "data": BASE64.encode(b"\x1b[1;1R")
                             }
                         }),
-                    );
+                    )
+                        .unwrap();
                     cursor_queries_answered += 1;
                 }
             }
@@ -1971,8 +1964,8 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut stdin = TransportRpcWriter::new(bridge.stdin.take().unwrap()).unwrap();
-    let mut stdout = TransportRpcReader::new(bridge.stdout.take().unwrap());
+    let mut stdin = TransportEndpointWriter::new(bridge.stdin.take().unwrap(), instance).unwrap();
+    let mut stdout = TransportEndpointReader::new(bridge.stdout.take().unwrap());
     stdout.wait_ready().unwrap();
 
     #[cfg(unix)]
@@ -1988,47 +1981,55 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         marker.display().to_string().replace('\'', "''")
     );
 
-    write_rpc_frame(
-        &mut stdin,
+    stdin
+        .send(
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "cancel-me",
             "method": "bash_run",
-            "params": {
-                "command": cancel_command,
-                "timeoutMs": 10000
-            },
-            "context": {
-                "ctxId": "ctx-cancel",
-                "requestId": "mcp-cancel-me",
-                "source": "mcp",
-                "workspace": env.workspace()
+            "message": {
+                "input": {
+                    "command": cancel_command,
+                    "timeoutMs": 10000
+                },
+                "context": {
+                    "ctxId": "ctx-cancel",
+                    "requestId": "mcp-cancel-me",
+                    "source": "mcp",
+                    "workspace": env.workspace()
+                }
             }
         }),
-    );
+    )
+        .unwrap();
     wait_until_path_exists(&started_marker);
-    write_rpc_frame(
-        &mut stdin,
+    stdin
+        .send(
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "cancel-control",
             "method": "tool.call.cancel",
-            "params": {
+            "message": {
                 "rpcRequestId": "cancel-me",
                 "ctxId": "ctx-cancel",
                 "reason": "client timeout"
             }
         }),
-    );
+    )
+        .unwrap();
 
     let responses = read_rpc_responses(&mut stdout, &["cancel-control", "cancel-me"]);
     let cancel_response = responses
         .iter()
         .find(|response| response["id"] == "cancel-control")
         .expect("cancel acknowledgement response");
-    assert_eq!(cancel_response["ok"], true, "{cancel_response}");
+    assert_eq!(cancel_response["type"], "reply", "{cancel_response}");
     assert_eq!(
-        cancel_response["result"]["cancelled"], true,
+        cancel_response["message"]["cancelled"], true,
         "{cancel_response}"
     );
 
@@ -2036,7 +2037,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
         .iter()
         .find(|response| response["id"] == "cancel-me")
         .expect("cancelled tool call response");
-    assert_eq!(call_response["ok"], false, "{call_response}");
+    assert_eq!(call_response["type"], "error", "{call_response}");
     assert_eq!(
         call_response["error"]["code"], "tool.cancelled",
         "{call_response}"
@@ -2049,7 +2050,7 @@ fn tool_call_cancel_terminates_a_running_bash_process_group() {
 }
 
 #[test]
-fn internal_artifact_control_rpc_excludes_chunk_methods_and_is_not_listed_as_a_tool() {
+fn internal_artifact_rpc_is_not_listed_as_a_tool() {
     let env = TestEnv::new();
     let instance = "artifact-payload";
     fs::write(env.workspace().join("payload.txt"), b"rpc payload").unwrap();
@@ -2061,14 +2062,16 @@ fn internal_artifact_control_rpc_excludes_chunk_methods_and_is_not_listed_as_a_t
 
     let tools = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "payload-tools",
             "method": "tools.list",
-            "params": {}
+            "message": {}
         }),
     );
-    let names = tools["result"]["tools"]
+    let names = tools["message"]["tools"]
         .as_array()
         .unwrap()
         .iter()
@@ -2092,110 +2095,162 @@ fn internal_artifact_control_rpc_excludes_chunk_methods_and_is_not_listed_as_a_t
         + 60_000;
     let opened = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "payload-open",
             "method": "artifact.payload.open",
-            "params": {
+            "message": {
                 "path": "./payload.txt",
                 "expiresAtMs": expires_at_ms,
                 "workspace": env.workspace()
             }
         }),
     );
-    assert_eq!(opened["ok"], true, "{opened}");
-    assert_eq!(opened["result"]["descriptor"]["type"], "file");
-    let payload_id = opened["result"]["payloadId"].as_str().unwrap();
+    assert_eq!(opened["type"], "reply", "{opened}");
+    assert_eq!(opened["message"]["descriptor"]["type"], "file");
+    let payload_id = opened["message"]["payloadId"].as_str().unwrap();
 
-    let retired_read = env.rpc(
+    let chunk_read = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "payload-read",
             "method": "artifact.payload.read",
-            "params": { "payloadId": payload_id, "offsetBytes": 0, "maxBytes": 1024 }
+            "message": { "payloadId": payload_id, "offsetBytes": 0, "maxBytes": 1024 }
         }),
     );
-    assert_eq!(retired_read["ok"], false, "{retired_read}");
-    assert_eq!(retired_read["error"]["code"], "rpc.methodNotFound");
-    let retired_write = env.rpc(
+    assert_eq!(chunk_read["type"], "reply", "{chunk_read}");
+    assert_eq!(chunk_read["message"]["returnedBytes"], 11);
+    assert_eq!(chunk_read["message"]["content"], "cnBjIHBheWxvYWQ=");
+
+    let chunk_begun = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
-            "id": "receive-write",
-            "method": "artifact.receive.write",
-            "params": {
-                "receiveId": "retired",
-                "offsetBytes": 0,
-                "content": ""
+            "id": "chunk-receive-begin",
+            "method": "artifact.receive.begin",
+            "message": {
+                "descriptor": opened["message"]["descriptor"].clone(),
+                "overwrite": false,
+                "targetPath": "./chunk-received.txt",
+                "workspace": env.workspace()
             }
         }),
     );
-    assert_eq!(retired_write["ok"], false, "{retired_write}");
-    assert_eq!(retired_write["error"]["code"], "rpc.methodNotFound");
+    assert_eq!(chunk_begun["type"], "reply", "{chunk_begun}");
+    let chunk_receive_id = chunk_begun["message"]["receiveId"].as_str().unwrap();
+    let chunk_write = env.rpc(
+        instance,
+        "artifact",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "chunk-receive-write",
+            "method": "artifact.receive.write",
+            "message": {
+                "receiveId": chunk_receive_id,
+                "offsetBytes": 0,
+                "content": chunk_read["message"]["content"].clone()
+            }
+        }),
+    );
+    assert_eq!(chunk_write["type"], "reply", "{chunk_write}");
+    assert_eq!(chunk_write["message"]["nextOffsetBytes"], 11);
+    let chunk_finished = env.rpc(
+        instance,
+        "artifact",
+        &serde_json::json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "chunk-receive-finish",
+            "method": "artifact.receive.finish",
+            "message": { "receiveId": chunk_receive_id }
+        }),
+    );
+    assert_eq!(chunk_finished["type"], "reply", "{chunk_finished}");
+    assert_eq!(
+        fs::read(env.workspace().join("chunk-received.txt")).unwrap(),
+        b"rpc payload"
+    );
 
     let direct_begun = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "direct-receive-begin",
             "method": "artifact.receive.begin",
-            "params": {
-                "descriptor": opened["result"]["descriptor"].clone(),
+            "message": {
+                "descriptor": opened["message"]["descriptor"].clone(),
                 "overwrite": false,
                 "targetPath": "./direct-received.txt",
                 "workspace": env.workspace()
             }
         }),
     );
-    assert_eq!(direct_begun["ok"], true, "{direct_begun}");
-    let direct_receive_id = direct_begun["result"]["receiveId"].as_str().unwrap();
+    assert_eq!(direct_begun["type"], "reply", "{direct_begun}");
+    let direct_receive_id = direct_begun["message"]["receiveId"].as_str().unwrap();
     let direct_open = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "direct-open",
             "method": "artifact.receive.direct.open",
-            "params": { "receiveId": direct_receive_id, "expiresAtMs": expires_at_ms }
+            "message": { "receiveId": direct_receive_id, "expiresAtMs": expires_at_ms }
         }),
     );
-    assert_eq!(direct_open["ok"], true, "{direct_open}");
+    assert_eq!(direct_open["type"], "reply", "{direct_open}");
     let direct_push = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "direct-push",
             "method": "artifact.payload.direct.push",
-            "params": {
+            "message": {
                 "payloadId": payload_id,
                 "offsetBytes": 0,
                 "maxBytes": 1024,
-                "urls": direct_open["result"]["urls"].clone()
+                "urls": direct_open["message"]["urls"].clone()
             }
         }),
     );
-    assert_eq!(direct_push["ok"], true, "{direct_push}");
-    assert_eq!(direct_push["result"]["nextOffsetBytes"], 11);
+    assert_eq!(direct_push["type"], "reply", "{direct_push}");
+    assert_eq!(direct_push["message"]["nextOffsetBytes"], 11);
     let direct_close = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "direct-close",
             "method": "artifact.receive.direct.close",
-            "params": { "receiverId": direct_open["result"]["receiverId"].clone() }
+            "message": { "receiverId": direct_open["message"]["receiverId"].clone() }
         }),
     );
-    assert_eq!(direct_close["ok"], true, "{direct_close}");
+    assert_eq!(direct_close["type"], "reply", "{direct_close}");
     let direct_finished = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "direct-finish",
             "method": "artifact.receive.finish",
-            "params": { "receiveId": direct_receive_id }
+            "message": { "receiveId": direct_receive_id }
         }),
     );
-    assert_eq!(direct_finished["ok"], true, "{direct_finished}");
+    assert_eq!(direct_finished["type"], "reply", "{direct_finished}");
     assert_eq!(
         fs::read(env.workspace().join("direct-received.txt")).unwrap(),
         b"rpc payload"
@@ -2203,15 +2258,17 @@ fn internal_artifact_control_rpc_excludes_chunk_methods_and_is_not_listed_as_a_t
 
     let closed = env.rpc(
         instance,
+        "artifact",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "payload-close",
             "method": "artifact.payload.close",
-            "params": { "payloadId": payload_id }
+            "message": { "payloadId": payload_id }
         }),
     );
-    assert_eq!(closed["ok"], true, "{closed}");
-    assert_eq!(closed["result"]["closed"], true);
+    assert_eq!(closed["type"], "reply", "{closed}");
+    assert_eq!(closed["message"]["closed"], true);
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2228,14 +2285,16 @@ fn extension_resource_prepare_creates_a_private_instance_scoped_collection() {
 
     let tools = env.rpc(
         instance,
+        "tool",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "resource-tools",
             "method": "tools.list",
-            "params": {}
+            "message": {}
         }),
     );
-    let names = tools["result"]["tools"]
+    let names = tools["message"]["tools"]
         .as_array()
         .unwrap()
         .iter()
@@ -2245,17 +2304,19 @@ fn extension_resource_prepare_creates_a_private_instance_scoped_collection() {
 
     let prepared = env.rpc(
         instance,
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "resource-prepare",
             "method": "extension.resource.prepare",
-            "params": {
+            "message": {
                 "extensionId": "skill",
                 "collection": "managed"
             }
         }),
     );
-    assert_eq!(prepared["ok"], true, "{prepared}");
+    assert_eq!(prepared["type"], "reply", "{prepared}");
     let expected = env
         .instance_root(instance)
         .join("extensions")
@@ -2264,23 +2325,25 @@ fn extension_resource_prepare_creates_a_private_instance_scoped_collection() {
         .join("managed");
     assert!(expected.is_dir());
     assert_eq!(
-        prepared["result"]["directory"],
+        prepared["message"]["directory"],
         expected.to_string_lossy().into_owned()
     );
 
     let escaped = env.rpc(
         instance,
+        "core",
         &serde_json::json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "resource-escape",
             "method": "extension.resource.prepare",
-            "params": {
+            "message": {
                 "extensionId": "../escape",
                 "collection": "managed"
             }
         }),
     );
-    assert_eq!(escaped["ok"], false, "{escaped}");
+    assert_eq!(escaped["type"], "error", "{escaped}");
     assert_eq!(escaped["error"]["code"], "extension.resourceInvalid");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -2292,46 +2355,22 @@ fn receive_response(receiver: &mpsc::Receiver<Value>, id: &str) -> Value {
         let frame = receiver
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .expect("RPC response timeout");
-        if frame["type"] == "response" && frame["id"] == id {
+        if matches!(frame["type"].as_str(), Some("reply" | "error"))
+            && frame["id"] == id
+        {
             return frame;
         }
     }
 }
 
-fn try_read_rpc_frame(reader: &mut impl Read) -> Result<Value, String> {
-    let mut length = [0_u8; 4];
-    reader
-        .read_exact(&mut length)
-        .map_err(|error| error.to_string())?;
-    let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
-    reader
-        .read_exact(&mut payload)
-        .map_err(|error| error.to_string())?;
-    serde_json::from_slice(&payload).map_err(|error| error.to_string())
-}
-
-fn write_rpc_frame(writer: &mut impl Write, value: &Value) {
-    let payload = serde_json::to_vec(value).unwrap();
-    writer
-        .write_all(&(payload.len() as u32).to_be_bytes())
-        .unwrap();
-    writer.write_all(&payload).unwrap();
-    writer.flush().unwrap();
-}
-
-fn read_rpc_frame(reader: &mut impl Read) -> Value {
-    let mut length = [0_u8; 4];
-    reader.read_exact(&mut length).unwrap();
-    let mut payload = vec![0_u8; u32::from_be_bytes(length) as usize];
-    reader.read_exact(&mut payload).unwrap();
-    serde_json::from_slice(&payload).unwrap()
-}
-
-fn read_rpc_responses(reader: &mut impl Read, ids: &[&str]) -> Vec<Value> {
+fn read_rpc_responses<R: Read>(
+    reader: &mut TransportEndpointReader<R>,
+    ids: &[&str],
+) -> Vec<Value> {
     let mut responses = vec![None; ids.len()];
     while responses.iter().any(Option::is_none) {
-        let frame = read_rpc_frame(reader);
-        if frame["type"] != "response" {
+        let frame = reader.read_packet().unwrap();
+        if !matches!(frame["type"].as_str(), Some("reply" | "error")) {
             continue;
         }
         let Some(id) = frame["id"].as_str() else {

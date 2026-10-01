@@ -3,14 +3,13 @@ import test from "node:test";
 
 import {
     FRAME_MAX_DATA_SIZE,
-    FRAME_MAX_OPEN_METADATA_SIZE,
-    FRAME_MAX_OPEN_SERVICE_SIZE,
+    FRAME_MAX_METADATA_SIZE,
+    FRAME_MAX_SERVICE_SIZE,
     FRAME_PROTOCOL_RANGE,
     FRAME_PROTOCOL_VERSION,
     FrameBuffer,
     decodeFrame,
     encodeFrame,
-    encodePacket,
     type Frame,
 } from "@portable-devshell/shared/transport/frame";
 
@@ -175,7 +174,7 @@ test("Frame v1 keeps Service metadata opaque while validating the Service name",
         () =>
             encodeFrame({
                 ...frame,
-                service: "s".repeat(FRAME_MAX_OPEN_SERVICE_SIZE + 1),
+                service: "s".repeat(FRAME_MAX_SERVICE_SIZE + 1),
             }),
         /service/iu,
     );
@@ -183,23 +182,8 @@ test("Frame v1 keeps Service metadata opaque while validating the Service name",
         () =>
             encodeFrame({
                 ...frame,
-                metadata: new Uint8Array(FRAME_MAX_OPEN_METADATA_SIZE + 1),
+                metadata: new Uint8Array(FRAME_MAX_METADATA_SIZE + 1),
             }),
-        /metadata|large/iu,
-    );
-
-    const body = new Uint8Array(
-        6 + 6 + 1 + FRAME_MAX_OPEN_METADATA_SIZE + 1,
-    );
-    body[0] = 1;
-    body[1] = 1;
-    const view = new DataView(body.buffer);
-    view.setUint32(2, 9, false);
-    view.setUint32(6, 1024, false);
-    view.setUint16(10, 1, false);
-    body[12] = "x".charCodeAt(0);
-    assert.throws(
-        () => decodeFrame(encodePacket(body)),
         /metadata|large/iu,
     );
 });

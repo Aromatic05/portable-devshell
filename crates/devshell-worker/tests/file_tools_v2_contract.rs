@@ -23,15 +23,19 @@ fn call(
 ) -> Value {
     env.rpc(
         instance,
+        "tool",
         &json!({
+            "protocol": "rpc",
             "type": "request",
             "id": id,
             "method": method,
-            "params": params,
-            "context": {
-                "ctxId": ctx_id,
-                "source": "mcp",
-                "workspace": env.workspace()
+            "message": {
+                "input": params,
+                "context": {
+                    "ctxId": ctx_id,
+                    "source": "mcp",
+                    "workspace": env.workspace()
+                }
             }
         }),
     )
@@ -57,22 +61,22 @@ fn file_read_auto_returns_content_for_small_files_without_snapshot_tokens() {
         json!({ "path": "./small.rs" }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["view"], "content");
-    assert!(response["result"].get("path").is_none());
-    assert!(response["result"].get("returnedRanges").is_none());
-    assert!(response["result"].get("totalLines").is_none());
-    assert!(response["result"].get("totalBytes").is_none());
-    assert!(response["result"].get("truncated").is_none());
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["view"], "content");
+    assert!(response["message"].get("path").is_none());
+    assert!(response["message"].get("returnedRanges").is_none());
+    assert!(response["message"].get("totalLines").is_none());
+    assert!(response["message"].get("totalBytes").is_none());
+    assert!(response["message"].get("truncated").is_none());
     assert!(
-        response["result"]["content"]
+        response["message"]["content"]
             .as_str()
             .unwrap()
             .starts_with("1:fn main")
     );
-    assert!(response["result"].get("snapshotId").is_none());
-    assert!(response["result"].get("snapshotTag").is_none());
-    assert!(response["result"].get("revision").is_none());
+    assert!(response["message"].get("snapshotId").is_none());
+    assert!(response["message"].get("snapshotTag").is_none());
+    assert!(response["message"].get("revision").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -99,8 +103,8 @@ fn file_read_batch_reads_multiple_files_and_keeps_paths_in_results() {
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(response["type"], "reply", "{response}");
+    let files = response["message"]["files"].as_array().unwrap();
     assert_eq!(files.len(), 2);
     assert_eq!(files[0]["path"], "./first.txt");
     assert_eq!(files[0]["content"], "1:first");
@@ -126,10 +130,10 @@ fn file_read_legacy_wire_input_keeps_the_legacy_result_shape() {
         json!({ "path": "./legacy.txt", "view": "content", "selector": "1-1:raw" }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["content"], "1:legacy");
-    assert!(response["result"].get("files").is_none());
-    assert!(response["result"].get("path").is_none());
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["content"], "1:legacy");
+    assert!(response["message"].get("files").is_none());
+    assert!(response["message"].get("path").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -155,7 +159,7 @@ fn file_read_batch_establishes_edit_coverage_for_every_returned_file() {
             ]
         }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -174,9 +178,9 @@ fn file_read_batch_establishes_edit_coverage_for_every_returned_file() {
             )
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert!(
-        edited["result"]["operations"]
+        edited["message"]["operations"]
             .as_array()
             .unwrap()
             .iter()
@@ -216,14 +220,14 @@ fn file_read_outline_reports_symbol_ranges_and_hierarchy() {
         json!({ "path": "./large.rs" }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["view"], "outline");
-    let content = response["result"]["content"].as_str().unwrap();
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["view"], "outline");
+    let content = response["message"]["content"].as_str().unwrap();
     assert!(content.contains("1-1 struct Demo"), "{content}");
     assert!(content.contains("3-6 impl Demo"), "{content}");
     assert!(content.contains("  4-4 fn first"), "{content}");
-    assert!(response["result"].get("parseStatus").is_none());
-    assert!(response["result"].get("nextSelector").is_none());
+    assert!(response["message"].get("parseStatus").is_none());
+    assert!(response["message"].get("nextSelector").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -243,7 +247,7 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let denied = call(
         &env,
@@ -255,7 +259,7 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+changed\n*** End Edit"
         }),
     );
-    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["type"], "error", "{denied}");
     assert_eq!(denied["error"]["code"], "file.snapshotRequired");
 
     let edited = call(
@@ -268,7 +272,7 @@ fn file_edit_uses_context_scoped_implicit_snapshots() {
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+changed\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "one\nchanged\n"
@@ -292,7 +296,7 @@ fn file_edit_successful_patch_carries_generated_coverage_across_calls() {
         "file_read",
         json!({ "path": "document.txt", "selector": "2-2:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let first = call(
         &env,
@@ -312,8 +316,8 @@ fn file_edit_successful_patch_carries_generated_coverage_across_calls() {
             )
         }),
     );
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(first["result"]["operations"][0]["status"], "applied");
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(first["message"]["operations"][0]["status"], "applied");
 
     let second = call(
         &env,
@@ -332,8 +336,8 @@ fn file_edit_successful_patch_carries_generated_coverage_across_calls() {
             )
         }),
     );
-    assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["operations"][0]["status"], "applied");
+    assert_eq!(second["type"], "reply", "{second}");
+    assert_eq!(second["message"]["operations"][0]["status"], "applied");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "one\nsecond\nreplacement\nthree\n"
@@ -357,7 +361,7 @@ fn file_edit_failed_patch_neither_expands_nor_discards_coverage() {
         "file_read",
         json!({ "path": "document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     for id in ["2", "3"] {
         let denied = call(
@@ -377,10 +381,10 @@ fn file_edit_failed_patch_neither_expands_nor_discards_coverage() {
                 )
             }),
         );
-        assert_eq!(denied["ok"], true, "{denied}");
-        assert_eq!(denied["result"]["operations"][0]["status"], "failed");
+        assert_eq!(denied["type"], "reply", "{denied}");
+        assert_eq!(denied["message"]["operations"][0]["status"], "failed");
         assert_eq!(
-            denied["result"]["operations"][0]["error"]["code"],
+            denied["message"]["operations"][0]["error"]["code"],
             "file.unreadRange"
         );
     }
@@ -402,8 +406,8 @@ fn file_edit_failed_patch_neither_expands_nor_discards_coverage() {
             )
         }),
     );
-    assert_eq!(allowed["ok"], true, "{allowed}");
-    assert_eq!(allowed["result"]["operations"][0]["status"], "applied");
+    assert_eq!(allowed["type"], "reply", "{allowed}");
+    assert_eq!(allowed["message"]["operations"][0]["status"], "applied");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -425,7 +429,7 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Write File: created.txt\ncreated\n*** End Edit"
         }),
     );
-    assert_eq!(written["ok"], true, "{written}");
+    assert_eq!(written["type"], "reply", "{written}");
 
     let patched = call(
         &env,
@@ -437,8 +441,8 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Patch File: created.txt\n@@\n-created\n+updated\n*** End Edit"
         }),
     );
-    assert_eq!(patched["ok"], true, "{patched}");
-    assert_eq!(patched["result"]["operations"][0]["status"], "applied");
+    assert_eq!(patched["type"], "reply", "{patched}");
+    assert_eq!(patched["message"]["operations"][0]["status"], "applied");
 
     let read = call(
         &env,
@@ -448,7 +452,7 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
         "file_read",
         json!({ "path": "source.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let moved = call(
         &env,
@@ -460,7 +464,7 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Move File: source.txt\n*** To: moved.txt\n*** End Edit"
         }),
     );
-    assert_eq!(moved["ok"], true, "{moved}");
+    assert_eq!(moved["type"], "reply", "{moved}");
 
     let moved_patch = call(
         &env,
@@ -472,8 +476,8 @@ fn file_edit_write_and_move_carry_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Patch File: moved.txt\n@@\n-move me\n+moved knowledge\n*** End Edit"
         }),
     );
-    assert_eq!(moved_patch["ok"], true, "{moved_patch}");
-    assert_eq!(moved_patch["result"]["operations"][0]["status"], "applied");
+    assert_eq!(moved_patch["type"], "reply", "{moved_patch}");
+    assert_eq!(moved_patch["message"]["operations"][0]["status"], "applied");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -493,7 +497,7 @@ fn file_edit_rewrite_carries_generated_knowledge_across_calls() {
         "file_read",
         json!({ "path": "document.txt", "view": "content" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let rewritten = call(
         &env,
@@ -505,8 +509,8 @@ fn file_edit_rewrite_carries_generated_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Rewrite File: document.txt\nfirst\nsecond\n*** End Edit"
         }),
     );
-    assert_eq!(rewritten["ok"], true, "{rewritten}");
-    assert_eq!(rewritten["result"]["operations"][0]["status"], "applied");
+    assert_eq!(rewritten["type"], "reply", "{rewritten}");
+    assert_eq!(rewritten["message"]["operations"][0]["status"], "applied");
 
     let patched = call(
         &env,
@@ -518,8 +522,8 @@ fn file_edit_rewrite_carries_generated_knowledge_across_calls() {
             "changes": "*** Begin Edit\n*** Patch File: document.txt\n@@\n-second\n+changed\n*** End Edit"
         }),
     );
-    assert_eq!(patched["ok"], true, "{patched}");
-    assert_eq!(patched["result"]["operations"][0]["status"], "applied");
+    assert_eq!(patched["type"], "reply", "{patched}");
+    assert_eq!(patched["message"]["operations"][0]["status"], "applied");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -539,7 +543,7 @@ fn file_edit_delete_clears_knowledge_for_a_recreated_path() {
         "file_read",
         json!({ "path": "document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let deleted = call(
         &env,
@@ -551,7 +555,7 @@ fn file_edit_delete_clears_knowledge_for_a_recreated_path() {
             "changes": "*** Begin Edit\n*** Delete File: document.txt\n*** End Edit"
         }),
     );
-    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert_eq!(deleted["type"], "reply", "{deleted}");
     fs::write(env.workspace().join("document.txt"), "replacement\n").unwrap();
 
     let denied = call(
@@ -564,7 +568,7 @@ fn file_edit_delete_clears_knowledge_for_a_recreated_path() {
             "changes": "*** Begin Edit\n*** Patch File: document.txt\n@@\n-replacement\n+changed\n*** End Edit"
         }),
     );
-    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["type"], "error", "{denied}");
     assert_eq!(denied["error"]["code"], "file.snapshotRequired");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -589,7 +593,7 @@ fn file_read_outline_establishes_only_rendered_signature_coverage() {
         "file_read",
         json!({ "path": "sample.rs", "view": "outline" }),
     );
-    assert_eq!(outline["ok"], true, "{outline}");
+    assert_eq!(outline["type"], "reply", "{outline}");
 
     let signature = call(
         &env,
@@ -601,8 +605,8 @@ fn file_read_outline_establishes_only_rendered_signature_coverage() {
             "changes": "*** Begin Edit\n*** Patch File: sample.rs\n@@\n-struct Demo;\n+struct Renamed;\n*** End Edit"
         }),
     );
-    assert_eq!(signature["ok"], true, "{signature}");
-    assert_eq!(signature["result"]["operations"][0]["status"], "applied");
+    assert_eq!(signature["type"], "reply", "{signature}");
+    assert_eq!(signature["message"]["operations"][0]["status"], "applied");
 
     let body = call(
         &env,
@@ -614,10 +618,10 @@ fn file_read_outline_establishes_only_rendered_signature_coverage() {
             "changes": "*** Begin Edit\n*** Patch File: sample.rs\n@@\n-    println!(\"body\");\n+    println!(\"changed\");\n*** End Edit"
         }),
     );
-    assert_eq!(body["ok"], true, "{body}");
-    assert_eq!(body["result"]["operations"][0]["status"], "failed");
+    assert_eq!(body["type"], "reply", "{body}");
+    assert_eq!(body["message"]["operations"][0]["status"], "failed");
     assert_eq!(
-        body["result"]["operations"][0]["error"]["code"],
+        body["message"]["operations"][0]["error"]["code"],
         "file.unreadRange"
     );
 
@@ -643,8 +647,8 @@ fn file_grep_establishes_edit_coverage() {
         "file_grep",
         json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert!(searched["result"]["files"][0].get("snapshotId").is_none());
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert!(searched["message"]["files"][0].get("snapshotId").is_none());
 
     let edited = call(
         &env,
@@ -656,7 +660,7 @@ fn file_grep_establishes_edit_coverage() {
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n before\n-needle\n+changed\n after\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -682,9 +686,9 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
         "file_grep",
         json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
-    assert!(searched["result"]["nextCursor"].is_string());
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert_eq!(searched["message"]["files"].as_array().unwrap().len(), 20);
+    assert!(searched["message"]["nextCursor"].is_string());
 
     let returned_edit = call(
         &env,
@@ -696,7 +700,7 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
             "changes": "*** Begin Edit\n*** Rewrite File: ./result-01.txt\nreturned needle\n*** End Edit"
         }),
     );
-    assert_eq!(returned_edit["ok"], true, "{returned_edit}");
+    assert_eq!(returned_edit["type"], "reply", "{returned_edit}");
 
     let hidden_edit = call(
         &env,
@@ -708,7 +712,7 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
             "changes": "*** Begin Edit\n*** Rewrite File: ./result-21.txt\nhidden\n*** End Edit"
         }),
     );
-    assert_eq!(hidden_edit["ok"], false, "{hidden_edit}");
+    assert_eq!(hidden_edit["type"], "error", "{hidden_edit}");
     assert_eq!(hidden_edit["error"]["code"], "file.snapshotRequired");
     assert_eq!(
         fs::read_to_string(env.workspace().join("result-21.txt")).unwrap(),
@@ -716,7 +720,7 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
     );
     fs::write(env.workspace().join("result-21.txt"), "updated needle\n").unwrap();
 
-    let cursor = searched["result"]["nextCursor"]
+    let cursor = searched["message"]["nextCursor"]
         .as_str()
         .unwrap()
         .to_string();
@@ -728,11 +732,11 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
         "file_grep",
         json!({ "cursor": cursor }),
     );
-    assert_eq!(second_page["ok"], true, "{second_page}");
-    assert_eq!(second_page["result"]["files"].as_array().unwrap().len(), 1);
-    assert_eq!(second_page["result"]["files"][0]["path"], "./result-21.txt");
+    assert_eq!(second_page["type"], "reply", "{second_page}");
+    assert_eq!(second_page["message"]["files"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["message"]["files"][0]["path"], "./result-21.txt");
     assert!(
-        second_page["result"]["files"][0]["content"]
+        second_page["message"]["files"][0]["content"]
             .as_str()
             .is_some_and(|content| content.contains("updated needle")),
         "pending lookahead must be refreshed when the next page is consumed: {second_page}"
@@ -748,7 +752,7 @@ fn file_grep_snapshots_only_files_returned_in_the_current_page() {
             "changes": "*** Begin Edit\n*** Rewrite File: ./result-21.txt\nvisible\n*** End Edit"
         }),
     );
-    assert_eq!(second_page_edit["ok"], true, "{second_page_edit}");
+    assert_eq!(second_page_edit["type"], "reply", "{second_page_edit}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -771,7 +775,7 @@ fn file_edit_static_preflight_prevents_partial_changes() {
         }),
     );
 
-    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["type"], "error", "{response}");
     assert_eq!(response["error"]["code"], "file.snapshotRequired");
     assert!(!env.workspace().join("created.txt").exists());
     assert_eq!(
@@ -805,11 +809,11 @@ fn file_edit_keeps_applied_operations_and_stops_after_runtime_failure() {
         json!({ "changes": changes }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert!(response["result"].get("complete").is_none());
-    assert_eq!(response["result"]["operations"][0]["status"], "applied");
-    assert_eq!(response["result"]["operations"][1]["status"], "failed");
-    assert_eq!(response["result"]["operations"][2]["status"], "notExecuted");
+    assert_eq!(response["type"], "reply", "{response}");
+    assert!(response["message"].get("complete").is_none());
+    assert_eq!(response["message"]["operations"][0]["status"], "applied");
+    assert_eq!(response["message"]["operations"][1]["status"], "failed");
+    assert_eq!(response["message"]["operations"][2]["status"], "notExecuted");
     assert_eq!(
         fs::read_to_string(env.workspace().join("created.txt")).unwrap(),
         "created\n"
@@ -841,7 +845,7 @@ fn file_edit_applies_all_five_operations_in_order() {
             "file_read",
             json!({ "path": format!("./{path}"), "view": "content" }),
         );
-        assert_eq!(read["ok"], true, "{read}");
+        assert_eq!(read["type"], "reply", "{read}");
     }
 
     let edited = call(
@@ -870,18 +874,18 @@ fn file_edit_applies_all_five_operations_in_order() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert!(edited["result"].get("complete").is_none());
-    assert_eq!(edited["result"]["operations"].as_array().unwrap().len(), 5);
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert!(edited["message"].get("complete").is_none());
+    assert_eq!(edited["message"]["operations"].as_array().unwrap().len(), 5);
     assert!(
-        edited["result"]["operations"]
+        edited["message"]["operations"]
             .as_array()
             .unwrap()
             .iter()
             .all(|operation| operation["status"] == "applied")
     );
     assert!(
-        edited["result"]["operations"]
+        edited["message"]["operations"]
             .as_array()
             .unwrap()
             .iter()
@@ -924,7 +928,7 @@ fn file_edit_creates_missing_parent_directories_for_write_add_and_move() {
         "file_read",
         json!({ "path": "move-source.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -946,9 +950,9 @@ fn file_edit_creates_missing_parent_directories_for_write_add_and_move() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert!(
-        edited["result"]["operations"]
+        edited["message"]["operations"]
             .as_array()
             .unwrap()
             .iter()
@@ -999,7 +1003,7 @@ fn file_edit_parent_creation_does_not_follow_workspace_symlinks() {
         }),
     );
 
-    assert_eq!(edited["ok"], false, "{edited}");
+    assert_eq!(edited["type"], "error", "{edited}");
     assert!(!outside.path().join("deep").exists());
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1024,7 +1028,7 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
         "file_read",
         json!({ "path": "./document.txt", "view": "content", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -1036,10 +1040,10 @@ fn file_edit_rejects_patch_context_outside_read_coverage() {
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n-three\n+third\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "failed");
     assert_eq!(
-        edited["result"]["operations"][0]["error"]["code"],
+        edited["message"]["operations"][0]["error"]["code"],
         "file.unreadRange"
     );
     assert_eq!(
@@ -1065,7 +1069,7 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
     fs::write(
         env.workspace().join("document.txt"),
         "external\none\ntwo\nthree\n",
@@ -1082,9 +1086,9 @@ fn file_edit_three_way_merges_non_conflicting_external_changes() {
             "changes": "*** Begin Edit\n*** Patch File: ./document.txt\n@@\n one\n-two\n+second\n three\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
-    assert!(edited["result"]["operations"][0].get("merged").is_none());
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "applied");
+    assert!(edited["message"]["operations"][0].get("merged").is_none());
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "external\none\nsecond\nthree\n"
@@ -1108,16 +1112,19 @@ fn closing_transport_session_does_not_release_context_snapshots() {
         "file_read",
         json!({ "path": "./document.txt" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
-    let closed = call(
-        &env,
+    assert_eq!(read["type"], "reply", "{read}");
+    let closed = env.rpc(
         instance,
-        "2",
-        "control",
-        "tool.session.close",
-        json!({ "sessionId": "ctx-a" }),
+        "tool",
+        &json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "2",
+            "method": "tool.session.close",
+            "message": { "sessionId": "ctx-a" }
+        }),
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
 
     let edited = call(
         &env,
@@ -1129,7 +1136,7 @@ fn closing_transport_session_does_not_release_context_snapshots() {
             "changes": "*** Begin Edit\n*** Rewrite File: ./document.txt\nnew\n*** End Edit"
         }),
     );
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "new\n"
@@ -1170,8 +1177,8 @@ fn file_edit_keeps_a_call_local_snapshot_chain_for_dependent_operations() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert!(edited["result"].get("complete").is_none(), "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert!(edited["message"].get("complete").is_none(), "{edited}");
     assert!(!env.workspace().join("first.txt").exists());
     assert_eq!(
         fs::read_to_string(env.workspace().join("second.txt")).unwrap(),
@@ -1197,10 +1204,10 @@ fn file_edit_returns_diff_only_when_requested() {
             "changes": "*** Begin Edit\n*** Write File: ./summary.txt\nsummary\n*** End Edit"
         }),
     );
-    assert_eq!(summary["ok"], true, "{summary}");
-    assert!(summary["result"]["operations"][0].get("diff").is_none());
+    assert_eq!(summary["type"], "reply", "{summary}");
+    assert!(summary["message"]["operations"][0].get("diff").is_none());
     assert!(
-        summary["result"]["operations"][0]
+        summary["message"]["operations"][0]
             .get("truncated")
             .is_none()
     );
@@ -1216,10 +1223,10 @@ fn file_edit_returns_diff_only_when_requested() {
             "resultDetail": "diff"
         }),
     );
-    assert_eq!(detailed["ok"], true, "{detailed}");
-    assert!(detailed["result"]["operations"][0]["diff"].is_string());
+    assert_eq!(detailed["type"], "reply", "{detailed}");
+    assert!(detailed["message"]["operations"][0]["diff"].is_string());
     assert!(
-        detailed["result"]["operations"][0]
+        detailed["message"]["operations"][0]
             .get("truncated")
             .is_none()
     );
@@ -1242,8 +1249,8 @@ fn file_read_metadata_returns_complete_metadata_without_content() {
         "file_read",
         json!({ "files": [{ "path": "./document.txt", "view": "metadata" }] }),
     );
-    assert_eq!(response["ok"], true, "{response}");
-    let entry = &response["result"]["files"][0];
+    assert_eq!(response["type"], "reply", "{response}");
+    let entry = &response["message"]["files"][0];
     assert_eq!(entry["path"], "./document.txt");
     assert_eq!(entry["view"], "metadata");
     assert!(entry.get("content").is_none());
@@ -1273,7 +1280,7 @@ fn file_tools_reject_non_canonical_workspace_paths() {
         json!({ "path": "././document.txt" }),
     );
 
-    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["type"], "error", "{response}");
     assert_eq!(response["error"]["code"], "file.invalidPath");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1294,9 +1301,9 @@ fn file_tools_omit_absent_pagination_fields() {
         "file_read",
         json!({ "path": "./document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert!(read["result"].get("nextSelector").is_none());
-    assert!(read["result"].get("truncated").is_none());
+    assert_eq!(read["type"], "reply", "{read}");
+    assert!(read["message"].get("nextSelector").is_none());
+    assert!(read["message"].get("truncated").is_none());
 
     let found = call(
         &env,
@@ -1306,9 +1313,9 @@ fn file_tools_omit_absent_pagination_fields() {
         "file_glob",
         json!({ "patterns": ["./document.txt"] }),
     );
-    assert_eq!(found["ok"], true, "{found}");
-    assert!(found["result"].get("nextCursor").is_none());
-    assert!(found["result"].get("content").is_none());
+    assert_eq!(found["type"], "reply", "{found}");
+    assert!(found["message"].get("nextCursor").is_none());
+    assert!(found["message"].get("content").is_none());
 
     let searched = call(
         &env,
@@ -1318,9 +1325,9 @@ fn file_tools_omit_absent_pagination_fields() {
         "file_grep",
         json!({ "paths": ["./document.txt"], "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert!(searched["result"].get("nextCursor").is_none());
-    assert!(searched["result"]["files"][0].get("matchCount").is_none());
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert!(searched["message"].get("nextCursor").is_none());
+    assert!(searched["message"]["files"][0].get("matchCount").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1347,9 +1354,9 @@ fn file_glob_treats_missing_roots_and_exact_paths_as_empty_results() {
             "type": "file"
         }),
     );
-    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["type"], "reply", "{found}");
     assert_eq!(
-        found["result"]["entries"],
+        found["message"]["entries"],
         json!([{ "path": "./.pi/prompts/release.md", "type": "file" }])
     );
 
@@ -1361,8 +1368,8 @@ fn file_glob_treats_missing_roots_and_exact_paths_as_empty_results() {
         "file_glob",
         json!({ "patterns": ["./.pi/skills/SKILL.md"] }),
     );
-    assert_eq!(exact_missing["ok"], true, "{exact_missing}");
-    assert_eq!(exact_missing["result"]["entries"], json!([]));
+    assert_eq!(exact_missing["type"], "reply", "{exact_missing}");
+    assert_eq!(exact_missing["message"]["entries"], json!([]));
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1384,8 +1391,8 @@ fn file_glob_respects_gitignore_and_can_explicitly_include_ignored_files() {
         "file_glob",
         json!({ "patterns": ["./"] }),
     );
-    assert_eq!(default_result["ok"], true, "{default_result}");
-    let default_paths = default_result["result"]["entries"]
+    assert_eq!(default_result["type"], "reply", "{default_result}");
+    let default_paths = default_result["message"]["entries"]
         .as_array()
         .unwrap()
         .iter()
@@ -1402,8 +1409,8 @@ fn file_glob_respects_gitignore_and_can_explicitly_include_ignored_files() {
         "file_glob",
         json!({ "patterns": ["./"], "gitignore": false }),
     );
-    assert_eq!(inclusive_result["ok"], true, "{inclusive_result}");
-    let inclusive_paths = inclusive_result["result"]["entries"]
+    assert_eq!(inclusive_result["type"], "reply", "{inclusive_result}");
+    let inclusive_paths = inclusive_result["message"]["entries"]
         .as_array()
         .unwrap()
         .iter()
@@ -1438,22 +1445,22 @@ fn file_read_metadata_reports_missing_entries_and_dangling_symlinks_in_one_batch
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["files"][0]["path"], "./missing.txt");
-    assert_eq!(response["result"]["files"][0]["metadata"]["exists"], false);
+    assert_eq!(response["type"], "reply", "{response}");
+    assert_eq!(response["message"]["files"][0]["path"], "./missing.txt");
+    assert_eq!(response["message"]["files"][0]["metadata"]["exists"], false);
     assert!(
-        response["result"]["files"][0]["metadata"]
+        response["message"]["files"][0]["metadata"]
             .get("type")
             .is_none()
     );
-    assert_eq!(response["result"]["files"][1]["path"], "./dangling-link");
-    assert_eq!(response["result"]["files"][1]["metadata"]["exists"], true);
+    assert_eq!(response["message"]["files"][1]["path"], "./dangling-link");
+    assert_eq!(response["message"]["files"][1]["metadata"]["exists"], true);
     assert_eq!(
-        response["result"]["files"][1]["metadata"]["type"],
+        response["message"]["files"][1]["metadata"]["type"],
         "symlink"
     );
     assert!(
-        response["result"]["files"][1]["metadata"]
+        response["message"]["files"][1]["metadata"]
             .get("targetType")
             .is_none()
     );
@@ -1493,13 +1500,13 @@ fn file_read_metadata_does_not_follow_a_workspace_symlink_outside_the_workspace(
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    let entry = &response["result"]["files"][0];
+    assert_eq!(response["type"], "reply", "{response}");
+    let entry = &response["message"]["files"][0];
     assert_eq!(entry["path"], "./outside-link");
     assert_eq!(entry["metadata"]["type"], "symlink");
     assert!(entry["metadata"]["sizeBytes"].is_number(), "{entry}");
     assert!(entry["metadata"].get("targetType").is_none(), "{entry}");
-    let inside = &response["result"]["files"][1];
+    let inside = &response["message"]["files"][1];
     assert_eq!(inside["metadata"]["type"], "symlink");
     assert_eq!(inside["metadata"]["targetType"], "file", "{inside}");
 
@@ -1517,7 +1524,7 @@ fn file_read_metadata_does_not_follow_a_workspace_symlink_outside_the_workspace(
         "file_read",
         json!({ "files": [{ "path": "./outside-dir/missing.txt", "view": "metadata" }] }),
     );
-    assert_eq!(escaped_missing["ok"], false, "{escaped_missing}");
+    assert_eq!(escaped_missing["type"], "error", "{escaped_missing}");
 
     let missing_tail = call(
         &env,
@@ -1527,9 +1534,9 @@ fn file_read_metadata_does_not_follow_a_workspace_symlink_outside_the_workspace(
         "file_read",
         json!({ "files": [{ "path": "./missing-dir/missing.txt", "view": "metadata" }] }),
     );
-    assert_eq!(missing_tail["ok"], true, "{missing_tail}");
+    assert_eq!(missing_tail["type"], "reply", "{missing_tail}");
     assert_eq!(
-        missing_tail["result"]["files"][0]["metadata"]["exists"],
+        missing_tail["message"]["files"][0]["metadata"]["exists"],
         false
     );
     env.json_command(&["stop", "--instance", instance]);
@@ -1555,7 +1562,7 @@ fn file_grep_exact_file_reports_non_text_input() {
         json!({ "paths": ["./binary.dat"], "pattern": "BAD", "syntax": "literal" }),
     );
 
-    assert_eq!(response["ok"], false, "{response}");
+    assert_eq!(response["type"], "error", "{response}");
     assert_eq!(response["error"]["code"], "file.notText", "{response}");
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1581,8 +1588,8 @@ fn file_grep_cursor_continuation_rejects_repeated_query_fields() {
         "file_grep",
         json!({ "paths": paths.clone(), "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(first_page["ok"], true, "{first_page}");
-    let cursor = first_page["result"]["nextCursor"].as_str().unwrap();
+    assert_eq!(first_page["type"], "reply", "{first_page}");
+    let cursor = first_page["message"]["nextCursor"].as_str().unwrap();
 
     let mixed = call(
         &env,
@@ -1593,7 +1600,7 @@ fn file_grep_cursor_continuation_rejects_repeated_query_fields() {
         json!({ "pattern": "needle", "cursor": cursor }),
     );
 
-    assert_eq!(mixed["ok"], false, "{mixed}");
+    assert_eq!(mixed["type"], "error", "{mixed}");
     assert_eq!(mixed["error"]["code"], "tool.invalidArguments");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -1614,7 +1621,7 @@ fn file_edit_preserves_the_detected_line_ending_style() {
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -1627,8 +1634,8 @@ fn file_edit_preserves_the_detected_line_ending_style() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert!(edited["result"].get("complete").is_none(), "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert!(edited["message"].get("complete").is_none(), "{edited}");
     assert_eq!(
         fs::read(env.workspace().join("document.txt")).unwrap(),
         b"updated\r\nsecond\r\n"
@@ -1657,7 +1664,7 @@ fn file_edit_streams_sparse_patch_for_files_larger_than_the_snapshot_limit() {
         "file_read",
         json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -1670,11 +1677,11 @@ fn file_edit_streams_sparse_patch_for_files_larger_than_the_snapshot_limit() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
-    assert_eq!(edited["result"]["operations"][0]["addedLines"], 1);
-    assert_eq!(edited["result"]["operations"][0]["removedLines"], 1);
-    assert!(edited["result"]["operations"][0].get("diff").is_none());
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "applied");
+    assert_eq!(edited["message"]["operations"][0]["addedLines"], 1);
+    assert_eq!(edited["message"]["operations"][0]["removedLines"], 1);
+    assert!(edited["message"]["operations"][0].get("diff").is_none());
     let result = fs::read_to_string(env.workspace().join("large.txt")).unwrap();
     assert!(result.starts_with("target new\nfiller line"));
     assert_eq!(result.len(), original_len);
@@ -1701,7 +1708,7 @@ fn file_edit_sparse_rewrite_preserves_bom_and_crlf_without_old_content_diff() {
         "file_read",
         json!({ "path": "./large.txt", "view": "content", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -1714,9 +1721,9 @@ fn file_edit_sparse_rewrite_preserves_bom_and_crlf_without_old_content_diff() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "applied");
-    assert!(edited["result"]["operations"][0].get("diff").is_none());
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "applied");
+    assert!(edited["message"]["operations"][0].get("diff").is_none());
     assert_eq!(
         fs::read(env.workspace().join("large.txt")).unwrap(),
         b"\xef\xbb\xbfnew first\r\nnew second\r\n"
@@ -1740,7 +1747,7 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
         "file_read",
         json!({ "path": "./document.txt", "view": "content" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
     fs::write(
         env.workspace().join("document.txt"),
         "one\nexternal\nthree\n",
@@ -1758,13 +1765,13 @@ fn file_edit_rejects_conflicting_external_changes_without_overwriting_them() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert_eq!(
-        edited["result"]["operations"][0]["status"], "failed",
+        edited["message"]["operations"][0]["status"], "failed",
         "{edited}"
     );
     assert_eq!(
-        edited["result"]["operations"][0]["error"]["code"],
+        edited["message"]["operations"][0]["error"]["code"],
         "file.revisionMismatch"
     );
     assert_eq!(
@@ -1798,9 +1805,9 @@ fn file_grep_keeps_the_serialized_page_within_the_rpc_output_budget() {
         json!({ "pattern": "needle", "syntax": "literal" }),
     );
 
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert!(serde_json::to_vec(&searched["result"]).unwrap().len() <= 1024 * 1024);
-    assert!(searched["result"]["nextCursor"].is_string());
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert!(serde_json::to_vec(&searched["message"]).unwrap().len() <= 1024 * 1024);
+    assert!(searched["message"]["nextCursor"].is_string());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -1824,9 +1831,9 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_glob",
         json!({ "patterns": ["./tree"], "type": "file" }),
     );
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(first["result"]["entries"].as_array().unwrap().len(), 200);
-    let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(first["message"]["entries"].as_array().unwrap().len(), 200);
+    let cursor = first["message"]["nextCursor"].as_str().unwrap().to_string();
 
     #[cfg(windows)]
     {
@@ -1850,12 +1857,12 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_glob",
         json!({ "cursor": cursor.clone() }),
     );
-    assert_eq!(second["ok"], true, "{second}");
-    let entries = second["result"]["entries"].as_array().unwrap();
+    assert_eq!(second["type"], "reply", "{second}");
+    let entries = second["message"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 50, "{second}");
     assert_eq!(entries[0]["path"], "./tree/file-200.txt");
     assert_eq!(entries[49]["path"], "./tree/file-249.txt");
-    assert!(second["result"].get("nextCursor").is_none());
+    assert!(second["message"].get("nextCursor").is_none());
 
     let reused = call(
         &env,
@@ -1865,8 +1872,8 @@ fn file_glob_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_glob",
         json!({ "cursor": cursor }),
     );
-    assert_eq!(reused["ok"], true, "{reused}");
-    assert_eq!(reused["result"]["entries"].as_array().unwrap().len(), 50);
+    assert_eq!(reused["type"], "reply", "{reused}");
+    assert_eq!(reused["message"]["entries"].as_array().unwrap().len(), 50);
 
     env.json_command(&["stop", "--instance", instance]);
     #[cfg(windows)]
@@ -1892,8 +1899,8 @@ fn file_glob_cursor_is_bound_to_context_and_workspace() {
         "file_glob",
         json!({ "patterns": ["./tree"], "type": "file" }),
     );
-    assert_eq!(first["ok"], true, "{first}");
-    let cursor = first["result"]["nextCursor"].as_str().unwrap();
+    assert_eq!(first["type"], "reply", "{first}");
+    let cursor = first["message"]["nextCursor"].as_str().unwrap();
 
     let other_context = call(
         &env,
@@ -1909,15 +1916,19 @@ fn file_glob_cursor_is_bound_to_context_and_workspace() {
     fs::create_dir_all(&other_workspace).unwrap();
     let wrong_workspace = env.rpc(
         instance,
+        "tool",
         &json!({
+            "protocol": "rpc",
             "type": "request",
             "id": "3",
             "method": "file_glob",
-            "params": { "cursor": cursor },
-            "context": {
-                "ctxId": "ctx-a",
-                "source": "mcp",
-                "workspace": other_workspace
+            "message": {
+                "input": { "cursor": cursor },
+                "context": {
+                    "ctxId": "ctx-a",
+                    "source": "mcp",
+                    "workspace": other_workspace
+                }
             }
         }),
     );
@@ -1954,9 +1965,9 @@ fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
             "context": 0
         }),
     );
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(first["result"]["files"].as_array().unwrap().len(), 20);
-    let cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(first["message"]["files"].as_array().unwrap().len(), 20);
+    let cursor = first["message"]["nextCursor"].as_str().unwrap().to_string();
 
     #[cfg(windows)]
     {
@@ -1980,12 +1991,12 @@ fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_grep",
         json!({ "cursor": cursor.clone() }),
     );
-    assert_eq!(second["ok"], true, "{second}");
-    let files = second["result"]["files"].as_array().unwrap();
+    assert_eq!(second["type"], "reply", "{second}");
+    let files = second["message"]["files"].as_array().unwrap();
     assert_eq!(files.len(), 5, "{second}");
     assert_eq!(files[0]["path"], "./search-tree/file-020.txt");
     assert_eq!(files[4]["path"], "./search-tree/file-024.txt");
-    assert!(second["result"].get("nextCursor").is_none());
+    assert!(second["message"].get("nextCursor").is_none());
 
     let reused = call(
         &env,
@@ -1995,8 +2006,8 @@ fn file_grep_cursor_resumes_the_open_traversal_after_root_replacement() {
         "file_grep",
         json!({ "cursor": cursor }),
     );
-    assert_eq!(reused["ok"], true, "{reused}");
-    assert_eq!(reused["result"]["files"].as_array().unwrap().len(), 5);
+    assert_eq!(reused["type"], "reply", "{reused}");
+    assert_eq!(reused["message"]["files"].as_array().unwrap().len(), 5);
 
     env.json_command(&["stop", "--instance", instance]);
     #[cfg(windows)]
@@ -2022,8 +2033,8 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         "file_glob",
         json!({ "patterns": ["./tree"], "type": "file" }),
     );
-    assert_eq!(first["ok"], true, "{first}");
-    let first_cursor = first["result"]["nextCursor"].as_str().unwrap().to_string();
+    assert_eq!(first["type"], "reply", "{first}");
+    let first_cursor = first["message"]["nextCursor"].as_str().unwrap().to_string();
 
     let second = call(
         &env,
@@ -2033,9 +2044,9 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         "file_glob",
         json!({ "cursor": first_cursor.clone() }),
     );
-    assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["entries"].as_array().unwrap().len(), 200);
-    let second_cursor = second["result"]["nextCursor"].as_str().unwrap().to_string();
+    assert_eq!(second["type"], "reply", "{second}");
+    assert_eq!(second["message"]["entries"].as_array().unwrap().len(), 200);
+    let second_cursor = second["message"]["nextCursor"].as_str().unwrap().to_string();
 
     let retry = call(
         &env,
@@ -2045,8 +2056,8 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         "file_glob",
         json!({ "cursor": first_cursor.clone() }),
     );
-    assert_eq!(retry["ok"], true, "{retry}");
-    assert_eq!(retry["result"]["entries"], second["result"]["entries"]);
+    assert_eq!(retry["type"], "reply", "{retry}");
+    assert_eq!(retry["message"]["entries"], second["message"]["entries"]);
 
     let third = call(
         &env,
@@ -2056,8 +2067,8 @@ fn file_glob_cursor_retires_parent_only_after_child_is_used() {
         "file_glob",
         json!({ "cursor": second_cursor }),
     );
-    assert_eq!(third["ok"], true, "{third}");
-    assert_eq!(third["result"]["entries"].as_array().unwrap().len(), 50);
+    assert_eq!(third["type"], "reply", "{third}");
+    assert_eq!(third["message"]["entries"].as_array().unwrap().len(), 50);
 
     let retired = call(
         &env,
@@ -2098,9 +2109,9 @@ fn file_grep_marks_per_file_match_truncation_explicitly() {
             "context": 0
         }),
     );
-    assert_eq!(truncated["ok"], true, "{truncated}");
-    assert_eq!(truncated["result"]["files"][0]["truncated"], true);
-    assert_eq!(truncated["result"]["files"][0]["nextLine"], 201);
+    assert_eq!(truncated["type"], "reply", "{truncated}");
+    assert_eq!(truncated["message"]["files"][0]["truncated"], true);
+    assert_eq!(truncated["message"]["files"][0]["nextLine"], 201);
 
     let continued = call(
         &env,
@@ -2116,16 +2127,16 @@ fn file_grep_marks_per_file_match_truncation_explicitly() {
             "startLine": 201
         }),
     );
-    assert_eq!(continued["ok"], true, "{continued}");
+    assert_eq!(continued["type"], "reply", "{continued}");
     assert!(
-        continued["result"]["files"][0]["content"]
+        continued["message"]["files"][0]["content"]
             .as_str()
             .unwrap()
             .contains("*201:needle 200"),
         "{continued}"
     );
-    assert!(continued["result"]["files"][0].get("truncated").is_none());
-    assert!(continued["result"]["files"][0].get("nextLine").is_none());
+    assert!(continued["message"]["files"][0].get("truncated").is_none());
+    assert!(continued["message"]["files"][0].get("nextLine").is_none());
 
     let exact = call(
         &env,
@@ -2140,9 +2151,9 @@ fn file_grep_marks_per_file_match_truncation_explicitly() {
             "context": 0
         }),
     );
-    assert_eq!(exact["ok"], true, "{exact}");
-    assert!(exact["result"]["files"][0].get("truncated").is_none());
-    assert!(exact["result"]["files"][0].get("nextLine").is_none());
+    assert_eq!(exact["type"], "reply", "{exact}");
+    assert!(exact["message"]["files"][0].get("truncated").is_none());
+    assert!(exact["message"]["files"][0].get("nextLine").is_none());
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2171,9 +2182,9 @@ fn file_grep_exact_page_does_not_return_an_empty_continuation() {
             "context": 0
         }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 20);
-    assert!(searched["result"].get("nextCursor").is_none(), "{searched}");
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert_eq!(searched["message"]["files"].as_array().unwrap().len(), 20);
+    assert!(searched["message"].get("nextCursor").is_none(), "{searched}");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2201,8 +2212,8 @@ fn file_read_batch_keeps_successful_items_when_one_path_fails() {
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(response["type"], "reply", "{response}");
+    let files = response["message"]["files"].as_array().unwrap();
     assert_eq!(files.len(), 3);
     assert_eq!(files[0]["path"], "./first.txt");
     assert_eq!(files[0]["content"], "1:first");
@@ -2230,7 +2241,7 @@ fn file_edit_accepts_common_apply_patch_aliases() {
         "file_read",
         json!({ "path": "document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2253,7 +2264,7 @@ fn file_edit_accepts_common_apply_patch_aliases() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "new\n"
@@ -2281,7 +2292,7 @@ fn file_edit_accepts_pi_v2_redundant_apply_patch_trailer() {
         "file_read",
         json!({ "path": "document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2302,7 +2313,7 @@ fn file_edit_accepts_pi_v2_redundant_apply_patch_trailer() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "new\n"
@@ -2326,7 +2337,7 @@ fn file_edit_canonical_wrapper_does_not_absorb_end_patch_trailer() {
         "file_read",
         json!({ "path": "document.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2347,7 +2358,7 @@ fn file_edit_canonical_wrapper_does_not_absorb_end_patch_trailer() {
         }),
     );
 
-    assert_eq!(edited["ok"], false, "{edited}");
+    assert_eq!(edited["type"], "error", "{edited}");
     assert_eq!(
         fs::read_to_string(env.workspace().join("document.txt")).unwrap(),
         "old\n"
@@ -2380,10 +2391,10 @@ fn file_tools_normalize_bare_workspace_paths_and_selector_ranges() {
             }]
         }),
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["files"][0]["path"], "./document.txt");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["files"][0]["path"], "./document.txt");
     assert_eq!(
-        read["result"]["files"][0]["content"],
+        read["message"]["files"][0]["content"],
         "2:two\n3:three\n4:four\n5:five\n6:six\n7:seven\n8:eight"
     );
 
@@ -2395,8 +2406,8 @@ fn file_tools_normalize_bare_workspace_paths_and_selector_ranges() {
         "file_glob",
         json!({ "patterns": ["document.txt"] }),
     );
-    assert_eq!(found["ok"], true, "{found}");
-    assert_eq!(found["result"]["entries"][0]["path"], "./document.txt");
+    assert_eq!(found["type"], "reply", "{found}");
+    assert_eq!(found["message"]["entries"][0]["path"], "./document.txt");
 
     let searched = call(
         &env,
@@ -2406,8 +2417,8 @@ fn file_tools_normalize_bare_workspace_paths_and_selector_ranges() {
         "file_grep",
         json!({ "paths": ["document.txt"], "pattern": "six", "syntax": "literal" }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert_eq!(searched["result"]["files"][0]["path"], "./document.txt");
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert_eq!(searched["message"]["files"][0]["path"], "./document.txt");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2431,8 +2442,8 @@ fn file_grep_treats_missing_paths_as_empty_and_recovers_malformed_default_regex_
         "file_grep",
         json!({ "paths": ["missing.txt"], "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(missing["ok"], true, "{missing}");
-    assert_eq!(missing["result"]["files"], json!([]));
+    assert_eq!(missing["type"], "reply", "{missing}");
+    assert_eq!(missing["message"]["files"], json!([]));
 
     let fallback = call(
         &env,
@@ -2442,10 +2453,10 @@ fn file_grep_treats_missing_paths_as_empty_and_recovers_malformed_default_regex_
         "file_grep",
         json!({ "paths": ["document.txt"], "pattern": "new Server(" }),
     );
-    assert_eq!(fallback["ok"], true, "{fallback}");
-    assert_eq!(fallback["result"]["files"][0]["path"], "./document.txt");
+    assert_eq!(fallback["type"], "reply", "{fallback}");
+    assert_eq!(fallback["message"]["files"][0]["path"], "./document.txt");
     assert!(
-        fallback["result"]["files"][0]["content"]
+        fallback["message"]["files"][0]["content"]
             .as_str()
             .is_some_and(|content| content.contains("new Server(1)")),
         "{fallback}"
@@ -2459,7 +2470,7 @@ fn file_grep_treats_missing_paths_as_empty_and_recovers_malformed_default_regex_
         "file_grep",
         json!({ "paths": ["document.txt"], "pattern": "new Server(", "syntax": "regex" }),
     );
-    assert_eq!(explicit_regex["ok"], false, "{explicit_regex}");
+    assert_eq!(explicit_regex["type"], "error", "{explicit_regex}");
     assert_eq!(explicit_regex["error"]["code"], "file.invalidRegex");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -2480,7 +2491,7 @@ fn file_edit_semantic_failure_leaves_entire_changeset_unapplied() {
         "file_read",
         json!({ "path": "existing.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2502,11 +2513,11 @@ fn file_edit_semantic_failure_leaves_entire_changeset_unapplied() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][1]["status"], "failed");
     assert_eq!(
-        edited["result"]["operations"][1]["error"]["code"],
+        edited["message"]["operations"][1]["error"]["code"],
         "file.patchNotFound"
     );
     assert!(!env.workspace().join("created.txt").exists());
@@ -2541,8 +2552,8 @@ fn file_read_batch_preserves_multiple_successes_around_a_missing_item() {
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(response["type"], "reply", "{response}");
+    let files = response["message"]["files"].as_array().unwrap();
     assert_eq!(files.len(), 3, "{response}");
     assert_eq!(files[0]["path"], "./first.txt");
     assert_eq!(files[0]["content"], "1:first");
@@ -2569,9 +2580,9 @@ fn file_glob_and_grep_mix_missing_and_existing_paths_without_losing_results() {
         "file_glob",
         json!({ "patterns": ["missing.txt", "present.txt"], "type": "file" }),
     );
-    assert_eq!(globbed["ok"], true, "{globbed}");
+    assert_eq!(globbed["type"], "reply", "{globbed}");
     assert_eq!(
-        globbed["result"]["entries"],
+        globbed["message"]["entries"],
         json!([{ "path": "./present.txt", "type": "file" }])
     );
 
@@ -2583,9 +2594,9 @@ fn file_glob_and_grep_mix_missing_and_existing_paths_without_losing_results() {
         "file_grep",
         json!({ "paths": ["missing.txt", "present.txt"], "pattern": "needle", "syntax": "literal" }),
     );
-    assert_eq!(searched["ok"], true, "{searched}");
-    assert_eq!(searched["result"]["files"].as_array().unwrap().len(), 1);
-    assert_eq!(searched["result"]["files"][0]["path"], "./present.txt");
+    assert_eq!(searched["type"], "reply", "{searched}");
+    assert_eq!(searched["message"]["files"].as_array().unwrap().len(), 1);
+    assert_eq!(searched["message"]["files"][0]["path"], "./present.txt");
 
     env.json_command(&["stop", "--instance", instance]);
 }
@@ -2605,8 +2616,8 @@ fn file_read_selector_clamps_eof_but_rejects_fully_out_of_bounds_ranges() {
         "file_read",
         json!({ "path": "document.txt", "selector": "2-999:raw" }),
     );
-    assert_eq!(clamped["ok"], true, "{clamped}");
-    assert_eq!(clamped["result"]["content"], "2:two\n3:three");
+    assert_eq!(clamped["type"], "reply", "{clamped}");
+    assert_eq!(clamped["message"]["content"], "2:two\n3:three");
 
     let outside = call(
         &env,
@@ -2616,7 +2627,7 @@ fn file_read_selector_clamps_eof_but_rejects_fully_out_of_bounds_ranges() {
         "file_read",
         json!({ "path": "document.txt", "selector": "99-120:raw" }),
     );
-    assert_eq!(outside["ok"], false, "{outside}");
+    assert_eq!(outside["type"], "error", "{outside}");
     assert_eq!(outside["error"]["code"], "file.invalidRange");
 
     env.json_command(&["stop", "--instance", instance]);
@@ -2648,9 +2659,9 @@ fn file_edit_aliases_preserve_dependent_change_set_semantics() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
+    assert_eq!(edited["type"], "reply", "{edited}");
     assert!(
-        edited["result"]["operations"]
+        edited["message"]["operations"]
             .as_array()
             .unwrap()
             .iter()
@@ -2681,7 +2692,7 @@ fn file_edit_semantic_validation_handles_large_existing_files_without_partial_co
         "file_read",
         json!({ "path": "large.txt", "selector": "2200001-2200001:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2703,9 +2714,9 @@ fn file_edit_semantic_validation_handles_large_existing_files_without_partial_co
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][1]["status"], "failed");
     assert!(!env.workspace().join("should-not-exist.txt").exists());
     assert_eq!(
         fs::metadata(env.workspace().join("large.txt"))
@@ -2741,8 +2752,8 @@ fn file_read_batch_isolates_invalid_range_and_non_text_items() {
         }),
     );
 
-    assert_eq!(response["ok"], true, "{response}");
-    let files = response["result"]["files"].as_array().unwrap();
+    assert_eq!(response["type"], "reply", "{response}");
+    let files = response["message"]["files"].as_array().unwrap();
     assert_eq!(files.len(), 4, "{response}");
     assert_eq!(files[0]["content"], "1:one");
     assert_eq!(files[1]["error"]["code"], "file.invalidRange");
@@ -2767,7 +2778,7 @@ fn file_edit_external_revision_failure_before_commit_keeps_prior_operations_unap
         "file_read",
         json!({ "path": "existing.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
     fs::write(env.workspace().join("existing.txt"), "external\n").unwrap();
 
     let edited = call(
@@ -2788,11 +2799,11 @@ fn file_edit_external_revision_failure_before_commit_keeps_prior_operations_unap
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][1]["status"], "failed");
     assert_eq!(
-        edited["result"]["operations"][1]["error"]["code"],
+        edited["message"]["operations"][1]["error"]["code"],
         "file.revisionMismatch"
     );
     assert!(!env.workspace().join("created.txt").exists());
@@ -2832,12 +2843,12 @@ fn file_edit_semantic_failure_after_virtual_move_leaves_no_intermediate_paths() 
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][1]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][2]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][1]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][2]["status"], "failed");
     assert_eq!(
-        edited["result"]["operations"][2]["error"]["code"],
+        edited["message"]["operations"][2]["error"]["code"],
         "file.patchNotFound"
     );
     assert!(!env.workspace().join("first.txt").exists());
@@ -2861,7 +2872,7 @@ fn file_edit_semantic_failure_does_not_create_missing_parent_directories() {
         "file_read",
         json!({ "path": "existing.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let edited = call(
         &env,
@@ -2883,11 +2894,11 @@ fn file_edit_semantic_failure_does_not_create_missing_parent_directories() {
         }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    assert_eq!(edited["result"]["operations"][0]["status"], "notExecuted");
-    assert_eq!(edited["result"]["operations"][1]["status"], "failed");
+    assert_eq!(edited["type"], "reply", "{edited}");
+    assert_eq!(edited["message"]["operations"][0]["status"], "notExecuted");
+    assert_eq!(edited["message"]["operations"][1]["status"], "failed");
     assert_eq!(
-        edited["result"]["operations"][1]["error"]["code"],
+        edited["message"]["operations"][1]["error"]["code"],
         "file.patchNotFound"
     );
     assert!(!env.workspace().join("generated").exists());
@@ -2914,7 +2925,7 @@ fn file_edit_semantic_failure_at_operation_limit_leaves_all_prior_writes_unappli
         "file_read",
         json!({ "path": "existing.txt", "selector": "1-1:raw" }),
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let mut changes = String::from("*** Begin Edit\n");
     for index in 0..255 {
@@ -2933,8 +2944,8 @@ fn file_edit_semantic_failure_at_operation_limit_leaves_all_prior_writes_unappli
         json!({ "changes": changes }),
     );
 
-    assert_eq!(edited["ok"], true, "{edited}");
-    let operations = edited["result"]["operations"].as_array().unwrap();
+    assert_eq!(edited["type"], "reply", "{edited}");
+    let operations = edited["message"]["operations"].as_array().unwrap();
     assert_eq!(operations.len(), 256, "{edited}");
     assert!(
         operations[..255]

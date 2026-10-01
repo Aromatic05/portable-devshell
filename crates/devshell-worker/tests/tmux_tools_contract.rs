@@ -120,12 +120,13 @@ fn call_with_identity(
     }
     env.rpc(
         instance,
+        "tool",
         &json!({
+            "protocol": "rpc",
             "type": "request",
             "id": id,
             "method": method,
-            "params": params,
-            "context": context
+            "message": { "input": params, "context": context }
         }),
     )
 }
@@ -294,8 +295,8 @@ fn wait_for_terminal(env: &TestEnv, instance: &str, task: &str, ctx_id: &str) ->
             ctx_id,
             "wait-task",
         );
-        assert_eq!(response["ok"], true, "{response}");
-        let status = response["result"]["task"]["status"]
+        assert_eq!(response["type"], "reply", "{response}");
+        let status = response["message"]["task"]["status"]
             .as_str()
             .unwrap_or("unknown");
         if status != "running" {
@@ -357,8 +358,8 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "ctx-a",
         "run-ready",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     let input = call(
         &env,
         instance,
@@ -368,15 +369,15 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "ctx-a",
         "input-zero-time",
     );
-    assert_eq!(input["ok"], true, "{input}");
-    if input["result"]["task"]["status"] == "running" {
-        assert!(input["result"]["pane"]["id"].is_string(), "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
+    if input["message"]["task"]["status"] == "running" {
+        assert!(input["message"]["pane"]["id"].is_string(), "{input}");
     } else {
-        assert!(input["result"].get("pane").is_none(), "{input}");
+        assert!(input["message"].get("pane").is_none(), "{input}");
     }
-    assert!(input["result"].get("kind").is_none());
-    assert!(input["result"].get("observationEpoch").is_none());
-    assert!(input["result"].get("observationReset").is_none());
+    assert!(input["message"].get("kind").is_none());
+    assert!(input["message"].get("observationEpoch").is_none());
+    assert!(input["message"].get("observationReset").is_none());
     let read = call(
         &env,
         instance,
@@ -386,15 +387,15 @@ fn tmux_zero_time_ms_returns_immediate_observations() {
         "ctx-a",
         "read-zero-time",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert!(read["result"].get("pane").is_none());
-    assert!(read["result"].get("resume").is_none(), "{read}");
-    assert!(read["result"].get("timeout").is_none(), "{read}");
-    assert!(read["result"].get("kind").is_none());
-    assert!(read["result"].get("observationEpoch").is_none());
-    assert!(read["result"].get("observationReset").is_none());
+    assert_eq!(read["type"], "reply", "{read}");
+    assert!(read["message"].get("pane").is_none());
+    assert!(read["message"].get("resume").is_none(), "{read}");
+    assert!(read["message"].get("timeout").is_none(), "{read}");
+    assert!(read["message"].get("kind").is_none());
+    assert!(read["message"].get("observationEpoch").is_none());
+    assert!(read["message"].get("observationReset").is_none());
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -423,9 +424,9 @@ fn tmux_read_preserves_output_after_a_task_exits_nonzero() {
         "ctx-a",
         "run-failed-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "running", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
     thread::sleep(Duration::from_millis(1300));
     let read = call(
@@ -437,10 +438,10 @@ fn tmux_read_preserves_output_after_a_task_exits_nonzero() {
         "ctx-a",
         "read-failed-task",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["task"]["status"], "7", "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "7", "{read}");
     assert!(
-        read["result"]["output"]
+        read["message"]["output"]
             .as_array()
             .is_some_and(|lines| lines.iter().any(|line| line == "FAILED-TASK-OUTPUT")),
         "completed non-zero tasks must keep unread transcript output: {read}"
@@ -475,8 +476,8 @@ fn tmux_read_negative_line_waits_for_the_interval_before_returning_tail() {
         "ctx-tail",
         "run-tail-wait",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
     let started = Instant::now();
     let read = call(
@@ -490,14 +491,14 @@ fn tmux_read_negative_line_waits_for_the_interval_before_returning_tail() {
     );
     let elapsed = started.elapsed();
 
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
     assert!(
         elapsed >= Duration::from_millis(250),
         "negative-line read returned too early after {elapsed:?}: {read}"
     );
-    assert_eq!(read["result"]["waitReason"], "timeout", "{read}");
-    assert_eq!(read["result"]["task"]["status"], "running", "{read}");
-    let output = read["result"]["output"].as_array().unwrap();
+    assert_eq!(read["message"]["waitReason"], "timeout", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "running", "{read}");
+    let output = read["message"]["output"].as_array().unwrap();
     assert!(output.iter().any(|line| line == "FIRST"), "{read}");
     assert!(output.iter().any(|line| line == "SECOND"), "{read}");
 
@@ -528,16 +529,16 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
         "ctx-a",
         "run-ok",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
-    assert!(run["result"]["task"].get("paneId").is_none());
-    assert!(run["result"]["task"].get("startedAt").is_none());
-    assert!(run["result"]["task"].get("finishedAt").is_none());
-    assert!(run["result"].get("pane").is_none(), "{run}");
-    assert!(run["result"].get("kind").is_none());
-    assert!(run["result"].get("warnings").is_none());
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
+    assert!(run["message"]["task"].get("paneId").is_none());
+    assert!(run["message"]["task"].get("startedAt").is_none());
+    assert!(run["message"]["task"].get("finishedAt").is_none());
+    assert!(run["message"].get("pane").is_none(), "{run}");
+    assert!(run["message"].get("kind").is_none());
+    assert!(run["message"].get("warnings").is_none());
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -545,7 +546,7 @@ fn tmux_run_returns_a_task_and_preserves_clean_first_output() {
         "{run}"
     );
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -588,10 +589,10 @@ fn tmux_run_accepts_bare_workspace_relative_cwd() {
         "run-bare-cwd",
     );
 
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -614,7 +615,7 @@ fn tmux_run_accepts_bare_workspace_relative_cwd() {
         "ctx-a",
         "run-home-cwd",
     );
-    assert_eq!(home["ok"], false, "{home}");
+    assert_eq!(home["type"], "error", "{home}");
     assert_eq!(home["error"]["code"], "tmux.invalidCwd", "{home}");
 
     stop(&env, instance);
@@ -648,13 +649,13 @@ fn tmux_run_public_timeout_bounds_direct_block_wait() {
     );
     let elapsed = started.elapsed();
 
-    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
     assert!(
         elapsed < Duration::from_secs(4),
         "public timeout did not return before the task could finish naturally; call lasted {elapsed:?}: {run}"
     );
-    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
-    assert_eq!(run["result"]["timedOut"], true, "{run}");
+    assert_eq!(run["message"]["task"]["status"], "running", "{run}");
+    assert_eq!(run["message"]["timedOut"], true, "{run}");
     stop(&env, instance);
 }
 
@@ -683,8 +684,8 @@ fn tmux_input_waits_for_output_after_input_not_preexisting_backlog() {
         "ctx-input",
         "run-input-wait",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     thread::sleep(Duration::from_millis(100));
 
     let started = Instant::now();
@@ -699,13 +700,13 @@ fn tmux_input_waits_for_output_after_input_not_preexisting_backlog() {
     );
     let elapsed = started.elapsed();
 
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     assert!(
         elapsed >= Duration::from_millis(150),
         "preexisting backlog satisfied the post-input wait after {elapsed:?}: {input}"
     );
     assert!(
-        input["result"]["output"]
+        input["message"]["output"]
             .as_array()
             .is_some_and(|lines| lines.iter().any(|line| line == "NEW:hello")),
         "{input}"
@@ -738,8 +739,8 @@ fn tmux_input_negative_line_waits_for_the_interval_before_returning_tail() {
         "ctx-input-tail",
         "run-input-tail-wait",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
     let started = Instant::now();
     let input = call(
@@ -753,13 +754,13 @@ fn tmux_input_negative_line_waits_for_the_interval_before_returning_tail() {
     );
     let elapsed = started.elapsed();
 
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     assert!(
         elapsed >= Duration::from_millis(250),
         "negative-line input returned too early after {elapsed:?}: {input}"
     );
-    assert_eq!(input["result"]["task"]["status"], "running", "{input}");
-    let output = input["result"]["output"].as_array().unwrap();
+    assert_eq!(input["message"]["task"]["status"], "running", "{input}");
+    let output = input["message"]["output"].as_array().unwrap();
     assert!(output.iter().any(|line| line == "FIRST:hello"), "{input}");
     assert!(output.iter().any(|line| line == "SECOND"), "{input}");
 
@@ -790,9 +791,9 @@ fn tmux_run_can_start_without_consuming_transcript_output() {
         "ctx-a",
         "run-no-consume",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert!(run["result"].get("output").is_none(), "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    assert!(run["message"].get("output").is_none(), "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     let observed = call(
         &env,
         instance,
@@ -802,8 +803,8 @@ fn tmux_run_can_start_without_consuming_transcript_output() {
         "ctx-a",
         "observe-no-consume-read",
     );
-    assert_eq!(observed["ok"], true, "{observed}");
-    assert!(observed["result"].get("output").is_none(), "{observed}");
+    assert_eq!(observed["type"], "reply", "{observed}");
+    assert!(observed["message"].get("output").is_none(), "{observed}");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let listed = call(
@@ -815,8 +816,8 @@ fn tmux_run_can_start_without_consuming_transcript_output() {
             "ctx-a",
             "observe-no-consume",
         );
-        assert_eq!(listed["ok"], true, "{listed}");
-        let running = listed["result"]["panes"]
+        assert_eq!(listed["type"], "reply", "{listed}");
+        let running = listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -836,8 +837,8 @@ fn tmux_run_can_start_without_consuming_transcript_output() {
         "ctx-a",
         "read-no-consume",
     );
-    assert_eq!(finished["ok"], true, "{finished}");
-    let output = finished["result"]["output"].as_array().unwrap();
+    assert_eq!(finished["type"], "reply", "{finished}");
+    let output = finished["message"]["output"].as_array().unwrap();
     assert!(output.iter().any(|line| line == "EARLY"), "{finished}");
     assert!(output.iter().any(|line| line == "LATE"), "{finished}");
     stop(&env, instance);
@@ -862,9 +863,9 @@ fn tmux_run_defaults_to_nonblock_for_long_tasks() {
         "ctx-a",
         "run-default-nonblock",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "running", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     let closed = call(
         &env,
         instance,
@@ -874,7 +875,7 @@ fn tmux_run_defaults_to_nonblock_for_long_tasks() {
         "ctx-a",
         "close-default-nonblock",
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
     stop(&env, instance);
 }
 
@@ -898,8 +899,8 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-a",
         "create-server",
     );
-    assert_eq!(created["ok"], true, "{created}");
-    let persistent_pane = created["result"]["pane"]["id"]
+    assert_eq!(created["type"], "reply", "{created}");
+    let persistent_pane = created["message"]["pane"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -913,9 +914,9 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-a",
         "run-sleep",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
-    let task_pane = run["result"]["pane"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane = run["message"]["pane"]["id"].as_str().unwrap().to_string();
 
     let read = call(
         &env,
@@ -926,7 +927,7 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-b",
         "read-cross-context",
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
 
     let inspect = call(
         &env,
@@ -937,7 +938,7 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-b",
         "inspect-task-pane",
     );
-    assert_eq!(inspect["ok"], true, "{inspect}");
+    assert_eq!(inspect["type"], "reply", "{inspect}");
 
     let wrong_target = call(
         &env,
@@ -962,9 +963,9 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-b",
         "close-independent-pane",
     );
-    assert_eq!(closed_interactive["ok"], true, "{closed_interactive}");
+    assert_eq!(closed_interactive["type"], "reply", "{closed_interactive}");
     assert_eq!(
-        closed_interactive["result"]["closedPaneId"],
+        closed_interactive["message"]["closedPaneId"],
         persistent_pane
     );
 
@@ -977,9 +978,9 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "ctx-c",
         "input-cross-context",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let finished = wait_for_terminal(&env, instance, &task, "ctx-c");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
 
     let listed = call(
         &env,
@@ -991,7 +992,7 @@ fn tmux_task_and_persistent_pane_controls_remain_separate_across_contexts() {
         "list-after-task",
     );
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1025,7 +1026,7 @@ fn persistent_pane_rejects_close_while_foreground_process_is_running() {
         "ctx-a",
         "create-busy-pane",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
 
     let input = call(
         &env,
@@ -1036,7 +1037,7 @@ fn persistent_pane_rejects_close_while_foreground_process_is_running() {
         "ctx-a",
         "start-busy-command",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -1049,7 +1050,7 @@ fn persistent_pane_rejects_close_while_foreground_process_is_running() {
             "ctx-b",
             "list-busy-pane",
         );
-        let status = listed["result"]["panes"]
+        let status = listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1085,7 +1086,7 @@ fn persistent_pane_rejects_close_while_foreground_process_is_running() {
         "ctx-b",
         "force-close-busy-pane",
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
     stop(&env, instance);
 }
 
@@ -1113,8 +1114,8 @@ fn persistent_pane_survives_user_shell_exit() {
         "ctx-a",
         "create-survivor-pane",
     );
-    assert_eq!(created["ok"], true, "{created}");
-    let pane_id = created["result"]["pane"]["id"]
+    assert_eq!(created["type"], "reply", "{created}");
+    let pane_id = created["message"]["pane"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1128,7 +1129,7 @@ fn persistent_pane_survives_user_shell_exit() {
         "ctx-a",
         "exit-survivor-shell",
     );
-    assert_eq!(exited["ok"], true, "{exited}");
+    assert_eq!(exited["type"], "reply", "{exited}");
 
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
@@ -1141,7 +1142,7 @@ fn persistent_pane_survives_user_shell_exit() {
             "ctx-b",
             "list-restarted-shell",
         );
-        let pane = listed["result"]["panes"]
+        let pane = listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1165,7 +1166,7 @@ fn persistent_pane_survives_user_shell_exit() {
         "ctx-b",
         "use-restarted-shell",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let output = env.workspace().join("after-exit.txt");
     let deadline = Instant::now() + Duration::from_secs(3);
     while !output.exists() && Instant::now() < deadline {
@@ -1200,9 +1201,9 @@ fn failed_main_shell_startup_remains_observable_and_recovers() {
         "ctx-a",
         "list-with-broken-shell",
     );
-    assert_eq!(initial["ok"], true, "{initial}");
+    assert_eq!(initial["type"], "reply", "{initial}");
     assert!(
-        initial["result"]["panes"]
+        initial["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1224,8 +1225,8 @@ fn failed_main_shell_startup_remains_observable_and_recovers() {
             "ctx-a",
             &format!("list-after-shell-repair-{attempt}"),
         );
-        assert_eq!(recovered["ok"], true, "{recovered}");
-        if recovered["result"]["panes"]
+        assert_eq!(recovered["type"], "reply", "{recovered}");
+        if recovered["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1262,9 +1263,9 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "ctx-a",
         "run-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
-    let task_pane = run["result"]["pane"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane = run["message"]["pane"]["id"].as_str().unwrap().to_string();
 
     let guarded = call(
         &env,
@@ -1286,8 +1287,8 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "ctx-b",
         "force-close-cross-context",
     );
-    assert_eq!(closed["ok"], true, "{closed}");
-    assert_eq!(closed["result"]["closedTaskId"], task, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
+    assert_eq!(closed["message"]["closedTaskId"], task, "{closed}");
 
     let closed_again = call(
         &env,
@@ -1298,9 +1299,9 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "ctx-c",
         "close-terminal-task-again",
     );
-    assert_eq!(closed_again["ok"], true, "{closed_again}");
+    assert_eq!(closed_again["type"], "reply", "{closed_again}");
     assert_eq!(
-        closed_again["result"]["closedTaskId"], task,
+        closed_again["message"]["closedTaskId"], task,
         "{closed_again}"
     );
 
@@ -1313,8 +1314,8 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "ctx-c",
         "read-after-force-close",
     );
-    assert_eq!(after_close["ok"], true, "{after_close}");
-    assert_eq!(after_close["result"]["task"]["status"], "terminated");
+    assert_eq!(after_close["type"], "reply", "{after_close}");
+    assert_eq!(after_close["message"]["task"]["status"], "terminated");
 
     let stale_input = call(
         &env,
@@ -1340,7 +1341,7 @@ fn tmux_force_close_task_is_not_owned_by_the_creating_context() {
         "list-after-close",
     );
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1369,9 +1370,9 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
         "ctx-a",
         "run-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
-    let task_pane_name = run["result"]["pane"]["name"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
+    let task_pane_name = run["message"]["pane"]["name"].as_str().unwrap();
     let tmux_pane_id = tmux_pane_id_by_name(&env, instance, task_pane_name);
 
     let changed = Command::new("tmux")
@@ -1403,9 +1404,9 @@ fn pane_incarnation_change_invalidates_stale_task_control() {
         "ctx-b",
         "read-stale-incarnation",
     );
-    assert_eq!(stale_read["ok"], true, "{stale_read}");
+    assert_eq!(stale_read["type"], "reply", "{stale_read}");
     assert_eq!(
-        stale_read["result"]["task"]["status"], "unknown",
+        stale_read["message"]["task"]["status"], "unknown",
         "{stale_read}"
     );
 
@@ -1445,7 +1446,7 @@ fn tmux_inspect_defaults_to_main_when_other_panes_exist() {
         "ctx-a",
         "create-extra-pane",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
 
     let inspect = call(
         &env,
@@ -1456,13 +1457,13 @@ fn tmux_inspect_defaults_to_main_when_other_panes_exist() {
         "ctx-a",
         "inspect-default-main",
     );
-    assert_eq!(inspect["ok"], true, "{inspect}");
+    assert_eq!(inspect["type"], "reply", "{inspect}");
     assert_eq!(
-        inspect["result"]["panes"].as_array().unwrap().len(),
+        inspect["message"]["panes"].as_array().unwrap().len(),
         1,
         "{inspect}"
     );
-    assert_eq!(inspect["result"]["panes"][0]["name"], "main", "{inspect}");
+    assert_eq!(inspect["message"]["panes"][0]["name"], "main", "{inspect}");
     stop(&env, instance);
 }
 
@@ -1486,7 +1487,7 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "ctx-a",
         "write-short-pane-output",
     );
-    assert_eq!(short["ok"], true, "{short}");
+    assert_eq!(short["type"], "reply", "{short}");
     let short_deadline = Instant::now() + Duration::from_secs(3);
     loop {
         let inspect = call(
@@ -1498,8 +1499,8 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
             "ctx-a",
             "inspect-short-pane-output",
         );
-        assert_eq!(inspect["ok"], true, "{inspect}");
-        if inspect["result"]["panes"][0]["lines"]
+        assert_eq!(inspect["type"], "reply", "{inspect}");
+        if inspect["message"]["panes"][0]["lines"]
             .as_array()
             .is_some_and(|lines| lines.iter().any(|line| line == "SHORT-PANE-LINE"))
         {
@@ -1521,7 +1522,7 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "ctx-a",
         "fill-main-history",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let idle_deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let listed = call(
@@ -1533,8 +1534,8 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
             "ctx-a",
             "wait-main-idle",
         );
-        assert_eq!(listed["ok"], true, "{listed}");
-        let main_status = listed["result"]["panes"]
+        assert_eq!(listed["type"], "reply", "{listed}");
+        let main_status = listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1567,8 +1568,8 @@ fn tmux_inspect_honors_nonzero_end_offsets() {
         "ctx-a",
         "inspect-range",
     );
-    assert_eq!(inspect["ok"], true, "{inspect}");
-    let actual = inspect["result"]["panes"][0]["lines"]
+    assert_eq!(inspect["type"], "reply", "{inspect}");
+    let actual = inspect["message"]["panes"][0]["lines"]
         .as_array()
         .unwrap()
         .iter()
@@ -1598,10 +1599,10 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
         "ctx-a",
         "run-first",
     );
-    assert_eq!(first["ok"], true, "{first}");
-    let first_task = first["result"]["task"]["id"].as_str().unwrap().to_string();
-    let first_pane = first["result"]["pane"]["id"].as_str().unwrap().to_string();
-    assert_ne!(first["result"]["pane"]["name"], "main");
+    assert_eq!(first["type"], "reply", "{first}");
+    let first_task = first["message"]["task"]["id"].as_str().unwrap().to_string();
+    let first_pane = first["message"]["pane"]["id"].as_str().unwrap().to_string();
+    assert_ne!(first["message"]["pane"]["name"], "main");
 
     let second = call_with_identity(
         &env,
@@ -1615,9 +1616,9 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
             request_id: "run-fresh",
         },
     );
-    assert_eq!(second["ok"], true, "{second}");
-    assert_eq!(second["result"]["task"]["status"], "0", "{second}");
-    assert!(second["result"].get("pane").is_none(), "{second}");
+    assert_eq!(second["type"], "reply", "{second}");
+    assert_eq!(second["message"]["task"]["status"], "0", "{second}");
+    assert!(second["message"].get("pane").is_none(), "{second}");
 
     let replay = call_with_identity(
         &env,
@@ -1632,8 +1633,8 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
         },
     );
     assert_eq!(
-        replay["result"]["task"]["id"],
-        second["result"]["task"]["id"]
+        replay["message"]["task"]["id"],
+        second["message"]["task"]["id"]
     );
 
     let conflict = call_with_identity(
@@ -1662,7 +1663,7 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
         "ctx-b",
         "list-live-only",
     );
-    let panes = listed["result"]["panes"].as_array().unwrap();
+    let panes = listed["message"]["panes"].as_array().unwrap();
     assert!(
         panes.iter().any(|pane| pane["id"] == first_pane),
         "{listed}"
@@ -1670,7 +1671,7 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
     assert!(
         panes
             .iter()
-            .all(|pane| pane["id"] != second["result"]["pane"]["id"]),
+            .all(|pane| pane["id"] != second["message"]["pane"]["id"]),
         "{listed}"
     );
 
@@ -1683,7 +1684,7 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
         "ctx-a",
         "stop-first",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let _ = wait_for_terminal(&env, instance, &first_task, "ctx-a");
     let listed = call(
         &env,
@@ -1695,14 +1696,14 @@ fn tmux_run_uses_fresh_ephemeral_panes_and_preserves_replay() {
         "list-after-first",
     );
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
             .all(|pane| pane["id"] != first_pane)
     );
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -1732,7 +1733,7 @@ fn managed_panes_use_independent_single_pane_windows() {
             "ctx-a",
             &format!("create-{name}"),
         );
-        assert_eq!(created["ok"], true, "{created}");
+        assert_eq!(created["type"], "reply", "{created}");
     }
 
     let layout = tmux_window_layout(&env, instance);
@@ -1762,8 +1763,8 @@ fn managed_panes_use_independent_single_pane_windows() {
         "ctx-a",
         "list-window-metadata",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
-    let panes = listed["result"]["panes"].as_array().unwrap();
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let panes = listed["message"]["panes"].as_array().unwrap();
     assert_eq!(panes.len(), 3, "{listed}");
     assert!(panes.iter().all(|pane| {
         pane["id"].is_string()
@@ -1780,11 +1781,11 @@ fn managed_panes_use_independent_single_pane_windows() {
             && pane.get("createdAt").is_none()
             && pane.get("locked").is_none()
     }));
-    assert!(listed["result"].get("kind").is_none());
-    assert!(listed["result"].get("capacity").is_none());
-    assert!(listed["result"].get("observationEpoch").is_none());
-    assert!(listed["result"].get("observationReset").is_none());
-    assert!(listed["result"].get("warnings").is_none());
+    assert!(listed["message"].get("kind").is_none());
+    assert!(listed["message"].get("capacity").is_none());
+    assert!(listed["message"].get("observationEpoch").is_none());
+    assert!(listed["message"].get("observationReset").is_none());
+    assert!(listed["message"].get("warnings").is_none());
 
     stop(&env, instance);
 }
@@ -1829,8 +1830,8 @@ fn concurrent_first_tmux_calls_share_session_initialization() {
         (first.join().unwrap(), second.join().unwrap())
     });
 
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(second["type"], "reply", "{second}");
     let listed = call(
         &env,
         instance,
@@ -1840,8 +1841,8 @@ fn concurrent_first_tmux_calls_share_session_initialization() {
         "ctx-c",
         "list-after-session-init-race",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
-    let panes = listed["result"]["panes"].as_array().unwrap();
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let panes = listed["message"]["panes"].as_array().unwrap();
     assert_eq!(panes.len(), 1, "{listed}");
     assert_eq!(panes[0]["name"], "main", "{listed}");
     stop(&env, instance);
@@ -1890,13 +1891,13 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
         (first.join().unwrap(), second.join().unwrap())
     });
 
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(second["type"], "reply", "{second}");
     assert_eq!(
-        first["result"]["task"]["id"],
-        second["result"]["task"]["id"]
+        first["message"]["task"]["id"],
+        second["message"]["task"]["id"]
     );
-    let task = first["result"]["task"]["id"].as_str().unwrap();
+    let task = first["message"]["task"]["id"].as_str().unwrap();
     let interrupted = call(
         &env,
         instance,
@@ -1906,7 +1907,7 @@ fn concurrent_duplicate_run_requests_share_one_in_flight_execution() {
         "ctx-a",
         "stop-replayed-task",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let _ = wait_for_terminal(&env, instance, task, "ctx-a");
     stop(&env, instance);
 }
@@ -1948,7 +1949,7 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
                 "ctx-b",
                 "list-running",
             );
-            if let Some(task) = listed["result"]["panes"]
+            if let Some(task) = listed["message"]["panes"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -1968,10 +1969,10 @@ fn block_wait_does_not_prevent_same_context_interrupt() {
             "ctx-b",
             "interrupt-block",
         );
-        assert_eq!(interrupted["ok"], true, "{interrupted}");
+        assert_eq!(interrupted["type"], "reply", "{interrupted}");
         let result = block.join().unwrap();
-        assert_eq!(result["ok"], true, "{result}");
-        assert_ne!(result["result"]["task"]["status"], "running", "{result}");
+        assert_eq!(result["type"], "reply", "{result}");
+        assert_ne!(result["message"]["task"]["status"], "running", "{result}");
     });
 
     stop(&env, instance);
@@ -2009,10 +2010,10 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
         "ctx-bash",
         "run-clean-bash",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -2028,7 +2029,7 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
         "ctx-bash",
         "bash-main-input",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let marker = env.workspace().join("bash-interactive-marker.txt");
     let deadline = Instant::now() + Duration::from_secs(3);
     while !marker.exists() && Instant::now() < deadline {
@@ -2046,7 +2047,7 @@ fn tmux_run_uses_clean_bash_while_main_uses_user_bash_rc() {
             "ctx-bash",
             "list-bash-main-idle",
         );
-        let main = listed["result"]["panes"]
+        let main = listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -2089,9 +2090,9 @@ fn tmux_tools_do_not_wait_for_main_shell_readiness() {
         "ctx-slow-main",
         "run-with-slow-main",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
-    assert_eq!(run["result"]["output"][0], "TASK-INDEPENDENT", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["message"]["output"][0], "TASK-INDEPENDENT", "{run}");
 
     let listed = call(
         &env,
@@ -2102,9 +2103,9 @@ fn tmux_tools_do_not_wait_for_main_shell_readiness() {
         "ctx-slow-main",
         "list-with-slow-main",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -2121,7 +2122,7 @@ fn tmux_tools_do_not_wait_for_main_shell_readiness() {
         "ctx-slow-main",
         "inspect-with-slow-main",
     );
-    assert_eq!(inspected["ok"], true, "{inspected}");
+    assert_eq!(inspected["type"], "reply", "{inspected}");
 
     let input = call(
         &env,
@@ -2132,7 +2133,7 @@ fn tmux_tools_do_not_wait_for_main_shell_readiness() {
         "ctx-slow-main",
         "input-with-slow-main",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     stop(&env, instance);
 }
 
@@ -2165,10 +2166,10 @@ fn tmux_run_does_not_source_inherited_bash_env() {
         "ctx-bash-env",
         "run-clean-bash-env",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -2200,10 +2201,10 @@ fn tmux_run_does_not_expose_internal_environment() {
         "ctx-tmux-env",
         "run-clean-tmux-env",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -2238,10 +2239,10 @@ fn tmux_transcript_overflow_rotates_without_stopping_capture() {
         "ctx-transcript-limit",
         "run-large-transcript",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["warnings"]
+        run["message"]["warnings"]
             .as_array()
             .unwrap()
             .iter()
@@ -2249,14 +2250,14 @@ fn tmux_transcript_overflow_rotates_without_stopping_capture() {
         "{run}"
     );
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
             .any(|line| line == "ROTATING-END"),
         "{run}"
     );
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     let transcript = tmux_workspace_state_root(&env, instance)
         .join("transcripts")
         .join(format!("{task}.log"));
@@ -2288,8 +2289,8 @@ fn tmux_reports_when_running_task_transcript_capture_is_lost() {
         "ctx-capture-health",
         "run-capture-health",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
     let pane_id = tmux_pane_id_by_name(&env, instance, &task);
     let closed = Command::new("tmux")
         .arg("-S")
@@ -2312,9 +2313,9 @@ fn tmux_reports_when_running_task_transcript_capture_is_lost() {
         "ctx-capture-health",
         "read-after-capture-loss",
     );
-    assert_eq!(read["ok"], true, "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
     assert!(
-        read["result"]["warnings"]
+        read["message"]["warnings"]
             .as_array()
             .is_some_and(|warnings| warnings
                 .iter()
@@ -2331,9 +2332,9 @@ fn tmux_reports_when_running_task_transcript_capture_is_lost() {
         "ctx-capture-health",
         "list-after-capture-loss",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     assert!(
-        listed["result"]["warnings"]
+        listed["message"]["warnings"]
             .as_array()
             .is_some_and(|warnings| warnings
                 .iter()
@@ -2383,7 +2384,7 @@ fn tmux_internal_plumbing_does_not_resolve_through_user_path() {
         "ctx-path",
         "create-with-poisoned-path",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
 
     let command = format!(
         "test \"$(command -v cat)\" = {}/cat\nprintf 'PATH-CLEAN\\n'",
@@ -2398,10 +2399,10 @@ fn tmux_internal_plumbing_does_not_resolve_through_user_path() {
         "ctx-path",
         "run-with-poisoned-path",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -2456,10 +2457,10 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_fish_rc() {
         "ctx-fish",
         "run-clean-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .unwrap()
             .iter()
@@ -2475,7 +2476,7 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_fish_rc() {
         "ctx-fish",
         "fish-main-input",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let marker = env.workspace().join("fish-interactive-marker.txt");
     let deadline = Instant::now() + Duration::from_secs(3);
     while !marker.exists() && Instant::now() < deadline {
@@ -2526,8 +2527,8 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
         "ctx-zsh",
         "run-clean-task-zsh",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let mut attempt = 0;
@@ -2542,8 +2543,8 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
             "ctx-zsh",
             &format!("wait-zsh-main-{attempt}"),
         );
-        if listed["ok"] == true {
-            let main = listed["result"]["panes"]
+        if listed["type"] == "reply" {
+            let main = listed["message"]["panes"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -2571,7 +2572,7 @@ fn tmux_run_stays_clean_bash_while_main_uses_user_zsh_rc() {
         "ctx-zsh",
         "zsh-main-input",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let marker = env.workspace().join("zsh-interactive-marker.txt");
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut marker_value = String::new();
@@ -2605,23 +2606,25 @@ fn transport_session_close_does_not_bind_task_control_to_a_ctx_id() {
         "ctx-a",
         "run-before-close",
     );
-    assert_eq!(run["ok"], true, "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
     assert!(
-        run["result"]["pane"].get("ownedByCurrentContext").is_none(),
+        run["message"]["pane"].get("ownedByCurrentContext").is_none(),
         "{run}"
     );
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
-    let closed = call(
-        &env,
+    let closed = env.rpc(
         instance,
-        "2",
-        "tool.session.close",
-        json!({ "sessionId": "transport-session-a" }),
-        "ctx-control",
-        "close-transport-session",
+        "tool",
+        &json!({
+            "protocol": "rpc",
+            "type": "request",
+            "id": "2",
+            "method": "tool.session.close",
+            "message": { "sessionId": "transport-session-a" }
+        }),
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
 
     let reconnected = call(
         &env,
@@ -2632,7 +2635,7 @@ fn transport_session_close_does_not_bind_task_control_to_a_ctx_id() {
         "ctx-b",
         "read-after-reconnect",
     );
-    assert_eq!(reconnected["ok"], true, "{reconnected}");
+    assert_eq!(reconnected["type"], "reply", "{reconnected}");
 
     let interrupted = call(
         &env,
@@ -2643,9 +2646,9 @@ fn transport_session_close_does_not_bind_task_control_to_a_ctx_id() {
         "ctx-b",
         "input-after-reconnect",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-c");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -2668,7 +2671,7 @@ fn worker_restart_adopts_existing_panes() {
         "ctx-a",
         "create-persistent",
     );
-    let pane_id = created["result"]["pane"]["id"]
+    let pane_id = created["message"]["pane"]["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -2684,15 +2687,15 @@ fn worker_restart_adopts_existing_panes() {
         "ctx-b",
         "list-adopt",
     );
-    let persistent = listed["result"]["panes"]
+    let persistent = listed["message"]["panes"]
         .as_array()
         .unwrap()
         .iter()
         .find(|pane| pane["name"] == "persistent")
         .unwrap();
     assert_eq!(persistent["id"], pane_id);
-    assert!(listed["result"].get("observationReset").is_none());
-    assert!(listed["result"].get("warnings").is_none(), "{listed}");
+    assert!(listed["message"].get("observationReset").is_none());
+    assert!(listed["message"].get("warnings").is_none(), "{listed}");
     stop(&env, instance);
 }
 
@@ -2715,8 +2718,8 @@ fn instance_retire_destroys_recoverable_tmux_generation_but_keeps_control_histor
         "ctx-a",
         "run-before-retire",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
     let ring = tmux_transcript_buffer_name(&env, instance, &task);
     let ring_deadline = Instant::now() + Duration::from_secs(2);
     while !shared_memory_exists(&ring) && Instant::now() < ring_deadline {
@@ -2751,9 +2754,9 @@ fn instance_retire_destroys_recoverable_tmux_generation_but_keeps_control_histor
         "ctx-b",
         "list-after-retire",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -2782,7 +2785,7 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "ctx-a",
         "create-legacy-pane",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
 
     let run = call(
         &env,
@@ -2793,8 +2796,8 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "ctx-a",
         "run-legacy-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
     let state_root = tmux_workspace_state_root(&env, instance);
     let task_script = state_root.join("tasks").join(format!("{task}.sh"));
     let task_log = state_root.join("transcripts").join(format!("{task}.log"));
@@ -2840,12 +2843,12 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "ctx-b",
         "list-after-schema-migration",
     );
-    assert_eq!(migrated["ok"], true, "{migrated}");
+    assert_eq!(migrated["type"], "reply", "{migrated}");
     assert!(
         !shared_memory_exists(&transcript_buffer),
         "incompatible running task shared memory must be unlinked during runtime migration"
     );
-    let panes = migrated["result"]["panes"].as_array().unwrap();
+    let panes = migrated["message"]["panes"].as_array().unwrap();
     assert!(
         panes.iter().any(|pane| pane["name"] == "main"),
         "{migrated}"
@@ -2855,7 +2858,7 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "{migrated}"
     );
     assert!(
-        migrated["result"]["warnings"]
+        migrated["message"]["warnings"]
             .as_array()
             .unwrap()
             .iter()
@@ -2880,8 +2883,8 @@ fn incompatible_tmux_runtime_schema_is_rebuilt_once() {
         "ctx-b",
         "list-after-schema-migration-warning",
     );
-    assert_eq!(second["ok"], true, "{second}");
-    assert!(second["result"].get("warnings").is_none(), "{second}");
+    assert_eq!(second["type"], "reply", "{second}");
+    assert!(second["message"].get("warnings").is_none(), "{second}");
     stop(&env, instance);
 }
 
@@ -2904,8 +2907,8 @@ fn worker_restart_automatically_adopts_running_tasks() {
         "ctx-a",
         "run-before-restart",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
     env.json_command(&["stop", "--instance", instance]);
     assert!(env.tmux_socket_file(instance).exists());
@@ -2920,8 +2923,8 @@ fn worker_restart_automatically_adopts_running_tasks() {
         "ctx-b",
         "list-adopted",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
-    let adopted = listed["result"]["panes"]
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let adopted = listed["message"]["panes"]
         .as_array()
         .unwrap()
         .iter()
@@ -2929,7 +2932,7 @@ fn worker_restart_automatically_adopts_running_tasks() {
         .unwrap_or_else(|| panic!("adopted task pane missing: {listed}"));
     assert!(adopted.get("ownedByCurrentContext").is_none(), "{listed}");
     assert!(
-        listed["result"]["warnings"]
+        listed["message"]["warnings"]
             .as_array()
             .unwrap()
             .iter()
@@ -2946,9 +2949,9 @@ fn worker_restart_automatically_adopts_running_tasks() {
         "ctx-b",
         "interrupt-adopted",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-c");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -2976,10 +2979,10 @@ fn worker_restart_preserves_completed_task_transcript() {
         "ctx-a",
         "run-completed-before-restart",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
-    assert_eq!(run["result"]["output"][0], "BEFORE-RESTART", "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["message"]["output"][0], "BEFORE-RESTART", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
     let state_root = tmux_workspace_state_root(&env, instance);
     let stale_script = state_root.join("tasks").join(format!("{task}.sh"));
     let stale_done = state_root.join("transcripts").join(format!("{task}.done"));
@@ -2999,10 +3002,10 @@ fn worker_restart_preserves_completed_task_transcript() {
         "ctx-b",
         "read-completed-after-restart",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["task"]["status"], "0", "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "0", "{read}");
     assert_eq!(
-        read["result"]["output"].as_array().unwrap(),
+        read["message"]["output"].as_array().unwrap(),
         &[json!("AFTER-RESTART")],
         "already-consumed transcript output must not replay after restart: {read}"
     );
@@ -3079,11 +3082,11 @@ fn worker_restart_finishes_cleanup_for_a_persisted_completed_task() {
         "ctx-a",
         "run-before-failed-cleanup",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
-    assert_eq!(run["result"]["output"][0], "RECOVERED", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["message"]["output"][0], "RECOVERED", "{run}");
     assert!(
-        run["result"]["warnings"]
+        run["message"]["warnings"]
             .as_array()
             .unwrap()
             .iter()
@@ -3091,7 +3094,7 @@ fn worker_restart_finishes_cleanup_for_a_persisted_completed_task() {
         "{run}"
     );
     assert!(marker.exists());
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
 
     let panes = Command::new(&real_tmux)
         .arg("-S")
@@ -3128,9 +3131,9 @@ fn worker_restart_finishes_cleanup_for_a_persisted_completed_task() {
         "ctx-b",
         "list-after-cleanup-restart",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .unwrap()
             .iter()
@@ -3147,9 +3150,9 @@ fn worker_restart_finishes_cleanup_for_a_persisted_completed_task() {
         "ctx-b",
         "read-after-cleanup-restart",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["task"]["status"], "0", "{read}");
-    assert!(read["result"].get("output").is_none(), "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "0", "{read}");
+    assert!(read["message"].get("output").is_none(), "{read}");
     stop(&env, instance);
 }
 
@@ -3172,8 +3175,8 @@ fn worker_restart_preserves_running_task_transcript_cursor() {
         "ctx-a",
         "run-before-cursor-restart",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
 
     let consumed = call(
         &env,
@@ -3184,10 +3187,10 @@ fn worker_restart_preserves_running_task_transcript_cursor() {
         "ctx-a",
         "consume-before-restart",
     );
-    assert_eq!(consumed["ok"], true, "{consumed}");
-    assert_eq!(consumed["result"]["output"][0], "CONSUMED", "{consumed}");
+    assert_eq!(consumed["type"], "reply", "{consumed}");
+    assert_eq!(consumed["message"]["output"][0], "CONSUMED", "{consumed}");
     assert_eq!(
-        consumed["result"]["task"]["status"], "running",
+        consumed["message"]["task"]["status"], "running",
         "{consumed}"
     );
 
@@ -3204,10 +3207,10 @@ fn worker_restart_preserves_running_task_transcript_cursor() {
         "ctx-b",
         "read-running-after-restart",
     );
-    assert_eq!(after_restart["ok"], true, "{after_restart}");
-    assert_eq!(after_restart["result"]["task"]["status"], "running");
+    assert_eq!(after_restart["type"], "reply", "{after_restart}");
+    assert_eq!(after_restart["message"]["task"]["status"], "running");
     assert!(
-        after_restart["result"].get("output").is_none(),
+        after_restart["message"].get("output").is_none(),
         "{after_restart}"
     );
 
@@ -3220,7 +3223,7 @@ fn worker_restart_preserves_running_task_transcript_cursor() {
         "ctx-b",
         "stop-running-after-restart",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let _ = wait_for_terminal(&env, instance, &task, "ctx-b");
     stop(&env, instance);
 }
@@ -3244,8 +3247,8 @@ fn tmux_read_marks_a_running_task_lost_when_the_tmux_server_disappears() {
         "ctx-a",
         "run-before-server-loss",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
 
     kill_tmux_server(&env, instance);
 
@@ -3258,9 +3261,9 @@ fn tmux_read_marks_a_running_task_lost_when_the_tmux_server_disappears() {
         "ctx-b",
         "read-after-server-loss",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["task"]["status"], "unknown", "{read}");
-    assert!(read["result"].get("pane").is_none(), "{read}");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "unknown", "{read}");
+    assert!(read["message"].get("pane").is_none(), "{read}");
 
     stop(&env, instance);
 }
@@ -3286,7 +3289,7 @@ fn tmux_capacity_never_collects_persistent_panes() {
             "ctx-a",
             &format!("create-persistent-{index}"),
         );
-        assert_eq!(created["ok"], true, "{created}");
+        assert_eq!(created["type"], "reply", "{created}");
     }
 
     let full_create = call(
@@ -3326,7 +3329,7 @@ fn tmux_capacity_never_collects_persistent_panes() {
         "ctx-b",
         "close-one",
     );
-    assert_eq!(closed["ok"], true, "{closed}");
+    assert_eq!(closed["type"], "reply", "{closed}");
 
     let task = call(
         &env,
@@ -3337,8 +3340,8 @@ fn tmux_capacity_never_collects_persistent_panes() {
         "ctx-b",
         "task-after-close",
     );
-    assert_eq!(task["ok"], true, "{task}");
-    assert_eq!(task["result"]["task"]["status"], "0", "{task}");
+    assert_eq!(task["type"], "reply", "{task}");
+    assert_eq!(task["message"]["task"]["status"], "0", "{task}");
     stop(&env, instance);
 }
 
@@ -3364,8 +3367,8 @@ fn tmux_input_delivers_ctrl_b_to_foreground_process() {
         "ctx-a",
         "run-od",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
     let input = call(
         &env,
         instance,
@@ -3375,9 +3378,9 @@ fn tmux_input_delivers_ctrl_b_to_foreground_process() {
         "ctx-a",
         "send-ctrl-b",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -3403,8 +3406,8 @@ fn tmux_input_returns_immediately_by_default() {
         "ctx-a",
         "run-no-output-input",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap();
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap();
 
     let input = call(
         &env,
@@ -3415,8 +3418,8 @@ fn tmux_input_returns_immediately_by_default() {
         "ctx-a",
         "send-no-output-input",
     );
-    assert_eq!(input["ok"], true, "{input}");
-    assert_eq!(input["result"]["task"]["status"], "running", "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
+    assert_eq!(input["message"]["task"]["status"], "running", "{input}");
 
     let interrupted = call(
         &env,
@@ -3427,9 +3430,9 @@ fn tmux_input_returns_immediately_by_default() {
         "ctx-a",
         "interrupt-after-input",
     );
-    assert_eq!(interrupted["ok"], true, "{interrupted}");
+    assert_eq!(interrupted["type"], "reply", "{interrupted}");
     let finished = wait_for_terminal(&env, instance, task, "ctx-a");
-    assert_ne!(finished["result"]["task"]["status"], "running");
+    assert_ne!(finished["message"]["task"]["status"], "running");
     stop(&env, instance);
 }
 
@@ -3487,7 +3490,7 @@ fn repeated_tmux_list_skips_session_reinitialization() {
         "ctx-a",
         "warm-list",
     );
-    assert_eq!(warm["ok"], true, "{warm}");
+    assert_eq!(warm["type"], "reply", "{warm}");
     for index in 1..8 {
         let created = call(
             &env,
@@ -3498,7 +3501,7 @@ fn repeated_tmux_list_skips_session_reinitialization() {
             "ctx-a",
             &format!("create-perf-{index}"),
         );
-        assert_eq!(created["ok"], true, "{created}");
+        assert_eq!(created["type"], "reply", "{created}");
     }
     std::fs::write(&log, "").unwrap();
 
@@ -3511,7 +3514,7 @@ fn repeated_tmux_list_skips_session_reinitialization() {
         "ctx-a",
         "measured-list",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     let invocation_count = std::fs::read_to_string(&log)
         .unwrap_or_default()
         .lines()
@@ -3557,9 +3560,9 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         "ctx-a",
         "run-reader",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().unwrap().to_string();
-    assert_eq!(run["result"]["task"]["status"], "running", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().unwrap().to_string();
+    assert_eq!(run["message"]["task"]["status"], "running", "{run}");
 
     let listed = call(
         &env,
@@ -3570,8 +3573,8 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         "ctx-list",
         "list-running-task",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
-    let listed_task = listed["result"]["panes"]
+    assert_eq!(listed["type"], "reply", "{listed}");
+    let listed_task = listed["message"]["panes"]
         .as_array()
         .unwrap()
         .iter()
@@ -3607,12 +3610,12 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
         (first.join().unwrap(), second.join().unwrap())
     });
 
-    assert_eq!(first["ok"], true, "{first}");
-    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(first["type"], "reply", "{first}");
+    assert_eq!(second["type"], "reply", "{second}");
 
     let mut output: Vec<String> = Vec::new();
     for response in [&first, &second] {
-        if let Some(lines) = response["result"]["output"].as_array() {
+        if let Some(lines) = response["message"]["output"].as_array() {
             output.extend(lines.iter().map(|line| line.as_str().unwrap().to_string()));
         }
     }
@@ -3629,11 +3632,11 @@ fn concurrent_tmux_input_from_distinct_contexts_serializes_on_the_pane() {
             "ctx-collect",
             &format!("collect-output-{attempt}"),
         );
-        assert_eq!(read["ok"], true, "{read}");
-        if let Some(lines) = read["result"]["output"].as_array() {
+        assert_eq!(read["type"], "reply", "{read}");
+        if let Some(lines) = read["message"]["output"].as_array() {
             output.extend(lines.iter().map(|line| line.as_str().unwrap().to_string()));
         }
-        let status = read["result"]["task"]["status"]
+        let status = read["message"]["task"]["status"]
             .as_str()
             .unwrap_or("unknown");
         if status != "running" {

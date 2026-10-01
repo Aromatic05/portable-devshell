@@ -184,25 +184,30 @@ impl TestEnv {
         serde_json::from_slice(&output).unwrap()
     }
 
-    pub fn rpc(&self, instance: &str, request: &Value) -> Value {
-        let payload = serde_json::to_vec(request).unwrap();
-        self.raw_rpc(instance, &payload)
+    pub fn rpc(&self, instance: &str, port: &str, packet: &Value) -> Value {
+        self.rpc_with_command(self.std_command(), instance, port, packet)
     }
 
-    pub fn rpc_without_runtime_dir(&self, instance: &str, request: &Value) -> Value {
-        let payload = serde_json::to_vec(request).unwrap();
-        self.raw_rpc_with_command(self.std_command_without_runtime_dir(), instance, &payload)
+    pub fn rpc_without_runtime_dir(
+        &self,
+        instance: &str,
+        port: &str,
+        packet: &Value,
+    ) -> Value {
+        self.rpc_with_command(
+            self.std_command_without_runtime_dir(),
+            instance,
+            port,
+            packet,
+        )
     }
 
-    pub fn raw_rpc(&self, instance: &str, payload: &[u8]) -> Value {
-        self.raw_rpc_with_command(self.std_command(), instance, payload)
-    }
-
-    fn raw_rpc_with_command(
+    fn rpc_with_command(
         &self,
         mut command: std::process::Command,
         instance: &str,
-        payload: &[u8],
+        port: &str,
+        packet: &Value,
     ) -> Value {
         let mut child = command
             .args(["transport", "--instance", instance])
@@ -212,11 +217,8 @@ impl TestEnv {
             .unwrap();
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
-        let expected_id = serde_json::from_slice::<Value>(payload)
-            .ok()
-            .and_then(|request| request.get("id").and_then(Value::as_str).map(str::to_owned));
-        let response = exchange_rpc(&mut input, &mut output, payload, expected_id.as_deref())
-            .expect("transport RPC exchange");
+        let response = exchange_rpc(&mut input, &mut output, instance, port, packet)
+            .expect("Endpoint RPC exchange");
         drop(input);
         assert!(child.wait().unwrap().success());
         response

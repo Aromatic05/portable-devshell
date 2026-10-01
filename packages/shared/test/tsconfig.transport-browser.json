@@ -10,8 +10,11 @@
     },
     "files": [
         "../src/browser.ts",
-        "../src/transport/ClientConnection.ts",
-        "../src/transport/Codec.ts",
-        "../src/transport/PrefixRoute.ts"
+        "../src/transport/endpoint/Endpoint.ts",
+        "../src/transport/endpoint/route/Route.ts",
+        "../src/transport/envelope/Codec.ts",
+        "../src/transport/packet/Rpc.ts",
+        "../src/transport/packet/Event.ts",
+        "../src/transport/packet/Stream.ts"
     ]
 }

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { Channel } from "@portable-devshell/shared";
 import {
+    FRAME_MAX_DATA_SIZE,
     FrameBuffer,
     FrameProtocol,
     FrameResetError,
@@ -66,7 +67,7 @@ class RecordingChannel implements Channel {
     }
 }
 
-function pair(maxDataSize = 2): {
+function pair(): {
     leftChannel: RecordingChannel;
     opener: FrameProtocol;
     acceptor: FrameProtocol;
@@ -77,8 +78,8 @@ function pair(maxDataSize = 2): {
     right.connect(left);
     return {
         leftChannel: left,
-        opener: new FrameProtocol(left, { role: "opener", maxDataSize }),
-        acceptor: new FrameProtocol(right, { role: "acceptor", maxDataSize }),
+        opener: new FrameProtocol(left, { role: "opener" }),
+        acceptor: new FrameProtocol(right, { role: "acceptor" }),
     };
 }
 
@@ -113,14 +114,15 @@ async function readText(stream: FrameStream): Promise<string> {
 }
 
 test("DATA scheduler gives concurrent logical streams alternating bounded chunks", async () => {
-    const { leftChannel, opener, acceptor } = pair(2);
-    const first = await open(opener, acceptor, "first");
-    const second = await open(opener, acceptor, "second");
+    const { leftChannel, opener, acceptor } = pair();
+    const streamBytes = FRAME_MAX_DATA_SIZE * 3;
+    const first = await open(opener, acceptor, "first", streamBytes);
+    const second = await open(opener, acceptor, "second", streamBytes);
     leftChannel.writes.length = 0;
 
     await Promise.all([
-        first.local.write(Uint8Array.of(1, 2, 3, 4, 5, 6)),
-        second.local.write(Uint8Array.of(7, 8, 9, 10, 11, 12)),
+        first.local.write(new Uint8Array(streamBytes)),
+        second.local.write(new Uint8Array(streamBytes)),
     ]);
 
     const data = decodeWrites(leftChannel.writes).filter(
@@ -130,18 +132,18 @@ test("DATA scheduler gives concurrent logical streams alternating bounded chunks
     assert.deepEqual(
         data.map((frame) => [frame.streamId, frame.data.byteLength]),
         [
-            [1, 2],
-            [2, 2],
-            [1, 2],
-            [2, 2],
-            [1, 2],
-            [2, 2],
+            [1, FRAME_MAX_DATA_SIZE],
+            [2, FRAME_MAX_DATA_SIZE],
+            [1, FRAME_MAX_DATA_SIZE],
+            [2, FRAME_MAX_DATA_SIZE],
+            [1, FRAME_MAX_DATA_SIZE],
+            [2, FRAME_MAX_DATA_SIZE],
         ],
     );
 });
 
 test("FIN is a half-close and the opposite direction remains writable", async () => {
-    const { opener, acceptor } = pair(4);
+    const { opener, acceptor } = pair();
     const { local, remote } = await open(opener, acceptor, "half-close", 8);
 
     await local.write(new TextEncoder().encode("request"));
@@ -156,7 +158,7 @@ test("FIN is a half-close and the opposite direction remains writable", async ()
 });
 
 test("FrameStreamChannel maps remote FIN to full logical close", async () => {
-    const { opener, acceptor } = pair(4);
+    const { opener, acceptor } = pair();
     const { local, remote } = await open(opener, acceptor, "channel-close", 8);
     const channel = new FrameStreamChannel(local);
 
@@ -178,7 +180,7 @@ test("FrameStreamChannel maps remote FIN to full logical close", async () => {
 });
 
 test("RESET aborts both directions without closing sibling streams", async () => {
-    const { opener, acceptor } = pair(4);
+    const { opener, acceptor } = pair();
     const first = await open(opener, acceptor, "first", 8);
     const sibling = await open(opener, acceptor, "sibling", 8);
 

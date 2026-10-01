@@ -6,21 +6,21 @@ import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import {
-    SocketChannel,
+    LocalChannel,
     StreamChannel,
-    WebSocketServerChannel,
+    WebServerChannel,
     type Channel,
 } from "@portable-devshell/shared";
-import { createTestIpcPath } from "../../../../../../test/TestPlatformSupport.ts";
-import { createTestTempDirectory } from "../../../../../../test/TestTempDirectory.ts";
+import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
+import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
-interface ListeningSocket {
+interface ListeningEndpoint {
     directory: string;
     server: Server;
     socketPath: string;
 }
 
-async function listen(): Promise<ListeningSocket> {
+async function listen(): Promise<ListeningEndpoint> {
     const directory = await createTestTempDirectory("channel");
     const socketPath = createTestIpcPath("channel", directory);
     const server = createServer();
@@ -31,7 +31,7 @@ async function listen(): Promise<ListeningSocket> {
     return { directory, server, socketPath };
 }
 
-async function closeListeningSocket(listening: ListeningSocket): Promise<void> {
+async function closeListeningSocket(listening: ListeningEndpoint): Promise<void> {
     await new Promise<void>((resolve) =>
         listening.server.close(() => resolve()),
     );
@@ -59,12 +59,12 @@ async function rawSocket(socketPath: string): Promise<Socket> {
     });
 }
 
-test("SocketChannel connect/accept exchanges raw bytes", async (t) => {
+test("LocalChannel connect/accept exchanges raw bytes", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
-        SocketChannel.accept(socket),
+        LocalChannel.accept(socket),
     );
-    const client = await SocketChannel.connect(listening.socketPath);
+    const client = await LocalChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
         client.close();
@@ -77,11 +77,11 @@ test("SocketChannel connect/accept exchanges raw bytes", async (t) => {
     assert.equal(Buffer.from(await received).toString("utf8"), "hello");
 });
 
-test("SocketChannel aborts and destroys a pending socket connection", async () => {
+test("LocalChannel aborts and destroys a pending socket connection", async () => {
     const socket = new Socket();
     const controller = new AbortController();
     const reason = new Error("connection cancelled");
-    const connecting = SocketChannel.connect("unused", {
+    const connecting = LocalChannel.connect("unused", {
         signal: controller.signal,
         socketFactory: () => socket,
     });
@@ -92,10 +92,10 @@ test("SocketChannel aborts and destroys a pending socket connection", async () =
     assert.equal(socket.destroyed, true);
 });
 
-test("SocketChannel preserves byte order without interpreting chunk boundaries", async (t) => {
+test("LocalChannel preserves byte order without interpreting chunk boundaries", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
-        SocketChannel.accept(socket),
+        LocalChannel.accept(socket),
     );
     const socket = await rawSocket(listening.socketPath);
     const service = await accepted;
@@ -119,10 +119,10 @@ test("SocketChannel preserves byte order without interpreting chunk boundaries",
     assert.equal(await received, "onetwo");
 });
 
-test("SocketChannel treats EOF as a normal close regardless of byte content", async (t) => {
+test("LocalChannel treats EOF as a normal close regardless of byte content", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
-        SocketChannel.accept(socket),
+        LocalChannel.accept(socket),
     );
     const socket = await rawSocket(listening.socketPath);
     const service = await accepted;
@@ -139,12 +139,12 @@ test("SocketChannel treats EOF as a normal close regardless of byte content", as
     assert.equal(await closed, undefined);
 });
 
-test("SocketChannel serializes concurrent writes and rejects writes after close", async (t) => {
+test("LocalChannel serializes concurrent writes and rejects writes after close", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
-        SocketChannel.accept(socket),
+        LocalChannel.accept(socket),
     );
-    const client = await SocketChannel.connect(listening.socketPath);
+    const client = await LocalChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
         client.close();
@@ -169,12 +169,12 @@ test("SocketChannel serializes concurrent writes and rejects writes after close"
     await assert.rejects(client.write(Buffer.from("three")), /closed/i);
 });
 
-test("SocketChannel isolates late close listener failures", async (t) => {
+test("LocalChannel isolates late close listener failures", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
-        SocketChannel.accept(socket),
+        LocalChannel.accept(socket),
     );
-    const client = await SocketChannel.connect(listening.socketPath);
+    const client = await LocalChannel.connect(listening.socketPath);
     const service = await accepted;
     t.after(async () => {
         client.close();
@@ -302,10 +302,10 @@ test("StreamChannel preserves raw bytes and propagates writes", async () => {
     assert.equal(transportClosed, true);
 });
 
-test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-frame lifecycle", async () => {
+test("WebServerChannel owns shared send, close, heartbeat, and binary-frame lifecycle", async () => {
     const sendSocket = new FakeServerWebSocket();
     sendSocket.deferSend = true;
-    const sendChannel = new WebSocketServerChannel(sendSocket);
+    const sendChannel = new WebServerChannel(sendSocket);
     const sendClosed = new Promise<Error | undefined>((resolve) =>
         sendChannel.onClose(resolve),
     );
@@ -320,7 +320,7 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
 
     const closeSocket = new FakeServerWebSocket();
     closeSocket.closeError = new Error("close failed");
-    const closeChannel = new WebSocketServerChannel(closeSocket);
+    const closeChannel = new WebServerChannel(closeSocket);
     const closeResult = new Promise<Error | undefined>((resolve) =>
         closeChannel.onClose(resolve),
     );
@@ -330,7 +330,7 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
 
     const textSocket = new FakeServerWebSocket();
     textSocket.closeError = new Error("close frame failed");
-    const textChannel = new WebSocketServerChannel(textSocket);
+    const textChannel = new WebServerChannel(textSocket);
     const textClosed = new Promise<Error | undefined>((resolve) =>
         textChannel.onClose(resolve),
     );
@@ -340,7 +340,7 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
 
     const heartbeatSocket = new FakeServerWebSocket();
     heartbeatSocket.pingError = new Error("ping failed");
-    const heartbeatChannel = new WebSocketServerChannel(heartbeatSocket, {
+    const heartbeatChannel = new WebServerChannel(heartbeatSocket, {
         deadConnectionMs: 1_000,
         heartbeatIntervalMs: 1,
         now: () => 0,
@@ -356,9 +356,9 @@ test("WebSocketServerChannel owns shared send, close, heartbeat, and binary-fram
     assert.equal(heartbeatSocket.terminated, true);
 });
 
-test("WebSocketServerChannel isolates late close listener failures", async () => {
+test("WebServerChannel isolates late close listener failures", async () => {
     const socket = new FakeServerWebSocket();
-    const channel = new WebSocketServerChannel(socket);
+    const channel = new WebServerChannel(socket);
     const warnings: unknown[] = [];
     const originalWarn = console.warn;
     console.warn = (warning) => warnings.push(warning);

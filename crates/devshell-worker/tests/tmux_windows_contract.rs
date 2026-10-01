@@ -27,16 +27,20 @@ fn call(
 ) -> Value {
     env.rpc(
         instance,
+        "tool",
         &json!({
+            "protocol": "rpc",
             "type": "request",
             "id": id,
             "method": method,
-            "params": params,
-            "context": {
+            "message": {
+                "input": params,
+                "context": {
                 "ctxId": "ctx-windows-panes",
                 "requestId": request_id,
                 "source": "mcp",
                 "workspace": env.workspace(),
+                }
             }
         }),
     )
@@ -56,8 +60,8 @@ fn persistent_pane_survives_worker_restart_on_windows() {
         json!({ "command": "create", "name": "shell" }),
         "create-shell",
     );
-    assert_eq!(created["ok"], true, "{created}");
-    assert_eq!(created["result"]["pane"]["name"], "shell", "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
+    assert_eq!(created["message"]["pane"]["name"], "shell", "{created}");
 
     let input = call(
         &env,
@@ -70,7 +74,7 @@ fn persistent_pane_survives_worker_restart_on_windows() {
         }),
         "write-shell",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
 
     thread::sleep(Duration::from_millis(500));
     let inspected = call(
@@ -81,8 +85,8 @@ fn persistent_pane_survives_worker_restart_on_windows() {
         json!({ "pane": "shell", "start": -40, "end": 0 }),
         "inspect-before-restart",
     );
-    assert_eq!(inspected["ok"], true, "{inspected}");
-    let before_lines = inspected["result"]["panes"][0]["lines"]
+    assert_eq!(inspected["type"], "reply", "{inspected}");
+    let before_lines = inspected["message"]["panes"][0]["lines"]
         .as_array()
         .expect("pane lines");
     assert!(
@@ -105,9 +109,9 @@ fn persistent_pane_survives_worker_restart_on_windows() {
         json!({ "command": "list" }),
         "list-after-restart",
     );
-    assert_eq!(listed["ok"], true, "{listed}");
+    assert_eq!(listed["type"], "reply", "{listed}");
     assert!(
-        listed["result"]["panes"]
+        listed["message"]["panes"]
             .as_array()
             .expect("pane list")
             .iter()
@@ -123,11 +127,11 @@ fn persistent_pane_survives_worker_restart_on_windows() {
         json!({ "pane": "shell", "start": -40, "end": 0 }),
         "inspect-after-restart",
     );
-    assert_eq!(inspected["ok"], true, "{inspected}");
-    assert_eq!(inspected["result"]["panes"][0]["name"], "shell");
+    assert_eq!(inspected["type"], "reply", "{inspected}");
+    assert_eq!(inspected["message"]["panes"][0]["name"], "shell");
     assert!(
         matches!(
-            inspected["result"]["panes"][0]["command"].as_str(),
+            inspected["message"]["panes"][0]["command"].as_str(),
             Some("pwsh" | "powershell")
         ),
         "{inspected}"
@@ -158,9 +162,9 @@ fn managed_task_uses_pwsh_and_preserves_durable_output_on_windows() {
         }),
         "run-pwsh-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
-    let output = run["result"]["output"].as_array().expect("task output");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
+    let output = run["message"]["output"].as_array().expect("task output");
     assert!(
         output
             .iter()
@@ -201,8 +205,8 @@ fn managed_task_accepts_input_on_windows() {
         }),
         "run-input-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"].as_str().expect("task id");
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"].as_str().expect("task id");
 
     let input = call(
         &env,
@@ -217,7 +221,7 @@ fn managed_task_accepts_input_on_windows() {
         }),
         "input-task",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
 
     let mut observed = Vec::new();
     let mut final_read = Value::Null;
@@ -230,9 +234,9 @@ fn managed_task_accepts_input_on_windows() {
             json!({ "task": task, "timeMs": 1000, "line": 80 }),
             &format!("read-input-result-{index}"),
         );
-        assert_eq!(read["ok"], true, "{read}");
+        assert_eq!(read["type"], "reply", "{read}");
         observed.extend(
-            read["result"]["output"]
+            read["message"]["output"]
                 .as_array()
                 .expect("task output")
                 .iter()
@@ -279,10 +283,10 @@ fn managed_task_preserves_nonzero_exit_and_output_on_windows() {
         }),
         "run-failure-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "7", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "7", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .expect("task output")
             .iter()
@@ -316,8 +320,8 @@ fn managed_task_and_transcript_survive_worker_restart_on_windows() {
         }),
         "run-restart-task",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    let task = run["result"]["task"]["id"]
+    assert_eq!(run["type"], "reply", "{run}");
+    let task = run["message"]["task"]["id"]
         .as_str()
         .expect("task id")
         .to_string();
@@ -335,9 +339,9 @@ fn managed_task_and_transcript_survive_worker_restart_on_windows() {
         json!({ "task": task, "line": 80, "timeMs": 3000 }),
         "read-after-restart",
     );
-    assert_eq!(read["ok"], true, "{read}");
-    assert_eq!(read["result"]["task"]["status"], "0", "{read}");
-    let output = read["result"]["output"].as_array().expect("task output");
+    assert_eq!(read["type"], "reply", "{read}");
+    assert_eq!(read["message"]["task"]["status"], "0", "{read}");
+    let output = read["message"]["output"].as_array().expect("task output");
     for marker in ["BEFORE_WORKER_RESTART", "AFTER_WORKER_RESTART"] {
         assert!(
             output
@@ -373,10 +377,10 @@ fn user_panes_do_not_inherit_the_internal_psmux_role_on_windows() {
         }),
         "run-env-clean",
     );
-    assert_eq!(run["ok"], true, "{run}");
-    assert_eq!(run["result"]["task"]["status"], "0", "{run}");
+    assert_eq!(run["type"], "reply", "{run}");
+    assert_eq!(run["message"]["task"]["status"], "0", "{run}");
     assert!(
-        run["result"]["output"]
+        run["message"]["output"]
             .as_array()
             .expect("task output")
             .iter()
@@ -393,7 +397,7 @@ fn user_panes_do_not_inherit_the_internal_psmux_role_on_windows() {
         json!({ "command": "create", "name": "env-shell" }),
         "create-env-shell",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
     let input = call(
         &env,
         instance,
@@ -405,7 +409,7 @@ fn user_panes_do_not_inherit_the_internal_psmux_role_on_windows() {
         }),
         "input-env-shell",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     thread::sleep(Duration::from_millis(300));
     let inspected = call(
         &env,
@@ -415,8 +419,8 @@ fn user_panes_do_not_inherit_the_internal_psmux_role_on_windows() {
         json!({ "pane": "env-shell", "start": -30, "end": 0 }),
         "inspect-env-shell",
     );
-    assert_eq!(inspected["ok"], true, "{inspected}");
-    let lines = inspected["result"]["panes"][0]["lines"]
+    assert_eq!(inspected["type"], "reply", "{inspected}");
+    let lines = inspected["message"]["panes"][0]["lines"]
         .as_array()
         .expect("pane lines");
     assert!(
@@ -459,9 +463,9 @@ fn user_psmux_config_does_not_change_managed_session_on_windows() {
         json!({ "command": "create", "name": "config-safe" }),
         "create-config-safe-pane",
     );
-    assert_eq!(created["ok"], true, "{created}");
+    assert_eq!(created["type"], "reply", "{created}");
     assert_eq!(
-        created["result"]["pane"]["name"], "config-safe",
+        created["message"]["pane"]["name"], "config-safe",
         "{created}"
     );
 
@@ -476,7 +480,7 @@ fn user_psmux_config_does_not_change_managed_session_on_windows() {
         }),
         "probe-config-isolation",
     );
-    assert_eq!(input["ok"], true, "{input}");
+    assert_eq!(input["type"], "reply", "{input}");
     thread::sleep(Duration::from_millis(300));
     let inspected = call(
         &env,
@@ -486,8 +490,8 @@ fn user_psmux_config_does_not_change_managed_session_on_windows() {
         json!({ "pane": "config-safe", "start": -30, "end": 0 }),
         "inspect-config-isolation",
     );
-    assert_eq!(inspected["ok"], true, "{inspected}");
-    let lines = inspected["result"]["panes"][0]["lines"]
+    assert_eq!(inspected["type"], "reply", "{inspected}");
+    let lines = inspected["message"]["panes"][0]["lines"]
         .as_array()
         .expect("pane lines");
     assert!(

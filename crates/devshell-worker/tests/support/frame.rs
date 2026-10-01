@@ -16,30 +16,39 @@ const TEST_RECEIVE_WINDOW: u32 = u32::MAX;
 pub(super) fn exchange_rpc(
     writer: &mut impl Write,
     reader: &mut impl Read,
-    payload: &[u8],
-    expected_id: Option<&str>,
+    instance: &str,
+    port: &str,
+    packet: &Value,
 ) -> io::Result<Value> {
-    writer.write_all(&encode_open())?;
+    writer.write_all(&encode_open("envelope"))?;
     writer.flush()?;
 
-    let mut rpc = Vec::with_capacity(4 + payload.len());
-    rpc.extend_from_slice(&(payload.len() as u32).to_be_bytes());
-    rpc.extend_from_slice(payload);
+    let envelope = serde_json::json!({
+        "source": { "host": "test", "port": port },
+        "dest": { "host": format!("{instance}-worker"), "port": port },
+        "packet": packet,
+    });
+    let body = serde_json::to_vec(&envelope)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let mut encoded = Vec::with_capacity(4 + body.len());
+    encoded.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    encoded.extend_from_slice(&body);
 
+    let expected_id = packet.get("id").and_then(Value::as_str);
     let mut send_credit = 0_u32;
     let mut incoming = VecDeque::new();
     let mut offset = 0_usize;
-    while offset < rpc.len() {
+    while offset < encoded.len() {
         while send_credit == 0 {
             pump_transport(reader, &mut incoming, &mut send_credit)?;
         }
         let byte_len = FRAME_MAX_DATA_SIZE
             .min(send_credit as usize)
-            .min(rpc.len() - offset);
+            .min(encoded.len() - offset);
         writer.write_all(&encode_frame(
             FRAME_DATA,
             RPC_STREAM_ID,
-            &rpc[offset..offset + byte_len],
+            &encoded[offset..offset + byte_len],
         ))?;
         writer.flush()?;
         send_credit -= byte_len as u32;
@@ -47,52 +56,59 @@ pub(super) fn exchange_rpc(
     }
 
     loop {
-        while let Some(frame) = try_read_rpc_frame(&mut incoming)? {
-            if frame["type"] == "response" && expected_id.is_none_or(|id| frame["id"] == id) {
-                return Ok(frame);
+        while let Some(envelope) = try_read_envelope(&mut incoming)? {
+            let packet = &envelope["packet"];
+            if matches!(packet["type"].as_str(), Some("reply" | "error"))
+                && expected_id.is_none_or(|id| packet["id"] == id)
+            {
+                return Ok(packet.clone());
             }
         }
         pump_transport(reader, &mut incoming, &mut send_credit)?;
     }
 }
 
-#[allow(dead_code)]
-pub struct TransportRpcWriter<W: Write> {
+pub struct TransportEndpointWriter<W: Write> {
     inner: W,
+    instance: String,
 }
 
-#[allow(dead_code)]
-impl<W: Write> TransportRpcWriter<W> {
-    pub fn new(mut inner: W) -> io::Result<Self> {
-        inner.write_all(&encode_open())?;
+impl<W: Write> TransportEndpointWriter<W> {
+    pub fn new(mut inner: W, instance: &str) -> io::Result<Self> {
+        inner.write_all(&encode_open("envelope"))?;
         inner.flush()?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            instance: instance.to_string(),
+        })
     }
-}
 
-impl<W: Write> Write for TransportRpcWriter<W> {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        for chunk in buffer.chunks(FRAME_MAX_DATA_SIZE) {
+    pub fn send(&mut self, port: &str, packet: &Value) -> io::Result<()> {
+        let envelope = serde_json::json!({
+            "source": { "host": "test", "port": port },
+            "dest": { "host": format!("{}-worker", self.instance), "port": port },
+            "packet": packet,
+        });
+        let body = serde_json::to_vec(&envelope)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let mut encoded = Vec::with_capacity(4 + body.len());
+        encoded.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        encoded.extend_from_slice(&body);
+        for chunk in encoded.chunks(FRAME_MAX_DATA_SIZE) {
             self.inner
                 .write_all(&encode_frame(FRAME_DATA, RPC_STREAM_ID, chunk))?;
         }
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }
 }
 
-#[allow(dead_code)]
-pub struct TransportRpcReader<R: Read> {
+pub struct TransportEndpointReader<R: Read> {
     inner: R,
     buffered: VecDeque<u8>,
     finished: bool,
 }
 
-#[allow(dead_code)]
-impl<R: Read> TransportRpcReader<R> {
+impl<R: Read> TransportEndpointReader<R> {
     pub fn new(inner: R) -> Self {
         Self {
             inner,
@@ -108,7 +124,7 @@ impl<R: Read> TransportRpcReader<R> {
                 self.finished = true;
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "transport closed before worker.rpc received send credit",
+                    "transport closed before envelope stream received send credit",
                 ));
             };
             if stream_id != RPC_STREAM_ID {
@@ -124,7 +140,7 @@ impl<R: Read> TransportRpcReader<R> {
                     self.finished = true;
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
-                        "worker.rpc finished before receiving send credit",
+                        "envelope stream finished before receiving send credit",
                     ));
                 }
                 FRAME_RESET => {
@@ -143,12 +159,27 @@ impl<R: Read> TransportRpcReader<R> {
         }
     }
 
+    pub fn read_packet(&mut self) -> io::Result<Value> {
+        loop {
+            if let Some(envelope) = try_read_envelope(&mut self.buffered)? {
+                return Ok(envelope["packet"].clone());
+            }
+            self.fill()?;
+            if self.finished && self.buffered.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "envelope stream closed before packet",
+                ));
+            }
+        }
+    }
+
     fn fill(&mut self) -> io::Result<()> {
-        while self.buffered.is_empty() && !self.finished {
+        while !self.finished {
             let Some((frame_type, stream_id, payload)) = read_transport_frame(&mut self.inner)?
             else {
                 self.finished = true;
-                break;
+                return Ok(());
             };
             if stream_id != RPC_STREAM_ID {
                 return Err(io::Error::new(
@@ -157,9 +188,15 @@ impl<R: Read> TransportRpcReader<R> {
                 ));
             }
             match frame_type {
-                FRAME_DATA => self.buffered.extend(payload),
+                FRAME_DATA => {
+                    self.buffered.extend(payload);
+                    return Ok(());
+                }
                 FRAME_WINDOW => {}
-                FRAME_FIN => self.finished = true,
+                FRAME_FIN => {
+                    self.finished = true;
+                    return Ok(());
+                }
                 FRAME_RESET => {
                     return Err(io::Error::new(
                         io::ErrorKind::ConnectionReset,
@@ -178,12 +215,14 @@ impl<R: Read> TransportRpcReader<R> {
     }
 }
 
-impl<R: Read> Read for TransportRpcReader<R> {
+impl<R: Read> Read for TransportEndpointReader<R> {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
         if output.is_empty() {
             return Ok(0);
         }
-        self.fill()?;
+        if self.buffered.is_empty() && !self.finished {
+            self.fill()?;
+        }
         let count = output.len().min(self.buffered.len());
         for slot in &mut output[..count] {
             *slot = self.buffered.pop_front().expect("buffered byte");
@@ -192,8 +231,8 @@ impl<R: Read> Read for TransportRpcReader<R> {
     }
 }
 
-fn encode_open() -> Vec<u8> {
-    let service = b"worker.rpc";
+fn encode_open(service: &str) -> Vec<u8> {
+    let service = service.as_bytes();
     let mut payload = Vec::with_capacity(6 + service.len());
     payload.extend_from_slice(&TEST_RECEIVE_WINDOW.to_be_bytes());
     payload.extend_from_slice(&(service.len() as u16).to_be_bytes());
@@ -292,12 +331,12 @@ fn pump_transport(
     Ok(())
 }
 
-fn try_read_rpc_frame(buffer: &mut VecDeque<u8>) -> io::Result<Option<Value>> {
+fn try_read_envelope(buffer: &mut VecDeque<u8>) -> io::Result<Option<Value>> {
     if buffer.len() < 4 {
         return Ok(None);
     }
     let header = buffer.make_contiguous();
-    let payload_len = u32::from_be_bytes(header[..4].try_into().expect("RPC length")) as usize;
+    let payload_len = u32::from_be_bytes(header[..4].try_into().expect("Envelope length")) as usize;
     if buffer.len() < 4 + payload_len {
         return Ok(None);
     }
@@ -310,9 +349,9 @@ fn try_read_rpc_frame(buffer: &mut VecDeque<u8>) -> io::Result<Option<Value>> {
 
 fn decode_reset_message(payload: &[u8]) -> String {
     if payload.len() < 2 {
-        return "worker.rpc transport reset".to_string();
+        return "Endpoint transport reset".to_string();
     }
     let code = u16::from_be_bytes(payload[..2].try_into().expect("reset code"));
     let message = String::from_utf8_lossy(&payload[2..]);
-    format!("worker.rpc transport reset {code}: {message}")
+    format!("Endpoint transport reset {code}: {message}")
 }
