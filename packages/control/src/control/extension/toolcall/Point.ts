@@ -57,10 +57,10 @@ function parseDeclaration(
     const hook = declaration.hook;
     if (
         typeof hook !== "string" ||
-        !/^[0-9]{3}-[a-z][a-z0-9-]*$/u.test(hook)
+        !/^(?!000)[0-9]{3}-[a-z][a-z0-9-]*$/u.test(hook)
     ) {
         throw new TypeError(
-            "ToolCall hook must match NNN-name with a priority from 000 through 999.",
+            "ToolCall hook must match NNN-name with a priority from 001 through 999.",
         );
     }
     return Object.freeze({ hook, id: declaration.id });

@@ -116,7 +116,7 @@ export class ToolCallExtensionBinding {
         }
         if (this.#approval !== undefined) {
             entries.push({
-                hook: "500-approval",
+                hook: "510-approval",
                 id: "approval",
                 review: async (input) =>
                     await this.#approval!(input, signal, recording),

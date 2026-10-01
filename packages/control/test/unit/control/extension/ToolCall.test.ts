@@ -68,7 +68,7 @@ function host(options: {
     };
 }
 
-test("ToolCall review pipeline places builtin approval at 500-approval", async () => {
+test("ToolCall review pipeline places builtin approval at 510-approval", async () => {
     const calls: string[] = [];
     const binding = new ToolCallExtensionBinding(
         host({
@@ -82,7 +82,7 @@ test("ToolCall review pipeline places builtin approval at 500-approval", async (
                     },
                 },
                 {
-                    hook: "000-early",
+                    hook: "500-early",
                     id: "early",
                     binding: async () => {
                         calls.push("early");
@@ -121,7 +121,7 @@ test("approval rejection short-circuits later reviews", async () => {
         host({
             reviews: [
                 {
-                    hook: "000-early",
+                    hook: "500-early",
                     id: "early",
                     binding: async () => {
                         calls.push("early");
@@ -189,17 +189,17 @@ test("review and rewrite ordering are independent", async () => {
                     },
                 },
                 {
-                    hook: "000-review",
+                    hook: "500-review",
                     id: "review-early",
                     binding: async () => {
-                        reviewCalls.push("000");
+                        reviewCalls.push("500");
                         return { decision: "continue" };
                     },
                 },
             ],
             rewrites: [
                 { hook: "900-rewrite", id: "rewrite-late", binding: rewrite("900") },
-                { hook: "000-rewrite", id: "rewrite-early", binding: rewrite("000") },
+                { hook: "500-rewrite", id: "rewrite-early", binding: rewrite("500") },
             ],
         }) as never,
     );
@@ -220,9 +220,9 @@ test("review and rewrite ordering are independent", async () => {
         value: { ...value, payload: { trace: [] } },
     });
 
-    assert.deepEqual(reviewCalls, ["000", "900"]);
-    assert.deepEqual(rewriteCalls, ["000", "900"]);
-    assert.deepEqual(rewritten.payload, { trace: ["000", "900"] });
+    assert.deepEqual(reviewCalls, ["500", "900"]);
+    assert.deepEqual(rewriteCalls, ["500", "900"]);
+    assert.deepEqual(rewritten.payload, { trace: ["500", "900"] });
     lease.release();
 });
 
@@ -233,7 +233,7 @@ test("ToolCall binding holds exact registration leases for the call", async () =
             releases,
             reviews: [
                 {
-                    hook: "000-review",
+                    hook: "500-review",
                     id: "review",
                     binding: async () => ({ decision: "continue" }),
                 },

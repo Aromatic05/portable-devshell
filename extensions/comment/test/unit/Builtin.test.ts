@@ -6,7 +6,7 @@ import type { ExtensionContext } from "@portable-devshell/extension";
 
 import { activate, deactivate } from "../../src/index.ts";
 
-test("Comment Extension declares a total ToolCall hook order", () => {
+test("Comment Extension declares stable ToolCall hook priorities", () => {
     const manifest = JSON.parse(
         readFileSync(
             new URL("../../src/devshell-extension.json", import.meta.url),
@@ -20,13 +20,13 @@ test("Comment Extension declares a total ToolCall hook order", () => {
     };
 
     assert.deepEqual(manifest.extensions?.["toolcall.review"], [
-        { hook: "000-toolcall-gate", id: "toolcall-gate" },
+        { hook: "500-toolcall-gate", id: "toolcall-gate" },
     ]);
     assert.deepEqual(manifest.extensions?.["toolcall.rewrite"], [
-        { hook: "001-todo-access", id: "todo-access" },
-        { hook: "002-todo-invalid", id: "todo-invalid" },
-        { hook: "900-tool-advice", id: "tool-advice" },
-        { hook: "999-comment-delivery", id: "comment-delivery" },
+        { hook: "500-todo-access", id: "todo-access" },
+        { hook: "501-todo-invalid", id: "todo-invalid" },
+        { hook: "502-tool-advice", id: "tool-advice" },
+        { hook: "510-comment-delivery", id: "comment-delivery" },
     ]);
 });
 
