@@ -180,7 +180,6 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     assert.deepEqual(calls[0]?.input, { path: "./README.md" });
     assert.equal(calls[0]?.signal, controller.signal);
     assert.equal(calls[0]?.context.source, "extension");
-    assert.equal(calls[0]?.context.extensionId, "example");
     assert.equal(calls[0]?.context.operationId, "operation-1");
     assert.equal(calls[0]?.context.requestId, "operation-1");
     assert.equal(calls[0]?.context.workspace, "/canonical");

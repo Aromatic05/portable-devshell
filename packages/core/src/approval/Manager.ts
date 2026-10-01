@@ -106,9 +106,6 @@ export class ApprovalManager {
             ...(input.context.ctxId === undefined
                 ? {}
                 : { ctxId: input.context.ctxId }),
-            ...(input.context.extensionId === undefined
-                ? {}
-                : { extensionId: input.context.extensionId }),
             source: input.context.source,
             status: "pending",
             toolName: input.toolName,

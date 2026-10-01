@@ -3,16 +3,10 @@ import type { JsonValue } from "../JsonValue.js";
 
 export type ToolCallSource = "cli" | "tui" | "web" | "mcp" | "extension";
 
-export interface ToolCallAssociation {
-    taskId: string;
-    todoItemId: string;
-}
-
 export interface ToolCallContext {
     requestId?: string;
     operationId?: string;
     ctxId?: string;
-    extensionId?: string;
     workspace?: string;
     source: ToolCallSource;
 }
@@ -41,7 +35,6 @@ export interface ToolCallQuery {
     before?: string;
     callIds?: string[];
     ctxId?: string;
-    extensionId?: string;
     includeInput?: boolean;
     includeOutput?: boolean;
     limit?: number;
@@ -66,10 +59,7 @@ export interface ToolCallRecord extends ToolCallProvenance {
     approvalId?: string;
     requestId?: string;
     ctxId?: string;
-    extensionId?: string;
     source: ToolCallSource;
-    taskId?: string;
-    todoItemId?: string;
     startedAt: string;
     status: ToolCallStatus;
     stderrBytes?: number;

@@ -40,9 +40,6 @@ export function createTestTodoPort(): InstanceTodoPort {
         async control() {
             return empty;
         },
-        currentAssociation() {
-            return undefined;
-        },
         async delete() {
             return undefined;
         },

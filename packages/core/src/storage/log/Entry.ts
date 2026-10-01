@@ -8,7 +8,6 @@ export interface InstanceLogEntry {
     requestId?: string;
     seq: number;
     ctxId?: string;
-    extensionId?: string;
     source?: ToolCallSource;
     stream: "stderr" | "stdout";
     toolName?: string;

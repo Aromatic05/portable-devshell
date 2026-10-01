@@ -17,7 +17,6 @@ export type ToolCallSource = "cli" | "extension" | "mcp" | "tui" | "web";
 export interface ToolCallContext {
     ctxId?: string;
     instance: string;
-    extensionId?: string;
     operationId?: string;
     requestId?: string;
     source: ToolCallSource;

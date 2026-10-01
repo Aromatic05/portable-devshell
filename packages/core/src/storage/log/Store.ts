@@ -27,12 +27,7 @@ export class LogStoreInstance {
         at: string,
         context: Pick<
             InstanceLogEntry,
-            | "callId"
-            | "requestId"
-            | "ctxId"
-            | "extensionId"
-            | "source"
-            | "toolName"
+            "callId" | "requestId" | "ctxId" | "source" | "toolName"
         > = {},
     ): Promise<InstanceLogEntry> {
         const operation = this.#appendTail.then(async () => {
@@ -48,9 +43,6 @@ export class LogStoreInstance {
                 ...(context.ctxId === undefined
                     ? {}
                     : { ctxId: context.ctxId }),
-                ...(context.extensionId === undefined
-                    ? {}
-                    : { extensionId: context.extensionId }),
                 ...(context.source === undefined
                     ? {}
                     : { source: context.source }),

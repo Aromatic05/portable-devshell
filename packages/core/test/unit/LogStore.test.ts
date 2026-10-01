@@ -719,7 +719,6 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 callId: "extension-call",
                 completedAt: "2026-09-01T11:30:00.000Z",
                 ctxId: "ctx-extension",
-                extensionId: "example",
                 inputSummary: "{}",
                 instance: instanceName,
                 source: "extension",
@@ -747,7 +746,7 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
             ["ctx-b"],
         );
         assert.deepEqual(
-            (await store.readQuery({ extensionId: "example" })).map(
+            (await store.readQuery({ source: "extension" })).map(
                 (record) => record.callId,
             ),
             ["extension-call"],
@@ -1271,8 +1270,6 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
             ctxId: "context-1",
             inputSummary: "must-not-persist",
             source: "mcp",
-            taskId: "task-duplicate",
-            todoItemId: "item-duplicate",
             toolName: "bash_run",
             workspace: "/duplicate/workspace",
         } as const;
@@ -1290,8 +1287,6 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         assert.equal(logEntry.toolName, "bash_run");
         assert.equal("inputSummary" in logEntry, false);
         assert.equal("workspace" in logEntry, false);
-        assert.equal("taskId" in logEntry, false);
-        assert.equal("todoItemId" in logEntry, false);
         assert.deepEqual(await logStore.read({ fromSeq: 1 }), [logEntry]);
 
         const patch =
@@ -1305,7 +1300,6 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
             { source: "cli", workspace: "/projects/alpha" },
             "2026-07-07T00:00:01.000Z",
             "running",
-            { taskId: "task-1", todoItemId: "implement" },
             { input: patch },
         );
 
@@ -1350,8 +1344,6 @@ test("LogStoreInstance and AuditToolCallHistory write and query per-instance rec
         assert.deepEqual(completed.output, { stdout: "ok" });
         assert.equal(completed.source, "cli");
         assert.equal(completed.workspace, "/projects/alpha");
-        assert.equal(completed.taskId, "task-1");
-        assert.equal(completed.todoItemId, "implement");
 
         const completedSecond = await history.completed(
             "call-2",

@@ -15,7 +15,6 @@ import type {
     TodoReadResult,
     TodoTaskControlAction,
     TodoWriteInput,
-    ToolCallAssociation,
     WaitCreateInput,
     WaitRecord,
 } from "@portable-devshell/shared";
@@ -28,7 +27,6 @@ export interface InstanceTodoPort {
         ctxId: string,
         expectedRevision?: number,
     ): Promise<TodoReadResult>;
-    currentAssociation(): ToolCallAssociation | undefined;
     delete(taskId: string): Promise<void>;
     read(input?: TodoReadInput): Promise<TodoReadResult>;
     summaries(): ActiveTodoSummary[];

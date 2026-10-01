@@ -3,7 +3,6 @@ import {
     type ApprovalRequest,
     type InstanceName,
     type JsonValue,
-    type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
@@ -42,9 +41,6 @@ interface WorkerToolOptions {
     assertReady(): void;
     instanceName: InstanceName;
     logStore: LogStoreInstance;
-    toolCallAssociationProvider?: (
-        context: ToolCallContext,
-    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
@@ -63,7 +59,6 @@ export class WorkerInstanceTool {
         });
         this.#audit = new WorkerInstanceToolAudit({
             appendEvent: options.appendEvent,
-            toolCallAssociationProvider: options.toolCallAssociationProvider,
             toolCallHistory: options.toolCallHistory,
         });
         this.#log = new WorkerInstanceToolLog({

@@ -27,7 +27,6 @@ import type {
     TodoTaskControlAction,
     TodoTaskSummary,
     TodoWriteInput,
-    ToolCallAssociation,
 } from "@portable-devshell/shared";
 import { cleanupStaleAtomicStateTemps } from "../../AtomicState.js";
 
@@ -515,28 +514,6 @@ export class TodoState {
                 },
             ];
         });
-    }
-
-    currentAssociation(
-        document: TodoDocument,
-        ctxId?: string,
-    ): ToolCallAssociation | undefined {
-        if (ctxId === undefined) return undefined;
-        const associations = document.active.flatMap((active) => {
-            if (active.activeCtxId !== ctxId) return [];
-            if (
-                active.pausedAt !== undefined ||
-                active.cancelledAt !== undefined
-            )
-                return [];
-            const current = active.items.find(
-                (item) => item.status === "in_progress",
-            );
-            return current === undefined
-                ? []
-                : [{ taskId: active.taskId, todoItemId: current.id }];
-        });
-        return associations.length === 1 ? associations[0] : undefined;
     }
 
     #createState(input: TodoWriteInput, ctxId: string): SharedTodoState {

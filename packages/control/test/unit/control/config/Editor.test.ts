@@ -1442,9 +1442,6 @@ test("instance delete terminalizes live state and detaches Context environments 
                     async control() {
                         throw new Error("unused");
                     },
-                    currentAssociation() {
-                        return undefined;
-                    },
                     async delete() {},
                     async read() {
                         return {
@@ -1653,9 +1650,6 @@ test("instance delete commits configuration before generation retirement", async
                     async control() {
                         throw new Error("unused");
                     },
-                    currentAssociation() {
-                        return undefined;
-                    },
                     async delete() {},
                     async read() {
                         return {
@@ -1839,9 +1833,6 @@ test("instance delete persistence failure performs no destructive cleanup", asyn
                     async control() {
                         throw new Error("unused");
                     },
-                    currentAssociation() {
-                        return undefined;
-                    },
                     async delete() {},
                     async read() {
                         return {
@@ -1942,9 +1933,6 @@ test("instance delete permits failed and stale instances without requiring a pro
                         async control() {
                             throw new Error("unused");
                         },
-                        currentAssociation() {
-                            return undefined;
-                        },
                         async delete() {},
                         async read() {
                             return {
@@ -2029,9 +2017,6 @@ test("instance delete permits a stopped instance when runtime and provider clean
                     async cancelAll() {},
                     async control() {
                         throw new Error("unused");
-                    },
-                    currentAssociation() {
-                        return undefined;
                     },
                     async delete() {},
                     async read() {
@@ -2141,9 +2126,6 @@ test("config editor hot-applies model Extension ACL and MCP context changes with
                     async cancelAll() {},
                     async control() {
                         throw new Error("unused");
-                    },
-                    currentAssociation() {
-                        return undefined;
                     },
                     async delete() {},
                     async read() {
@@ -2439,9 +2421,6 @@ function descriptor(
             async cancelAll() {},
             async control() {
                 throw new Error("unused");
-            },
-            currentAssociation() {
-                return undefined;
             },
             async delete() {},
             async read() {

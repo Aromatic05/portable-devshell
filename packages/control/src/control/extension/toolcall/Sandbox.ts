@@ -250,9 +250,6 @@ function encodeContext(context: ToolCallContext): ExtensionJsonValue {
     return {
         ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
         instance: context.instance,
-        ...(context.extensionId === undefined
-            ? {}
-            : { extensionId: context.extensionId }),
         ...(context.operationId === undefined
             ? {}
             : { operationId: context.operationId }),
@@ -273,14 +270,6 @@ function decodeContext(value: ExtensionJsonValue | undefined): ToolCallContext {
             ? {}
             : { ctxId: readString(record.ctxId, "context.ctxId") }),
         instance: readString(record.instance, "context.instance"),
-        ...(record.extensionId === undefined
-            ? {}
-            : {
-                  extensionId: readString(
-                      record.extensionId,
-                      "context.extensionId",
-                  ),
-              }),
         ...(record.operationId === undefined
             ? {}
             : {

@@ -352,9 +352,6 @@ function toLogEntry(value: InstanceLogEntry): ExtensionInstanceLogEntry {
         at: value.at,
         ...(value.callId === undefined ? {} : { callId: value.callId }),
         ...(value.ctxId === undefined ? {} : { ctxId: value.ctxId }),
-        ...(value.extensionId === undefined
-            ? {}
-            : { extensionId: value.extensionId }),
         instanceName: value.instanceName,
         message: value.message,
         ...(value.requestId === undefined

@@ -2,7 +2,6 @@ import {
     errorCodes,
     type CommandResult,
     type JsonValue,
-    type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallFailureStage,
     type ToolCallQuery,
@@ -29,9 +28,6 @@ interface WorkerInstanceToolAuditOptions {
         type: InstanceEventInput["type"],
         data?: JsonValue,
     ): Promise<unknown>;
-    toolCallAssociationProvider?: (
-        context: ToolCallContext,
-    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
 }
 
@@ -39,14 +35,10 @@ export type ToolCallRunningContext = ToolCallScope["eventContext"];
 
 export class WorkerInstanceToolAudit {
     readonly #appendEvent: WorkerInstanceToolAuditOptions["appendEvent"];
-    readonly #toolCallAssociationProvider?: (
-        context: ToolCallContext,
-    ) => ToolCallAssociation | undefined;
     readonly #toolCallHistory: AuditToolCallHistory;
 
     constructor(options: WorkerInstanceToolAuditOptions) {
         this.#appendEvent = options.appendEvent;
-        this.#toolCallAssociationProvider = options.toolCallAssociationProvider;
         this.#toolCallHistory = options.toolCallHistory;
     }
 
@@ -56,13 +48,7 @@ export class WorkerInstanceToolAudit {
         input: JsonValue,
         context: ToolCallContext,
     ): ToolCallScope {
-        return createToolCallScope(
-            callId,
-            toolName,
-            input,
-            context,
-            this.#toolCallAssociationProvider?.(context),
-        );
+        return createToolCallScope(callId, toolName, input, context);
     }
 
     runningContext(scope: ToolCallScope): ToolCallRunningContext {
@@ -77,7 +63,6 @@ export class WorkerInstanceToolAudit {
             scope.context,
             scope.startedAt,
             "queued",
-            scope.association,
             scope.input,
         );
     }

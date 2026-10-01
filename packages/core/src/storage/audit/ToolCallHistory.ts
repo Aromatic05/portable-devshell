@@ -5,7 +5,6 @@ import {
     type ToolCallFailureStage,
     type ToolCallQuery,
     type ToolCallApprovalDecision,
-    type ToolCallAssociation,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -31,12 +30,9 @@ interface ActiveToolCall {
     input?: JsonValue;
     requestId?: string;
     ctxId?: string;
-    extensionId?: string;
     source: ToolCallContext["source"];
     startedAt: string;
     status: ToolCallRecord["status"];
-    taskId?: string;
-    todoItemId?: string;
     toolName: string;
     workspace?: string;
 }
@@ -70,7 +66,6 @@ export class AuditToolCallHistory {
         context: ToolCallContext,
         startedAt: string,
         status: ToolCallRecord["status"] = "running",
-        association?: ToolCallAssociation,
         input?: JsonValue,
     ): Promise<void> {
         await this.#initialize();
@@ -80,12 +75,9 @@ export class AuditToolCallHistory {
             input,
             requestId: context.requestId,
             ctxId: context.ctxId,
-            extensionId: context.extensionId,
             source: context.source,
             startedAt,
             status,
-            taskId: association?.taskId,
-            todoItemId: association?.todoItemId,
             toolName,
             workspace: context.workspace,
         });
@@ -406,13 +398,6 @@ function sliceByFilters(
             return false;
         }
 
-        if (
-            query.extensionId !== undefined &&
-            record.extensionId !== query.extensionId
-        ) {
-            return false;
-        }
-
         if (query.source !== undefined && record.source !== query.source) {
             return false;
         }
@@ -525,7 +510,6 @@ function canReadTail(
         query.before === undefined &&
         query.callIds === undefined &&
         query.ctxId === undefined &&
-        query.extensionId === undefined &&
         query.includeInput === undefined &&
         query.includeOutput === undefined &&
         query.maxBytes === undefined &&
@@ -541,7 +525,6 @@ function canReadQuery(query: ToolCallQuery): boolean {
         (query.limit !== undefined ||
             query.callIds !== undefined ||
             query.ctxId !== undefined ||
-            query.extensionId !== undefined ||
             query.source !== undefined ||
             query.status !== undefined ||
             query.toolName !== undefined)

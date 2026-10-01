@@ -41,7 +41,6 @@ export class WorkerInstanceToolLog {
             callId: string;
             requestId?: string;
             ctxId?: string;
-            extensionId?: string;
             source: ToolCallContext["source"];
             toolName: string;
         },
@@ -53,9 +52,6 @@ export class WorkerInstanceToolLog {
                 ? {}
                 : { requestId: context.requestId }),
             ...(context.ctxId === undefined ? {} : { ctxId: context.ctxId }),
-            ...(context.extensionId === undefined
-                ? {}
-                : { extensionId: context.extensionId }),
             source: context.source,
             toolName: context.toolName,
         };
@@ -105,12 +101,7 @@ export class WorkerInstanceToolLog {
         at: string,
         context: Pick<
             InstanceLogEntry,
-            | "callId"
-            | "requestId"
-            | "ctxId"
-            | "extensionId"
-            | "source"
-            | "toolName"
+            "callId" | "requestId" | "ctxId" | "source" | "toolName"
         >,
     ): Promise<number> {
         let bytes = 0;

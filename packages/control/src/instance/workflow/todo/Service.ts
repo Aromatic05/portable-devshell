@@ -6,7 +6,6 @@ import type {
     TodoReadResult,
     TodoTaskControlAction,
     TodoWriteInput,
-    ToolCallAssociation,
 } from "@portable-devshell/shared";
 
 import { TodoState, type TodoDocument, type TodoTransition } from "./Store.js";
@@ -47,10 +46,6 @@ export class TodoService {
 
     summaries(): ActiveTodoSummary[] {
         return this.#state.activeSummaries(this.#store.readActive());
-    }
-
-    currentAssociation(ctxId?: string): ToolCallAssociation | undefined {
-        return this.#state.currentAssociation(this.#store.readActive(), ctxId);
     }
 
     async write(input: TodoWriteInput, ctxId: string): Promise<TodoReadResult> {

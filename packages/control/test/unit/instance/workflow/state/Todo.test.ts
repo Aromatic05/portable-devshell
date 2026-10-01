@@ -7,7 +7,7 @@ import { TodoState } from "../../../../../src/instance/workflow/todo/Store.ts";
 import { TodoStore } from "../../../../../src/instance/workflow/todo/Store.ts";
 import { createTestTempDirectory } from "../../../../../../../test/TestTempDirectory.ts";
 
-test("TodoState owns validation, transitions, summaries, and associations", () => {
+test("TodoState owns validation, transitions, and summaries", () => {
     const state = new TodoState("aromatic-pc", {
         now: () => "2026-07-16T00:00:00.000Z",
         taskId: () => "task-fixed",
@@ -81,10 +81,6 @@ test("TodoState owns validation, transitions, summaries, and associations", () =
         state.activeSummaries(parallel).map((summary) => summary.title),
         ["Implement", "Verify"],
     );
-    assert.deepEqual(state.currentAssociation(created.document, "ctx-1"), {
-        taskId: "task-fixed",
-        todoItemId: "implement",
-    });
 });
 
 test("TodoState reads and updates an existing task by stable taskId", () => {
@@ -190,7 +186,6 @@ test("TodoState persists checkpoints and task controls model re-entry without re
         state.readResult(paused.document).tasks?.[0]?.status,
         "paused",
     );
-    assert.equal(state.currentAssociation(paused.document, "ctx-1"), undefined);
     assert.deepEqual(paused.document.active[0]?.items, items);
 
     const resumed = state.control(
@@ -204,11 +199,6 @@ test("TodoState persists checkpoints and task controls model re-entry without re
         state.readResult(resumed.document).tasks?.[0]?.status,
         "in_progress",
     );
-    assert.deepEqual(state.currentAssociation(resumed.document, "ctx-2"), {
-        taskId: "task-fixed",
-        todoItemId: "continue",
-    });
-
     const updated = state.transition(
         resumed.document,
         {
@@ -349,68 +339,6 @@ test("TodoState lists live titles and isolates concurrent task revisions", () =>
         ["First", "Second"],
     );
     assert.equal(state.readResult(second.document, "First").taskId, "task-1");
-    assert.equal(
-        state.currentAssociation(second.document, "ctx-first")?.taskId,
-        "task-1",
-    );
-    assert.equal(
-        state.currentAssociation(second.document, "ctx-second"),
-        undefined,
-    );
-});
-
-test("TodoState resolves a unique in-progress association across every task owned by one ctxId", () => {
-    let sequence = 0;
-    const state = new TodoState("aromatic-pc", {
-        taskId: () => `task-${++sequence}`,
-    });
-    const pending = state.transition(
-        state.emptyDocument(),
-        {
-            revision: 0,
-            title: "Pending",
-            todos: [
-                { content: "Pending work", id: "pending", status: "pending" },
-            ],
-        },
-        "ctx-shared",
-    );
-    const active = state.transition(
-        pending.document,
-        {
-            revision: 0,
-            title: "Active",
-            todos: [
-                { content: "Active work", id: "active", status: "in_progress" },
-            ],
-        },
-        "ctx-shared",
-    );
-
-    assert.deepEqual(state.currentAssociation(active.document, "ctx-shared"), {
-        taskId: "task-2",
-        todoItemId: "active",
-    });
-
-    const ambiguous = state.transition(
-        active.document,
-        {
-            revision: 1,
-            title: "Pending",
-            todos: [
-                {
-                    content: "Pending work",
-                    id: "pending",
-                    status: "in_progress",
-                },
-            ],
-        },
-        "ctx-shared",
-    );
-    assert.equal(
-        state.currentAssociation(ambiguous.document, "ctx-shared"),
-        undefined,
-    );
 });
 
 test("TodoState rejects invalid item sets and stale revisions", () => {

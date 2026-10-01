@@ -496,7 +496,6 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                         toolInput as JsonValue,
                         {
                             ctxId: sessionId,
-                            extensionId: this.#extensionId,
                             ...(options.operationId === undefined
                                 ? {}
                                 : {

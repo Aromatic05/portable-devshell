@@ -4,7 +4,6 @@ export interface InstanceLogEntry {
     at: string;
     callId?: string;
     ctxId?: string;
-    extensionId?: string;
     instanceName: string;
     message: string;
     requestId?: string;

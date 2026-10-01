@@ -1,13 +1,8 @@
-import type {
-    JsonValue,
-    ToolCallAssociation,
-    ToolCallContext,
-} from "@portable-devshell/shared";
+import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 
 const LIVE_INPUT_SUMMARY_MAX_LENGTH = 512;
 
 export interface ToolCallScope {
-    association?: ToolCallAssociation;
     callId: string;
     context: ToolCallContext;
     eventContext: {
@@ -15,10 +10,7 @@ export interface ToolCallScope {
         inputSummary: string;
         requestId?: string;
         ctxId?: string;
-        extensionId?: string;
         source: ToolCallContext["source"];
-        taskId?: string;
-        todoItemId?: string;
         toolName: string;
         workspace?: string;
     };
@@ -33,13 +25,11 @@ export function createToolCallScope(
     toolName: string,
     input: JsonValue,
     context: ToolCallContext,
-    association?: ToolCallAssociation,
 ): ToolCallScope {
     const inputSummary = summarizeToolCallInput(input);
     const startedAt = new Date().toISOString();
 
     return {
-        association,
         callId,
         context,
         eventContext: {
@@ -47,10 +37,7 @@ export function createToolCallScope(
             inputSummary,
             requestId: context.requestId,
             ctxId: context.ctxId,
-            extensionId: context.extensionId,
             source: context.source,
-            taskId: association?.taskId,
-            todoItemId: association?.todoItemId,
             toolName,
             workspace: context.workspace,
         },

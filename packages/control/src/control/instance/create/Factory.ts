@@ -59,10 +59,6 @@ export class InstanceFactory {
         });
         const worker = this.#workerInstanceFactory.create(
             this.#toWorkerConfig(instance, reverseConnection, homeDirectory),
-            {
-                toolCallAssociationProvider: (context) =>
-                    todo.currentAssociation(context.ctxId),
-            },
         );
         workerHolder.value = worker;
         const terminal = new WorkerTerminalBackend({ worker });

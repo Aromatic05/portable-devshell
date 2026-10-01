@@ -43,8 +43,6 @@ test("WorkerInstanceToolLog chunks large streams without changing their content"
         inputSummary: "duplicate input",
         requestId: "request-log",
         source: "mcp" as const,
-        taskId: "task-log",
-        todoItemId: "item-log",
         toolName: "bash_run",
         workspace: "/duplicate/workspace",
     };
@@ -78,8 +76,6 @@ test("WorkerInstanceToolLog chunks large streams without changing their content"
     const eventData = events[0]?.data as Record<string, unknown>;
     assert.equal("inputSummary" in eventData, false);
     assert.equal("workspace" in eventData, false);
-    assert.equal("taskId" in eventData, false);
-    assert.equal("todoItemId" in eventData, false);
 });
 
 test("WorkerInstanceToolLog keeps bounded reads below one MiB of decoded stream data", async () => {

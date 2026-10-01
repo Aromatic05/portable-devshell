@@ -113,7 +113,6 @@ export class ToolCallApproval {
                     reason: evaluation.request.reason,
                     requestId: context.requestId,
                     ctxId: context.ctxId,
-                    extensionId: context.extensionId,
                     source: context.source,
                     startedAt,
                     status: "pendingApproval",

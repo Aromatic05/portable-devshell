@@ -283,9 +283,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                     async control() {
                         return todoFixture;
                     },
-                    currentAssociation() {
-                        return undefined;
-                    },
                     async delete() {},
                     async read(input) {
                         const taskId = input?.taskId;

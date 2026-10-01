@@ -1,8 +1,6 @@
 import {
     Endpoint,
     type InstanceEvent,
-    type ToolCallAssociation,
-    type ToolCallContext,
 } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 
@@ -28,14 +26,7 @@ import {
 } from "./Config.js";
 
 export class WorkerInstanceFactory {
-    create(
-        config: WorkerInstanceConfig,
-        options: {
-            toolCallAssociationProvider?: (
-                context: ToolCallContext,
-            ) => ToolCallAssociation | undefined;
-        } = {},
-    ): WorkerInstance {
+    create(config: WorkerInstanceConfig): WorkerInstance {
         const resolved = resolveWorkerInstanceConfig(config);
         const paths = new InstancePaths(resolved.name, resolved.homeDirectory);
         const catalog = new WorkerToolCatalog();
@@ -98,7 +89,6 @@ export class WorkerInstanceFactory {
                 store: new ApprovalStore(approvalStore),
                 timeout: resolved.approvalTimeout,
             }),
-            toolCallAssociationProvider: options.toolCallAssociationProvider,
             toolCallHistory: new AuditToolCallHistory(
                 resolved.name,
                 toolCallStore,

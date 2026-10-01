@@ -7,7 +7,6 @@ import {
     createError,
     errorCodes,
     type JsonValue,
-    type ToolCallAssociation,
     type ToolCallContext,
     type ToolCallQuery,
     type ToolCallRecord,
@@ -105,9 +104,6 @@ interface WorkerInstanceDependencies {
     stateMachine: InstanceStateMachine;
     terminalClient: WorkerTerminalClient;
     transportConnection: WorkerTransportConnection;
-    toolCallAssociationProvider?: (
-        context: ToolCallContext,
-    ) => ToolCallAssociation | undefined;
     toolCallHistory: AuditToolCallHistory;
     toolCallScheduler: WorkerToolCallScheduler;
     toolInvoker: WorkerToolInvoker;
@@ -185,8 +181,6 @@ export class WorkerInstance {
             assertReady: () => this.#assertReady(),
             instanceName: this.#config.name,
             logStore: dependencies.logStore,
-            toolCallAssociationProvider:
-                dependencies.toolCallAssociationProvider,
             toolCallHistory: dependencies.toolCallHistory,
             toolCallScheduler: dependencies.toolCallScheduler,
             toolInvoker: dependencies.toolInvoker,

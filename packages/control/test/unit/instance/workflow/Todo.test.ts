@@ -60,10 +60,6 @@ test("TodoService creates, validates revisions, persists atomically, and emits d
         (await service.read()).tasks?.map((task) => task.taskId),
         [created.taskId],
     );
-    assert.equal(
-        service.currentAssociation("mcp-session")?.todoItemId,
-        "implement",
-    );
     assert.equal(events[0]?.type, "todo.created");
 
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {

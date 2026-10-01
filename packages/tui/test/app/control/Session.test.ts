@@ -791,9 +791,6 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                             summary: { completed: 0, total: 0 },
                         };
                     },
-                    currentAssociation() {
-                        return undefined;
-                    },
                     async delete() {},
                     async read() {
                         options.onTodoRead?.();
