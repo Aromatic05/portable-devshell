@@ -13,7 +13,7 @@ use crate::tool::file::search::glob::FileGlobTool;
 use crate::tool::file::search::grep::FileGrepTool;
 use crate::tool::tmux::register_tools as register_tmux_tools;
 use crate::tool::{ToolCatalogEntry, ToolError, ToolHandler, ToolName};
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Default)]
 pub struct ToolRegistry {
@@ -232,7 +232,7 @@ fn is_numeric_type(value: &serde_json::Value) -> bool {
 
 pub fn builtin_registry(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
     artifacts: Arc<ArtifactStore>,
 ) -> Result<ToolRegistry, ToolError> {

@@ -5,7 +5,7 @@ use crate::cli::instance::maintain::retire::retire_instance;
 use crate::daemon::process::{self, DaemonState};
 use crate::host::home::devshell_home;
 use crate::instance::{InstanceName, read_config};
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
 struct GcResponse {
@@ -42,7 +42,7 @@ pub fn run(args: GcArgs) -> Result<String, String> {
             continue;
         };
         let instance_paths = crate::instance::storage::InstancePaths::resolve(&instance)?;
-        let socket_paths = SocketPaths::resolve(&instance)?;
+        let socket_paths = EndpointPaths::resolve(&instance)?;
         if !instance_paths.config_file.exists() {
             continue;
         }

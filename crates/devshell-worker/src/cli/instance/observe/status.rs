@@ -6,7 +6,7 @@ use crate::cli::InstanceArgs;
 use crate::daemon::process::{self, DaemonState};
 use crate::instance::InstanceName;
 use crate::instance::storage::InstancePaths;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
 struct StatusResponse {
@@ -22,7 +22,7 @@ struct StatusResponse {
 pub fn run(args: InstanceArgs) -> Result<String, String> {
     let instance = InstanceName::parse(&args.instance)?;
     let instance_paths = InstancePaths::resolve(&instance)?;
-    let socket_paths = SocketPaths::resolve(&instance)?;
+    let socket_paths = EndpointPaths::resolve(&instance)?;
     let pid = process::read_pid(&instance_paths);
     let daemon_state = process::daemon_state(&instance_paths, &socket_paths);
     let daemon_status = if daemon_state == DaemonState::Running {

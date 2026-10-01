@@ -9,7 +9,7 @@ use crate::daemon::process::lifecycle::{readiness, shutdown};
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
 use crate::instance::{InstanceLock, InstanceName, build_config, write_config};
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
 struct StartResponse {
@@ -22,7 +22,7 @@ struct StartResponse {
 pub fn run(args: InstanceArgs) -> Result<String, String> {
     let instance = InstanceName::parse(&args.instance)?;
     let instance_paths = InstancePaths::resolve(&instance)?;
-    let socket_paths = SocketPaths::resolve(&instance)?;
+    let socket_paths = EndpointPaths::resolve(&instance)?;
 
     ensure_dir(&instance_paths.instance_root, 0o700)?;
     ensure_dir(&instance_paths.logs_dir, 0o700)?;
@@ -77,7 +77,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
     .map_err(|error| error.to_string())
 }
 
-fn running_daemon_matches_current_worker(socket_paths: &SocketPaths) -> Result<bool, String> {
+fn running_daemon_matches_current_worker(socket_paths: &EndpointPaths) -> Result<bool, String> {
     let Some(current_sha256) = process::current_worker_sha256() else {
         return Ok(true);
     };
@@ -102,7 +102,7 @@ fn running_daemon_matches_current_worker(socket_paths: &SocketPaths) -> Result<b
 fn start_daemon(
     instance: &InstanceName,
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
 ) -> Result<(), String> {
     if !instance_paths.config_file.exists() {
         let config = build_config(instance)?;

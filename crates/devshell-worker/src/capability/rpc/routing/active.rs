@@ -182,6 +182,26 @@ impl ActiveToolCallRegistry {
         Ok(true)
     }
 
+    pub fn cancel_request(&self, rpc_request_id: &str) -> Result<bool, RpcError> {
+        let state = self.state.lock().map_err(|_| {
+            RpcError::new(
+                "worker.toolSchedulerFailed",
+                "Active tool call registry lock poisoned.",
+            )
+        })?;
+        let Some(cancellation) = state
+            .calls
+            .iter()
+            .find_map(|(key, cancellation)| {
+                (key.rpc_request_id == rpc_request_id).then_some(cancellation)
+            })
+        else {
+            return Ok(false);
+        };
+        cancellation.cancel();
+        Ok(true)
+    }
+
     pub fn begin_stop(&self) -> Result<(), String> {
         let mut state = self
             .state

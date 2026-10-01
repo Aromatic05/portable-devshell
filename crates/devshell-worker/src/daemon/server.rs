@@ -12,7 +12,6 @@ use crate::capability::rpc::codec::{
 };
 use crate::capability::rpc::error::RpcError;
 use crate::capability::rpc::response::RpcResponse;
-use crate::capability::rpc::reverse::ReverseRpcPayload;
 use crate::capability::rpc::router::RpcRouter;
 use crate::daemon::log::append_log;
 use crate::daemon::process;
@@ -21,7 +20,7 @@ use crate::instance::storage::{ensure_dir, ensure_file_mode};
 use crate::instance::{InstanceLock, InstanceName, read_config};
 use crate::tool::builtin_registry;
 use crate::transport::reverse::ReverseConnector;
-use crate::transport::socket::{LocalIpcListener, LocalIpcStream, SocketPaths};
+use crate::transport::endpoint::channel::{LocalIpcListener, LocalIpcStream, EndpointPaths};
 
 const FAIL_AFTER_BIND_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_AFTER_BIND";
 const FAIL_ACCEPT_LOOP_ENV: &str = "DEVSHELL_WORKER_TEST_FAIL_ACCEPT_LOOP";
@@ -29,7 +28,7 @@ const DELAY_READY_MS_ENV: &str = "DEVSHELL_WORKER_TEST_DELAY_READY_MS";
 
 pub fn serve(instance: InstanceName) -> Result<(), String> {
     let instance_paths = InstancePaths::resolve(&instance)?;
-    let socket_paths = SocketPaths::resolve(&instance)?;
+    let socket_paths = EndpointPaths::resolve(&instance)?;
     ensure_dir(&instance_paths.logs_dir, 0o700)?;
     ensure_dir(&instance_paths.artifacts_dir, 0o700)?;
     ensure_dir(&instance_paths.state_dir, 0o700)?;
@@ -100,11 +99,6 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
     .map_err(|error| error.message)?;
     let tools = Arc::new(builtin_tools);
     let payload_maintenance = Arc::clone(&payloads);
-    let service_context = crate::transport::service::ServiceContext::daemon(
-        socket_paths.socket_file.clone(),
-        Arc::clone(&payloads),
-        Arc::clone(&receives),
-    );
     let router = Arc::new(RpcRouter::new(
         config.clone(),
         runtime,
@@ -113,15 +107,18 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         receives,
         resources,
     ));
+    let endpoint_context = crate::transport::endpoint::EndpointContext::new(
+        &config.instance,
+        Arc::clone(&router),
+    );
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
-        let payload = Arc::new(ReverseRpcPayload::new(Arc::clone(&router)));
         ReverseConnector::new(
             instance.clone(),
             instance_paths.clone(),
             reverse,
             socket_paths.transport_socket_file.clone(),
-            payload,
+            Arc::clone(&router),
         )
         .spawn()
     });
@@ -156,11 +153,11 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
                 stream.set_nonblocking(false).map_err(|error| {
                     format!("failed to set accepted transport stream blocking: {error}")
                 })?;
-                let service_context = service_context.clone();
+                let endpoint_context = endpoint_context.clone();
                 let instance_paths = instance_paths.clone();
                 thread::spawn(move || {
                     if let Err(error) =
-                        crate::transport::service::serve_ipc(stream, service_context)
+                        crate::transport::endpoint::serve_ipc(stream, endpoint_context)
                     {
                         let _ = append_log(
                             &instance_paths,
@@ -288,11 +285,15 @@ impl NotificationPump {
         let thread = thread::spawn(move || {
             while running.load(Ordering::SeqCst) {
                 match router.try_pop_notification() {
-                    Ok(Some(frame)) => {
+                    Ok(Some(notification)) => {
                         let result = writer
                             .lock()
                             .map_err(|_| "rpc connection writer lock poisoned".to_string())
-                            .and_then(|mut stream| write_frame(&mut *stream, &frame));
+                            .and_then(|mut stream| {
+                                let frame =
+                                    crate::capability::rpc::codec::encode_json(&notification)?;
+                                write_frame(&mut *stream, &frame)
+                            });
                         if result.is_err() {
                             return;
                         }
@@ -338,12 +339,12 @@ fn remove_empty_runtime_dir(path: &std::path::Path) {
 
 struct RuntimeFilesGuard {
     instance_paths: InstancePaths,
-    socket_paths: SocketPaths,
+    socket_paths: EndpointPaths,
     armed: bool,
 }
 
 impl RuntimeFilesGuard {
-    fn new(instance_paths: InstancePaths, socket_paths: SocketPaths) -> Self {
+    fn new(instance_paths: InstancePaths, socket_paths: EndpointPaths) -> Self {
         Self {
             instance_paths,
             socket_paths,

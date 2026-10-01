@@ -139,12 +139,14 @@ impl RpcRouter {
     pub fn shutdown_requested(&self) -> bool {
         self.shutdown_requested.load(Ordering::SeqCst)
     }
-    pub fn try_pop_notification(&self) -> Result<Option<Vec<u8>>, String> {
+    pub fn try_pop_notification(&self) -> Result<Option<serde_json::Value>, String> {
         self.notifications.try_pop()
     }
 
-    pub fn clear_notifications(&self) -> Result<(), String> {
-        self.notifications.clear()
+
+
+    pub fn cancel_request(&self, request_id: &str) -> Result<bool, RpcError> {
+        self.active_tool_calls.cancel_request(request_id)
     }
 
     fn dispatch_tool_inner(

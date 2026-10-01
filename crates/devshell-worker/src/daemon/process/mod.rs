@@ -22,7 +22,7 @@ use crate::instance::sandbox::SecurityMode;
 use crate::instance::storage::InstancePaths;
 #[cfg(unix)]
 use crate::instance::storage::ensure_file_mode;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 pub const INTERNAL_INSTANCE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_INSTANCE";
 pub const INTERNAL_SECURITY_MODE_ENV: &str = "DEVSHELL_WORKER_INTERNAL_SECURITY_MODE";
@@ -191,14 +191,14 @@ pub fn clear_pid(paths: &InstancePaths) -> Result<(), String> {
 
 pub fn clear_runtime_files(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
 ) -> Result<(), String> {
     clear_pid(instance_paths)?;
     remove_ipc_endpoint_if_exists(&socket_paths.socket_file)?;
     remove_ipc_endpoint_if_exists(&socket_paths.transport_socket_file)
 }
 
-pub fn daemon_is_responsive(socket_paths: &SocketPaths) -> bool {
+pub fn daemon_is_responsive(socket_paths: &EndpointPaths) -> bool {
     matches!(
         send_request_with_timeout(
             &socket_paths.socket_file,
@@ -209,7 +209,7 @@ pub fn daemon_is_responsive(socket_paths: &SocketPaths) -> bool {
     )
 }
 
-pub fn daemon_state(instance_paths: &InstancePaths, socket_paths: &SocketPaths) -> DaemonState {
+pub fn daemon_state(instance_paths: &InstancePaths, socket_paths: &EndpointPaths) -> DaemonState {
     if daemon_is_responsive(socket_paths) {
         return DaemonState::Running;
     }
@@ -221,7 +221,7 @@ pub fn daemon_state(instance_paths: &InstancePaths, socket_paths: &SocketPaths) 
     }
 }
 
-pub fn has_runtime_residue(instance_paths: &InstancePaths, socket_paths: &SocketPaths) -> bool {
+pub fn has_runtime_residue(instance_paths: &InstancePaths, socket_paths: &EndpointPaths) -> bool {
     instance_paths.pid_file.exists()
         || unix_socket_exists(&socket_paths.socket_file)
         || read_pid(instance_paths)

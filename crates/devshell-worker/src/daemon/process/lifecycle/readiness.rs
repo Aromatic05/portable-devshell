@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::capability::rpc::bridge::send_request_with_timeout;
 use crate::capability::rpc::request::RpcRequest;
-use crate::transport::socket::{SocketPaths, endpoint_may_exist};
+use crate::transport::endpoint::channel::{EndpointPaths, endpoint_may_exist};
 
-pub fn wait_until_ready(socket_paths: &SocketPaths, timeout: Duration) -> Result<(), String> {
+pub fn wait_until_ready(socket_paths: &EndpointPaths, timeout: Duration) -> Result<(), String> {
     let started = Instant::now();
     while started.elapsed() <= timeout {
         if endpoint_may_exist(&socket_paths.socket_file) {

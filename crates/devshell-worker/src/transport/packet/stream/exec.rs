@@ -97,19 +97,19 @@ impl ExecService {
         self.join_stderr();
     }
 
-    pub(super) fn take_stdin(&mut self) -> Result<ChildStdin, String> {
+    pub fn take_stdin(&mut self) -> Result<ChildStdin, String> {
         self.stdin
             .take()
             .ok_or_else(|| "process.exec stdin is already attached.".to_string())
     }
 
-    pub(super) fn take_stdout(&mut self) -> Result<ChildStdout, String> {
+    pub fn take_stdout(&mut self) -> Result<ChildStdout, String> {
         self.stdout
             .take()
             .ok_or_else(|| "process.exec stdout is already attached.".to_string())
     }
 
-    pub(super) fn poll_status(&mut self) -> Result<bool, String> {
+    pub fn poll_status(&mut self) -> Result<bool, String> {
         if self.finished {
             return Ok(true);
         }

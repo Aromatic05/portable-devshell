@@ -3,16 +3,17 @@ use std::sync::mpsc;
 use std::thread;
 
 use crate::instance::InstanceName;
-use crate::transport::socket::{LocalIpcStream, SocketPaths};
+use crate::transport::endpoint::channel::{LocalIpcStream, EndpointPaths};
 
+pub mod endpoint;
+pub mod envelope;
 pub mod frame;
+pub mod packet;
 pub mod reverse;
-pub mod service;
-pub mod socket;
 
 pub fn run(instance: &str) -> Result<String, String> {
     let instance = InstanceName::parse(instance)?;
-    let socket_paths = SocketPaths::resolve(&instance)?;
+    let socket_paths = EndpointPaths::resolve(&instance)?;
     let stream = LocalIpcStream::connect(&socket_paths.transport_socket_file).map_err(|error| {
         format!(
             "failed to connect transport endpoint {}: {error}",

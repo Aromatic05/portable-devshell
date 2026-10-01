@@ -7,15 +7,13 @@ const WINDOW_PAYLOAD_SIZE: usize = 4;
 const RESET_CODE_SIZE: usize = 2;
 
 const FRAME_WIRE_FORMAT_VERSION: u8 = 1;
-pub const FRAME_PROTOCOL_VERSION: &str = "1.0.0";
 pub const FRAME_MAX_DATA_SIZE: usize = 64 * 1024;
-pub const FRAME_MAX_OPEN_METADATA_SIZE: usize = 64 * 1024;
-pub const FRAME_MAX_OPEN_SERVICE_SIZE: usize = 256;
-pub const TRANSPORT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+pub const FRAME_MAX_METADATA_SIZE: usize = 64 * 1024;
+pub const FRAME_MAX_SERVICE_SIZE: usize = 256;
+pub const FRAME_MAX_ERROR_SIZE: usize = 64 * 1024;
+const FRAME_MAX_BODY_SIZE: usize = FRAME_HEADER_SIZE + OPEN_FIXED_SIZE + FRAME_MAX_SERVICE_SIZE + FRAME_MAX_METADATA_SIZE;
 
 pub const RESET_UNSUPPORTED_SERVICE: u16 = 1;
-pub const RESET_SERVICE_REJECTED: u16 = 2;
-pub const RESET_SERVICE_FAILED: u16 = 3;
 #[cfg(test)]
 pub const RESET_CANCELLED: u16 = 4;
 
@@ -60,25 +58,24 @@ impl Frame {
 #[derive(Debug)]
 pub struct FrameDecoder {
     buffer: Vec<u8>,
-    max_frame_size: usize,
     start: usize,
 }
 
 impl Default for FrameDecoder {
     fn default() -> Self {
-        Self::new(TRANSPORT_MAX_FRAME_SIZE)
+        Self::new()
     }
 }
 
 impl FrameDecoder {
-    pub fn new(max_frame_size: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
-            max_frame_size,
             start: 0,
         }
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.start == self.buffer.len()
     }
@@ -94,11 +91,8 @@ impl FrameDecoder {
                 break;
             }
             let body_len = read_u32(&self.buffer, self.start)? as usize;
-            if body_len > self.max_frame_size {
-                return Err(format!(
-                    "Frame payload exceeds {} bytes.",
-                    self.max_frame_size
-                ));
+            if body_len > FRAME_MAX_BODY_SIZE {
+                return Err(format!("Frame payload exceeds {FRAME_MAX_BODY_SIZE} bytes."));
             }
             let packet_len = PACKET_HEADER_SIZE
                 .checked_add(body_len)
@@ -153,12 +147,12 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, String> {
                 return Err("OPEN receive window must be a positive u32.".to_string());
             }
             let service_bytes = service.as_bytes();
-            if service_bytes.is_empty() || service_bytes.len() > FRAME_MAX_OPEN_SERVICE_SIZE {
+            if service_bytes.is_empty() || service_bytes.len() > FRAME_MAX_SERVICE_SIZE {
                 return Err("OPEN service must be a non-empty UTF-8 name.".to_string());
             }
-            if metadata.len() > FRAME_MAX_OPEN_METADATA_SIZE {
+            if metadata.len() > FRAME_MAX_METADATA_SIZE {
                 return Err(format!(
-                    "OPEN metadata exceeds {FRAME_MAX_OPEN_METADATA_SIZE} bytes."
+                    "OPEN metadata exceeds {FRAME_MAX_METADATA_SIZE} bytes."
                 ));
             }
             let service_len = u16::try_from(service_bytes.len())
@@ -189,6 +183,9 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, String> {
                 return Err("RESET code must be a positive u16.".to_string());
             }
             let message = message.as_bytes();
+            if message.len() > FRAME_MAX_ERROR_SIZE {
+                return Err(format!("RESET message exceeds {FRAME_MAX_ERROR_SIZE} bytes."));
+            }
             let mut payload = Vec::with_capacity(RESET_CODE_SIZE + message.len());
             payload.extend_from_slice(&code.to_be_bytes());
             payload.extend_from_slice(message);
@@ -199,10 +196,8 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<u8>, String> {
     let body_len = FRAME_HEADER_SIZE
         .checked_add(payload.len())
         .ok_or_else(|| "Frame body length overflow.".to_string())?;
-    if body_len > TRANSPORT_MAX_FRAME_SIZE {
-        return Err(format!(
-            "Frame payload exceeds {TRANSPORT_MAX_FRAME_SIZE} bytes."
-        ));
+    if body_len > FRAME_MAX_BODY_SIZE {
+        return Err(format!("Frame payload exceeds {FRAME_MAX_BODY_SIZE} bytes."));
     }
     let body_len_u32 =
         u32::try_from(body_len).map_err(|_| "Frame body exceeds u32 length.".to_string())?;
@@ -220,10 +215,8 @@ pub fn decode_frame(packet: &[u8]) -> Result<Frame, String> {
         return Err("Frame packet header is incomplete.".to_string());
     }
     let body_len = read_u32(packet, 0)? as usize;
-    if body_len > TRANSPORT_MAX_FRAME_SIZE {
-        return Err(format!(
-            "Frame payload exceeds {TRANSPORT_MAX_FRAME_SIZE} bytes."
-        ));
+    if body_len > FRAME_MAX_BODY_SIZE {
+        return Err(format!("Frame payload exceeds {FRAME_MAX_BODY_SIZE} bytes."));
     }
     if packet.len() != PACKET_HEADER_SIZE + body_len {
         return Err("Frame packet length does not match payload length.".to_string());
@@ -281,7 +274,11 @@ pub fn decode_frame(packet: &[u8]) -> Result<Frame, String> {
             if code == 0 {
                 return Err("RESET code must be a positive u16.".to_string());
             }
-            let message = String::from_utf8(payload[RESET_CODE_SIZE..].to_vec())
+            let message_bytes = &payload[RESET_CODE_SIZE..];
+            if message_bytes.len() > FRAME_MAX_ERROR_SIZE {
+                return Err(format!("RESET message exceeds {FRAME_MAX_ERROR_SIZE} bytes."));
+            }
+            let message = String::from_utf8(message_bytes.to_vec())
                 .map_err(|_| "RESET message must be valid UTF-8.".to_string())?;
             Ok(Frame::Reset {
                 stream_id,
@@ -305,9 +302,9 @@ fn decode_open(stream_id: u32, payload: &[u8]) -> Result<Frame, String> {
     if service_len == 0 {
         return Err("OPEN service must not be empty.".to_string());
     }
-    if service_len > FRAME_MAX_OPEN_SERVICE_SIZE {
+    if service_len > FRAME_MAX_SERVICE_SIZE {
         return Err(format!(
-            "OPEN service exceeds {FRAME_MAX_OPEN_SERVICE_SIZE} bytes."
+            "OPEN service exceeds {FRAME_MAX_SERVICE_SIZE} bytes."
         ));
     }
     let service_end = OPEN_FIXED_SIZE
@@ -319,9 +316,9 @@ fn decode_open(stream_id: u32, payload: &[u8]) -> Result<Frame, String> {
     let service = String::from_utf8(payload[OPEN_FIXED_SIZE..service_end].to_vec())
         .map_err(|_| "OPEN service must be valid UTF-8.".to_string())?;
     let metadata_len = payload.len() - service_end;
-    if metadata_len > FRAME_MAX_OPEN_METADATA_SIZE {
+    if metadata_len > FRAME_MAX_METADATA_SIZE {
         return Err(format!(
-            "OPEN metadata exceeds {FRAME_MAX_OPEN_METADATA_SIZE} bytes."
+            "OPEN metadata exceeds {FRAME_MAX_METADATA_SIZE} bytes."
         ));
     }
     Ok(Frame::Open {
@@ -412,7 +409,7 @@ mod tests {
             encode_frame(&Frame::Open {
                 stream_id: 1,
                 receive_window: 8,
-                service: "s".repeat(FRAME_MAX_OPEN_SERVICE_SIZE + 1),
+                service: "s".repeat(FRAME_MAX_SERVICE_SIZE + 1),
                 metadata: Vec::new(),
             })
             .is_err()
@@ -422,17 +419,17 @@ mod tests {
                 stream_id: 1,
                 receive_window: 8,
                 service: "test".to_string(),
-                metadata: vec![0; FRAME_MAX_OPEN_METADATA_SIZE + 1],
+                metadata: vec![0; FRAME_MAX_METADATA_SIZE + 1],
             })
             .is_err()
         );
 
         let mut payload =
-            Vec::with_capacity(OPEN_FIXED_SIZE + 1 + FRAME_MAX_OPEN_METADATA_SIZE + 1);
+            Vec::with_capacity(OPEN_FIXED_SIZE + 1 + FRAME_MAX_METADATA_SIZE + 1);
         payload.extend_from_slice(&8u32.to_be_bytes());
         payload.extend_from_slice(&1u16.to_be_bytes());
         payload.push(b'x');
-        payload.extend(std::iter::repeat_n(0, FRAME_MAX_OPEN_METADATA_SIZE + 1));
+        payload.extend(std::iter::repeat_n(0, FRAME_MAX_METADATA_SIZE + 1));
         assert!(decode_open(1, &payload).is_err());
     }
 

@@ -49,7 +49,7 @@ impl ReverseConnector {
                 .map_err(|error| format!("failed to connect reverse websocket: {error}"))?
         };
         set_websocket_read_timeout(&mut socket, Some(Duration::from_millis(50)))?;
-        self.payload.prepare_connection()?;
+        self.bridge.prepare()?;
         append_log(
             &self.paths,
             &format!("reverse connection established transport=wss generation={generation}"),
@@ -61,15 +61,15 @@ impl ReverseConnector {
         &self,
         mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
     ) -> Result<(), String> {
-        while !self.payload.is_stopping() {
+        while !self.bridge.is_stopping() {
             self.flush_wss_responses(&mut socket)?;
             match socket.read() {
                 Ok(Message::Binary(frame)) => {
-                    if let Some(response) = self.payload.accept_inbound(&frame)?
+                    if let Some(response) = self.bridge.accept_inbound(&frame)?
                         && let Err(error) =
-                            socket.send(Message::Binary(response.frame.clone().into()))
+                            socket.send(Message::Binary(response.clone().into()))
                     {
-                        self.payload.requeue_front(response)?;
+                        self.bridge.requeue_front(response)?;
                         return Err(error.to_string());
                     }
                 }
@@ -100,9 +100,9 @@ impl ReverseConnector {
         &self,
         socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
     ) -> Result<(), String> {
-        while let Some(response) = self.payload.try_pop_outbound()? {
-            if let Err(error) = socket.send(Message::Binary(response.frame.clone().into())) {
-                self.payload.requeue_front(response)?;
+        while let Some(response) = self.bridge.try_pop_outbound()? {
+            if let Err(error) = socket.send(Message::Binary(response.clone().into())) {
+                self.bridge.requeue_front(response)?;
                 return Err(error.to_string());
             }
         }

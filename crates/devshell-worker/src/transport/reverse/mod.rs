@@ -1,5 +1,5 @@
 pub(crate) mod proxy;
-mod service;
+mod bridge;
 mod sse;
 mod websocket;
 
@@ -17,36 +17,20 @@ use crate::daemon::log::append_log;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_file_mode;
 use crate::instance::{InstanceName, WorkerReverseConfig};
-use service::ReverseFramePayload;
+use bridge::ReverseBridge;
+use crate::capability::rpc::router::RpcRouter;
 
 const WSS_FAILURES_BEFORE_SSE: u32 = 3;
 const MAX_RECONNECT_BACKOFF: Duration = Duration::from_secs(30);
 const SSE_RETRY_AFTER: Duration = Duration::from_secs(5);
 const SSE_READ_TIMEOUT: Duration = Duration::from_secs(45);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReversePayloadFrame {
-    pub frame: Vec<u8>,
-    pub opaque_id: Option<String>,
-}
-
-pub trait ReversePayload: Send + Sync {
-    fn is_stopping(&self) -> bool;
-    fn prepare_connection(&self) -> Result<(), String>;
-    fn accept_inbound(&self, frame: &[u8]) -> Result<Option<ReversePayloadFrame>, String>;
-    fn queue_outbound(&self, frame: ReversePayloadFrame) -> Result<(), String>;
-    fn try_pop_outbound(&self) -> Result<Option<ReversePayloadFrame>, String>;
-    fn wait_pop_outbound(&self, timeout: Duration) -> Result<Option<ReversePayloadFrame>, String>;
-    fn requeue_front(&self, frame: ReversePayloadFrame) -> Result<(), String>;
-    fn wake_outbound(&self);
-}
-
 #[derive(Clone)]
 pub struct ReverseConnector {
     instance: InstanceName,
     paths: InstancePaths,
     config: WorkerReverseConfig,
-    payload: Arc<ReverseFramePayload>,
+    bridge: Arc<ReverseBridge>,
 }
 
 impl ReverseConnector {
@@ -54,14 +38,14 @@ impl ReverseConnector {
         instance: InstanceName,
         paths: InstancePaths,
         config: WorkerReverseConfig,
-        transport_socket: PathBuf,
-        payload: Arc<dyn ReversePayload>,
+        transport_endpoint: PathBuf,
+        router: Arc<RpcRouter>,
     ) -> Self {
         Self {
             instance,
             paths,
             config,
-            payload: Arc::new(ReverseFramePayload::new(transport_socket, payload)),
+            bridge: Arc::new(ReverseBridge::new(transport_endpoint, router)),
         }
     }
 
@@ -91,7 +75,7 @@ impl ReverseConnector {
         let mut wss_failures = 0_u32;
         let mut backoff = Duration::from_secs(1);
 
-        while !self.payload.is_stopping() {
+        while !self.bridge.is_stopping() {
             let generation = match self.next_generation() {
                 Ok(generation) => generation,
                 Err(error) => {
@@ -133,7 +117,7 @@ impl ReverseConnector {
                 }
             }
 
-            if self.payload.is_stopping() {
+            if self.bridge.is_stopping() {
                 break;
             }
             thread::sleep(if wss_failures >= WSS_FAILURES_BEFORE_SSE {

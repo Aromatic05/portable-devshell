@@ -1,5 +1,5 @@
-mod endpoint;
+mod paths;
 mod platform;
 
-pub use endpoint::SocketPaths;
+pub use paths::EndpointPaths;
 pub use platform::{LocalIpcListener, LocalIpcStream, endpoint_may_exist};

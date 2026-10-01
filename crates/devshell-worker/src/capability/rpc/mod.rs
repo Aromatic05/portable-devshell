@@ -3,7 +3,6 @@ pub mod command;
 pub mod control;
 pub mod message;
 pub mod notification;
-pub mod reverse;
 pub mod routing;
 
 pub use client as bridge;

@@ -24,7 +24,7 @@ use crate::tool::tmux::state::TmuxState;
 use crate::tool::{
     ToolCall, ToolCapability, ToolCatalogEntry, ToolError, ToolHandler, ToolName, ToolRegistry,
 };
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 pub use backend::retire::retire_instance_runtime;
 
@@ -78,14 +78,14 @@ struct TmuxStateRegistry {
     instance_paths: InstancePaths,
     model_devshell: Arc<ModelDevshellShim>,
     runtime: WorkerRuntimeContext,
-    socket_paths: SocketPaths,
+    socket_paths: EndpointPaths,
     states: Mutex<HashMap<PathBuf, Arc<TmuxState>>>,
 }
 
 impl TmuxStateRegistry {
     fn new(
         instance_paths: &InstancePaths,
-        socket_paths: &SocketPaths,
+        socket_paths: &EndpointPaths,
         runtime: &WorkerRuntimeContext,
         model_devshell: Arc<ModelDevshellShim>,
     ) -> Self {
@@ -147,7 +147,7 @@ where
 pub fn register_tools(
     registry: &mut ToolRegistry,
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     runtime: &WorkerRuntimeContext,
     model_devshell: Arc<ModelDevshellShim>,
 ) -> Result<(), ToolError> {

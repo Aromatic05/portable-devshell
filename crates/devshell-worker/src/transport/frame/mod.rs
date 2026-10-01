@@ -6,8 +6,8 @@ use std::collections::HashMap;
 #[cfg(test)]
 pub use codec::RESET_CANCELLED;
 pub use codec::{
-    FRAME_MAX_DATA_SIZE, FRAME_PROTOCOL_VERSION, Frame, FrameDecoder, RESET_SERVICE_FAILED,
-    RESET_SERVICE_REJECTED, RESET_UNSUPPORTED_SERVICE, encode_frame,
+    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, RESET_UNSUPPORTED_SERVICE,
+    encode_frame,
 };
 use stream::StreamState;
 
@@ -46,7 +46,6 @@ type FrameRead = Option<(Vec<u8>, Option<Frame>)>;
 #[derive(Debug)]
 pub struct FrameProtocol {
     role: FrameRole,
-    max_data_size: usize,
     max_streams: usize,
     #[cfg(test)]
     next_stream_id: u64,
@@ -58,20 +57,11 @@ impl FrameProtocol {
     pub fn new(role: FrameRole) -> Self {
         Self {
             role,
-            max_data_size: FRAME_MAX_DATA_SIZE,
             max_streams: DEFAULT_MAX_ACTIVE_STREAMS,
             #[cfg(test)]
             next_stream_id: 1,
             last_remote_stream_id: 0,
             streams: HashMap::new(),
-        }
-    }
-
-    #[cfg(test)]
-    fn with_max_data_size(role: FrameRole, max_data_size: usize) -> Self {
-        Self {
-            max_data_size,
-            ..Self::new(role)
         }
     }
 
@@ -257,7 +247,7 @@ impl FrameProtocol {
         if data.is_empty() || stream.send_credit == 0 {
             return Ok(None);
         }
-        let byte_len = stream.take_send_credit(self.max_data_size.min(data.len()));
+        let byte_len = stream.take_send_credit(FRAME_MAX_DATA_SIZE.min(data.len()));
         if byte_len == 0 {
             return Ok(None);
         }
@@ -310,6 +300,7 @@ impl FrameProtocol {
         Ok(Some((data, window)))
     }
 
+    #[cfg(test)]
     pub fn finish(&mut self, stream_id: u32) -> Result<Frame, String> {
         let stream = self
             .streams
@@ -324,6 +315,7 @@ impl FrameProtocol {
         Ok(frame)
     }
 
+    #[cfg(test)]
     pub fn reset(&mut self, stream_id: u32, code: u16, message: String) -> Result<Frame, String> {
         self.streams
             .remove(&stream_id)
@@ -335,10 +327,12 @@ impl FrameProtocol {
         })
     }
 
+    #[cfg(test)]
     pub fn stream_open(&self, stream_id: u32) -> bool {
         self.streams.contains_key(&stream_id)
     }
 
+    #[cfg(test)]
     pub fn remote_finished(&self, stream_id: u32) -> Result<bool, String> {
         self.streams
             .get(&stream_id)
@@ -557,23 +551,33 @@ mod tests {
 
     #[test]
     fn data_is_bounded_by_credit_and_max_frame_chunk() {
-        let mut opener = FrameProtocol::with_max_data_size(FrameRole::Opener, 2);
+        let mut opener = FrameProtocol::new(FrameRole::Opener);
         let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
-        let (stream_id, open) = opener.open("test".into(), Vec::new(), 3).unwrap();
+        let window_size = u32::try_from(FRAME_MAX_DATA_SIZE + 1).unwrap();
+        let (stream_id, open) = opener
+            .open("test".into(), Vec::new(), window_size)
+            .unwrap();
         acceptor.accept_frame(open).unwrap();
-        let window = acceptor.accept_open(stream_id, 3).unwrap();
+        let window = acceptor.accept_open(stream_id, window_size).unwrap();
         opener.accept_frame(window).unwrap();
 
+        let data = vec![0_u8; FRAME_MAX_DATA_SIZE + 2];
         let (used, first) = opener
-            .next_data_frame(stream_id, &[1, 2, 3, 4])
+            .next_data_frame(stream_id, &data)
             .unwrap()
             .unwrap();
-        assert_eq!(used, 2);
+        assert_eq!(used, FRAME_MAX_DATA_SIZE);
         acceptor.accept_frame(first).unwrap();
-        let (used, second) = opener.next_data_frame(stream_id, &[3, 4]).unwrap().unwrap();
+        let (used, second) = opener
+            .next_data_frame(stream_id, &data[FRAME_MAX_DATA_SIZE..])
+            .unwrap()
+            .unwrap();
         assert_eq!(used, 1);
         acceptor.accept_frame(second).unwrap();
-        assert!(opener.next_data_frame(stream_id, &[4]).unwrap().is_none());
+        assert!(opener
+            .next_data_frame(stream_id, &data[FRAME_MAX_DATA_SIZE + 1..])
+            .unwrap()
+            .is_none());
     }
 
     #[test]

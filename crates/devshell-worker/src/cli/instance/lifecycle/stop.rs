@@ -7,7 +7,7 @@ use crate::daemon::process::lifecycle::shutdown;
 use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
 use crate::instance::{InstanceLock, InstanceName};
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
 struct StopResponse {
@@ -30,7 +30,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
 
 pub fn stop_instance(instance: &InstanceName) -> Result<bool, String> {
     let instance_paths = InstancePaths::resolve(instance)?;
-    let socket_paths = SocketPaths::resolve(instance)?;
+    let socket_paths = EndpointPaths::resolve(instance)?;
     let _lock = if instance_paths.instance_root.exists() {
         ensure_dir(&instance_paths.state_dir, 0o700)?;
         Some(InstanceLock::acquire(&instance_paths)?)
@@ -54,7 +54,7 @@ pub fn stop_instance(instance: &InstanceName) -> Result<bool, String> {
 
 pub(crate) fn stop_running_daemon(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
 ) -> Result<bool, String> {
     let timeout = std::time::Duration::from_secs(5);
     let pid = process::read_pid(instance_paths);

@@ -63,9 +63,7 @@ impl LocalIpcStream {
         Ok(())
     }
 
-    pub fn shutdown_write(&self) -> IoResult<()> {
-        self.inner.shutdown(Shutdown::Write)
-    }
+
 
     pub fn shutdown_both(&self) -> IoResult<()> {
         self.inner.shutdown(Shutdown::Both)

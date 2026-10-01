@@ -412,7 +412,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{DevshellCommandBroker, SESSION_IDLE_TIMEOUT};
-    use crate::capability::rpc::codec::decode_json;
     use crate::capability::rpc::notification::WorkerNotificationQueue;
     use crate::capability::rpc::request::RpcRequest;
 
@@ -493,8 +492,7 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(closed["closed"], true);
-        let notification: serde_json::Value =
-            decode_json(&notifications.try_pop().unwrap().unwrap()).unwrap();
+        let notification = notifications.try_pop().unwrap().unwrap();
         assert_eq!(notification["method"], "devshell.command.close");
         assert_eq!(notification["params"]["sessionId"], session_id);
 
@@ -547,12 +545,10 @@ mod tests {
             .unwrap();
 
         assert!(broker.session(&first_id).is_err());
-        let close: serde_json::Value =
-            decode_json(&notifications.try_pop().unwrap().unwrap()).unwrap();
+        let close = notifications.try_pop().unwrap().unwrap();
         assert_eq!(close["method"], "devshell.command.close");
         assert_eq!(close["params"]["sessionId"], first_id);
-        let open: serde_json::Value =
-            decode_json(&notifications.try_pop().unwrap().unwrap()).unwrap();
+        let open = notifications.try_pop().unwrap().unwrap();
         assert_eq!(open["method"], "devshell.command.open");
     }
 }

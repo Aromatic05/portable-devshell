@@ -33,7 +33,7 @@ impl TcpService {
         let _ = self.stream.shutdown(Shutdown::Both);
     }
 
-    pub(super) fn clone_stream(&self) -> Result<TcpStream, String> {
+    pub fn clone_stream(&self) -> Result<TcpStream, String> {
         self.stream
             .try_clone()
             .map_err(|error| format!("network.tcp stream clone failed: {error}"))

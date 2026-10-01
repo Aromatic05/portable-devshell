@@ -1,6 +1,8 @@
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 
 use crate::capability::artifact::direct::{
@@ -32,6 +34,14 @@ struct ArtifactPayloadCloseInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactPayloadReadInput {
+    payload_id: String,
+    offset_bytes: u64,
+    max_bytes: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtifactReceiveBeginRpcInput {
     descriptor: ArtifactPayloadDescriptor,
     #[serde(default)]
@@ -44,6 +54,14 @@ struct ArtifactReceiveBeginRpcInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtifactReceiveIdInput {
     receive_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ArtifactReceiveWriteInput {
+    receive_id: String,
+    offset_bytes: u64,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +117,32 @@ pub fn payload_close(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHand
     })
 }
 
+pub fn payload_read(payloads: Arc<ArtifactPayloadStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactPayloadReadInput = parse_params(request)?;
+        let mut reader = payloads
+            .open_reader(&input.payload_id, input.offset_bytes, input.max_bytes)
+            .map_err(RpcError::from)?;
+        let total_bytes = reader.total_bytes();
+        let mut content = Vec::new();
+        reader
+            .read_to_end(&mut content)
+            .map_err(|error| RpcError::new("artifact.readFailed", error.to_string()))?;
+        let next_offset_bytes = input.offset_bytes + content.len() as u64;
+        let eof = next_offset_bytes >= total_bytes as u64;
+        Ok(serde_json::json!({
+            "payloadId": input.payload_id,
+            "offsetBytes": input.offset_bytes,
+            "returnedBytes": content.len(),
+            "totalBytes": total_bytes,
+            "content": STANDARD.encode(content),
+            "encoding": "base64",
+            "eof": eof,
+            "nextOffsetBytes": if eof { serde_json::Value::Null } else { serde_json::json!(next_offset_bytes) },
+        }))
+    })
+}
+
 pub fn receive_begin(
     receives: Arc<ArtifactReceiveStore>,
     policy: Arc<dyn SecurityPolicy>,
@@ -143,6 +187,20 @@ pub fn receive_abort(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHand
             "aborted": true,
             "receiveId": input.receive_id
         }))
+    })
+}
+
+pub fn receive_write(receives: Arc<ArtifactReceiveStore>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: ArtifactReceiveWriteInput = parse_params(request)?;
+        let content = STANDARD
+            .decode(input.content)
+            .map_err(|error| RpcError::new("artifact.payloadInvalid", error.to_string()))?;
+        serialize(
+            receives
+                .write_bytes(&input.receive_id, input.offset_bytes, &content)
+                .map_err(RpcError::from)?,
+        )
     })
 }
 

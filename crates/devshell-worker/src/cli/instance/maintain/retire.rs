@@ -6,7 +6,7 @@ use crate::instance::storage::InstancePaths;
 use crate::instance::storage::ensure_dir;
 use crate::instance::{InstanceLock, InstanceName};
 use crate::tool::tmux;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 #[derive(Serialize)]
 struct RetireResponse {
@@ -28,7 +28,7 @@ pub fn run(args: InstanceArgs) -> Result<String, String> {
 
 pub fn retire_instance(instance: &InstanceName) -> Result<bool, String> {
     let instance_paths = InstancePaths::resolve(instance)?;
-    let socket_paths = SocketPaths::resolve(instance)?;
+    let socket_paths = EndpointPaths::resolve(instance)?;
     if !instance_paths.instance_root.exists() {
         return Ok(false);
     }

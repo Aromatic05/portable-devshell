@@ -9,7 +9,7 @@ use crate::instance::InstanceName;
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
 
 #[derive(Clone, Debug)]
-pub struct SocketPaths {
+pub struct EndpointPaths {
     pub instance_runtime_dir: PathBuf,
     pub socket_file: PathBuf,
     pub transport_socket_file: PathBuf,
@@ -17,7 +17,7 @@ pub struct SocketPaths {
     pub tmux_socket_file: PathBuf,
 }
 
-impl SocketPaths {
+impl EndpointPaths {
     pub fn resolve(instance: &InstanceName) -> Result<Self, String> {
         let default_runtime_dir = xdg_runtime_dir()?
             .join("devshell-worker")

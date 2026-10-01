@@ -149,9 +149,7 @@ impl LocalIpcStream {
         Ok(())
     }
 
-    pub fn shutdown_write(&self) -> IoResult<()> {
-        Ok(())
-    }
+
 }
 
 impl Read for LocalIpcStream {

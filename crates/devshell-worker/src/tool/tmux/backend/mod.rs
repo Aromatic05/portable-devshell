@@ -33,7 +33,7 @@ use crate::tool::tmux::transcript::codec::{
 };
 use crate::tool::tmux::transcript::ring as transcript_ring;
 use crate::tool::unix_time_millis;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 pub const TMUX_SESSION: &str = "devshell";
 pub const MAX_PANES: usize = 16;
@@ -134,7 +134,7 @@ impl TmuxBackend {
 
     pub fn new(
         instance_paths: &InstancePaths,
-        socket_paths: &SocketPaths,
+        socket_paths: &EndpointPaths,
         runtime: &WorkerRuntimeContext,
         workspace: &Path,
     ) -> Result<Self, ToolError> {
@@ -1367,7 +1367,7 @@ fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
 
 #[cfg(unix)]
 fn workspace_socket(
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     instance_root: &Path,
     workspace: &Path,
     workspace_key: &str,
@@ -1389,7 +1389,7 @@ fn workspace_socket(
 
 #[cfg(windows)]
 fn workspace_socket(
-    _socket_paths: &SocketPaths,
+    _socket_paths: &EndpointPaths,
     _instance_root: &Path,
     _workspace: &Path,
     workspace_key: &str,
@@ -1400,7 +1400,7 @@ fn workspace_socket(
 #[cfg(unix)]
 fn workspace_storage(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     workspace: &Path,
     workspace_key: &str,
 ) -> Result<(PathBuf, PathBuf), ToolError> {
@@ -1434,7 +1434,7 @@ fn workspace_storage(
 #[cfg(windows)]
 fn workspace_storage(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     workspace: &Path,
     workspace_key: &str,
 ) -> Result<(PathBuf, PathBuf), ToolError> {

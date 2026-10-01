@@ -11,7 +11,7 @@ use crate::capability::rpc::request::RpcRequest;
 use crate::capability::rpc::response::RpcResponse;
 use crate::instance::storage::ensure_dir;
 use crate::tool::ToolCall;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 pub const BROKER_SOCKET_ENV: &str = "DEVSHELL_MODEL_BROKER_SOCKET";
 pub const CTX_ID_ENV: &str = "DEVSHELL_MODEL_CTX_ID";
@@ -36,7 +36,7 @@ pub struct ModelDevshellEnvironment {
 }
 
 impl ModelDevshellShim {
-    pub fn prepare(socket_paths: &SocketPaths) -> Result<Self, String> {
+    pub fn prepare(socket_paths: &EndpointPaths) -> Result<Self, String> {
         let bin_dir = socket_paths
             .instance_runtime_dir
             .join("model-cli")

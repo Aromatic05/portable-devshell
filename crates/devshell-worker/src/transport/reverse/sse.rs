@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::daemon::log::append_log;
 
-use super::{ReverseConnector, ReverseFramePayload, reverse_endpoint};
+use super::{ReverseConnector, reverse_endpoint};
 
 impl ReverseConnector {
     pub(super) fn run_sse(&self, client: &Client, generation: u64) -> Result<(), String> {
@@ -31,7 +31,7 @@ impl ReverseConnector {
             .error_for_status()
             .map_err(|error| format!("reverse SSE rejected: {error}"))?;
 
-        self.payload.prepare_connection()?;
+        self.bridge.prepare()?;
         append_log(
             &self.paths,
             &format!("reverse connection established transport=sse generation={generation}"),
@@ -49,7 +49,7 @@ impl ReverseConnector {
         let reader = BufReader::new(response);
 
         for line in reader.lines() {
-            if self.payload.is_stopping() {
+            if self.bridge.is_stopping() {
                 return Ok(());
             }
             if let Some(error) = take_upload_error(&upload_error)? {
@@ -61,8 +61,8 @@ impl ReverseConnector {
                     let frame = BASE64
                         .decode(data.as_bytes())
                         .map_err(|error| format!("invalid reverse SSE frame: {error}"))?;
-                    if let Some(response) = self.payload.accept_inbound(&frame)? {
-                        self.payload.queue_outbound(response)?;
+                    if let Some(response) = self.bridge.accept_inbound(&frame)? {
+                        self.bridge.requeue_front(response)?;
                     }
                 }
                 event_name.clear();
@@ -131,7 +131,6 @@ impl ReverseConnector {
 
 struct SseUploader {
     handle: Option<thread::JoinHandle<()>>,
-    payload: Arc<ReverseFramePayload>,
     running: Arc<AtomicBool>,
 }
 
@@ -143,13 +142,13 @@ impl SseUploader {
         upload_error: Arc<Mutex<Option<String>>>,
     ) -> Self {
         let running = Arc::new(AtomicBool::new(true));
-        let payload = Arc::clone(&connector.payload);
+        let bridge = Arc::clone(&connector.bridge);
         let thread_running = Arc::clone(&running);
-        let thread_payload = Arc::clone(&payload);
+        let thread_bridge = Arc::clone(&bridge);
         let handle = thread::spawn(move || {
             let mut upstream_seq = 0_u64;
-            while thread_running.load(Ordering::SeqCst) && !connector.payload.is_stopping() {
-                let response = match thread_payload.wait_pop_outbound(Duration::from_millis(100)) {
+            while thread_running.load(Ordering::SeqCst) && !connector.bridge.is_stopping() {
+                let response = match thread_bridge.wait_pop_outbound(Duration::from_millis(100)) {
                     Ok(response) => response,
                     Err(error) => {
                         set_upload_error(&upload_error, error);
@@ -159,12 +158,12 @@ impl SseUploader {
                 let Some(response) = response else {
                     continue;
                 };
-                let frame = response.frame.clone();
+                let frame = response.clone();
                 upstream_seq = upstream_seq.saturating_add(1);
                 if let Err(error) =
                     connector.post_upstream(&client, generation, upstream_seq, &frame)
                 {
-                    let _ = thread_payload.requeue_front(response);
+                    let _ = thread_bridge.requeue_front(response);
                     set_upload_error(&upload_error, error);
                     return;
                 }
@@ -172,7 +171,6 @@ impl SseUploader {
         });
         Self {
             handle: Some(handle),
-            payload,
             running,
         }
     }
@@ -181,8 +179,7 @@ impl SseUploader {
 impl Drop for SseUploader {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
-        self.payload.wake_outbound();
-        if let Some(handle) = self.handle.take() {
+                if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
     }

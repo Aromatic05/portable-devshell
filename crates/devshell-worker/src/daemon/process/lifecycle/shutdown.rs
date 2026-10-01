@@ -6,9 +6,9 @@ use crate::daemon::process;
 use crate::daemon::process::platform::{process_is_running, terminate_process};
 use crate::instance::InstanceLock;
 use crate::instance::storage::InstancePaths;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
-pub fn request_stop(socket_paths: &SocketPaths) -> Result<(), String> {
+pub fn request_stop(socket_paths: &EndpointPaths) -> Result<(), String> {
     let response = crate::capability::rpc::bridge::send_request_with_timeout(
         &socket_paths.socket_file,
         &RpcRequest::request("stop-1", "worker.stop", serde_json::json!({})),
@@ -28,7 +28,7 @@ pub fn request_stop(socket_paths: &SocketPaths) -> Result<(), String> {
 
 pub fn stop_stale_daemon(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     timeout: Duration,
 ) -> Result<bool, String> {
     let Some(pid) = process::read_pid(instance_paths) else {
@@ -53,7 +53,7 @@ pub fn stop_stale_daemon(
 pub fn terminate_daemon_process(
     pid: u32,
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     timeout: Duration,
 ) -> Result<(), String> {
     if process_is_running(pid) {
@@ -71,7 +71,7 @@ pub fn terminate_daemon_process(
 pub fn terminate_spawned_daemon(
     daemon: &mut process::SpawnedDaemon,
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     timeout: Duration,
 ) -> Result<(), String> {
     let pid = daemon.pid();

@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use crate::instance::storage::InstancePaths;
-use crate::transport::socket::SocketPaths;
+use crate::transport::endpoint::channel::EndpointPaths;
 
 use super::TMUX_SESSION;
 use crate::tool::tmux::transcript::ring as transcript_ring;
 
 pub fn retire_instance_runtime(
     instance_paths: &InstancePaths,
-    socket_paths: &SocketPaths,
+    socket_paths: &EndpointPaths,
     instance: &str,
 ) -> Result<(), String> {
     #[cfg(windows)]
@@ -81,7 +81,7 @@ fn retire_windows_workspaces(instance_paths: &InstancePaths, instance: &str) -> 
 }
 
 #[cfg(unix)]
-fn socket_candidates(socket_paths: &SocketPaths) -> Result<Vec<PathBuf>, String> {
+fn socket_candidates(socket_paths: &EndpointPaths) -> Result<Vec<PathBuf>, String> {
     let mut sockets = HashSet::new();
     sockets.insert(socket_paths.tmux_socket_file.clone());
     collect_matching_sockets(&socket_paths.instance_runtime_dir, "tmux-", &mut sockets)?;
