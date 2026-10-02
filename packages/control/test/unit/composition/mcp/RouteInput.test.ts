@@ -27,9 +27,6 @@ import {
 import { readTodoSubscriptionFromSeq } from "../../../../src/instance/workflow/todo/Route.ts";
 import {
     limitToolCallResponse,
-    readToolApprovalDecision,
-    readToolApprovalId,
-    readToolApprovalListOptions,
     readToolCall,
     readToolCallQuery,
 } from "../../../../src/instance/execution/tool/Input.ts";
@@ -260,10 +257,15 @@ test("runtime log response limiting preserves the oldest unread prefix for curso
     );
 });
 
-test("tool route inputs preserve call defaults, filters, and approval metadata", () => {
+test("tool route inputs preserve control-host call defaults and filters", () => {
     assert.deepEqual(
-        readToolCall({ toolName: "bash_run", workspace: "/workspace" }),
+        readToolCall({
+            instance: "demo-local",
+            toolName: "bash_run",
+            workspace: "/workspace",
+        }),
         {
+            instance: asInstanceName("demo-local"),
             input: null,
             toolName: "bash_run",
             workspace: "/workspace",
@@ -271,11 +273,13 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
     );
     assert.deepEqual(
         readToolCall({
+            instance: "demo-local",
             input: { command: "pwd" },
             toolName: "bash_run",
             workspace: "/workspace",
         }),
         {
+            instance: asInstanceName("demo-local"),
             input: { command: "pwd" },
             toolName: "bash_run",
             workspace: "/workspace",
@@ -312,31 +316,9 @@ test("tool route inputs preserve call defaults, filters, and approval metadata",
             toolName: "bash_run",
         },
     );
-    assert.equal(
-        readToolApprovalId({ approvalId: "approval-1" }, "tool.getApproval"),
-        "approval-1",
-    );
-    assert.deepEqual(readToolApprovalListOptions(), { pendingOnly: false });
-    assert.deepEqual(readToolApprovalListOptions({ pendingOnly: true }), {
-        pendingOnly: true,
-    });
-    assert.deepEqual(
-        readToolApprovalDecision({
-            decision: "approve",
-            policyPatch: { mode: "allow" },
-            reason: "reviewed",
-            remember: true,
-        }),
-        {
-            decision: "approve",
-            policyPatch: { mode: "allow" },
-            reason: "reviewed",
-            remember: true,
-        },
-    );
 });
 
-test("tool route inputs reject malformed filters and approval decisions", () => {
+test("tool route inputs reject malformed filters", () => {
     for (const action of [
         () => readToolCall({ toolName: "" }),
         () => readToolCallQuery({ after: 1 } as never),
@@ -353,16 +335,6 @@ test("tool route inputs reject malformed filters and approval decisions", () => 
         () => readToolCallQuery({ source: "web" }),
         () => readToolCallQuery({ status: "pendingApproval" as never }),
         () => readToolCallQuery({ toolName: 1 } as never),
-        () => readToolApprovalId({}, "tool.getApproval"),
-        () => readToolApprovalListOptions({ pendingOnly: "yes" } as never),
-        () => readToolApprovalDecision({ decision: "allow" }),
-        () =>
-            readToolApprovalDecision({ decision: "deny", reason: 1 } as never),
-        () =>
-            readToolApprovalDecision({
-                decision: "deny",
-                remember: "yes",
-            } as never),
     ]) {
         assertTargetInvalid(action);
     }
