@@ -262,9 +262,14 @@ export class WorkerInstance {
         );
     }
 
-    async touchAlerts(workspace: string): Promise<void> {
+    async touchAlerts(
+        workspace: string,
+    ): Promise<Awaited<ReturnType<WorkerProtocolClient["touchAlerts"]>>> {
         this.#assertReady();
-        await this.#protocolClient.touchAlerts(workspace, this.#config.alerts);
+        return await this.#protocolClient.touchAlerts(
+            workspace,
+            this.#config.alerts,
+        );
     }
 
     async releaseAlerts(workspace: string): Promise<void> {

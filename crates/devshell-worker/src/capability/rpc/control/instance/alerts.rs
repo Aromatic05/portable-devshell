@@ -39,10 +39,10 @@ pub fn read_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
 pub fn touch_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
         let input: AlertsReadInput = parse_params(request)?;
-        service
+        let advice = service
             .touch(Path::new(&input.workspace), input.config)
             .map_err(rpc_error)?;
-        serialize(serde_json::json!({}))
+        serialize(serde_json::json!({ "advice": advice }))
     })
 }
 

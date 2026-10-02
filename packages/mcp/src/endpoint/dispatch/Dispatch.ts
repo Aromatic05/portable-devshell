@@ -289,6 +289,7 @@ export class McpEndpointDispatch {
                 : undefined;
         let executionEpoch: number | undefined;
         let executionObserved = false;
+        let workspaceAdvice: string[] = [];
         const afterReview = appOnlyInteraction
             ? undefined
             : async (): Promise<void> => {
@@ -320,9 +321,12 @@ export class McpEndpointDispatch {
                           resolvedContext.record,
                           routed.instance,
                       );
-                      await this.#touchAlerts(
+                      const alerts = await this.#touchAlerts(
                           routed.instance,
                           prepared.workspace!,
+                      );
+                      workspaceAdvice = alerts.advice.map(
+                          (advice) => advice.text,
                       );
                   }
                   await this.#appendMcpToolCalled(routed.instance, toolName, {
@@ -431,15 +435,18 @@ export class McpEndpointDispatch {
                     resolvedContext.record,
                     this.#instanceName,
                 )?.workspace;
-                return await this.#callTmuxRun(
-                    routed.input,
-                    context,
-                    routed.instance,
-                    ownerWorkspace,
-                    recordProvenance,
-                    signal,
-                    () => executionEpoch,
-                    afterReview,
+                return appendWorkspaceAdvice(
+                    await this.#callTmuxRun(
+                        routed.input,
+                        context,
+                        routed.instance,
+                        ownerWorkspace,
+                        recordProvenance,
+                        signal,
+                        () => executionEpoch,
+                        afterReview,
+                    ),
+                    workspaceAdvice,
                 );
             }
 
@@ -453,42 +460,48 @@ export class McpEndpointDispatch {
                     resolvedContext.record,
                     this.#instanceName,
                 )?.workspace;
-                return await this.#callTmuxRead(
-                    routed.input,
-                    context,
-                    routed.instance,
-                    ownerWorkspace,
-                    recordProvenance,
-                    signal,
-                    () => executionEpoch,
-                    afterReview,
+                return appendWorkspaceAdvice(
+                    await this.#callTmuxRead(
+                        routed.input,
+                        context,
+                        routed.instance,
+                        ownerWorkspace,
+                        recordProvenance,
+                        signal,
+                        () => executionEpoch,
+                        afterReview,
+                    ),
+                    workspaceAdvice,
                 );
             }
 
-            return await this.#workerHandler.call(
-                toolName,
-                input,
-                context,
-                selected.definition,
-                snapshot.instanceRoutingEnabled,
-                signal,
-                async (result, callId) => {
-                    await recordProvenance(callId);
-                    if (
-                        toolName === "tmux_read" &&
-                        context.ctxId !== undefined
-                    ) {
-                        await this.#supersedeObservedTmuxWaits(
-                            routed.instance,
-                            readTmuxReadTask(routed.input),
-                            context.ctxId,
-                            result,
-                            false,
-                        );
-                    }
-                    return result;
-                },
-                afterReview,
+            return appendWorkspaceAdvice(
+                await this.#workerHandler.call(
+                    toolName,
+                    input,
+                    context,
+                    selected.definition,
+                    snapshot.instanceRoutingEnabled,
+                    signal,
+                    async (result, callId) => {
+                        await recordProvenance(callId);
+                        if (
+                            toolName === "tmux_read" &&
+                            context.ctxId !== undefined
+                        ) {
+                            await this.#supersedeObservedTmuxWaits(
+                                routed.instance,
+                                readTmuxReadTask(routed.input),
+                                context.ctxId,
+                                result,
+                                false,
+                            );
+                        }
+                        return result;
+                    },
+                    afterReview,
+                ),
+                workspaceAdvice,
             );
         } catch (error) {
             if (
@@ -1667,12 +1680,16 @@ export class McpEndpointDispatch {
         return await this.#gateway?.prepareWorkspace(instance, workspace);
     }
 
-    async #touchAlerts(instance: string, workspace: string): Promise<void> {
+    async #touchAlerts(
+        instance: string,
+        workspace: string,
+    ): Promise<{ advice: Array<{ code: string; text: string }> }> {
         if (instance === this.#instanceName) {
-            await this.#worker.touchAlerts?.(workspace);
-            return;
+            const result = await this.#worker.touchAlerts?.(workspace);
+            return result === undefined ? { advice: [] } : result;
         }
-        await this.#gateway?.touchAlerts(instance, workspace);
+        const result = await this.#gateway?.touchAlerts(instance, workspace);
+        return result === undefined ? { advice: [] } : result;
     }
 
     async #touchTemporaryDirectory(
@@ -2033,6 +2050,42 @@ function contextEnvironment(
     return record.environments.find(
         (environment) => environment.instance === instance,
     );
+}
+
+function appendWorkspaceAdvice(
+    result: McpEndpointResult,
+    comments: readonly string[],
+): McpEndpointResult {
+    if (comments.length === 0) return result;
+    if (result instanceof McpNativeToolResult) {
+        return new McpNativeToolResult({
+            ...(result._meta === undefined ? {} : { _meta: result._meta }),
+            content: result.content,
+            isError: result.isError,
+            structuredContent: appendStructuredComments(
+                result.structuredContent,
+                comments,
+            ),
+        });
+    }
+    return appendStructuredComments(result, comments);
+}
+
+function appendStructuredComments(
+    value: JsonValue,
+    comments: readonly string[],
+): JsonValue {
+    if (!isRecord(value)) return value;
+    const existing = Array.isArray(value.comment)
+        ? value.comment.filter(
+              (entry): entry is string =>
+                  typeof entry === "string" && entry.length > 0,
+          )
+        : [];
+    return {
+        ...value,
+        comment: [...new Set([...existing, ...comments])],
+    };
 }
 
 function contextWorkspaceRequired(ctxId: string, instance: string) {

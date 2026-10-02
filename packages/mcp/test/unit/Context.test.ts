@@ -2089,9 +2089,12 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 _context: ToolCallContext,
                 operation: (callId: string, input: JsonValue) => Promise<T>,
                 _signal?: AbortSignal,
-                afterReview?: (callId: string) => Promise<void> | void,
+                afterReview?: (
+                    callId: string,
+                    instance: string,
+                ) => Promise<void> | void,
             ): Promise<T> {
-                await afterReview?.("call-test");
+                await afterReview?.("call-test", "demo-local");
                 return await operation("call-test", input);
             },
             async appendMcpSessionClosed() {},
@@ -2108,7 +2111,7 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
                 _recording,
                 afterReview,
             ) {
-                await afterReview?.("call-test");
+                await afterReview?.("call-test", "demo-local");
                 calls.push({ context, input, toolName });
                 return { ok: true };
             },
@@ -2177,6 +2180,14 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
             },
             async touchAlerts(workspace) {
                 touchedAlertWorkspaces.push(workspace);
+                return {
+                    advice: [
+                        {
+                            code: "workspace.temporary.overuse",
+                            text: "Workspace temporary storage is overused.",
+                        },
+                    ],
+                };
             },
             async touchTemporaryDirectory(path) {
                 touchedTemporaryDirectories.push(path);
@@ -2268,10 +2279,14 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         ),
         hasCode("mcp.contextInvalid"),
     );
-    await endpoint.callTool(
+    const run = await endpoint.callTool(
         "bash_run",
         { command: "pwd", ctxId: "ctx-created" },
         { principal: "local", requestId: "run" },
+    );
+    assert.deepEqual(
+        structuredResult<Record<string, JsonValue>>(run).comment,
+        ["Workspace temporary storage is overused."],
     );
     assert.deepEqual(calls, [
         {

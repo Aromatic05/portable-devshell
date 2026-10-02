@@ -253,12 +253,37 @@ export class McpContextRemoteEnvironment {
                         previous.temporaryDirectory,
                     );
                     signal?.throwIfAborted();
-                    await gateway.touchAlerts(instance, workspace);
+                    const alerts = await gateway.touchAlerts(
+                        instance,
+                        workspace,
+                    );
                     signal?.throwIfAborted();
+                    const base = isRecord(connection)
+                        ? connection
+                        : { result: connection };
+                    const advice =
+                        alerts?.advice.map((entry) => entry.text) ?? [];
                     return {
-                        ...(isRecord(connection)
-                            ? connection
-                            : { result: connection }),
+                        ...base,
+                        ...(advice.length === 0
+                            ? {}
+                            : {
+                                  comment: [
+                                      ...new Set([
+                                          ...(Array.isArray(base.comment)
+                                              ? base.comment.filter(
+                                                    (
+                                                        entry,
+                                                    ): entry is string =>
+                                                        typeof entry ===
+                                                            "string" &&
+                                                        entry.length > 0,
+                                                )
+                                              : []),
+                                          ...advice,
+                                      ]),
+                                  ],
+                              }),
                         instance,
                         temporaryDirectory: previous.temporaryDirectory,
                         workspace,

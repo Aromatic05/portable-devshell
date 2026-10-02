@@ -520,8 +520,10 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         return snapshot as unknown as JsonValue;
     }
 
-    async touchAlerts(instance: string, workspace: string): Promise<void> {
-        await this.#requireDescriptor(instance).worker.touchAlerts(workspace);
+    async touchAlerts(instance: string, workspace: string) {
+        return await this.#requireDescriptor(instance).worker.touchAlerts(
+            workspace,
+        );
     }
 
     async touchTemporaryDirectory(

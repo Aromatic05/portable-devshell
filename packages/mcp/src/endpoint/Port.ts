@@ -72,7 +72,12 @@ export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
         advice: Array<{ code: string; text: string }>;
     }>;
     releaseAlerts?(workspace: string): Promise<void>;
-    touchAlerts?(workspace: string): Promise<void>;
+    touchAlerts?(workspace: string): Promise<
+        | void
+        | {
+              advice: Array<{ code: string; text: string }>;
+          }
+    >;
     touchTemporaryDirectory?(path: string): Promise<void>;
     readonly handshake?: McpEndpointEnvironmentHandshake;
 }
@@ -311,7 +316,15 @@ export interface McpInstanceGateway {
     ): Promise<void>;
     statusInstance(instance: string): Promise<JsonValue>;
     stopInstance(instance: string): Promise<JsonValue>;
-    touchAlerts(instance: string, workspace: string): Promise<void>;
+    touchAlerts(
+        instance: string,
+        workspace: string,
+    ): Promise<
+        | void
+        | {
+              advice: Array<{ code: string; text: string }>;
+          }
+    >;
     touchTemporaryDirectory(instance: string, path: string): Promise<void>;
     writeTodo(
         instance: string,

@@ -46,7 +46,7 @@ pub struct AlertScript {
     timeout_ms: Option<u64>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Advice {
     pub code: String,
@@ -59,6 +59,7 @@ struct WorkspaceAlerts {
     config: Option<AlertConfig>,
     last_run: Option<Instant>,
     last_seen: Instant,
+    pending_advice: Vec<Advice>,
 }
 
 pub struct AlertService {
@@ -116,22 +117,28 @@ impl AlertService {
                     config: config.clone(),
                     last_run: None,
                     last_seen: now,
+                    pending_advice: Vec::new(),
                 },
             );
         }
         let advice = collect_advice(&workspace, config.as_ref());
         complete_probe(&self.state, &workspace, probe_id, &config, advice);
-        let state = self
+        let mut state = self
             .state
             .lock()
             .map_err(|_| AlertError::new("alerts.unavailable", "alert state lock poisoned"))?;
-        Ok(state
-            .get(&workspace)
-            .map(|entry| entry.advice.clone())
-            .unwrap_or_default())
+        let Some(entry) = state.get_mut(&workspace) else {
+            return Ok(Vec::new());
+        };
+        entry.pending_advice.clear();
+        Ok(entry.advice.clone())
     }
 
-    pub fn touch(&self, workspace: &Path, config: Option<AlertConfig>) -> Result<(), AlertError> {
+    pub fn touch(
+        &self,
+        workspace: &Path,
+        config: Option<AlertConfig>,
+    ) -> Result<Vec<Advice>, AlertError> {
         let workspace = workspace.canonicalize().map_err(|error| {
             AlertError::new(
                 "workspace.invalid",
@@ -154,9 +161,11 @@ impl AlertService {
                 if entry.config != config {
                     entry.config = config;
                     entry.advice.clear();
+                    entry.pending_advice.clear();
                     entry.last_run = None;
                 }
                 entry.last_seen = now;
+                return Ok(std::mem::take(&mut entry.pending_advice));
             }
             None => {
                 state.insert(
@@ -167,11 +176,12 @@ impl AlertService {
                         config,
                         last_run: None,
                         last_seen: now,
+                        pending_advice: Vec::new(),
                     },
                 );
             }
         }
-        Ok(())
+        Ok(Vec::new())
     }
 
     pub fn configure(&self, config: Option<AlertConfig>) -> Result<(), AlertError> {
@@ -186,6 +196,7 @@ impl AlertService {
             if entry.config != config {
                 entry.config = config.clone();
                 entry.advice.clear();
+                entry.pending_advice.clear();
                 entry.last_run = None;
             }
         }
@@ -294,6 +305,9 @@ fn complete_probe(
         }
         entry.active_probe = None;
         if entry.config == *config {
+            if entry.advice != advice {
+                entry.pending_advice = advice.clone();
+            }
             entry.advice = advice;
             entry.last_run = Some(Instant::now());
         }
@@ -573,6 +587,36 @@ mod tests {
         assert_eq!(advice.code, "workspace.temporary.overuse");
         assert!(advice.text.contains("2 GiB"));
         assert!(advice.text.contains("var/"));
+    }
+
+    #[test]
+    fn changed_advice_is_consumed_once_by_touch() {
+        let workspace = crate::testing::temp_dir();
+        let service = AlertService::new();
+        service.read(workspace.path(), None).unwrap();
+        let canonical = workspace.path().canonicalize().unwrap();
+        let probe_id = 42;
+        {
+            let mut state = service.state.lock().unwrap();
+            state.get_mut(&canonical).unwrap().active_probe = Some(probe_id);
+        }
+        super::complete_probe(
+            &service.state,
+            &canonical,
+            probe_id,
+            &None,
+            vec![super::Advice {
+                code: "workspace.temporary.overuse".to_string(),
+                text: "temporary overuse".to_string(),
+            }],
+        );
+
+        let first = service.touch(workspace.path(), None).unwrap();
+        let second = service.touch(workspace.path(), None).unwrap();
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].code, "workspace.temporary.overuse");
+        assert!(second.is_empty());
     }
 
     #[cfg(unix)]

@@ -275,11 +275,13 @@ export class WorkerProtocolClient {
     async touchAlerts(
         workspace: string,
         config: ControlInstanceAlertsConfig | undefined,
-    ): Promise<void> {
-        await this.#request("core", "alerts.touch", {
-            config,
-            workspace,
-        } as unknown as JsonValue);
+    ): Promise<WorkerAlertsReadResult> {
+        return asObjectResult<WorkerAlertsReadResult>(
+            await this.#request("core", "alerts.touch", {
+                config,
+                workspace,
+            } as unknown as JsonValue),
+        );
     }
 
     async releaseAlerts(workspace: string): Promise<void> {
