@@ -20,6 +20,7 @@ import {
     type InstanceLogEntry,
     type JsonValue,
     type ToolCallQuery,
+    type ToolCallRecord,
 } from "@portable-devshell/shared";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -35,6 +36,13 @@ export interface ExtensionInstanceEditorPort {
     deleteInstance(params?: JsonValue): Promise<JsonValue>;
     disableInstance(params?: JsonValue): Promise<JsonValue>;
     enableInstance(params?: JsonValue): Promise<JsonValue>;
+}
+
+export interface ExtensionToolCallDecorator {
+    decorate(
+        instance: string,
+        records: readonly ToolCallRecord[],
+    ): Promise<readonly ToolCallRecord[]>;
 }
 
 export interface ExtensionConfiguredInstance {
@@ -232,15 +240,18 @@ export class ExtensionInstanceRuntimeCapabilityControl
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
+    readonly #toolCallDecorator?: ExtensionToolCallDecorator;
 
     constructor(options: {
         allowed: boolean;
         extensionId: string;
         instances: InstanceRegistry;
+        toolCallDecorator?: ExtensionToolCallDecorator;
     }) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
+        this.#toolCallDecorator = options.toolCallDecorator;
     }
 
     async appendEvent(
@@ -277,9 +288,17 @@ export class ExtensionInstanceRuntimeCapabilityControl
                 "Extension instanceRuntime readToolCalls query must be an object.",
             );
         }
-        return (await this.#require(name).worker.readToolCalls(
+        const instance = this.#require(name);
+        const records = await instance.worker.readToolCalls(
             query as ToolCallQuery,
-        )).map(toExtensionJson);
+        );
+        const decorated =
+            this.#toolCallDecorator === undefined
+                ? records
+                : await this.#toolCallDecorator
+                      .decorate(instance.name, records)
+                      .catch(() => records);
+        return decorated.map(toExtensionJson);
     }
 
     #require(name: string) {

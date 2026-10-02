@@ -706,6 +706,7 @@ test("AuditToolCallHistory pushes filtered limited history into storage", async 
         startedAt: "2026-09-01T00:00:00.000Z",
         status: "completed",
         toolName: "bash_run",
+        workspace: "/repo/filtered",
     };
     let storageQuery: unknown;
     const history = new AuditToolCallHistory(instanceName, {
@@ -719,10 +720,19 @@ test("AuditToolCallHistory pushes filtered limited history into storage", async 
         },
     });
 
-    assert.deepEqual(await history.read({ ctxId: "ctx-filtered", limit: 64 }), [
-        record,
-    ]);
-    assert.deepEqual(storageQuery, { ctxId: "ctx-filtered", limit: 64 });
+    assert.deepEqual(
+        await history.read({
+            ctxId: "ctx-filtered",
+            limit: 64,
+            workspace: "/repo/filtered",
+        }),
+        [record],
+    );
+    assert.deepEqual(storageQuery, {
+        ctxId: "ctx-filtered",
+        limit: 64,
+        workspace: "/repo/filtered",
+    });
 });
 
 test("AuditToolCallHistory keeps cursor pagination bounded while merging active calls", async () => {
@@ -849,6 +859,7 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 startedAt: "2026-09-01T09:59:00.000Z",
                 status: "completed",
                 toolName: "bash_run",
+                workspace: "/repo/b",
             },
             {
                 callId: "ctx-a-latest",
@@ -860,6 +871,7 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 startedAt: "2026-09-01T10:59:00.000Z",
                 status: "queueTimeout",
                 toolName: "tmux_run",
+                workspace: "/repo/a",
             },
             {
                 callId: "extension-call",
@@ -896,6 +908,12 @@ test("AuditDatabase queries bounded tool-call history and failure summaries with
                 (record) => record.callId,
             ),
             ["extension-call"],
+        );
+        assert.deepEqual(
+            (await store.readQuery({ workspace: "/repo/b" })).map(
+                (record) => record.callId,
+            ),
+            ["ctx-b"],
         );
         const compact = await store.readQuery({
             includeInput: false,

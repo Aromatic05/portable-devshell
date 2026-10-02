@@ -39,6 +39,7 @@ export interface ToolCallQuery {
     source?: ToolCallSource;
     status?: ToolCallStatus;
     toolName?: string;
+    workspace?: string;
 }
 
 export interface ToolCallRecord extends ToolCallProvenance {

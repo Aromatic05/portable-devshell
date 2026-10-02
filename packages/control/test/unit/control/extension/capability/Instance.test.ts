@@ -126,6 +126,16 @@ test("Instance runtime capability appends events and reads audit ToolCalls witho
         allowed: true,
         extensionId: "comment",
         instances,
+        toolCallDecorator: {
+            async decorate(instance, records) {
+                assert.equal(instance, "demo-local");
+                return records.map((record) => ({
+                    ...record,
+                    explanation: "why",
+                    purpose: "verify progress",
+                }));
+            },
+        },
     });
 
     await capability.appendEvent("demo-local", "context.message.queued", {
@@ -138,12 +148,15 @@ test("Instance runtime capability appends events and reads audit ToolCalls witho
         await capability.readToolCalls("demo-local", {
             includeInput: true,
             toolName: "todo_report",
+            workspace: "/repo",
         }),
         [
             {
                 callId: "call-1",
                 context: { ctxId: "ctx-1", source: "mcp" },
+                explanation: "why",
                 input: { message: "progress" },
+                purpose: "verify progress",
                 status: "succeeded",
                 toolName: "todo_report",
             },
@@ -156,6 +169,10 @@ test("Instance runtime capability appends events and reads audit ToolCalls witho
         },
     ]);
     assert.deepEqual(queries, [
-        { includeInput: true, toolName: "todo_report" },
+        {
+            includeInput: true,
+            toolName: "todo_report",
+            workspace: "/repo",
+        },
     ]);
 });

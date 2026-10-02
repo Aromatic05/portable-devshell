@@ -103,6 +103,12 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
         throw invalid("tool.listCalls requires string ctxId.");
     }
     if (
+        payload.workspace !== undefined &&
+        typeof payload.workspace !== "string"
+    ) {
+        throw invalid("tool.listCalls requires string workspace.");
+    }
+    if (
         payload.includeInput !== undefined &&
         typeof payload.includeInput !== "boolean"
     ) {
@@ -155,6 +161,9 @@ export function readToolCallQuery(payload?: JsonValue): ToolCallQuery {
         ...(payload.toolName === undefined
             ? {}
             : { toolName: payload.toolName }),
+        ...(payload.workspace === undefined
+            ? {}
+            : { workspace: payload.workspace }),
     };
 }
 

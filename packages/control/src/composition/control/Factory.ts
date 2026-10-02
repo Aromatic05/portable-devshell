@@ -138,6 +138,7 @@ export class ControlRuntimeFactory {
                     instances: options.state.instances,
                     paths: extensionPaths,
                     points: extensionPoints,
+                    toolCallDecorator: mcp.toolProvenance,
                     workerFactory: (input) =>
                         new ExtensionWorkerCapabilityControl({
                             ...input,

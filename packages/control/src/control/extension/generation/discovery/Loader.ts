@@ -34,7 +34,10 @@ import {
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
-import { ExtensionInstanceRuntimeCapabilityControl } from "../capability/Instance.js";
+import {
+    ExtensionInstanceRuntimeCapabilityControl,
+    type ExtensionToolCallDecorator,
+} from "../capability/Instance.js";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
@@ -94,6 +97,7 @@ export interface ExtensionLoaderOptions {
         options: ExtensionSandboxHostOptions,
     ) => ExtensionSandboxHost;
     sandboxResourceLimits?: ResourceLimits;
+    toolCallDecorator?: ExtensionToolCallDecorator;
     workerFactory?: (input: {
         allowed: boolean;
         extensionId: string;
@@ -123,6 +127,7 @@ export class ExtensionLoader {
         options: ExtensionSandboxHostOptions,
     ) => ExtensionSandboxHost;
     readonly #sandboxResourceLimits?: ResourceLimits;
+    readonly #toolCallDecorator?: ExtensionToolCallDecorator;
     readonly #workerFactory?: ExtensionLoaderOptions["workerFactory"];
 
     constructor(options: ExtensionLoaderOptions) {
@@ -145,6 +150,7 @@ export class ExtensionLoader {
             options.sandboxFactory ??
             ((sandboxOptions) => new ExtensionSandboxHost(sandboxOptions));
         this.#sandboxResourceLimits = options.sandboxResourceLimits;
+        this.#toolCallDecorator = options.toolCallDecorator;
         this.#workerFactory = options.workerFactory;
     }
 
@@ -225,6 +231,7 @@ export class ExtensionLoader {
                 allowed: manifest.capabilities.includes("instanceRuntime"),
                 extensionId: id,
                 instances: this.#instances,
+                toolCallDecorator: this.#toolCallDecorator,
             });
 
         const worker = manifest.capabilities.includes("workers")

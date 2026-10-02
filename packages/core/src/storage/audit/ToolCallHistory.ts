@@ -370,6 +370,13 @@ function sliceByFilters(
             return false;
         }
 
+        if (
+            query.workspace !== undefined &&
+            record.workspace !== query.workspace
+        ) {
+            return false;
+        }
+
         if (query.source !== undefined && record.source !== query.source) {
             return false;
         }
@@ -487,7 +494,8 @@ function canReadTail(
         query.maxBytes === undefined &&
         query.source === undefined &&
         query.status === undefined &&
-        query.toolName === undefined
+        query.toolName === undefined &&
+        query.workspace === undefined
     );
 }
 
@@ -499,7 +507,8 @@ function canReadQuery(query: ToolCallQuery): boolean {
             query.ctxId !== undefined ||
             query.source !== undefined ||
             query.status !== undefined ||
-            query.toolName !== undefined)
+            query.toolName !== undefined ||
+            query.workspace !== undefined)
     );
 }
 

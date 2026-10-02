@@ -444,6 +444,10 @@ export class AuditDatabase {
             predicates.push("json_extract(payload, '$.ctxId') = ?");
             parameters.push(query.ctxId);
         }
+        if (query.workspace !== undefined) {
+            predicates.push("json_extract(payload, '$.workspace') = ?");
+            parameters.push(query.workspace);
+        }
         if (query.source !== undefined) {
             predicates.push("json_extract(payload, '$.source') = ?");
             parameters.push(query.source);
@@ -634,6 +638,9 @@ export class AuditDatabase {
                 WHERE collection = 'toolCalls';
             CREATE INDEX IF NOT EXISTS audit_records_tool_call_ctx_id
                 ON audit_records(json_extract(payload, '$.ctxId'), id)
+                WHERE collection = 'toolCalls';
+            CREATE INDEX IF NOT EXISTS audit_records_tool_call_workspace
+                ON audit_records(json_extract(payload, '$.workspace'), id)
                 WHERE collection = 'toolCalls';
             DROP INDEX IF EXISTS audit_records_tool_call_extension_id;
             DROP INDEX IF EXISTS audit_records_collection_sequence;
