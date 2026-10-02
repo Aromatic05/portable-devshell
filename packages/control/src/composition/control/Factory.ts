@@ -24,6 +24,7 @@ import { McpRuntimeFactory } from "../mcp/Runtime.js";
 import { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
 import { ControlRuntime } from "./Runtime.js";
 import type { ControlRuntimeState } from "./State.js";
+import { ControlRuntimeContext } from "./subsystem/Context.js";
 import { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 import { RuntimeSubscriptionManager } from "../../instance/execution/runtime/Subscription.js";
@@ -67,7 +68,12 @@ export class ControlRuntimeFactory {
             });
             const extensionPoints = createControlExtensionPointRegistry();
             const runtimeSubscriptions = new RuntimeSubscriptionManager();
+            const contexts = new ControlRuntimeContext({
+                contextFile: controlPaths.contextsFile,
+                instances: options.state.instances,
+            });
             const mcp = new ControlRuntimeMcp({
+                contexts,
                 artifact,
                 controlPaths,
                 factory: this.#mcpFactory,
@@ -118,7 +124,7 @@ export class ControlRuntimeFactory {
                         new ExtensionContextObserveCapabilityControl({
                             allowed,
                             extensionId,
-                            listContexts: async () => await mcp.listContexts(),
+                            listContexts: async (query) => await contexts.list(query),
                         }),
                     instanceFactory: ({
                         extensionId,
@@ -173,6 +179,7 @@ export class ControlRuntimeFactory {
                 },
             );
             return new ControlRuntime({
+                contexts,
                 artifact,
                 builtinExtensionSources: this.#builtinExtensionSources,
                 config: () => options.state.requireConfig(),

@@ -241,8 +241,8 @@ export function ContextBatchDisableDialog({
                                 <tr>
                                     <th>Select</th>
                                     <th>Context</th>
-                                    <th>Initial instance</th>
-                                    <th>Initial workspace</th>
+                                    <th>Attached instances</th>
+                                    <th>Attached workspaces</th>
                                     <th>Status</th>
                                     <th>Last used</th>
                                 </tr>
@@ -266,9 +266,26 @@ export function ContextBatchDisableDialog({
                                         <td>
                                             <code>{context.ctxId}</code>
                                         </td>
-                                        <td>{context.instance}</td>
                                         <td>
-                                            <code>{context.workspace}</code>
+                                            {context.environments.length === 0
+                                                ? "No attached environments"
+                                                : context.environments
+                                                      .map(
+                                                          (environment) =>
+                                                              environment.instance,
+                                                      )
+                                                      .join(", ")}
+                                        </td>
+                                        <td>
+                                            {context.environments.length === 0
+                                                ? "—"
+                                                : context.environments
+                                                      .map(
+                                                          (environment) =>
+                                                              environment.workspace ??
+                                                              "—",
+                                                      )
+                                                      .join(", ")}
                                         </td>
                                         <td>
                                             <span
@@ -391,13 +408,7 @@ export function ContextIntervention({
         context === undefined
             ? undefined
             : (
-                  context.environments ?? [
-                      {
-                          instance: context.instance,
-                          temporaryDirectory: context.temporaryDirectory,
-                          workspace: context.workspace,
-                      },
-                  ]
+                  context.environments
               ).find((candidate) => candidate.instance === instance);
     const interactive = state.connection === "online" && !disabled;
     const renewOperation = `context-renew:${ctxId}`;
@@ -466,9 +477,9 @@ export function ContextIntervention({
             ) : (
                 <p className="hint">
                     Workspace:{" "}
-                    {environment?.workspace ??
-                        context.workspace ??
-                        "not attached"}{" "}
+                    {environment === undefined
+                        ? "No environment attached for selected instance"
+                        : (environment.workspace ?? "—")}{" "}
                     · Status: {context.status} · expires {context.expiresAt}
                 </p>
             )}

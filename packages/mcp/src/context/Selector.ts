@@ -8,10 +8,10 @@ import {
 
 import { readOptionalMcpContextInput } from "../endpoint/dispatch/Input.js";
 import type { McpEndpointCallContext } from "../endpoint/Port.js";
-import {
-    McpContextRegistry,
-    type McpContextExternalBinding,
-} from "./registry/Registry.js";
+import type {
+    ContextRegistryPort,
+    McpContextExternalBinding,
+} from "@portable-devshell/shared";
 
 export interface McpResolvedContext {
     input: JsonValue;
@@ -26,7 +26,7 @@ export interface McpContextSelector {
     ): McpContextExternalBinding[];
     expose(record: McpContextRecord): Record<string, JsonValue>;
     resolve(
-        registry: McpContextRegistry,
+        registry: ContextRegistryPort,
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         instanceName: string,
@@ -64,7 +64,7 @@ class UnifiedContextSelector implements McpContextSelector {
     }
 
     async resolve(
-        registry: McpContextRegistry,
+        registry: ContextRegistryPort,
         input: JsonValue,
         requestContext: McpEndpointCallContext,
         _instanceName: string,

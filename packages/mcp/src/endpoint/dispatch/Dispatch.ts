@@ -11,8 +11,8 @@ import {
     type ToolCallProvenance,
 } from "@portable-devshell/shared";
 
-import { McpContextRegistry } from "../../context/registry/Registry.js";
-import type { McpContextEnvironmentCleanupService } from "../../context/Environment.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type { ContextEnvironmentPort, ContextCleanupPort } from "../../context/Port.js";
 import {
     createMcpContextSelector,
     type McpContextSelector,
@@ -72,8 +72,9 @@ export type {
 
 export interface McpEndpointDispatchOptions {
     catalog: McpEndpointCatalog;
-    cleanup?: McpContextEnvironmentCleanupService;
-    contextRegistry?: McpContextRegistry;
+    cleanup: ContextCleanupPort;
+    contextRegistry: ContextRegistryPort;
+    environmentService: ContextEnvironmentPort;
     contextSelector?: McpContextSelector;
     gateway?: McpInstanceGateway;
     instanceName: string;
@@ -107,7 +108,8 @@ export function mcpTmuxBlockSyncMsForContextMode(
 export class McpEndpointDispatch {
     readonly #artifact: McpEndpointHandlerArtifact;
     readonly #catalog: McpEndpointCatalog;
-    readonly #contextRegistry: McpContextRegistry;
+    readonly #contextRegistry: ContextRegistryPort;
+    readonly #environmentService: ContextEnvironmentPort;
     readonly #contextSelector: McpContextSelector;
     readonly #environment: McpEndpointHandlerEnvironment;
     readonly #gateway?: McpInstanceGateway;
@@ -130,8 +132,8 @@ export class McpEndpointDispatch {
     constructor(options: McpEndpointDispatchOptions) {
         this.#catalog = options.catalog;
         this.#readyWaitMs = options.readyWaitMs;
-        this.#contextRegistry =
-            options.contextRegistry ?? new McpContextRegistry();
+        this.#contextRegistry = options.contextRegistry;
+        this.#environmentService = options.environmentService;
         this.#contextSelector =
             options.contextSelector ?? createMcpContextSelector("explicit");
         this.#gateway = options.gateway;
@@ -161,6 +163,7 @@ export class McpEndpointDispatch {
             cleanup: options.cleanup,
             contextRegistry: this.#contextRegistry,
             contextSelector: this.#contextSelector,
+            environment: options.environmentService,
             gateway: options.gateway,
             instanceName: options.instanceName,
             worker: options.worker,
@@ -1503,45 +1506,11 @@ export class McpEndpointDispatch {
     }
 
     async #ensureContextWorkerState(
-        record: Awaited<ReturnType<McpContextRegistry["validateAndTouch"]>>,
+        record: McpContextRecord,
         instance: string,
         workspace?: string,
     ): Promise<McpContextEnvironment> {
-        const stored = contextEnvironment(record, instance);
-        const environment = workspace === undefined || workspace === stored?.workspace
-            ? stored
-            : { instance, workspace };
-        if (environment?.workspace === undefined) {
-            throw contextWorkspaceRequired(record.ctxId, instance);
-        }
-        if (environment.temporaryDirectory !== undefined) {
-            try {
-                await this.#touchTemporaryDirectory(
-                    instance,
-                    environment.temporaryDirectory,
-                );
-                return environment;
-            } catch (error) {
-                if (!isRecoverableContextTemporaryError(error)) {
-                    throw error;
-                }
-            }
-        }
-
-        const prepared = await this.#prepareWorkspace(
-            instance,
-            environment.workspace,
-        );
-        if (prepared === undefined) return environment;
-        const updated = await this.#contextRegistry.updateWorkerState(
-            record.ctxId,
-            instance,
-            {
-                temporaryDirectory: prepared.temporaryDirectory,
-                workspace: prepared.workspace,
-            },
-        );
-        return contextEnvironment(updated, instance)!;
+        return await this.#environmentService.ensurePrepared(record.ctxId, instance, workspace);
     }
 
     async #appendMcpToolCalled(
@@ -1562,13 +1531,6 @@ export class McpEndpointDispatch {
         }
     }
 
-    async #prepareWorkspace(instance: string, workspace: string) {
-        if (instance === this.#instanceName) {
-            return await this.#worker.prepareWorkspace?.(workspace);
-        }
-        return await this.#gateway?.prepareWorkspace(instance, workspace);
-    }
-
     async #touchAlerts(
         instance: string,
         workspace: string,
@@ -1579,17 +1541,6 @@ export class McpEndpointDispatch {
         }
         const result = await this.#gateway?.touchAlerts(instance, workspace);
         return result === undefined ? { advice: [] } : result;
-    }
-
-    async #touchTemporaryDirectory(
-        instance: string,
-        path: string,
-    ): Promise<void> {
-        if (instance === this.#instanceName) {
-            await this.#worker.touchTemporaryDirectory?.(path);
-            return;
-        }
-        await this.#gateway?.touchTemporaryDirectory(instance, path);
     }
 
     async #auditControlTool(

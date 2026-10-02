@@ -62,3 +62,5 @@ export * from "./transport/packet/Stream.js";
 export * from "./presentation/ActivityPresentation.js";
 export * from "./presentation/ContextPresentation.js";
 export * from "./presentation/ValuePresentation.js";
+
+export * from "./protocol/interaction/context/ContextAuthority.js";

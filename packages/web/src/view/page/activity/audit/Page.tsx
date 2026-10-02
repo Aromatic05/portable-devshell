@@ -324,17 +324,14 @@ function auditScopeOptions(
         }
     >();
     for (const context of state.readModel.contexts) {
-        const environments = context.environments ?? [
-            { instance: context.instance },
-        ];
-        for (const environment of environments) {
+        for (const environment of context.environments) {
             instances.add(environment.instance);
             contexts.set(`${environment.instance}\u0000${context.ctxId}`, {
                 ctxId: context.ctxId,
                 instance: environment.instance,
                 record: context,
                 status: context.status,
-                workspace: environment.workspace ?? context.workspace,
+                workspace: environment.workspace,
             });
         }
     }

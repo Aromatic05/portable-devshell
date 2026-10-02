@@ -1,17 +1,10 @@
 import type {
     McpContextAutomaticReentryMode,
     McpContextAutomaticReentrySourceKind,
-    McpContextAutomaticReentryState,
-    McpContextBinding,
-    McpContextEnvironmentBinding,
     McpContextExternalBinding,
-    McpContextInstanceReference,
-    McpContextMaskedInstance,
-    McpContextQuery,
     McpContextEnvironmentCleanup,
-    McpContextValidationBinding,
 } from "@portable-devshell/shared";
-import type { McpContextRecord, McpContextEnvironment } from "@portable-devshell/shared";
+import type { McpContextRecord } from "@portable-devshell/shared";
 
 export type {
     McpContextAutomaticReentryMode,

@@ -35,7 +35,7 @@ import type { InstanceRegistry } from "../control/instance/registry/Registry.js"
 import {
     createContextRouteModule,
     type ContextAdminPort,
-} from "./mcp/route/Context.js";
+} from "../control/context/Route.js";
 import { createMcpRouteModule } from "./mcp/route/Module.js";
 import type { OperationalOverviewPort } from "../control/overview/Route.js";
 import { createOperationalOverviewRouteModule } from "../control/overview/Route.js";

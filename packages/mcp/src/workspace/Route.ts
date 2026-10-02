@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { JsonValue } from "@portable-devshell/shared";
 
-import { McpContextRegistry } from "../context/registry/Registry.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { HttpHost } from "../host/Http.js";
 import {
     isMcpInteractionGateway,
@@ -19,7 +19,7 @@ const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_POLL_MS = 250;
 
 export interface McpWorkspaceLiveRouteOptions {
-    contextRegistry: McpContextRegistry;
+    contextRegistry: ContextRegistryPort;
     gateway?: McpInstanceGateway;
     heartbeatMs?: number;
     host: HttpHost;

@@ -46,7 +46,7 @@ packages/shared   wire types、error、schema、公共数据结构
 packages/core     WorkerInstance、RPC、provider-neutral 工具调用链
 packages/control  daemon、配置、instance 生命周期、持久状态、审计
 packages/extension  Control Extension public ABI
-packages/mcp      MCP endpoint、Context、Workspace、OAuth、HTTP integration
+packages/mcp      MCP endpoint、Workspace App、OAuth、HTTP integration
 packages/cli      Control CLI、instance/config/debug/skill/artifact 管理
 packages/tui      终端 UI
 packages/web      Web 管理面
@@ -158,7 +158,9 @@ input
 
 ## Context
 
-Context 是应用级状态 key，不是 MCP session。
+Context 是由 Control 管理的应用级状态 key，不是 MCP session。权威实现集中在 `packages/control/src/control/context/`；MCP 使用注入的 Context 能力，不拥有 Registry 或 Context 生命周期。
+
+`environments[]` 是唯一当前关联来源。每条关联明确 instance 与可选 workspace；删除 Instance 只解除关联，即使没有剩余关联也不终止 Context。
 
 ```text
 ctxId

@@ -302,14 +302,7 @@ export class TuiCommandDispatcherDetail {
                     context === undefined
                         ? undefined
                         : (
-                              context.environments ?? [
-                                  {
-                                      instance: context.instance,
-                                      temporaryDirectory:
-                                          context.temporaryDirectory,
-                                      workspace: context.workspace,
-                                  },
-                              ]
+                              context.environments
                           ).find(
                               (environment) =>
                                   environment.instance ===

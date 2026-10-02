@@ -27,7 +27,6 @@ export class McpRuntimeFactory {
         config: ControlConfig,
         registry: InstanceRegistry,
         options?: {
-            contextFile?: string;
             gateway?: McpInstanceGateway;
             runtimeState?: McpRuntimeState;
             storageDir?: string;
@@ -60,11 +59,9 @@ export class McpRuntimeFactory {
                   })
             : [];
 
+        if (options?.runtimeState === undefined) throw new Error("MCP requires the Control-owned Context runtime.");
         return new McpHost(
             {
-                ...(options?.contextFile === undefined
-                    ? {}
-                    : { contextFile: options.contextFile }),
                 instances: endpoints,
                 listenHost: config.mcp.listenHost,
                 listenPort: config.mcp.listenPort,
@@ -86,7 +83,7 @@ export class McpRuntimeFactory {
                               options.workspaceAppLeaseFile,
                       }),
             },
-            options?.runtimeState,
+            options.runtimeState,
         );
     }
 }

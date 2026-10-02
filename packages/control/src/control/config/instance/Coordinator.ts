@@ -27,6 +27,7 @@ export interface InstanceConfigCoordinatorOptions {
     cleanupDebtFile?: string;
     engine: ConfigEngine;
     getMcpHost?: () => McpHost | undefined;
+    detachContextInstance?: (instance: string) => Promise<void>;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
@@ -52,6 +53,7 @@ import {
 } from "./CleanupDebt.js";
 
 export class InstanceConfigCoordinator {
+    readonly #detachContextInstance?: (instance: string) => Promise<void>;
     readonly #cleanupDebts: InstanceCleanupDebtStore;
     readonly #engine: ConfigEngine;
     readonly #getMcpHost: () => McpHost | undefined;
@@ -76,6 +78,7 @@ export class InstanceConfigCoordinator {
     readonly #mcpEndpointConfigMapper: McpEndpointFactory;
 
     constructor(options: InstanceConfigCoordinatorOptions) {
+        this.#detachContextInstance = options.detachContextInstance;
         this.#cleanupDebts = new InstanceCleanupDebtStore(
             options.cleanupDebtFile,
         );
@@ -718,6 +721,7 @@ export class InstanceConfigCoordinator {
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing).catch((error) => failures.push(error));
         }
+        await this.#detachContextInstance?.(existing.name).catch((error) => failures.push(error));
         await this.#retireStateForDelete(descriptor, skipRuntimeRetirement).catch(
             (error) => failures.push(error),
         );
@@ -726,9 +730,7 @@ export class InstanceConfigCoordinator {
                 failures.push(error),
             );
         }
-        await this.#getMcpHost()
-            ?.contextAdmin.detachInstance(existing.name)
-            .catch((error) => failures.push(error));
+
         await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing).catch(
             (error) => failures.push(error),
         );
@@ -784,9 +786,7 @@ export class InstanceConfigCoordinator {
             await descriptor.worker
                 .retireProviderResources()
                 .catch((error) => failures.push(error));
-            await this.#getMcpHost()
-                ?.contextAdmin.detachInstance(record.instance.name)
-                .catch((error) => failures.push(error));
+            await this.#detachContextInstance?.(record.instance.name).catch((error) => failures.push(error));
             await this.#notifyInstanceLifecycle(
                 this.#instanceDeleted,
                 record.instance,

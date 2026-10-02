@@ -1,0 +1,247 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { McpContextRecord } from "@portable-devshell/shared";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type { McpEndpointWorkerPort, McpInstanceGateway } from "../../../../../mcp/src/endpoint/Port.js";
+import { ContextCleanupService } from "../../../../src/control/context/Cleanup.js";
+import { ContextEnvironmentService } from "../../../../src/control/context/Environment.js";
+import { ContextRegistry } from "../../../../src/control/context/Registry.js";
+
+function worker() {
+    return {
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+                projectMemoryDirectory: `${workspace}/.agent`,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+        async touchTemporaryDirectory() {},
+        async releaseAlerts() {},
+    } as unknown as McpEndpointWorkerPort;
+}
+
+function runtime(
+    registry: ContextRegistry,
+    gateway: McpInstanceGateway,
+    localWorker = worker(),
+) {
+    const cleanup = new ContextCleanupService({
+        contextRegistry: registry,
+        gateway: () => gateway,
+        releaseLocalAlerts: async () => {},
+    });
+    const environment = new ContextEnvironmentService({
+        contextRegistry: registry,
+        cleanup,
+        gateway: () => gateway,
+        worker: (instance) => instance === "local" ? localWorker : undefined,
+    });
+    return { cleanup, environment };
+}
+
+function gateway(overrides: Partial<McpInstanceGateway> = {}) {
+    return {
+        async connectInstance() { return {}; },
+        async releaseInstanceReference() {},
+        async prepareWorkspace(_instance: string, workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
+                projectMemoryDirectory: `${workspace}/.agent`,
+                temporaryDirectory: `${workspace}/tmp`,
+                workspace,
+            };
+        },
+        async readAlerts() { return { advice: [] }; },
+        async touchTemporaryDirectory() {},
+        async releaseAlerts() {},
+        async readGoal() { return { goalId: "goal-1", status: "active" as const }; },
+        async manageGoal() { return undefined; },
+        async goalContinuation() { return {}; },
+        async listWaits() { return []; },
+        ...overrides,
+    } as unknown as McpInstanceGateway;
+}
+
+async function createContext(registry: ContextRegistry, instance: string, workspace: string): Promise<McpContextRecord> {
+    return await registry.create({
+        principal: "user-1",
+        environments: [{ instance, workspace, temporaryDirectory: `${workspace}/tmp` }],
+    });
+}
+
+test("local and remote workspace switches both stop at active Goal guard", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-goal" });
+    await createContext(registry, "local", "/old");
+    const reference = await registry.referenceInstance("ctx-goal", "remote");
+    await registry.attachEnvironment("ctx-goal", { instance: "remote", workspace: "/remote-old" });
+    const { environment } = runtime(registry, gateway());
+    await assert.rejects(environment.prepareLocal("ctx-goal", "local", "/new"), /Workspace Goal goal-1 is still active/);
+    assert.ok(reference?.handle);
+    await assert.rejects(environment.attachRemote("ctx-goal", reference.handle, "/remote-new"), /Workspace Goal goal-1 is still active/);
+});
+
+test("local and remote workspace switches both stop at unfinished Wait guard", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-wait" });
+    await createContext(registry, "local", "/old");
+    const reference = await registry.referenceInstance("ctx-wait", "remote");
+    await registry.attachEnvironment("ctx-wait", { instance: "remote", workspace: "/remote-old" });
+    const waitGateway = gateway({
+        async readGoal() { return undefined; },
+        async listWaits(instance: string) {
+            return [{
+                waitId: "wait-1",
+                status: "waiting",
+                createdByCtxId: "ctx-wait",
+                workspace: instance === "local" ? "/old" : "/remote-old",
+                automaticRecovery: true,
+            }] as never;
+        },
+    });
+    const { environment } = runtime(registry, waitGateway);
+    await assert.rejects(environment.prepareLocal("ctx-wait", "local", "/new"), /Workspace wait wait-1 is still attached/);
+    await assert.rejects(environment.attachRemote("ctx-wait", reference!.handle!, "/remote-new"), /Workspace wait wait-1 is still attached/);
+});
+
+test("canonical workspace aliases pass the same-scope guard locally and remotely", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-canonical" });
+    await createContext(registry, "local", "/canonical");
+    const reference = await registry.referenceInstance("ctx-canonical", "remote");
+    await registry.attachEnvironment("ctx-canonical", { instance: "remote", workspace: "/canonical" });
+    const localWorker = {
+        ...worker(),
+        async prepareWorkspace() {
+            return { projectMemoryAgentFile: "", projectMemoryDirectory: "", temporaryDirectory: "/canonical/tmp", workspace: "/canonical" };
+        },
+    } as unknown as McpEndpointWorkerPort;
+    const remote = gateway({
+        async prepareWorkspace() {
+            return { projectMemoryAgentFile: "", projectMemoryDirectory: "", temporaryDirectory: "/canonical/tmp", workspace: "/canonical" };
+        },
+    });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => remote });
+    const environment = new ContextEnvironmentService({
+        contextRegistry: registry,
+        cleanup,
+        gateway: () => remote,
+        worker: (instance) => instance === "local" ? localWorker : undefined,
+    });
+    await environment.prepareLocal("ctx-canonical", "local", "/alias");
+    await environment.attachRemote("ctx-canonical", reference!.handle!, "/alias");
+    assert.deepEqual((await registry.lookup("ctx-canonical", { principal: "user-1" })).environments.map(({ workspace }) => workspace), ["/canonical", "/canonical"]);
+});
+
+test("temporary storage is restored only for its stored workspace", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-temp" });
+    await createContext(registry, "local", "/same");
+    let prepared = 0;
+    let touched: string[] = [];
+    const localWorker = {
+        ...worker(),
+        async prepareWorkspace(workspace: string) {
+            prepared += 1;
+            return { projectMemoryAgentFile: "", projectMemoryDirectory: "", temporaryDirectory: `${workspace}/new-tmp`, workspace };
+        },
+        async touchTemporaryDirectory(path: string) { touched.push(path); },
+    } as unknown as McpEndpointWorkerPort;
+    const { environment } = runtime(registry, gateway(), localWorker);
+    const restored = await environment.ensurePrepared("ctx-temp", "local", "/same");
+    assert.equal(restored.temporaryDirectory, "/same/tmp");
+    assert.deepEqual(touched, ["/same/tmp"]);
+    assert.equal(prepared, 0);
+    await assert.rejects(environment.ensurePrepared("ctx-temp", "local", "/other"), /Workspace Goal|switch workspace through environ_info first/);
+    assert.equal((await registry.resolveEnvironment("ctx-temp", "local"))?.workspace, "/same");
+});
+
+test("shared workspace alert cleanup waits until the final active Context releases it", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-a" });
+    const first = await createContext(registry, "remote", "/shared");
+    const second = await registry.create({ principal: "user-2", environments: [{ instance: "remote", workspace: "/shared" }] });
+    let releases = 0;
+    const remote = gateway({ async releaseAlerts() { releases += 1; } });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => remote });
+    await registry.recordEnvironmentCleanup(first.ctxId, { instance: "remote", kind: "alerts", workspace: "/shared" });
+    await registry.recordEnvironmentCleanup(second.ctxId, { instance: "remote", kind: "alerts", workspace: "/shared" });
+    await registry.detachEnvironment(first.ctxId, "remote");
+    await cleanup.reconcile(first.ctxId);
+    assert.equal(releases, 0);
+    await registry.detachEnvironment(second.ctxId, "remote");
+    await cleanup.reconcile(first.ctxId);
+    assert.equal(releases, 1);
+});
+
+test("cancelled remote attach records and settles its reference cleanup debt", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-cancel" });
+    await registry.create({ principal: "user-1" });
+    await registry.referenceInstance("ctx-cancel", "remote");
+    const controller = new AbortController();
+    const remote = gateway({
+        async connectInstance() { controller.abort(new Error("cancelled")); return {}; },
+        async releaseInstanceReference() { throw new Error("release unavailable"); },
+    });
+    const { environment } = runtime(registry, remote);
+    const reference = await registry.referenceInstance("ctx-cancel", "remote");
+    await assert.rejects(environment.attachRemote("ctx-cancel", reference!.handle!, undefined, controller.signal), /cancelled/);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual((await registry.listEnvironmentCleanup("ctx-cancel")).map(({ cleanup }) => cleanup.kind), ["instance_reference"]);
+});
+
+test("local cancellation after preparation releases alerts without changing the prior binding", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-local-before" });
+    await createContext(registry, "local", "/old");
+    const controller = new AbortController();
+    let releases = 0;
+    const localGateway = gateway({
+        async readGoal() { return undefined; },
+        async releaseAlerts() { releases += 1; },
+    });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => localGateway });
+    const localWorker = {
+        ...worker(),
+        async prepareWorkspace(workspace: string) {
+            controller.abort(new Error("cancel before attach"));
+            return { projectMemoryAgentFile: "", projectMemoryDirectory: "", temporaryDirectory: `${workspace}/tmp`, workspace };
+        },
+    } as unknown as McpEndpointWorkerPort;
+    const environment = new ContextEnvironmentService({
+        contextRegistry: registry,
+        cleanup,
+        gateway: () => localGateway,
+        worker: (instance) => instance === "local" ? localWorker : undefined,
+    });
+    await assert.rejects(environment.prepareLocal("ctx-local-before", "local", "/new", { signal: controller.signal }), /cancel before attach/);
+    assert.deepEqual(await registry.resolveEnvironment("ctx-local-before", "local"), { instance: "local", temporaryDirectory: "/old/tmp", workspace: "/old" });
+    assert.equal(releases, 1);
+    assert.deepEqual(await registry.listEnvironmentCleanup("ctx-local-before"), []);
+});
+
+test("local cancellation after attach restores the prior workspace and temporary directory", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-local-after" });
+    await createContext(registry, "local", "/old");
+    const controller = new AbortController();
+    const localGateway = gateway({ async readGoal() { return undefined; } });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => localGateway });
+    const transactionalRegistry = new Proxy(registry, {
+        get(target, property) {
+            if (property === "attachEnvironment") {
+                return async (...args: Parameters<ContextRegistryPort["attachEnvironment"]>) => {
+                    const record = await target.attachEnvironment(...args);
+                    controller.abort(new Error("cancel after attach"));
+                    return record;
+                };
+            }
+            const value = Reflect.get(target, property, target) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+        },
+    }) as unknown as ContextRegistryPort;
+    const environment = new ContextEnvironmentService({
+        contextRegistry: transactionalRegistry,
+        cleanup,
+        gateway: () => localGateway,
+        worker: (instance) => instance === "local" ? worker() : undefined,
+    });
+    await assert.rejects(environment.prepareLocal("ctx-local-after", "local", "/new", { signal: controller.signal }), /cancel after attach/);
+    assert.deepEqual(await registry.resolveEnvironment("ctx-local-after", "local"), { instance: "local", temporaryDirectory: "/old/tmp", workspace: "/old" });
+});

@@ -43,12 +43,14 @@ import { ControlWebSocketListener } from "../../server/web/Socket.js";
 import { ExtensionWebGateway } from "../../server/web/extension/application/Gateway.js";
 import { ControlRouteComposition } from "../Route.js";
 import type { ControlRuntimeArtifact } from "./subsystem/Artifact.js";
+import type { ContextService } from "../../control/context/Service.js";
 import type { ControlRuntimeMcp } from "./subsystem/Mcp.js";
 import type { ControlRuntimeReverse } from "./subsystem/Reverse.js";
 import { toMcpOAuthApprovalConfig } from "../mcp/Runtime.js";
 import { McpExtensionService } from "../mcp/extension/Service.js";
 
 export interface ControlRuntimeOptions {
+    contexts: ContextService;
     artifact: ControlRuntimeArtifact;
     builtinExtensionSources?: readonly BuiltinExtensionSource[];
     config?: () => ControlConfig;
@@ -70,6 +72,7 @@ interface ControlWebRuntime {
 }
 
 export class ControlRuntime {
+    readonly #contexts: ContextService;
     readonly #artifact: ControlRuntimeArtifact;
     readonly #builtinExtensionSources: readonly BuiltinExtensionSource[];
     readonly #channels: ControlChannelServer;
@@ -90,6 +93,7 @@ export class ControlRuntime {
     #webFlowUninstall?: () => void;
 
     constructor(options: ControlRuntimeOptions) {
+        this.#contexts = options.contexts;
         this.#artifact = options.artifact;
         this.#builtinExtensionSources = Object.freeze([
             ...(options.builtinExtensionSources ?? []),
@@ -175,7 +179,7 @@ export class ControlRuntime {
                         ?.modelExtensions.includes(extensionId) === true,
             },
             commands: modelCliCommands,
-            contextAdmin: () => options.mcp.host?.contextAdmin,
+            contextAdmin: () => options.contexts,
             instances: options.instances,
         });
         this.#routes = new ControlRouteComposition({
@@ -187,7 +191,7 @@ export class ControlRuntime {
             ...(options.config === undefined
                 ? {}
                 : { configuredInstances: () => options.config!().instances }),
-            contextAdmin: () => options.mcp.host?.contextAdmin,
+            contextAdmin: () => options.contexts,
             debug: this.#debug,
             extension: this.#extensionControl,
             extensionRoutes: new ControlExtensionRouteService(this.#extensions),
@@ -282,6 +286,7 @@ export class ControlRuntime {
             if (this.#webFlow !== undefined && webHost !== undefined) {
                 this.#webFlowUninstall = this.#webFlow.install(webHost);
             }
+            await this.#contexts.initialize();
             await this.#extensions.start();
             for (const source of this.#builtinExtensionSources) {
                 await this.#extensionControl.installBuiltin(
@@ -291,6 +296,7 @@ export class ControlRuntime {
             }
             await this.#mcp.prepare();
             await this.#mcp.start();
+            await this.#contexts.reconcile();
             await this.#channels.start();
         } catch (error) {
             try {

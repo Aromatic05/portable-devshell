@@ -4,8 +4,6 @@ export * from "./auth/Provider.js";
 export * from "./auth/oauth/Resource.js";
 export * from "./auth/oauth/interaction/Approval.js";
 
-export * from "./context/Environment.js";
-export * from "./context/registry/Registry.js";
 
 export * from "./endpoint/Binding.js";
 export * from "./endpoint/Endpoint.js";
@@ -29,3 +27,6 @@ export * from "./host/Route.js";
 export * from "./workspace/app/App.js";
 export * from "./workspace/app/Lease.js";
 export * from "./workspace/app/Presence.js";
+
+export type * from "./context/Port.js";
+export type * from "./context/Runtime.js";

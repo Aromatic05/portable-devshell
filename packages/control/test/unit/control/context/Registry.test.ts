@@ -50,6 +50,30 @@ test("resolves and queries remote attachments by their own instance and workspac
     assert.deepEqual((await registry.list({ instance: "worker-b", workspace: "/work/b", status: "active" })).map(({ ctxId }) => ctxId), [record.ctxId]);
 });
 
+test("keeps remote references stable after attachment and allows masking", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-stable-handle" });
+    const record = await registry.create({
+        principal: "user-1",
+        environments: [{ instance: "worker-a", workspace: "/work/a" }],
+    });
+    const before = await registry.referenceInstance(record.ctxId, "worker-b");
+    assert.equal(before?.current, false);
+    assert.ok(before?.handle);
+    await registry.attachEnvironment(record.ctxId, {
+        instance: "worker-b",
+        workspace: "/work/b",
+    });
+    const after = await registry.referenceInstance(record.ctxId, "worker-b");
+    assert.deepEqual(after, before);
+    assert.equal(await registry.resolveRemoteInstanceHandle(record.ctxId, before.handle), "worker-b");
+    const masked = await registry.maskRemoteInstance(record.ctxId, before.handle);
+    assert.deepEqual(masked, {
+        environment: { instance: "worker-b", workspace: "/work/b" },
+        instance: "worker-b",
+    });
+    assert.equal(await registry.referenceInstance(record.ctxId, "worker-b"), undefined);
+});
+
 test("detaching an instance invalidates only its automatic reentry claim", async () => {
     const registry = new ContextRegistry({ idFactory: () => "ctx-claim" });
     const record = await registry.create({

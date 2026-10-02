@@ -11,6 +11,9 @@
             "@portable-devshell/extension": [
                 "./packages/extension/src/index.ts"
             ],
+            "@portable-devshell/extension/context": [
+                "./packages/extension/src/domain/context.ts"
+            ],
             "@portable-devshell/extension/cli": [
                 "./packages/extension/src/domain/cli.ts"
             ],

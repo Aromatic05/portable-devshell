@@ -7,7 +7,7 @@ import type {
     WaitRecord,
 } from "@portable-devshell/shared";
 
-import type { McpContextRegistry } from "../../context/registry/Registry.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     isMcpGoalGateway,
     isMcpInteractionGateway,
@@ -25,7 +25,7 @@ import { assertWorkspaceWaitRecoveryAssociationAvailable } from "./Arbiter.js";
 export class McpWorkspaceLegacyV0615 {
     constructor(
         private readonly options: {
-            contextRegistry?: McpContextRegistry;
+            contextRegistry?: ContextRegistryPort;
             gateway?: McpInstanceGateway;
             instanceName: string;
         },

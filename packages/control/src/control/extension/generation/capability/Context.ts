@@ -11,12 +11,16 @@ export class ExtensionContextObserveCapabilityControl
 {
     readonly #allowed: boolean;
     readonly #extensionId: string;
-    readonly #listContexts: () => Promise<readonly McpContextRecord[]>;
+    readonly #listContexts: (
+        query: ExtensionContextQuery,
+    ) => Promise<readonly McpContextRecord[]>;
 
     constructor(options: {
         allowed: boolean;
         extensionId: string;
-        listContexts: () => Promise<readonly McpContextRecord[]>;
+        listContexts: (
+            query: ExtensionContextQuery,
+        ) => Promise<readonly McpContextRecord[]>;
     }) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
@@ -28,9 +32,7 @@ export class ExtensionContextObserveCapabilityControl
     ): Promise<readonly ExtensionContextRecord[]> {
         this.#assertAllowed();
         const normalized = readQuery(query);
-        return (await this.#listContexts())
-            .filter((record) => matches(record, normalized))
-            .map(toContextRecord);
+        return (await this.#listContexts(normalized)).map(toContextRecord);
     }
 
     #assertAllowed(): void {
@@ -72,32 +74,6 @@ function isContextStatus(value: unknown): value is ExtensionContextStatus {
     return value === "active" || value === "expired" || value === "disabled";
 }
 
-function matches(
-    record: McpContextRecord,
-    query: ExtensionContextQuery,
-): boolean {
-    if (query.status !== undefined && record.status !== query.status) return false;
-    if (
-        query.instance !== undefined &&
-        record.instance !== query.instance &&
-        !record.environments.some(
-            (environment) => environment.instance === query.instance,
-        )
-    ) {
-        return false;
-    }
-    if (
-        query.workspace !== undefined &&
-        record.workspace !== query.workspace &&
-        !record.environments.some(
-            (environment) => environment.workspace === query.workspace,
-        )
-    ) {
-        return false;
-    }
-    return true;
-}
-
 function toContextRecord(record: McpContextRecord): ExtensionContextRecord {
     return {
         createdAt: record.createdAt,
@@ -109,9 +85,7 @@ function toContextRecord(record: McpContextRecord): ExtensionContextRecord {
                 : { workspace: environment.workspace }),
         })),
         expiresAt: record.expiresAt,
-        instance: record.instance,
         lastAccessedAt: record.lastAccessedAt,
         status: record.status,
-        workspace: record.workspace,
     };
 }

@@ -6,7 +6,7 @@ import type {
     WaitRecord,
 } from "@portable-devshell/shared";
 
-import type { McpContextRegistry } from "../../context/registry/Registry.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
 import {
     isMcpGoalGateway,
     isMcpInteractionGateway,
@@ -142,7 +142,7 @@ export async function assertWorkspaceWaitRecoveryAssociationAvailable(
 export class McpWorkspaceReentryArbiter {
     constructor(
         private readonly options: {
-            contextRegistry: McpContextRegistry;
+            contextRegistry: ContextRegistryPort;
             gateway?: McpInstanceGateway;
             instanceName: string;
         },

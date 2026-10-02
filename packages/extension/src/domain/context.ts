@@ -10,10 +10,8 @@ export interface ExtensionContextRecord {
     readonly ctxId: string;
     readonly environments: readonly ExtensionContextEnvironment[];
     readonly expiresAt: string;
-    readonly instance: string;
     readonly lastAccessedAt: string;
     readonly status: ExtensionContextStatus;
-    readonly workspace: string;
 }
 
 export interface ExtensionContextQuery {

@@ -10,7 +10,6 @@ import type {
     ControlConfig,
     ControlWebAuthConfig,
     JsonValue,
-    McpContextRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -26,9 +25,11 @@ import { InstanceCreateCoordinator } from "../../../control/instance/create/Coor
 import { McpRuntimeFactory } from "../../mcp/Runtime.js";
 import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ControlRuntimeArtifact } from "./Artifact.js";
+import type { ControlRuntimeContext } from "./Context.js";
 import type { ControlRuntimeState } from "../State.js";
 
 export interface ControlRuntimeMcpOptions {
+    contexts: ControlRuntimeContext;
     artifact: ControlRuntimeArtifact;
     controlPaths: ControlPathHome;
     factory?: McpRuntimeFactory;
@@ -69,7 +70,7 @@ export class ControlRuntimeMcp {
         this.#artifact = options.artifact;
         this.#controlPaths = options.controlPaths;
         this.#runtimeState = new McpRuntimeState({
-            contextFile: options.controlPaths.contextsFile,
+            contexts: options.contexts,
             storageDir: options.controlPaths.oauthDir,
             workspaceAppLeaseFile: options.controlPaths.workspaceAppLeasesFile,
         });
@@ -101,11 +102,11 @@ export class ControlRuntimeMcp {
             toolProvenance: this.toolProvenance,
         });
         gatewayHolder.value = this.instanceGateway;
+        options.contexts.bindGateway(this.instanceGateway);
         this.#host = factory.wire(
             options.state.requireConfig(),
             options.state.instances,
             {
-                contextFile: options.controlPaths.contextsFile,
                 gateway: decorateMcpInstanceGatewayArtifact(
                     this.instanceGateway,
                     options.artifact.service,
@@ -134,6 +135,9 @@ export class ControlRuntimeMcp {
             configStore: options.state.configStore,
             getConfig: () => options.state.requireConfig(),
             getMcpHost: () => this.#host,
+            detachContextInstance: async (instance) => {
+                await options.contexts.detachInstance(instance);
+            },
             getMcpInstanceGateway: () => this.instanceGateway,
             getRestartControlRequired: () =>
                 options.state.restartControlRequired,
@@ -153,12 +157,7 @@ export class ControlRuntimeMcp {
     }
 
     async prepare(): Promise<void> {
-        await this.#runtimeState.initialize();
         await this.configEditor.reconcileCleanupDebt();
-    }
-
-    async listContexts(): Promise<readonly McpContextRecord[]> {
-        return await this.#runtimeState.contextRegistry.list();
     }
 
     get host(): McpHost | undefined {
@@ -190,7 +189,6 @@ export class ControlRuntimeMcp {
         config: ControlConfig,
     ): Promise<McpHost | undefined> {
         const next = this.#factory.wire(config, this.#state.instances, {
-            contextFile: this.#controlPaths.contextsFile,
             gateway: decorateMcpInstanceGatewayArtifact(
                 this.instanceGateway,
                 this.#artifact.service,

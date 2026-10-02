@@ -13,7 +13,7 @@ import {
 
 import type { InstanceDescriptor } from "../../../instance/Descriptor.js";
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
-import type { ContextAdminPort } from "../../../../composition/mcp/route/Context.js";
+import type { ContextAdminPort } from "../../../context/Route.js";
 import type { CliExtensionCommandService } from "./Service.js";
 import type {
     CliCommandIo,
@@ -246,10 +246,11 @@ export class ModelDevshellBroker {
         };
         const modelContext: CliModelCommandContext = Object.freeze({
             instanceReference: async (instance: string) => {
+                if (instance === descriptor.name) return { current: true };
                 const admin = this.#contextAdmin();
                 if (admin === undefined)
                     throw integrityError(
-                        "MCP Context authority is unavailable.",
+                        "Context authority is unavailable.",
                     );
                 return await admin.referenceInstance(request.ctxId, instance);
             },
@@ -320,10 +321,10 @@ export class ModelDevshellBroker {
             request.ctxId,
             descriptor.name,
         );
-        if (
-            context.workspace !== request.workspace ||
-            context.instance !== descriptor.name
-        ) {
+        const environment = context.environments.find(
+            (candidate) => candidate.instance === descriptor.name,
+        );
+        if (environment?.workspace !== request.workspace) {
             throw integrityError(
                 "Worker model devshell context binding does not match the authoritative MCP Context.",
             );
@@ -360,7 +361,7 @@ export class ModelDevshellBroker {
     ): Promise<McpContextRecord> {
         const admin = this.#contextAdmin();
         if (admin === undefined) {
-            throw integrityError("MCP Context authority is unavailable.");
+            throw integrityError("Context authority is unavailable.");
         }
         try {
             return await admin.validateForInstance(ctxId, instance);

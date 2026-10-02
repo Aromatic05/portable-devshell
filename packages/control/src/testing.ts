@@ -32,3 +32,9 @@ export * from "./composition/Route.js";
 export * from "./composition/control/Runtime.js";
 export * from "./server/endpoint/Socket.js";
 export * from "./composition/control/subsystem/Reverse.js";
+
+export * from "./control/context/Registry.js";
+export * from "./control/context/Environment.js";
+export * from "./control/context/Cleanup.js";
+export * from "./control/context/Service.js";
+export * from "./composition/control/subsystem/Context.js";

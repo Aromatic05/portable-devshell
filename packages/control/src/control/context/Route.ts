@@ -5,7 +5,7 @@ import type {
 } from "@portable-devshell/shared";
 import { createError, errorCodes } from "@portable-devshell/shared";
 
-import { requirePort, routeModule } from "../../../server/Route.js";
+import { requirePort, routeModule } from "../../server/Route.js";
 
 export interface ContextAdminPort {
     referenceInstance(
@@ -27,7 +27,7 @@ export function createContextRouteModule(
     const admin = () =>
         requirePort(
             typeof port === "function" ? port() : port,
-            "MCP contexts are not available.",
+            "Contexts are not available.",
         );
     return routeModule("context", {
         list: async () => (await admin().list()) as unknown as JsonValue,
@@ -56,3 +56,4 @@ function readCtxId(value: JsonValue | undefined): string {
     }
     return ctxId;
 }
+

@@ -31,6 +31,7 @@ export type { ConfigRuntimeChangeSet } from "../Engine.js";
 interface ConfigEditorCoordinatorOptions extends ConfigEngineOptions {
     cleanupDebtFile?: string;
     getMcpHost?: () => McpHost | undefined;
+    detachContextInstance?: (instance: string) => Promise<void>;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
@@ -51,6 +52,7 @@ export class ConfigEditorCoordinator {
             cleanupDebtFile: options.cleanupDebtFile,
             engine: this.#engine,
             getMcpHost: options.getMcpHost,
+            detachContextInstance: options.detachContextInstance,
             getMcpInstanceGateway: options.getMcpInstanceGateway,
             instanceConfigMapper: options.instanceConfigMapper,
             instanceRegistry: options.instanceRegistry,

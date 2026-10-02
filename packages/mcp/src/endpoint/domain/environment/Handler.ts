@@ -6,16 +6,11 @@ import {
     type ToolCallContext,
 } from "@portable-devshell/shared";
 
-import {
-    McpContextRegistry,
-    type McpContextExternalBinding,
-} from "../../../context/registry/Registry.js";
-import {
-    McpContextEnvironmentCleanupService,
-    McpContextRemoteEnvironment,
-} from "../../../context/Environment.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type { ContextEnvironmentPort, ContextCleanupPort } from "../../../context/Port.js";
+import type { McpContextExternalBinding } from "@portable-devshell/shared";
 import type { McpContextSelector } from "../../../context/Selector.js";
-import { isMcpGoalGateway, type McpInstanceGateway } from "../../Port.js";
+import type { McpInstanceGateway } from "../../Port.js";
 import {
     mcpEnvironmentToolName,
     mcpRemoteEnvironmentToolName,
@@ -45,17 +40,18 @@ export interface McpEnvironmentHandlerResult {
 }
 
 export class McpEndpointHandlerEnvironment {
-    readonly #cleanup: McpContextEnvironmentCleanupService;
-    readonly #contextRegistry: McpContextRegistry;
+    readonly #cleanup: ContextCleanupPort;
+    readonly #contextRegistry: ContextRegistryPort;
     readonly #contextSelector: McpContextSelector;
     readonly #gateway?: McpInstanceGateway;
     readonly #instanceName: string;
-    readonly #remoteEnvironment?: McpContextRemoteEnvironment;
+    readonly #environment: ContextEnvironmentPort;
     readonly #worker: McpEndpointWorkerPort;
 
     constructor(options: {
-        cleanup?: McpContextEnvironmentCleanupService;
-        contextRegistry: McpContextRegistry;
+        cleanup: ContextCleanupPort;
+        contextRegistry: ContextRegistryPort;
+        environment: ContextEnvironmentPort;
         contextSelector: McpContextSelector;
         gateway?: McpInstanceGateway;
         instanceName: string;
@@ -65,28 +61,8 @@ export class McpEndpointHandlerEnvironment {
         this.#contextSelector = options.contextSelector;
         this.#gateway = options.gateway;
         this.#instanceName = options.instanceName;
-        this.#cleanup =
-            options.cleanup ??
-            new McpContextEnvironmentCleanupService({
-                contextRegistry: this.#contextRegistry,
-                gateway: () => options.gateway,
-                releaseLocalAlerts: async (instance, workspace) => {
-                    if (instance !== options.instanceName) {
-                        throw new Error(
-                            `Instance ${instance} is unavailable for local alert cleanup.`,
-                        );
-                    }
-                    await options.worker.releaseAlerts?.(workspace);
-                },
-            });
-        this.#remoteEnvironment =
-            options.gateway === undefined
-                ? undefined
-                : new McpContextRemoteEnvironment({
-                      cleanup: this.#cleanup,
-                      contextRegistry: this.#contextRegistry,
-                      gateway: () => options.gateway,
-                  });
+        this.#cleanup = options.cleanup;
+        this.#environment = options.environment;
         this.#worker = options.worker;
     }
 
@@ -123,8 +99,7 @@ export class McpEndpointHandlerEnvironment {
         requestContext: McpEndpointCallContext,
         signal?: AbortSignal,
     ): Promise<McpEnvironmentHandlerResult> {
-        const remote = this.#remoteEnvironment;
-        if (remote === undefined) {
+        if (this.#gateway === undefined) {
             throw mcpEndpointToolNotExposed(
                 mcpRemoteEnvironmentToolName,
                 this.#instanceName,
@@ -141,8 +116,7 @@ export class McpEndpointHandlerEnvironment {
             { touch: false },
         );
         let record = resolution.record;
-        const workspace =
-            contextWorkspace(record, this.#instanceName) ?? record.workspace;
+        const workspace = contextWorkspace(record, this.#instanceName);
         const context: ToolCallContext = {
             ctxId: record.ctxId,
             requestId: requestContext.requestId,
@@ -190,7 +164,7 @@ export class McpEndpointHandlerEnvironment {
                             handle: true,
                             workspace: "optional",
                         });
-                        const details = await remote.attach(
+                        const details = await this.#environment.attachRemote(
                             record.ctxId,
                             commandInput.handle!,
                             commandInput.workspace,
@@ -211,7 +185,7 @@ export class McpEndpointHandlerEnvironment {
                             handle: true,
                             workspace: false,
                         });
-                        const details = await remote.mask(
+                        const details = await this.#environment.maskRemote(
                             record.ctxId,
                             commandInput.handle!,
                         );
@@ -284,21 +258,17 @@ export class McpEndpointHandlerEnvironment {
 
                     const { alerts, environment, prepared, skillsDirectory } =
                         await this.#prepareEnvironment(
+                            record.ctxId,
                             workspace,
+                            resolution.bindings.length === 0
+                                ? undefined
+                                : { bindings: resolution.bindings, principal: requestContext.principal },
+                            signal,
                             (prepared) => {
                                 alertCleanupWorkspace = prepared;
                             },
                         );
-                    if (
-                        !resolution.created &&
-                        previousWorkspace !== undefined &&
-                        previousWorkspace !== prepared.workspace
-                    ) {
-                        await this.#assertWorkspaceSwitchAvailable(
-                            record.ctxId,
-                            previousWorkspace,
-                        );
-                    }
+                    committed = true;
                     await this.#worker.appendMcpToolCalled(
                         mcpEnvironmentToolName,
                         {
@@ -354,7 +324,7 @@ export class McpEndpointHandlerEnvironment {
                                       prepared.projectMemoryDirectory,
                               }
                             : {}),
-                        ...(this.#remoteEnvironment === undefined
+                        ...(this.#gateway === undefined
                             ? {}
                             : {
                                   remoteEnvironment: {
@@ -366,22 +336,7 @@ export class McpEndpointHandlerEnvironment {
                         workspace: prepared.workspace,
                     };
 
-                    const attached = await this.#contextRegistry.attachEnvironment(
-                        record.ctxId,
-                        {
-                            instance: this.#instanceName,
-                            temporaryDirectory: prepared.temporaryDirectory,
-                            workspace: prepared.workspace,
-                        },
-                        resolution.bindings.length === 0
-                            ? undefined
-                            : {
-                                  bindings: resolution.bindings,
-                                  principal: requestContext.principal,
-                              },
-                    );
-                    committed = true;
-                    attachedCtxId = attached.ctxId;
+                    attachedCtxId = record.ctxId;
                     await this.#cleanup.reconcile(record.ctxId);
                     return result;
                 },
@@ -397,27 +352,13 @@ export class McpEndpointHandlerEnvironment {
         } catch (error) {
             const cleanupFailures: unknown[] = [];
             if (resolution.created) {
-                await this.#rollbackUndisclosedContext(
+                await this.#environment.rollbackUndisclosed(
                     record.ctxId,
-                    alertCleanupWorkspace,
+                    this.#instanceName,
+                    committed ? alertCleanupWorkspace : undefined,
                 ).catch((cleanupError) => cleanupFailures.push(cleanupError));
             } else if (committed) {
                 throw error;
-            } else if (alertCleanupWorkspace !== undefined) {
-                const cleanupWorkspace = alertCleanupWorkspace;
-                await this.#releaseAlertsIfUnused(
-                    this.#instanceName,
-                    cleanupWorkspace,
-                ).catch(async (cleanupError) => {
-                    cleanupFailures.push(cleanupError);
-                    await this.#contextRegistry
-                        .recordEnvironmentCleanup(record.ctxId, {
-                            instance: this.#instanceName,
-                            kind: "alerts",
-                            workspace: cleanupWorkspace,
-                        })
-                        .catch((debtError) => cleanupFailures.push(debtError));
-                });
             }
             if (cleanupFailures.length > 0) {
                 throw new AggregateError(
@@ -426,40 +367,6 @@ export class McpEndpointHandlerEnvironment {
                 );
             }
             throw error;
-        }
-    }
-
-    async #assertWorkspaceSwitchAvailable(
-        ctxId: string,
-        previousWorkspace: string,
-    ): Promise<void> {
-        const gateway = this.#gateway;
-        if (gateway === undefined) return;
-        if (isMcpGoalGateway(gateway)) {
-            const goal = await gateway.readGoal(this.#instanceName, ctxId);
-            if (goal?.status === "active" || goal?.status === "blocked") {
-                throw new Error(
-                    `Workspace Goal ${goal.goalId} is still ${goal.status} in ${goal.workspace ?? previousWorkspace}; finish or stop it before switching workspace.`,
-                );
-            }
-        }
-        if (gateway.listWaits !== undefined) {
-            const waits = await gateway.listWaits(this.#instanceName);
-            const blocking = waits.find(
-                (wait) =>
-                    wait.createdByCtxId === ctxId &&
-                    (wait.workspace === undefined ||
-                        wait.workspace === previousWorkspace) &&
-                    wait.automaticRecovery !== false &&
-                    wait.recoveryDisabledAt === undefined &&
-                    wait.status !== "consumed" &&
-                    wait.status !== "cancelled",
-            );
-            if (blocking !== undefined) {
-                throw new Error(
-                    `Workspace wait ${blocking.waitId} is still attached to ${previousWorkspace}; finish or stop its owner before switching workspace.`,
-                );
-            }
         }
     }
 
@@ -547,8 +454,7 @@ export class McpEndpointHandlerEnvironment {
             input.workspace ??
             (bound.record === undefined
                 ? undefined
-                : (contextWorkspace(bound.record, this.#instanceName) ??
-                  bound.record.workspace));
+                : contextWorkspace(bound.record, this.#instanceName));
         if (workspace === undefined)
             throw unboundContext(
                 this.#contextSelector.requiresExplicitContextId,
@@ -600,104 +506,48 @@ export class McpEndpointHandlerEnvironment {
     }
 
     async #prepareEnvironment(
+        ctxId: string,
         workspace: string,
+        external: { bindings: readonly McpContextExternalBinding[]; principal: string } | undefined,
+        signal: AbortSignal | undefined,
         onAlertsAcquiring?: (workspace: string) => void,
     ) {
         const environment = requireMcpEndpointEnvironment(
             this.#worker,
             this.#instanceName,
         );
-        const prepareWorkspace = this.#worker.prepareWorkspace;
-        if (prepareWorkspace === undefined) {
-            throw workspacePreparationUnavailable(this.#instanceName);
-        }
         const prepareExtensionResource = this.#worker.prepareExtensionResource;
         if (prepareExtensionResource === undefined) {
             throw extensionResourcePreparationUnavailable(this.#instanceName);
         }
-        const prepared = await prepareWorkspace.call(this.#worker, workspace);
-        const skills = await prepareExtensionResource.call(this.#worker, {
-            collection: "managed",
-            extensionId: "skill",
-        });
-        onAlertsAcquiring?.(prepared.workspace);
-        const alerts = (await this.#worker.readAlerts(prepared.workspace))
-            .advice;
+        let skillsDirectory = "";
+        let alerts: Array<{ code: string; text: string }> = [];
+        const prepared = await this.#environment.prepareLocal(
+            ctxId,
+            this.#instanceName,
+            workspace,
+            {
+                external,
+                beforeCommit: async (facts) => {
+                    const skills = await prepareExtensionResource.call(this.#worker, {
+                        collection: "managed",
+                        extensionId: "skill",
+                    });
+                    skillsDirectory = skills.directory;
+                    onAlertsAcquiring?.(facts.workspace);
+                    alerts = (await this.#worker.readAlerts(facts.workspace)).advice;
+                },
+                signal,
+            },
+        );
         return {
             alerts,
             environment,
             prepared,
-            skillsDirectory: skills.directory,
+            skillsDirectory,
         };
     }
 
-    async #rollbackUndisclosedContext(
-        ctxId: string,
-        workspace?: string,
-    ): Promise<void> {
-        if (workspace === undefined) {
-            await this.#contextRegistry.discard(ctxId);
-            return;
-        }
-        const now = Date.now();
-        const hasOtherActiveContext = (await this.#contextRegistry.list()).some(
-            (context) =>
-                context.ctxId !== ctxId &&
-                context.status === "active" &&
-                Date.parse(context.expiresAt) > now &&
-                context.environments.some(
-                    (environment) =>
-                        environment.instance === this.#instanceName &&
-                        environment.workspace === workspace,
-                ),
-        );
-        await this.#contextRegistry.disable(ctxId);
-        if (!hasOtherActiveContext && this.#worker.releaseAlerts !== undefined) {
-            try {
-                await this.#worker.releaseAlerts(workspace);
-            } catch (error) {
-                const failures: unknown[] = [error];
-                await this.#contextRegistry
-                    .recordEnvironmentCleanup(ctxId, {
-                        instance: this.#instanceName,
-                        kind: "alerts",
-                        workspace,
-                    })
-                    .catch((debtError) => failures.push(debtError));
-                if (failures.length === 1) throw failures[0];
-                throw new AggregateError(
-                    failures,
-                    `Undisclosed Context ${ctxId} cleanup was incomplete.`,
-                );
-            }
-        }
-        await this.#contextRegistry.discard(ctxId);
-    }
-
-    async #releaseAlertsIfUnused(
-        instance: string,
-        workspace: string,
-    ): Promise<void> {
-        const now = Date.now();
-        const inUse = (await this.#contextRegistry.list()).some(
-            (context) =>
-                context.status === "active" &&
-                Date.parse(context.expiresAt) > now &&
-                context.environments.some(
-                    (environment) =>
-                        environment.instance === instance &&
-                        environment.workspace === workspace,
-                ),
-        );
-        if (inUse) return;
-        if (this.#gateway !== undefined) {
-            await this.#gateway.releaseAlerts(instance, workspace);
-            return;
-        }
-        if (instance === this.#instanceName) {
-            await this.#worker.releaseAlerts?.(workspace);
-        }
-    }
 }
 
 function contextWorkspace(

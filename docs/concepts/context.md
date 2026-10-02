@@ -1,6 +1,6 @@
 # Context
 
-Context 是 portable-devshell 在 MCP 之上的**应用级连续性对象**。它把一次 Agent 工作过程中需要持续归属的状态绑定在一起：workspace environment、Todo、Goal、Wait、Approval、Comments、审计和自动模型恢复。
+Context 是 portable-devshell 由 Control 管理的**应用级连续性对象**。它把一次 Agent 工作过程中需要持续归属的状态绑定在一起：workspace environment、Todo、Goal、Wait、Approval、Comments、审计和自动模型恢复。
 
 Context 不是 MCP transport session，也不是认证凭据。
 
@@ -21,7 +21,15 @@ Context
   execution / re-entry state
 ```
 
-一个 Context 可以同时附着多个 instance；每个 instance 都有自己的 workspace environment。instance 本身不持久化默认 workspace。
+一个 Context 可以关联零个或多个 instance；每个 instance 最多有一个当前 environment。`environments[]` 是唯一的当前关联来源，Context 没有 primary instance 或全局 workspace。instance 本身不持久化默认 workspace。
+
+Workspace scope 由 instance 与 Worker canonical workspace path 组成。目录不属于某个 Context；多个 Context 可以共享同一个 scope。
+
+## 实现归属
+
+Context 的权威状态、生命周期、environment 准备和清理集中在 `packages/control/src/control/context/`，由 Control runtime 创建并共享。MCP、CLI、App 和扩展通过注入能力访问同一份状态；MCP Host 不创建私有 Context Registry。
+
+持久化格式为 v2。启动时仅对已含明确 `environments[]` 的合法 v1 文档执行一次原子升级，移除顶层重复字段；缺少关联或仅有旧 external identity 的记录明确报错且不覆盖原文件。正常运行不合成旧 primary 关联。
 
 ## Context selector
 
@@ -92,17 +100,16 @@ workspace 必须是 **worker 机器上的绝对路径**。
 跨 instance environment 使用 opaque handle bootstrap。Instance Extension 的 model `list/status`
 通过 audited Context projection 返回当前 Context 可见 remote instance 的 handle；随后
 `environ_remote(command="attach", handle=..., workspace=...)` 在 Control/MCP 侧直接建立 environment，
-不依赖 primary Worker 能否执行 shell。handle 只属于当前 Context，不暴露内部 `ctxId` 或 provider
+不依赖当前入口 Worker 能否执行 shell。handle 只属于当前 Context，不暴露内部 `ctxId` 或 provider
 凭据。之后带 `instance` 路由的工具仍必须经过 Context attachment 校验。
 
 `environ_remote(command="mask", handle=...)` 是单调 self-confinement：mask 会撤销已有 remote
 environment，并永久拒绝该 Context 后续 discovery、attach 和 routed tool。该状态随 Context
-持久化且没有 unmask/clear/reset 操作；primary instance 不通过 remote handle 暴露，因此不能由
-`environ_remote` mask。
+持久化且没有 unmask/clear/reset 操作。模型命令的 `current` 只表示本次调用所在的 instance，不是 Context 的永久身份。已关联的 remote instance 仍保留稳定 handle。
 
 ### 切换 workspace
 
-同一个 Context 在同一 instance 上重新调用 `environ_info` 可以切换 workspace，但存在活动工作时会被阻止。当前实现至少会拒绝：
+同一个 Context 在同一 instance 上重新调用 `environ_info` 或 remote attach 可以切换 workspace，但两种入口共用切换检查，存在活动工作时会被阻止。当前实现至少会拒绝：
 
 - 旧 workspace 上仍 active/blocked 的 Goal；
 - 旧 workspace 上仍有可自动恢复的未完成 Wait。
@@ -118,6 +125,8 @@ active
 expired
 disabled
 ```
+
+Instance 删除只解除对应 attachment 并撤销其恢复资格；删除最后一个 attachment 不会 disable Context。`active` 且 `environments=[]` 表示 Context 有效但尚无执行位置，之后可以重新 attach。MCP disconnect 不结束 Context。
 
 活动调用会刷新租约。external-bound Context 在普通活动时可以续租同一个内部 Context；显式模式也可以通过 CLI 续租。
 

@@ -259,10 +259,9 @@ function retainedContext(
     return {
         createdAt: record.createdAt,
         ctxId: record.ctxId,
-        instances: new Set([
-            record.instance,
-            ...record.environments.map((environment) => environment.instance),
-        ]),
+        instances: new Set(
+            record.environments.map((environment) => environment.instance),
+        ),
         lastAccessedAt: record.lastAccessedAt,
         origin: "context-registry",
         status: record.status,

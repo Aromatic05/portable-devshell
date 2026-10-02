@@ -19,7 +19,7 @@ import {
     type McpInstanceGateway,
     type McpInteractionGateway,
 } from "../../Port.js";
-import type { McpContextRegistry } from "../../../context/registry/Registry.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
 import type { McpToolCatalogInteractionName } from "./Catalog.js";
 import { McpToolSchemaUnavailableError } from "../../tool/Schema.js";
 import { McpWorkspaceLegacyV0615 } from "../../../workspace/reentry/Legacy.js";
@@ -44,7 +44,7 @@ export class McpEndpointHandlerInteraction {
 
     constructor(
         private readonly options: {
-            contextRegistry?: McpContextRegistry;
+            contextRegistry?: ContextRegistryPort;
             gateway?: McpInstanceGateway;
             instanceName: string;
             now?: () => number;

@@ -145,13 +145,7 @@ function toSummary(
         registryRecord === undefined
             ? undefined
             : (
-                  registryRecord.environments ?? [
-                      {
-                          instance: registryRecord.instance,
-                          temporaryDirectory: registryRecord.temporaryDirectory,
-                          workspace: registryRecord.workspace,
-                      },
-                  ]
+                  registryRecord.environments
               ).find((candidate) => candidate.instance === instance);
     const latestApproval = [...context.approvals].sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt),

@@ -10,15 +10,17 @@ export type {
     McpOAuthAccessTokenVerification,
 } from "./auth/oauth/provider/Provider.js";
 export { McpHost, McpRuntimeState } from "./host/Host.js";
-export type { McpHostInstanceConfig } from "./host/Host.js";
+export type { McpHostInstanceConfig, McpHostConfig, WorkerInstanceLike } from "./host/Host.js";
 export type {
     McpToolProvenanceRecord,
     McpToolProvenanceRecorder,
 } from "./endpoint/domain/worker/Provenance.js";
-export { McpContextRegistry } from "./context/registry/Registry.js";
-export type { McpContextBinding } from "./context/registry/Model.js";
 export { HttpHost } from "./host/Http.js";
-export type { McpApprovalPort, McpInstanceGateway } from "./endpoint/Port.js";
+export { isMcpGoalGateway } from "./endpoint/Port.js";
+export type { McpApprovalPort, McpInstanceGateway, McpEndpointWorkerPort } from "./endpoint/Port.js";
 export { resolvePortableDevshellApplicationVersion } from "./Version.js";
 
 export * from "./workspace/app/Lease.js";
+
+export type * from "./context/Port.js";
+export type * from "./context/Runtime.js";

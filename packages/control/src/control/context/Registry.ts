@@ -986,7 +986,6 @@ export class ContextRegistry implements ContextRegistryPort {
             const record = this.#activeRecord(ctxId);
             if ((record.maskedInstances ?? []).includes(instance))
                 return undefined;
-            if (record.environments.some((environment) => environment.instance === instance)) return { current: true };
             const existing = record.remoteInstanceHandles?.find(
                 (reference) => reference.instance === instance,
             );

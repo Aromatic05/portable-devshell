@@ -6,8 +6,8 @@ import type {
 } from "@portable-devshell/shared";
 
 import type { McpAuthConfig } from "../auth/Config.js";
-import type { McpContextEnvironmentCleanupService } from "../context/Environment.js";
-import { McpContextRegistry } from "../context/registry/Registry.js";
+import type { ContextRegistryPort } from "@portable-devshell/shared";
+import type { ContextEnvironmentPort, ContextCleanupPort } from "../context/Port.js";
 import { createMcpContextSelector } from "../context/Selector.js";
 import type { McpInstanceGateway } from "./Port.js";
 import type { McpTool } from "./tool/Schema.js";
@@ -30,8 +30,9 @@ export type {
 
 export interface McpEndpointWorkerOptions {
     auth?: McpAuthConfig;
-    cleanup?: McpContextEnvironmentCleanupService;
-    contextRegistry?: McpContextRegistry;
+    contextRegistry: ContextRegistryPort;
+    environmentService: ContextEnvironmentPort;
+    cleanup: ContextCleanupPort;
     contextMode?: ControlMcpContextMode;
     extensions?: McpExtensionRegistry;
     gateway?: McpInstanceGateway;
@@ -69,6 +70,7 @@ export class McpEndpointWorker {
         });
         this.#dispatch = new McpEndpointDispatch({
             catalog: this.#catalog,
+            environmentService: options.environmentService,
             cleanup: options.cleanup,
             contextRegistry: options.contextRegistry,
             contextSelector,

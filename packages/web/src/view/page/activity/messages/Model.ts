@@ -100,18 +100,12 @@ function projectWebMessageSessions(state: WebState): WebMessageSession[] {
     };
 
     for (const context of state.readModel.contexts) {
-        const environments = context.environments ?? [
-            {
-                instance: context.instance,
-                workspace: context.workspace,
-            },
-        ];
-        for (const environment of environments) {
+        for (const environment of context.environments) {
             touch(environment.instance, context.ctxId, {
                 latestAt: context.lastAccessedAt || context.createdAt,
                 startedAt: context.createdAt,
                 status: context.status,
-                workspace: environment.workspace ?? context.workspace,
+                workspace: environment.workspace,
             });
         }
     }
