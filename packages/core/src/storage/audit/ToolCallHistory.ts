@@ -4,7 +4,6 @@ import {
     type ToolCallContext,
     type ToolCallFailureStage,
     type ToolCallQuery,
-    type ToolCallApprovalDecision,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 
@@ -23,9 +22,7 @@ type ToolCallHistoryStore = AuditRecordStore<ToolCallRecord> &
     >;
 
 interface ActiveToolCall {
-    approvalId?: string;
     callId: string;
-    decision?: ToolCallApprovalDecision;
     inputSummary: string;
     input?: JsonValue;
     requestId?: string;
@@ -83,13 +80,6 @@ export class AuditToolCallHistory {
         });
     }
 
-    async pendingApproval(callId: string, approvalId: string): Promise<void> {
-        await this.#initialize();
-        const activeCall = this.#readActiveCall(callId);
-        activeCall.approvalId = approvalId;
-        activeCall.status = "pendingApproval";
-    }
-
     async running(callId: string): Promise<void> {
         await this.#initialize();
         const activeCall = this.#readActiveCall(callId);
@@ -129,28 +119,12 @@ export class AuditToolCallHistory {
         callId: string,
         error: string,
         completedAt: string,
-        decision: ToolCallApprovalDecision | undefined,
     ): Promise<ToolCallRecord> {
         return await this.#finishNonRunning(
             callId,
             error,
             completedAt,
             "denied",
-            decision,
-        );
-    }
-
-    async expired(
-        callId: string,
-        error: string,
-        completedAt: string,
-    ): Promise<ToolCallRecord> {
-        return await this.#finishNonRunning(
-            callId,
-            error,
-            completedAt,
-            "expired",
-            "expired",
         );
     }
 
@@ -362,16 +336,14 @@ export class AuditToolCallHistory {
         completedAt: string,
         status: Extract<
             ToolCallRecord["status"],
-            "denied" | "expired" | "queueTimeout" | "cancelled"
+            "denied" | "queueTimeout" | "cancelled"
         >,
-        decision?: ToolCallApprovalDecision,
     ): Promise<ToolCallRecord> {
         await this.#initialize();
         const startedRecord = this.#readActiveCall(callId);
         const record: ToolCallRecord = {
             ...startedRecord,
             completedAt,
-            ...(decision === undefined ? {} : { decision }),
             error,
             instance: this.#instanceName,
             status,

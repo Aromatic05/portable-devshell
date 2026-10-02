@@ -8,12 +8,10 @@ import type { JsonValue } from "../protocol/JsonValue.js";
 const failedStatuses = new Set<ToolCallStatus>([
     "cancelled",
     "denied",
-    "expired",
     "failed",
     "queueTimeout",
 ]);
 const pendingStatuses = new Set<ToolCallStatus>([
-    "pendingApproval",
     "queued",
     "running",
 ]);

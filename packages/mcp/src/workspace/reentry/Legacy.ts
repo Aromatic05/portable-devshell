@@ -183,7 +183,6 @@ export class McpWorkspaceLegacyV0615 {
                             return calls.some(
                                 (call) =>
                                     call.status === "queued" ||
-                                    call.status === "pendingApproval" ||
                                     call.status === "running",
                             );
                         }),

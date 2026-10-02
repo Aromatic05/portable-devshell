@@ -251,12 +251,13 @@ function readSource(value: JsonValue): ToolCallSource {
 
 function readStatus(value: JsonValue): ToolCallStatus {
     if (
-        value === "pendingApproval" ||
+        value === "queued" ||
         value === "running" ||
         value === "completed" ||
         value === "failed" ||
         value === "denied" ||
-        value === "expired"
+        value === "queueTimeout" ||
+        value === "cancelled"
     ) {
         return value;
     }

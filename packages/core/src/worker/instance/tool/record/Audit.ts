@@ -87,7 +87,6 @@ export class WorkerInstanceToolAudit {
             scope.callId,
             errorCode,
             completedAt,
-            undefined,
         );
         await this.#appendEvent(
             "toolCall.denied",

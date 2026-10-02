@@ -1220,22 +1220,13 @@ test("WorkerInstance waits for approval before invoking tools and records approv
             (await instance.getApproval(approvalId)).status,
             "pending",
         );
-        assert.deepEqual(
-            await instance.readToolCalls({ status: "pendingApproval" }),
-            [],
-        );
+        assert.deepEqual(await instance.readToolCalls(), []);
 
         const pendingReplay = instance.subscribe(1);
         assert.equal(pendingReplay.kind, "events");
         assert.equal(
             pendingReplay.events.some(
                 (event) => event.type === "approval.requested",
-            ),
-            true,
-        );
-        assert.equal(
-            pendingReplay.events.some(
-                (event) => event.type === "toolCall.pendingApproval",
             ),
             true,
         );
@@ -1263,8 +1254,6 @@ test("WorkerInstance waits for approval before invoking tools and records approv
 
         const records = await instance.readToolCalls();
         assert.equal(records[0]?.status, "completed");
-        assert.equal(records[0]?.decision, undefined);
-        assert.equal(records[0]?.approvalId, undefined);
 
         const approved = await instance.getApproval(approvalId);
         assert.equal(approved.status, "approved");
@@ -1276,7 +1265,6 @@ test("WorkerInstance waits for approval before invoking tools and records approv
         const eventTypes = replay.events.map((event) => event.type);
         assert.equal(eventTypes.includes("approval.requested"), true);
         assert.equal(eventTypes.includes("approval.approved"), true);
-        assert.equal(eventTypes.includes("toolCall.pendingApproval"), true);
         assert.equal(eventTypes.includes("toolCall.running"), true);
         assert.equal(eventTypes.includes("toolCall.completed"), true);
     } finally {

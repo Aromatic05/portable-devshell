@@ -18,16 +18,13 @@ export interface ToolCallProvenance {
 
 export type ToolCallStatus =
     | "queued"
-    | "pendingApproval"
     | "running"
     | "completed"
     | "failed"
     | "denied"
-    | "expired"
     | "queueTimeout"
     | "cancelled";
 
-export type ToolCallApprovalDecision = "approved" | "denied" | "expired";
 export type ToolCallFailureStage = "postExecution" | "outboundHook";
 
 export interface ToolCallQuery {
@@ -47,7 +44,6 @@ export interface ToolCallQuery {
 export interface ToolCallRecord extends ToolCallProvenance {
     callId: string;
     completedAt?: string;
-    decision?: ToolCallApprovalDecision;
     error?: string;
     executionCompleted?: boolean;
     exitCode?: number | null;
@@ -56,7 +52,6 @@ export interface ToolCallRecord extends ToolCallProvenance {
     input?: JsonValue;
     output?: JsonValue;
     instance: InstanceName;
-    approvalId?: string;
     requestId?: string;
     ctxId?: string;
     source: ToolCallSource;

@@ -13,7 +13,6 @@ import { readWorkerAbortReason } from "../worker/AbortReason.js";
 import { getErrorCode } from "../worker/instance/state/Error.js";
 import {
     toApprovalEventData,
-    toEventData,
 } from "../worker/instance/state/Event.js";
 import { summarizeToolCallInput } from "./Context.js";
 import type {
@@ -79,7 +78,6 @@ export class ToolCallApproval {
             return { decision: "continue" };
 
         const { instance: _instance, ...context } = input.value.context;
-        const startedAt = new Date().toISOString();
         const inputSummary = summarizeToolCallInput(input.value.payload);
         const evaluation = await this.#approvalManager.evaluate({
             callId: input.callId,
@@ -101,25 +99,6 @@ export class ToolCallApproval {
             "approval.requested",
             toApprovalEventData(evaluation.request),
         );
-        if (recording === "host") {
-            await this.#appendEvent(
-                "toolCall.pendingApproval",
-                toEventData({
-                    approvalId: evaluation.request.approvalId,
-                    callId: input.callId,
-                    createdAt: evaluation.request.createdAt,
-                    expiresAt: evaluation.request.expiresAt,
-                    inputSummary,
-                    reason: evaluation.request.reason,
-                    requestId: context.requestId,
-                    ctxId: context.ctxId,
-                    source: context.source,
-                    startedAt,
-                    status: "pendingApproval",
-                    toolName: input.value.toolName,
-                }),
-            );
-        }
 
         const onAbort = () => {
             void this.#approvalManager

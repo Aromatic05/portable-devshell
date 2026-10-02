@@ -100,7 +100,6 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         toolCallScheduler: {
             reserve() {
                 return {
-                    markPendingApproval() {},
                     release() {},
                     async run<T>(operation: () => Promise<T>): Promise<T> {
                         return await operation();

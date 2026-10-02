@@ -1313,7 +1313,6 @@ export class McpWorkspaceReentryArbiter {
                         calls.some(
                             (call) =>
                                 call.status === "queued" ||
-                                call.status === "pendingApproval" ||
                                 call.status === "running",
                         )
                     )

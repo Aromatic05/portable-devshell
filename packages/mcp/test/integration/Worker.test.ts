@@ -672,9 +672,7 @@ import { tmpdir } from "node:os";
                 assert.equal(pendingApproval.toolName, "bash_run");
                 assert.equal(
                     (await instance.readToolCalls()).some(
-                        (record) =>
-                            record.source === "mcp" &&
-                            record.status === "pendingApproval",
+                        (record) => record.toolName === "bash_run",
                     ),
                     false,
                 );
@@ -695,7 +693,6 @@ import { tmpdir } from "node:os";
                     (record) => record.toolName === "bash_run",
                 );
                 assert.equal(approvedToolCall?.source, "mcp");
-                assert.equal(approvedToolCall?.decision, undefined);
                 assert.equal(approvedToolCall?.status, "completed");
 
                 deniedPromise = postJson(

@@ -31,14 +31,12 @@ export interface WorkerToolSchedulerRequest {
 }
 
 export interface WorkerToolSchedulerReservation {
-    markPendingApproval(): void;
     release(): void;
     run<T>(work: () => Promise<T>): Promise<T>;
 }
 
 type ToolSchedulerEntryState =
     | "reserved"
-    | "pendingApproval"
     | "queued"
     | "running"
     | "completed"
@@ -148,11 +146,6 @@ export class WorkerToolCallScheduler {
         }
 
         return {
-            markPendingApproval: () => {
-                if (entry.state === "reserved") {
-                    entry.state = "pendingApproval";
-                }
-            },
             release: () => {
                 this.#cancel(entry);
             },
@@ -221,7 +214,7 @@ export class WorkerToolCallScheduler {
         if (terminalStates.has(entry.state)) {
             throw this.#cancelledError(entry);
         }
-        if (entry.state !== "reserved" && entry.state !== "pendingApproval") {
+        if (entry.state !== "reserved") {
             throw new Error(
                 `Tool call ${entry.request.callId} cannot be queued from state ${entry.state}.`,
             );
@@ -431,7 +424,6 @@ export class WorkerToolCallScheduler {
         const queuedEntries = entries.filter(
             (entry) =>
                 entry.state === "reserved" ||
-                entry.state === "pendingApproval" ||
                 entry.state === "queued",
         );
         const runningEntries = entries.filter(
