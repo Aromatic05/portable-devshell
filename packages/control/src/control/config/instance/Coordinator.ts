@@ -733,6 +733,14 @@ export class InstanceConfigCoordinator {
         skipRuntimeRetirement: boolean,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
+        const cleanupDescriptor = descriptor ?? (
+            this.#reconcileContextInstanceCleanup === undefined
+                ? undefined
+                : this.#instanceConfigMapper.map(existing)
+        );
+        if (cleanupDescriptor !== undefined) {
+            this.#cleanupOnlyDescriptors.set(existing.name, cleanupDescriptor);
+        }
         try {
             await this.#detachContextInstance?.(existing.name);
         } catch (error) {
@@ -742,7 +750,7 @@ export class InstanceConfigCoordinator {
         try {
             await this.#reconcileContextInstanceCleanup?.(
                 existing.name,
-                descriptor,
+                cleanupDescriptor,
             );
         } catch (error) {
             failures.push(error);
@@ -754,11 +762,11 @@ export class InstanceConfigCoordinator {
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing).catch((error) => failures.push(error));
         }
-        await this.#retireStateForDelete(descriptor, skipRuntimeRetirement).catch(
+        await this.#retireStateForDelete(cleanupDescriptor, skipRuntimeRetirement).catch(
             (error) => failures.push(error),
         );
-        if (descriptor !== undefined) {
-            await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
+        if (cleanupDescriptor !== undefined) {
+            await closeDescriptorResourcesBestEffort(cleanupDescriptor).catch((error) =>
                 failures.push(error),
             );
             this.#cleanupOnlyDescriptors.delete(existing.name);
@@ -767,10 +775,10 @@ export class InstanceConfigCoordinator {
         await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing).catch(
             (error) => failures.push(error),
         );
-        if (descriptor !== undefined) {
+        if (cleanupDescriptor !== undefined) {
             this.#instanceRegistry.retireConnectionReferences(
-                descriptor.name,
-                descriptor.worker,
+                cleanupDescriptor.name,
+                cleanupDescriptor.worker,
             );
         }
         return failures;

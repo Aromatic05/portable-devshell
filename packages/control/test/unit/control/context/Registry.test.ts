@@ -178,6 +178,27 @@ test("detaching an instance invalidates only its automatic reentry claim", async
     assert.equal((await registry.lookup(record.ctxId, { principal: "user-1" })).status, "active");
 });
 
+test("instance detachment atomically persists cleanup for its removed workspace", async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "context-detachment-debt-"));
+    t.after(async () => await rm(directory, { force: true, recursive: true }));
+    const filePath = join(directory, "contexts.json");
+    const registry = new ContextRegistry({ filePath, idFactory: () => "ctx-retired-scope" });
+    await registry.initialize();
+    const context = await registry.create({
+        principal: "user",
+        environments: [{ instance: "removed", workspace: "/current" }, { instance: "other", workspace: "/other" }],
+    });
+    await registry.detachInstance("removed");
+    assert.deepEqual(await registry.detachInstance("removed"), []);
+    const restored = new ContextRegistry({ filePath });
+    await restored.initialize();
+    assert.deepEqual((await restored.lookup(context.ctxId, { principal: "user" })).environments, [{ instance: "other", workspace: "/other" }]);
+    assert.deepEqual(await restored.listEnvironmentCleanup(), [
+        { ctxId: context.ctxId, cleanup: { instance: "removed", kind: "instance_reference" } },
+        { ctxId: context.ctxId, cleanup: { instance: "removed", kind: "alerts", workspace: "/current" } },
+    ]);
+});
+
 test("migrates valid v1 records with explicit environments to v2", async () => {
     const directory = await mkdtemp(join(tmpdir(), "context-v1-"));
     const filePath = join(directory, "contexts.json");

@@ -845,6 +845,22 @@ export class ContextRegistry implements ContextRegistryPort {
             if (affected.length === 0) return [];
             await this.#mutateAndPersist(() => {
                 for (const record of affected) {
+                    const environment = record.environments.find(
+                        (candidate) => candidate.instance === instance,
+                    );
+                    if (environment !== undefined) {
+                        appendEnvironmentCleanup(record, {
+                            instance,
+                            kind: "instance_reference",
+                        });
+                        if (environment.workspace !== undefined) {
+                            appendEnvironmentCleanup(record, {
+                                instance,
+                                kind: "alerts",
+                                workspace: environment.workspace,
+                            });
+                        }
+                    }
                     record.environments = record.environments.filter(
                         (environment) => environment.instance !== instance,
                     );

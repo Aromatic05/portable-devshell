@@ -128,7 +128,7 @@ disabled
 
 Instance 删除只解除对应 attachment 并撤销其恢复资格；删除最后一个 attachment 不会 disable Context。`active` 且 `environments=[]` 表示 Context 有效但尚无执行位置，之后可以重新 attach。MCP disconnect 不结束 Context。
 
-Instance 删除先持久化清理债务并撤销正常访问，再解除 Context 关联、释放 alerts 和连接引用，最后销毁资源。清理失败时保留仅用于清理的 Worker 能力和债务；重启可从债务恢复清理能力，但不会重新注册为可访问的 Instance。
+Instance 删除先持久化清理债务并撤销正常访问，再解除 Context 关联、释放 alerts 和连接引用，最后销毁资源。解除关联与记录当前 Workspace 的资源清理债务是同一次原子持久化，不能只清理此前已存在的债务。清理失败时保留仅用于清理的 Worker 能力和债务；重启可从债务恢复清理能力，但不会重新注册为可访问的 Instance。
 
 活动调用会刷新租约。external-bound Context 在普通活动时可以续租同一个内部 Context；显式模式也可以通过 CLI 续租。
 
