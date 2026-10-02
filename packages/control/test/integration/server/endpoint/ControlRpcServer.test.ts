@@ -12,19 +12,23 @@ import type {
     TerminalProcessExit,
 } from "../../../../src/instance/execution/terminal/Backend.ts";
 import {
+    CONTROL_PROTOCOL_RANGE,
+    CONTROL_PROTOCOL_VERSION,
+    Endpoint,
+    LocalChannel,
+    Rpc,
+    Stream,
     asInstanceName,
     type ActiveTodoSummary,
-    ClientConnection,
     MASKED_CONFIG_TOKEN,
     createDefaultControlConfig,
     createError,
     errorCodes,
-    SocketChannel,
-    type ClientEvent,
-    type ClientStream,
-    type Destination,
+    toControlErrorBody,
+    type ControlErrorBody,
+    type ControlStreamMessage,
     type JsonValue,
-    type Peer,
+    type MessageStream,
     type ToolCallQuery,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -80,15 +84,14 @@ test("ControlSocketServer routes canonical control and instance operations over 
                 "service.hello",
                 {
                     clientKind: "tui",
-                    maxProtocolVersion: 1,
-                    minProtocolVersion: 1,
+                    protocolRange: CONTROL_PROTOCOL_RANGE,
                 },
                 "tui",
             )
         ).payload,
         {
             capabilities: ["request", "stream", "streamResume"],
-            protocolVersion: 1,
+            protocolVersion: CONTROL_PROTOCOL_VERSION,
         },
     );
     assert.equal(
@@ -99,8 +102,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
                 "service.hello",
                 {
                     clientKind: "tui",
-                    maxProtocolVersion: 2,
-                    minProtocolVersion: 2,
+                    protocolRange: { max: "2.0.0", min: "2.0.0" },
                 },
                 "tui",
             )
@@ -115,8 +117,7 @@ test("ControlSocketServer routes canonical control and instance operations over 
                 "service.hello",
                 {
                     clientKind: "web",
-                    maxProtocolVersion: 1,
-                    minProtocolVersion: 1,
+                    protocolRange: CONTROL_PROTOCOL_RANGE,
                 },
                 "web",
             )
@@ -238,19 +239,21 @@ test("ControlSocketServer routes canonical control and instance operations over 
     assert.equal(rejectedWeb.error?.code, "control.clientIdentityInvalid");
     assert.equal(harness.worker.lastToolCall?.source, "tui");
 
-    const missingDestination = await request(
-        harness.socketPath,
-        asInstanceName("missing"),
-        "runtime.snapshot",
+    await assert.rejects(
+        request(
+            harness.socketPath,
+            asInstanceName("missing"),
+            "runtime.snapshot",
+        ),
+        /No route for missing:runtime/u,
     );
-    assert.equal(missingDestination.error?.code, "control.invalidTarget");
 
     const missingOperation = await request(
         harness.socketPath,
         asInstanceName("alpha"),
         "runtime.missing",
     );
-    assert.equal(missingOperation.error?.code, "control.methodNotFound");
+    assert.equal(missingOperation.error?.code, "method_not_found");
 });
 
 test("local Control socket loads and rolls back a protected debug patch on a live worker object", async (t) => {
@@ -532,7 +535,7 @@ test("ControlSocketServer exposes server-backed Conversation preferences through
     );
 });
 
-test("ControlSocketServer rebuilds the immutable route snapshot after registry changes", async (t) => {
+test("ControlSocketServer rebuilds route bindings after registry changes", async (t) => {
     const directory = await createTestTempDirectory("route-snapshot");
     const socketPath = createTestIpcPath("control-rpc", directory);
     const registry = new InstanceRegistry([]);
@@ -550,12 +553,14 @@ test("ControlSocketServer rebuilds the immutable route snapshot after registry c
         );
     });
 
-    const before = await request(
-        socketPath,
-        asInstanceName("alpha"),
-        "runtime.snapshot",
+    await assert.rejects(
+        request(
+            socketPath,
+            asInstanceName("alpha"),
+            "runtime.snapshot",
+        ),
+        /No route for alpha:runtime/u,
     );
-    assert.equal(before.error?.code, "control.invalidTarget");
 
     registry.add(createDescriptor(new FakeWorker("alpha")));
 
@@ -587,31 +592,28 @@ test("interactive runtime receives stream input while the root handler is still 
     t.after(() => harness.cleanup());
     const client = createClient(harness.socketPath, "cli");
     await negotiateClient(client, "cli");
-    const opened = await client.openStream(
+    const stream = await client.open(
         asInstanceName("alpha"),
         "runtime",
         "start",
         {},
     );
-    const stream: ClientStream = opened.stream;
-    t.after(() => stream.close());
-    assert.equal(opened.acknowledgement.replyTo === undefined, false);
-    assert.notEqual(stream.id, opened.acknowledgement.replyTo);
+    t.after(() => void stream.close());
 
-    await stream.send("input", {
-        data: Buffer.from("hello").toString("base64"),
+    await stream.send({
+        name: "input",
+        payload: { data: Buffer.from("hello").toString("base64") },
     });
 
-    const output = await stream.nextEvent();
-    assert.equal(output.name, "runtime.output");
+    const output = await readStreamData(stream);
+    assert.equal(output.name, "output");
     assert.deepEqual(output.payload, { chunk: "echo:hello" });
 
-    const completed = await stream.nextEvent();
-    assert.equal(completed.name, "stream.completed");
-    assert.equal((completed.payload as { ready: boolean }).ready, true);
+    const completed = await stream.readMessage();
+    assert.equal(completed.type, "close");
+    assert.equal((completed.message as { ready: boolean }).ready, true);
     assert.deepEqual(
-        (completed.payload as { activeTodos?: ActiveTodoSummary[] })
-            .activeTodos,
+        (completed.message as { activeTodos?: ActiveTodoSummary[] }).activeTodos,
         activeTodos,
     );
 
@@ -663,7 +665,7 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     });
     process.emit("before-attach");
 
-    const attached = await client.openStream(
+    const attached = await client.open(
         asInstanceName("alpha"),
         "terminal",
         "attach",
@@ -673,28 +675,26 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
             terminalId: opened.terminalId,
         },
     );
-    t.after(() => attached.stream.close());
+    t.after(() => void attached.close());
+    const seed = await readStreamData(attached);
+    assert.equal(seed.name, "seed");
     assert.equal(
-        (
-            attached.acknowledgement.payload as {
-                session: { terminalId: string };
-            }
-        ).session.terminalId,
+        ((seed.payload as { session: { terminalId: string } }).session).terminalId,
         opened.terminalId,
     );
-    const replay = await attached.stream.nextEvent();
-    assert.equal(replay.name, "terminal.output");
+    const replay = await readStreamData(attached);
+    assert.equal(replay.name, "output");
     assert.deepEqual(replay.payload, { data: "before-attach", seq: 1 });
 
-    await attached.stream.send("input", {
+    await attached.send({ name: "input", payload: {
         clientSeq: 1,
         data: "printf ok\r",
         generation: opened.generation,
         terminalId: opened.terminalId,
         version: 1,
-    });
-    const inputAccepted = await attached.stream.nextEvent();
-    assert.equal(inputAccepted.name, "terminal.inputAccepted");
+    } });
+    const inputAccepted = await readStreamData(attached);
+    assert.equal(inputAccepted.name, "inputAccepted");
     assert.deepEqual(inputAccepted.payload, {
         clientSeq: 1,
         generation: opened.generation,
@@ -703,16 +703,16 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
         version: 1,
     });
 
-    await attached.stream.send("resize", {
+    await attached.send({ name: "resize", payload: {
         clientSeq: 2,
         cols: 120,
         generation: opened.generation,
         rows: 40,
         terminalId: opened.terminalId,
         version: 1,
-    });
-    const resized = await attached.stream.nextEvent();
-    assert.equal(resized.name, "terminal.resized");
+    } });
+    const resized = await readStreamData(attached);
+    assert.equal(resized.name, "resized");
     assert.deepEqual(resized.payload, {
         clientSeq: 2,
         generation: opened.generation,
@@ -724,21 +724,21 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
     assert.deepEqual(process.resizes, [{ cols: 120, rows: 40 }]);
 
     process.emit("live");
-    assert.deepEqual((await attached.stream.nextEvent()).payload, {
+    assert.deepEqual((await readStreamData(attached)).payload, {
         data: "live",
         seq: 2,
     });
-    await attached.stream.send("ack", {
+    await attached.send({ name: "ack", payload: {
         generation: opened.generation,
         terminalId: opened.terminalId,
         throughSeq: 2,
         version: 2,
-    });
-    attached.stream.close();
+    } });
+    await attached.close();
     process.emit("detached");
     assert.equal(process.killed, false);
 
-    const resumed = await client.openStream(
+    const resumed = await client.open(
         asInstanceName("alpha"),
         "terminal",
         "attach",
@@ -748,8 +748,9 @@ test("terminal RPC streams real session input, resize, detach, and sequence resu
             terminalId: opened.terminalId,
         },
     );
-    t.after(() => resumed.stream.close());
-    assert.deepEqual((await resumed.stream.nextEvent()).payload, {
+    t.after(() => void resumed.close());
+    assert.equal((await readStreamData(resumed)).name, "seed");
+    assert.deepEqual((await readStreamData(resumed)).payload, {
         data: "detached",
         seq: 3,
     });
@@ -795,7 +796,7 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
         rows: 24,
         workspace: "/tmp/ws",
     });
-    const attached = await client.openStream(
+    const attached = await client.open(
         asInstanceName("alpha"),
         "terminal",
         "attach",
@@ -805,21 +806,22 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
             terminalId: opened.terminalId,
         },
     );
+    assert.equal((await readStreamData(attached)).name, "seed");
     process.emit("12345");
     process.emit("67890");
 
-    let cancelled = false;
-    for (let index = 0; index < 4 && !cancelled; index += 1) {
-        const event = await attached.stream.nextEvent();
-        if (event.name === "stream.cancelled") {
-            cancelled = true;
-            assert.equal(event.error?.code, "stream.gap");
-        }
-    }
-    assert.equal(cancelled, true);
+    await assert.rejects(
+        async () => {
+            while (true) await attached.readMessage();
+        },
+        (error: unknown) => {
+            assert.equal((error as { code?: string }).code, "stream.gap");
+            return true;
+        },
+    );
     assert.equal(process.killed, false);
 
-    const resumed = await client.openStream(
+    const resumed = await client.open(
         asInstanceName("alpha"),
         "terminal",
         "attach",
@@ -829,11 +831,12 @@ test("terminal stream cancels a slow attachment at the unacknowledged window wit
             terminalId: opened.terminalId,
         },
     );
-    assert.deepEqual((await resumed.stream.nextEvent()).payload, {
+    assert.equal((await readStreamData(resumed)).name, "seed");
+    assert.deepEqual((await readStreamData(resumed)).payload, {
         data: "12345",
         seq: 1,
     });
-    resumed.stream.close();
+    await resumed.close();
 });
 
 test("service.shutdown replies before invoking the shutdown action", async (t) => {
@@ -911,84 +914,114 @@ function createDescriptor(
     };
 }
 
+interface TestClient {
+    close(): void;
+    open(
+        host: string,
+        port: string,
+        name: string,
+        payload?: JsonValue,
+    ): Promise<MessageStream>;
+    request<T = JsonValue>(
+        host: string,
+        port: string,
+        operation: string,
+        payload?: JsonValue,
+    ): Promise<T>;
+}
+
 function createClient(
     socketPath: string,
-    peer: Exclude<Peer, "server">,
-): ClientConnection {
-    return new ClientConnection({
-        connectChannel: (signal) =>
-            SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer,
+    _peer: "cli" | "tui" | "web",
+): TestClient {
+    const endpoint = new Endpoint({
+        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
     });
+    const protocols: Array<Rpc | Stream> = [];
+    const rpcs = new Map<string, Rpc>();
+    return {
+        close() {
+            for (const protocol of protocols) protocol.close();
+            endpoint.close();
+        },
+        async open(host, port, name, payload) {
+            const protocol = new Stream(await endpoint.connect(host, port));
+            protocols.push(protocol);
+            return await protocol.open(name, payload);
+        },
+        async request<T = JsonValue>(
+            host: string,
+            port: string,
+            operation: string,
+            payload?: JsonValue,
+        ) {
+            const key = `${host}\u0000${port}`;
+            let rpc = rpcs.get(key);
+            if (rpc === undefined) {
+                rpc = new Rpc(await endpoint.connect(host, port));
+                rpcs.set(key, rpc);
+                protocols.push(rpc);
+            }
+            return (await rpc.request(operation, payload)) as T;
+        },
+    };
 }
 
 async function negotiateClient(
-    connection: ClientConnection,
-    peer: Exclude<Peer, "server">,
+    connection: TestClient,
+    peer: "cli" | "tui" | "web",
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
         clientKind: peer,
-        maxProtocolVersion: 1,
-        minProtocolVersion: 1,
+        protocolRange: CONTROL_PROTOCOL_RANGE,
     });
 }
 
 function readToolCallId(value: JsonValue): string {
-    if (value === null || Array.isArray(value) || typeof value !== "object") {
+    if (value === null || Array.isArray(value) || typeof value !== "object")
         throw new Error("tool.listCalls returned a non-object record");
-    }
-    if (typeof value.callId !== "string") {
+    if (typeof value.callId !== "string")
         throw new Error("tool.listCalls returned a record without callId");
-    }
     return value.callId;
+}
+
+interface RequestResult {
+    error?: ControlErrorBody;
+    payload?: JsonValue;
 }
 
 async function request(
     socketPath: string,
-    destination: Destination,
+    destination: string,
     name: string,
     payload?: JsonValue,
-    peer: Exclude<Peer, "server"> = "cli",
-): Promise<ClientEvent> {
-    const [module, operation] = name.split(".");
+    peer: "cli" | "tui" | "web" = "cli",
+): Promise<RequestResult> {
+    const [port, operation] = name.split(".");
     const connection = createClient(socketPath, peer);
-    if (name === "service.hello") {
-        try {
-            return await connection.requestEvent(
+    try {
+        if (name !== "service.hello") await negotiateClient(connection, peer);
+        return {
+            payload: (await connection.request(
                 destination,
-                module!,
+                port!,
                 operation!,
                 payload,
-            );
-        } finally {
-            connection.close();
-        }
-    }
-    try {
-        const hello = await connection.requestEvent(
-            "@control",
-            "service",
-            "hello",
-            {
-                clientKind: peer,
-                maxProtocolVersion: 1,
-                minProtocolVersion: 1,
-            },
-        );
-        if (hello.error !== undefined) return hello;
-        return await connection.requestEvent(
-            destination,
-            module!,
-            operation!,
-            payload,
-        );
+            )) as JsonValue,
+        };
+    } catch (error) {
+        const body = toControlErrorBody(error);
+        if (body === undefined || body.code === "error.unknown") throw error;
+        return { error: body };
     } finally {
         connection.close();
     }
+}
+
+async function readStreamData(stream: MessageStream): Promise<ControlStreamMessage> {
+    const next = await stream.readMessage();
+    assert.equal(next.type, "data");
+    return next.message as ControlStreamMessage;
 }
 
 class FakeTerminalProcess implements TerminalProcess {

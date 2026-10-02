@@ -3,11 +3,10 @@ import test from "node:test";
 
 import {
     InstanceStateMachine,
-    WORKER_LEGACY_PROTOCOL_VERSION,
     WorkerInstance,
     WORKER_PROTOCOL_VERSION,
 } from "@portable-devshell/core/testing";
-import { asInstanceName, createError } from "@portable-devshell/shared";
+import { Endpoint, asInstanceName, createError } from "@portable-devshell/shared";
 
 test("WorkerInstance wraps start stop and status command failures with diagnostic details", async () => {
     const startFailure = createInstance({
@@ -179,6 +178,14 @@ function createInstance(
         }>;
     }>,
 ): WorkerInstance {
+    const boundEndpoint = new Endpoint();
+    const endpoint = {
+        bind: boundEndpoint.bind.bind(boundEndpoint),
+        connected: true,
+        disconnect() {},
+        onTransportClose: () => () => undefined,
+        reconnect: async () => undefined,
+    };
     return new WorkerInstance({
         approvalManager: {
             decideApproval: async () => {
@@ -225,8 +232,6 @@ function createInstance(
             handshake: {
                 clientName: "portable-devshell",
                 clientVersion: "0.1.0",
-                maxProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
-                minProtocolVersion: WORKER_LEGACY_PROTOCOL_VERSION,
                 protocolRange: {
                     min: WORKER_PROTOCOL_VERSION,
                     max: WORKER_PROTOCOL_VERSION,
@@ -251,12 +256,7 @@ function createInstance(
             listTools: commands.listTools ?? (async () => ({ tools: [] })),
             ping: async () => ({ pong: true }),
         } as never,
-        rpcBridge: {
-            close: () => undefined,
-            connect: async () => undefined,
-            onDisconnect: () => () => undefined,
-            onNotification: () => () => undefined,
-        } as never,
+        endpoint: endpoint as never,
         stateMachine: new InstanceStateMachine(asInstanceName("demo-local")),
         terminalClient: {} as never,
         transportConnection: {

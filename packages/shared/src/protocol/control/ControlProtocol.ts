@@ -3,11 +3,6 @@ export const CONTROL_PROTOCOL_RANGE = Object.freeze({
     max: CONTROL_PROTOCOL_VERSION,
     min: CONTROL_PROTOCOL_VERSION,
 });
-/**
- * @compat control-protocol-v1-integer
- * @removeAt 0.7.10
- */
-export const CONTROL_PROTOCOL_LEGACY_VERSION = 1;
 export const CONTROL_WEB_BASE_PATH = "/web";
 export const CONTROL_WEB_RPC_PATH = "/web/rpc";
 export const CONTROL_REMOTE_RPC_PATH = "/control/v1/connect";
@@ -40,20 +35,14 @@ export interface ControlProtocolRange {
     min: string;
 }
 
-export type ControlProtocolHelloRequest =
-    | {
-          clientKind: ControlClientKind;
-          clientVersion?: string;
-          protocolRange: ControlProtocolRange;
-      }
-    | {
-          clientKind: ControlClientKind;
-          clientVersion?: string;
-          maxProtocolVersion: number;
-          minProtocolVersion: number;
-      };
+export interface ControlProtocolHelloRequest {
+    clientKind: ControlClientKind;
+    clientVersion?: string;
+    protocolRange: ControlProtocolRange;
+}
+
 
 export interface ControlProtocolHelloResponse {
     capabilities: ControlProtocolCapability[];
-    protocolVersion: number | string;
+    protocolVersion: string;
 }

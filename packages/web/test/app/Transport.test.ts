@@ -2,26 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import {
     CONTROL_PROTOCOL_VERSION,
-    WebSocketChannel,
+    Endpoint,
+    Rpc,
+    WebChannel,
     type Channel,
     type WebSocketClientLike,
 } from "@portable-devshell/shared/browser";
-import {
-    encodePacket,
-    PacketBuffer,
-} from "@portable-devshell/shared/transport/frame";
 
 import {
-    connectBrowserWebSocketChannel,
+    connectBrowserWebChannel,
     rpcUrl,
 } from "../../src/app/transport/Socket.js";
 import { webRoutePath } from "../../src/app/transport/Route.js";
 import { createWebClients } from "../../src/app/transport/Client.js";
 
-describe("WebSocketChannel", () => {
+describe("WebChannel", () => {
     it("writes raw binary data and notifies close once", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(
+        const channel = new WebChannel(
             socket as unknown as WebSocketClientLike,
         );
         let closeCount = 0;
@@ -43,7 +41,7 @@ describe("WebSocketChannel", () => {
 
     it("delivers ordered ArrayBuffer and Blob messages as raw data chunks", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(
+        const channel = new WebChannel(
             socket as unknown as WebSocketClientLike,
         );
         socket.open();
@@ -71,7 +69,7 @@ describe("WebSocketChannel", () => {
 
     it("closes when an open send throws", async () => {
         const socket = new FakeSocket();
-        const channel = new WebSocketChannel(
+        const channel = new WebChannel(
             socket as unknown as WebSocketClientLike,
         );
         socket.open();
@@ -112,7 +110,7 @@ describe("WebSocketChannel", () => {
         let factoryCalls = 0;
 
         await expect(
-            connectBrowserWebSocketChannel(
+            connectBrowserWebChannel(
                 controller.signal,
                 "ws://controller.test/web/rpc",
                 () => {
@@ -128,7 +126,7 @@ describe("WebSocketChannel", () => {
         const socket = new FakeSocket();
         const controller = new AbortController();
         const reason = new Error("connect cancelled");
-        const connecting = connectBrowserWebSocketChannel(
+        const connecting = connectBrowserWebChannel(
             controller.signal,
             "ws://controller.test/web/rpc",
             () => socket as unknown as WebSocket,
@@ -218,64 +216,75 @@ class DeferredBlob extends Blob {
 
 describe("web client transport", () => {
     it("reports an unexpected persistent transport close", async () => {
-        const channel = new ReplyChannel();
-        const clients = createWebClients(async () => channel);
-        const failures: string[] = [];
-        clients.onTransportClose((error) => failures.push(error.message));
+        const clientChannel = new MemoryChannel();
+        const serverChannel = new MemoryChannel();
+        clientChannel.connect(serverChannel);
+        serverChannel.connect(clientChannel);
+        const server = new Endpoint({ host: "control" });
+        const accepting = server.accept(serverChannel);
+        const service = new Rpc(server.bind("service", "@control"), {
+            hello: () => ({
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
+            }),
+        });
+        const clients = createWebClients(async () => clientChannel);
+        const closed = new Promise<string>((resolve) =>
+            clients.onTransportClose((error) =>
+                resolve(error?.message ?? "closed"),
+            ),
+        );
         await clients.service.hello();
+        await accepting;
 
-        channel.close(new Error("transport lost"));
+        serverChannel.close(new Error("transport lost"));
 
-        expect(failures).toEqual(["transport lost"]);
+        expect(await closed).toBe("transport lost");
+        service.close();
+        server.close();
     });
 });
 
-class ReplyChannel implements Channel {
+class MemoryChannel implements Channel {
     closed = false;
-    private readonly dataListeners = new Set<(data: Uint8Array) => void>();
-    private readonly packets = new PacketBuffer();
-    private readonly closes = new Set<(error?: Error) => void>();
+    readonly #data = new Set<(data: Uint8Array) => void>();
+    readonly #close = new Set<(error?: Error) => void>();
+    #peer?: MemoryChannel;
+
+    connect(peer: MemoryChannel): void {
+        this.#peer = peer;
+    }
 
     async write(data: Uint8Array): Promise<void> {
-        for (const packet of this.packets.push(data)) {
-            const request = JSON.parse(new TextDecoder().decode(packet)) as {
-                destination: string;
-                id: string;
-                name: string;
-            };
-            const reply = {
-                destination: request.destination,
-                from: "server",
-                id: `reply-${request.id}`,
-                name: request.name,
-                payload: {
-                    capabilities: ["request", "stream", "streamResume"],
-                    protocolVersion: CONTROL_PROTOCOL_VERSION,
-                },
-                replyTo: request.id,
-                to: "web",
-            };
-            queueMicrotask(() => {
-                const encoded = encodePacket(
-                    new TextEncoder().encode(JSON.stringify(reply)),
-                );
-                for (const listener of this.dataListeners) listener(encoded);
-            });
-        }
+        if (this.closed) throw new Error("channel closed");
+        const peer = this.#peer;
+        if (peer === undefined || peer.closed) throw new Error("peer closed");
+        const copy = Uint8Array.from(data);
+        queueMicrotask(() => {
+            for (const listener of peer.#data) listener(copy);
+        });
     }
 
     onData(listener: (data: Uint8Array) => void): () => void {
-        this.dataListeners.add(listener);
-        return () => this.dataListeners.delete(listener);
+        this.#data.add(listener);
+        return () => this.#data.delete(listener);
     }
 
     onClose(listener: (error?: Error) => void): () => void {
-        this.closes.add(listener);
-        return () => this.closes.delete(listener);
+        this.#close.add(listener);
+        return () => this.#close.delete(listener);
     }
 
     close(error?: Error): void {
+        if (this.closed) return;
         this.closed = true;
-        for (const listener of this.closes) listener(error);
+        for (const listener of this.#close) listener(error);
+        const peer = this.#peer;
+        if (peer !== undefined && !peer.closed) {
+            peer.closed = true;
+            queueMicrotask(() => {
+                for (const listener of peer.#close) listener(error);
+            });
+        }
     }
 }

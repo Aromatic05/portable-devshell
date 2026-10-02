@@ -8,14 +8,14 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-    ClientConnection,
-    Codec,
-    createError,
+    CONTROL_PROTOCOL_RANGE,
+    CONTROL_PROTOCOL_VERSION,
+    Endpoint,
+    LocalChannel,
+    Rpc,
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
-    SocketChannel,
-    type Event,
     type InstanceListEntry,
     type JsonValue,
 } from "@portable-devshell/shared";
@@ -664,42 +664,24 @@ test("stop tolerates shutdown socket races in the real lifecycle rpc client", as
             return;
         }
 
-        const channel = SocketChannel.accept(socket);
-        const codec = new Codec(channel, { local: "server" });
-        codec.onEvent((event) => {
-            if (event.name === "service.hello") {
-                void codec
-                    .send({
-                        id: `reply-${event.id}`,
-                        replyTo: event.id,
-                        destination: "@control",
-                        name: "service.hello",
-                        payload: {
-                            capabilities: ["request", "stream", "streamResume"],
-                            protocolVersion: 1,
-                        },
-                    })
-                    .catch(() => undefined);
-                return;
-            }
-            if (event.name === "service.status") {
-                void codec
-                    .send({
-                        id: `reply-${event.id}`,
-                        replyTo: event.id,
-                        destination: "@control",
-                        name: "service.status",
-                        payload: { instanceCount: 1 },
-                    })
-                    .catch(() => undefined);
-                return;
-            }
-
-            if (event.name === "service.shutdown") {
+        const endpoint = new Endpoint();
+        const rpc = new Rpc(endpoint.bind("service", "@control"), {
+            hello: () => ({
+                capabilities: ["request", "stream", "streamResume"],
+                protocolVersion: CONTROL_PROTOCOL_VERSION,
+            }),
+            status: () => ({ instanceCount: 1 }),
+            shutdown: () => {
                 shutdownRequested = true;
                 socket.destroy();
-            }
+                return { stopping: true };
+            },
         });
+        socket.once("close", () => {
+            rpc.close();
+            endpoint.close();
+        });
+        void endpoint.accept(LocalChannel.accept(socket)).catch(() => undefined);
     });
 
     await mkdir(runtimeRoot, { recursive: true });
@@ -908,32 +890,27 @@ function isProcessRunning(pid: number): boolean {
 
 async function request(
     socketPath: string,
-    operation: Event["name"],
+    operation: string,
     params?: JsonValue,
 ): Promise<InstanceListEntry[]> {
-    const [module, method] = operation.split(".");
-    const client = new ClientConnection({
-        connectChannel: (signal) =>
-            SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "cli",
+    const [port, method] = operation.split(".");
+    const endpoint = new Endpoint({
+        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
     });
     try {
-        await client.request("@control", "service", "hello", {
+        const service = new Rpc(await endpoint.connect("@control", "service"));
+        await service.request("hello", {
             clientKind: "cli",
-            maxProtocolVersion: 1,
-            minProtocolVersion: 1,
+            protocolRange: CONTROL_PROTOCOL_RANGE,
         });
-        return await client.request<InstanceListEntry[]>(
-            "@control",
-            module!,
-            method!,
-            params,
-        );
+        service.close();
+        const rpc = new Rpc(await endpoint.connect("@control", port!));
+        try {
+            return (await rpc.request(method!, params)) as InstanceListEntry[];
+        } finally {
+            rpc.close();
+        }
     } finally {
-        client.close();
+        endpoint.close();
     }
 }

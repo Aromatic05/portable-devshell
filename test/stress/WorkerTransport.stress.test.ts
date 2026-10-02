@@ -11,8 +11,7 @@ import {
     WorkerTransportDriverLocal,
     WorkerTransportServiceClient,
 } from "@portable-devshell/core/testing";
-import { asInstanceName } from "@portable-devshell/shared";
-import type { FrameStream } from "@portable-devshell/shared/transport/frame";
+import { Endpoint, asInstanceName, type MessageStream } from "@portable-devshell/shared";
 
 import { resolveTestWorkerBinary } from "../TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../TestTempDirectory.ts";
@@ -31,7 +30,7 @@ function digest(data: Uint8Array): string {
     return createHash("sha256").update(data).digest("hex");
 }
 
-async function echoRoundTrip(stream: FrameStream, data: Uint8Array): Promise<void> {
+async function echoRoundTrip(stream: MessageStream, data: Uint8Array): Promise<void> {
     const writing = stream.write(data).then(async () => await stream.finish());
     const hash = createHash("sha256");
     let bytes = 0;
@@ -62,10 +61,18 @@ test("stress: real Rust Worker keeps multiplexed TCP and process streams stable"
     });
     const options = { env, instanceName };
     const connection = WorkerTransportConnection.fromTransport(transport, options);
-    const services = new WorkerTransportServiceClient(connection);
+    const endpoint = new Endpoint({
+        host: instanceName,
+        connectChannel: (signal) => connection.connect(signal),
+    });
+    const services = new WorkerTransportServiceClient(
+        endpoint,
+        `${instanceName}-worker`,
+    );
     const echoServer = createServer((socket) => socket.pipe(socket));
 
     t.after(async () => {
+        endpoint.close();
         connection.close();
         await new Promise<void>((resolve) => echoServer.close(() => resolve()));
         await transport.runWorkerCommand("stop", options).catch(() => undefined);
@@ -111,7 +118,7 @@ test("stress: real Rust Worker keeps multiplexed TCP and process streams stable"
     await echoRoundTrip(finalStream, new TextEncoder().encode("still-alive"));
 });
 
-test("stress: real Artifact Frame services round-trip 32 MiB without breaking RPC", async (t) => {
+test("stress: real Artifact RPC chunks round-trip 32 MiB without breaking RPC", async (t) => {
     assert.ok(workerBinaryPath, "stress runner must build a real devshell-worker");
     const workspace = await createTestTempDirectory("artifact-stress-workspace");
     const homeDirectory = await createTestTempDirectory("artifact-stress-home");

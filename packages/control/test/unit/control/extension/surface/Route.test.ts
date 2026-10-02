@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type {
     ExtensionRuntimeRecord,
-    PrefixRouteContext,
+    ControlPortContext,
 } from "@portable-devshell/shared";
 import { asInstanceName } from "@portable-devshell/shared";
 import { routes, type ControlRouteBinding } from "@portable-devshell/extension/control";
@@ -17,14 +17,16 @@ import {
 function context(
     peer: "cli" | "tui" | "web",
     subjectKind: string,
-): PrefixRouteContext {
+): ControlPortContext {
     return {
         connectionId: "conn-1",
+        host: "@control",
         peer,
         requestId: "req-1",
         signal: new AbortController().signal,
+        afterReply() {},
         subject: { id: "subject-1", kind: subjectKind },
-    } as PrefixRouteContext;
+    } as ControlPortContext;
 }
 
 function record(enabled = true): ExtensionRuntimeRecord {
@@ -275,8 +277,7 @@ test("Extension route contributions preserve scope, request context, and generat
             { id: "wire-1", name: "list", payload: { ctxId: "ctx-1" } },
             {
                 ...context("web", "web-session"),
-                destination: asInstanceName("demo"),
-                module: "contextMessage",
+                host: asInstanceName("demo"),
                 protocolVersion: "1.0.0",
             },
         ),

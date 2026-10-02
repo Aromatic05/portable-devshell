@@ -22,24 +22,10 @@ import {
     WorkerBinary,
     WorkerTransportConnection,
     WorkerTransportServiceClient,
-    decodeWorkerRpcMessage,
-    encodeWorkerRpcMessage,
     getWorkerTargetByKey,
     probeLocalWorkerTarget,
 } from "@portable-devshell/core/testing";
-import {
-    createError,
-    errorCodes,
-    StreamChannel,
-    type Channel,
-} from "@portable-devshell/shared";
-import {
-    FrameProtocol,
-    type FrameStream,
-    PacketBuffer,
-    encodePacket,
-    frameResetCodes,
-} from "@portable-devshell/shared/transport/frame";
+import { Endpoint, Rpc, createError, errorCodes } from "@portable-devshell/shared";
 import {
     realWorkerTestOptions,
     resolveTestWorkerBinary,
@@ -50,163 +36,6 @@ const workerBinaryPath = resolveTestWorkerBinary();
 
 const shellEscape = (value: string): string =>
     `'${value.replaceAll("'", `'\\''`)}'`;
-
-test("transport connection multiplexes Service streams over one physical Channel", async () => {
-    const pair = createFrameChannelPair();
-    let connects = 0;
-    const connection = new WorkerTransportConnection(async () => {
-        connects += 1;
-        return pair.controller;
-    });
-
-    const rpcPromise = connection.openService("worker.rpc");
-    await acceptFrameNegotiation(pair.worker);
-    const rpcOpen = acceptService(pair.worker, "worker.rpc");
-    const rpc = await rpcPromise;
-    const workerRpc = await rpcOpen;
-
-    const processOpen = acceptService(pair.worker, "process.exec");
-    const processService = await connection.openService("process.exec");
-    const workerProcess = await processOpen;
-
-    assert.equal(connects, 1);
-    await rpc.write(Buffer.from("rpc"));
-    assert.equal(Buffer.from((await workerRpc.read()) ?? []).toString(), "rpc");
-
-    rpc.close();
-    assert.equal(pair.controller.closed, false);
-    await processService.write(Buffer.from("process"));
-    assert.equal(
-        Buffer.from((await workerProcess.read()) ?? []).toString(),
-        "process",
-    );
-
-    connection.close();
-    assert.equal(pair.controller.closed, true);
-    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
-    assert.equal(processService.closed, true);
-});
-
-test("transport connection falls back only when a legacy peer does not support Frame negotiation", async () => {
-    const pair = createFrameChannelPair();
-    const connection = new WorkerTransportConnection(async () => pair.controller);
-
-    const rpcPromise = connection.openService("worker.rpc");
-    const negotiation = await pair.worker.nextOpen();
-    assert.ok(negotiation);
-    assert.equal(negotiation.service, "frame.negotiate");
-    await negotiation.reset(
-        frameResetCodes.unsupportedService,
-        "Unsupported transport Service frame.negotiate.",
-    );
-
-    const rpcOpen = acceptService(pair.worker, "worker.rpc");
-    const rpc = await rpcPromise;
-    const workerRpc = await rpcOpen;
-    await rpc.write(Buffer.from("legacy"));
-    assert.equal(
-        Buffer.from((await workerRpc.read()) ?? []).toString(),
-        "legacy",
-    );
-
-    connection.close();
-});
-
-test("transport service client maps typed tcp and exec inputs onto Frame Service metadata", async () => {
-    const pair = createFrameChannelPair();
-    const connection = new WorkerTransportConnection(async () => pair.controller);
-    const services = new WorkerTransportServiceClient(connection);
-
-    const tcpPromise = services.connectTcp({ host: "127.0.0.1", port: 8080 });
-    await acceptFrameNegotiation(pair.worker);
-    const tcp = await tcpPromise;
-    const tcpOpen = await pair.worker.nextOpen();
-    assert.ok(tcpOpen);
-    assert.equal(tcpOpen.service, "network.tcp");
-    assert.deepEqual(
-        JSON.parse(Buffer.from(tcpOpen.metadata).toString("utf8")),
-        { host: "127.0.0.1", port: 8080 },
-    );
-    await tcpOpen.accept();
-    await tcp.reset(frameResetCodes.cancelled, "test complete");
-
-    const processStream = await services.execProcess({
-        executable: "/usr/bin/example",
-        args: ["--flag", "value"],
-        cwd: "/workspace",
-    });
-    const processOpen = await pair.worker.nextOpen();
-    assert.ok(processOpen);
-    assert.equal(processOpen.service, "process.exec");
-    assert.deepEqual(
-        JSON.parse(Buffer.from(processOpen.metadata).toString("utf8")),
-        {
-            args: ["--flag", "value"],
-            cwd: "/workspace",
-            executable: "/usr/bin/example",
-        },
-    );
-    await processOpen.accept();
-    await processStream.reset(frameResetCodes.cancelled, "test complete");
-    connection.close();
-});
-
-function createFrameChannelPair(): {
-    controller: Channel;
-    worker: FrameProtocol;
-} {
-    const controllerToWorker = new PassThrough();
-    const workerToController = new PassThrough();
-    const pair: {
-        controller?: StreamChannel;
-        worker?: StreamChannel;
-        closed: boolean;
-    } = { closed: false };
-    const closePair = (error?: Error) => {
-        if (pair.closed) return;
-        pair.closed = true;
-        pair.controller?.close(error);
-        pair.worker?.close(error);
-    };
-    const controller = new StreamChannel(workerToController, controllerToWorker, {
-        closeTransport: closePair,
-    });
-    const workerChannel = new StreamChannel(
-        controllerToWorker,
-        workerToController,
-        { closeTransport: closePair },
-    );
-    pair.controller = controller;
-    pair.worker = workerChannel;
-    return {
-        controller,
-        worker: new FrameProtocol(workerChannel, { role: "acceptor" }),
-    };
-}
-
-async function acceptService(
-    protocol: FrameProtocol,
-    service: string,
-): Promise<FrameStream> {
-    const open = await protocol.nextOpen();
-    assert.notEqual(open, undefined);
-    assert.equal(open!.service, service);
-    assert.equal(open!.metadata.byteLength, 0);
-    return await open!.accept();
-}
-
-async function acceptFrameNegotiation(protocol: FrameProtocol): Promise<void> {
-    const open = await protocol.nextOpen();
-    assert.ok(open);
-    assert.equal(open.service, "frame.negotiate");
-    assert.deepEqual(JSON.parse(Buffer.from(open.metadata).toString("utf8")), {
-        max: "1.0.0",
-        min: "1.0.0",
-    });
-    const stream = await open.accept();
-    await stream.write(Buffer.from("1.0.0"));
-    await stream.finish();
-}
 
 function sanitizedWorkerEnv(): NodeJS.ProcessEnv {
     const env = { ...process.env };
@@ -262,7 +91,7 @@ test("local transport builds start command and transport channel", async () => {
 });
 
 test(
-    "local transport carries tcp and process services over the real Frame channel",
+    "local transport carries tcp and process streams over the Worker Endpoint",
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         assert.ok(workerBinaryPath);
@@ -305,8 +134,16 @@ test(
             env,
             instanceName,
         });
-        const services = new WorkerTransportServiceClient(connection);
+        const endpoint = new Endpoint({
+            host: instanceName,
+            connectChannel: (signal) => connection.connect(signal),
+        });
+        const services = new WorkerTransportServiceClient(
+            endpoint,
+            `${instanceName}-worker`,
+        );
         t.after(async () => {
+            endpoint.close();
             connection.close();
             await transport.runWorkerCommand("stop", { env, instanceName });
             await rm(homeDirectory, { force: true, recursive: true });
@@ -338,9 +175,7 @@ test(
             executable: process.execPath,
             args: ["-e", "setInterval(() => {}, 1000)"],
         });
-        const stalledWrite = assert.rejects(
-            stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61)),
-        );
+        await stalled.write(Buffer.alloc(2 * 1024 * 1024, 0x61));
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
 
         const responsive = await services.execProcess({
@@ -355,8 +190,7 @@ test(
         );
         assert.equal(await responsive.read(), undefined);
 
-        await stalled.reset(frameResetCodes.cancelled, "test complete");
-        await stalledWrite;
+        await stalled.cancel({ message: "test complete" });
     },
 );
 
@@ -2551,7 +2385,7 @@ test("podman transport rejects already running existing stopped containers", asy
 });
 
 test(
-    "local transport executes frozen devshell-worker lifecycle and Frame services",
+    "local transport executes frozen devshell-worker lifecycle and Endpoint RPC",
     realWorkerTestOptions(workerBinaryPath),
     async (t) => {
         const homeDirectory = await createTestTempDirectory("core-home");
@@ -2596,37 +2430,21 @@ test(
         });
         assert.equal(logsResult.exitCode, 0);
 
-        const transportChannel = await transport.connectWorkerChannel({
+        const connection = WorkerTransportConnection.fromTransport(transport, {
             env,
             instanceName,
         });
-        const frameProtocol = new FrameProtocol(transportChannel, {
-            role: "opener",
+        const endpoint = new Endpoint({
+            host: instanceName,
+            connectChannel: (signal) => connection.connect(signal),
         });
-        const rpcStream = await frameProtocol.open("worker.rpc");
-        const rpcPackets = new PacketBuffer();
-        await rpcStream.write(
-            encodePacket(
-                encodeWorkerRpcMessage({
-                    type: "request",
-                    id: "frame-rpc-ping",
-                    method: "worker.ping",
-                    params: {},
-                }),
-            ),
+        const rpc = new Rpc(
+            await endpoint.connect(`${instanceName}-worker`, "core"),
         );
-        const rpcChunk = await rpcStream.read();
-        assert.notEqual(rpcChunk, undefined);
-        const responses = rpcPackets.push(rpcChunk!);
-        assert.equal(responses.length, 1);
-        assert.deepEqual(decodeWorkerRpcMessage(responses[0]!), {
-            type: "response",
-            id: "frame-rpc-ping",
-            ok: true,
-            result: { pong: true },
-        });
-        await rpcStream.reset(frameResetCodes.cancelled, "test complete");
-        frameProtocol.close();
+        assert.deepEqual(await rpc.request("worker.ping", {}), { pong: true });
+        rpc.close();
+        endpoint.close();
+        connection.close();
 
         const stopResult = await transport.runWorkerCommand("stop", {
             env,

@@ -45,10 +45,22 @@ export class Rpc {
         handlers: Readonly<Record<string, RpcHandler>> = {},
     ) {
         this.#target = target;
-        this.#unsubscribe =
-            target instanceof Connection
-                ? target.onPacket((packet) => this.#accept(packet, target.remote))
-                : target.onPacket((packet, peer) => this.#accept(packet, peer));
+        if (target instanceof Connection) {
+            const offPacket = target.onPacket((packet) =>
+                this.#accept(packet, target.remote),
+            );
+            const offClose = target.onClose((error) =>
+                this.#disconnect(error),
+            );
+            this.#unsubscribe = () => {
+                offPacket();
+                offClose();
+            };
+        } else {
+            this.#unsubscribe = target.onPacket((packet, peer) =>
+                this.#accept(packet, peer),
+            );
+        }
         for (const [method, handler] of Object.entries(handlers))
             this.handle(method, handler);
     }
@@ -73,36 +85,69 @@ export class Rpc {
         const response = new Promise<Message | undefined>((resolve, reject) =>
             this.#pending.set(id, { peer: connection.remote, reject, resolve }),
         );
+        let rejectCancellation: ((reason?: unknown) => void) | undefined;
+        const cancellation =
+            signal === undefined
+                ? undefined
+                : new Promise<never>((_resolve, reject) => {
+                      rejectCancellation = reject;
+                  });
         const abort = () => {
             const pending = this.#pending.get(id);
             if (pending === undefined) return;
             this.#pending.delete(id);
-            pending.reject(signal!.reason);
-            void connection.send({ protocol: "rpc", type: "cancel", id });
+            const reason = signal!.reason;
+            if (!connection.connected) {
+                rejectCancellation!(reason);
+                return;
+            }
+            connection
+                .send({ protocol: "rpc", type: "cancel", id })
+                .then(
+                    () => rejectCancellation!(reason),
+                    (error) =>
+                        rejectCancellation!(
+                            connection.connected ? error : reason,
+                        ),
+                );
         };
         signal?.addEventListener("abort", abort, { once: true });
         try {
-            await connection.send({
-                protocol: "rpc",
-                type: "request",
-                id,
-                method,
-                ...(message === undefined ? {} : { message }),
-            } satisfies RpcPacket);
-            return (await response) as T;
+            const outcome =
+                cancellation === undefined
+                    ? response
+                    : Promise.race([response, cancellation]);
+            const [, value] = await Promise.all([
+                connection.send({
+                    protocol: "rpc",
+                    type: "request",
+                    id,
+                    method,
+                    ...(message === undefined ? {} : { message }),
+                } satisfies RpcPacket),
+                outcome,
+            ]);
+            return value as T;
         } finally {
+            this.#pending.delete(id);
             signal?.removeEventListener("abort", abort);
         }
     }
 
     close(): void {
         this.#unsubscribe();
-        for (const controller of this.#active.values()) controller.abort();
+        this.#disconnect(new Error("RPC closed."));
+        this.#handlers.clear();
+    }
+
+    #disconnect(error?: Error): void {
+        const failure = error ?? new Error("RPC connection closed.");
+        for (const controller of this.#active.values())
+            controller.abort(failure);
         for (const pending of this.#pending.values())
-            pending.reject(new Error("RPC closed."));
+            pending.reject(failure);
         this.#active.clear();
         this.#pending.clear();
-        this.#handlers.clear();
     }
 
     async #accept(value: unknown, peer: Address): Promise<void> {
@@ -138,27 +183,42 @@ export class Rpc {
                 : this.#target.connect(peer.host, peer.port);
         const handler = this.#handlers.get(packet.method);
         if (handler === undefined) {
-            await connection.send({
-                protocol: "rpc",
-                type: "error",
-                id: packet.id,
-                error: {
-                    code: "method_not_found",
-                    message: `RPC method ${packet.method} was not found.`,
-                },
-            } satisfies RpcPacket);
+            if (connection.connected)
+                await connection.send({
+                    protocol: "rpc",
+                    type: "error",
+                    id: packet.id,
+                    error: {
+                        code: "method_not_found",
+                        message:
+                            "RPC method " + packet.method + " was not found.",
+                    },
+                } satisfies RpcPacket);
             return;
         }
         const controller = new AbortController();
         const afterReply: Array<() => Promise<void> | void> = [];
         this.#active.set(packet.id, controller);
         try {
-            const message = await handler(packet.message, {
-                afterReply: (action) => afterReply.push(action),
-                peer,
-                requestId: packet.id,
-                signal: controller.signal,
-            });
+            let message: Message | undefined;
+            try {
+                message = await handler(packet.message, {
+                    afterReply: (action) => afterReply.push(action),
+                    peer,
+                    requestId: packet.id,
+                    signal: controller.signal,
+                });
+            } catch (error) {
+                if (connection.connected)
+                    await connection.send({
+                        protocol: "rpc",
+                        type: "error",
+                        id: packet.id,
+                        error: fromError(error),
+                    } satisfies RpcPacket);
+                return;
+            }
+            if (!connection.connected) return;
             await connection.send({
                 protocol: "rpc",
                 type: "reply",
@@ -166,13 +226,6 @@ export class Rpc {
                 ...(message === undefined ? {} : { message }),
             } satisfies RpcPacket);
             for (const action of afterReply) queueMicrotask(() => void action());
-        } catch (error) {
-            await connection.send({
-                protocol: "rpc",
-                type: "error",
-                id: packet.id,
-                error: fromError(error),
-            } satisfies RpcPacket);
         } finally {
             this.#active.delete(packet.id);
         }

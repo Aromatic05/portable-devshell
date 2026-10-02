@@ -292,7 +292,7 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         );
 
         worker.setHomeDirectory("/home/reconnected-alpha");
-        worker.emit("worker.rpcConnected");
+        worker.emit("worker.transportConnected");
 
         await waitFor(
             () =>
@@ -820,30 +820,28 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         let oauthApprovalReads = 0;
         let restartCount = 0;
         const routes = new ControlRouteComposition({
-            extensionRoutes:
-                options.conversationEntries === undefined
-                    ? undefined
-                    : {
-                          modules(scope) {
-                              return scope === "control"
-                                  ? []
-                                  : [
-                                        {
-                                            name: "conversation",
-                                            operations: [
-                                                {
-                                                    name: "list",
-                                                    handle: async () =>
-                                                        options.conversationEntries!() as unknown as JsonValue,
-                                                },
-                                            ],
-                                        },
-                                    ];
-                          },
-                          onChange() {
-                              return () => undefined;
-                          },
-                      },
+            extensionRoutes: {
+                modules(scope) {
+                    return scope === "control"
+                        ? []
+                        : [
+                              {
+                                  name: "conversation",
+                                  operations: [
+                                      {
+                                          name: "list",
+                                          handle: async () =>
+                                              (options.conversationEntries?.() ??
+                                                  []) as unknown as JsonValue,
+                                      },
+                                  ],
+                              },
+                          ];
+                },
+                onChange() {
+                    return () => undefined;
+                },
+            },
             artifact: {
                 listShares() {
                     return [];
@@ -883,6 +881,14 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 },
             } as never,
             instances,
+            tuiPages: {
+                async invoke() {
+                    return { items: [], title: "" };
+                },
+                list() {
+                    return [];
+                },
+            } as never,
             mcpStatus: () => ({
                 running: false,
                 reason: "MCP runtime is disabled.",

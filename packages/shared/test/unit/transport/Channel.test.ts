@@ -139,6 +139,33 @@ test("LocalChannel treats EOF as a normal close regardless of byte content", asy
     assert.equal(await closed, undefined);
 });
 
+test("LocalChannel flushes a completed write before normal close", async (t) => {
+    const listening = await listen();
+    const accepted = onceConnection(listening.server).then((socket) =>
+        LocalChannel.accept(socket),
+    );
+    const client = await LocalChannel.connect(listening.socketPath);
+    const service = await accepted;
+    t.after(async () => {
+        client.close();
+        service.close();
+        await closeListeningSocket(listening);
+    });
+
+    const received = new Promise<string>((resolve) => {
+        let value = "";
+        service.onData((data) => {
+            value += Buffer.from(data).toString("utf8");
+        });
+        service.onClose(() => resolve(value));
+    });
+
+    await client.write(Buffer.from("reply"));
+    client.close();
+
+    assert.equal(await received, "reply");
+});
+
 test("LocalChannel serializes concurrent writes and rejects writes after close", async (t) => {
     const listening = await listen();
     const accepted = onceConnection(listening.server).then((socket) =>
@@ -192,10 +219,13 @@ test("LocalChannel isolates late close listener failures", async (t) => {
         client.onClose(() => {
             throw new Error("late close listener failed");
         });
-        client.onClose(() => {
-            notified += 1;
-        });
-        await new Promise((resolve) => setImmediate(resolve));
+        const closed = new Promise<void>((resolve) =>
+            client.onClose(() => {
+                notified += 1;
+                resolve();
+            }),
+        );
+        await closed;
 
         assert.equal(notified, 1);
         assert.equal(warnings.length, 1);

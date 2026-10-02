@@ -7,21 +7,15 @@ import {
     WORKER_PROTOCOL_VERSION,
     WorkerInstanceFactory,
     WorkerTransportConnection,
-    decodeWorkerRpcMessage,
-    encodeWorkerRpcMessage,
 } from "@portable-devshell/core/testing";
 import { HttpHost } from "@portable-devshell/mcp/testing";
 import {
+    Endpoint,
+    Rpc,
     asInstanceName,
     type Channel,
     type JsonValue,
 } from "@portable-devshell/shared";
-import {
-    encodePacket,
-    FRAME_PROTOCOL_VERSION,
-    FrameProtocol,
-    PacketBuffer,
-} from "@portable-devshell/shared/transport/frame";
 import WebSocket from "ws";
 
 import {
@@ -294,7 +288,7 @@ test("SSE plus POST fallback completes RPC handshake and deduplicates repeated u
             },
             () => undefined,
         );
-        void serveWorkerRpc(sseChannel, methods).catch((error: unknown) => {
+        void serveWorkerEndpoint(sseChannel, methods).catch((error: unknown) => {
             sseChannel.finish(
                 error instanceof Error ? error : new Error(String(error)),
             );
@@ -376,7 +370,7 @@ function connectWorker(
             }),
         () => socket.close(1000, "worker closed"),
     );
-    void serveWorkerRpc(channel, methods).catch((error: unknown) => {
+    void serveWorkerEndpoint(channel, methods).catch((error: unknown) => {
         errors.push(error instanceof Error ? error.message : String(error));
     });
     socket.on("message", (data, isBinary) => {
@@ -470,42 +464,40 @@ class TestWorkerChannel implements Channel {
     }
 }
 
-async function serveWorkerRpc(
+async function serveWorkerEndpoint(
     channel: Channel,
     methods: string[],
 ): Promise<void> {
-    const protocol = new FrameProtocol(channel, { role: "acceptor" });
-    let open = await protocol.nextOpen();
-    if (open?.service === "frame.negotiate") {
-        const negotiation = await open.accept();
-        await negotiation.write(Buffer.from(FRAME_PROTOCOL_VERSION));
-        await negotiation.finish();
-        open = await protocol.nextOpen();
-    }
-    assert.notEqual(open, undefined);
-    assert.equal(open!.service, "worker.rpc");
-    assert.equal(open!.metadata.byteLength, 0);
-    const stream = await open!.accept();
-    const packets = new PacketBuffer();
-    while (true) {
-        const chunk = await stream.read();
-        if (chunk === undefined) return;
-        for (const payload of packets.push(chunk)) {
-            const request = decodeWorkerRpcMessage(payload) as Record<string, JsonValue>;
-            const id = String(request.id);
-            const method = String(request.method);
-            methods.push(method);
-            await stream.write(
-                encodePacket(
-                    encodeWorkerRpcMessage({
-                        id,
-                        ok: true,
-                        result: responseFor(method),
-                        type: "response",
-                    }),
-                ),
-            );
-        }
+    const endpoint = new Endpoint({ host: "reverse-test-worker" });
+    const core = new Rpc(endpoint.bind("core"), {
+        "worker.ping": () => {
+            methods.push("worker.ping");
+            return responseFor("worker.ping");
+        },
+        "worker.handshake": () => {
+            methods.push("worker.handshake");
+            return responseFor("worker.handshake");
+        },
+        "worker.stop": () => {
+            methods.push("worker.stop");
+            return responseFor("worker.stop");
+        },
+    });
+    const tool = new Rpc(endpoint.bind("tool"), {
+        "tools.list": () => {
+            methods.push("tools.list");
+            return responseFor("tools.list");
+        },
+    });
+    const closed = new Promise<void>((resolve) => channel.onClose(() => resolve()));
+    const detach = await endpoint.accept(channel);
+    try {
+        await closed;
+    } finally {
+        detach();
+        core.close();
+        tool.close();
+        endpoint.close();
     }
 }
 

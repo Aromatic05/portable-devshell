@@ -1,11 +1,11 @@
 import {
-    CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_VERSION,
     Endpoint,
     Rpc,
     Stream,
     createError,
     errorCodes,
+    toControlErrorBody,
     type Channel,
     type ControlClientKind,
     type ControlHostDefinition,
@@ -49,7 +49,17 @@ export interface ControlChannelServerOptions {
 interface Session {
     readonly admission: ControlChannelAdmission;
     peer?: ControlClientKind;
+    pending?: {
+        peer: ControlClientKind;
+        protocolVersion: string;
+        requestId: string;
+    };
     protocolVersion?: string;
+}
+
+interface PreparedContext {
+    readonly context: ControlPortContext;
+    finish(ok: boolean): void;
 }
 
 interface BoundPort {
@@ -73,9 +83,16 @@ export class ControlChannelServer {
     readonly #unsubscribeRoutes: () => void;
     #listeners: ControlChannelListener[];
     readonly #startedListeners: ControlChannelListener[] = [];
+    #closePromise?: Promise<void>;
+    #startPromise?: Promise<void>;
     #started = false;
+    #stopping = false;
 
     constructor(options: ControlChannelServerOptions) {
+        if (options.listeners.length === 0)
+            throw new Error(
+                "Control channel server requires at least one listener.",
+            );
         this.#listeners = [...options.listeners];
         this.#routes = options.routes;
         this.#syncPorts();
@@ -83,39 +100,142 @@ export class ControlChannelServer {
     }
 
     async start(): Promise<void> {
-        if (this.#started) return;
-        for (const listener of this.#listeners) {
-            await listener.start((connection) => void this.#accept(connection));
-            this.#startedListeners.push(listener);
+        if (this.#startPromise !== undefined) return await this.#startPromise;
+        const start = this.#startAfterClose();
+        this.#startPromise = start;
+        try {
+            await start;
+        } finally {
+            if (this.#startPromise === start) this.#startPromise = undefined;
         }
-        this.#started = true;
+    }
+
+    async #startAfterClose(): Promise<void> {
+        const close = this.#closePromise;
+        if (close !== undefined) await close;
+        if (this.#started) return;
+        if (this.#startedListeners.length > 0) await this.#closeListeners();
+        await this.#startInternal();
     }
 
     async close(): Promise<void> {
-        if (!this.#started) return;
-        for (const connection of this.#connections) {
-            connection.detach?.();
-            connection.channel.close();
+        this.#stopping = true;
+        if (this.#closePromise !== undefined) return await this.#closePromise;
+        const close = this.#closeAfterStart();
+        this.#closePromise = close;
+        try {
+            await close;
+        } finally {
+            if (this.#closePromise === close) this.#closePromise = undefined;
         }
-        this.#connections.clear();
-        for (const listener of [...this.#startedListeners].reverse())
-            await listener.close();
-        this.#startedListeners.length = 0;
-        this.#started = false;
     }
 
     async replaceListener(
         previous: ControlChannelListener,
         next: ControlChannelListener,
     ): Promise<void> {
+        if (!this.#started)
+            throw new Error("Control channel server is not started.");
         const index = this.#listeners.indexOf(previous);
-        await next.start((connection) => void this.#accept(connection));
-        await previous.close();
+        if (index < 0 || !this.#startedListeners.includes(previous))
+            throw new Error("Control channel listener is not active.");
+
+        const accept = (connection: ControlAcceptedChannel) =>
+            void this.#accept(connection);
+        await next.start(accept);
+        try {
+            await previous.close();
+        } catch (error) {
+            const rollbackFailures: unknown[] = [];
+            await next.close().catch((rollbackError) => {
+                rollbackFailures.push(rollbackError);
+                if (!this.#startedListeners.includes(next))
+                    this.#startedListeners.push(next);
+            });
+            await previous.start(accept).catch((rollbackError) => {
+                rollbackFailures.push(rollbackError);
+            });
+            if (rollbackFailures.length > 0)
+                throw new AggregateError(
+                    [error, ...rollbackFailures],
+                    "Control channel listener replacement failed and rollback was incomplete.",
+                );
+            throw error;
+        }
         this.#listeners[index] = next;
-        this.#startedListeners[this.#startedListeners.indexOf(previous)] = next;
+        const startedIndex = this.#startedListeners.indexOf(previous);
+        this.#startedListeners[startedIndex] = next;
+    }
+
+    async #startInternal(): Promise<void> {
+        this.#stopping = false;
+        try {
+            for (const listener of this.#listeners) {
+                await listener.start((connection) => void this.#accept(connection));
+                this.#startedListeners.push(listener);
+            }
+            this.#started = true;
+        } catch (error) {
+            this.#stopping = true;
+            this.#closeConnections();
+            try {
+                await this.#closeListeners();
+            } catch (closeError) {
+                throw new AggregateError(
+                    [error, closeError],
+                    "Control channel server failed to start and clean up.",
+                );
+            }
+            throw error;
+        }
+    }
+
+    async #closeAfterStart(): Promise<void> {
+        await this.#startPromise?.catch(() => undefined);
+        await this.#closeInternal();
+    }
+
+    async #closeInternal(): Promise<void> {
+        this.#stopping = true;
+        this.#closeConnections();
+        try {
+            await this.#closeListeners();
+        } finally {
+            this.#started = false;
+        }
+    }
+
+    #closeConnections(): void {
+        for (const connection of this.#connections) {
+            connection.detach?.();
+            connection.channel.close();
+        }
+        this.#connections.clear();
+    }
+
+    async #closeListeners(): Promise<void> {
+        const failures: unknown[] = [];
+        const listeners = this.#startedListeners.splice(0);
+        const failed = new Set<ControlChannelListener>();
+        for (const listener of [...listeners].reverse())
+            await listener.close().catch((error) => {
+                failed.add(listener);
+                failures.push(error);
+            });
+        for (const listener of listeners)
+            if (failed.has(listener)) this.#startedListeners.push(listener);
+        if (failures.length > 0)
+            throw new AggregateError(
+                failures,
+                "Control channel listeners failed to close.",
+            );
     }
 
     async #accept({ admission, channel }: ControlAcceptedChannel): Promise<void> {
+        if (this.#stopping) {
+            channel.close(new Error("Control channel server is stopping."));
+            return;
+        }
         const active: ActiveConnection = { channel };
         this.#connections.add(active);
         try {
@@ -159,23 +279,30 @@ export class ControlChannelServer {
                 definition.port.operations.map((operation) => [
                     operation.name,
                     async (payload: unknown, rpc: RpcContext) => {
-                        const context = this.#context(
+                        const prepared = this.#context(
                             definition.host,
                             definition.port.name,
                             operation.name,
                             payload as JsonValue | undefined,
                             rpc,
                         );
-                        return await operation.handle(
-                            {
-                                id: rpc.requestId,
-                                name: operation.name,
-                                ...(payload === undefined
-                                    ? {}
-                                    : { payload: payload as JsonValue }),
-                            },
-                            context,
-                        );
+                        try {
+                            const result = await operation.handle(
+                                {
+                                    id: rpc.requestId,
+                                    name: operation.name,
+                                    ...(payload === undefined
+                                        ? {}
+                                        : { payload: payload as JsonValue }),
+                                },
+                                prepared.context,
+                            );
+                            prepared.finish(true);
+                            return result;
+                        } catch (error) {
+                            prepared.finish(false);
+                            throw error;
+                        }
                     },
                 ]),
             );
@@ -219,12 +346,19 @@ export class ControlChannelServer {
                             context,
                         );
                     } catch (error) {
-                        await messageStream.cancel({
-                            message:
-                                error instanceof Error
-                                    ? error.message
-                                    : String(error),
-                        });
+                        const body = toControlErrorBody(error);
+                        await messageStream.cancel(
+                            body === undefined
+                                ? { message: String(error) }
+                                : {
+                                      code: body.code,
+                                      ...(body.details === undefined
+                                          ? {}
+                                          : { details: body.details }),
+                                      message: body.message,
+                                      retryable: body.retryable,
+                                  },
+                        );
                     }
                 },
             );
@@ -238,13 +372,20 @@ export class ControlChannelServer {
         operation: string,
         payload: JsonValue | undefined,
         rpc: RpcContext,
-    ): ControlPortContext {
+    ): PreparedContext {
         const session = this.#sessions.get(rpc.peer.host)!;
         if (host === "@control" && port === "service" && operation === "hello") {
             if (session.peer !== undefined)
                 throw createError({
                     code: errorCodes.controlClientIdentityInvalid,
                     message: "Control connection identity is already negotiated.",
+                    retryable: false,
+                });
+            if (session.pending !== undefined)
+                throw createError({
+                    code: errorCodes.controlClientIdentityInvalid,
+                    message:
+                        "Control connection identity negotiation is already in progress.",
                     retryable: false,
                 });
             const request = readHelloRequest(payload);
@@ -255,9 +396,34 @@ export class ControlChannelServer {
                     retryable: false,
                 });
             const negotiated = negotiateControlProtocol(payload, request.clientKind);
-            session.peer = request.clientKind;
-            session.protocolVersion = String(negotiated.protocolVersion);
-        } else if (session.peer === undefined) {
+            const pending = {
+                peer: request.clientKind,
+                protocolVersion: String(negotiated.protocolVersion),
+                requestId: rpc.requestId,
+            };
+            session.pending = pending;
+            return {
+                context: {
+                    afterReply: rpc.afterReply,
+                    connectionId: rpc.peer.host,
+                    host,
+                    peer: pending.peer,
+                    protocolVersion: pending.protocolVersion,
+                    requestId: rpc.requestId,
+                    signal: rpc.signal,
+                    subject: session.admission.subject,
+                },
+                finish: (ok) => {
+                    if (session.pending !== pending) return;
+                    if (ok) {
+                        session.peer = pending.peer;
+                        session.protocolVersion = pending.protocolVersion;
+                    }
+                    session.pending = undefined;
+                },
+            };
+        }
+        if (session.peer === undefined) {
             throw createError({
                 code: errorCodes.controlClientIdentityRequired,
                 message: "service.hello must be the first request on a Control connection.",
@@ -265,16 +431,19 @@ export class ControlChannelServer {
             });
         }
         return {
-            afterReply: rpc.afterReply,
-            connectionId: rpc.peer.host,
-            host,
-            peer: session.peer!,
-            ...(session.protocolVersion === undefined
-                ? {}
-                : { protocolVersion: session.protocolVersion }),
-            requestId: rpc.requestId,
-            signal: rpc.signal,
-            subject: session.admission.subject,
+            context: {
+                afterReply: rpc.afterReply,
+                connectionId: rpc.peer.host,
+                host,
+                peer: session.peer,
+                ...(session.protocolVersion === undefined
+                    ? {}
+                    : { protocolVersion: session.protocolVersion }),
+                requestId: rpc.requestId,
+                signal: rpc.signal,
+                subject: session.admission.subject,
+            },
+            finish() {},
         };
     }
 
@@ -369,16 +538,13 @@ export function negotiateControlProtocol(
     }
     return {
         capabilities: ["request", "stream", "streamResume"],
-        protocolVersion: request.legacy
-            ? CONTROL_PROTOCOL_LEGACY_VERSION
-            : CONTROL_PROTOCOL_VERSION,
+        protocolVersion: CONTROL_PROTOCOL_VERSION,
     };
 }
 
 interface ParsedControlHelloRequest {
     clientKind: ControlClientKind;
     clientVersion?: string;
-    legacy: boolean;
     protocolRange: {
         max: string;
         min: string;
@@ -416,41 +582,13 @@ function readHelloRequest(
             ? {}
             : { clientVersion: payload.clientVersion }),
     };
-    if (payload.protocolRange !== undefined) {
-        if (
-            payload.minProtocolVersion !== undefined ||
-            payload.maxProtocolVersion !== undefined
-        ) {
-            throw invalidHello(
-                "service.hello must not mix protocolRange with legacy protocol version fields.",
-            );
-        }
-        const protocolRange = readProtocolRange(payload.protocolRange);
-        return { ...base, legacy: false, protocolRange };
-    }
-
-    const minProtocolVersion = payload.minProtocolVersion;
-    const maxProtocolVersion = payload.maxProtocolVersion;
-    if (
-        !isLegacyProtocolVersion(minProtocolVersion) ||
-        !isLegacyProtocolVersion(maxProtocolVersion)
-    ) {
+    if (payload.protocolRange === undefined)
         throw invalidHello(
             "service.hello requires protocolRange with semantic versions.",
         );
-    }
-    if (minProtocolVersion > maxProtocolVersion) {
-        throw invalidHello(
-            "service.hello minProtocolVersion must not exceed maxProtocolVersion.",
-        );
-    }
     return {
         ...base,
-        legacy: true,
-        protocolRange: {
-            max: `${maxProtocolVersion}.0.0`,
-            min: `${minProtocolVersion}.0.0`,
-        },
+        protocolRange: readProtocolRange(payload.protocolRange),
     };
 }
 
@@ -473,12 +611,6 @@ function readProtocolRange(value: JsonValue): { max: string; min: string } {
         );
     }
     return { max, min };
-}
-
-function isLegacyProtocolVersion(value: JsonValue | undefined): value is number {
-    return (
-        typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    );
 }
 
 function compareProtocolVersion(left: string, right: string): number {

@@ -9,9 +9,8 @@ import { createTestIpcPath } from "../../../../../test/TestPlatformSupport.ts";
 import {
     asInstanceName,
     CONTROL_PROTOCOL_VERSION,
-    PrefixRoute,
+    type ControlHostDefinition,
     type JsonValue,
-    type PrefixRouteSnapshot,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
 import { CommentService } from "../../../../../extensions/comment/src/comment/CommentService.ts";
@@ -563,6 +562,24 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             instanceName: "alpha",
             store: commentStore,
         });
+        for (const call of toolCalls) {
+            if (
+                call.toolName !== "todo_report" ||
+                call.status !== "completed" ||
+                call.ctxId === undefined ||
+                typeof call.input !== "object" ||
+                call.input === null ||
+                Array.isArray(call.input) ||
+                typeof call.input.message !== "string"
+            )
+                continue;
+            commentStore.appendReport({
+                callId: call.callId,
+                createdAt: call.completedAt ?? call.startedAt,
+                ctxId: call.ctxId,
+                text: call.input.message,
+            });
+        }
         const preferences = new ConversationPreferenceStore(
             join(root, "conversation-preferences.json"),
         );
@@ -570,8 +587,15 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
         const server = new ControlSocketServer({
             routes: {
                 connectionClosed() {},
-                snapshot: () =>
-                    createRoutes(messages, preferences, toolCalls, routeCalls),
+                hosts: () =>
+                    createRoutes(
+                        messages,
+                        commentStore,
+                        preferences,
+                        toolCalls,
+                        routeCalls,
+                    ),
+                onChange: () => () => undefined,
             },
             socketPath,
         });
@@ -621,10 +645,11 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
 
     function createRoutes(
         messages: CommentService,
+        conversationStore: ConversationStore,
         preferences: ConversationPreferenceStore,
         toolCalls: readonly ToolCallRecord[],
         routeCalls: { contextQueue: number },
-    ): PrefixRouteSnapshot {
+    ): readonly ControlHostDefinition[] {
         const snapshot = {
             connectionState: "connected",
             daemonState: "running",
@@ -633,10 +658,10 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
             ready: true,
             status: "ready",
         };
-        return PrefixRoute.snapshot([
+        return [
             {
-                destination: "@control",
-                modules: [
+                host: "@control",
+                ports: [
                     {
                         name: "service",
                         operations: [
@@ -763,6 +788,13 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                         operations: [{ name: "get", handle: () => overview() }],
                     },
                     {
+                        name: "tui",
+                        operations: [
+                            { name: "pages", handle: () => [] },
+                            { name: "page", handle: () => ({}) },
+                        ],
+                    },
+                    {
                         name: "artifact",
                         operations: [
                             { name: "listShares", handle: () => [] },
@@ -772,8 +804,8 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                 ],
             },
             {
-                destination: asInstanceName("alpha"),
-                modules: [
+                host: asInstanceName("alpha"),
+                ports: [
                     {
                         name: "runtime",
                         operations: [
@@ -786,15 +818,34 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                                 handle: () => ({ lastSeq: 1, snapshot }),
                             },
                             { name: "readLogs", handle: () => [] },
+                        ],
+                        streams: [
                             {
                                 name: "subscribe",
-                                handle: async (_request, context) => {
-                                    await context.openStream({
-                                        events: [],
-                                        lastSeq: 1,
+                                handle: async (stream) => {
+                                    await stream.send({
+                                        name: "seed",
+                                        payload: { events: [], lastSeq: 1 },
                                     });
-                                    return undefined;
                                 },
+                            },
+                        ],
+                    },
+                    {
+                        name: "goal",
+                        operations: [
+                            { name: "get", handle: () => ({ goal: null }) },
+                        ],
+                    },
+                    {
+                        name: "conversation",
+                        operations: [
+                            {
+                                name: "list",
+                                handle: (request) =>
+                                    conversationStore.list(
+                                        (request.payload ?? {}) as never,
+                                    ) as unknown as JsonValue,
                             },
                         ],
                     },
@@ -858,7 +909,7 @@ import { selectMainScreenModel } from "../../../src/view/projection/View.js";
                     },
                 ],
             },
-        ]);
+        ];
     }
 
     function overview(): JsonValue {

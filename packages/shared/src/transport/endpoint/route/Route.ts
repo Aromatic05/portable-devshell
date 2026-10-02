@@ -23,7 +23,12 @@ export class Connection {
         this.remote = remote;
     }
 
+    get connected(): boolean {
+        return !this.#port.closed && this.#port.canReach(this.remote);
+    }
+
     send(packet: Packet): Promise<void> {
+        if (!this.connected) throw new Error("Connection is closed.");
         return this.#port.send(this.remote, packet);
     }
 
@@ -36,10 +41,20 @@ export class Connection {
                 return listener(packet);
         });
     }
+
+    onClose(listener: (error?: Error) => void): () => void {
+        const offPort = this.#port.onClose(listener);
+        const offRoute = this.#port.onUnreachable(this.remote, listener);
+        return () => {
+            offPort();
+            offRoute();
+        };
+    }
 }
 
 export class Port {
     readonly local: Address;
+    readonly #closeListeners = new Set<(error?: Error) => void>();
     readonly #listeners = new Set<PacketListener>();
     readonly #route: Route;
     readonly #unbind: () => void;
@@ -59,7 +74,25 @@ export class Port {
         return new Connection(this, { host, port });
     }
 
+    canReach(dest: Address): boolean {
+        return this.#route.canReach(dest);
+    }
+
+    onClose(listener: (error?: Error) => void): () => void {
+        if (this.#closed) {
+            queueMicrotask(() => listener());
+            return () => undefined;
+        }
+        this.#closeListeners.add(listener);
+        return () => this.#closeListeners.delete(listener);
+    }
+
+    onUnreachable(dest: Address, listener: (error?: Error) => void): () => void {
+        return this.#route.onUnreachable(dest, listener);
+    }
+
     send(dest: Address, packet: Packet): Promise<void> {
+        if (this.#closed) throw new Error("Port is closed.");
         return this.#route.send(this.local, dest, packet);
     }
 
@@ -77,6 +110,9 @@ export class Port {
         this.#closed = true;
         this.#listeners.clear();
         this.#unbind();
+        const listeners = [...this.#closeListeners];
+        this.#closeListeners.clear();
+        for (const listener of listeners) listener();
     }
 
     async receive(packet: Packet, source: Address): Promise<void> {
@@ -87,6 +123,11 @@ export class Port {
 export class Route {
     readonly #ports = new Map<Host, Map<PortName, Port>>();
     readonly #peers = new Map<Host, EnvelopeCodec>();
+    readonly #reachability = new Set<{
+        dest: Address;
+        listener: (error?: Error) => void;
+        reachable: boolean;
+    }>();
     #gateway?: EnvelopeCodec;
 
     bind(host: Host, port: PortName): Port {
@@ -95,13 +136,37 @@ export class Route {
             ports = new Map();
             this.#ports.set(host, ports);
         }
-        if (ports.has(port)) throw new Error(`${host}:${port} is already bound.`);
+        if (ports.has(port))
+            throw new Error(host + ":" + port + " is already bound.");
         const binding = new Port(this, { host, port }, () => {
             ports!.delete(port);
             if (ports!.size === 0) this.#ports.delete(host);
+            this.#refreshReachability();
         });
         ports.set(port, binding);
+        this.#refreshReachability();
         return binding;
+    }
+
+    canReach(dest: Address): boolean {
+        return (
+            this.#ports.get(dest.host)?.has(dest.port) === true ||
+            this.#peers.has(dest.host) ||
+            this.#gateway !== undefined
+        );
+    }
+
+    onUnreachable(
+        dest: Address,
+        listener: (error?: Error) => void,
+    ): () => void {
+        const watcher = {
+            dest,
+            listener,
+            reachable: this.canReach(dest),
+        };
+        this.#reachability.add(watcher);
+        return () => this.#reachability.delete(watcher);
     }
 
     attach(
@@ -109,12 +174,13 @@ export class Route {
         lifecycle?: { attached(host: Host): void; detached(host: Host): void },
     ): () => void {
         const hosts = new Set<Host>();
-        const detach = () => {
+        const detach = (error?: Error) => {
             for (const host of hosts) {
                 if (this.#peers.get(host) === codec) this.#peers.delete(host);
                 lifecycle?.detached(host);
             }
             hosts.clear();
+            this.#refreshReachability(error);
         };
         const offEnvelope = codec.onEnvelope((envelope) => {
             if (!hosts.has(envelope.source.host)) {
@@ -122,7 +188,10 @@ export class Route {
                 lifecycle?.attached(envelope.source.host);
             }
             this.#peers.set(envelope.source.host, codec);
-            void this.#dispatch(envelope, codec);
+            this.#refreshReachability();
+            void this.#dispatch(envelope, codec).catch((error) =>
+                codec.close(normalizeError(error)),
+            );
         });
         const offClose = codec.onClose(detach);
         return () => {
@@ -134,16 +203,25 @@ export class Route {
 
     gateway(codec: EnvelopeCodec): () => void {
         this.#gateway = codec;
+        this.#refreshReachability();
         const offEnvelope = codec.onEnvelope((envelope) =>
-            void this.#dispatch(envelope, codec),
+            void this.#dispatch(envelope, codec).catch((error) =>
+                codec.close(normalizeError(error)),
+            ),
         );
-        const offClose = codec.onClose(() => {
-            if (this.#gateway === codec) this.#gateway = undefined;
+        const offClose = codec.onClose((error) => {
+            if (this.#gateway === codec) {
+                this.#gateway = undefined;
+                this.#refreshReachability(error);
+            }
         });
         return () => {
             offEnvelope();
             offClose();
-            if (this.#gateway === codec) this.#gateway = undefined;
+            if (this.#gateway === codec) {
+                this.#gateway = undefined;
+                this.#refreshReachability();
+            }
         };
     }
 
@@ -184,6 +262,20 @@ export class Route {
             await this.#gateway.send(envelope);
             return;
         }
-        throw new Error(`No route for ${envelope.dest.host}:${envelope.dest.port}.`);
+        throw new Error(
+            "No route for " + envelope.dest.host + ":" + envelope.dest.port + ".",
+        );
     }
+
+    #refreshReachability(error?: Error): void {
+        for (const watcher of this.#reachability) {
+            const reachable = this.canReach(watcher.dest);
+            if (watcher.reachable && !reachable) watcher.listener(error);
+            watcher.reachable = reachable;
+        }
+    }
+}
+
+function normalizeError(error: unknown): Error {
+    return error instanceof Error ? error : new Error(String(error));
 }

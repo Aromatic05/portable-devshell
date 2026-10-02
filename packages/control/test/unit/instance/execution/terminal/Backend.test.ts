@@ -6,7 +6,6 @@ import type {
     WorkerTerminalDescriptor,
     WorkerTerminalIdentity,
     WorkerTerminalNotification,
-    WorkerRpcError,
 } from "@portable-devshell/core";
 
 import {
@@ -27,7 +26,7 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
     readonly kills: WorkerTerminalIdentity[] = [];
     notification?: (notification: WorkerTerminalNotification) => void;
     connected?: () => void;
-    disconnected?: (error: WorkerRpcError) => void;
+    disconnected?: (error: Error) => void;
     attachExit?: { exitCode: number; signal: number };
     version = 1;
     latestSeq = 1;
@@ -119,14 +118,14 @@ class FakeWorkerTerminal implements WorkerTerminalPort {
         };
     }
 
-    onRpcConnected(listener: () => void): () => void {
+    onTransportConnected(listener: () => void): () => void {
         this.connected = listener;
         return () => {
             this.connected = undefined;
         };
     }
 
-    onRpcDisconnected(listener: (error: WorkerRpcError) => void): () => void {
+    onTransportDisconnected(listener: (error: Error) => void): () => void {
         this.disconnected = listener;
         return () => {
             this.disconnected = undefined;

@@ -5,17 +5,20 @@ import { attachToolCallErrorPayload } from "@portable-devshell/core";
 import {
     createError,
     type JsonValue,
-    type PrefixRouteContext,
+    type ControlPortContext,
 } from "@portable-devshell/shared";
 
 import { createToolRouteModule } from "../../../../src/instance/execution/tool/Route.ts";
 
-function routeContext(connectionId: string): PrefixRouteContext {
+function routeContext(connectionId: string): ControlPortContext {
     return {
+        afterReply() {},
         connectionId,
+        host: "demo",
         peer: "tui",
         requestId: "req-1",
-    } as unknown as PrefixRouteContext;
+        signal: new AbortController().signal,
+    };
 }
 
 function callHandler(
@@ -195,29 +198,24 @@ test("control tool stream forwards progress before completing the unchanged fina
             async releaseToolSession() {},
         } as never,
     });
-    const operation = module.operations.find(
+    const operation = module.streams?.find(
         (entry) => entry.name === "callStream",
     );
     if (operation === undefined)
-        throw new Error("tool.callStream operation is missing");
-    const context = {
-        ...routeContext("pi-stream"),
-        async openStream() {
-            return {
-                id: "stream-1",
-                async cancel() {},
-                async complete(payload?: JsonValue) {
-                    completed = payload;
-                },
-                async emit(name: string, payload?: JsonValue) {
-                    emitted.push({ name, payload });
-                },
-            };
+        throw new Error("tool.callStream stream is missing");
+    const context = routeContext("pi-stream");
+    const stream = {
+        async close(payload?: JsonValue) {
+            completed = payload;
         },
-    } as unknown as PrefixRouteContext;
+        async send(message: { name: string; payload?: JsonValue }) {
+            emitted.push(message);
+        },
+    };
 
     assert.equal(
         await operation.handle(
+            stream as never,
             {
                 id: "stream-request",
                 name: "callStream",

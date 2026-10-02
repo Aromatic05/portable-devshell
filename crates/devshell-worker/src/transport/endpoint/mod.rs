@@ -276,7 +276,8 @@ where
                                 error: Some(StreamError {
                                     message: error,
                                     code: None,
-                                    data: None,
+                                    details: None,
+                                    retryable: None,
                                 }),
                             },
                         )?,
@@ -519,7 +520,8 @@ fn dispatch_stream(
                                     error: Some(StreamError {
                                         message: error,
                                         code: None,
-                                        data: None,
+                                        details: None,
+                                        retryable: None,
                                     }),
                                 },
                             )?,
@@ -621,7 +623,8 @@ fn finish_stream_if_ready(
                         error: Some(StreamError {
                             message: error,
                             code: None,
-                            data: None,
+                            details: None,
+                            retryable: None,
                         }),
                     },
                 )?,

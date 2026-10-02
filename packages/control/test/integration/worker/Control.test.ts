@@ -6,16 +6,19 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+    CONTROL_PROTOCOL_RANGE,
+    Endpoint,
+    LocalChannel,
+    Rpc,
+    Stream,
     asInstanceName,
-    ClientConnection,
-    createError,
     ControlLifecycleManager,
     ControlPathHome,
     ControlPathRuntime,
-    SocketChannel,
-    type Destination,
     type ConfigInstanceDraft,
+    type ControlStreamMessage,
     type JsonValue,
+    type MessageStream,
 } from "@portable-devshell/shared";
 
 import { controlDaemonModulePath } from "../../../src/testing.ts";
@@ -328,20 +331,11 @@ async function exerciseWorkerTerminal(
     instance: string,
     workspace: string,
 ): Promise<void> {
-    const client = new ClientConnection({
-        connectChannel: (signal) =>
-            SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "tui",
-    });
+    const client = createClient(socketPath);
     try {
         await client.request("@control", "service", "hello", {
             clientKind: "tui",
-            maxProtocolVersion: 1,
-            minProtocolVersion: 1,
+            protocolRange: CONTROL_PROTOCOL_RANGE,
         });
         const opened = await client.request<{
             generation: number;
@@ -352,7 +346,7 @@ async function exerciseWorkerTerminal(
             rows: 24,
             workspace,
         });
-        const attached = await client.openStream(
+        const attached = await client.open(
             asInstanceName(instance),
             "terminal",
             "attach",
@@ -363,15 +357,19 @@ async function exerciseWorkerTerminal(
             },
         );
         try {
+            assert.equal((await readStreamData(attached)).name, "seed");
             let clientSeq = 1;
             const cursorResponder = createCursorPositionResponder(
                 async (data) => {
-                    await attached.stream.send("input", {
-                        clientSeq: clientSeq++,
-                        data,
-                        generation: opened.generation,
-                        terminalId: opened.terminalId,
-                        version: opened.version,
+                    await attached.send({
+                        name: "input",
+                        payload: {
+                            clientSeq: clientSeq++,
+                            data,
+                            generation: opened.generation,
+                            terminalId: opened.terminalId,
+                            version: opened.version,
+                        },
                     });
                 },
             );
@@ -379,27 +377,24 @@ async function exerciseWorkerTerminal(
                 const bootstrapDeadline = Date.now() + 5_000;
                 let responseCount = 0;
                 while (responseCount === 0) {
-                    if (Date.now() >= bootstrapDeadline) {
-                        throw new Error(
-                            "terminal bootstrap cursor query timeout",
-                        );
-                    }
-                    const event = await attached.stream.nextEvent();
-                    if (event.name === "terminal.output") {
-                        const payload = event.payload as
-                            { data?: string } | undefined;
-                        responseCount += await cursorResponder.consume(
-                            payload?.data ?? "",
-                        );
+                    if (Date.now() >= bootstrapDeadline)
+                        throw new Error("terminal bootstrap cursor query timeout");
+                    const event = await readStreamData(attached);
+                    if (event.name === "output") {
+                        const payload = event.payload as { data?: string } | undefined;
+                        responseCount += await cursorResponder.consume(payload?.data ?? "");
                     }
                 }
             }
-            await attached.stream.send("input", {
-                clientSeq: clientSeq++,
-                data: terminalPrintCommand("forward-worker-terminal-ready"),
-                generation: opened.generation,
-                terminalId: opened.terminalId,
-                version: opened.version,
+            await attached.send({
+                name: "input",
+                payload: {
+                    clientSeq: clientSeq++,
+                    data: terminalPrintCommand("forward-worker-terminal-ready"),
+                    generation: opened.generation,
+                    terminalId: opened.terminalId,
+                    version: opened.version,
+                },
             });
             let output = "";
             let latestSeq = 0;
@@ -407,26 +402,28 @@ async function exerciseWorkerTerminal(
             while (!output.includes("forward-worker-terminal-ready")) {
                 if (Date.now() >= deadline)
                     throw new Error(`terminal output timeout: ${output}`);
-                const event = await attached.stream.nextEvent();
-                if (event.name === "terminal.output") {
+                const event = await readStreamData(attached);
+                if (event.name === "output") {
                     const payload = event.payload as
-                        { data?: string; seq?: number } | undefined;
+                        | { data?: string; seq?: number }
+                        | undefined;
                     const data = payload?.data ?? "";
                     output += data;
                     latestSeq = Math.max(latestSeq, payload?.seq ?? 0);
-                    if (process.platform === "win32") {
+                    if (process.platform === "win32")
                         await cursorResponder.consume(data);
-                    }
                 }
             }
-            if (latestSeq > 0) {
-                await attached.stream.send("ack", {
-                    generation: opened.generation,
-                    terminalId: opened.terminalId,
-                    throughSeq: latestSeq,
-                    version: opened.version,
+            if (latestSeq > 0)
+                await attached.send({
+                    name: "ack",
+                    payload: {
+                        generation: opened.generation,
+                        terminalId: opened.terminalId,
+                        throughSeq: latestSeq,
+                        version: opened.version,
+                    },
                 });
-            }
             await client.request(
                 asInstanceName(instance),
                 "terminal",
@@ -434,66 +431,96 @@ async function exerciseWorkerTerminal(
                 opened,
             );
         } finally {
-            attached.stream.close();
+            await attached.close();
         }
     } finally {
         client.close();
     }
 }
 
+interface TestClient {
+    close(): void;
+    open(
+        host: string,
+        port: string,
+        name: string,
+        payload?: JsonValue,
+    ): Promise<MessageStream>;
+    request<T = JsonValue>(
+        host: string,
+        port: string,
+        operation: string,
+        payload?: JsonValue,
+    ): Promise<T>;
+}
+
+function createClient(socketPath: string): TestClient {
+    const endpoint = new Endpoint({
+        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+    });
+    const protocols: Array<Rpc | Stream> = [];
+    const rpcs = new Map<string, Rpc>();
+    return {
+        close() {
+            for (const protocol of protocols) protocol.close();
+            endpoint.close();
+        },
+        async open(host, port, name, payload) {
+            const protocol = new Stream(await endpoint.connect(host, port));
+            protocols.push(protocol);
+            return await protocol.open(name, payload);
+        },
+        async request<T = JsonValue>(
+            host: string,
+            port: string,
+            operation: string,
+            payload?: JsonValue,
+        ) {
+            const key = `${host}\u0000${port}`;
+            let rpc = rpcs.get(key);
+            if (rpc === undefined) {
+                rpc = new Rpc(await endpoint.connect(host, port));
+                rpcs.set(key, rpc);
+                protocols.push(rpc);
+            }
+            return (await rpc.request(operation, payload)) as T;
+        },
+    };
+}
+
+async function readStreamData(stream: MessageStream): Promise<ControlStreamMessage> {
+    const next = await stream.readMessage();
+    assert.equal(next.type, "data");
+    return next.message as ControlStreamMessage;
+}
+
 async function request(
     socketPath: string,
     operation: string,
-    destination: Destination,
+    destination: string,
     params?: JsonValue,
     clientKind: "cli" | "tui" = "cli",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
-    const [module, method] = operation.split(".");
-    const client = new ClientConnection({
-        connectChannel: (signal) =>
-            SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: clientKind,
-    });
+    const [port, method] = operation.split(".");
+    const client = createClient(socketPath);
     try {
         await client.request("@control", "service", "hello", {
             clientKind,
-            maxProtocolVersion: 1,
-            minProtocolVersion: 1,
+            protocolRange: CONTROL_PROTOCOL_RANGE,
         });
         if (operation === "runtime.start") {
-            const opened = await client.openStream(
-                destination,
-                module!,
-                method!,
-                params,
-            );
+            const stream = await client.open(destination, port!, method!, params);
             try {
                 while (true) {
-                    const event = await opened.stream.nextEvent();
-                    if (event.name === "stream.completed") {
-                        return event.payload;
-                    }
-                    if (event.name === "stream.cancelled") {
-                        throw createError(
-                            event.error ?? {
-                                code: "control.requestFailed",
-                                message: "runtime.start was cancelled",
-                                retryable: false,
-                            },
-                        );
-                    }
+                    const next = await stream.readMessage();
+                    if (next.type === "close") return next.message;
                 }
             } finally {
-                opened.stream.close();
+                await stream.close();
             }
         }
-
-        return await client.request(destination, module!, method!, params);
+        return await client.request(destination, port!, method!, params);
     } finally {
         client.close();
     }

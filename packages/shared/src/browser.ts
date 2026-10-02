@@ -84,7 +84,6 @@ export { Event } from "./transport/packet/Event.js";
 export { MessageStream, Stream } from "./transport/packet/Stream.js";
 export type { Message } from "./transport/packet/Packet.js";
 export {
-    CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     CONTROL_REMOTE_BEARER_SUBPROTOCOL_PREFIX,

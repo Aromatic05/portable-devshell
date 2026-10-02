@@ -194,15 +194,24 @@ export function createTerminalRouteModule(
                 );
             });
 
-            const detach = () => attachment?.detach();
-            const offClose = stream.onClose(detach);
-            const offCancel = stream.onCancel(detach);
+            let resolveEnded!: () => void;
+            const ended = new Promise<void>((resolve) => {
+                resolveEnded = resolve;
+            });
+            let endedFlag = false;
+            const end = () => {
+                if (endedFlag) return;
+                endedFlag = true;
+                attachment?.detach();
+                resolveEnded();
+            };
+            const offClose = stream.onClose(end);
+            const offCancel = stream.onCancel(end);
             const enqueueOutput = (frame: TerminalOutputFrame) => {
                 if (terminal || frame.seq <= lastAckedSeq) return;
                 const bytes = Buffer.byteLength(frame.data, "utf8");
                 if (pendingBytes + bytes > maxUnackedBytes) {
                     terminal = true;
-                    detach();
                     const error = createError({
                         code: errorCodes.streamGap,
                         details: {
@@ -214,7 +223,10 @@ export function createTerminalRouteModule(
                             "Terminal attachment exceeded its unacknowledged output window.",
                         retryable: true,
                     }).toBody();
-                    sendTail = sendTail.then(() => stream.cancel(error));
+                    sendTail = sendTail.then(async () => {
+                        await stream.cancel(error);
+                        end();
+                    });
                     return;
                 }
                 pendingBytes += bytes;
@@ -237,7 +249,7 @@ export function createTerminalRouteModule(
                         payload: exit as unknown as JsonValue,
                     });
                     await stream.close(completed as unknown as JsonValue);
-                    detach();
+                    end();
                 });
             };
 
@@ -250,6 +262,8 @@ export function createTerminalRouteModule(
             });
             for (const frame of attachment.replay) enqueueOutput(frame);
             if (attachment.exit !== undefined) enqueueExit(attachment.exit);
+            await sendTail;
+            if (!endedFlag) await ended;
             await sendTail;
             offData();
             offClose();

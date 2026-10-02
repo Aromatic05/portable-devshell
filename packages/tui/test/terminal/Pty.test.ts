@@ -1,53 +1,84 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-    asInstanceName,
-    type ClientEvent,
-    type TerminalSessionDescriptor,
+import type {
+    ControlStreamMessage,
+    MessageStream,
+    TerminalSessionDescriptor,
 } from "@portable-devshell/shared";
 import {
     TuiControlTerminalPtyFactory,
     type TuiControlTerminalClient,
-    type TuiControlTerminalStream,
-    type TuiOpenedTerminalStream,
 } from "../../src/terminal/control/Pty.ts";
 import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
 
 {
-    class FakeStream implements TuiControlTerminalStream {
-        readonly id = "stream-1";
+    class FakeStream {
         readonly sent: Array<{ operation: string; payload: unknown }> = [];
         closed = false;
-        readonly #events: ClientEvent[] = [];
-        readonly #waiters: Array<(event: ClientEvent) => void> = [];
+        readonly #events: Array<
+            | { type: "data"; message: ControlStreamMessage; seq: number }
+            | { type: "close"; message?: unknown }
+        > = [];
+        readonly #waiters: Array<
+            (event:
+                | { type: "data"; message: ControlStreamMessage; seq: number }
+                | { type: "close"; message?: unknown }) => void
+        > = [];
+        #seq = 0;
 
-        close(): void {
+        async close(message?: unknown): Promise<void> {
             this.closed = true;
+            if (message !== undefined) this.#push({ type: "close", message });
         }
 
-        async nextEvent(): Promise<ClientEvent> {
+        async readMessage(): Promise<
+            | { type: "data"; message: ControlStreamMessage; seq: number }
+            | { type: "close"; message?: unknown }
+        > {
             return (
                 this.#events.shift() ??
                 (await new Promise((resolve) => this.#waiters.push(resolve)))
             );
         }
 
-        async send(operation: string, payload?: unknown): Promise<void> {
-            this.sent.push({ operation, payload });
+        async send(message: ControlStreamMessage): Promise<void> {
+            this.sent.push({ operation: message.name, payload: message.payload });
         }
 
-        emit(name: ClientEvent["name"], payload?: unknown): void {
-            const event = {
-                destination: asInstanceName("alpha"),
-                id: `event-${this.#events.length}`,
-                name,
-                ...(payload === undefined ? {} : { payload }),
-                streamId: this.id,
-            } as ClientEvent;
+        emit(name: string, payload?: unknown): void {
+            this.#push({
+                type: "data",
+                message: {
+                    name,
+                    ...(payload === undefined ? {} : { payload }),
+                } as ControlStreamMessage,
+                seq: ++this.#seq,
+            });
+        }
+
+        complete(message: unknown): void {
+            this.#push({ type: "close", message });
+        }
+
+        asMessageStream(): MessageStream {
+            return this as unknown as MessageStream;
+        }
+
+        #push(event:
+            | { type: "data"; message: ControlStreamMessage; seq: number }
+            | { type: "close"; message?: unknown }): void {
             const waiter = this.#waiters.shift();
             if (waiter === undefined) this.#events.push(event);
             else waiter(event);
         }
+    }
+
+    function attachStream(
+        stream: FakeStream,
+        session: TerminalSessionDescriptor,
+    ): MessageStream {
+        stream.emit("seed", { session });
+        return stream.asMessageStream();
     }
 
     test("control terminal PTY waits for versioned acknowledgements and resumes by output sequence", async () => {
@@ -66,21 +97,12 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const attachCalls: unknown[] = [];
         let openCalls = 0;
         const client: TuiControlTerminalClient = {
-            async attach(_instance, input): Promise<TuiOpenedTerminalStream> {
+            async attach(_instance, input) {
                 attachCalls.push(input);
-                return {
-                    acknowledgement: {
-                        destination: asInstanceName("alpha"),
-                        id: "ack",
-                        name: "terminal.attach",
-                        payload: {
-                            session: { ...opened, latestSeq: input.fromSeq },
-                        },
-                        replyTo: "request",
-                        streamId: stream.id,
-                    },
-                    stream,
-                };
+                return attachStream(stream, {
+                    ...opened,
+                    latestSeq: input.fromSeq,
+                });
             },
             async kill() {
                 throw new Error("detach must not kill the terminal");
@@ -104,7 +126,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
 
         await waitFor(() => attachCalls.length === 1);
         assert.equal(openCalls, 1);
-        stream.emit("terminal.output", { data: "hello", seq: 1 });
+        stream.emit("output", { data: "hello", seq: 1 });
         await waitFor(() => output.includes("hello"));
 
         await waitFor(() =>
@@ -127,7 +149,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
                 },
             },
         );
-        stream.emit("terminal.inputAccepted", {
+        stream.emit("inputAccepted", {
             clientSeq: 1,
             generation: 3,
             terminalId: "terminal-1",
@@ -152,7 +174,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
                 },
             },
         );
-        stream.emit("terminal.resized", {
+        stream.emit("resized", {
             clientSeq: 2,
             generation: 3,
             terminalId: "terminal-1",
@@ -166,19 +188,11 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const resumedStream = new FakeStream();
         client.attach = async (_instance, input) => {
             attachCalls.push(input);
-            return {
-                acknowledgement: {
-                    destination: asInstanceName("alpha"),
-                    id: "ack-2",
-                    name: "terminal.attach",
-                    payload: {
-                        session: { ...opened, latestSeq: 1, version: 2 },
-                    },
-                    replyTo: "request-2",
-                    streamId: resumedStream.id,
-                },
-                stream: resumedStream,
-            };
+            return attachStream(resumedStream, {
+                ...opened,
+                latestSeq: input.fromSeq,
+                version: 2,
+            });
         };
         const resumed = factory.create("alpha")("ignored", [], {
             columns: 100,
@@ -194,7 +208,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
             generation: 3,
             terminalId: "terminal-1",
         });
-        resumedStream.emit("terminal.output", { data: "hello", seq: 1 });
+        resumedStream.emit("output", { data: "hello", seq: 1 });
         await waitFor(() => resumedOutput.includes("hello"));
     });
 
@@ -211,29 +225,17 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const stream = new FakeStream();
         const client: TuiControlTerminalClient = {
             async attach() {
-                return {
-                    acknowledgement: {
-                        destination: asInstanceName("alpha"),
-                        id: "ack-unknown",
-                        name: "terminal.attach",
-                        payload: {
-                            session: {
-                                cols: 80,
-                                createdAt: "2026-08-06T00:00:00.000Z",
-                                generation: 1,
-                                instance: "alpha",
-                                latestSeq: 0,
-                                rows: 24,
-                                state: "running",
-                                terminalId: "terminal-unknown",
-                                version: 1,
-                            },
-                        },
-                        replyTo: "request-unknown",
-                        streamId: stream.id,
-                    },
-                    stream,
-                };
+                return attachStream(stream, {
+                    cols: 80,
+                    createdAt: "2026-08-06T00:00:00.000Z",
+                    generation: 1,
+                    instance: "alpha",
+                    latestSeq: 0,
+                    rows: 24,
+                    state: "running",
+                    terminalId: "terminal-unknown",
+                    version: 1,
+                });
             },
             async kill() {
                 throw new Error("not used");
@@ -293,17 +295,7 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         };
         const client: TuiControlTerminalClient = {
             async attach() {
-                return {
-                    acknowledgement: {
-                        destination: asInstanceName("alpha"),
-                        id: "ack-completed",
-                        name: "terminal.attach",
-                        payload: { session: { ...opened } },
-                        replyTo: "request-completed",
-                        streamId: stream.id,
-                    },
-                    stream,
-                };
+                return attachStream(stream, { ...opened });
             },
             async kill() {
                 throw new Error("not used");
@@ -325,8 +317,8 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         pty.onExit((event) => exits.push(event.exitCode));
         await waitFor(() => factory.snapshot("alpha") !== undefined);
 
-        stream.emit("terminal.exit", { exitCode: 0, signal: 0 });
-        stream.emit("stream.completed", {
+        stream.emit("exit", { exitCode: 0, signal: 0 });
+        stream.complete({
             ...opened,
             state: "exited",
             version: 7,
@@ -366,22 +358,10 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         const killInputs: unknown[] = [];
         const client: TuiControlTerminalClient = {
             async attach(_instance, input) {
-                return {
-                    acknowledgement: {
-                        destination: asInstanceName("alpha"),
-                        id: `ack-${currentOpen.terminalId}`,
-                        name: "terminal.attach",
-                        payload: {
-                            session: {
-                                ...currentOpen,
-                                latestSeq: input.fromSeq,
-                            },
-                        },
-                        replyTo: "request",
-                        streamId: currentStream.id,
-                    },
-                    stream: currentStream,
-                };
+                return attachStream(currentStream, {
+                    ...currentOpen,
+                    latestSeq: input.fromSeq,
+                });
             },
             async kill(_instance, identity) {
                 killInputs.push(identity);
@@ -405,8 +385,8 @@ import { TuiKeyDispatcher } from "../../src/interaction/Input.js";
         );
 
         const killing = factory.kill("alpha");
-        oldStream.emit("terminal.exit", { exitCode: 0, signal: 0 });
-        oldStream.emit("stream.completed", {
+        oldStream.emit("exit", { exitCode: 0, signal: 0 });
+        oldStream.complete({
             ...oldSession,
             state: "exited",
             version: 2,

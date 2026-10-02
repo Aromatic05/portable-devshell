@@ -6,10 +6,10 @@ import test from "node:test";
 
 import {
     CONTROL_PROTOCOL_VERSION,
-    Codec,
+    Endpoint,
+    LocalChannel,
+    Rpc,
     resolveControlSocketPath,
-    SocketChannel,
-    type JsonValue,
 } from "@portable-devshell/shared";
 
 import {
@@ -28,52 +28,55 @@ test("module CLI clients perform control rpc over unix socket", async (t) => {
     const socketPath = createTestIpcPath("cli-control", runtimeRoot);
     const methods: string[] = [];
     const server = createServer((socket) => {
-        const codec = new Codec(SocketChannel.accept(socket), {
-            local: "server",
-        });
-        codec.onEvent((event) => {
-            methods.push(event.name);
-            const payload: JsonValue =
-                event.name === "service.hello"
-                    ? {
-                          capabilities: ["request", "stream", "streamResume"],
-                          protocolVersion: CONTROL_PROTOCOL_VERSION,
-                      }
-                    : event.name === "instance.list"
-                      ? [
-                            {
-                                mcpEnabled: true,
+        const endpoint = new Endpoint();
+        const protocols = [
+            new Rpc(endpoint.bind("service", "@control"), {
+                hello: () => {
+                    methods.push("service.hello");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
+                    };
+                },
+            }),
+            new Rpc(endpoint.bind("instance", "@control"), {
+                list: () => {
+                    methods.push("instance.list");
+                    return [
+                        {
+                            mcpEnabled: true,
+                            name: "demo-local",
+                            snapshot: {
+                                connectionState: "disconnected",
+                                daemonState: "stopped",
+                                lastSeq: 0,
                                 name: "demo-local",
-                                snapshot: {
-                                    connectionState: "disconnected",
-                                    daemonState: "stopped",
-                                    lastSeq: 0,
-                                    name: "demo-local",
-                                    ready: false,
-                                    status: "stopped",
-                                },
+                                ready: false,
+                                status: "stopped",
                             },
-                        ]
-                      : event.name === "runtime.readLogs"
-                        ? [
-                              {
-                                  at: "2026-07-08T00:00:00.000Z",
-                                  message: "ready\n",
-                                  seq: 1,
-                                  stream: "stdout",
-                              },
-                          ]
-                        : null;
-            void codec
-                .send({
-                    id: `reply-${event.id}`,
-                    replyTo: event.id,
-                    destination: event.destination,
-                    name: event.name,
-                    payload,
-                })
-                .catch(() => undefined);
+                        },
+                    ];
+                },
+            }),
+            new Rpc(endpoint.bind("runtime", "demo-local"), {
+                readLogs: () => {
+                    methods.push("runtime.readLogs");
+                    return [
+                        {
+                            at: "2026-07-08T00:00:00.000Z",
+                            message: "ready\n",
+                            seq: 1,
+                            stream: "stdout",
+                        },
+                    ];
+                },
+            }),
+        ];
+        socket.once("close", () => {
+            for (const protocol of protocols) protocol.close();
+            endpoint.close();
         });
+        void endpoint.accept(LocalChannel.accept(socket)).catch(() => undefined);
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -116,30 +119,35 @@ test("CliMain negotiates Control before a control-plane business request", async
         await mkdir(dirname(socketPath), { recursive: true });
     }
     const server = createServer((socket) => {
-        const codec = new Codec(SocketChannel.accept(socket), {
-            local: "server",
+        const endpoint = new Endpoint();
+        const protocols = [
+            new Rpc(endpoint.bind("service", "@control"), {
+                hello: () => {
+                    methods.push("service.hello");
+                    return {
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
+                    };
+                },
+            }),
+            new Rpc(endpoint.bind("cli", "@control"), {
+                commands: () => {
+                    methods.push("cli.commands");
+                    return [];
+                },
+            }),
+            new Rpc(endpoint.bind("overview", "@control"), {
+                get: () => {
+                    methods.push("overview.get");
+                    return {};
+                },
+            }),
+        ];
+        socket.once("close", () => {
+            for (const protocol of protocols) protocol.close();
+            endpoint.close();
         });
-        codec.onEvent((event) => {
-            methods.push(event.name);
-            const payload: JsonValue =
-                event.name === "service.hello"
-                    ? {
-                          capabilities: ["request", "stream", "streamResume"],
-                          protocolVersion: CONTROL_PROTOCOL_VERSION,
-                      }
-                    : event.name === "cli.commands"
-                      ? []
-                      : {};
-            void codec
-                .send({
-                    id: `reply-${event.id}`,
-                    replyTo: event.id,
-                    destination: event.destination,
-                    name: event.name,
-                    payload,
-                })
-                .catch(() => undefined);
-        });
+        void endpoint.accept(LocalChannel.accept(socket)).catch(() => undefined);
     });
 
     await new Promise<void>((resolve, reject) => {

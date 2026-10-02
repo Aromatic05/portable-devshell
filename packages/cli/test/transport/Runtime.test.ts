@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import {
-    ClientStream,
-    type ClientConnection,
-    type ControlClients,
-} from "@portable-devshell/shared";
+import type { ControlClients, MessageStream } from "@portable-devshell/shared";
 
 import { createCliRuntimeAdapter } from "../../src/transport/Runtime.js";
 
@@ -28,31 +24,26 @@ test(
             rawModes.push(mode);
         };
 
-        let closeCount = 0;
-        const stream = new ClientStream("relay-test", {
-            close() {
-                closeCount += 1;
+        const stream = {
+            onCancel() {
+                return () => undefined;
             },
-            async nextEvent() {
-                return await new Promise<never>(() => undefined);
+            onClose() {
+                return () => undefined;
+            },
+            onData() {
+                return () => undefined;
             },
             async send() {
                 throw new Error("relay send failed");
             },
-        });
+        } as unknown as MessageStream;
         const runtime = {
             async openStart() {
-                return { acknowledgement: {} as never, stream };
+                return stream;
             },
         } as unknown as ControlClients["runtime"];
-        const connection = {
-            mapError(error: unknown) {
-                return error instanceof Error
-                    ? error
-                    : new Error(String(error));
-            },
-        } as unknown as ClientConnection;
-        const adapter = createCliRuntimeAdapter(connection, runtime);
+        const adapter = createCliRuntimeAdapter(runtime);
 
         const started = adapter.start("alpha", {
             input,
@@ -63,7 +54,6 @@ test(
 
         await assert.rejects(started, /relay send failed/u);
         assert.deepEqual(rawModes, [true, false]);
-        assert.equal(closeCount, 1);
         assert.equal(input.listenerCount("data"), 0);
         assert.equal(input.listenerCount("end"), 0);
     },

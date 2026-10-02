@@ -8,10 +8,11 @@ import test from "node:test";
 
 import {
     CONTROL_PROTOCOL_VERSION,
-    Codec,
-    SocketChannel,
+    Endpoint,
+    LocalChannel,
+    Rpc,
+    Stream,
     resolveControlSocketPath,
-    type Event,
     type JsonValue,
 } from "@portable-devshell/shared";
 
@@ -624,278 +625,122 @@ test("CliInstance integration", async (t) => {
 function createInstanceHarness(): { attach: (socket: Socket) => void } {
     return {
         attach(socket: Socket) {
-            const codec = new Codec(SocketChannel.accept(socket), {
-                local: "server",
+            const endpoint = new Endpoint();
+            const protocols: Array<Rpc | Stream> = [
+                new Rpc(endpoint.bind("service", "@control"), {
+                    hello: () => ({
+                        capabilities: ["request", "stream", "streamResume"],
+                        protocolVersion: CONTROL_PROTOCOL_VERSION,
+                    }),
+                }),
+                new Rpc(endpoint.bind("cli", "@control"), {
+                    commands: () => [],
+                }),
+                new Rpc(endpoint.bind("instance", "@control"), {
+                    list: () => [
+                        {
+                            mcpEnabled: true,
+                            name: "demo-local",
+                            snapshot: stoppedSnapshot(),
+                        },
+                    ],
+                }),
+                new Rpc(endpoint.bind("runtime", "demo-local"), {
+                    snapshot: () => ({
+                        lastSeq: 1,
+                        snapshot: stoppedSnapshot(),
+                    }),
+                    refresh: () => ({
+                        lastSeq: 1,
+                        snapshot: stoppedSnapshot(),
+                    }),
+                    stop: () => stoppedSnapshot(),
+                    readLogs: (message) => {
+                        const payload = message as JsonValue | undefined;
+                        return isRecord(payload) && payload.fromSeq === 2
+                            ? [
+                                  {
+                                      at: "",
+                                      instanceName: "demo-local",
+                                      message: "after\n",
+                                      seq: 2,
+                                      stream: "stdout",
+                                  },
+                              ]
+                            : [
+                                  {
+                                      at: "",
+                                      instanceName: "demo-local",
+                                      message: "before\n",
+                                      seq: 1,
+                                      stream: "stdout",
+                                  },
+                              ];
+                    },
+                }),
+            ];
+
+            const runtime = new Stream(endpoint.bind("runtime", "demo-local"));
+            runtime.onOpen(async (stream, name) => {
+                if (name === "start") {
+                    await stream.close(readySnapshot());
+                    return;
+                }
+                if (name === "subscribe") {
+                    await stream.send({
+                        name: "seed",
+                        payload: { events: [], lastSeq: 1 },
+                    });
+                    setTimeout(() => {
+                        void stream.send({
+                            name: "event",
+                            payload: {
+                                at: "",
+                                data: { toolName: "bash_run" },
+                                instanceName: "demo-local",
+                                seq: 2,
+                                type: "toolCall.completed",
+                            },
+                            seq: 2,
+                        });
+                    }, 5);
+                    return;
+                }
+                await stream.cancel({
+                    code: "control.methodNotFound",
+                    message: `unknown runtime stream ${name}`,
+                    retryable: false,
+                });
             });
-            codec.onEvent((event) => {
-                void handleHarnessEvent(codec, event).catch(() => undefined);
+            protocols.push(runtime);
+
+            const tool = new Stream(endpoint.bind("tool", "demo-local"));
+            tool.onOpen(async (stream, name) => {
+                if (name !== "callStream") {
+                    await stream.cancel({
+                        code: "control.methodNotFound",
+                        message: `unknown tool stream ${name}`,
+                        retryable: false,
+                    });
+                    return;
+                }
+                await stream.close({
+                    exitCode: 0,
+                    stderr: "",
+                    stdout: "/tmp/ws\n",
+                });
             });
+            protocols.push(tool);
+
+            socket.once("close", () => {
+                for (const protocol of protocols) protocol.close();
+                endpoint.close();
+            });
+            void endpoint
+                .accept(LocalChannel.accept(socket))
+                .catch(() => undefined);
         },
     };
-}
-
-async function handleHarnessEvent(codec: Codec, event: Event): Promise<void> {
-    switch (event.name) {
-        case "service.hello":
-            await reply(codec, event, {
-                capabilities: ["request", "stream", "streamResume"],
-                protocolVersion: CONTROL_PROTOCOL_VERSION,
-            });
-            return;
-        case "cli.commands":
-            await reply(codec, event, []);
-            return;
-        case "cli.commandStream":
-            await handleCliCommandStream(codec, event);
-            return;
-        case "instance.list":
-            await reply(codec, event, [
-                {
-                    mcpEnabled: true,
-                    name: "demo-local",
-                    snapshot: stoppedSnapshot(),
-                },
-            ]);
-            return;
-        case "runtime.snapshot":
-        case "runtime.refresh":
-            await reply(codec, event, {
-                lastSeq: 1,
-                snapshot: stoppedSnapshot(),
-            });
-            return;
-        case "runtime.start":
-            await codec.send({
-                id: `ack-${event.id}`,
-                replyTo: event.id,
-                streamId: `stream-${event.id}`,
-                destination: event.destination,
-                name: event.name,
-                payload: { accepted: true },
-            });
-            await codec.send({
-                id: `complete-${event.id}`,
-                streamId: `stream-${event.id}`,
-                destination: event.destination,
-                name: "stream.completed",
-                payload: readySnapshot(),
-            });
-            return;
-        case "runtime.stop":
-            await reply(codec, event, stoppedSnapshot());
-            return;
-        case "runtime.readLogs":
-            await reply(
-                codec,
-                event,
-                isRecord(event.payload) && event.payload.fromSeq === 2
-                    ? [
-                          {
-                              at: "",
-                              instanceName: "demo-local",
-                              message: "after\n",
-                              seq: 2,
-                              stream: "stdout",
-                          },
-                      ]
-                    : [
-                          {
-                              at: "",
-                              instanceName: "demo-local",
-                              message: "before\n",
-                              seq: 1,
-                              stream: "stdout",
-                          },
-                      ],
-            );
-            return;
-        case "runtime.subscribe":
-            await codec.send({
-                id: `ack-${event.id}`,
-                replyTo: event.id,
-                streamId: `stream-${event.id}`,
-                destination: event.destination,
-                name: event.name,
-                payload: { events: [], lastSeq: 1 },
-            });
-            setTimeout(() => {
-                void codec
-                    .send({
-                        id: `event-${event.id}`,
-                        streamId: `stream-${event.id}`,
-                        destination: event.destination,
-                        name: "toolCall.completed",
-                        payload: {
-                            at: "",
-                            data: { toolName: "bash_run" },
-                            instanceName: "demo-local",
-                            seq: 2,
-                            type: "toolCall.completed",
-                        },
-                        seq: 2,
-                    })
-                    .catch(() => undefined);
-            }, 5);
-            return;
-        case "tool.call":
-            await reply(codec, event, {
-                exitCode: 0,
-                stderr: "",
-                stdout: "/tmp/ws\n",
-            });
-            return;
-        default:
-            await codec.send({
-                id: `error-${event.id}`,
-                replyTo: event.id,
-                destination: event.destination,
-                name: event.name,
-                error: {
-                    code: "control.methodNotFound",
-                    message: `unknown operation ${event.name}`,
-                    retryable: false,
-                },
-            });
-    }
-}
-
-async function handleCliCommandStream(
-    codec: Codec,
-    event: Event,
-): Promise<void> {
-    const payload = isRecord(event.payload) ? event.payload : {};
-    const argv =
-        Array.isArray(payload.argv) &&
-        payload.argv.every((value) => typeof value === "string")
-            ? (payload.argv as string[])
-            : [];
-    const commandId = payload.commandId;
-    if (commandId !== "instance") {
-        await codec.send({
-            id: `error-${event.id}`,
-            replyTo: event.id,
-            destination: event.destination,
-            name: event.name,
-            error: {
-                code: "control.cliCommandFailed",
-                message: `unknown CLI command ${String(commandId)}`,
-                retryable: false,
-            },
-        });
-        return;
-    }
-
-    const streamId = `stream-${event.id}`;
-    await codec.send({
-        id: `ack-${event.id}`,
-        replyTo: event.id,
-        streamId,
-        destination: event.destination,
-        name: event.name,
-        payload: { accepted: true },
-    });
-
-    const operation = argv[0];
-    if (operation === "logs" && argv[2] === "-f") {
-        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", {
-            chunk: "[1] stdout before\n",
-        });
-        await sendCliStreamEvent(codec, event, streamId, "cli.stdout", {
-            chunk: "[2] stdout after\n",
-        });
-        await completeCliCommand(codec, event, streamId, "");
-        return;
-    }
-
-    const text =
-        operation === "list"
-            ? "demo-local\tstopped\tready=false\n"
-            : operation === "status"
-              ? renderHarnessSnapshot(stoppedSnapshot())
-              : operation === "start"
-                ? renderHarnessSnapshot(readySnapshot())
-                : operation === "stop"
-                  ? renderHarnessSnapshot(stoppedSnapshot())
-                  : operation === "logs"
-                    ? "[1] stdout before\n"
-                    : operation === "call"
-                      ? "instance: demo-local\ntool: bash_run\nexitCode: 0\nstdout:\n/tmp/ws\n"
-                      : undefined;
-    if (text === undefined) {
-        await codec.send({
-            id: `cancel-${event.id}`,
-            streamId,
-            destination: event.destination,
-            name: "stream.cancelled",
-            error: {
-                code: "cli.usage",
-                message: `unsupported instance test command: ${String(operation)}`,
-                retryable: false,
-            },
-        });
-        return;
-    }
-    await completeCliCommand(codec, event, streamId, text);
-}
-
-async function sendCliStreamEvent(
-    codec: Codec,
-    event: Event,
-    streamId: string,
-    name: `${string}.${string}`,
-    payload: JsonValue,
-): Promise<void> {
-    await codec.send({
-        id: `${name}-${event.id}-${Math.random()}`,
-        streamId,
-        destination: event.destination,
-        name,
-        payload,
-    });
-}
-
-async function completeCliCommand(
-    codec: Codec,
-    event: Event,
-    streamId: string,
-    text: string,
-): Promise<void> {
-    await codec.send({
-        id: `complete-${event.id}`,
-        streamId,
-        destination: event.destination,
-        name: "stream.completed",
-        payload: { kind: "text", text },
-    });
-}
-
-function renderHarnessSnapshot(
-    value: ReturnType<typeof stoppedSnapshot>,
-): string {
-    return [
-        `instance: ${value.name}`,
-        `status: ${value.status}`,
-        `ready: ${value.ready}`,
-        `daemonState: ${value.daemonState}`,
-        `connectionState: ${value.connectionState}`,
-        `lastSeq: ${value.lastSeq}`,
-        "Todo: none",
-        "",
-    ].join("\n");
-}
-
-async function reply(
-    codec: Codec,
-    event: Event,
-    payload: JsonValue,
-): Promise<void> {
-    await codec.send({
-        id: `reply-${event.id}`,
-        replyTo: event.id,
-        destination: event.destination,
-        name: event.name,
-        payload,
-    });
 }
 
 function isRecord(

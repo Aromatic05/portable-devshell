@@ -5,11 +5,15 @@ import test from "node:test";
 
 import type { WorkerInstance } from "@portable-devshell/core/testing";
 import {
+    CONTROL_PROTOCOL_RANGE,
+    Endpoint,
+    LocalChannel,
+    Rpc,
+    Stream,
     asInstanceName,
-    ClientConnection,
-    createError,
-    SocketChannel,
+    type ControlStreamMessage,
     type JsonValue,
+    type MessageStream,
 } from "@portable-devshell/shared";
 
 import { ControlRouteComposition } from "../../../../src/composition/Route.ts";
@@ -46,29 +50,30 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
 
     const connection = await connect(socketPath);
     t.after(() => connection.close());
-    const opened = await connection.openStream(
+    const stream = await connection.open(
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
         { fromSeq: 1 },
     );
-    t.after(() => opened.stream.close());
-    assert.equal(opened.acknowledgement.replyTo === undefined, false);
-    assert.notEqual(opened.stream.id, opened.acknowledgement.replyTo);
-    assert.deepEqual(opened.acknowledgement.payload, {
+    t.after(() => void stream.close());
+    const seed = await readMessage(stream);
+    assert.equal(seed.name, "seed");
+    assert.deepEqual(seed.payload, {
         events: [worker.events[0]],
         lastSeq: 1,
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    const normal = await opened.stream.nextEvent();
-    assert.equal(normal.name, "toolCall.completed");
+    const normal = await readMessage(stream);
+    assert.equal(normal.name, "event");
     assert.equal(normal.seq, 2);
+    assert.equal((normal.payload as { type?: string }).type, "toolCall.completed");
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
     worker.dropBefore(4);
-    const gap = await opened.stream.nextEvent();
-    assert.equal(gap.name, "stream.gap");
+    const gap = await readMessage(stream);
+    assert.equal(gap.name, "gap");
     assert.deepEqual(gap.payload, {
         instance: "alpha",
         latestSeq: 3,
@@ -77,9 +82,10 @@ test("stream gap is non-terminal and the dedicated subscription remains usable",
     });
 
     worker.emit("toolCall.completed", { toolName: "bash_run" });
-    const recovered = await opened.stream.nextEvent();
-    assert.equal(recovered.name, "toolCall.completed");
+    const recovered = await readMessage(stream);
+    assert.equal(recovered.name, "event");
     assert.equal(recovered.seq, 4);
+    assert.equal((recovered.payload as { type?: string }).type, "toolCall.completed");
 });
 
 test("an initial unavailable sequence returns a normal stream.gap error reply", async (t) => {
@@ -110,38 +116,68 @@ test("an initial unavailable sequence returns a normal stream.gap error reply", 
 
     const connection = await connect(socketPath);
     t.after(() => connection.close());
-    const reply = await connection.requestEvent(
+    const stream = await connection.open(
         asInstanceName("alpha"),
         "runtime",
         "subscribe",
         { fromSeq: 1 },
     );
-    assert.equal(reply.error?.code, "stream.gap");
-    assert.equal(reply.error?.retryable, true);
-    assert.deepEqual(reply.error?.details, {
-        instance: "alpha",
-        latestSeq: 2,
-        oldestAvailableSeq: 2,
-        requestedFromSeq: 1,
+    await assert.rejects(stream.readMessage(), (error: unknown) => {
+        const value = error as Error & {
+            code?: string;
+            details?: unknown;
+            retryable?: boolean;
+        };
+        assert.equal(value.code, "stream.gap");
+        assert.equal(value.retryable, true);
+        assert.deepEqual(value.details, {
+            instance: "alpha",
+            latestSeq: 2,
+            oldestAvailableSeq: 2,
+            requestedFromSeq: 1,
+        });
+        return true;
     });
 });
 
-async function connect(socketPath: string): Promise<ClientConnection> {
-    const connection = new ClientConnection({
-        connectChannel: (signal) =>
-            SocketChannel.connect(socketPath, { signal }),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "cli",
+interface TestConnection {
+    close(): void;
+    open(
+        host: string,
+        port: string,
+        name: string,
+        payload?: JsonValue,
+    ): Promise<MessageStream>;
+}
+
+async function connect(socketPath: string): Promise<TestConnection> {
+    const endpoint = new Endpoint({
+        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
     });
-    await connection.request("@control", "service", "hello", {
+    const protocols: Array<Rpc | Stream> = [];
+    const service = new Rpc(await endpoint.connect("@control", "service"));
+    protocols.push(service);
+    await service.request("hello", {
         clientKind: "cli",
-        maxProtocolVersion: 1,
-        minProtocolVersion: 1,
+        protocolRange: CONTROL_PROTOCOL_RANGE,
     });
-    return connection;
+    return {
+        close() {
+            for (const protocol of protocols) protocol.close();
+            endpoint.close();
+        },
+        async open(host, port, name, payload) {
+            const protocol = new Stream(await endpoint.connect(host, port));
+            protocols.push(protocol);
+            return await protocol.open(name, payload);
+        },
+    };
+}
+
+async function readMessage(stream: MessageStream): Promise<ControlStreamMessage> {
+    const next = await stream.readMessage();
+    assert.equal(next.type, "data");
+    return next.message as ControlStreamMessage;
 }
 
 class FakeWorker {

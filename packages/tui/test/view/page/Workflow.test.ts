@@ -328,6 +328,14 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 },
             } as never,
             instances,
+            tuiPages: {
+                async invoke() {
+                    return { items: [], title: "" };
+                },
+                list() {
+                    return [];
+                },
+            } as never,
             mcpStatus: () => ({
                 running: false,
                 reason: "MCP runtime is disabled.",

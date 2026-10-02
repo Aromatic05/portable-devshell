@@ -5,7 +5,8 @@ import type { Message } from "./Packet.js";
 export interface StreamError {
     readonly message: string;
     readonly code?: string;
-    readonly data?: unknown;
+    readonly details?: unknown;
+    readonly retryable?: boolean;
 }
 
 export type StreamRead =
@@ -35,10 +36,22 @@ export class Stream {
 
     constructor(target: Connection | Port) {
         this.#target = target;
-        this.#unsubscribe =
-            target instanceof Connection
-                ? target.onPacket((packet) => this.#accept(packet, target.remote))
-                : target.onPacket((packet, peer) => this.#accept(packet, peer));
+        if (target instanceof Connection) {
+            const offPacket = target.onPacket((packet) =>
+                this.#accept(packet, target.remote),
+            );
+            const offClose = target.onClose((error) =>
+                this.#disconnect(error),
+            );
+            this.#unsubscribe = () => {
+                offPacket();
+                offClose();
+            };
+        } else {
+            this.#unsubscribe = target.onPacket((packet, peer) =>
+                this.#accept(packet, peer),
+            );
+        }
     }
 
     async open(name: string, message?: Message): Promise<MessageStream> {
@@ -74,6 +87,15 @@ export class Stream {
         for (const stream of this.#streams.values()) stream.dispose();
         this.#streams.clear();
         this.#openListeners.clear();
+    }
+
+    #disconnect(error?: Error): void {
+        const failure: StreamError = {
+            message: error?.message ?? "Stream connection closed.",
+        };
+        for (const stream of [...this.#streams.values()])
+            stream.acceptCancel(failure);
+        this.#streams.clear();
     }
 
     async #accept(value: unknown, peer: Address): Promise<void> {
@@ -196,6 +218,7 @@ export class MessageStream {
     async finish(): Promise<void> {
         if (this.#closed || this.#localFinished) return;
         this.#localFinished = true;
+        if (!this.#connection.connected) return;
         await this.#connection.send({
             protocol: "stream",
             type: "fin",
@@ -206,25 +229,37 @@ export class MessageStream {
     async close(message?: Message): Promise<void> {
         if (this.#closed) return;
         this.#closed = true;
-        await this.#connection.send({
-            protocol: "stream",
-            type: "close",
-            id: this.id,
-            ...(message === undefined ? {} : { message }),
-        } satisfies StreamPacket);
-        this.#finish();
+        try {
+            if (this.#connection.connected)
+                await this.#connection.send({
+                    protocol: "stream",
+                    type: "close",
+                    id: this.id,
+                    ...(message === undefined ? {} : { message }),
+                } satisfies StreamPacket);
+        } catch (error) {
+            if (this.#connection.connected) throw error;
+        } finally {
+            this.#finish();
+        }
     }
 
     async cancel(error?: StreamError): Promise<void> {
         if (this.#closed) return;
         this.#closed = true;
-        await this.#connection.send({
-            protocol: "stream",
-            type: "cancel",
-            id: this.id,
-            ...(error === undefined ? {} : { error }),
-        } satisfies StreamPacket);
-        this.#finish();
+        try {
+            if (this.#connection.connected)
+                await this.#connection.send({
+                    protocol: "stream",
+                    type: "cancel",
+                    id: this.id,
+                    ...(error === undefined ? {} : { error }),
+                } satisfies StreamPacket);
+        } catch (cause) {
+            if (this.#connection.connected) throw cause;
+        } finally {
+            this.#finish();
+        }
     }
 
     onData(
@@ -323,7 +358,8 @@ export class MessageStream {
 function streamError(error?: StreamError): Error {
     return Object.assign(new Error(error?.message ?? "Stream cancelled."), {
         ...(error?.code === undefined ? {} : { code: error.code }),
-        ...(error?.data === undefined ? {} : { data: error.data }),
+        ...(error?.details === undefined ? {} : { details: error.details }),
+        ...(error?.retryable === undefined ? {} : { retryable: error.retryable }),
     });
 }
 

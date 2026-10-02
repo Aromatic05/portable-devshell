@@ -20,10 +20,9 @@ import {
 } from "@portable-devshell/mcp";
 import {
     CONTROL_PROTOCOL_VERSION,
-    PrefixRoute,
     controlWebBasePath,
+    type ControlHostDefinition,
     type JsonValue,
-    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
@@ -329,7 +328,8 @@ async function startBrowserRuntime(options: {
         ],
         routes: {
             connectionClosed() {},
-            snapshot: () => createRouteSnapshot(calls),
+            hosts: () => createRouteHosts(calls),
+            onChange: () => () => undefined,
         },
     });
 
@@ -414,15 +414,15 @@ async function buildBrowserAssets(outputDirectory: string): Promise<void> {
     });
 }
 
-function createRouteSnapshot(calls: {
+function createRouteHosts(calls: {
     hello: number;
     overview: number;
     preferences: number;
-}): PrefixRouteSnapshot {
-    return PrefixRoute.snapshot([
+}): readonly ControlHostDefinition[] {
+    return [
         {
-            destination: "@control",
-            modules: [
+            host: "@control",
+            ports: [
                 {
                     name: "service",
                     operations: [
@@ -503,7 +503,7 @@ function createRouteSnapshot(calls: {
                 },
             ],
         },
-    ]);
+    ];
 }
 
 function overviewPayload(): JsonValue {

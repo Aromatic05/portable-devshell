@@ -135,10 +135,12 @@ export class LocalChannel implements Channel {
         if (error !== undefined && this.#closeError === undefined) {
             this.#closeError = error;
         }
-        if (this.#closed) {
+        if (this.#closed) return;
+        this.#closed = true;
+        if (error === undefined) {
+            this.#socket.end();
             return;
         }
-        this.#closed = true;
         this.#socket.destroy();
         this.#finishClose();
     }

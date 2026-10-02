@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type {
     DebugPatchSummary,
-    PrefixRouteContext,
+    ControlPortContext,
 } from "@portable-devshell/shared";
 
 import {
@@ -14,13 +14,16 @@ import {
 function context(
     peer: "cli" | "tui" | "web",
     subjectKind: string,
-): PrefixRouteContext {
+): ControlPortContext {
     return {
         connectionId: "conn-1",
+        host: "@control",
         peer,
         requestId: "req-1",
+        signal: new AbortController().signal,
+        afterReply() {},
         subject: { id: "subject-1", kind: subjectKind },
-    } as PrefixRouteContext;
+    } as ControlPortContext;
 }
 
 function patch(): DebugPatchSummary {

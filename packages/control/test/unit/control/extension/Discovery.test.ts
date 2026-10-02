@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
-    PrefixRouteContext,
-    PrefixRouteModuleDefinition,
+    ControlPortContext,
+    ControlPortDefinition,
 } from "@portable-devshell/shared";
 import { errorCodes, toControlErrorBody } from "@portable-devshell/shared";
 import type {
@@ -102,17 +102,19 @@ function extensionHost(
 function context(
     peer: "cli" | "tui" | "web",
     subjectKind = peer === "cli" ? "local-owner" : "web-session",
-): PrefixRouteContext {
+): ControlPortContext {
     return {
         connectionId: "conn-1",
+        host: "@control",
         peer,
         requestId: "req-1",
         signal: new AbortController().signal,
+        afterReply() {},
         subject: { id: "subject-1", kind: subjectKind },
-    } as PrefixRouteContext;
+    } as ControlPortContext;
 }
 
-function operation(module: PrefixRouteModuleDefinition, name: string) {
+function operation(module: ControlPortDefinition, name: string) {
     const found = module.operations.find(
         (candidate) => candidate.name === name,
     );

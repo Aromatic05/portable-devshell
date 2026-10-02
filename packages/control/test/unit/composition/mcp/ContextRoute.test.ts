@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type {
     McpContextRecord,
-    PrefixRouteContext,
+    ControlPortContext,
 } from "@portable-devshell/shared";
 
 import {
@@ -52,9 +52,12 @@ test("context routes resolve the current admin port for every request", async ()
         throw new Error("context.list operation is missing");
     const context = {
         connectionId: "conn",
+        host: "@control",
         peer: "cli",
         requestId: "req",
-    } as PrefixRouteContext;
+        signal: new AbortController().signal,
+        afterReply() {},
+    } as ControlPortContext;
 
     const first = await list.handle({ id: "1", name: "list" }, context);
     current = "second";

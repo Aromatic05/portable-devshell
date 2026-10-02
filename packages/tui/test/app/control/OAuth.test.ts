@@ -89,6 +89,14 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
                 },
             } as never,
             instances: new InstanceRegistry([]),
+            tuiPages: {
+                async invoke() {
+                    return { items: [], title: "" };
+                },
+                list() {
+                    return [];
+                },
+            } as never,
             mcpStatus: () => host.status(),
             oauthApprovals: () => host.oauthApprovals,
             shutdown() {},

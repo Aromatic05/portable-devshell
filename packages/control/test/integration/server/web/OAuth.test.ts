@@ -10,13 +10,12 @@ import {
 } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
-    ClientConnection,
     CONTROL_PROTOCOL_RANGE,
-    PrefixRoute,
+    Endpoint,
+    Rpc,
     controlWebBasePath,
-    createError,
+    type ControlHostDefinition,
     type JsonValue,
-    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 
 import { ControlChannelServer } from "../../../../src/server/endpoint/Channel.ts";
@@ -67,7 +66,7 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     const uninstall = flow.install(http);
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     http.installOAuth(protectedResource);
     await flow.warmup();
@@ -118,27 +117,21 @@ test("web oauth2 completes browser PKCE and authenticates the real control WebSo
     });
     assert.equal(authenticated.status, 200);
 
-    const connection = new ClientConnection({
+    const endpoint = new Endpoint({
         connectChannel: async () =>
             await NodeWebSocketChannel.connect(
                 `${publicBaseUrl.replace("http", "ws")}/web/rpc`,
                 sessionCookie!,
             ),
-        mapError: (error) =>
-            error instanceof Error ? error : new Error(String(error)),
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
     });
-    t.after(() => connection.close());
-    await connection.request("@control", "service", "hello", {
+    t.after(() => endpoint.close());
+    const service = new Rpc(await endpoint.connect("@control", "service"));
+    t.after(() => service.close());
+    await service.request("hello", {
         clientKind: "web",
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });
-    assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
-        { pong: true },
-    );
+    assert.deepEqual(await service.request<JsonValue>("ping"), { pong: true });
 });
 
 test("web oauth2 rejects a callback whose state cookie does not match", async (t) => {
@@ -608,11 +601,11 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
     assert.fail("condition was not met before timeout");
 }
 
-function createRouteSnapshot(): PrefixRouteSnapshot {
-    return PrefixRoute.snapshot([
+function createRouteHosts(): readonly ControlHostDefinition[] {
+    return [
         {
-            destination: "@control",
-            modules: [
+            host: "@control",
+            ports: [
                 {
                     name: "service",
                     operations: [
@@ -629,5 +622,5 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                 },
             ],
         },
-    ]);
+    ];
 }

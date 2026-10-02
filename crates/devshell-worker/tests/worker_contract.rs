@@ -1,4 +1,6 @@
 mod support;
+#[path = "support/endpoint.rs"]
+mod endpoint;
 
 use std::fs;
 use std::io::Read;
@@ -11,7 +13,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use serde_json::Value;
 use support::TestEnv;
-use support::frame::{TransportEndpointReader, TransportEndpointWriter};
+use endpoint::{TransportEndpointReader, TransportEndpointWriter};
 
 #[test]
 fn start_is_workspace_neutral_and_keeps_config_minimal() {

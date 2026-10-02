@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PrefixRouteContext } from "@portable-devshell/shared";
+import type { ControlPortContext } from "@portable-devshell/shared";
 
 import type { ArtifactService } from "../../../src/control/artifact/Service.ts";
 import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
@@ -26,16 +26,16 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
             };
         },
     } as unknown as ArtifactService;
-    const table = new ControlRouteComposition({
+    const routes = new ControlRouteComposition({
         artifact: artifactService,
         instances: new InstanceRegistry([]),
         shutdown() {},
     });
-    const snapshot = table.snapshot();
-    const handler = snapshot.destinations
-        .get("@control")!
-        .get("artifact")!
-        .get("startTransfer")!;
+    const control = routes.hosts().find((host) => host.host === "@control")!;
+    const artifact = control.ports.find((port) => port.name === "artifact")!;
+    const handler = artifact.operations.find(
+        (operation) => operation.name === "startTransfer",
+    )!.handle;
 
     const result = await handler(
         {
@@ -50,7 +50,7 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
                 targetWorkspace: "/tmp",
             },
         },
-        createContext("@control", "artifact"),
+        createContext("@control"),
     );
 
     assert.equal(
@@ -73,18 +73,11 @@ test("artifact.startTransfer accepts an explicit source instance", async () => {
     ]);
 });
 
-function createContext(
-    destination: "@control" | string,
-    module: string,
-): PrefixRouteContext {
+function createContext(host: string): ControlPortContext {
     return {
         afterReply() {},
         connectionId: "connection-1",
-        destination: destination as never,
-        module,
-        async openStream() {
-            throw new Error("stream not expected");
-        },
+        host,
         peer: "cli",
         requestId: "request-1",
         signal: new AbortController().signal,

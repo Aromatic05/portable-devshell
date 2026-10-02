@@ -10,5 +10,3 @@ export interface WorkerChannelOptions {
     instanceName: string;
     env?: NodeJS.ProcessEnv;
 }
-
-export type WorkerRpcOptions = WorkerChannelOptions;

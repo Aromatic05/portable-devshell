@@ -7,16 +7,16 @@ import test from "node:test";
 import { HttpHost } from "@portable-devshell/mcp";
 import { McpHost } from "@portable-devshell/mcp/testing";
 import {
-    ClientConnection,
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
     CONTROL_REMOTE_RPC_PATH,
-    PrefixRoute,
-    WebSocketChannel,
+    Endpoint,
+    Rpc,
+    WebChannel,
     controlWebBasePath,
-    createError,
+    type Channel,
+    type ControlHostDefinition,
     type JsonValue,
-    type PrefixRouteSnapshot,
 } from "@portable-devshell/shared";
 import WebSocket from "ws";
 
@@ -45,7 +45,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
         routes: {
             connectionClosed: (connectionId) =>
                 closedConnections.push(connectionId),
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts, onChange: () => () => undefined,
         },
     });
 
@@ -92,17 +92,12 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
     );
     assert.match(crossOrigin, /403/iu);
 
-    const connection = new ClientConnection({
-        connectChannel: async () =>
-            await NodeWebSocketChannel.connect(
-                `${origin.replace("http", "ws")}/web/rpc`,
-                cookie!.split(";", 1)[0]!,
-            ),
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
-    });
+    const connection = createClient(async () =>
+        await NodeWebSocketChannel.connect(
+            `${origin.replace("http", "ws")}/web/rpc`,
+            cookie!.split(";", 1)[0]!,
+        ),
+    );
     t.after(() => connection.close());
     await negotiate(connection, "web");
 
@@ -111,17 +106,12 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
         { pong: true },
     );
 
-    const forgedNative = new ClientConnection({
-        connectChannel: async () =>
-            await NodeWebSocketChannel.connect(
-                `${origin.replace("http", "ws")}/web/rpc`,
-                cookie!.split(";", 1)[0]!,
-            ),
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "cli",
-    });
+    const forgedNative = createClient(async () =>
+        await NodeWebSocketChannel.connect(
+            `${origin.replace("http", "ws")}/web/rpc`,
+            cookie!.split(";", 1)[0]!,
+        ),
+    );
     t.after(() => forgedNative.close());
     await assert.rejects(
         negotiate(forgedNative, "cli"),
@@ -183,7 +173,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
         listeners: [
             new ControlWebSocketListener({ http: host.server, sessions }),
         ],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await host.start();
@@ -197,7 +187,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
 
     const origin = httpOrigin(host.server);
     await assert.rejects(
-        WebSocketChannel.connect({
+        WebChannel.connect({
             token: "anonymous-native-is-not-enabled",
             url: `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
         }),
@@ -214,13 +204,7 @@ test("Web none auth stays independent when its shared MCP listener requires OAut
         cookie!,
     );
     t.after(() => webSocket.close());
-    const connection = new ClientConnection({
-        connectChannel: async () => webSocket,
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
-    });
+    const connection = createClient(async () => webSocket);
     await negotiate(connection, "web");
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
@@ -240,7 +224,7 @@ test("web token auth exchanges the configured web bearer token for a session coo
     });
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await http.start();
@@ -285,13 +269,7 @@ test("web token auth exchanges the configured web bearer token for a session coo
         cookie!,
     );
     t.after(() => webSocket.close());
-    const connection = new ClientConnection({
-        connectChannel: async () => webSocket,
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
-    });
+    const connection = createClient(async () => webSocket);
     await negotiate(connection, "web");
     assert.deepEqual(
         await connection.request<JsonValue>("@control", "service", "ping"),
@@ -312,7 +290,7 @@ test("web token auth never accepts an MCP namespace bearer token", async (t) => 
     });
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await http.start();
@@ -366,7 +344,7 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
         ],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts, onChange: () => () => undefined,
         },
     });
     await channels.start();
@@ -404,17 +382,12 @@ test("web routes and cookies follow the public base URL path prefix", async (t) 
     );
     assert.match(rejectedLegacyPath, /404/iu);
 
-    const connection = new ClientConnection({
-        connectChannel: async () =>
-            await NodeWebSocketChannel.connect(
-                `${origin.replace("http", "ws")}${basePath}/rpc`,
-                cookie,
-            ),
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
-    });
+    const connection = createClient(async () =>
+        await NodeWebSocketChannel.connect(
+            `${origin.replace("http", "ws")}${basePath}/rpc`,
+            cookie,
+        ),
+    );
     t.after(() => connection.close());
     await negotiate(connection, "web");
     assert.deepEqual(
@@ -438,7 +411,7 @@ test("web session expiry closes its active channel", async (t) => {
         ],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts, onChange: () => () => undefined,
         },
     });
     await channels.start();
@@ -487,7 +460,7 @@ test("web RPC requires the canonical subprotocol", async (t) => {
         ],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts, onChange: () => () => undefined,
         },
     });
     await channels.start();
@@ -536,7 +509,7 @@ test("web session capacity evicts the oldest browser session and closes its chan
         ],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts, onChange: () => () => undefined,
         },
     });
     await channels.start();
@@ -601,7 +574,7 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
                 sessions,
             }),
         ],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await http.start();
@@ -615,11 +588,11 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     const origin = httpOrigin(http);
     const url = `${origin.replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`;
     await assert.rejects(
-        WebSocketChannel.connect({ token: "wrong-token", url }),
+        WebChannel.connect({ token: "wrong-token", url }),
         /failed|rejected|Unauthorized/iu,
     );
     await assert.rejects(
-        WebSocketChannel.connect({
+        WebChannel.connect({
             token: remoteToken,
             url: `${origin.replace("http", "ws")}/web/rpc`,
         }),
@@ -627,14 +600,9 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
     );
 
     for (const peer of ["tui", "cli"] as const) {
-        const connection = new ClientConnection({
-            connectChannel: (signal) =>
-                WebSocketChannel.connect({ token: remoteToken, url }, signal),
-            mapError: normalizeError,
-            mapRemoteError: (error) => createError(error),
-            mode: "persistent",
-            peer,
-        });
+        const connection = createClient((signal) =>
+            WebChannel.connect({ token: remoteToken, url }, signal),
+        );
         t.after(() => connection.close());
         await negotiate(connection, peer);
         assert.deepEqual(
@@ -642,14 +610,9 @@ test("native TUI and CLI bearer clients use the shared remote Control WebSocket 
             { pong: true },
         );
     }
-    const forgedWeb = new ClientConnection({
-        connectChannel: (signal) =>
-            WebSocketChannel.connect({ token: remoteToken, url }, signal),
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer: "web",
-    });
+    const forgedWeb = createClient((signal) =>
+        WebChannel.connect({ token: remoteToken, url }, signal),
+    );
     t.after(() => forgedWeb.close());
     await assert.rejects(
         negotiate(forgedWeb, "web"),
@@ -682,7 +645,7 @@ test("native OAuth bearer expiry closes an active Control WebSocket", async (t) 
     });
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await http.start();
@@ -693,7 +656,7 @@ test("native OAuth bearer expiry closes an active Control WebSocket", async (t) 
         );
     });
 
-    const channel = await WebSocketChannel.connect({
+    const channel = await WebChannel.connect({
         token: "expiring-oauth-token",
         url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
     });
@@ -732,7 +695,7 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
     });
     const channels = new ControlChannelServer({
         listeners: [new ControlWebSocketListener({ access, http, sessions })],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: { connectionClosed() {}, hosts: createRouteHosts, onChange: () => () => undefined },
     });
     await channels.start();
     await http.start();
@@ -743,7 +706,7 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
         );
     });
 
-    const channel = await WebSocketChannel.connect({
+    const channel = await WebChannel.connect({
         token: "revocable-oauth-token",
         url: `${httpOrigin(http).replace("http", "ws")}${CONTROL_REMOTE_RPC_PATH}`,
     });
@@ -754,11 +717,11 @@ test("native OAuth grant revocation closes its active Control WebSocket", async 
     await waitUntil(() => channel.closed);
 });
 
-function createRouteSnapshot(): PrefixRouteSnapshot {
-    return PrefixRoute.snapshot([
+function createRouteHosts(): readonly ControlHostDefinition[] {
+    return [
         {
-            destination: "@control",
-            modules: [
+            host: "@control",
+            ports: [
                 {
                     name: "service",
                     operations: [
@@ -775,11 +738,48 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                 },
             ],
         },
-    ]);
+    ];
+}
+
+interface TestClient {
+    close(): void;
+    request<T = JsonValue>(
+        host: string,
+        port: string,
+        method: string,
+        payload?: JsonValue,
+    ): Promise<T>;
+}
+
+function createClient(
+    connectChannel: (signal?: AbortSignal) => Promise<Channel>,
+): TestClient {
+    const endpoint = new Endpoint({ connectChannel });
+    const rpcs = new Map<string, Rpc>();
+    return {
+        close() {
+            for (const rpc of rpcs.values()) rpc.close();
+            endpoint.close();
+        },
+        async request<T = JsonValue>(
+            host: string,
+            port: string,
+            method: string,
+            payload?: JsonValue,
+        ) {
+            const key = `${host}\u0000${port}`;
+            let rpc = rpcs.get(key);
+            if (rpc === undefined) {
+                rpc = new Rpc(await endpoint.connect(host, port));
+                rpcs.set(key, rpc);
+            }
+            return (await rpc.request(method, payload)) as T;
+        },
+    };
 }
 
 async function negotiate(
-    connection: ClientConnection,
+    connection: TestClient,
     clientKind: "cli" | "tui" | "web",
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
@@ -817,6 +817,15 @@ function createMcpWorker() {
     } as never;
 }
 
+async function waitUntil(predicate: () => boolean): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    while (!predicate()) {
+        if (Date.now() >= deadline)
+            throw new Error("Timed out waiting for condition.");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+}
+
 async function openRejected(
     url: string,
     options: { cookie?: string; origin?: string; protocol: string },
@@ -838,18 +847,4 @@ async function openRejected(
             resolve("unexpected open");
         });
     });
-}
-
-function normalizeError(error: unknown): Error {
-    return error instanceof Error ? error : new Error(String(error));
-}
-
-async function waitUntil(predicate: () => boolean): Promise<void> {
-    const deadline = Date.now() + 2_000;
-    while (!predicate()) {
-        if (Date.now() >= deadline) {
-            throw new Error("Timed out waiting for condition.");
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-    }
 }

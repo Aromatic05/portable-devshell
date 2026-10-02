@@ -87,7 +87,9 @@ pub struct StreamError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    pub details: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
 }
 
 pub fn decode(value: Value) -> Result<Packet, String> {

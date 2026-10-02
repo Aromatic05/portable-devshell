@@ -2,16 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    CONTROL_PROTOCOL_LEGACY_VERSION,
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
-    ClientConnection,
-    PrefixRoute,
-    createError,
+    Endpoint,
+    Rpc,
     errorCodes,
     type Channel,
     type JsonValue,
-    type PrefixRouteSnapshot,
+    type ControlHostDefinition,
 } from "@portable-devshell/shared";
 
 import {
@@ -249,7 +247,8 @@ test("ControlChannelServer serves the same routes through multiple channel provi
         connectionClosed(connectionId: string) {
             closedConnections.push(connectionId);
         },
-        snapshot: createRouteSnapshot,
+        hosts: createRouteHosts,
+        onChange: () => () => undefined,
     };
     const server = new ControlChannelServer({
         listeners: [socketProvider, webProvider],
@@ -295,8 +294,7 @@ test("ControlChannelServer serves the same routes through multiple channel provi
     await assert.rejects(
         webConnection.request("@control", "service", "hello", {
             clientKind: "web",
-            maxProtocolVersion: CONTROL_PROTOCOL_VERSION,
-            minProtocolVersion: CONTROL_PROTOCOL_VERSION,
+            protocolRange: CONTROL_PROTOCOL_RANGE,
         }),
         (error: unknown) =>
             (error as { code?: string }).code ===
@@ -320,7 +318,7 @@ test("ControlChannelServer rejects a self-asserted peer outside transport admiss
     });
     const server = new ControlChannelServer({
         listeners: [provider],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
     await server.start();
     t.after(async () => await server.close());
@@ -339,7 +337,7 @@ test("ControlChannelServer rejects unsupported protocol ranges during first requ
     const provider = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [provider],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
     await server.start();
     t.after(async () => await server.close());
@@ -360,7 +358,7 @@ test("ControlChannelServer rejects unsafe semantic protocol components as invali
     const provider = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [provider],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
     await server.start();
     t.after(async () => await server.close());
@@ -384,7 +382,7 @@ test("ControlChannelServer negotiates semantic protocol ranges", async (t) => {
     const provider = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [provider],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
     await server.start();
     t.after(async () => await server.close());
@@ -403,68 +401,32 @@ test("ControlChannelServer negotiates semantic protocol ranges", async (t) => {
     );
 });
 
-test("ControlChannelServer preserves the 0.7.6 integer hello compatibility path", async (t) => {
-    const provider = new MemoryControlChannelListener();
-    const server = new ControlChannelServer({
-        listeners: [provider],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
-    });
-    await server.start();
-    t.after(async () => await server.close());
-    const connection = createClient(provider, "tui");
-    t.after(() => connection.close());
-
-    assert.deepEqual(
-        await connection.request("@control", "service", "hello", {
-            clientKind: "tui",
-            maxProtocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
-            minProtocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
-        }),
-        {
-            capabilities: ["request", "stream", "streamResume"],
-            protocolVersion: CONTROL_PROTOCOL_LEGACY_VERSION,
-        },
-    );
-    assert.deepEqual(
-        await connection.request<JsonValue>("@control", "service", "ping"),
-        {
-            pong: true,
-            protocolVersion: CONTROL_PROTOCOL_VERSION,
-            subject: { id: "uid:test", kind: "local-owner" },
-        },
-    );
-});
-
 test("ControlChannelServer does not authenticate a connection when hello handling fails", async (t) => {
     const provider = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [provider],
-        routes: {
-            connectionClosed() {},
-            snapshot: () =>
-                PrefixRoute.snapshot([
+        routes: createRouteProvider(() => [
+            {
+                host: "@control",
+                ports: [
                     {
-                        destination: "@control",
-                        modules: [
+                        name: "service",
+                        operations: [
                             {
-                                name: "service",
-                                operations: [
-                                    {
-                                        name: "hello",
-                                        handle: () => {
-                                            throw new Error("hello failed");
-                                        },
-                                    },
-                                    {
-                                        name: "ping",
-                                        handle: () => ({ pong: true }),
-                                    },
-                                ],
+                                name: "hello",
+                                handle: () => {
+                                    throw new Error("hello failed");
+                                },
+                            },
+                            {
+                                name: "ping",
+                                handle: () => ({ pong: true }),
                             },
                         ],
                     },
-                ]),
-        },
+                ],
+            },
+        ]),
     });
     await server.start();
     t.after(async () => await server.close());
@@ -494,7 +456,8 @@ test("ControlChannelServer closes earlier providers when a later provider fails 
         listeners: [first, failure],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
 
@@ -508,7 +471,8 @@ test("ControlChannelServer coalesces concurrent start calls", async (t) => {
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
     t.after(async () => await server.close());
@@ -530,7 +494,8 @@ test("ControlChannelServer waits for an active start before closing providers", 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
 
@@ -552,7 +517,8 @@ test("ControlChannelServer retries providers that failed to close", async () => 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
 
@@ -570,7 +536,8 @@ test("ControlChannelServer finishes failed cleanup before restarting providers",
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
 
@@ -593,7 +560,8 @@ test("ControlChannelServer coalesces restarts while failed cleanup is retried", 
         listeners: [provider],
         routes: {
             connectionClosed() {},
-            snapshot: createRouteSnapshot,
+            hosts: createRouteHosts,
+        onChange: () => () => undefined,
         },
     });
 
@@ -624,7 +592,7 @@ test("ControlChannelServer replaces one started provider without closing others"
     const replacement = new MemoryControlChannelListener();
     const server = new ControlChannelServer({
         listeners: [socket, web],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
 
     await server.start();
@@ -643,7 +611,7 @@ test("ControlChannelServer rolls back a replacement when the previous provider f
     const replacement = new RetryCloseControlChannelListener(0);
     const server = new ControlChannelServer({
         listeners: [socket, previous],
-        routes: { connectionClosed() {}, snapshot: createRouteSnapshot },
+        routes: createRouteProvider(),
     });
 
     await server.start();
@@ -666,24 +634,61 @@ test("ControlChannelServer rolls back a replacement when the previous provider f
     assert.deepEqual(replacement.events, ["start:1", "close:1"]);
 });
 
-function createClient(
-    provider: MemoryControlChannelListener,
-    peer: "tui" | "web",
-): ClientConnection {
-    return new ClientConnection({
-        connectChannel: async () => provider.connect(),
-        mapError: normalizeError,
-        mapRemoteError: (error) => createError(error),
-        mode: "persistent",
-        peer,
-    });
+interface TestClient {
+    close(): void;
+    request<T = JsonValue>(
+        host: string,
+        port: string,
+        method: string,
+        payload?: JsonValue,
+    ): Promise<T>;
 }
 
-function createRouteSnapshot(): PrefixRouteSnapshot {
-    return PrefixRoute.snapshot([
+function createClient(
+    provider: MemoryControlChannelListener,
+    _peer: "tui" | "web",
+): TestClient {
+    const endpoint = new Endpoint({
+        connectChannel: async () => provider.connect(),
+    });
+    const rpcs = new Map<string, Rpc>();
+    return {
+        close() {
+            for (const rpc of rpcs.values()) rpc.close();
+            endpoint.close();
+        },
+        async request<T = JsonValue>(
+            host: string,
+            port: string,
+            method: string,
+            payload?: JsonValue,
+        ): Promise<T> {
+            const key = `${host}\u0000${port}`;
+            let rpc = rpcs.get(key);
+            if (rpc === undefined) {
+                rpc = new Rpc(await endpoint.connect(host, port));
+                rpcs.set(key, rpc);
+            }
+            return (await rpc.request(method, payload)) as T;
+        },
+    };
+}
+
+function createRouteProvider(
+    hosts: () => readonly ControlHostDefinition[] = createRouteHosts,
+) {
+    return {
+        connectionClosed() {},
+        hosts,
+        onChange: () => () => undefined,
+    };
+}
+
+function createRouteHosts(): readonly ControlHostDefinition[] {
+    return [
         {
-            destination: "@control",
-            modules: [
+            host: "@control",
+            ports: [
                 {
                     name: "service",
                     operations: [
@@ -701,10 +706,7 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                                 pong: true,
                                 ...(context.protocolVersion === undefined
                                     ? {}
-                                    : {
-                                          protocolVersion:
-                                              context.protocolVersion,
-                                      }),
+                                    : { protocolVersion: context.protocolVersion }),
                                 ...(context.subject === undefined
                                     ? {}
                                     : {
@@ -719,19 +721,15 @@ function createRouteSnapshot(): PrefixRouteSnapshot {
                 },
             ],
         },
-    ]);
+    ];
 }
 
 async function negotiate(
-    connection: ClientConnection,
+    connection: TestClient,
     clientKind: "cli" | "tui" | "web",
 ): Promise<void> {
     await connection.request("@control", "service", "hello", {
         clientKind,
         protocolRange: CONTROL_PROTOCOL_RANGE,
     });
-}
-
-function normalizeError(error: unknown): Error {
-    return error instanceof Error ? error : new Error(String(error));
 }
