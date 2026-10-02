@@ -13,7 +13,8 @@ import type {
     ExtensionWorkerToolDefinition,
 } from "@portable-devshell/extension";
 import { randomUUID } from "node:crypto";
-import type { JsonValue } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import { InstanceConnectionService } from "../../../instance/registry/Connection.js";
 import type { InstanceConnectionLease } from "../../../instance/registry/Connection.js";
 import type { InstanceDescriptor } from "../../../instance/Descriptor.js";
@@ -356,6 +357,24 @@ interface ManagedExtensionWorkerSession {
     session: ExtensionWorkerSession;
 }
 
+export interface ExtensionWorkerToolCallPort {
+    callTool(
+        instance: string,
+        toolName: string,
+        input: JsonValue,
+        context: ToolCallContext,
+        signal?: AbortSignal,
+        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput?: (
+            input: JsonValue,
+            callId: string,
+            finalValue: ToolCallHookValue,
+        ) => Promise<JsonValue> | JsonValue,
+        onProgress?: (progress: JsonValue) => void,
+        recording?: "caller" | "host",
+    ): Promise<JsonValue>;
+}
+
 export interface ExtensionWorkerCapabilityControlOptions {
     allowed: boolean;
     connections?: ExtensionWorkerConnectionPort;
@@ -363,6 +382,7 @@ export interface ExtensionWorkerCapabilityControlOptions {
     generation: string;
     instances: InstanceRegistry;
     recording?: "caller" | "host";
+    toolCalls: ExtensionWorkerToolCallPort;
 }
 
 export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapability {
@@ -375,6 +395,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
     readonly #recording: "caller" | "host";
     readonly #retiringInstances = new Set<string>();
     readonly #sessions = new Map<string, ManagedExtensionWorkerSession>();
+    readonly #toolCalls: ExtensionWorkerToolCallPort;
     #closed = false;
 
     constructor(options: ExtensionWorkerCapabilityControlOptions) {
@@ -386,6 +407,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
         this.#generation = options.generation;
         this.#instances = options.instances;
         this.#recording = options.recording ?? "host";
+        this.#toolCalls = options.toolCalls;
     }
 
     async openSession(
@@ -490,8 +512,9 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                 environment,
                 instance,
                 workspace: prepared.workspace,
-                callTool: async (toolName, toolInput, options = {}) =>
-                    (await lease.worker.callTool(
+                callTool: async (toolName, toolInput, options = {}) => {
+                    return (await this.#toolCalls.callTool(
+                        instance,
                         toolName,
                         toolInput as JsonValue,
                         {
@@ -511,7 +534,8 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                         options.onProgress as
                             ((progress: JsonValue) => void) | undefined,
                         this.#recording,
-                    )) as ExtensionJsonValue,
+                    )) as ExtensionJsonValue;
+                },
                 close,
                 listTools: () =>
                     lease.worker

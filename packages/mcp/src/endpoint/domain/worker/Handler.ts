@@ -1,120 +1,27 @@
-import type {
-    JsonValue,
-    ToolCallContext,
-    ToolDefinition,
-} from "@portable-devshell/shared";
-
+import type { ToolCallHookValue } from "@portable-devshell/core";
+import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import type { McpInstanceGateway } from "../../Port.js";
-import type { McpEndpointCatalog } from "../../tool/Catalog.js";
 import { readMcpRoutedInput } from "../../dispatch/Input.js";
-import type { McpEndpointWorkerPort } from "../../Port.js";
-import {
-    mcpEndpointToolNotExposed,
-    requireMcpEndpointGateway,
-    waitForMcpEndpointReady,
-    waitForMcpGatewayReady,
-} from "../../dispatch/Support.js";
+import { requireMcpEndpointGateway } from "../../dispatch/Support.js";
 
 export class McpEndpointHandlerWorker {
-    constructor(
-        private readonly options: {
-            catalog: McpEndpointCatalog;
-            gateway?: McpInstanceGateway;
-            instanceName: string;
-            readyWaitMs?: number;
-            worker: McpEndpointWorkerPort;
-        },
-    ) {}
+    constructor(private readonly options: {
+        gateway?: McpInstanceGateway;
+        instanceName: string;
+    }) {}
 
     async call(
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        selected: ToolDefinition | undefined,
         instanceRoutingEnabled: boolean,
-        signal?: AbortSignal,
-        transformResult?: (
-            result: JsonValue,
-            callId: string,
-        ) => Promise<JsonValue>,
-        afterReview?: (callId: string) => Promise<void> | void,
+        signal: AbortSignal | undefined,
+        transformResult: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        invocationInput: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue>,
     ): Promise<JsonValue> {
-        const routed = readMcpRoutedInput(
-            input,
-            instanceRoutingEnabled,
-            this.options.instanceName,
-        );
-        if (routed.instance === this.options.instanceName) {
-            if (selected === undefined) {
-                throw mcpEndpointToolNotExposed(
-                    toolName,
-                    this.options.instanceName,
-                );
-            }
-            this.options.catalog.assertAdaptable(selected);
-            return await this.options.worker.callTool(
-                toolName,
-                routed.input,
-                context,
-                signal,
-                transformResult,
-                undefined,
-                undefined,
-                "host",
-                async (callId, instance) => {
-                    await this.#waitForReady(instance, signal);
-                    await afterReview?.(callId);
-                },
-            );
-        }
-
-        const gateway = requireMcpEndpointGateway(
-            this.options.gateway,
-            this.options.instanceName,
-        );
-        const targetTool = gateway
-            .listTools(routed.instance)
-            .find((tool) => tool.name === toolName);
-        if (targetTool === undefined) {
-            throw mcpEndpointToolNotExposed(toolName, routed.instance);
-        }
-        this.options.catalog.assertAdaptable(targetTool);
-        return await gateway.callTool(
-            routed.instance,
-            toolName,
-            routed.input,
-            context,
-            signal,
-            transformResult,
-            undefined,
-            async (callId, instance) => {
-                await this.#waitForReady(instance, signal);
-                await afterReview?.(callId);
-            },
-        );
-    }
-
-    async #waitForReady(
-        instance: string,
-        signal?: AbortSignal,
-    ): Promise<void> {
-        if (instance === this.options.instanceName) {
-            await waitForMcpEndpointReady(
-                this.options.worker,
-                instance,
-                signal,
-                { timeoutMs: this.options.readyWaitMs },
-            );
-            return;
-        }
-        await waitForMcpGatewayReady(
-            requireMcpEndpointGateway(
-                this.options.gateway,
-                this.options.instanceName,
-            ),
-            instance,
-            signal,
-            { timeoutMs: this.options.readyWaitMs },
+        const routed = readMcpRoutedInput(input, instanceRoutingEnabled, this.options.instanceName);
+        return await requireMcpEndpointGateway(this.options.gateway, this.options.instanceName).callTool(
+            routed.instance, toolName, routed.input, context, signal, transformResult, invocationInput,
         );
     }
 }

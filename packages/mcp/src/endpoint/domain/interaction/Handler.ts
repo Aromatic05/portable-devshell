@@ -922,13 +922,13 @@ export class McpEndpointHandlerInteraction {
         const instances = await this.#contextInstances(ctxId);
         let approval:
             | Awaited<
-                  ReturnType<McpInteractionGateway["listApprovals"]>
+                  ReturnType<McpInteractionGateway["approval"]["listApprovals"]>
               >[number]
             | undefined;
         let approvalInstance: string | undefined;
         for (const instance of instances) {
             const candidate = (
-                await gateway.listApprovals(instance).catch(() => [])
+                await gateway.approval.listApprovals(instance).catch(() => [])
             ).find((entry) => entry.approvalId === approvalId);
             if (candidate !== undefined) {
                 approval = candidate;
@@ -946,7 +946,7 @@ export class McpEndpointHandlerInteraction {
                 `Pending approval ${approvalId} was not found for the current Context.`,
             );
         }
-        const decided = await gateway.decideApproval(
+        const decided = await gateway.approval.decideApproval!(
             approvalInstance,
             approvalId,
             decision,

@@ -1,3 +1,4 @@
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import { spawn as nodeSpawn } from "node:child_process";
 import { rm, writeFile } from "node:fs/promises";
@@ -37,7 +38,7 @@ import {
     createCommentTodoInvalid,
     createCommentToolCallGate,
 } from "@portable-devshell/comment-extension";
-import { ToolCallHookSequence } from "@portable-devshell/core";
+import { ToolCallHookSequence, ToolCallPipeline } from "@portable-devshell/core";
 import {
     asInstanceName,
     type ContextMessageRecord,
@@ -198,21 +199,19 @@ test(
                 "conversation-preferences.json",
             ),
         });
+        let sequence = new ToolCallHookSequence({});
+        let target: ReturnType<WorkerInstanceFactory["create"]>;
+        const pipeline = new ToolCallPipeline({
+            hooks: () => ({ release() {}, sequence }),
+            resolveTarget: () => target.toolCallTarget(),
+        });
         const gateway = {
             async appendMcpToolCalled() {},
             assertReady() {},
-            async callToolOperation<T extends JsonValue>(
-                _instance: string,
-                _toolName: string,
-                input: JsonValue,
-                _context: ToolCallContext,
-                operation: (callId: string, input: JsonValue) => Promise<T>,
-            ): Promise<T> {
-                return await operation("call-test", input);
+            async callToolOperation<T extends JsonValue>(instance: string, name: string, input: JsonValue, context: ToolCallContext, operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>, signal?: AbortSignal): Promise<T> {
+                return await pipeline.callOperation(instance, name, input, context, operation, signal);
             },
-            async callTool() {
-                throw new Error("routed calls are not used by this test");
-            },
+            callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => pipeline.call(...args),
             environment() {
                 return undefined;
             },
@@ -260,6 +259,7 @@ test(
                 { enabled: false, provider: "none" },
                 gateway,
             );
+        target = instance;
         const commentGate = createCommentToolCallGate(comment.comment);
         const commentTodoAccess = createCommentTodoAccess(comment.comment);
         const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
@@ -272,34 +272,31 @@ test(
                 );
             },
         };
-        instance.bindToolCallHooks(() => ({
-            release() {},
-            sequence: new ToolCallHookSequence({
+        sequence = new ToolCallHookSequence({
                 reviews: [
                     async (input) =>
-                        await commentGate(input as never, unsupportedInvocation),
+                        await commentGate(input as never, unsupportedInvocation as never),
                 ],
                 rewrites: [
                     async (input) =>
                         await commentTodoAccess(
                             input as never,
-                            unsupportedInvocation,
-                        ),
+                            unsupportedInvocation as never,
+                        ) as unknown as ToolCallHookValue,
                     async (input) =>
                         await commentTodoInvalid(
                             input as never,
-                            unsupportedInvocation,
-                        ),
+                            unsupportedInvocation as never,
+                        ) as unknown as ToolCallHookValue,
                     async (input) =>
-                        await commentAdvice(input as never, unsupportedInvocation),
+                        await commentAdvice(input as never, unsupportedInvocation as never) as unknown as ToolCallHookValue,
                     async (input) =>
                         await commentDelivery(
                             input as never,
-                            unsupportedInvocation,
-                        ),
+                            unsupportedInvocation as never,
+                        ) as unknown as ToolCallHookValue,
                 ],
-            }),
-        }), () => instance.toolCallTarget());
+        });
         cleanupDirs.push(contextRoot);
 
         try {

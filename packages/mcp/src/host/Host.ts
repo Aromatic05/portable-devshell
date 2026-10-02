@@ -34,25 +34,12 @@ import { HttpHost } from "./Http.js";
 import { McpHostRouteRegistry } from "./Route.js";
 
 interface WorkerInstanceLike {
-    callToolOperation<T extends JsonValue>(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
-        signal?: AbortSignal,
-    ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(
         toolName: string,
         context: { ctxId?: string; requestId?: string },
     ): Promise<void>;
-    callTool(
-        toolName: string,
-        input: JsonValue,
-        context: { ctxId?: string; requestId?: string; source: "mcp" },
-        signal?: AbortSignal,
-    ): Promise<JsonValue>;
     hasToolSchemaCache?(): boolean;
     listTools(): ToolDefinition[];
     prepareExtensionResource?(input: {
@@ -619,9 +606,9 @@ export class McpHost {
                         );
                     });
                 }
-                if (gateway.listApprovals !== undefined) {
+                if (gateway.approval !== undefined) {
                     const approvals = await gateway
-                        .listApprovals(environment.instance)
+                        .approval.listApprovals(environment.instance)
                         .catch((error) => {
                             failures.push(error);
                             return [];
@@ -633,9 +620,9 @@ export class McpHost {
                         ) {
                             continue;
                         }
-                        if (gateway.cancelApproval !== undefined) {
+                        if (gateway.approval.cancelApproval !== undefined) {
                             await cleanup(async () => {
-                                await gateway.cancelApproval!(
+                                await gateway.approval!.cancelApproval!(
                                     environment.instance,
                                     approval.approvalId,
                                     "Context " +
@@ -645,9 +632,9 @@ export class McpHost {
                                         ".",
                                 );
                             });
-                        } else if (gateway.decideApproval !== undefined) {
+                        } else if (gateway.approval.decideApproval !== undefined) {
                             await cleanup(async () => {
-                                await gateway.decideApproval!(
+                                await gateway.approval!.decideApproval!(
                                     environment.instance,
                                     approval.approvalId,
                                     "deny",

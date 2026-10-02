@@ -1,4 +1,8 @@
-import type { McpInstanceGateway } from "@portable-devshell/mcp";
+import type { ToolCallHookValue, ToolCallPipeline } from "@portable-devshell/core";
+import type {
+    McpApprovalPort,
+    McpInstanceGateway,
+} from "@portable-devshell/mcp";
 import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     ArtifactViewImageInput,
@@ -22,11 +26,30 @@ export interface McpInstanceGatewayControlOptions {
 }
 
 export class McpInstanceGatewayControl implements McpInstanceGateway {
+    readonly approval: McpApprovalPort = {
+        listApprovals: async (instance) =>
+            await this.#requireDescriptor(instance).approval.listApprovals(),
+        listPendingApprovals: async (instance, ctxId) =>
+            await this.#requireDescriptor(
+                instance,
+            ).approval.listPendingApprovals(ctxId),
+        decideApproval: async (instance, approvalId, decision) =>
+            await this.#requireDescriptor(instance).approval.decideApproval(
+                approvalId,
+                {
+                    decidedBy: "web",
+                    decision,
+                },
+            ),
+        cancelApproval: async (instance, approvalId, reason) =>
+            await this.#requireDescriptor(instance).approval.cancel(approvalId, reason),
+    };
     readonly #getConfig: () => ControlConfig;
     readonly #instanceRegistry: InstanceRegistry;
     readonly #instanceConnections: InstanceConnectionService;
     readonly #toolProvenance?: ToolCallProvenanceStore;
     #extensions?: McpExtensionService;
+    #toolCalls?: Pick<ToolCallPipeline, "call" | "callOperation">;
     #modelCommands: (instance: string) => readonly string[] = () => [];
 
     constructor(options: McpInstanceGatewayControlOptions) {
@@ -61,50 +84,35 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         }
     }
 
+    bindToolCalls(ingress: Pick<ToolCallPipeline, "call" | "callOperation">): void {
+        if (this.#toolCalls !== undefined)
+            throw new Error("MCP tool call ingress is already bound.");
+        this.#toolCalls = ingress;
+    }
+
     async callToolOperation<T extends JsonValue>(
         instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
+        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
         signal?: AbortSignal,
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
     ): Promise<T> {
-        return await this.#requireDescriptor(instance).worker.callToolOperation(
-            toolName,
-            input,
-            context,
-            operation,
-            signal,
-            afterReview,
+        return await this.#requireToolCalls().callOperation(
+            instance, toolName, input, context, operation, signal,
         );
     }
 
     async callTool(
-        instance: string,
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-        transformResult?: (
-            result: JsonValue,
-            callId: string,
-        ) => Promise<JsonValue>,
-        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
+        ...args: Parameters<ToolCallPipeline["call"]>
     ): Promise<JsonValue> {
-        const descriptor = this.#requireDescriptor(instance);
-        return await descriptor.worker.callTool(
-            toolName,
-            input,
-            context,
-            signal,
-            transformResult,
-            invocationInput,
-            undefined,
-            "host",
-            afterReview,
-        );
+        return await this.#requireToolCalls().call(...args);
+    }
+
+    #requireToolCalls(): Pick<ToolCallPipeline, "call" | "callOperation"> {
+        if (this.#toolCalls === undefined)
+            throw new Error("MCP tool call ingress is not bound.");
+        return this.#toolCalls;
     }
 
     async invokeToolInternal(
@@ -368,16 +376,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
         await this.#requireDescriptor(instance).goal.touch(ctxId, kind);
     }
 
-    async listApprovals(instance: string) {
-        return await this.#requireDescriptor(instance).worker.listApprovals();
-    }
-
-    async listPendingApprovals(instance: string, ctxId?: string) {
-        return await this.#requireDescriptor(
-            instance,
-        ).worker.listPendingApprovals(ctxId);
-    }
-
     async readToolCalls(instance: string, ctxId: string, limit: number) {
         const records = await this.#requireDescriptor(
             instance,
@@ -415,31 +413,6 @@ export class McpInstanceGatewayControl implements McpInstanceGateway {
             ctxId,
             expectedRevision,
         )) as unknown as JsonValue;
-    }
-
-    async decideApproval(
-        instance: string,
-        approvalId: string,
-        decision: "approve" | "deny",
-    ) {
-        return await this.#requireDescriptor(instance).worker.decideApproval(
-            approvalId,
-            {
-                decidedBy: "web",
-                decision,
-            },
-        );
-    }
-
-    async cancelApproval(
-        instance: string,
-        approvalId: string,
-        reason?: string,
-    ) {
-        return await this.#requireDescriptor(instance).worker.cancelApproval(
-            approvalId,
-            reason,
-        );
     }
 
     async readTodo(

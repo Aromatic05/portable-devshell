@@ -33,7 +33,6 @@ import {
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
-import { ExtensionWorkerCapabilityControl } from "../capability/Execution.js";
 import { ExtensionInstanceRuntimeCapabilityControl } from "../capability/Instance.js";
 import {
     ExtensionSandboxHost,
@@ -215,36 +214,22 @@ export class ExtensionLoader {
             });
 
         const worker = manifest.capabilities.includes("workers")
-            ? (this.#workerFactory?.({
+            ? this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "host",
-              }) ??
-              new ExtensionWorkerCapabilityControl({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-                  instances: this.#instances,
-                  recording: "host",
-              }))
+              }) ?? unavailableWorkerRuntime(id, this.#instances)
             : unavailableWorkerRuntime(id, this.#instances);
         const delegatedWorker = manifest.capabilities.includes(
             "delegatedWorkers",
         )
-            ? (this.#workerFactory?.({
+            ? this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "caller",
-              }) ??
-              new ExtensionWorkerCapabilityControl({
-                  allowed: true,
-                  extensionId: id,
-                  generation,
-                  instances: this.#instances,
-                  recording: "caller",
-              }))
+              }) ?? unavailableWorkerRuntime(id, this.#instances)
             : unavailableWorkerRuntime(id, this.#instances);
         const processes =
             this.#processFactory?.({
@@ -611,13 +596,17 @@ function unavailableInstances(
 
 function unavailableWorkerRuntime(
     extensionId: string,
-    instances: InstanceRegistry,
+    _instances: InstanceRegistry,
 ): ExtensionWorkerRuntime {
-    return new ExtensionWorkerCapabilityControl({
-        allowed: false,
-        extensionId,
-        generation: "unavailable",
-        instances,
+    const unavailable = (): never => {
+        throw new Error(
+            `Extension ${extensionId} requested workers but the host did not configure that capability.`,
+        );
+    };
+    return Object.freeze({
+        closeAll: async () => {},
+        openSession: async () => unavailable(),
+        retireInstance: async () => {},
     });
 }
 

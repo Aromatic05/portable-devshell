@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -89,6 +91,7 @@ test("tool descriptors advertise endpoint authentication schemes", () => {
     const harness = createWorkerHarness();
     const base = {
         instanceName: "demo",
+        gateway: harness.gateway,
         worker: harness.worker,
     };
 
@@ -278,6 +281,7 @@ test("tmux_run does not render a Workspace App", () => {
     });
     const tool = new McpEndpointWorker({
         instanceName: "demo",
+        gateway: harness.gateway,
         worker: harness.worker,
     })
         .listTools()
@@ -322,7 +326,8 @@ test("MCP endpoint serves App resources and environment presentation from a gene
         new McpEndpointWorker({
             extensions,
             instanceName: "demo",
-            worker: harness.worker,
+            gateway: harness.gateway,
+        worker: harness.worker,
             workspaceAppEnabled: false,
         }),
     );
@@ -684,7 +689,7 @@ test("cached removed tool recipients return a structured tombstone over MCP", as
     }
 });
 
-test("tools/call delegates to WorkerInstance.callTool", async () => {
+test("tools/call delegates to host Gateway ingress", async () => {
     const harness = createWorkerHarness();
     const binding = createBinding(harness);
     const server = await createBindingServer(binding);
@@ -759,7 +764,8 @@ test("tools/call forwards stale worker arguments even when the advertised schema
     const binding = new McpEndpointBinding(
         new McpEndpointWorker({
             instanceName: "demo",
-            worker: harness.worker,
+            gateway: harness.gateway,
+        worker: harness.worker,
         }),
     );
     const server = await createBindingServer(binding);
@@ -1004,6 +1010,7 @@ test("explicit context mode exposes ctxId and does not bind authority to OpenAI 
                 provenanceRecords.push(record);
             },
         },
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const bashTool = endpoint
@@ -1176,6 +1183,7 @@ test("OpenAI session binding resolves one internal ctxId without making models c
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const requestContext = {
@@ -1379,6 +1387,7 @@ test("expired OpenAI session binding renews the same internal Context on ordinar
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const requestContext = {
@@ -1416,6 +1425,7 @@ test("disabled OpenAI session binding reacquires a new Context and moves the bin
         contextMode: "openai-session",
         contextRegistry: registry,
         instanceName: "demo",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const requestContext = {
@@ -1893,13 +1903,14 @@ test("tools/call still maps not ready to mcp.instanceNotReady", async () => {
 test("tools/call waits for a transiently not-ready instance before executing", async () => {
     const pending = { ready: false };
     const harness = createWorkerHarness({ ready: false });
-    const worker = harness.worker as unknown as {
-        callTool(...args: unknown[]): Promise<unknown>;
-        snapshot(): { ready: boolean };
-    };
+    const worker = harness.worker;
     let invoked = false;
     worker.snapshot = () => ({ ready: pending.ready });
-    worker.callTool = async () => {
+    harness.gateway.assertReady = () => {
+        if (!pending.ready) throw Object.assign(new Error("not ready"), { code: "core.instanceNotReady" });
+    };
+    harness.gateway.callTool = async (_instance, toolName, input, context, _signal, transformResult, invocationInput) => {
+        await invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName("demo") } });
         invoked = true;
         return { exitCode: 0, stderr: "", stdout: "/workspace\n" };
     };
@@ -1944,17 +1955,17 @@ function createBinding(
     const gateway =
         options?.workspaceApp === true
             ? ({
+                  ...harness.gateway,
                   consumeWait: unused,
                   createWait: unused,
-                  decideApproval: unused,
+                  approval: { decideApproval: unused, listApprovals: async () => [], listPendingApprovals: async () => [] },
                   detachWait: unused,
-                  listApprovals: async () => [],
                   listTools: () => [],
                   listWaits: async () => [],
                   resolveWait: unused,
                   waitForWait: unused,
               } as unknown as McpInstanceGateway)
-            : undefined;
+            : harness.gateway;
     const extensions =
         options?.workspaceApp === true
             ? new McpExtensionRegistry([
@@ -1968,7 +1979,7 @@ function createBinding(
             ...(gateway === undefined ? {} : { gateway }),
             instanceName: "demo",
             readyWaitMs: options?.readyWaitMs,
-            worker: harness.worker,
+        worker: harness.worker,
         }),
         options?.serverVersion,
     );
@@ -2179,163 +2190,183 @@ function createWorkerHarness(options?: {
         stdout: "/workspace\n",
     };
 
+    const worker = {
+        async appendMcpSessionClosed(sessionId: string) {
+            events.push({ data: { sessionId }, type: "mcp.sessionClosed" });
+        },
+        async appendMcpSessionOpened(sessionId: string) {
+            events.push({ data: { sessionId }, type: "mcp.sessionOpened" });
+        },
+        async appendMcpToolCalled(
+            toolName: string,
+            context: { ctxId?: string; requestId?: string },
+        ) {
+            events.push({
+                data: {
+                    requestId: context.requestId ?? null,
+                    ctxId: context.ctxId ?? null,
+                    source: "mcp",
+                    toolName,
+                },
+                type: "mcp.toolCalled",
+            });
+        },
+        handshake: {
+            homeDirectory: "/home/demo",
+            instance: "demo",
+            platform: {
+                arch: "x86_64",
+                distribution: {
+                    id: "arch",
+                    name: "Arch Linux",
+                    version: "rolling",
+                },
+                os: "linux",
+                packageManager: "pacman",
+                shell: {
+                    executable: "/bin/bash",
+                    kind: "bash",
+                    version: "5",
+                },
+            },
+        },
+        async prepareExtensionResource(input: {
+            collection: string;
+            extensionId: string;
+        }) {
+            assert.deepEqual(input, {
+                collection: "managed",
+                extensionId: "skill",
+            });
+            return {
+                directory:
+                    "/home/demo/.devshell/demo/extensions/skill/resources/managed",
+            };
+        },
+        async prepareWorkspace(workspace: string) {
+            return {
+                projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
+                projectMemoryDirectory: `${workspace}/.devshell`,
+                projectMemoryPresent: true,
+                temporaryDirectory: "/tmp/workspace-123456",
+                workspace,
+            };
+        },
+        async readAlerts() {
+            return { advice: [] };
+        },
+        hasToolSchemaCache() {
+            return hasToolSchemaCache;
+        },
+        snapshot() {
+            return { ready };
+        },
+        listTools() {
+            return tools;
+        },
+        };
+    const gateway: McpInstanceGateway = {
+        async callToolOperation<T extends JsonValue>(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            context: { ctxId?: string; requestId?: string; source: string },
+            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            _signal?: AbortSignal,
+            ): Promise<T> {
+            auditedCalls.push({ context, input, toolName });
+            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, source: "mcp", instance: asInstanceName(instance) } });
+            },
+        async callTool(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            context: { ctxId?: string; requestId?: string; source: string },
+            signal?: AbortSignal,
+            transformResult?: (
+                result: JsonValue,
+                callId: string,
+            ) => Promise<JsonValue>,
+            _invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+            ) {
+            input = await _invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, source: "mcp", instance: asInstanceName(instance) } }) ?? input;
+            if (!worker.snapshot().ready) {
+                const error = new Error("not ready");
+                Object.assign(error, {
+                    code: "core.instanceNotReady",
+                    details: { toolName },
+                    retryable: false,
+                });
+                throw error;
+            }
+
+            calls.push({ toolName, input, ...context });
+            let toolResult: JsonValue;
+            try {
+                toolResult =
+                    options?.callHandler === undefined
+                        ? result
+                        : await options.callHandler(
+                              toolName,
+                              input,
+                              context,
+                              signal,
+                          );
+            } catch (error) {
+                if ((options?.comments?.length ?? 0) > 0 && error instanceof Error)
+                    throw attachToolCallErrorPayload(error, {
+                        comment: [...options!.comments!],
+                    });
+                throw error;
+            }
+            if (
+                (options?.comments?.length ?? 0) > 0 &&
+                typeof toolResult === "object" &&
+                toolResult !== null &&
+                !Array.isArray(toolResult)
+            ) {
+                toolResult = {
+                    ...toolResult,
+                    comment: [...options!.comments!],
+                };
+            }
+            return transformResult === undefined
+                ? toolResult
+                : await transformResult(toolResult, "call-test");
+            },
+        async appendMcpToolCalled() {},
+        assertReady() {
+            if (!worker.snapshot().ready) throw Object.assign(new Error("not ready"), { code: "core.instanceNotReady" });
+        },
+        environment: () => worker.handshake,
+        listTools: () => tools,
+        async listInstances() { return []; },
+        async prepareWorkspace(_instance, workspace) { return await worker.prepareWorkspace(workspace); },
+        async readAlerts() { return { advice: [] }; },
+        async releaseAlerts() {},
+        async touchAlerts() {},
+        async touchTemporaryDirectory() {},
+        async connectInstance() { return {}; },
+        async releaseInstanceReference() {},
+        async statusInstance() { return {}; },
+        async stopInstance() { return {}; },
+        async readTodo() { return {}; },
+        async writeTodo() { return {}; },
+    };
     return {
-        auditedCalls,
-        calls: calls as Array<{
+auditedCalls,
+calls: calls as Array<{
             input: JsonValue;
             requestId?: string;
             ctxId?: string;
             source?: string;
             toolName: string;
         }>,
-        events,
-        worker: {
-            async callToolOperation<T extends JsonValue>(
-                toolName: string,
-                input: JsonValue,
-                context: { ctxId?: string; requestId?: string; source: string },
-                operation: (callId: string, input: JsonValue) => Promise<T>,
-                _signal?: AbortSignal,
-                afterReview?: (callId: string) => Promise<void> | void,
-            ): Promise<T> {
-                auditedCalls.push({ context, input, toolName });
-                await afterReview?.("call-test");
-                return await operation("call-test", input);
-            },
-            async appendMcpSessionClosed(sessionId: string) {
-                events.push({ data: { sessionId }, type: "mcp.sessionClosed" });
-            },
-            async appendMcpSessionOpened(sessionId: string) {
-                events.push({ data: { sessionId }, type: "mcp.sessionOpened" });
-            },
-            async appendMcpToolCalled(
-                toolName: string,
-                context: { ctxId?: string; requestId?: string },
-            ) {
-                events.push({
-                    data: {
-                        requestId: context.requestId ?? null,
-                        ctxId: context.ctxId ?? null,
-                        source: "mcp",
-                        toolName,
-                    },
-                    type: "mcp.toolCalled",
-                });
-            },
-            handshake: {
-                homeDirectory: "/home/demo",
-                instance: "demo",
-                platform: {
-                    arch: "x86_64",
-                    distribution: {
-                        id: "arch",
-                        name: "Arch Linux",
-                        version: "rolling",
-                    },
-                    os: "linux",
-                    packageManager: "pacman",
-                    shell: {
-                        executable: "/bin/bash",
-                        kind: "bash",
-                        version: "5",
-                    },
-                },
-            },
-            async prepareExtensionResource(input: {
-                collection: string;
-                extensionId: string;
-            }) {
-                assert.deepEqual(input, {
-                    collection: "managed",
-                    extensionId: "skill",
-                });
-                return {
-                    directory:
-                        "/home/demo/.devshell/demo/extensions/skill/resources/managed",
-                };
-            },
-            async prepareWorkspace(workspace: string) {
-                return {
-                    projectMemoryAgentFile: `${workspace}/.devshell/AGENT.md`,
-                    projectMemoryDirectory: `${workspace}/.devshell`,
-                    projectMemoryPresent: true,
-                    temporaryDirectory: "/tmp/workspace-123456",
-                    workspace,
-                };
-            },
-            async readAlerts() {
-                return { advice: [] };
-            },
-            hasToolSchemaCache() {
-                return hasToolSchemaCache;
-            },
-            snapshot() {
-                return { ready };
-            },
-            listTools() {
-                return tools;
-            },
-            async callTool(
-                toolName: string,
-                input: JsonValue,
-                context: { ctxId?: string; requestId?: string; source: string },
-                signal?: AbortSignal,
-                transformResult?: (
-                    result: JsonValue,
-                    callId: string,
-                ) => Promise<JsonValue>,
-                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-                _onProgress?: (progress: JsonValue) => void,
-                _recording?: "caller" | "host",
-                afterReview?: (callId: string) => Promise<void> | void,
-            ) {
-                if (!ready) {
-                    const error = new Error("not ready");
-                    Object.assign(error, {
-                        code: "core.instanceNotReady",
-                        details: { toolName },
-                        retryable: false,
-                    });
-                    throw error;
-                }
-
-                await afterReview?.("call-test");
-
-                calls.push({ toolName, input, ...context });
-                let toolResult: JsonValue;
-                try {
-                    toolResult =
-                        options?.callHandler === undefined
-                            ? result
-                            : await options.callHandler(
-                                  toolName,
-                                  input,
-                                  context,
-                                  signal,
-                              );
-                } catch (error) {
-                    if ((options?.comments?.length ?? 0) > 0 && error instanceof Error)
-                        throw attachToolCallErrorPayload(error, {
-                            comment: [...options!.comments!],
-                        });
-                    throw error;
-                }
-                if (
-                    (options?.comments?.length ?? 0) > 0 &&
-                    typeof toolResult === "object" &&
-                    toolResult !== null &&
-                    !Array.isArray(toolResult)
-                ) {
-                    toolResult = {
-                        ...toolResult,
-                        comment: [...options!.comments!],
-                    };
-                }
-                return transformResult === undefined
-                    ? toolResult
-                    : await transformResult(toolResult, "call-test");
-            },
-        },
+events,
+        gateway,
+        worker,
     } as const;
 }
 

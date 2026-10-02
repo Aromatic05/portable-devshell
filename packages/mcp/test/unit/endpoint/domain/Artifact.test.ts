@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -93,20 +95,9 @@ test("remote artifact path operations request an instance workspace attachment",
 
 function createWorker(ready: boolean, hasSchema: boolean) {
     return {
-        async callToolOperation<T extends JsonValue>(
-            _toolName: string,
-            input: JsonValue,
-            _context: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
-        ): Promise<T> {
-            return await operation("call-test", input);
-        },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callTool() {
-            return {};
-        },
         async readAlerts() {
             return { advice: [] };
         },
@@ -134,7 +125,7 @@ function createGateway(
             toolName: string,
             input: JsonValue,
             context: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
+            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
             signal?: AbortSignal,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
@@ -147,7 +138,7 @@ function createGateway(
                     signal,
                 );
             }
-            return await operation("call-test", input);
+            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
         },
         async callTool() {
             return {};
@@ -228,13 +219,14 @@ test("native control result uses the Boundary-returned structured content", asyn
         },
     });
     const worker = createWorker(false, true);
-    worker.callToolOperation = async <T extends JsonValue>(
+    gateway.callToolOperation = async <T extends JsonValue>(
+        instance: string,
         _toolName: string,
         input: JsonValue,
         _context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
+        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
     ): Promise<T> => {
-        const result = await operation("call-boundary", input);
+        const result = await operation("call-boundary", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
         return {
             ...(result as Record<string, JsonValue>),
             name: "outer-masked.png",

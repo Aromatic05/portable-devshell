@@ -18,7 +18,7 @@ export type {
 export { McpContextRegistry } from "./context/registry/Registry.js";
 export type { McpContextBinding } from "./context/registry/Model.js";
 export { HttpHost } from "./host/Http.js";
-export type { McpInstanceGateway } from "./endpoint/Port.js";
+export type { McpApprovalPort, McpInstanceGateway } from "./endpoint/Port.js";
 export { resolvePortableDevshellApplicationVersion } from "./Version.js";
 
 export * from "./workspace/app/Lease.js";

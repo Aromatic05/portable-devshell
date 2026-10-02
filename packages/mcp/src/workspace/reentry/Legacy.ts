@@ -147,20 +147,7 @@ export class McpWorkspaceLegacyV0615 {
                     interactionGateway.listWaits(this.options.instanceName),
                     Promise.allSettled(
                         instances.map(async (instance) =>
-                            interactionGateway.listPendingApprovals ===
-                            undefined
-                                ? (
-                                      await interactionGateway.listApprovals(
-                                          instance,
-                                      )
-                                  ).filter(
-                                      (approval) =>
-                                          approval.status === "pending",
-                                  )
-                                : await interactionGateway.listPendingApprovals(
-                                      instance,
-                                      ctxId,
-                                  ),
+                            await interactionGateway.approval.listPendingApprovals(instance, ctxId),
                         ),
                     ),
                     Promise.allSettled(

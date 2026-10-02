@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ToolCallPipeline } from "../../../../../core/src/toolcall/Pipeline.ts";
+import { ToolCallHookSequence } from "../../../../../core/src/toolcall/hook/Sequence.ts";
 
 import {
     InstanceRegistry,
@@ -54,28 +56,38 @@ test("cross-instance readiness check accepts a ready target", () => {
     assert.doesNotThrow(() => gateway.assertReady("remote-server"));
 });
 
-test("cross-instance audit is recorded by the target worker", async () => {
-    const calls: Array<{ context: unknown; input: unknown; toolName: string }> =
-        [];
+test("MCP approval adapter delegates through the descriptor approval port", async () => {
+    const pending = {
+        approvalId: "approval-1",
+        ctxId: "ctx-1",
+        status: "pending",
+    };
+    const decided = { ...pending, status: "approved" };
     const registry = new InstanceRegistry([
         {
-            enabled: true,
-            mcpEnabled: true,
-            mcpPath: "/remote-server/mcp",
-            modelExtensions: [],
-            name: "remote-server",
+            name: "alpha",
+            approval: {
+                async listApprovals() {
+                    return [pending];
+                },
+                async listPendingApprovals(ctxId?: string) {
+                    return ctxId === "ctx-1" ? [pending] : [];
+                },
+                async decideApproval(approvalId: string, input: unknown) {
+                    assert.equal(approvalId, "approval-1");
+                    assert.deepEqual(input, {
+                        decidedBy: "web",
+                        decision: "approve",
+                    });
+                    return decided;
+                },
+                async cancel() {
+                    return pending;
+                },
+            },
             worker: {
-                async callToolOperation(
-                    toolName: string,
-                    input: unknown,
-                    context: unknown,
-                    operation: (
-                        callId: string,
-                        input: unknown,
-                    ) => Promise<unknown>,
-                ) {
-                    calls.push({ context, input, toolName });
-                    return await operation("remote-call", input);
+                async listApprovals() {
+                    throw new Error("worker approval API must not be used");
                 },
             },
         } as never,
@@ -85,26 +97,62 @@ test("cross-instance audit is recorded by the target worker", async () => {
         instanceRegistry: registry,
     });
 
-    const result = await gateway.callToolOperation(
-        "remote-server",
-        "artifact_viewImage",
-        { path: "./preview.png" },
-        { ctxId: "ctx-remote", source: "mcp", workspace: "/projects/remote" },
-        async (callId) => ({ callId }),
+    assert.deepEqual(await gateway.approval.listApprovals("alpha"), [pending]);
+    assert.deepEqual(
+        await gateway.approval.listPendingApprovals?.("alpha", "ctx-1"),
+        [pending],
     );
+    assert.deepEqual(
+        await gateway.approval.decideApproval?.("alpha", "approval-1", "approve"),
+        decided,
+    );
+});
 
-    assert.deepEqual(result, { callId: "remote-call" });
-    assert.deepEqual(calls, [
-        {
-            context: {
-                ctxId: "ctx-remote",
-                source: "mcp",
-                workspace: "/projects/remote",
-            },
-            input: { path: "./preview.png" },
-            toolName: "artifact_viewImage",
+test("MCP gateway binds once and routes unknown original targets through host ingress", async () => {
+    const gateway = createGateway(true);
+    const dispatched: unknown[] = [];
+    const pipeline = new ToolCallPipeline({
+        hooks: () => ({
+            release() {},
+            sequence: new ToolCallHookSequence({
+                rewrites: [({ value, direction }) => direction === "inbound"
+                    ? { ...value, context: { ...value.context, instance: "remote-server" as never }, toolName: "final_tool", payload: { rewritten: true } }
+                    : value],
+            }),
+        }),
+        resolveTarget(instance) {
+            assert.equal(instance, "remote-server");
+            return { async dispatch(request) {
+                dispatched.push(request.value);
+                const input = await request.invocationInput?.(request.value.payload, request.callId, request.value) ?? request.value.payload;
+                const result = request.operation === undefined
+                    ? input
+                    : await request.operation(request.callId, input, request.value);
+                request.onProgress?.({ progress: true });
+                return await request.transformResult?.(result, request.callId) ?? result;
+            } };
         },
-    ]);
+    });
+    gateway.bindToolCalls(pipeline);
+    assert.throws(() => gateway.bindToolCalls(pipeline), /already bound/);
+    const progress: unknown[] = [];
+    const signal = new AbortController().signal;
+    assert.deepEqual(await gateway.callTool(
+        "unknown", "original", {}, { source: "mcp" }, signal,
+        async (result) => ({ result }),
+        (input, callId, value) => {
+            assert.equal(typeof callId, "string");
+            assert.equal(value.context.instance, "remote-server");
+            return input;
+        },
+        (value) => progress.push(value), "caller",
+    ), { result: { rewritten: true } });
+    assert.deepEqual(progress, [{ progress: true }]);
+    assert.deepEqual(await gateway.callToolOperation(
+        "unknown", "original", {}, { source: "mcp" },
+        async (_callId, input, value) => ({ input, instance: value.context.instance, toolName: value.toolName }),
+    ), { input: { rewritten: true }, instance: "remote-server", toolName: "final_tool" });
+    assert.equal(dispatched.length, 2);
 });
 
 test("closing an MCP tool session releases worker-owned session state", async () => {

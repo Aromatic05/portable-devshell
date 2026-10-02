@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,6 +10,7 @@ import {
     McpEndpointWorker,
     McpHost,
     McpNativeToolResult,
+    type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
 import { McpRuntimeState } from "@portable-devshell/mcp";
 import type {
@@ -1799,6 +1802,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
                         assert.equal(reason, "disabled");
                         terminalContexts.push(ctxId);
                     },
+                    approval: {
                     async listApprovals() {
                         return approvals;
                     },
@@ -1814,6 +1818,7 @@ test("McpHost context admin releases alerts only after the last workspace contex
                         )!;
                         approval.status = "cancelled";
                         return approval;
+                    },
                     },
                 } as never,
                 name: "demo-local",
@@ -2079,42 +2084,34 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
     let extensionPreparationError: Error | undefined;
     let releaseAlertError: Error | undefined;
     let temporaryTouchError: Error | undefined;
-    const endpoint = new McpEndpointWorker({
-        contextRegistry: registry,
-        instanceName: "demo-local",
-        worker: {
+    const gateway: Pick<McpInstanceGateway, "callTool" | "callToolOperation" | "assertReady" | "listTools"> = {
             async callToolOperation<T extends JsonValue>(
+                instance: string,
                 _toolName: string,
                 input: JsonValue,
                 _context: ToolCallContext,
-                operation: (callId: string, input: JsonValue) => Promise<T>,
+                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
                 _signal?: AbortSignal,
-                afterReview?: (
-                    callId: string,
-                    instance: string,
-                ) => Promise<void> | void,
             ): Promise<T> {
-                await afterReview?.("call-test", "demo-local");
-                return await operation("call-test", input);
+                return await operation("call-test", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
             },
+            async callTool(instance, toolName, input, context, _signal, transformResult, invocationInput) {
+                const finalValue: ToolCallHookValue = { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } };
+                const prepared = await invocationInput?.(input, "call-test", finalValue) ?? input;
+                calls.push({ context, input: prepared, toolName });
+                return await transformResult?.({ ok: true }, "call-test") ?? { ok: true };
+            },
+        assertReady() {},
+        listTools: () => [bashRun],
+    };
+    const endpoint = new McpEndpointWorker({
+        gateway: gateway as McpInstanceGateway,
+        contextRegistry: registry,
+        instanceName: "demo-local",
+        worker: {
             async appendMcpSessionClosed() {},
             async appendMcpSessionOpened() {},
             async appendMcpToolCalled() {},
-            async callTool(
-                toolName,
-                input,
-                context,
-                _signal,
-                _transformResult,
-                _invocationInput,
-                _onProgress,
-                _recording,
-                afterReview,
-            ) {
-                await afterReview?.("call-test", "demo-local");
-                calls.push({ context, input, toolName });
-                return { ok: true };
-            },
             handshake: {
                 homeDirectory: "/home/demo",
                 instance: "demo-local",

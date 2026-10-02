@@ -5,6 +5,7 @@ import { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionInstanceCapabilityControl } from "../../control/extension/generation/capability/Instance.js";
+import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Execution.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
@@ -130,6 +131,12 @@ export class ControlRuntimeFactory {
                     instances: options.state.instances,
                     paths: extensionPaths,
                     points: extensionPoints,
+                    workerFactory: (input) =>
+                        new ExtensionWorkerCapabilityControl({
+                            ...input,
+                            instances: options.state.instances,
+                            toolCalls: mcp.instanceGateway,
+                        }),
                 }),
                 registry: new ExtensionRegistryStore(
                     extensionPaths.registryFile,

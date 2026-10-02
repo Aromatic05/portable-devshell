@@ -1,3 +1,4 @@
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import {
     createError,
     errorCodes,
@@ -108,27 +109,16 @@ export function requireMcpEndpointGateway(
 }
 
 export async function callMcpEndpointToolOperation<T extends JsonValue>(options: {
-    afterReview?: (callId: string, instance: string) => Promise<void> | void;
     context: ToolCallContext;
     gateway?: McpInstanceGateway;
     input: JsonValue;
     localInstance: string;
-    operation: (callId: string, input: JsonValue) => Promise<T>;
+    operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>;
     signal?: AbortSignal;
     targetInstance: string;
     toolName: string;
-    worker: Pick<McpEndpointWorkerPort, "callToolOperation">;
+    worker?: McpEndpointWorkerPort;
 }): Promise<T> {
-    if (options.targetInstance === options.localInstance) {
-        return await options.worker.callToolOperation(
-            options.toolName,
-            options.input,
-            options.context,
-            options.operation,
-            options.signal,
-            options.afterReview,
-        );
-    }
     return await requireMcpEndpointGateway(
         options.gateway,
         options.localInstance,
@@ -139,7 +129,6 @@ export async function callMcpEndpointToolOperation<T extends JsonValue>(options:
         options.context,
         options.operation,
         options.signal,
-        options.afterReview,
     );
 }
 

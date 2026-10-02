@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -14,6 +16,7 @@ import {
     McpEndpointDispatch,
     mcpTmuxBlockSyncMsForContextMode,
 } from "../../../../src/endpoint/dispatch/Dispatch.ts";
+import type { McpInstanceGateway } from "../../../../src/endpoint/Port.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
 import { McpContextRegistry } from "../../../../src/context/registry/Registry.ts";
 import { createMcpContextSelector } from "../../../../src/context/Selector.ts";
@@ -104,22 +107,6 @@ function createWorker(
     const auditResults: Array<{ result: JsonValue; toolName: string }> = [];
     const releasedAlerts: string[] = [];
     const worker = {
-        async callToolOperation<T extends JsonValue>(
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
-            _signal?: AbortSignal,
-            afterReview?: (callId: string) => Promise<void> | void,
-        ): Promise<T> {
-            audited.push({ context, toolName });
-            await afterReview?.("call-test");
-            const result = await operation("call-test", input);
-            auditResults.push({ result, toolName });
-            if (options.failAuditAfterOperation === true)
-                throw new Error("audit finalize failed");
-            return result;
-        },
         async appendMcpSessionClosed(sessionId: string): Promise<void> {
             events.push({ data: { sessionId }, type: "closed" });
         },
@@ -136,24 +123,6 @@ function createWorker(
                 data: { ...context, toolName } as JsonValue,
                 type: "called",
             });
-        },
-        async callTool(
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            _signal?: AbortSignal,
-            _transformResult?: (
-                result: JsonValue,
-                callId: string,
-            ) => Promise<JsonValue>,
-            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-            _onProgress?: (progress: JsonValue) => void,
-            _recording?: "caller" | "host",
-            afterReview?: (callId: string) => Promise<void> | void,
-        ): Promise<JsonValue> {
-            await afterReview?.("call-test");
-            calls.push({ context, input, toolName });
-            return { ok: true, toolName };
         },
         handshake: {
             homeDirectory: "/home/demo",
@@ -198,7 +167,58 @@ function createWorker(
         },
         snapshot: () => ({ ready: options.ready ?? true }),
     };
-    return { audited, auditResults, calls, events, releasedAlerts, worker };
+    const gateway: McpInstanceGateway = {
+        async callToolOperation<T extends JsonValue>(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+            _signal?: AbortSignal,
+        ): Promise<T> {
+            audited.push({ context, toolName });
+            const result = await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
+            auditResults.push({ result, toolName });
+            if (options.failAuditAfterOperation === true)
+                throw new Error("audit finalize failed");
+            return result;
+        },
+        async callTool(
+            instance: string,
+            toolName: string,
+            input: JsonValue,
+            context: ToolCallContext,
+            _signal?: AbortSignal,
+            transformResult?: (
+                result: JsonValue,
+                callId: string,
+            ) => Promise<JsonValue>,
+            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+            _onProgress?: (progress: JsonValue) => void,
+            _recording?: "caller" | "host",
+        ): Promise<JsonValue> {
+            input = await invocationInput?.(input, "call-test", { kind: "call", toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } }) ?? input;
+            calls.push({ context, input, toolName });
+            return await transformResult?.({ ok: true, toolName }, "call-test") ?? { ok: true, toolName };
+        },
+        async appendMcpToolCalled() {},
+        assertReady() {},
+        environment: () => worker.handshake,
+        listTools: () => options.tools ?? [workerTool()],
+        async listInstances() { return []; },
+        async prepareWorkspace(_instance, workspace) { return await worker.prepareWorkspace(workspace); },
+        async readAlerts() { return { advice: [] }; },
+        async releaseAlerts() {},
+        async touchAlerts() {},
+        async touchTemporaryDirectory() {},
+        async connectInstance() { return {}; },
+        async releaseInstanceReference() {},
+        async statusInstance() { return {}; },
+        async stopInstance() { return {}; },
+        async readTodo() { return {}; },
+        async writeTodo() { return {}; },
+    };
+    return { audited, auditResults, calls, events, gateway, releasedAlerts, worker };
 }
 
 test("McpEndpointCatalog keeps control tools available without a worker schema", () => {
@@ -233,6 +253,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     const dismissedRecoveries: string[] = [];
     const contextRegistry = new McpContextRegistry();
     const gateway = {
+        ...harness.gateway,
         assertReady() {},
         async callTool(): Promise<JsonValue> {
             return { remote: true };
@@ -446,6 +467,7 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
     const harness = createWorker();
     const connected: string[] = [];
     const gateway = {
+        ...harness.gateway,
         assertReady() {},
         async callTool(): Promise<JsonValue> {
             return {};
@@ -551,6 +573,7 @@ test("Workspace authorization metadata never enters audit results or MCP events"
         throw new Error("unused");
     };
     const gateway = {
+        ...harness.gateway,
         consumeWait: unused,
         createWait: unused,
         decideApproval: unused,
@@ -626,6 +649,7 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         throw new Error("unused");
     };
     const gateway = {
+        ...harness.gateway,
         consumeWait: unused,
         createWait: unused,
         decideApproval: unused,
@@ -736,7 +760,11 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
+
+    };
+    const ingress = {
         async invokeToolInternal(
+            instance: string,
             toolName: string,
             input: JsonValue,
             _context?: ToolCallContext,
@@ -762,6 +790,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             );
         },
         async callTool(
+            instance: string,
             toolName: string,
             input: JsonValue,
             _context?: ToolCallContext,
@@ -770,14 +799,12 @@ test("tmux_run block waits are interruptible before handoff and detach after the
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_run");
             const callId = `call-tmux-run-${runCalls + 1}`;
-            await afterReview?.(callId);
             assert.deepEqual(input, {
                 command: "sleep 10",
                 timeout: 660_000,
@@ -786,7 +813,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             assert.deepEqual(
                 invocationInput === undefined
                     ? input
-                    : await invocationInput(input),
+                    : await invocationInput(input, callId, { kind: "call", toolName: toolName, payload: input, context: { ..._context, source: "mcp", instance: asInstanceName(instance) } }),
                 {
                     command: "sleep 10",
                     consumeOutput: false,
@@ -850,6 +877,8 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         return wait;
     };
     const gateway = {
+        ...harness.gateway,
+        ...ingress,
         async cancelWait(_instance: string, waitId: string) {
             return update(waitId, "cancelled");
         },
@@ -1249,7 +1278,11 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     const harness = createWorker({ tools: [tmuxReadBlockTool()] });
     const worker = {
         ...harness.worker,
+
+    };
+    const ingress = {
         async invokeToolInternal(
+            instance: string,
             toolName: string,
             input: JsonValue,
         ): Promise<JsonValue> {
@@ -1258,6 +1291,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
             return await readTmux(input);
         },
         async callTool(
+            instance: string,
             toolName: string,
             input: JsonValue,
             _context?: ToolCallContext,
@@ -1266,18 +1300,16 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
                 result: JsonValue,
                 callId: string,
             ) => Promise<JsonValue>,
-            invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+            invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
             _onProgress?: (progress: JsonValue) => void,
             _recording?: "caller" | "host",
-            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<JsonValue> {
             assert.equal(toolName, "tmux_read");
-            await afterReview?.("call-tmux-read");
             logicalReadCalls += 1;
             const result = await readTmux(
                 invocationInput === undefined
                     ? input
-                    : await invocationInput(input),
+                    : await invocationInput(input, "call-tmux-read", { kind: "call", toolName: toolName, payload: input, context: { ..._context, source: "mcp", instance: asInstanceName(instance) } }),
             );
             return transformResult === undefined
                 ? result
@@ -1346,6 +1378,8 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         return wait;
     };
     const gateway = {
+        ...harness.gateway,
+        ...ingress,
         async cancelWait(_instance: string, waitId: string) {
             return update(waitId, "cancelled");
         },
@@ -1680,7 +1714,9 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
         workspace: "/projects/old",
     });
     const stoppedGoals: string[] = [];
+    const harness = createWorker({ failAuditAfterOperation: true });
     const gateway = {
+        ...harness.gateway,
         async goalContinuation() {
             return {};
         },
@@ -1698,11 +1734,12 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
                 : undefined;
         },
     } as never;
-    const harness = createWorker({ failAuditAfterOperation: true });
+
     const contextSelector = createMcpContextSelector("explicit");
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1749,7 +1786,9 @@ test("successful environ_info creates a new explicit Context without retiring ol
     });
     const releasedAlerts: string[] = [];
     const stoppedGoals: string[] = [];
+    const harness = createWorker();
     const gateway = {
+        ...harness.gateway,
         async goalContinuation() {
             return {};
         },
@@ -1770,11 +1809,12 @@ test("successful environ_info creates a new explicit Context without retiring ol
             releasedAlerts.push(workspace);
         },
     } as never;
-    const harness = createWorker();
+
     const contextSelector = createMcpContextSelector("explicit");
     const catalog = new McpEndpointCatalog({
         contextSelector,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
@@ -1821,12 +1861,14 @@ test("environ_info releases the previous workspace alert lease after an explicit
     const harness = createWorker();
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
 
@@ -1851,12 +1893,14 @@ test("environ_info rolls back an undisclosed Context when post-create event reco
     });
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
 
@@ -1884,12 +1928,14 @@ test("environ_info keeps failed undisclosed cleanup disabled with durable debt",
     });
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
 
@@ -1932,12 +1978,14 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     });
     const catalog = new McpEndpointCatalog({
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
     const dispatch = new McpEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
+        gateway: harness.gateway,
         worker: harness.worker,
     });
 

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
+import type { JsonValue } from "@portable-devshell/shared";
 
 import {
     ExtensionWorkerCapabilityControl,
     resolveExtensionWorkerInstance,
+    type ExtensionWorkerToolCallPort,
 } from "../../../../src/control/extension/generation/capability/Execution.ts";
 
 test("Extension worker instance selection prefers one enabled local instance", () => {
@@ -43,15 +44,8 @@ test("Extension worker instance selection prefers one enabled local instance", (
     );
 });
 
-test("Extension worker session uses the audited WorkerInstance call path and generic attribution", async () => {
-    const calls: Array<{
-        context: ToolCallContext;
-        input: JsonValue;
-        onProgress?: (progress: JsonValue) => void;
-        recording?: "caller" | "host";
-        signal?: AbortSignal;
-        toolName: string;
-    }> = [];
+test("Extension worker session enters host ingress and keeps cleanup on its original instance", async () => {
+    const calls: Array<Parameters<ExtensionWorkerToolCallPort["callTool"]>> = [];
     const released: Array<{ instance: string; reference: string }> = [];
     const closedToolSessions: string[] = [];
     const worker = {
@@ -72,27 +66,6 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
             },
             protocolVersion: 5,
             workerVersion: "0.7.0",
-        },
-        async callTool(
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            signal?: AbortSignal,
-            _transformResult?: unknown,
-            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-            onProgress?: (progress: JsonValue) => void,
-            recording?: "caller" | "host",
-        ) {
-            calls.push({
-                context,
-                input,
-                onProgress,
-                recording,
-                signal,
-                toolName,
-            });
-            onProgress?.({ phase: "running" });
-            return { ok: true };
         },
         listTools() {
             return [
@@ -118,8 +91,16 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
             closedToolSessions.push(sessionId);
         },
     };
+    const toolCalls: ExtensionWorkerToolCallPort = {
+        async callTool(...args) {
+            calls.push(args);
+            args[7]?.({ phase: "running" });
+            return { instance: "rewritten" };
+        },
+    };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls,
         connections: {
             async acquire(instance, reference) {
                 assert.equal(instance, "local");
@@ -163,76 +144,61 @@ test("Extension worker session uses the audited WorkerInstance call path and gen
     ]);
     const controller = new AbortController();
     const progress: JsonValue[] = [];
+    const onProgress = (value: JsonValue) => progress.push(value);
     assert.deepEqual(
         await session.callTool(
             "file_read",
             { path: "./README.md" },
             {
-                onProgress: (value) => progress.push(value),
+                onProgress,
                 operationId: "operation-1",
                 signal: controller.signal,
             },
         ),
-        { ok: true },
+        { instance: "rewritten" },
     );
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0]?.toolName, "file_read");
-    assert.deepEqual(calls[0]?.input, { path: "./README.md" });
-    assert.equal(calls[0]?.signal, controller.signal);
-    assert.equal(calls[0]?.context.source, "extension");
-    assert.equal(calls[0]?.context.operationId, "operation-1");
-    assert.equal(calls[0]?.context.requestId, "operation-1");
-    assert.equal(calls[0]?.context.workspace, "/canonical");
-    assert.match(calls[0]?.context.ctxId ?? "", /^ext-/u);
-    assert.equal(calls[0]?.recording, "host");
     assert.deepEqual(progress, [{ phase: "running" }]);
-
     await session.close();
     await session.close();
     assert.equal(closedToolSessions.length, 1);
-    assert.equal(released.length, 1);
-    assert.equal(released[0]?.instance, "local");
+    const sessionId = closedToolSessions[0];
+    assert.match(sessionId!, /^ext-/u);
+    assert.deepEqual(calls, [[
+        "local",
+        "file_read",
+        { path: "./README.md" },
+        {
+            ctxId: sessionId,
+            operationId: "operation-1",
+            requestId: "operation-1",
+            source: "extension",
+            workspace: "/canonical",
+        },
+        controller.signal,
+        undefined,
+        undefined,
+        onProgress,
+        "host",
+    ]]);
+    assert.equal(session.instance, "local");
+    assert.deepEqual(released, [{
+        instance: "local",
+        reference: `extension-worker:example:g1:${sessionId}`,
+    }]);
 });
 
 test("delegated Worker capability fixes caller-owned recording at the host boundary", async () => {
     const recordings: Array<"caller" | "host" | undefined> = [];
-    const worker = {
-        handshake: {
-            capabilities: { cancel: true, streaming: true, tools: true },
-            homeDirectory: "/home/dev",
-            instance: "local",
-            platform: { arch: "x64", os: "linux" },
-            protocolVersion: 5,
-            workerVersion: "0.7.0",
-        },
-        async callTool(
-            _toolName: string,
-            _input: JsonValue,
-            _context: ToolCallContext,
-            _signal?: AbortSignal,
-            _transformResult?: unknown,
-            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-            _onProgress?: (progress: JsonValue) => void,
-            recording?: "caller" | "host",
-        ) {
-            recordings.push(recording);
+    const worker = lifecycleWorker("local", []);
+    const toolCalls: ExtensionWorkerToolCallPort = {
+        async callTool(...args) {
+            recordings.push(args[8]);
             return { ok: true };
         },
-        listTools() {
-            return [];
-        },
-        async prepareWorkspace(workspace: string) {
-            return {
-                projectMemoryAgentFile: `${workspace}/AGENTS.md`,
-                projectMemoryDirectory: workspace,
-                temporaryDirectory: `${workspace}/tmp`,
-                workspace,
-            };
-        },
-        async releaseToolSession() {},
     };
     const common = {
         allowed: true,
+        toolCalls,
         connections: {
             async acquire() {
                 return {
@@ -271,6 +237,7 @@ test("Extension worker capability refuses undeclared access before acquiring an 
     let acquired = false;
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: false,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
                 acquired = true;
@@ -306,7 +273,6 @@ test("Extension worker instance retirement closes only matching sessions", async
                 protocolVersion: number;
                 workerVersion: string;
             };
-            callTool(): Promise<JsonValue>;
             listTools(): never[];
             prepareWorkspace(workspace: string): Promise<{
                 projectMemoryAgentFile: string;
@@ -327,9 +293,6 @@ test("Extension worker instance retirement closes only matching sessions", async
                 protocolVersion: 5,
                 workerVersion: "0.7.0",
             },
-            async callTool() {
-                return {};
-            },
             listTools() {
                 return [];
             },
@@ -346,6 +309,7 @@ test("Extension worker instance retirement closes only matching sessions", async
     }
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {
                 return {
@@ -401,6 +365,7 @@ test("Extension worker closeAll cleans an openSession that finishes after close 
     const worker = lifecycleWorker("local", releasedToolSessions);
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {
                 markAcquireStarted();
@@ -445,6 +410,7 @@ test("Extension worker openSession preserves primary and cleanup failures", asyn
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
                 return {
@@ -487,6 +453,7 @@ test("Extension worker closeAll retries fault cleanup failures during retirement
     };
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire() {
                 return {
@@ -536,6 +503,7 @@ test("Extension worker instance retirement fences an older openSession but permi
     let acquireCount = 0;
     const capability = new ExtensionWorkerCapabilityControl({
         allowed: true,
+        toolCalls: { async callTool() { throw new Error("unexpected ToolCall"); } },
         connections: {
             async acquire(instance) {
                 acquireCount += 1;
@@ -588,9 +556,6 @@ function lifecycleWorker(instance: string, releasedToolSessions: string[]) {
             platform: { arch: "x64", os: "linux" },
             protocolVersion: 5,
             workerVersion: "0.7.0",
-        },
-        async callTool() {
-            return {};
         },
         listTools() {
             return [];

@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import { ToolCallPipeline, ToolCallHookSequence, type ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -216,6 +218,10 @@ test("environment tools cross the ToolCall operation boundary before side effect
     let connectCalls = 0;
     let prepareCalls = 0;
     const gateway = createGateway({
+        async callToolOperation(_instance, toolName) {
+            boundaryCalls.push(toolName);
+            throw new Error("boundary rejected");
+        },
         async connectInstance(instance) {
             connectCalls += 1;
             return { instance };
@@ -223,15 +229,6 @@ test("environment tools cross the ToolCall operation boundary before side effect
     });
     const worker = {
         ...createWorker(),
-        async callToolOperation<T extends JsonValue>(
-            toolName: string,
-            _input: JsonValue,
-            _context: ToolCallContext,
-            _operation: (callId: string, input: JsonValue) => Promise<T>,
-        ): Promise<T> {
-            boundaryCalls.push(toolName);
-            throw new Error("boundary rejected");
-        },
         async prepareExtensionResource() {
             return { directory: "/workspace/.devshell/skills" };
         },
@@ -295,94 +292,6 @@ test("environment tools cross the ToolCall operation boundary before side effect
     );
 });
 
-test("ordinary MCP tools cross inbound Review before mutable Context and Todo preparation", async () => {
-    let now = Date.parse("2026-09-18T00:00:00.000Z");
-    const registry = new McpContextRegistry({
-        idFactory: () => "ctx-review-admission",
-        now: () => now,
-    });
-    const created = await registry.create({
-        instance: "main-pc",
-        principal: "local",
-        workspace: "/workspace",
-    });
-    const boundaryCalls: string[] = [];
-    let appendCalls = 0;
-    let prepareCalls = 0;
-    let touchAlertCalls = 0;
-    const worker = {
-        ...createWorker(),
-        async appendMcpToolCalled() {
-            appendCalls += 1;
-        },
-        async callTool(toolName: string) {
-            boundaryCalls.push(toolName);
-            throw new Error("boundary rejected");
-        },
-        async callToolOperation<T extends JsonValue>(toolName: string): Promise<T> {
-            boundaryCalls.push(toolName);
-            throw new Error("boundary rejected");
-        },
-        async prepareWorkspace(workspace: string) {
-            prepareCalls += 1;
-            return {
-                projectMemoryAgentFile: `${workspace}/AGENT.md`,
-                projectMemoryDirectory: workspace,
-                projectMemoryPresent: true,
-                temporaryDirectory: `${workspace}/tmp`,
-                workspace,
-            };
-        },
-        async touchAlerts() {
-            touchAlertCalls += 1;
-        },
-    };
-    const gateway = createGateway();
-    const endpoint = new McpEndpointWorker({
-        contextRegistry: registry,
-        gateway,
-        instanceName: "main-pc",
-        worker,
-    });
-    const beforeContext = await registry.lookup(created.ctxId, {
-        principal: "local",
-    });
-    const beforeExecution = await registry.readAutomaticReentry(
-        created.ctxId,
-        "main-pc",
-    );
-    now += 1_000;
-
-    await assert.rejects(
-        endpoint.callTool(
-            "bash_run",
-            { command: "pwd", ctxId: created.ctxId },
-            context,
-        ),
-        /boundary rejected/u,
-    );
-    await assert.rejects(
-        endpoint.callTool("todo_read", { ctxId: created.ctxId }, context),
-        /boundary rejected/u,
-    );
-
-    const afterContext = await registry.lookup(created.ctxId, {
-        principal: "local",
-    });
-    const afterExecution = await registry.readAutomaticReentry(
-        created.ctxId,
-        "main-pc",
-    );
-    assert.deepEqual(boundaryCalls, ["bash_run", "todo_read"]);
-    assert.equal(appendCalls, 0);
-    assert.equal(prepareCalls, 0);
-    assert.equal(touchAlertCalls, 0);
-    assert.equal(afterContext.lastAccessedAt, beforeContext.lastAccessedAt);
-    assert.equal(afterContext.expiresAt, beforeContext.expiresAt);
-    assert.equal(afterExecution.executionEpoch, beforeExecution.executionEpoch);
-    assert.equal(afterExecution.executionActive, beforeExecution.executionActive);
-    assert.equal(afterExecution.executionLeaseUntil, beforeExecution.executionLeaseUntil);
-});
 
 test("environ_remote bootstraps and irreversibly masks remote routing", async () => {
     const registry = new McpContextRegistry({
@@ -576,14 +485,14 @@ test("worker calls default to the endpoint instance and route explicit targets t
         toolName: string;
     }> = [];
     const worker = createWorker({
-        callTool: async (toolName, input) => {
-            localCalls.push({ input, toolName });
-            return { local: true };
-        },
         tools: [bashTool, fileReadTool],
     });
     const gateway = createGateway({
-        callTool: async (instance, toolName, input, callContext) => {
+        callTool: async (instance, toolName, input, callContext): Promise<JsonValue> => {
+            if (instance === "main-pc") {
+                localCalls.push({ input, toolName });
+                return { local: true };
+            }
             remoteCalls.push({
                 context: callContext,
                 input,
@@ -1167,7 +1076,7 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
     ]);
 });
 
-test("remote worker calls may inspect tool exposure before post-Review readiness but never execute while not ready", async () => {
+test("remote worker calls never execute or query target schema while not ready", async () => {
     let listToolsCalled = false;
     let remoteCalled = false;
     const notReady = Object.assign(new Error("not ready"), {
@@ -1211,7 +1120,7 @@ test("remote worker calls may inspect tool exposure before post-Review readiness
             return true;
         },
     );
-    assert.equal(listToolsCalled, true);
+    assert.equal(listToolsCalled, false);
     assert.equal(remoteCalled, false);
 });
 
@@ -1428,49 +1337,15 @@ function createManagedEndpoint(
 
 function createWorker(
     options: {
-        callTool?: (
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-        ) => Promise<JsonValue>;
         hasSchema?: boolean;
         ready?: boolean;
         tools?: ToolDefinition[];
     } = {},
 ) {
     return {
-        async callToolOperation<T extends JsonValue>(
-            _toolName: string,
-            input: JsonValue,
-            _context: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
-            _signal?: AbortSignal,
-            afterReview?: (callId: string) => Promise<void> | void,
-        ): Promise<T> {
-            await afterReview?.("call-test");
-            return await operation("call-test", input);
-        },
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callTool(
-            toolName: string,
-            input: JsonValue,
-            callContext: ToolCallContext,
-            _signal?: AbortSignal,
-            _transformResult?: (
-                result: JsonValue,
-                callId: string,
-            ) => Promise<JsonValue>,
-            _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-            _onProgress?: (progress: JsonValue) => void,
-            _recording?: "caller" | "host",
-            afterReview?: (callId: string) => Promise<void> | void,
-        ) {
-            await afterReview?.("call-test");
-            return await (options.callTool?.(toolName, input, callContext) ??
-                Promise.resolve({ ok: true }));
-        },
         async readAlerts() {
             return { advice: [] };
         },
@@ -1539,9 +1414,8 @@ function createGateway(
             toolName: string,
             input: JsonValue,
             callContext: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
+            operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
             signal?: AbortSignal,
-            afterReview?: (callId: string) => Promise<void> | void,
         ): Promise<T> {
             if (overrides.callToolOperation !== undefined) {
                 return await overrides.callToolOperation(
@@ -1551,11 +1425,9 @@ function createGateway(
                     callContext,
                     operation,
                     signal,
-                    afterReview,
                 );
             }
-            await afterReview?.("call-test");
-            return await operation("call-test", input);
+            return await operation("call-test", input, { kind: "call", toolName: toolName, payload: input, context: { ...callContext, instance: asInstanceName(instance) } });
         },
         async callTool(
             instance,
@@ -1565,21 +1437,24 @@ function createGateway(
             signal,
             transformResult,
             invocationInput,
-            afterReview,
+            onProgress,
+            recording,
         ) {
-            await afterReview?.("call-test");
+            const finalValue: ToolCallHookValue = { kind: "call", toolName, payload: input, context: { ...callContext, instance: asInstanceName(instance) } };
+            const preparedInput = await invocationInput?.(input, "call-test", finalValue) ?? input;
             const result =
                 overrides.callTool === undefined
                     ? { instance, toolName }
                     : await overrides.callTool(
                           instance,
                           toolName,
-                          input,
+                          preparedInput,
                           callContext,
                           signal,
-                          transformResult,
-                          invocationInput,
-                          afterReview,
+                          undefined,
+                          undefined,
+                          onProgress,
+                          recording,
                       );
             return transformResult === undefined
                 ? result
@@ -1916,4 +1791,115 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
             .properties?.title,
         undefined,
     );
+});
+
+
+async function rewrittenEndpoint(toolName: string, remote: boolean, reject = false) {
+    let now = Date.now();
+    const registry = new McpContextRegistry({ now: () => now });
+    const original = await registry.create({ instance: "main-pc", principal: "local", workspace: "/original" });
+    const instance = remote ? "final" : "main-pc";
+    const final = await registry.create({ instance, principal: "local", workspace: "/final" });
+    now += 1000;
+    const changes: Array<[string, ...unknown[]]> = [];
+    const inputs: JsonValue[] = [];
+    const provenance: unknown[] = [];
+    const values: ToolCallHookValue[] = [];
+    const callIds: string[] = [];
+    const reviews: string[] = [];
+    const pipeline = new ToolCallPipeline({
+        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence({
+            reviews: [({ value }) => { reviews.push(value.context.instance); return reject ? { decision: "reject", reason: "blocked" } : { decision: "continue" }; }],
+            rewrites: [({ value }) => ({ ...value, toolName, payload: { command: "rewritten", task: "final-task", wait: "block", timeMs: 180000 }, context: { ...value.context, instance: asInstanceName(instance), ctxId: final.ctxId, workspace: "/final" } })],
+        }) }),
+        resolveTarget(target) {
+            assert.equal(target, instance);
+            return { async dispatch(request): Promise<JsonValue> {
+                values.push(request.value);
+                callIds.push(request.callId);
+                inputs.push(await request.invocationInput?.(request.value.payload, request.callId, request.value) ?? request.value.payload);
+                const result: JsonValue = request.operation === undefined ? { task: { id: "final-task", status: "completed" }, output: "ready", waitReason: "terminal" } : await request.operation(request.callId, request.value.payload, request.value);
+                return await request.transformResult?.(result, request.callId) ?? result;
+            } };
+        },
+    });
+    const prepare = async (target: string, workspace: string) => { changes.push(["workspace", target, workspace]); return { projectMemoryAgentFile: "/memory/AGENT.md", projectMemoryDirectory: "/memory", temporaryDirectory: "/tmp/final", workspace }; };
+    const called = async (target: string, name: string, context: unknown) => { changes.push(["event", target, name, context]); };
+    const gateway = createGateway({
+        callToolOperation: (...args) => pipeline.callOperation(...args),
+        assertReady(target) { changes.push(["ready", target]); },
+        appendMcpToolCalled: called,
+        prepareWorkspace: prepare,
+        async touchAlerts(target, workspace) { changes.push(["alerts", target, workspace]); },
+        async touchGoal(target, ctxId) { changes.push(["goal", target, ctxId]); },
+        listTools: () => [bashTool, fileReadTool, { ...bashTool, group: "tmux", name: "tmux_run" }, { ...bashTool, group: "tmux", name: "tmux_read" }],
+        listExtensionTools: () => [{ ...bashTool, group: "ext", name: "ext_original" }, { ...bashTool, group: "ext", name: "ext_final" }],
+        async callExtensionTool(target, name, input, context) { changes.push(["extension", target, name, input, context]); return { structuredContent: {} }; },
+    });
+    Object.assign(gateway, {
+        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => pipeline.call(...args),
+        approval: { async listApprovals() { return []; }, async listPendingApprovals() { return []; }, async decideApproval() { throw new Error("unexpected approval"); } },
+        async listWaits() { return []; },
+        async createWait() { throw new Error("unexpected wait"); },
+        async detachWait() { throw new Error("unexpected wait"); },
+        async consumeWait() { throw new Error("unexpected wait"); },
+        async resolveWait() { throw new Error("unexpected wait"); },
+        async waitForWait() { throw new Error("unexpected wait"); },
+        async cancelWait() { throw new Error("unexpected wait"); },
+        async reattachWait() { throw new Error("unexpected wait"); },
+        async observeTmuxTask() { throw new Error("unexpected observation"); },
+        invokeToolInternal: async (target: string, name: string, _input: JsonValue, context: ToolCallContext) => { changes.push(["internal", target, name, context]); return { task: { id: "final-task", status: "completed" }, output: "ready" }; },
+    });
+    const endpoint = new McpEndpointWorker({
+        contextRegistry: registry, gateway, instanceName: "main-pc",
+        toolProvenance: { async record(value) { provenance.push(value); } },
+        worker: { ...createWorker({ tools: [bashTool, fileReadTool, { ...bashTool, group: "tmux", name: "tmux_run" }, { ...bashTool, group: "tmux", name: "tmux_read" }] }), prepareWorkspace: (workspace) => prepare("main-pc", workspace), appendMcpToolCalled: (name, context) => called("main-pc", name, context), async touchAlerts(workspace) { changes.push(["alerts", "main-pc", workspace]); } },
+    });
+    return { endpoint, registry, original, final, instance, changes, inputs, provenance, values, callIds, reviews };
+}
+
+for (const remote of [true, false]) {
+    test(`MCP accepted bookkeeping uses final instance, tool and Context (${remote ? "remote" : "local"})`, async () => {
+        const h = await rewrittenEndpoint("file_read", remote);
+        await h.endpoint.callTool("bash_run", { ctxId: h.original.ctxId, instance: "unknown", command: "original", purpose: "final target" }, context);
+        assert.deepEqual(h.reviews, ["unknown"]);
+        assert.deepEqual(h.changes.filter((change) => change[0] === "ready"), [["ready", h.instance]]);
+        assert.deepEqual(h.changes.find((change) => change[0] === "workspace"), ["workspace", h.instance, "/final"]);
+        assert.deepEqual(h.changes.find((change) => change[0] === "event"), ["event", h.instance, "file_read", h.values[0]!.context]);
+        assert.deepEqual(h.provenance, [{ callId: h.callIds[0], instance: h.instance, purpose: "final target" }]);
+        assert.equal((await h.registry.validate(h.original.ctxId, context)).lastAccessedAt, h.original.lastAccessedAt);
+        assert.notEqual((await h.registry.validate(h.final.ctxId, context)).lastAccessedAt, h.final.lastAccessedAt);
+        assert.equal((await h.registry.readAutomaticReentry(h.final.ctxId, h.instance)).executionEpoch, 2);
+    });
+}
+
+for (const name of ["tmux_run", "tmux_read"]) {
+    test(`${name} adapts final rewritten input and finishes against final Context`, async () => {
+        const h = await rewrittenEndpoint(name, true);
+        await h.endpoint.callTool(name, { ctxId: h.original.ctxId, instance: "unknown", command: "original", task: "original-task", wait: "block", timeMs: 180000, purpose: "tmux" }, context);
+        assert.deepEqual(h.inputs[0], name === "tmux_run" ? { command: "rewritten", task: "final-task", wait: "nonblock", timeMs: 180000, consumeOutput: false } : { consumeOutput: false, line: 0, task: "final-task", timeMs: 0 });
+        const internal = h.changes.find((change) => change[0] === "internal") as [string, string, string, ToolCallContext];
+        assert.equal(internal[1], "final");
+        assert.equal(internal[3].ctxId, h.final.ctxId);
+    });
+}
+
+for (const name of ["bash_run", "ext_original", "tmux_run"]) {
+    test(`${name} rejected review leaves accepted MCP state untouched`, async () => {
+        const h = await rewrittenEndpoint(name, true, true);
+        await assert.rejects(h.endpoint.callTool(name, { ctxId: h.original.ctxId, instance: "unknown", wait: "block", purpose: "rejected" }, context), { code: "core.toolCallRejected" });
+        assert.deepEqual(h.changes, []);
+        assert.deepEqual(h.values, []);
+        assert.deepEqual(h.provenance, []);
+        assert.deepEqual(await h.registry.validate(h.original.ctxId, context), h.original);
+    });
+}
+
+
+test("MCP Extension operation uses final rewritten tool and Context without worker preparation", async () => {
+    const h = await rewrittenEndpoint("ext_final", true);
+    await h.endpoint.callTool("ext_original", { ctxId: h.original.ctxId, purpose: "operation" }, context);
+    assert.deepEqual(h.changes.find((change) => change[0] === "extension"), ["extension", "final", "ext_final", h.values[0]!.payload, h.values[0]!.context]);
+    assert.equal(h.changes.some((change) => change[0] === "workspace"), false);
+    assert.deepEqual(h.provenance, [{ callId: h.callIds[0], instance: "final", purpose: "operation" }]);
 });

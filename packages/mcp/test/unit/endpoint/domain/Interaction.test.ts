@@ -1,3 +1,5 @@
+import { asInstanceName } from "@portable-devshell/shared";
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
@@ -178,14 +180,12 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 toolName: string,
                 input: JsonValue,
                 context: ToolCallContext,
-                operation: (callId: string, input: JsonValue) => Promise<T>,
+                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
                 _signal?: AbortSignal,
-                afterReview?: (callId: string) => Promise<void> | void,
             ): Promise<T> {
                 audited.push({ instance, toolName });
                 const callId = `audit-${toolName}`;
-                await afterReview?.(callId);
-                const result = await operation(callId, input);
+                const result = await operation(callId, input, { kind: "call", toolName: toolName, payload: input, context: { ...context, instance: asInstanceName(instance) } });
                 if (instance === "beta" && context.ctxId !== undefined) {
                     consumed.push({
                         callId,
@@ -347,50 +347,6 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         const worker = {
             fail: false,
             async appendMcpToolCalled() {},
-            async callToolOperation<T extends JsonValue>(
-                _toolName: string,
-                input: JsonValue,
-                _context: ToolCallContext,
-                operation: (callId: string, input: JsonValue) => Promise<T>,
-                _signal?: AbortSignal,
-                afterReview?: (callId: string) => Promise<void> | void,
-            ): Promise<T> {
-                await afterReview?.("call-test");
-                return await operation("call-test", input);
-            },
-            async callTool(
-                _toolName: string,
-                input: JsonValue,
-                _context: ToolCallContext,
-                _signal?: AbortSignal,
-                transformResult?: (
-                    result: JsonValue,
-                    callId: string,
-                ) => Promise<JsonValue>,
-                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-                _onProgress?: (progress: JsonValue) => void,
-                _recording?: "caller" | "host",
-                afterReview?: (callId: string) => Promise<void> | void,
-            ): Promise<JsonValue> {
-                if (worker.fail) throw new Error("worker failed");
-                const callId = `worker-call-${++callSequence}`;
-                await afterReview?.(callId);
-                const result = { exitCode: 0, stderr: "", stdout: "ok" };
-                const transformed = transformResult === undefined
-                    ? result
-                    : await transformResult(result, callId);
-                const comments =
-                    gatewayOverrides.comments?.(_context, callId) ?? [];
-                if (
-                    comments.length > 0 &&
-                    typeof transformed === "object" &&
-                    transformed !== null &&
-                    !Array.isArray(transformed)
-                ) {
-                    return { ...transformed, comment: [...comments] };
-                }
-                return transformed;
-            },
             handshake: {
                 homeDirectory: "/workspace",
                 instance: "alpha",
@@ -420,11 +376,48 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         };
         const gateway = {
             assertReady() {},
-            async callTool(): Promise<JsonValue> {
-                return { exitCode: 0, stderr: "", stdout: "remote" };
+            async callToolOperation<T extends JsonValue>(
+                instance: string,
+                _toolName: string,
+                input: JsonValue,
+                _context: ToolCallContext,
+                operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
+                _signal?: AbortSignal,
+            ): Promise<T> {
+                return await operation("call-test", input, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
             },
-            async createSshInstance(): Promise<JsonValue> {
-                return {};
+            async callTool(
+                instance: string,
+                _toolName: string,
+                input: JsonValue,
+                _context: ToolCallContext,
+                _signal?: AbortSignal,
+                transformResult?: (
+                    result: JsonValue,
+                    callId: string,
+                ) => Promise<JsonValue>,
+                invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+                _onProgress?: (progress: JsonValue) => void,
+                _recording?: "caller" | "host",
+            ): Promise<JsonValue> {
+                if (worker.fail) throw new Error("worker failed");
+                const callId = `worker-call-${++callSequence}`;
+                await invocationInput?.(input, callId, { kind: "call", toolName: _toolName, payload: input, context: { ..._context, instance: asInstanceName(instance) } });
+                const result = { exitCode: 0, stderr: "", stdout: "ok" };
+                const transformed = transformResult === undefined
+                    ? result
+                    : await transformResult(result, callId);
+                const comments =
+                    gatewayOverrides.comments?.(_context, callId) ?? [];
+                if (
+                    comments.length > 0 &&
+                    typeof transformed === "object" &&
+                    transformed !== null &&
+                    !Array.isArray(transformed)
+                ) {
+                    return { ...transformed, comment: [...comments] };
+                }
+                return transformed;
             },
             async listInstances(): Promise<JsonValue> {
                 return [];
@@ -1123,8 +1116,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             instance: "remote",
             workspace: "/remote",
         });
-        Object.assign(fake.gateway, {
-            async listApprovals(instance: string) {
+        Object.assign(fake.gateway.approval, {
+            async listPendingApprovals(instance: string) {
                 return instance === "remote"
                     ? [
                           {
@@ -1144,6 +1137,8 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                       ]
                     : [];
             },
+        });
+        Object.assign(fake.gateway, {
             async readToolCalls(instance: string) {
                 return instance === "remote"
                     ? [
@@ -4117,11 +4112,14 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
                 pending.delete(waitId);
                 return structuredClone(record);
             },
-            async listApprovals() {
-                return [];
-            },
-            async decideApproval() {
-                throw new Error("No approval in this test");
+            approval: {
+                async listPendingApprovals() { return []; },
+                async listApprovals() {
+                    return [];
+                },
+                async decideApproval() {
+                    throw new Error("No approval in this test");
+                },
             },
         } as unknown as McpInteractionGateway;
 

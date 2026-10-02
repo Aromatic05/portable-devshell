@@ -224,30 +224,31 @@ export class McpWorkspaceReentryArbiter {
         return { ...state, released: true } as unknown as JsonValue;
     }
 
-    async observeExecutionStart(ctxId: string): Promise<number | undefined> {
-        await this.#settleAttemptedFromExecution(ctxId);
+    async observeExecutionStart(ctxId: string, instance = this.options.instanceName): Promise<number | undefined> {
+        await this.#settleAttemptedFromExecution(ctxId, instance);
         return (
             await this.options.contextRegistry
-                .observeExecutionActivity(ctxId, this.options.instanceName)
+                .observeExecutionActivity(ctxId, instance)
                 .catch(() => undefined)
         )?.executionEpoch;
     }
 
-    async observeExecutionActivity(ctxId: string): Promise<void> {
+    async observeExecutionActivity(ctxId: string, instance = this.options.instanceName): Promise<void> {
         await this.options.contextRegistry
-            .observeExecutionActivity(ctxId, this.options.instanceName)
+            .observeExecutionActivity(ctxId, instance)
             .catch(() => undefined);
     }
 
     async releaseExecutionActivity(
         ctxId: string,
         executionEpoch: number | undefined,
+        instance = this.options.instanceName,
     ): Promise<void> {
         if (executionEpoch === undefined) return;
         await this.options.contextRegistry
             .releaseExecutionActivity(
                 ctxId,
-                this.options.instanceName,
+                instance,
                 executionEpoch,
             )
             .catch(() => undefined);
@@ -1077,12 +1078,12 @@ export class McpWorkspaceReentryArbiter {
         }
     }
 
-    async #settleAttemptedFromExecution(ctxId: string): Promise<void> {
+    async #settleAttemptedFromExecution(ctxId: string, instance: string): Promise<void> {
         let state;
         try {
             state = await this.options.contextRegistry.readAutomaticReentry(
                 ctxId,
-                this.options.instanceName,
+                instance,
             );
         } catch {
             return;
@@ -1106,14 +1107,14 @@ export class McpWorkspaceReentryArbiter {
                 } else {
                     try {
                         await this.options.gateway.completeWaitRecovery(
-                            this.options.instanceName,
+                            instance,
                             sourceId,
                             claimId,
                         );
                     } catch {
                         const wait = (
                             await this.options.gateway.listWaits?.(
-                                this.options.instanceName,
+                                instance,
                             )
                         )?.find((candidate) => candidate.waitId === sourceId);
                         settled =
@@ -1130,7 +1131,7 @@ export class McpWorkspaceReentryArbiter {
                         sourceId,
                         async () =>
                             await this.options.gateway!.goalContinuation!(
-                                this.options.instanceName,
+                                instance,
                                 {
                                     action: "report",
                                     accepted: true,
@@ -1149,7 +1150,7 @@ export class McpWorkspaceReentryArbiter {
             ) {
                 if (this.options.gateway?.recordGoalReentry !== undefined) {
                     const goal = await this.options.gateway.readGoal?.(
-                        this.options.instanceName,
+                        instance,
                         ctxId,
                     );
                     if (
@@ -1157,7 +1158,7 @@ export class McpWorkspaceReentryArbiter {
                         (sourceId === undefined || goal.goalId === sourceId)
                     ) {
                         await this.options.gateway.recordGoalReentry(
-                            this.options.instanceName,
+                            instance,
                             ctxId,
                             goal.progressEpoch,
                         );
@@ -1171,7 +1172,7 @@ export class McpWorkspaceReentryArbiter {
         await this.options.contextRegistry
             .markAutomaticReentryAccepted(
                 ctxId,
-                this.options.instanceName,
+                instance,
                 claimId,
             )
             .catch(() => undefined);
@@ -1331,17 +1332,8 @@ export class McpWorkspaceReentryArbiter {
     ): Promise<boolean> {
         for (const instance of await this.#contextInstances(ctxId)) {
             try {
-                const approvals =
-                    gateway.listPendingApprovals !== undefined
-                        ? await gateway.listPendingApprovals(instance, ctxId)
-                        : await gateway.listApprovals(instance);
-                if (
-                    approvals.some(
-                        (approval) =>
-                            approval.ctxId === ctxId &&
-                            approval.status === "pending",
-                    )
-                )
+                const approvals = await gateway.approval.listPendingApprovals(instance, ctxId);
+                if (approvals.length > 0)
                     return true;
             } catch {
                 // A disconnected auxiliary instance cannot contribute an actionable local approval.

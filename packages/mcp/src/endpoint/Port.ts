@@ -1,3 +1,4 @@
+import type { ToolCallHookValue } from "@portable-devshell/core";
 import type {
     ArtifactViewImageInput,
     ArtifactViewImageResult,
@@ -22,34 +23,12 @@ import type {
 import type { McpEndpointCatalogWorker } from "./tool/Catalog.js";
 
 export interface McpEndpointWorkerPort extends McpEndpointCatalogWorker {
-    callToolOperation<T extends JsonValue>(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
-        signal?: AbortSignal,
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
-    ): Promise<T>;
     appendMcpSessionClosed(sessionId: string): Promise<void>;
     appendMcpSessionOpened(sessionId: string): Promise<void>;
     appendMcpToolCalled(
         toolName: string,
         context: { requestId?: string; ctxId?: string },
     ): Promise<void>;
-    callTool(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-        transformResult?: (
-            result: JsonValue,
-            callId: string,
-        ) => Promise<JsonValue>,
-        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-        onProgress?: (progress: JsonValue) => void,
-        recording?: "caller" | "host",
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
-    ): Promise<JsonValue>;
     invokeToolInternal?(
         toolName: string,
         input: JsonValue,
@@ -123,7 +102,15 @@ export interface McpExtensionToolResult {
     structuredContent: JsonValue;
 }
 
+export interface McpApprovalPort {
+    listApprovals(instance: string): Promise<ApprovalRequest[]>;
+    listPendingApprovals(instance: string, ctxId?: string): Promise<ApprovalRequest[]>;
+    decideApproval?(instance: string, approvalId: string, decision: "approve" | "deny"): Promise<ApprovalRequest>;
+    cancelApproval?(instance: string, approvalId: string, reason?: string): Promise<ApprovalRequest>;
+}
+
 export interface McpInstanceGateway {
+    approval?: McpApprovalPort;
     appendMcpToolCalled(
         instance: string,
         toolName: string,
@@ -143,9 +130,8 @@ export interface McpInstanceGateway {
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
+        operation: (callId: string, input: JsonValue, finalValue: ToolCallHookValue) => Promise<T>,
         signal?: AbortSignal,
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
     ): Promise<T>;
     callTool(
         instance: string,
@@ -157,8 +143,9 @@ export interface McpInstanceGateway {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-        afterReview?: (callId: string, instance: string) => Promise<void> | void,
+        invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
+        onProgress?: (progress: JsonValue) => void,
+        recording?: "caller" | "host",
     ): Promise<JsonValue>;
     invokeToolInternal?(
         instance: string,
@@ -244,21 +231,6 @@ export interface McpInstanceGateway {
     ): Promise<WaitRecord>;
     waitForWait?(instance: string, waitId: string): Promise<WaitRecord>;
     listWaits?(instance: string): Promise<WaitRecord[]>;
-    listApprovals?(instance: string): Promise<ApprovalRequest[]>;
-    listPendingApprovals?(
-        instance: string,
-        ctxId?: string,
-    ): Promise<ApprovalRequest[]>;
-    decideApproval?(
-        instance: string,
-        approvalId: string,
-        decision: "approve" | "deny",
-    ): Promise<ApprovalRequest>;
-    cancelApproval?(
-        instance: string,
-        approvalId: string,
-        reason?: string,
-    ): Promise<ApprovalRequest>;
     readToolCalls?(
         instance: string,
         ctxId: string,
@@ -349,10 +321,8 @@ export type McpInteractionGateway = McpInstanceGateway &
             | "resolveWait"
             | "waitForWait"
             | "listWaits"
-            | "listApprovals"
-            | "decideApproval"
         >
-    >;
+    > & { approval: McpApprovalPort & Required<Pick<McpApprovalPort, "decideApproval">> };
 
 export function isMcpInteractionGateway(
     gateway: McpInstanceGateway | undefined,
@@ -365,8 +335,9 @@ export function isMcpInteractionGateway(
         gateway.resolveWait !== undefined &&
         gateway.waitForWait !== undefined &&
         gateway.listWaits !== undefined &&
-        gateway.listApprovals !== undefined &&
-        gateway.decideApproval !== undefined
+        gateway.approval !== undefined &&
+        gateway.approval.listPendingApprovals !== undefined &&
+        gateway.approval.decideApproval !== undefined
     );
 }
 

@@ -43,11 +43,7 @@ export async function readWorkspaceSnapshot(
             goalGateway?.readGoal(instanceName, ctxId),
             Promise.allSettled(
                 instances.map(async (instance) =>
-                    gateway.listPendingApprovals === undefined
-                        ? (await gateway.listApprovals(instance)).filter(
-                              (approval) => approval.status === "pending",
-                          )
-                        : await gateway.listPendingApprovals(instance, ctxId),
+                    await gateway.approval.listPendingApprovals(instance, ctxId),
                 ),
             ),
             Promise.allSettled(
