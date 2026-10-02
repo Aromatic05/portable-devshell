@@ -217,14 +217,7 @@ export class ControlRuntime {
         });
         this.#mcp.configEditor.registerInstanceGenerationRetirement(
             async (instance) => {
-                await this.#extensions.instanceGenerationRetired({
-                    instance: instance.name,
-                });
-            },
-        );
-        this.#mcp.configEditor.registerInstanceGenerationRetirement(
-            async (instance) => {
-                await this.#extensions.retireInstanceHostResources(instance.name);
+                await this.#extensions.retireInstanceGeneration(instance.name);
             },
         );
         this.#mcp.configEditor.registerInstanceGenerationRetirement(

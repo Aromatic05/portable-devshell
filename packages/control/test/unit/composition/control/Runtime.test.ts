@@ -217,7 +217,7 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
     assert.deepEqual(calls, ["web", "mcp"]);
 });
 
-test("runtime notifies Extensions before retiring host-managed generation resources", async (t) => {
+test("runtime registers one Extension generation retirement handler", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-extension-lifecycle");
     const socketPath = createTestIpcPath("control-runtime-extension", runtimeDir);
     const lifecycle: string[] = [];
@@ -232,10 +232,8 @@ test("runtime notifies Extensions before retiring host-managed generation resour
         extensionPaths: testExtensionPaths(),
         extensions: {
             ...testExtensionSurface(),
-            async instanceGenerationRetired(event: { instance: string }) {
-                lifecycle.push(`extension:${event.instance}`);
-            },
-            async retireInstanceHostResources(instance: string) {
+            async retireInstanceGeneration(instance: string) {
+                lifecycle.push(`extension:${instance}`);
                 lifecycle.push(`resources:${instance}`);
             },
         } as never,
@@ -282,7 +280,7 @@ test("runtime notifies Extensions before retiring host-managed generation resour
 
     assert.equal(disableRetirements, 0);
     assert.equal(deleteRetirements, 0);
-    assert.equal(generationRetirements.length, 4);
+    assert.equal(generationRetirements.length, 3);
     for (const retire of generationRetirements) {
         await retire({ name: "alpha" });
     }
@@ -350,9 +348,8 @@ function testExtensionSurface() {
             return () => undefined;
         },
         async contextEnvironmentRetired() {},
-        async instanceGenerationRetired() {},
         async reload() {},
-        async retireInstanceHostResources() {},
+        async retireInstanceGeneration() {},
         async start() {},
         async stop() {},
     };
@@ -918,9 +915,8 @@ test("runtime installs builtin Extensions through the normal installer before op
             return () => undefined;
         },
         async contextEnvironmentRetired() {},
-        async instanceGenerationRetired() {},
         async reload() {},
-        async retireInstanceHostResources() {},
+        async retireInstanceGeneration() {},
         async start() {},
         async stop() {},
         async waitForDrain() {},
@@ -1002,9 +998,8 @@ test("runtime keeps the Control channel closed when builtin Extension installati
                 return () => undefined;
             },
             async contextEnvironmentRetired() {},
-            async instanceGenerationRetired() {},
             async reload() {},
-            async retireInstanceHostResources() {},
+            async retireInstanceGeneration() {},
             async selectGeneration() {},
             async start() {},
             async stop() {},

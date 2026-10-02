@@ -913,7 +913,7 @@ test("Extension host waits for every instance resource retirement even when anot
 
     let settled = false;
     const retirement = host
-        .retireInstanceHostResources("local")
+        .retireInstanceGeneration("local")
         .then(
             () => ({ error: undefined }),
             (error: unknown) => ({ error }),
@@ -970,9 +970,46 @@ test("Extension host broadcasts Instance generation retirement separately from h
     await host.reload("one");
     await host.reload("two");
 
-    await host.instanceGenerationRetired({ instance: "local" });
+    await host.retireInstanceGeneration("local");
 
     assert.deepEqual(events.sort(), ["one:local", "two:local"]);
+    await host.stop();
+});
+
+test("Extension host reclaims host resources after an Instance generation notification fails", async () => {
+    const registry = new MemoryRegistry({
+        extensions: { example: { enabled: true, selectedGeneration: "a" } },
+        schemaVersion: 1,
+    });
+    const events: string[] = [];
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) =>
+                unregisteredGeneration(
+                    id,
+                    name,
+                    async () => undefined,
+                    async (instance) => {
+                        events.push(`resources:${instance}`);
+                    },
+                    async (event) => {
+                        events.push(`extension:${event.instance}`);
+                        throw new Error("notification failed");
+                    },
+                ),
+            async (id, name) => unregisteredManifest(id, name),
+        ),
+        registry,
+    });
+    await host.start();
+    await host.reload("example");
+
+    await assert.rejects(
+        host.retireInstanceGeneration("local"),
+        /failed to handle Instance generation retirement/u,
+    );
+
+    assert.deepEqual(events, ["extension:local", "resources:local"]);
     await host.stop();
 });
 

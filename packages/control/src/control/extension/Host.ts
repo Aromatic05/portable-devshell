@@ -501,9 +501,25 @@ export class ExtensionHost {
         });
     }
 
-    async instanceGenerationRetired(event: {
-        instance: string;
-    }): Promise<void> {
+    async retireInstanceGeneration(instance: string): Promise<void> {
+        const failures: unknown[] = [];
+        await this.#notifyInstanceGenerationRetired(instance).catch((error) =>
+            failures.push(error),
+        );
+        await this.#retireInstanceHostResources(instance).catch((error) =>
+            failures.push(error),
+        );
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) {
+            throw new AggregateError(
+                failures,
+                `Extension Instance generation retirement was incomplete for ${instance}.`,
+            );
+        }
+    }
+
+    async #notifyInstanceGenerationRetired(instance: string): Promise<void> {
+        const event = { instance };
         const failures: unknown[] = [];
         await Promise.all(
             [...this.#active.entries()].map(async ([id, generation]) => {
@@ -561,7 +577,7 @@ export class ExtensionHost {
         }
     }
 
-    async retireInstanceHostResources(instance: string): Promise<void> {
+    async #retireInstanceHostResources(instance: string): Promise<void> {
         const failures: unknown[] = [];
         await Promise.all(
             [...this.#active.entries()].map(async ([id, generation]) => {
