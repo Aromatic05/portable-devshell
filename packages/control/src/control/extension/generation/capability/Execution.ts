@@ -1,17 +1,19 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ExtensionJsonValue,
     ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessExit,
     ExtensionProcessStartInput,
+} from "@portable-devshell/extension/process";
+import type {
     ExtensionWorkerCapability,
     ExtensionWorkerEnvironment,
     ExtensionWorkerOpenInput,
     ExtensionWorkerSession,
     ExtensionWorkerToolDefinition,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/worker";
 import { randomUUID } from "node:crypto";
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
@@ -364,7 +366,10 @@ export interface ExtensionWorkerToolCallPort {
         input: JsonValue,
         context: ToolCallContext,
         signal?: AbortSignal,
-        transformResult?: (result: JsonValue, callId: string) => Promise<JsonValue>,
+        transformResult?: (
+            result: JsonValue,
+            callId: string,
+        ) => Promise<JsonValue>,
         invocationInput?: (
             input: JsonValue,
             callId: string,
@@ -473,8 +478,7 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                     const failures: unknown[] = [];
                     if (!toolSessionReleased) {
                         try {
-                            await lease.worker
-                                .releaseToolSession(sessionId);
+                            await lease.worker.releaseToolSession(sessionId);
                             toolSessionReleased = true;
                         } catch (error) {
                             failures.push(error);
@@ -482,8 +486,10 @@ export class ExtensionWorkerCapabilityControl implements ExtensionWorkerCapabili
                     }
                     if (!connectionReleased) {
                         try {
-                            await this.#connections
-                                .release(instance, reference);
+                            await this.#connections.release(
+                                instance,
+                                reference,
+                            );
                             connectionReleased = true;
                         } catch (error) {
                             failures.push(error);

@@ -1,7 +1,5 @@
-import type {
-    ExtensionContext,
-    ExtensionWorkerSession,
-} from "@portable-devshell/extension";
+import type { ExtensionContext } from "@portable-devshell/extension";
+import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 
 import type { AgentToolSession } from "./provider/AgentToolSession.js";
 import { projectAgentModelTools } from "./provider/AgentToolProjection.js";

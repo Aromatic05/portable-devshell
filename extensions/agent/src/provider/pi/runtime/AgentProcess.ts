@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ExtensionJsonValue,
     ExtensionManagedProcess,
     ExtensionProcessCapability,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 
 import type {
     AgentProviderHandle,

@@ -7,15 +7,15 @@ import type { ResourceLimits } from "node:worker_threads";
 import {
     parseExtensionManifest,
     type ExtensionContext,
-    type ExtensionAssetCapability,
     type ExtensionConfigDeclaration,
     type ExtensionJsonValue,
     type ExtensionLogger,
     type ExtensionManifest,
     type ExtensionModule,
-    type ExtensionProcessCapability,
-    type ExtensionWorkerCapability,
 } from "@portable-devshell/extension";
+import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
+import type { ExtensionWorkerCapability } from "@portable-devshell/extension/worker";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
@@ -35,9 +35,7 @@ import {
     type ExtensionHostModuleResolver,
 } from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
-import {
-    ExtensionInstanceEventPublishCapabilityControl,
-} from "../capability/Instance.js";
+import { ExtensionInstanceEventPublishCapabilityControl } from "../capability/Instance.js";
 import {
     ExtensionToolCallHistoryCapabilityControl,
     type ExtensionToolCallDecorator,
@@ -229,19 +227,20 @@ export class ExtensionLoader {
                 extensionId: id,
                 generation,
             }) ?? unavailableContextObserve(id);
-        const instanceCapabilities =
-            this.#instanceFactory?.({
-                manageAllowed: manifest.capabilities.includes("instance.manage"),
-                observeAllowed: manifest.capabilities.includes("instance.observe"),
-                extensionId: id,
-                generation,
-            }) ?? {
-                manage: unavailableInstanceManage(id),
-                observe: unavailableInstanceObserve(id),
-            };
+        const instanceCapabilities = this.#instanceFactory?.({
+            manageAllowed: manifest.capabilities.includes("instance.manage"),
+            observeAllowed: manifest.capabilities.includes("instance.observe"),
+            extensionId: id,
+            generation,
+        }) ?? {
+            manage: unavailableInstanceManage(id),
+            observe: unavailableInstanceObserve(id),
+        };
         const instanceEventPublish: ExtensionInstanceEventPublishCapability =
             new ExtensionInstanceEventPublishCapabilityControl({
-                allowed: manifest.capabilities.includes("instance.events.publish"),
+                allowed: manifest.capabilities.includes(
+                    "instance.events.publish",
+                ),
                 extensionId: id,
                 instances: this.#instances,
             });
@@ -254,22 +253,20 @@ export class ExtensionLoader {
             });
 
         const workerExecute = manifest.capabilities.includes("worker.execute")
-            ? this.#workerFactory?.({
+            ? (this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "host",
-              }) ?? unavailableWorkerRuntime(id, "worker.execute")
+              }) ?? unavailableWorkerRuntime(id, "worker.execute"))
             : unavailableWorkerRuntime(id, "worker.execute");
-        const workerDelegate = manifest.capabilities.includes(
-            "worker.delegate",
-        )
-            ? this.#workerFactory?.({
+        const workerDelegate = manifest.capabilities.includes("worker.delegate")
+            ? (this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "caller",
-              }) ?? unavailableWorkerRuntime(id, "worker.delegate")
+              }) ?? unavailableWorkerRuntime(id, "worker.delegate"))
             : unavailableWorkerRuntime(id, "worker.delegate");
         const processes =
             this.#processFactory?.({

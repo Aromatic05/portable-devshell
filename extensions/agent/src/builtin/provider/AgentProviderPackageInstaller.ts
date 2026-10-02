@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 
 import type { AgentProviderRuntimePaths } from "./AgentProviderRuntimePaths.js";
 
@@ -60,10 +60,7 @@ export class AgentProviderPackageInstaller {
         options: AgentProviderPackageInstallOptions = {},
     ): Promise<void> {
         validateSpec(spec);
-        if (
-            options.force !== true &&
-            (await this.isInstalled(runtime, spec))
-        ) {
+        if (options.force !== true && (await this.isInstalled(runtime, spec))) {
             return;
         }
 
@@ -202,7 +199,12 @@ async function assertInstalledDependencies(
     spec: AgentProviderPackageSpec,
 ): Promise<void> {
     for (const [name, version] of Object.entries(spec.dependencies)) {
-        const manifestPath = join(root, "node_modules", ...name.split("/"), "package.json");
+        const manifestPath = join(
+            root,
+            "node_modules",
+            ...name.split("/"),
+            "package.json",
+        );
         const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
             name?: unknown;
             version?: unknown;

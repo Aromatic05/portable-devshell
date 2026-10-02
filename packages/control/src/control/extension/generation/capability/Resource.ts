@@ -28,7 +28,7 @@ import type {
     ExtensionAssetCapability,
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/asset";
 import {
     createArtifactDirectoryArchive,
     extractArtifactDirectoryArchive,

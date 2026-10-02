@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 
 import type {
     AgentProvider,

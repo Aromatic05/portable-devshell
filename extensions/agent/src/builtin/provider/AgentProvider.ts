@@ -1,4 +1,4 @@
-import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 
 import type { AgentProviderRuntimePaths } from "./AgentProviderRuntimePaths.js";
 import type { AgentWorkerTarget } from "../worker/AgentWorkerTarget.js";

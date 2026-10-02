@@ -8,16 +8,20 @@ import {
 } from "node:worker_threads";
 
 import type {
-    ExtensionAssetCapability,
     ExtensionCapability,
     ExtensionConfig,
     ExtensionJsonValue,
     ExtensionLogger,
+} from "@portable-devshell/extension";
+import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
+} from "@portable-devshell/extension/process";
+import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/worker";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
@@ -763,10 +767,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 return await this.#registerWorkerSession(opened);
             }
             case "workerDelegate.openSession": {
-                const opened =
-                    await this.#workerDelegateCapability.openSession(
-                        input as SandboxWorkerOpenInput,
-                    );
+                const opened = await this.#workerDelegateCapability.openSession(
+                    input as SandboxWorkerOpenInput,
+                );
                 return await this.#registerWorkerSession(opened);
             }
             case "workerDelegate.callTool":

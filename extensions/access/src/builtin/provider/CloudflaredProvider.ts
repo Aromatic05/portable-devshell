@@ -1,4 +1,4 @@
-import type { ExtensionManagedProcess } from "@portable-devshell/extension";
+import type { ExtensionManagedProcess } from "@portable-devshell/extension/process";
 
 import { AccessBinaryManager } from "../binary/AccessBinaryManager.js";
 import type { CloudflaredAccessEndpoint } from "../Config.js";
@@ -25,14 +25,24 @@ export class CloudflaredProvider implements AccessProvider {
 
     async open(input: AccessProviderOpenInput): Promise<AccessProviderSession> {
         if (input.endpoint.provider !== this.kind)
-            throw new TypeError("CloudflaredProvider received a non-cloudflared endpoint.");
+            throw new TypeError(
+                "CloudflaredProvider received a non-cloudflared endpoint.",
+            );
         const endpoint: CloudflaredAccessEndpoint = input.endpoint;
-        const command = await this.#binaries.resolve(this.kind, endpoint.binary);
+        const command = await this.#binaries.resolve(
+            this.kind,
+            endpoint.binary,
+        );
         const detector = new CloudflaredHostnameDetector(input.target.origin);
         let publicUrl = endpoint.publicUrl;
         const publicUrlListeners = new Set<(publicUrl: string) => void>();
         const process = await this.#context.processes.start({
-            args: ["tunnel", "--no-autoupdate", "run", ...(endpoint.arguments ?? [])],
+            args: [
+                "tunnel",
+                "--no-autoupdate",
+                "run",
+                ...(endpoint.arguments ?? []),
+            ],
             command,
             environment: { TUNNEL_TOKEN: endpoint.token },
         });
@@ -62,7 +72,8 @@ export class CloudflaredProvider implements AccessProvider {
                 detected !== publicUrl
             ) {
                 publicUrl = detected;
-                for (const listener of [...publicUrlListeners]) listener(detected);
+                for (const listener of [...publicUrlListeners])
+                    listener(detected);
             }
         };
         const removeStdout = process.onStdout(accept);
@@ -121,7 +132,10 @@ export class CloudflaredHostnameDetector {
         const lines = this.#buffer.split(/\r?\n/u);
         this.#buffer = lines.pop() ?? "";
         for (const line of lines) {
-            const detected = detectCloudflaredPublicUrl(line, this.#targetOrigin);
+            const detected = detectCloudflaredPublicUrl(
+                line,
+                this.#targetOrigin,
+            );
             if (detected !== undefined) return detected;
         }
         if (this.#buffer.length > 64 * 1024)
@@ -136,7 +150,8 @@ export function detectCloudflaredPublicUrl(
 ): string | undefined {
     if (!line.includes(remoteConfigMessage)) return undefined;
     const config = readRemoteConfig(line);
-    if (config === undefined || !Array.isArray(config.ingress)) return undefined;
+    if (config === undefined || !Array.isArray(config.ingress))
+        return undefined;
     const hostnames = new Set<string>();
     for (const rule of config.ingress) {
         if (!isRecord(rule) || typeof rule.hostname !== "string") continue;
@@ -193,7 +208,9 @@ function readEncodedConfig(source: string): string | undefined {
             }
             if (char !== '"') continue;
             try {
-                const decoded = JSON.parse(source.slice(0, index + 1)) as unknown;
+                const decoded = JSON.parse(
+                    source.slice(0, index + 1),
+                ) as unknown;
                 return typeof decoded === "string" ? decoded : undefined;
             } catch {
                 return undefined;
@@ -214,13 +231,18 @@ function serviceMatchesOrigin(service: string, targetOrigin: URL): boolean {
         return false;
     }
     if (candidate.protocol !== targetOrigin.protocol) return false;
-    if (normalizedPort(candidate) !== normalizedPort(targetOrigin)) return false;
+    if (normalizedPort(candidate) !== normalizedPort(targetOrigin))
+        return false;
     return sameHost(candidate.hostname, targetOrigin.hostname);
 }
 
 function normalizedPort(url: URL): string {
     if (url.port.length > 0) return url.port;
-    return url.protocol === "https:" ? "443" : url.protocol === "http:" ? "80" : "";
+    return url.protocol === "https:"
+        ? "443"
+        : url.protocol === "http:"
+          ? "80"
+          : "";
 }
 
 function sameHost(left: string, right: string): boolean {
@@ -246,7 +268,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function formatExit(exit: { readonly code?: number; readonly signal?: string }): string {
+function formatExit(exit: {
+    readonly code?: number;
+    readonly signal?: string;
+}): string {
     if (exit.code !== undefined) return `code ${exit.code}`;
     if (exit.signal !== undefined) return `signal ${exit.signal}`;
     return "unknown exit";
@@ -255,9 +280,7 @@ function formatExit(exit: { readonly code?: number; readonly signal?: string }):
 function session(
     process: ExtensionManagedProcess,
     publicUrl: () => string | undefined,
-    onPublicUrlChange: (
-        listener: (publicUrl: string) => void,
-    ) => () => void,
+    onPublicUrlChange: (listener: (publicUrl: string) => void) => () => void,
     cleanup: () => void,
 ): AccessProviderSession {
     let cleaned = false;

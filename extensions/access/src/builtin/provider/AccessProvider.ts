@@ -1,7 +1,7 @@
 import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 
 import type { AccessEndpoint } from "../Config.js";
 import type { AccessTarget } from "../Target.js";
@@ -20,9 +20,7 @@ export interface AccessProviderOpenInput {
 export interface AccessProviderSession {
     readonly closed: Promise<void>;
     readonly process: ExtensionManagedProcess;
-    onPublicUrlChange?(
-        listener: (publicUrl: string) => void,
-    ): () => void;
+    onPublicUrlChange?(listener: (publicUrl: string) => void): () => void;
     publicUrl(): string | undefined;
     stop(): Promise<void>;
 }

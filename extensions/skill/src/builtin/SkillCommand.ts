@@ -1,10 +1,10 @@
 import { isAbsolute, resolve } from "node:path";
 
 import type {
-    ExtensionAssetProjectionResult,
     ExtensionContext,
     ExtensionJsonValue,
 } from "@portable-devshell/extension";
+import type { ExtensionAssetProjectionResult } from "@portable-devshell/extension/asset";
 import type {
     CliNativeCommandInvocationContext,
     CliCommandResult,

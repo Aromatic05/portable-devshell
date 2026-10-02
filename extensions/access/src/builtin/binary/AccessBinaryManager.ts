@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
 
-import type { ExtensionProcessCapability } from "@portable-devshell/extension";
+import type { ExtensionProcessCapability } from "@portable-devshell/extension/process";
 
 import type { AccessProviderKind } from "../Config.js";
 
@@ -50,7 +50,10 @@ export class AccessBinaryManager {
     >;
     readonly #resolving = new Map<string, Promise<string>>();
 
-    constructor(dataDirectory: string, options: AccessBinaryManagerOptions = {}) {
+    constructor(
+        dataDirectory: string,
+        options: AccessBinaryManagerOptions = {},
+    ) {
         this.#arch = options.arch ?? process.arch;
         this.#binDirectory = join(dataDirectory, "bin");
         this.#fetch = options.fetch;
@@ -60,7 +63,10 @@ export class AccessBinaryManager {
             options.resolveManagedAsset ?? resolvePinnedManagedAsset;
     }
 
-    async resolve(kind: AccessProviderKind, override?: string): Promise<string> {
+    async resolve(
+        kind: AccessProviderKind,
+        override?: string,
+    ): Promise<string> {
         if (override !== undefined) return override;
         if (kind === "ssh") return "ssh";
         let resolving = this.#resolving.get(kind);
@@ -93,12 +99,10 @@ export class AccessBinaryManager {
             `Failed to download ${kind} binary`,
         );
         verifySha256(downloaded, asset.sha256, `${kind} ${asset.version}`);
-        const bytes = asset.archive === "tar.gz"
-            ? await extractExecutableFromTarGz(
-                  downloaded,
-                  executableName,
-              )
-            : downloaded;
+        const bytes =
+            asset.archive === "tar.gz"
+                ? await extractExecutableFromTarGz(downloaded, executableName)
+                : downloaded;
         const temporary = `${executable}.${randomUUID()}.tmp`;
         await writeFile(temporary, bytes, { mode: 0o700 });
         try {
@@ -126,7 +130,10 @@ export class AccessBinaryManager {
                 signal: AbortSignal.timeout(120_000),
             });
         } catch (error) {
-            throw new Error(`${message}: ${error instanceof Error ? error.message : String(error)}.`, { cause: error });
+            throw new Error(
+                `${message}: ${error instanceof Error ? error.message : String(error)}.`,
+                { cause: error },
+            );
         }
         if (!response.ok)
             throw new Error(`${message}: HTTP ${response.status}.`);
@@ -170,7 +177,6 @@ export class AccessBinaryManager {
             await rm(temporary, { force: true }).catch(() => undefined);
         }
     }
-
 }
 
 function resolvePinnedManagedAsset(
@@ -279,9 +285,12 @@ function platformArch(
               : platform === "linux"
                 ? "linux"
                 : undefined;
-    const normalizedArch = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : undefined;
+    const normalizedArch =
+        arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : undefined;
     if (os === undefined || normalizedArch === undefined) {
-        throw new Error(`Access binary download does not support ${platform}/${arch}.`);
+        throw new Error(
+            `Access binary download does not support ${platform}/${arch}.`,
+        );
     }
     return { arch: normalizedArch, os };
 }
@@ -304,9 +313,15 @@ function verifySha256(bytes: Buffer, expected: string, label: string): void {
     }
 }
 
-async function isExecutable(path: string, platform: NodeJS.Platform): Promise<boolean> {
+async function isExecutable(
+    path: string,
+    platform: NodeJS.Platform,
+): Promise<boolean> {
     try {
-        await access(path, platform === "win32" ? constants.F_OK : constants.X_OK);
+        await access(
+            path,
+            platform === "win32" ? constants.F_OK : constants.X_OK,
+        );
         return true;
     } catch {
         return false;
@@ -325,16 +340,23 @@ async function extractExecutableFromTarGz(
         const name = readTarString(header, 0, 100);
         const prefix = readTarString(header, 345, 155);
         const path = prefix.length === 0 ? name : `${prefix}/${name}`;
-        const sizeText = readTarString(header, 124, 12).replace(/\0.*$/u, "").trim();
+        const sizeText = readTarString(header, 124, 12)
+            .replace(/\0.*$/u, "")
+            .trim();
         const size = sizeText.length === 0 ? 0 : Number.parseInt(sizeText, 8);
         if (!Number.isSafeInteger(size) || size < 0)
-            throw new TypeError("Downloaded tar archive contains an invalid entry size.");
+            throw new TypeError(
+                "Downloaded tar archive contains an invalid entry size.",
+            );
         const bodyOffset = offset + 512;
         const bodyEnd = bodyOffset + size;
         if (bodyEnd > archive.length)
             throw new TypeError("Downloaded tar archive is truncated.");
         const type = String.fromCharCode(header[156] ?? 0);
-        if ((type === "0" || type === "\0") && basename(path) === executableName)
+        if (
+            (type === "0" || type === "\0") &&
+            basename(path) === executableName
+        )
             return Buffer.from(archive.subarray(bodyOffset, bodyEnd));
         offset = bodyOffset + Math.ceil(size / 512) * 512;
     }

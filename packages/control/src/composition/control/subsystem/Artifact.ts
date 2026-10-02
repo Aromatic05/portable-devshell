@@ -6,7 +6,7 @@ import { createError, errorCodes } from "@portable-devshell/shared";
 import type {
     ExtensionAssetProjectionInput,
     ExtensionAssetProjectionResult,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/asset";
 
 import {
     ArtifactHttpRoute,

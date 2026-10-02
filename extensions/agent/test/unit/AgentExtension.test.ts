@@ -5,8 +5,8 @@ import test from "node:test";
 import {
     parseExtensionManifest,
     type ExtensionContext,
-    type ExtensionWorkerSession,
 } from "@portable-devshell/extension";
+import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 import type { CliNativeCommandInvocationContext } from "@portable-devshell/extension/cli";
 
 import {
@@ -36,10 +36,7 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     assert.equal(manifest.entry, "dist/builtin/index.js");
     assert.equal(manifest.apiVersion, "5.0.0");
     assert.equal(manifest.activation, "lazy");
-    assert.deepEqual(manifest.capabilities, [
-        "worker.delegate",
-        "processes",
-    ]);
+    assert.deepEqual(manifest.capabilities, ["worker.delegate", "processes"]);
     assert.deepEqual(manifest.extensions, {
         "cli.native-commands": [
             {

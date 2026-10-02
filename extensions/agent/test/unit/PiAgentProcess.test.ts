@@ -6,13 +6,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ExtensionJsonValue,
     ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessExit,
     ExtensionProcessStartInput,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 import { ExtensionError } from "@portable-devshell/extension";
 
 import type { AgentToolSession } from "../../src/builtin/provider/AgentToolSession.ts";

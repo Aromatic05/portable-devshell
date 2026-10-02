@@ -8,7 +8,7 @@ import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessStartInput,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { AccessBinaryManager } from "../../src/builtin/binary/AccessBinaryManager.ts";
@@ -23,7 +23,10 @@ test("AccessBinaryManager honors explicit binaries without network access", asyn
         }) as typeof fetch,
     });
     try {
-        assert.equal(await manager.resolve("cloudflared", "/custom/cloudflared"), "/custom/cloudflared");
+        assert.equal(
+            await manager.resolve("cloudflared", "/custom/cloudflared"),
+            "/custom/cloudflared",
+        );
         assert.equal(await manager.resolve("ssh"), "ssh");
         assert.equal(fetched, false);
     } finally {
@@ -32,7 +35,9 @@ test("AccessBinaryManager honors explicit binaries without network access", asyn
 });
 
 test("AccessBinaryManager downloads a direct cloudflared asset once", async () => {
-    const directory = await createTestTempDirectory("access-binary-cloudflared");
+    const directory = await createTestTempDirectory(
+        "access-binary-cloudflared",
+    );
     const requests: string[] = [];
     const url = "https://downloads.example/cloudflared";
     const bytes = Buffer.from("cloudflared-binary");
@@ -112,7 +117,10 @@ test("AccessBinaryManager downloads through the managed process capability", asy
     });
     try {
         const executable = await manager.resolve("cloudflared");
-        assert.equal((await readFile(executable)).toString(), "managed-cloudflared");
+        assert.equal(
+            (await readFile(executable)).toString(),
+            "managed-cloudflared",
+        );
         assert.equal(starts.length, 1);
         assert.equal(starts[0]?.command, process.execPath);
         assert.match(starts[0]?.args?.[0] ?? "", /DownloadWorker\.js$/u);
@@ -154,10 +162,16 @@ function fakeFetch(
     responses: Readonly<Record<string, Response>>,
 ): typeof fetch {
     return (async (input: URL | RequestInfo) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const url =
+            typeof input === "string"
+                ? input
+                : input instanceof URL
+                  ? input.href
+                  : input.url;
         requests.push(url);
         const response = responses[url];
-        if (response === undefined) return new Response("not found", { status: 404 });
+        if (response === undefined)
+            return new Response("not found", { status: 404 });
         return response.clone();
     }) as typeof fetch;
 }
@@ -174,7 +188,10 @@ function sha256(value: Buffer): string {
     return createHash("sha256").update(value).digest("hex");
 }
 
-function managedProcess(exit: { code?: number; signal?: string }): ExtensionManagedProcess {
+function managedProcess(exit: {
+    code?: number;
+    signal?: string;
+}): ExtensionManagedProcess {
     return {
         closed: Promise.resolve(exit),
         onMessage: () => () => undefined,
@@ -191,13 +208,25 @@ function tarFile(name: string, body: Buffer): Buffer {
     header.write("0000700\0", 100, 8, "ascii");
     header.write("0000000\0", 108, 8, "ascii");
     header.write("0000000\0", 116, 8, "ascii");
-    header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124, 12, "ascii");
+    header.write(
+        `${body.length.toString(8).padStart(11, "0")}\0`,
+        124,
+        12,
+        "ascii",
+    );
     header.write("00000000000\0", 136, 12, "ascii");
     header.fill(0x20, 148, 156);
     header[156] = "0".charCodeAt(0);
     header.write("ustar\0", 257, 6, "ascii");
     const checksum = header.reduce((sum, byte) => sum + byte, 0);
-    header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
-    const padding = Buffer.alloc(Math.ceil(body.length / 512) * 512 - body.length);
+    header.write(
+        `${checksum.toString(8).padStart(6, "0")}\0 `,
+        148,
+        8,
+        "ascii",
+    );
+    const padding = Buffer.alloc(
+        Math.ceil(body.length / 512) * 512 - body.length,
+    );
     return Buffer.concat([header, body, padding, Buffer.alloc(1024)]);
 }

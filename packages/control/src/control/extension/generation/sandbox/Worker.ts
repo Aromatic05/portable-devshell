@@ -3,24 +3,30 @@ import { syncBuiltinESMExports } from "node:module";
 import { parentPort, workerData, type MessagePort } from "node:worker_threads";
 
 import type {
-    ExtensionAssetBundle,
-    ExtensionAssetCapability,
-    ExtensionAssetProjectionInput,
-    ExtensionAssetProjectionResult,
     ExtensionCapabilities,
     ExtensionConfig,
     ExtensionConfigChange,
     ExtensionContext,
     ExtensionJsonValue,
     ExtensionLogger,
-    ExtensionManagedProcess,
     ExtensionModule,
+} from "@portable-devshell/extension";
+import type {
+    ExtensionAssetBundle,
+    ExtensionAssetCapability,
+    ExtensionAssetProjectionInput,
+    ExtensionAssetProjectionResult,
+} from "@portable-devshell/extension/asset";
+import type {
+    ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessExit,
     ExtensionProcessStartInput,
+} from "@portable-devshell/extension/process";
+import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/worker";
 import type {
     ExtensionArtifactCapability,
     ExtensionArtifactShareInput,
@@ -430,15 +436,12 @@ function createConfig(): ExtensionConfig {
             (await requestCapability("config.get", {
                 path,
             } satisfies SandboxConfigGetInput)) as
-                | ExtensionJsonValue
-                | undefined,
+                ExtensionJsonValue | undefined,
         onChange: (listener: (change: ExtensionConfigChange) => void) => {
             configListeners.add(listener);
             return () => configListeners.delete(listener);
         },
-        update: async (
-            patch: Readonly<Record<string, ExtensionJsonValue>>,
-        ) => {
+        update: async (patch: Readonly<Record<string, ExtensionJsonValue>>) => {
             await requestCapability("config.update", {
                 ...patch,
             } satisfies SandboxConfigUpdateInput);
@@ -524,12 +527,16 @@ function createInstanceManageCapability(): ExtensionInstanceManageCapability {
             (await requestCapability(
                 "instanceManage.start",
                 nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceManageCapability["start"]>>,
+            )) as Awaited<
+                ReturnType<ExtensionInstanceManageCapability["start"]>
+            >,
         stop: async (name: string) =>
             (await requestCapability(
                 "instanceManage.stop",
                 nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceManageCapability["stop"]>>,
+            )) as Awaited<
+                ReturnType<ExtensionInstanceManageCapability["stop"]>
+            >,
         validateCreate: async (draft: ExtensionJsonValue) =>
             (await requestCapability("instanceManage.validateCreate", {
                 draft,

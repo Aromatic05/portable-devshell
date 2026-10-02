@@ -9,8 +9,8 @@ import {
     type ExtensionConfigDeclaration,
     type ExtensionContext,
     type ExtensionPointDeclaration,
-    type ExtensionWorkerSession,
 } from "@portable-devshell/extension";
+import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 import { nativeCommands } from "@portable-devshell/extension/cli";
 import { applications } from "@portable-devshell/extension/web";
 
@@ -60,7 +60,9 @@ async function createHarness(): Promise<LoaderHarness> {
                     activation: "lazy",
                     apiVersion: input.apiVersion ?? EXTENSION_API_VERSION,
                     capabilities: input.capabilities ?? [],
-                    ...(input.config === undefined ? {} : { config: input.config }),
+                    ...(input.config === undefined
+                        ? {}
+                        : { config: input.config }),
                     entry: "extension.mjs",
                     extensions: input.extensions ?? {},
                     id: input.manifestId ?? id,
@@ -243,7 +245,9 @@ test("Extension loader validates declared Config and injects context.config", as
             type: "object",
         },
     };
-    const { id, generation } = await harness.writeGeneration({ config: declaration });
+    const { id, generation } = await harness.writeGeneration({
+        config: declaration,
+    });
     const calls: string[] = [];
     let seenContext: ExtensionContext | undefined;
     const loader = new ExtensionLoader({
@@ -251,7 +255,10 @@ test("Extension loader validates declared Config and injects context.config", as
             assert.deepEqual(input.declaration, declaration);
             assert.equal(input.extensionId, id);
             assert.equal(input.generation, generation);
-            assert.equal(input.stateDirectory, harness.paths.stateDirectory(id));
+            assert.equal(
+                input.stateDirectory,
+                harness.paths.stateDirectory(id),
+            );
             return {
                 close() {
                     calls.push("close");
@@ -520,9 +527,7 @@ test("Extension loader notifies retired Context environments without touching Wo
         reason: "disabled",
     });
 
-    assert.deepEqual(events, [
-        "module.retire-context:local:ctx-one:disabled",
-    ]);
+    assert.deepEqual(events, ["module.retire-context:local:ctx-one:disabled"]);
     await candidate.retire();
 });
 

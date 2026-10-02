@@ -5,17 +5,21 @@ import test, { type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import type {
-    ExtensionAssetCapability,
     ExtensionCapability,
     ExtensionConfig,
     ExtensionJsonValue,
     ExtensionLogger,
+} from "@portable-devshell/extension";
+import type { ExtensionAssetCapability } from "@portable-devshell/extension/asset";
+import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessExit,
+} from "@portable-devshell/extension/process";
+import type {
     ExtensionWorkerCapability,
     ExtensionWorkerSession,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/worker";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
@@ -37,9 +41,7 @@ import {
     createCliNativeSandboxBinding,
 } from "../../../../../src/control/extension/cli/Sandbox.ts";
 import { createTuiPageSandboxBinding } from "../../../../../src/control/extension/tui/Sandbox.ts";
-import {
-    createToolCallRewriteSandboxBinding,
-} from "../../../../../src/control/extension/toolcall/Sandbox.ts";
+import { createToolCallRewriteSandboxBinding } from "../../../../../src/control/extension/toolcall/Sandbox.ts";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
@@ -252,7 +254,11 @@ export function activate(context) {
     );
     const descriptor = await sandbox.start();
     assert.deepEqual(descriptor.registrations, [
-        { descriptor: { kind: "rewrite" }, id: "secret", pointId: "toolcall.rewrite" },
+        {
+            descriptor: { kind: "rewrite" },
+            id: "secret",
+            pointId: "toolcall.rewrite",
+        },
     ]);
     const binding = createToolCallRewriteSandboxBinding(
         { kind: "rewrite" },
@@ -354,7 +360,11 @@ export function activate(context) {
         changed: true,
         count: 2,
     });
-    assert.deepEqual(calls, ["get:example.count", "update", "get:example.count"]);
+    assert.deepEqual(calls, [
+        "get:example.count",
+        "update",
+        "get:example.count",
+    ]);
 });
 
 test("Extension sandbox bridges invocation-scoped CLI I/O", async (t) => {
@@ -1425,8 +1435,8 @@ export function activate(context) {
             left.pointId.localeCompare(right.pointId),
         ),
         [
-        { descriptor: { kind: "page" }, id: "tui", pointId: "tui.pages" },
-        { descriptor: { kind: "page" }, id: "web", pointId: "web.pages" },
+            { descriptor: { kind: "page" }, id: "tui", pointId: "tui.pages" },
+            { descriptor: { kind: "page" }, id: "web", pointId: "web.pages" },
         ],
     );
 

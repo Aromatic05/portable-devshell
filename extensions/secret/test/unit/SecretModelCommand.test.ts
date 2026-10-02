@@ -4,8 +4,8 @@ import test from "node:test";
 import type {
     ExtensionContext,
     ExtensionJsonValue,
-    ExtensionWorkerSession,
 } from "@portable-devshell/extension";
+import type { ExtensionWorkerSession } from "@portable-devshell/extension/worker";
 
 import { executeSecretModelCommand } from "../../src/builtin/command/SecretModelCommand.ts";
 

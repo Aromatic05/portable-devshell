@@ -3,19 +3,28 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+import type { ExtensionJsonValue } from "@portable-devshell/extension";
 import type {
-    ExtensionJsonValue,
     ExtensionManagedProcess,
     ExtensionProcessExit,
     ExtensionProcessStartInput,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { AccessBinaryManager } from "../../src/builtin/binary/AccessBinaryManager.ts";
 import { CloudflaredProvider } from "../../src/builtin/provider/CloudflaredProvider.ts";
-import { FrpProvider, renderFrpConfig } from "../../src/builtin/provider/FrpProvider.ts";
-import { buildSshArgs, SshReverseProvider } from "../../src/builtin/provider/SshReverseProvider.ts";
-import type { FrpAccessEndpoint, SshAccessEndpoint } from "../../src/builtin/Config.ts";
+import {
+    FrpProvider,
+    renderFrpConfig,
+} from "../../src/builtin/provider/FrpProvider.ts";
+import {
+    buildSshArgs,
+    SshReverseProvider,
+} from "../../src/builtin/provider/SshReverseProvider.ts";
+import type {
+    FrpAccessEndpoint,
+    SshAccessEndpoint,
+} from "../../src/builtin/Config.ts";
 
 class FakeProcess implements ExtensionManagedProcess {
     readonly closed: Promise<ExtensionProcessExit>;
@@ -116,7 +125,9 @@ test("cloudflared provider runs a named tunnel token and discovers its published
 });
 
 test("cloudflared provider keeps an explicit public URL instead of auto-detected hostnames", async () => {
-    const directory = await createTestTempDirectory("access-cloudflared-explicit");
+    const directory = await createTestTempDirectory(
+        "access-cloudflared-explicit",
+    );
     try {
         const harness = processContext(directory);
         const provider = new CloudflaredProvider(
@@ -150,7 +161,9 @@ test("cloudflared provider keeps an explicit public URL instead of auto-detected
     }
 });
 
-async function waitForProcess(harness: ReturnType<typeof processContext>): Promise<void> {
+async function waitForProcess(
+    harness: ReturnType<typeof processContext>,
+): Promise<void> {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         if (harness.processes.length > 0) return;
         await new Promise((resolve) => setImmediate(resolve));
@@ -171,8 +184,14 @@ test("FRP and SSH providers render the expected reverse forwarding targets", asy
         target: "mcp",
         token: "secret",
     };
-    assert.match(renderFrpConfig(frp, new URL("http://127.0.0.1:8080/")), /serverAddr = "frp\.example\.test"/u);
-    assert.match(renderFrpConfig(frp, new URL("http://127.0.0.1:8080/")), /remotePort = 9443/u);
+    assert.match(
+        renderFrpConfig(frp, new URL("http://127.0.0.1:8080/")),
+        /serverAddr = "frp\.example\.test"/u,
+    );
+    assert.match(
+        renderFrpConfig(frp, new URL("http://127.0.0.1:8080/")),
+        /remotePort = 9443/u,
+    );
 
     const ssh: SshAccessEndpoint = {
         binary: "/usr/bin/ssh",
@@ -231,7 +250,10 @@ test("FRP and SSH providers render the expected reverse forwarding targets", asy
             endpoint: ssh,
             target: { kind: "web", origin: new URL("http://127.0.0.1:8081/") },
         });
-        assert.deepEqual(sshHarness.starts[0]?.args, buildSshArgs(ssh, new URL("http://127.0.0.1:8081/")));
+        assert.deepEqual(
+            sshHarness.starts[0]?.args,
+            buildSshArgs(ssh, new URL("http://127.0.0.1:8081/")),
+        );
         await sshSession.stop();
     } finally {
         await rm(directory, { force: true, recursive: true });

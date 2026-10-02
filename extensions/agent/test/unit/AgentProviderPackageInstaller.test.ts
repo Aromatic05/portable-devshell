@@ -7,7 +7,7 @@ import type {
     ExtensionManagedProcess,
     ExtensionProcessCapability,
     ExtensionProcessStartInput,
-} from "@portable-devshell/extension";
+} from "@portable-devshell/extension/process";
 
 import {
     AgentProviderPackageInstaller,
@@ -31,7 +31,10 @@ test("Provider runtime dependencies install on the client and are reused until u
     await h.installer.install(h.runtime, spec);
     assert.equal(await h.installer.isInstalled(h.runtime, spec), true);
     assert.equal(h.starts.length, 1);
-    assert.equal(h.starts[0]?.command, process.platform === "win32" ? "npm.cmd" : "npm");
+    assert.equal(
+        h.starts[0]?.command,
+        process.platform === "win32" ? "npm.cmd" : "npm",
+    );
     assert.deepEqual(h.starts[0]?.args, [
         "install",
         "--ignore-scripts",
