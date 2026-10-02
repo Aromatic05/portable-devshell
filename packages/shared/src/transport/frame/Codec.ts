@@ -73,35 +73,61 @@ enum FrameType {
 }
 
 export class FrameBuffer {
-    #buffer = new Uint8Array();
+    #buffer = new Uint8Array(1024);
+    #end = 0;
+    #start = 0;
 
     get empty(): boolean {
-        return this.#buffer.byteLength === 0;
+        return this.#start === this.#end;
     }
 
     push(chunk: Uint8Array): Frame[] {
-        const data = new Uint8Array(this.#buffer.byteLength + chunk.byteLength);
-        data.set(this.#buffer);
-        data.set(chunk, this.#buffer.byteLength);
+        if (chunk.byteLength === 0) return [];
+        this.#append(chunk);
         const frames: Frame[] = [];
-        let offset = 0;
-        while (data.byteLength - offset >= LENGTH_SIZE) {
-            const length = readU32(data, offset);
+        while (this.#end - this.#start >= LENGTH_SIZE) {
+            const length = readU32(this.#buffer, this.#start);
             assertFrameSize(length);
-            if (data.byteLength - offset < LENGTH_SIZE + length) break;
+            if (this.#end - this.#start < LENGTH_SIZE + length) break;
+            const bodyStart = this.#start + LENGTH_SIZE;
             frames.push(
                 decodeFrameBody(
-                    data.subarray(offset + LENGTH_SIZE, offset + LENGTH_SIZE + length),
+                    this.#buffer.subarray(bodyStart, bodyStart + length),
                 ),
             );
-            offset += LENGTH_SIZE + length;
+            this.#start += LENGTH_SIZE + length;
         }
-        this.#buffer = data.slice(offset);
+        if (this.#start === this.#end) {
+            this.#start = 0;
+            this.#end = 0;
+        }
         return frames;
     }
 
     reset(): void {
-        this.#buffer = new Uint8Array();
+        this.#start = 0;
+        this.#end = 0;
+    }
+
+    #append(chunk: Uint8Array): void {
+        const unread = this.#end - this.#start;
+        const required = unread + chunk.byteLength;
+        if (this.#buffer.byteLength < required) {
+            let capacity = this.#buffer.byteLength;
+            while (capacity < required) capacity *= 2;
+            const next = new Uint8Array(capacity);
+            if (unread > 0)
+                next.set(this.#buffer.subarray(this.#start, this.#end), 0);
+            this.#buffer = next;
+            this.#start = 0;
+            this.#end = unread;
+        } else if (this.#end + chunk.byteLength > this.#buffer.byteLength) {
+            this.#buffer.copyWithin(0, this.#start, this.#end);
+            this.#start = 0;
+            this.#end = unread;
+        }
+        this.#buffer.set(chunk, this.#end);
+        this.#end += chunk.byteLength;
     }
 }
 
