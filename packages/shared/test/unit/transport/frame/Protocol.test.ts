@@ -123,30 +123,6 @@ test("FrameProtocol opens one Service stream and moves opaque bytes in both dire
     acceptor.close();
 });
 
-test("per-stream credit blocks only the slow logical stream", async () => {
-    const { opener, acceptor } = pair();
-    const first = await openPair(opener, acceptor, "first", 2);
-    const second = await openPair(opener, acceptor, "second", 2);
-
-    let firstDone = false;
-    const firstWrite = first.local.write(Uint8Array.of(1, 2, 3, 4)).then(() => {
-        firstDone = true;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(firstDone, false);
-
-    await second.local.write(Uint8Array.of(9, 8));
-    assert.deepEqual(await second.remote.read(), Uint8Array.of(9, 8));
-    assert.equal(firstDone, false);
-
-    assert.deepEqual(await first.remote.read(), Uint8Array.of(1, 2));
-    await firstWrite;
-    assert.deepEqual(await first.remote.read(), Uint8Array.of(3, 4));
-
-    opener.close();
-    acceptor.close();
-});
-
 test("WINDOW restores receive credit before a synchronous peer can spend it", async () => {
     const { opener, acceptor } = pair(true);
     const { local, remote } = await openPair(opener, acceptor, "credit-race", 2);
@@ -162,10 +138,9 @@ test("WINDOW restores receive credit before a synchronous peer can spend it", as
     acceptor.close();
 });
 
-test("late frames for a retired stream do not close sibling streams", async () => {
+test("late frames for the retired stream are ignored", async () => {
     const { opener, acceptor, acceptorChannel } = pair();
     const first = await openPair(opener, acceptor, "first", 8);
-    const sibling = await openPair(opener, acceptor, "sibling", 8);
 
     await first.local.finish();
     await first.remote.finish();
@@ -202,8 +177,6 @@ test("late frames for a retired stream do not close sibling streams", async () =
 
     assert.equal(opener.closed, false);
     assert.equal(acceptor.closed, false);
-    await sibling.local.write(Uint8Array.of(9));
-    assert.deepEqual(await sibling.remote.read(), Uint8Array.of(9));
 });
 
 test("FrameProtocol rejects OPEN in the wrong direction and closes the Channel", async () => {
@@ -273,18 +246,18 @@ test("FrameProtocol preserves FIN that arrives while a remote OPEN is still pend
     assert.equal(await local.read(), undefined);
 });
 
-test("FrameProtocol enforces a configured active stream bound", async () => {
+test("FrameProtocol allows only one local Service stream", async () => {
     const left = new MemoryChannel();
     const right = new MemoryChannel();
     left.connect(right);
     right.connect(left);
-    const opener = new FrameProtocol(left, { role: "opener", maxStreams: 1 });
-    const acceptor = new FrameProtocol(right, { role: "acceptor", maxStreams: 1 });
+    const opener = new FrameProtocol(left, { role: "opener" });
+    const acceptor = new FrameProtocol(right, { role: "acceptor" });
     const stream = await openPair(opener, acceptor, "service", 8);
 
     await assert.rejects(
         opener.open("overflow", new Uint8Array(), { receiveWindow: 8 }),
-        /active stream limit/iu,
+        /already open/iu,
     );
     assert.equal(opener.closed, false);
     assert.equal(acceptor.closed, false);
@@ -293,12 +266,12 @@ test("FrameProtocol enforces a configured active stream bound", async () => {
     assert.deepEqual(await stream.remote.read(), Uint8Array.of(1, 2, 3));
 });
 
-test("FrameProtocol rejects a remote OPEN beyond a configured stream bound", async () => {
+test("FrameProtocol rejects a second remote OPEN", async () => {
     const left = new MemoryChannel();
     const right = new MemoryChannel();
     left.connect(right);
     right.connect(left);
-    const acceptor = new FrameProtocol(right, { role: "acceptor", maxStreams: 1 });
+    const acceptor = new FrameProtocol(right, { role: "acceptor" });
 
     for (let streamId = 1; streamId <= 2; streamId += 1) {
         await left.write(

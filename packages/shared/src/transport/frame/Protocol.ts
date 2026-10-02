@@ -14,12 +14,10 @@ import {
 } from "./Stream.js";
 
 const DEFAULT_RECEIVE_WINDOW = 256 * 1024;
-const DEFAULT_MAX_ACTIVE_STREAMS = 256;
 const UINT32_MAX = 0xffff_ffff;
 
 export interface FrameProtocolOptions {
     role: "opener" | "acceptor";
-    maxStreams?: number;
     receiveWindow?: number;
 }
 
@@ -39,38 +37,26 @@ interface OpenWaiter {
     resolve(value: FrameOpenRequest | undefined): void;
 }
 
-interface DataJob {
-    readonly stream: FrameStreamState;
-    readonly data: Uint8Array;
-    resolve(): void;
-    reject(error: Error): void;
-}
-
 export class FrameProtocol implements FrameStreamHost {
     readonly #channel: Channel;
     readonly #frames = new FrameBuffer();
     readonly #role: FrameProtocolOptions["role"];
-    readonly #maxStreams: number;
     readonly #defaultReceiveWindow: number;
-    readonly #streams = new Map<number, FrameStreamState>();
     readonly #pendingOpen: FrameOpenRequestImpl[] = [];
     readonly #openWaiters: OpenWaiter[] = [];
-    readonly #dataJobs: DataJob[] = [];
-    #nextStreamId = 1;
-    #lastRemoteStreamId = 0;
+    #stream?: FrameStreamState;
+    #retiredStreamId?: number;
+    #opened = false;
     #closed = false;
     #closeError?: Error;
     #writeTail: Promise<void> = Promise.resolve();
-    #dataPumping = false;
 
     constructor(channel: Channel, options: FrameProtocolOptions) {
         this.#channel = channel;
         this.#role = options.role;
-        this.#maxStreams = options.maxStreams ?? DEFAULT_MAX_ACTIVE_STREAMS;
         this.#defaultReceiveWindow =
             options.receiveWindow ?? DEFAULT_RECEIVE_WINDOW;
         assertPositiveU32(this.#defaultReceiveWindow, "receiveWindow");
-        assertPositiveU32(this.#maxStreams, "maxStreams");
 
         channel.onData((data) => this.#acceptData(data));
         channel.onClose((error) =>
@@ -98,18 +84,13 @@ export class FrameProtocol implements FrameStreamHost {
         if (this.#role !== "opener") {
             throw new Error("Only the Frame opener can open a Service stream.");
         }
-        if (this.#streams.size >= this.#maxStreams) {
-            throw new Error("Frame active stream limit reached.");
-        }
+        if (this.#opened)
+            throw new Error("Frame Service stream is already open.");
         const receiveWindow =
             options.receiveWindow ?? this.#defaultReceiveWindow;
         assertPositiveU32(receiveWindow, "receiveWindow");
-        if (this.#nextStreamId > UINT32_MAX) {
-            const error = protocolError("Frame stream id space is exhausted.");
-            this.close(error);
-            throw error;
-        }
-        const streamId = this.#nextStreamId++;
+        const streamId = 1;
+        this.#opened = true;
         const stream = new FrameStreamState({
             host: this,
             id: streamId,
@@ -119,7 +100,7 @@ export class FrameProtocol implements FrameStreamHost {
             sendCredit: 0,
             receiveCredit: receiveWindow,
         });
-        this.#streams.set(streamId, stream);
+        this.#stream = stream;
         try {
             await this.#writeFrame({
                 type: "open",
@@ -130,7 +111,7 @@ export class FrameProtocol implements FrameStreamHost {
             });
             return stream;
         } catch (error) {
-            this.#streams.delete(streamId);
+            if (this.#stream === stream) this.#stream = undefined;
             stream.fail(normalizeError(error));
             throw error;
         }
@@ -175,7 +156,11 @@ export class FrameProtocol implements FrameStreamHost {
             if (byteLength <= 0) continue;
             const chunk = data.slice(offset, offset + byteLength);
             try {
-                await this.#scheduleData(stream, chunk);
+                await this.#writeFrame({
+                    type: "data",
+                    streamId: stream.id,
+                    data: chunk,
+                });
             } catch (error) {
                 stream.grantSendCredit(byteLength);
                 throw error;
@@ -197,8 +182,8 @@ export class FrameProtocol implements FrameStreamHost {
     ): Promise<void> {
         this.#assertCurrent(stream);
         const error = new FrameResetError(code, message);
-        this.#streams.delete(stream.id);
-        this.#rejectDataJobs(stream, error);
+        if (this.#stream === stream) this.#stream = undefined;
+        this.#retiredStreamId = stream.id;
         stream.fail(error);
         await this.#writeFrame({
             type: "reset",
@@ -251,8 +236,9 @@ export class FrameProtocol implements FrameStreamHost {
         message: string,
     ): Promise<void> {
         const stream = request.stream;
-        if (this.#streams.get(stream.id) !== stream) return;
-        this.#streams.delete(stream.id);
+        if (this.#stream !== stream) return;
+        this.#stream = undefined;
+        this.#retiredStreamId = stream.id;
         const error = new FrameResetError(code, message);
         stream.fail(error);
         await this.#writeFrame({
@@ -278,15 +264,17 @@ export class FrameProtocol implements FrameStreamHost {
             this.#acceptOpenFrame(frame);
             return;
         }
-        const stream = this.#streams.get(frame.streamId);
+        const stream = this.#stream;
         if (stream === undefined) {
-            if (this.#isRetiredStreamId(frame.streamId)) {
-                return;
-            }
+            if (this.#retiredStreamId === frame.streamId) return;
             throw this.#connectionError(
                 `Frame references unknown stream ${frame.streamId}.`,
             );
         }
+        if (stream.id !== frame.streamId)
+            throw this.#connectionError(
+                `Frame references unknown stream ${frame.streamId}.`,
+            );
         if (!stream.accepted) {
             if (frame.type === "fin") {
                 try {
@@ -298,8 +286,8 @@ export class FrameProtocol implements FrameStreamHost {
             }
             if (frame.type === "reset") {
                 const error = new FrameResetError(frame.code, frame.message);
-                this.#streams.delete(stream.id);
-                this.#rejectDataJobs(stream, error);
+                if (this.#stream === stream) this.#stream = undefined;
+                this.#retiredStreamId = stream.id;
                 stream.fail(error);
                 return;
             }
@@ -337,8 +325,8 @@ export class FrameProtocol implements FrameStreamHost {
                 break;
             case "reset": {
                 const error = new FrameResetError(frame.code, frame.message);
-                this.#streams.delete(stream.id);
-                this.#rejectDataJobs(stream, error);
+                if (this.#stream === stream) this.#stream = undefined;
+                this.#retiredStreamId = stream.id;
                 stream.fail(error);
                 break;
             }
@@ -349,20 +337,9 @@ export class FrameProtocol implements FrameStreamHost {
         if (this.#role !== "acceptor") {
             throw this.#connectionError("Frame opener received an OPEN frame.");
         }
-        if (frame.streamId <= this.#lastRemoteStreamId) {
-            throw this.#connectionError(
-                `Frame stream id ${frame.streamId} is not monotonic.`,
-            );
-        }
-        if (this.#streams.has(frame.streamId)) {
-            throw this.#connectionError(
-                `Frame stream ${frame.streamId} is already open.`,
-            );
-        }
-        if (this.#streams.size >= this.#maxStreams) {
-            throw this.#connectionError("Frame active stream limit reached.");
-        }
-        this.#lastRemoteStreamId = frame.streamId;
+        if (this.#opened)
+            throw this.#connectionError("Frame Service stream is already open.");
+        this.#opened = true;
         const stream = new FrameStreamState({
             host: this,
             id: frame.streamId,
@@ -372,7 +349,7 @@ export class FrameProtocol implements FrameStreamHost {
             sendCredit: frame.receiveWindow,
             receiveCredit: 0,
         });
-        this.#streams.set(stream.id, stream);
+        this.#stream = stream;
         const request: FrameOpenRequestImpl = new FrameOpenRequestImpl(
             stream,
             this.#defaultReceiveWindow,
@@ -382,54 +359,6 @@ export class FrameProtocol implements FrameStreamHost {
         const waiter = this.#openWaiters.shift();
         if (waiter !== undefined) waiter.resolve(request);
         else this.#pendingOpen.push(request);
-    }
-
-    #isRetiredStreamId(streamId: number): boolean {
-        return this.#role === "opener"
-            ? streamId < this.#nextStreamId
-            : streamId <= this.#lastRemoteStreamId;
-    }
-
-    #scheduleData(stream: FrameStreamState, data: Uint8Array): Promise<void> {
-        return new Promise<void>((resolve, reject) => {
-            this.#dataJobs.push({ stream, data, resolve, reject });
-            this.#pumpData();
-        });
-    }
-
-    #pumpData(): void {
-        if (this.#dataPumping || this.#closed) return;
-        this.#dataPumping = true;
-        void (async () => {
-            try {
-                while (!this.#closed) {
-                    const job = this.#dataJobs.shift();
-                    if (job === undefined) break;
-                    if (this.#streams.get(job.stream.id) !== job.stream) {
-                        job.reject(
-                            job.stream.failure ??
-                                new Error("Frame stream is closed."),
-                        );
-                        continue;
-                    }
-                    try {
-                        await this.#writeFrame({
-                            type: "data",
-                            streamId: job.stream.id,
-                            data: job.data,
-                        });
-                        job.resolve();
-                    } catch (error) {
-                        job.reject(normalizeError(error));
-                    }
-                    await Promise.resolve();
-                }
-            } finally {
-                this.#dataPumping = false;
-                if (this.#dataJobs.length > 0 && !this.#closed)
-                    this.#pumpData();
-            }
-        })();
     }
 
     #writeFrame(frame: Frame): Promise<void> {
@@ -448,23 +377,15 @@ export class FrameProtocol implements FrameStreamHost {
     }
 
     #cleanupIfClosed(stream: FrameStreamState): void {
-        if (stream.closed && this.#streams.get(stream.id) === stream) {
-            this.#streams.delete(stream.id);
-        }
-    }
-
-    #rejectDataJobs(stream: FrameStreamState, error: Error): void {
-        for (let index = this.#dataJobs.length - 1; index >= 0; index -= 1) {
-            const job = this.#dataJobs[index];
-            if (job?.stream !== stream) continue;
-            this.#dataJobs.splice(index, 1);
-            job.reject(error);
+        if (stream.closed && this.#stream === stream) {
+            this.#stream = undefined;
+            this.#retiredStreamId = stream.id;
         }
     }
 
     #assertCurrent(stream: FrameStreamState): void {
         this.#assertOpen();
-        if (this.#streams.get(stream.id) !== stream) {
+        if (this.#stream !== stream) {
             throw stream.failure ?? new Error("Frame stream is closed.");
         }
     }
@@ -486,9 +407,8 @@ export class FrameProtocol implements FrameStreamHost {
         this.#closed = true;
         this.#closeError = error;
         const failure = error ?? new Error("Frame channel closed.");
-        for (const stream of this.#streams.values()) stream.fail(failure);
-        this.#streams.clear();
-        for (const job of this.#dataJobs.splice(0)) job.reject(failure);
+        this.#stream?.fail(failure);
+        this.#stream = undefined;
         this.#pendingOpen.length = 0;
         for (const waiter of this.#openWaiters.splice(0)) {
             waiter.resolve(undefined);

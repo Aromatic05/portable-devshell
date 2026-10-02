@@ -113,17 +113,13 @@ async function readText(stream: FrameStream): Promise<string> {
     }
 }
 
-test("DATA scheduler gives concurrent logical streams alternating bounded chunks", async () => {
+test("DATA write emits bounded chunks for the single stream", async () => {
     const { leftChannel, opener, acceptor } = pair();
     const streamBytes = FRAME_MAX_DATA_SIZE * 3;
     const first = await open(opener, acceptor, "first", streamBytes);
-    const second = await open(opener, acceptor, "second", streamBytes);
     leftChannel.writes.length = 0;
 
-    await Promise.all([
-        first.local.write(new Uint8Array(streamBytes)),
-        second.local.write(new Uint8Array(streamBytes)),
-    ]);
+    await first.local.write(new Uint8Array(streamBytes));
 
     const data = decodeWrites(leftChannel.writes).filter(
         (frame): frame is Extract<Frame, { type: "data" }> =>
@@ -133,11 +129,8 @@ test("DATA scheduler gives concurrent logical streams alternating bounded chunks
         data.map((frame) => [frame.streamId, frame.data.byteLength]),
         [
             [1, FRAME_MAX_DATA_SIZE],
-            [2, FRAME_MAX_DATA_SIZE],
             [1, FRAME_MAX_DATA_SIZE],
-            [2, FRAME_MAX_DATA_SIZE],
             [1, FRAME_MAX_DATA_SIZE],
-            [2, FRAME_MAX_DATA_SIZE],
         ],
     );
 });
@@ -179,10 +172,9 @@ test("FrameStreamChannel maps remote FIN to full logical close", async () => {
     assert.equal(remote.closed, true);
 });
 
-test("RESET aborts both directions without closing sibling streams", async () => {
+test("RESET aborts both directions without closing FrameProtocol", async () => {
     const { opener, acceptor } = pair();
     const first = await open(opener, acceptor, "first", 8);
-    const sibling = await open(opener, acceptor, "sibling", 8);
 
     await first.local.reset(frameResetCodes.cancelled, "cancelled");
     await assert.rejects(first.remote.read(), (error: unknown) => {
@@ -191,7 +183,6 @@ test("RESET aborts both directions without closing sibling streams", async () =>
         return true;
     });
     await assert.rejects(first.local.write(Uint8Array.of(1)), /reset|closed/iu);
-
-    await sibling.local.write(Uint8Array.of(9));
-    assert.deepEqual(await sibling.remote.read(), Uint8Array.of(9));
+    assert.equal(opener.closed, false);
+    assert.equal(acceptor.closed, false);
 });
