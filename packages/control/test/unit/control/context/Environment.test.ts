@@ -44,6 +44,7 @@ function runtime(
 
 function gateway(overrides: Partial<McpInstanceGateway> = {}) {
     return {
+        assertReady() {},
         async connectInstance() { return {}; },
         async releaseInstanceReference() {},
         async prepareWorkspace(_instance: string, workspace: string) {
@@ -63,6 +64,12 @@ function gateway(overrides: Partial<McpInstanceGateway> = {}) {
         async listWaits() { return []; },
         ...overrides,
     } as unknown as McpInstanceGateway;
+}
+
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((complete) => { resolve = complete; });
+    return { promise, resolve };
 }
 
 async function createContext(registry: ContextRegistry, instance: string, workspace: string): Promise<McpContextRecord> {
@@ -276,11 +283,12 @@ test("local cancellation after attach restores the prior workspace and temporary
             return typeof value === "function" ? value.bind(target) : value;
         },
     }) as unknown as ContextRegistryPort;
+    const localWorker = worker();
     const environment = new ContextEnvironmentService({
         contextRegistry: transactionalRegistry,
         cleanup,
         gateway: () => localGateway,
-        worker: (instance) => instance === "local" ? worker() : undefined,
+        worker: (instance) => instance === "local" ? localWorker : undefined,
     });
     await assert.rejects(environment.prepareLocal("ctx-local-after", "local", "/new", { signal: controller.signal }), /cancel after attach/);
     assert.deepEqual(await registry.resolveEnvironment("ctx-local-after", "local"), { instance: "local", temporaryDirectory: "/old/tmp", workspace: "/old" });
@@ -309,4 +317,105 @@ test("bootstrap rollback preserves alert debt when preparation and alert release
     const retained = await registry.lookup("ctx-bootstrap-debt", { principal: "user-1" });
     assert.equal(retained.status, "disabled");
     assert.deepEqual((await registry.listEnvironmentCleanup("ctx-bootstrap-debt")).map(({ cleanup: debt }) => debt.kind), ["alerts"]);
+});
+
+test("local deferred preparation cannot reattach the last Context after instance retirement", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-retired-local" });
+    await createContext(registry, "local", "/work/old");
+    const prepared = deferred<Awaited<ReturnType<NonNullable<McpEndpointWorkerPort["prepareWorkspace"]>>>>();
+    let prepareStarted!: () => void;
+    const started = new Promise<void>((resolve) => { prepareStarted = resolve; });
+    const retiredWorker = {
+        ...worker(),
+        async prepareWorkspace() {
+            prepareStarted();
+            return await prepared.promise;
+        },
+    } as unknown as McpEndpointWorkerPort;
+    let currentWorker: McpEndpointWorkerPort | undefined = retiredWorker;
+    const localGateway = gateway({ async readGoal() { return undefined; } });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => localGateway });
+    const environment = new ContextEnvironmentService({
+        contextRegistry: registry,
+        cleanup,
+        gateway: () => localGateway,
+        worker: () => currentWorker,
+    });
+    const preparing = environment.prepareLocal("ctx-retired-local", "local", "/work/new");
+    await started;
+    await registry.detachInstance("local");
+    currentWorker = undefined;
+    prepared.resolve({
+        projectMemoryAgentFile: "/work/new/AGENTS.md",
+        projectMemoryDirectory: "/work/new/.agent",
+        temporaryDirectory: "/work/new/tmp",
+        workspace: "/work/new",
+    });
+    await assert.rejects(preparing, /retired or replaced/);
+    const record = await registry.lookup("ctx-retired-local", { principal: "user-1" });
+    assert.deepEqual(record.environments, []);
+});
+
+test("remote attach checks target readiness after deferred preparation before attaching", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-retired-remote" });
+    await registry.create({ principal: "user-1" });
+    const reference = await registry.referenceInstance("ctx-retired-remote", "remote");
+    const prepared = deferred<Awaited<ReturnType<McpInstanceGateway["prepareWorkspace"]>>>();
+    let prepareStarted!: () => void;
+    const started = new Promise<void>((resolve) => { prepareStarted = resolve; });
+    let retired = false;
+    let readinessChecks = 0;
+    const remote = gateway({
+        async prepareWorkspace() {
+            prepareStarted();
+            return await prepared.promise;
+        },
+        assertReady() {
+            readinessChecks += 1;
+            if (retired) throw new Error("remote instance retired");
+        },
+    });
+    const { environment } = runtime(registry, remote);
+    const attaching = environment.attachRemote("ctx-retired-remote", reference!.handle!, "/work/remote");
+    await started;
+    retired = true;
+    prepared.resolve({
+        projectMemoryAgentFile: "/work/remote/AGENTS.md",
+        projectMemoryDirectory: "/work/remote/.agent",
+        temporaryDirectory: "/work/remote/tmp",
+        workspace: "/work/remote",
+    });
+    await assert.rejects(attaching, /remote instance retired/);
+    assert.equal(readinessChecks, 1);
+    assert.deepEqual((await registry.lookup("ctx-retired-remote", { principal: "user-1" })).environments, []);
+});
+
+test("ensurePrepared checks remote readiness before persisting prepared state", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-retired-ensure" });
+    await registry.create({ principal: "user-1", environments: [{ instance: "remote", workspace: "/work/remote" }] });
+    const prepared = deferred<Awaited<ReturnType<McpInstanceGateway["prepareWorkspace"]>>>();
+    let prepareStarted!: () => void;
+    const started = new Promise<void>((resolve) => { prepareStarted = resolve; });
+    let retired = false;
+    const remote = gateway({
+        async prepareWorkspace() {
+            prepareStarted();
+            return await prepared.promise;
+        },
+        assertReady() {
+            if (retired) throw new Error("remote instance retired");
+        },
+    });
+    const { environment } = runtime(registry, remote);
+    const ensuring = environment.ensurePrepared("ctx-retired-ensure", "remote");
+    await started;
+    retired = true;
+    prepared.resolve({
+        projectMemoryAgentFile: "/work/remote/AGENTS.md",
+        projectMemoryDirectory: "/work/remote/.agent",
+        temporaryDirectory: "/work/remote/tmp",
+        workspace: "/work/remote",
+    });
+    await assert.rejects(ensuring, /remote instance retired/);
+    assert.deepEqual(await registry.resolveEnvironment("ctx-retired-ensure", "remote"), { instance: "remote", workspace: "/work/remote" });
 });

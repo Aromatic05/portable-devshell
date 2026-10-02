@@ -45,6 +45,9 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                 }
                 await beforeCommit?.(prepared);
                 signal?.throwIfAborted();
+                if (this.#worker(instance) !== worker) {
+                    throw new Error(`Instance ${instance} was retired or replaced while preparing its environment.`);
+                }
                 await this.#registry.attachEnvironment(ctxId, { instance, workspace: prepared.workspace, temporaryDirectory: prepared.temporaryDirectory }, external);
                 attached = true;
                 signal?.throwIfAborted();
@@ -91,6 +94,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
             }
             const prepared = await this.#prepareWorkspace(instance, selected);
             if (prepared === undefined) return stored ?? { instance, workspace: selected };
+            this.#requireGateway(instance).assertReady(instance);
             const updated = await this.#registry.updateWorkerState(ctxId, instance, { workspace: prepared.workspace, temporaryDirectory: prepared.temporaryDirectory });
             return updated.environments.find((environment) => environment.instance === instance)!;
         });
@@ -111,6 +115,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                 const connection = await gateway.connectInstance(instance, ctxId);
                 signal?.throwIfAborted();
                 if (workspace === undefined) {
+                    gateway.assertReady(instance);
                     await this.#registry.attachEnvironment(ctxId, { instance });
                     attached = true;
                     signal?.throwIfAborted();
@@ -133,6 +138,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                 }
                 const alerts = await gateway.readAlerts(instance, prepared.workspace);
                 signal?.throwIfAborted();
+                gateway.assertReady(instance);
                 await this.#registry.attachEnvironment(ctxId, { instance, workspace: prepared.workspace, temporaryDirectory: prepared.temporaryDirectory });
                 attached = true;
                 signal?.throwIfAborted();
@@ -199,7 +205,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     }
 
     async #environment(ctxId: string, instance: string) {
-        return (await this.#registry.list()).find((record) => record.ctxId === ctxId && record.status === "active")?.environments.find((environment) => environment.instance === instance);
+        return await this.#registry.resolveEnvironment(ctxId, instance);
     }
 
     async #restoreEnvironment(ctxId: string, instance: string, previous?: McpContextEnvironment): Promise<void> {
