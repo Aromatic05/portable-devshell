@@ -20,6 +20,12 @@ struct AlertsConfigureInput {
     config: Option<AlertConfig>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AlertsReleaseInput {
+    workspace: String,
+}
+
 pub fn read_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
     control_handler(move |request| {
         let input: AlertsReadInput = parse_params(request)?;
@@ -35,6 +41,16 @@ pub fn touch_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
         let input: AlertsReadInput = parse_params(request)?;
         service
             .touch(Path::new(&input.workspace), input.config)
+            .map_err(rpc_error)?;
+        serialize(serde_json::json!({}))
+    })
+}
+
+pub fn release_handler(service: Arc<AlertService>) -> Arc<dyn ControlHandler> {
+    control_handler(move |request| {
+        let input: AlertsReleaseInput = parse_params(request)?;
+        service
+            .release(Path::new(&input.workspace))
             .map_err(rpc_error)?;
         serialize(serde_json::json!({}))
     })

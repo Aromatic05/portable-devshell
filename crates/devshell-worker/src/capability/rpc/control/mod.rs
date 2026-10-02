@@ -163,7 +163,11 @@ pub fn register_control_handlers(
     );
     handlers.insert(
         "alerts.touch".to_string(),
-        instance::alerts::touch_handler(alerts),
+        instance::alerts::touch_handler(Arc::clone(&alerts)),
+    );
+    handlers.insert(
+        "alerts.release".to_string(),
+        instance::alerts::release_handler(alerts),
     );
     handlers.insert("tools.list".to_string(), tool::list_handler(tools));
 }

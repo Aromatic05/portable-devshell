@@ -12,6 +12,7 @@ const DEFAULT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_SCRIPT_TIMEOUT_MS: u64 = 5_000;
 const CACHE_IDLE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MIN_INTERVAL_MS: u64 = 1_000;
+const WORKSPACE_TEMPORARY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct AlertError {
@@ -55,7 +56,7 @@ pub struct Advice {
 struct WorkspaceAlerts {
     active_probe: Option<u64>,
     advice: Vec<Advice>,
-    config: AlertConfig,
+    config: Option<AlertConfig>,
     last_run: Option<Instant>,
     last_seen: Instant,
 }
@@ -97,14 +98,9 @@ impl AlertService {
                 ),
             )
         })?;
-        let Some(config) = config else {
-            self.state
-                .lock()
-                .map_err(|_| AlertError::new("alerts.unavailable", "alert state lock poisoned"))?
-                .remove(&workspace);
-            return Ok(Vec::new());
-        };
-        validate_config(&config)?;
+        if let Some(config) = config.as_ref() {
+            validate_config(config)?;
+        }
         let now = Instant::now();
         let probe_id = self.next_probe_id.fetch_add(1, Ordering::Relaxed);
         {
@@ -123,7 +119,7 @@ impl AlertService {
                 },
             );
         }
-        let advice = collect_advice(&workspace, &config);
+        let advice = collect_advice(&workspace, config.as_ref());
         complete_probe(&self.state, &workspace, probe_id, &config, advice);
         let state = self
             .state
@@ -145,14 +141,9 @@ impl AlertService {
                 ),
             )
         })?;
-        let Some(config) = config else {
-            self.state
-                .lock()
-                .map_err(|_| AlertError::new("alerts.unavailable", "alert state lock poisoned"))?
-                .remove(&workspace);
-            return Ok(());
-        };
-        validate_config(&config)?;
+        if let Some(config) = config.as_ref() {
+            validate_config(config)?;
+        }
         let now = Instant::now();
         let mut state = self
             .state
@@ -184,14 +175,9 @@ impl AlertService {
     }
 
     pub fn configure(&self, config: Option<AlertConfig>) -> Result<(), AlertError> {
-        let Some(config) = config else {
-            self.state
-                .lock()
-                .map_err(|_| AlertError::new("alerts.unavailable", "alert state lock poisoned"))?
-                .clear();
-            return Ok(());
-        };
-        validate_config(&config)?;
+        if let Some(config) = config.as_ref() {
+            validate_config(config)?;
+        }
         let mut state = self
             .state
             .lock()
@@ -203,6 +189,23 @@ impl AlertService {
                 entry.last_run = None;
             }
         }
+        Ok(())
+    }
+
+    pub fn release(&self, workspace: &Path) -> Result<(), AlertError> {
+        let workspace = workspace.canonicalize().map_err(|error| {
+            AlertError::new(
+                "workspace.invalid",
+                format!(
+                    "failed to resolve workspace {}: {error}",
+                    workspace.display()
+                ),
+            )
+        })?;
+        self.state
+            .lock()
+            .map_err(|_| AlertError::new("alerts.unavailable", "alert state lock poisoned"))?
+            .remove(&workspace);
         Ok(())
     }
 }
@@ -237,13 +240,17 @@ fn validate_config(config: &AlertConfig) -> Result<(), AlertError> {
     Ok(())
 }
 
-fn interval(config: &AlertConfig) -> Duration {
-    Duration::from_millis(config.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS))
+fn interval(config: Option<&AlertConfig>) -> Duration {
+    Duration::from_millis(
+        config
+            .and_then(|config| config.interval_ms)
+            .unwrap_or(DEFAULT_INTERVAL_MS),
+    )
 }
 
 fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, next_probe_id: &Arc<AtomicU64>) {
     let now = Instant::now();
-    let probes: Vec<(PathBuf, AlertConfig, u64)> = state
+    let probes: Vec<(PathBuf, Option<AlertConfig>, u64)> = state
         .lock()
         .ok()
         .map(|mut entries| {
@@ -254,7 +261,7 @@ fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, next_probe_id
                 .filter_map(|(workspace, entry)| {
                     if entry.active_probe.is_some()
                         || entry.last_run.is_some_and(|last| {
-                            now.saturating_duration_since(last) < interval(&entry.config)
+                            now.saturating_duration_since(last) < interval(entry.config.as_ref())
                         })
                     {
                         return None;
@@ -267,7 +274,7 @@ fn poll_due(state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>, next_probe_id
         })
         .unwrap_or_default();
     for (workspace, config, probe_id) in probes {
-        let advice = collect_advice(&workspace, &config);
+        let advice = collect_advice(&workspace, config.as_ref());
         complete_probe(state, &workspace, probe_id, &config, advice);
     }
 }
@@ -276,7 +283,7 @@ fn complete_probe(
     state: &Arc<Mutex<HashMap<PathBuf, WorkspaceAlerts>>>,
     workspace: &Path,
     probe_id: u64,
-    config: &AlertConfig,
+    config: &Option<AlertConfig>,
     advice: Vec<Advice>,
 ) {
     if let Ok(mut entries) = state.lock()
@@ -293,8 +300,16 @@ fn complete_probe(
     }
 }
 
-fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
+fn collect_advice(workspace: &Path, config: Option<&AlertConfig>) -> Vec<Advice> {
     let mut advice = Vec::new();
+    if let Ok(used) = workspace_temporary_bytes(workspace)
+        && let Some(entry) = temporary_usage_advice(workspace, used)
+    {
+        advice.push(entry);
+    }
+    let Some(config) = config else {
+        return advice;
+    };
     if let (Some(limit), Some(used)) = (config.worker_memory_bytes, worker_rss_bytes())
         && used >= limit
     {
@@ -311,6 +326,76 @@ fn collect_advice(workspace: &Path, config: &AlertConfig) -> Vec<Advice> {
         advice.extend(run_script(workspace, script));
     }
     advice
+}
+
+fn temporary_usage_advice(workspace: &Path, used: u64) -> Option<Advice> {
+    (used >= WORKSPACE_TEMPORARY_LIMIT_BYTES).then(|| Advice {
+        code: "workspace.temporary.overuse".to_string(),
+        text: format!(
+            "Workspace temporary storage is {} MiB, at or above the 2 GiB limit. Stop expanding temporary data; remove disposable files or move large or persistent data to {}/var/.",
+            used / 1024 / 1024,
+            workspace.display()
+        ),
+    })
+}
+
+fn workspace_temporary_bytes(workspace: &Path) -> Result<u64, String> {
+    let root =
+        crate::instance::workspace::prepare::context_temporary_workspace_directory(workspace)
+            .map_err(|error| error.message)?;
+    if filesystem_used_bytes(&root).is_some_and(|used| used < WORKSPACE_TEMPORARY_LIMIT_BYTES) {
+        return Ok(0);
+    }
+    directory_bytes(&root)
+}
+
+#[cfg(unix)]
+fn filesystem_used_bytes(path: &Path) -> Option<u64> {
+    let status = nix::sys::statfs::statfs(path).ok()?;
+    let blocks: u64 = status.blocks().try_into().ok()?;
+    let free: u64 = status.blocks_free().try_into().ok()?;
+    let block_size: u64 = status.block_size().try_into().ok()?;
+    Some(blocks.saturating_sub(free).saturating_mul(block_size))
+}
+
+#[cfg(not(unix))]
+fn filesystem_used_bytes(_path: &Path) -> Option<u64> {
+    None
+}
+
+fn directory_bytes(root: &Path) -> Result<u64, String> {
+    let mut total = 0u64;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                let metadata = entry.metadata().map_err(|error| error.to_string())?;
+                total = total.saturating_add(allocated_file_bytes(&metadata));
+            }
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(unix)]
+fn allocated_file_bytes(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+
+    metadata.blocks().saturating_mul(512)
+}
+
+#[cfg(not(unix))]
+fn allocated_file_bytes(metadata: &std::fs::Metadata) -> u64 {
+    metadata.len()
 }
 
 #[cfg(target_os = "linux")]
@@ -454,25 +539,40 @@ mod tests {
     }
 
     #[test]
-    fn disabling_alerts_clears_registered_workspace_state() {
+    fn built_in_temporary_policy_stays_active_without_custom_alerts() {
         let workspace = crate::testing::temp_dir();
         let service = AlertService::new();
-        service
-            .read(
-                workspace.path(),
-                Some(AlertConfig {
-                    interval_ms: Some(1_000),
-                    max_uncommitted_changes: None,
-                    scripts: None,
-                    worker_memory_bytes: None,
-                }),
-            )
-            .unwrap();
+        service.read(workspace.path(), None).unwrap();
         assert_eq!(service.state.lock().unwrap().len(), 1);
 
         service.configure(None).unwrap();
 
+        assert_eq!(service.state.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn release_removes_workspace_state() {
+        let workspace = crate::testing::temp_dir();
+        let service = AlertService::new();
+        service.read(workspace.path(), None).unwrap();
+
+        service.release(workspace.path()).unwrap();
+
         assert!(service.state.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn temporary_usage_over_two_gib_emits_overuse_advice() {
+        let workspace = crate::testing::temp_dir();
+        let advice = super::temporary_usage_advice(
+            workspace.path(),
+            super::WORKSPACE_TEMPORARY_LIMIT_BYTES + 1,
+        )
+        .unwrap();
+
+        assert_eq!(advice.code, "workspace.temporary.overuse");
+        assert!(advice.text.contains("2 GiB"));
+        assert!(advice.text.contains("var/"));
     }
 
     #[cfg(unix)]

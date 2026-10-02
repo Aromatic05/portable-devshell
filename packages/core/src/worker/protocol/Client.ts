@@ -283,7 +283,7 @@ export class WorkerProtocolClient {
     }
 
     async releaseAlerts(workspace: string): Promise<void> {
-        await this.#request("core", "alerts.touch", { workspace });
+        await this.#request("core", "alerts.release", { workspace });
     }
 
     async closeToolSession(sessionId: string): Promise<void> {
