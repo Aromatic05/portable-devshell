@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::{ChildStdin, ChildStdout};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -64,6 +64,7 @@ enum EndpointEvent {
     ChannelFailed(String),
     Outbound(Envelope),
     StreamData { id: String, data: Vec<u8> },
+    StreamInputFinished { id: String },
     StreamOutputFinished { id: String },
     StreamFailed { id: String, error: String },
 }
@@ -78,7 +79,6 @@ enum StreamInput {
     Exec(Option<ChildStdin>),
     PayloadRead,
     ReceiveWrite {
-        finished: Arc<AtomicBool>,
         offset_bytes: Arc<AtomicU64>,
         receive_id: String,
         receives: Arc<ArtifactReceiveStore>,
@@ -123,10 +123,7 @@ impl StreamInput {
                 Ok(())
             }
             Self::PayloadRead => Ok(()),
-            Self::ReceiveWrite { finished, .. } => {
-                finished.store(true, Ordering::SeqCst);
-                Ok(())
-            }
+            Self::ReceiveWrite { .. } => Ok(()),
         }
     }
 }
@@ -167,7 +164,7 @@ enum ByteService {
         total_bytes: usize,
     },
     ReceiveWrite {
-        finished: Arc<AtomicBool>,
+        finished: bool,
         offset_bytes: Arc<AtomicU64>,
         receive_id: String,
         receives: Arc<ArtifactReceiveStore>,
@@ -230,7 +227,7 @@ impl ByteService {
                 let input: Input =
                     serde_json::from_value(message).map_err(|error| error.to_string())?;
                 Ok(Self::ReceiveWrite {
-                    finished: Arc::new(AtomicBool::new(false)),
+                    finished: false,
                     offset_bytes: Arc::new(AtomicU64::new(input.offset_bytes)),
                     receive_id: input.receive_id,
                     receives: Arc::clone(&context.receives),
@@ -246,12 +243,11 @@ impl ByteService {
             Self::Exec(service) => service.take_stdin().map(|value| StreamInput::Exec(Some(value))),
             Self::PayloadRead { .. } => Ok(StreamInput::PayloadRead),
             Self::ReceiveWrite {
-                finished,
                 offset_bytes,
                 receive_id,
                 receives,
+                ..
             } => Ok(StreamInput::ReceiveWrite {
-                finished: Arc::clone(finished),
                 offset_bytes: Arc::clone(offset_bytes),
                 receive_id: receive_id.clone(),
                 receives: Arc::clone(receives),
@@ -276,7 +272,13 @@ impl ByteService {
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
             Self::PayloadRead { .. } => Ok(true),
-            Self::ReceiveWrite { finished, .. } => Ok(finished.load(Ordering::SeqCst)),
+            Self::ReceiveWrite { finished, .. } => Ok(*finished),
+        }
+    }
+
+    fn input_finished(&mut self) {
+        if let Self::ReceiveWrite { finished, .. } = self {
+            *finished = true;
         }
     }
 
@@ -430,6 +432,12 @@ where
                         )?,
                     )?;
                 }
+            }
+            Ok(EndpointEvent::StreamInputFinished { id }) => {
+                if let Some(active) = streams.get_mut(&id) {
+                    active.service.input_finished();
+                }
+                finish_stream_if_ready(&id, &mut streams, &mut pending)?;
             }
             Ok(EndpointEvent::StreamOutputFinished { id }) => {
                 if let Some(active) = streams.get_mut(&id) {
@@ -935,6 +943,9 @@ fn spawn_stream_input(
                 return;
             }
             if finish {
+                let _ = events.send(EndpointEvent::StreamInputFinished {
+                    id: id.clone(),
+                });
                 return;
             }
         }
