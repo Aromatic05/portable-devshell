@@ -17,6 +17,7 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
@@ -479,6 +480,40 @@ export function activate(context) {
         "instances.list",
         "artifacts.listShares",
         "instances.snapshot:local-test",
+    ]);
+});
+
+test("Extension sandbox bridges declared Context runtime discovery", async (t) => {
+    const calls: string[] = [];
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-context-runtime",
+        `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const contexts = await context.capabilities.contextRuntime.list({
+            instance: "local-test",
+            workspace: "/repo"
+        });
+        return { kind: "json", value: contexts.map((value) => ({
+            ctxId: value.ctxId,
+            workspace: value.workspace
+        })) };
+    });
+}
+`,
+        {
+            capabilities: ["contextRuntime"],
+            contextRuntime: fakeContextRuntime(calls),
+        },
+    );
+
+    await sandbox.start();
+    assert.deepEqual(await cliJson(sandbox, [], "context-runtime"), [
+        { ctxId: "ctx-test", workspace: "/repo" },
+    ]);
+    assert.deepEqual(calls, [
+        'contextRuntime.list:{"instance":"local-test","workspace":"/repo"}',
     ]);
 });
 
@@ -1368,6 +1403,7 @@ function createSandbox(options: {
     capabilities?: readonly ExtensionCapability[];
     codeDirectory: string;
     config?: ExtensionConfig;
+    contextRuntime?: ExtensionContextRuntimeCapability;
     entryPath: string;
     externalMemoryLimitMb?: number;
     hostCallbackTimeoutMs?: number;
@@ -1400,6 +1436,7 @@ function createSandbox(options: {
             },
             version: "1.0.0",
         },
+        contextRuntime: options.contextRuntime ?? fakeContextRuntime([]),
         entryUrl: pathToFileURL(options.entryPath).href,
         ...(options.externalMemoryLimitMb === undefined
             ? {}
@@ -1553,6 +1590,30 @@ function fakeInstanceRuntime(
         async readToolCalls(name) {
             calls.push(`instanceRuntime.readToolCalls:${name}`);
             return [];
+        },
+    };
+}
+
+function fakeContextRuntime(
+    calls: string[],
+): ExtensionContextRuntimeCapability {
+    return {
+        async list(query) {
+            calls.push(`contextRuntime.list:${JSON.stringify(query ?? {})}`);
+            return [
+                {
+                    createdAt: "2026-10-01T00:00:00.000Z",
+                    ctxId: "ctx-test",
+                    environments: [
+                        { instance: "local-test", workspace: "/repo" },
+                    ],
+                    expiresAt: "2026-10-03T00:00:00.000Z",
+                    instance: "local-test",
+                    lastAccessedAt: "2026-10-02T00:00:00.000Z",
+                    status: "active",
+                    workspace: "/repo",
+                },
+            ];
         },
     };
 }
