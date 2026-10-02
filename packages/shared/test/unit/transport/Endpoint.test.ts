@@ -16,6 +16,7 @@ class MemoryChannel implements Channel {
     readonly #dataListeners = new Set<(data: Uint8Array) => void>();
     #closed = false;
     #peer?: MemoryChannel;
+    closeCalls = 0;
 
     get closed(): boolean {
         return this.#closed;
@@ -44,6 +45,7 @@ class MemoryChannel implements Channel {
     }
 
     close(error?: Error): void {
+        this.closeCalls += 1;
         if (this.#closed) return;
         this.#closed = true;
         for (const listener of this.#closeListeners) listener(error);
@@ -65,6 +67,8 @@ class MemoryChannel implements Channel {
 
 async function endpoints(): Promise<{
     client: Endpoint;
+    dispose: () => void;
+    right: MemoryChannel;
     server: Endpoint;
 }> {
     const left = new MemoryChannel();
@@ -83,9 +87,19 @@ async function endpoints(): Promise<{
     const server = new Endpoint({ host: "worker" });
     const accepting = server.accept(right);
     await client.connect("worker", "core");
-    await accepting;
-    return { client, server };
+    const dispose = await accepting;
+    return { client, dispose, right, server };
 }
+
+test("accepted Endpoint link retires when its Channel closes", async () => {
+    const { client, dispose, right, server } = await endpoints();
+    client.disconnect();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const closeCalls = right.closeCalls;
+    dispose();
+    assert.equal(right.closeCalls, closeCalls);
+    server.close();
+});
 
 test("Endpoint routes Rpc across host:port and Envelope fragmentation", async (t) => {
     const { client, server } = await endpoints();

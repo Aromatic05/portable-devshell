@@ -134,6 +134,7 @@ export class Endpoint {
     #link(frame: FrameProtocol, codec: EnvelopeCodec, detach: () => void): () => void {
         const link: Link = { codec, detach, frame };
         this.#links.add(link);
+        codec.onClose(() => this.#links.delete(link));
         return () => this.#close(link);
     }
 
