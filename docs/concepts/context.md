@@ -87,7 +87,7 @@ environ_info(workspace=<absolute worker path>)
 
 ## Environment attachment
 
-Context 对某个 instance 的 environment 至少记录：
+Context 对某个 instance 的 environment 记录 instance；准备 workspace 后还记录 workspace 与 temporaryDirectory：
 
 ```text
 instance

@@ -103,13 +103,6 @@ export class ContextService {
             await this.#presentation?.revokeContext(terminal.ctxId);
         });
 
-        const contexts = await this.registry
-            .list()
-            .catch((error) => {
-                failures.push(error);
-                return undefined;
-            });
-        const now = Date.now();
         const reconciledInstances = new Set<string>();
         for (const environment of terminal.environments) {
             const gateway = this.#gateway(environment.instance);
@@ -216,51 +209,27 @@ export class ContextService {
                 }
             }
 
-            if (
-                environment.workspace !== undefined &&
-                contexts !== undefined
-            ) {
-                const workspace = environment.workspace;
-                const hasOtherActiveContext = contexts.some(
-                    (context) =>
-                        context.ctxId !== terminal.ctxId &&
-                        context.status === "active" &&
-                        Date.parse(context.expiresAt) > now &&
-                        context.environments.some(
-                            (candidate) =>
-                                candidate.instance === environment.instance &&
-                                candidate.workspace === workspace,
-                        ),
-                );
-                if (!hasOtherActiveContext) {
-                    const worker = this.#worker(environment.instance);
-                    const releaseAlerts = worker?.releaseAlerts;
-                    if (releaseAlerts !== undefined && worker !== undefined) {
-                        await cleanup(async () => {
-                            await releaseAlerts.call(worker, workspace);
-                        });
-                    } else if (gateway !== undefined) {
-                        await cleanup(async () => {
-                            await gateway.releaseAlerts(
-                                environment.instance,
-                                workspace,
-                            );
-                        });
-                    }
-                }
-            }
-
-            {
+            if (environment.workspace !== undefined) {
                 await cleanup(async () => {
                     await this.registry.recordEnvironmentCleanup(
                         terminal.ctxId,
                         {
                             instance: environment.instance,
-                            kind: "instance_reference",
+                            kind: "alerts",
+                            workspace: environment.workspace!,
                         },
                     );
                 });
             }
+            await cleanup(async () => {
+                await this.registry.recordEnvironmentCleanup(
+                    terminal.ctxId,
+                    {
+                        instance: environment.instance,
+                        kind: "instance_reference",
+                    },
+                );
+            });
         }
 
         await cleanup(async () => {
@@ -269,9 +238,10 @@ export class ContextService {
             );
         });
         if (failures.length === 0) {
-            await this.registry
-                .settleCleanup(terminal.ctxId)
-                .catch((error) => failures.push(error));
+            await cleanup(async () => {
+                const pending = await this.registry.listEnvironmentCleanup(terminal.ctxId);
+                if (pending.length === 0) await this.registry.settleCleanup(terminal.ctxId);
+            });
         }
         if (failures.length > 0) {
             console.warn(
