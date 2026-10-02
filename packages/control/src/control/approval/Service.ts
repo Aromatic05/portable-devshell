@@ -13,6 +13,9 @@ import {
     type ToolCallSource,
 } from "@portable-devshell/shared";
 
+const TERMINAL_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const TERMINAL_MAX_COUNT = 1000;
+
 export class ApprovalError extends Error {
     readonly retryable = false;
 
@@ -55,6 +58,7 @@ export type ApprovalEvaluation =
 export interface ApprovalStorePort {
     append(request: ApprovalRequest): Promise<void>;
     close?(): void;
+    delete(approvalId: string): Promise<void>;
     get(approvalId: string): Promise<ApprovalRequest | undefined>;
     list(): Promise<ApprovalRequest[]>;
 }
@@ -203,7 +207,10 @@ export class ApprovalService {
 
     async listApprovals(): Promise<ApprovalRequest[]> {
         await this.#ensureReady();
-        return this.#store.list();
+        return this.#exclusive(async () => {
+            await this.#pruneTerminal();
+            return this.#store.list();
+        });
     }
 
     async listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
@@ -266,6 +273,7 @@ export class ApprovalService {
                 ...request,
                 decision,
                 status: input.decision === "approve" ? "approved" : "denied",
+                terminalAt: decision.decidedAt,
             };
             await this.#complete(
                 updated,
@@ -277,6 +285,7 @@ export class ApprovalService {
                           status: "denied",
                       },
             );
+            await this.#pruneTerminal();
             return updated;
         });
     }
@@ -304,11 +313,16 @@ export class ApprovalService {
         if (request === undefined) throw notFound(this.#instance, approvalId);
         if (request.status !== "pending") return request;
 
-        const updated = { ...request, status: "cancelled" as const };
+        const updated = {
+            ...request,
+            status: "cancelled" as const,
+            terminalAt: new Date(this.#now()).toISOString(),
+        };
         await this.#complete(updated, {
             error: cancelled(this.#instance, request.toolName, reason),
             status: "cancelled",
         }, reason);
+        await this.#pruneTerminal();
         return updated;
     }
 
@@ -321,13 +335,17 @@ export class ApprovalService {
                         Date.parse(request.expiresAt) <= this.#now()
                             ? "expired"
                             : "cancelled";
-                    await this.#complete({ ...request, status }, {
+                    const terminalAt = status === "expired"
+                        ? request.expiresAt
+                        : new Date(this.#now()).toISOString();
+                    await this.#complete({ ...request, status, terminalAt }, {
                         error: status === "expired"
                             ? expired(this.#instance, request.toolName)
                             : cancelled(this.#instance, request.toolName),
                         status,
                     });
                 }
+                await this.#pruneTerminal();
             })();
             this.#ready = ready;
             void ready.catch(() => {
@@ -351,12 +369,39 @@ export class ApprovalService {
         await this.#exclusive(async () => {
             const pending = this.#pending.get(id);
             if (pending === undefined) return;
-            const request = { ...pending.request, status: "expired" as const };
+            const request = {
+                ...pending.request,
+                status: "expired" as const,
+                terminalAt: pending.request.expiresAt,
+            };
             await this.#complete(request, {
                 error: expired(this.#instance, request.toolName),
                 status: "expired",
             });
+            await this.#pruneTerminal();
         });
+    }
+
+    async #pruneTerminal(): Promise<void> {
+        const cutoff = this.#now() - TERMINAL_MAX_AGE_MS;
+        const terminals = (await this.#store.list())
+            .filter((request) => request.status !== "pending")
+            .map((request) => ({
+                request,
+                time: Date.parse(request.terminalAt ?? request.decision?.decidedAt
+                    ?? (request.status === "expired" ? request.expiresAt : request.createdAt)),
+            }))
+            .sort((left, right) => left.time - right.time
+                || left.request.approvalId.localeCompare(right.request.approvalId)
+                || left.request.createdAt.localeCompare(right.request.createdAt));
+        const retained: ApprovalRequest[] = [];
+        for (const { request, time } of terminals) {
+            if (time < cutoff) await this.#store.delete(request.approvalId);
+            else retained.push(request);
+        }
+        for (const request of retained.slice(0, Math.max(0, retained.length - TERMINAL_MAX_COUNT))) {
+            await this.#store.delete(request.approvalId);
+        }
     }
 
     async #complete(
@@ -496,6 +541,7 @@ function eventData(
         extensionId: request.extensionId,
         source: request.source,
         status: request.status,
+        terminalAt: request.terminalAt,
         toolName: request.toolName,
         workspace: request.workspace,
     };

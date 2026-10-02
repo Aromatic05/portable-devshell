@@ -25,6 +25,10 @@ class MemoryStore implements ApprovalStorePort {
         return this.records.get(approvalId);
     }
 
+    async delete(approvalId: string): Promise<void> {
+        this.records.delete(approvalId);
+    }
+
     async list(): Promise<ApprovalRequest[]> {
         return [...this.records.values()];
     }
@@ -147,6 +151,7 @@ for (const decision of ["approve", "deny"] as const) {
         });
         const resolution = await result.awaitDecision;
         assert.equal(resolution.status, updated.status);
+        assert.equal(updated.terminalAt, new Date(0).toISOString());
         assert.equal(events.records.length, 2);
         assert.deepEqual(events.records[1], {
             type: `approval.${updated.status}`,
@@ -154,6 +159,7 @@ for (const decision of ["approve", "deny"] as const) {
                 ...events.records[0].data,
                 status: updated.status, decision, decidedBy: "web",
                 decidedAt: new Date(0).toISOString(), reason: "reviewed", remember: false,
+                terminalAt: new Date(0).toISOString(),
             },
         });
         await service.cancel("approval-1", "late cancellation");
@@ -181,6 +187,7 @@ for (const preAborted of [false, true]) {
             instance: "dev", toolName: "shell", reason: "caller stopped",
         });
         assert.equal((await store.get("approval-1"))?.status, "cancelled");
+        assert.equal((await store.get("approval-1"))?.terminalAt, new Date(0).toISOString());
         assert.deepEqual(events.records.map(({ type }) => type), [
             "approval.requested", "approval.cancelled",
         ]);
@@ -200,6 +207,7 @@ test("expiration emits once after persistence and ignores subsequent abort", asy
     assert.ok(result.decision === "ask");
     t.mock.timers.tick(100);
     assert.equal((await result.awaitDecision).status, "expired");
+    assert.equal((await service.getApproval("approval-1")).terminalAt, new Date(100).toISOString());
     controller.abort("too late");
     await service.cancel("approval-1");
     assert.deepEqual(events.records.map(({ type }) => type), [
@@ -290,6 +298,8 @@ for (const status of ["cancelled", "expired"] as const) {
             now: () => status === "expired" ? 100 : 0,
         });
         assert.equal((await recovered.getApproval("approval-1")).status, status);
+        assert.equal((await recovered.getApproval("approval-1")).terminalAt,
+            new Date(status === "expired" ? 100 : 0).toISOString());
         assert.equal((await recovered.getApproval("approval-1")).status, status);
         assert.deepEqual(events.records.map(({ type }) => type), [
             "approval.requested", `approval.${status}`,
@@ -297,3 +307,147 @@ for (const status of ["cancelled", "expired"] as const) {
         recovered.close();
     });
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function retentionFixture() {
+    let now = 60 * DAY_MS;
+    const store = new MemoryStore();
+    const events = new MemoryEvents(store);
+    const service = new ApprovalService({
+        instanceName: asInstanceName("dev"), store, events,
+        policy: { mode: "ask" },
+        now: () => now,
+        createId: () => "live-pending",
+    });
+    return { service, store, events, setNow: (value: number) => { now = value; } };
+}
+
+function retainedRequest(approvalId: string, fields: Partial<ApprovalRequest> = {}): ApprovalRequest {
+    return {
+        ...input,
+        approvalId,
+        createdAt: new Date(0).toISOString(),
+        expiresAt: new Date(DAY_MS).toISOString(),
+        instance: asInstanceName("dev"),
+        reason: "review required",
+        riskLevel: "medium",
+        status: "approved",
+        ...fields,
+    };
+}
+
+test("age pruning preserves an old live pending approval and the exact age boundary", async (t) => {
+    const { service, store, events, setNow } = retentionFixture();
+    t.after(() => service.close());
+    setNow(0);
+    const pending = await service.evaluate(input);
+    assert.ok(pending.decision === "ask");
+    setNow(60 * DAY_MS);
+    await store.append(retainedRequest("old-terminal", { terminalAt: new Date(29 * DAY_MS).toISOString() }));
+    await store.append(retainedRequest("age-boundary", { terminalAt: new Date(30 * DAY_MS).toISOString() }));
+
+    assert.deepEqual((await service.listApprovals()).map(({ approvalId }) => approvalId), [
+        "live-pending", "age-boundary",
+    ]);
+    assert.equal((await store.get("live-pending"))?.status, "pending");
+    assert.equal(events.records.length, 1);
+});
+
+test("count pruning retains the newest 1000 terminals and pending with deterministic ties", async (t) => {
+    const { service, store } = retentionFixture();
+    t.after(() => service.close());
+    await service.evaluate(input);
+    for (let index = 1001; index >= 0; index -= 1) {
+        await store.append(retainedRequest(`terminal-${String(index).padStart(4, "0")}`, {
+            terminalAt: new Date((59 * DAY_MS) + Math.floor(index / 2)).toISOString(),
+        }));
+    }
+
+    const approvals = await service.listApprovals();
+    assert.equal(approvals.length, 1001);
+    assert.equal((await store.get("live-pending"))?.status, "pending");
+    assert.deepEqual(approvals.filter(({ status }) => status !== "pending")
+        .map(({ approvalId }) => approvalId).sort(),
+    Array.from({ length: 1000 }, (_, index) => `terminal-${String(index + 2).padStart(4, "0")}`));
+});
+
+test("pruning uses terminalAt, decision time, expired deadline, then creation time", async (t) => {
+    const { service, store } = retentionFixture();
+    t.after(() => service.close());
+    const recent = new Date(59 * DAY_MS).toISOString();
+    await store.append(retainedRequest("terminal-time", {
+        terminalAt: recent,
+        decision: { approvalId: "terminal-time", decidedAt: new Date(0).toISOString(), decidedBy: "cli", decision: "approve" },
+    }));
+    await store.append(retainedRequest("decision-time", {
+        decision: { approvalId: "decision-time", decidedAt: recent, decidedBy: "cli", decision: "approve" },
+    }));
+    await store.append(retainedRequest("expiry-time", { status: "expired", expiresAt: recent }));
+    await store.append(retainedRequest("creation-time", { status: "cancelled", createdAt: recent }));
+    await store.append(retainedRequest("old-decision", {
+        createdAt: recent,
+        decision: { approvalId: "old-decision", decidedAt: new Date(0).toISOString(), decidedBy: "cli", decision: "approve" },
+    }));
+    await store.append(retainedRequest("old-expiry", { status: "expired", createdAt: recent }));
+    await store.append(retainedRequest("old-creation", { status: "cancelled" }));
+
+    assert.deepEqual((await service.listApprovals()).map(({ approvalId }) => approvalId), [
+        "terminal-time", "decision-time", "expiry-time", "creation-time",
+    ]);
+});
+
+test("startup recovery prunes old terminals and timestamps recovered pending before pruning", async (t) => {
+    const { service, store, events } = retentionFixture();
+    t.after(() => service.close());
+    await store.append(retainedRequest("old-terminal"));
+    await store.append(retainedRequest("old-expired-pending", { status: "pending" }));
+    await store.append(retainedRequest("recent-expired-pending", {
+        status: "pending", expiresAt: new Date(59 * DAY_MS).toISOString(),
+    }));
+    await store.append(retainedRequest("future-pending", {
+        status: "pending", expiresAt: new Date(61 * DAY_MS).toISOString(),
+    }));
+
+    const approvals = await service.listApprovals();
+    assert.deepEqual(approvals.map(({ approvalId, status, terminalAt }) => ({ approvalId, status, terminalAt })), [
+        { approvalId: "recent-expired-pending", status: "expired", terminalAt: new Date(59 * DAY_MS).toISOString() },
+        { approvalId: "future-pending", status: "cancelled", terminalAt: new Date(60 * DAY_MS).toISOString() },
+    ]);
+    assert.deepEqual(events.records.map(({ type, data }) => [type, data.approvalId]), [
+        ["approval.expired", "old-expired-pending"],
+        ["approval.expired", "recent-expired-pending"],
+        ["approval.cancelled", "future-pending"],
+    ]);
+    assert.deepEqual(await service.listPendingApprovals(), []);
+});
+
+test("listApprovals lazily removes terminals as the clock advances", async (t) => {
+    const { service, setNow, events } = retentionFixture();
+    t.after(() => service.close());
+    await service.evaluate(input);
+    const approved = await service.decideApproval("live-pending", { decision: "approve", decidedBy: "cli" });
+    assert.equal(approved.terminalAt, new Date(60 * DAY_MS).toISOString());
+    assert.equal((await service.listApprovals()).length, 1);
+    setNow(90 * DAY_MS + 1);
+    assert.deepEqual(await service.listApprovals(), []);
+    assert.equal(events.records.length, 2);
+});
+
+test("terminal transitions enforce both retention bounds", async (t) => {
+    const { service, store } = retentionFixture();
+    t.after(() => service.close());
+    await service.evaluate(input);
+    await store.append(retainedRequest("old-terminal"));
+    for (let index = 0; index < 1000; index += 1) {
+        await store.append(retainedRequest(`terminal-${String(index).padStart(4, "0")}`, {
+            terminalAt: new Date(59 * DAY_MS + index).toISOString(),
+        }));
+    }
+
+    await service.cancel("live-pending");
+    assert.equal(await store.get("old-terminal"), undefined);
+    assert.equal(await store.get("terminal-0000"), undefined);
+    assert.equal((await store.list()).length, 1000);
+    assert.equal((await store.get("live-pending"))?.terminalAt, new Date(60 * DAY_MS).toISOString());
+});

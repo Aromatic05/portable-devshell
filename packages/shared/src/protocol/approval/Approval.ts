@@ -31,6 +31,7 @@ export interface ApprovalRequest {
     extensionId?: string;
     source: ToolCallSource;
     status: ApprovalStatus;
+    terminalAt?: string;
     toolName: string;
     workspace?: string;
 }

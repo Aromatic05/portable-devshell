@@ -32,6 +32,7 @@ function fixture() {
         instanceName: asInstanceName("dev"),
         store: {
             append: async () => { assert.fail("review must only evaluate and wait"); },
+            delete: async () => { assert.fail("review must not prune approvals"); },
             get: async () => { assert.fail("review must not re-read approvals"); },
             list: async () => { assert.fail("review must not query approvals"); },
         },
