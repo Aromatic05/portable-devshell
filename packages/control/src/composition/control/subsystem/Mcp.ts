@@ -27,6 +27,7 @@ import type { ControlPathHome } from "@portable-devshell/shared";
 import type { ControlRuntimeArtifact } from "./Artifact.js";
 import type { ControlRuntimeContext } from "./Context.js";
 import type { ControlRuntimeState } from "../State.js";
+import type { InstanceDescriptor } from "../../../control/instance/Descriptor.js";
 
 export interface ControlRuntimeMcpOptions {
     contexts: ControlRuntimeContext;
@@ -137,6 +138,29 @@ export class ControlRuntimeMcp {
             getMcpHost: () => this.#host,
             detachContextInstance: async (instance) => {
                 await options.contexts.detachInstance(instance);
+            },
+            reconcileContextInstanceCleanup: async (
+                instance,
+                descriptor?: InstanceDescriptor,
+            ) => {
+                await options.contexts.cleanup.reconcileInstance(instance, {
+                    releaseAlerts: async (workspace) => {
+                        if (descriptor === undefined) {
+                            throw new Error(
+                                `Instance ${instance} has pending alerts cleanup without a cleanup descriptor.`,
+                            );
+                        }
+                        if (!descriptor.worker.snapshot().ready)
+                            await descriptor.worker.start();
+                        await descriptor.worker.releaseAlerts(workspace);
+                    },
+                    releaseInstanceReference: async (ctxId) => {
+                        options.state.instances.releaseConnectionReference(
+                            instance,
+                            ctxId,
+                        );
+                    },
+                });
             },
             getMcpInstanceGateway: () => this.instanceGateway,
             getRestartControlRequired: () =>

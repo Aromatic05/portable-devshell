@@ -13,6 +13,7 @@ import {
 import { McpEndpointFactory } from "../../../composition/mcp/Endpoint.js";
 import { HttpEndpointPreflight } from "../../../server/endpoint/Http.js";
 import { InstanceFactory } from "../../instance/create/Factory.js";
+import type { InstanceDescriptor } from "../../instance/Descriptor.js";
 import type { InstanceRegistry } from "../../instance/registry/Registry.js";
 import {
     diffConfigPaths,
@@ -32,6 +33,10 @@ interface ConfigEditorCoordinatorOptions extends ConfigEngineOptions {
     cleanupDebtFile?: string;
     getMcpHost?: () => McpHost | undefined;
     detachContextInstance?: (instance: string) => Promise<void>;
+    reconcileContextInstanceCleanup?: (
+        instance: string,
+        descriptor?: InstanceDescriptor,
+    ) => Promise<void>;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
@@ -53,6 +58,8 @@ export class ConfigEditorCoordinator {
             engine: this.#engine,
             getMcpHost: options.getMcpHost,
             detachContextInstance: options.detachContextInstance,
+            reconcileContextInstanceCleanup:
+                options.reconcileContextInstanceCleanup,
             getMcpInstanceGateway: options.getMcpInstanceGateway,
             instanceConfigMapper: options.instanceConfigMapper,
             instanceRegistry: options.instanceRegistry,

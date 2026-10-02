@@ -23,6 +23,12 @@ export interface ContextEnvironmentPort {
 
 export interface ContextCleanupPort {
     reconcile(ctxId?: string): Promise<void>;
+    reconcileInstance(instance: string, resources: ContextInstanceCleanupPort): Promise<void>;
+}
+
+export interface ContextInstanceCleanupPort {
+    releaseAlerts(workspace: string): Promise<void>;
+    releaseInstanceReference(ctxId: string): Promise<void>;
 }
 
 export type { ContextRegistryPort };

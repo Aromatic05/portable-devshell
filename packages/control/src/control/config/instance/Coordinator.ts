@@ -28,6 +28,10 @@ export interface InstanceConfigCoordinatorOptions {
     engine: ConfigEngine;
     getMcpHost?: () => McpHost | undefined;
     detachContextInstance?: (instance: string) => Promise<void>;
+    reconcileContextInstanceCleanup?: (
+        instance: string,
+        descriptor?: InstanceDescriptor,
+    ) => Promise<void>;
     getMcpInstanceGateway?: () => McpInstanceGateway | undefined;
     instanceConfigMapper?: InstanceFactory;
     instanceRegistry: InstanceRegistry;
@@ -54,12 +58,17 @@ import {
 
 export class InstanceConfigCoordinator {
     readonly #detachContextInstance?: (instance: string) => Promise<void>;
+    readonly #reconcileContextInstanceCleanup?: (
+        instance: string,
+        descriptor?: InstanceDescriptor,
+    ) => Promise<void>;
     readonly #cleanupDebts: InstanceCleanupDebtStore;
     readonly #engine: ConfigEngine;
     readonly #getMcpHost: () => McpHost | undefined;
     readonly #getMcpInstanceGateway: () => McpInstanceGateway | undefined;
     readonly #instanceConfigMapper: InstanceFactory;
     readonly #instanceRegistry: InstanceRegistry;
+    readonly #cleanupOnlyDescriptors = new Map<string, InstanceDescriptor>();
     readonly #instanceDisableRetirements = new Set<
         (instance: ControlConfig["instances"][number]) => Promise<void>
     >();
@@ -79,6 +88,8 @@ export class InstanceConfigCoordinator {
 
     constructor(options: InstanceConfigCoordinatorOptions) {
         this.#detachContextInstance = options.detachContextInstance;
+        this.#reconcileContextInstanceCleanup =
+            options.reconcileContextInstanceCleanup;
         this.#cleanupDebts = new InstanceCleanupDebtStore(
             options.cleanupDebtFile,
         );
@@ -324,25 +335,32 @@ export class InstanceConfigCoordinator {
         });
 
         await this.#engine.persist(nextConfig);
-        const cleanupFailures: unknown[] = [];
-        if (descriptor !== undefined) {
-            await this.#instanceRegistry
-                .retireGeneration(instanceName, descriptor)
-                .catch((error) => cleanupFailures.push(error));
-        }
-        let debtPersisted = false;
-        await this.#cleanupDebts
-            .put({
+        try {
+            await this.#cleanupDebts.put({
                 instance: existing,
                 operation: "delete",
                 ...(skipRuntimeRetirement
                     ? { skipRuntimeRetirement: true }
                     : {}),
-            })
-            .then(() => {
-                debtPersisted = true;
-            })
-            .catch((error) => cleanupFailures.push(error));
+            });
+        } catch (error) {
+            try {
+                await this.#engine.persist(currentConfig);
+            } catch (rollbackError) {
+                throw new AggregateError(
+                    [error, rollbackError],
+                    `Instance ${instanceName} deletion could not persist cleanup debt or restore configuration.`,
+                );
+            }
+            throw error;
+        }
+        const cleanupFailures: unknown[] = [];
+        if (descriptor !== undefined) {
+            this.#cleanupOnlyDescriptors.set(instanceName, descriptor);
+            await this.#instanceRegistry
+                .retireGeneration(instanceName, descriptor)
+                .catch((error) => cleanupFailures.push(error));
+        }
         try {
             this.#getMcpHost()?.unregisterInstance(instanceName);
         } catch (error) {
@@ -355,7 +373,7 @@ export class InstanceConfigCoordinator {
                 skipRuntimeRetirement,
             )),
         );
-        if (debtPersisted && cleanupFailures.length === 0) {
+        if (cleanupFailures.length === 0) {
             await this.#cleanupDebts
                 .clear(instanceName)
                 .catch((error) => cleanupFailures.push(error));
@@ -715,13 +733,27 @@ export class InstanceConfigCoordinator {
         skipRuntimeRetirement: boolean,
     ): Promise<unknown[]> {
         const failures: unknown[] = [];
+        try {
+            await this.#detachContextInstance?.(existing.name);
+        } catch (error) {
+            failures.push(error);
+            return failures;
+        }
+        try {
+            await this.#reconcileContextInstanceCleanup?.(
+                existing.name,
+                descriptor,
+            );
+        } catch (error) {
+            failures.push(error);
+            return failures;
+        }
         await this.#retireGenerationResources(existing).catch((error) =>
             failures.push(error),
         );
         for (const retire of [...this.#instanceDeleteRetirements]) {
             await retire(existing).catch((error) => failures.push(error));
         }
-        await this.#detachContextInstance?.(existing.name).catch((error) => failures.push(error));
         await this.#retireStateForDelete(descriptor, skipRuntimeRetirement).catch(
             (error) => failures.push(error),
         );
@@ -729,6 +761,7 @@ export class InstanceConfigCoordinator {
             await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
                 failures.push(error),
             );
+            this.#cleanupOnlyDescriptors.delete(existing.name);
         }
 
         await this.#notifyInstanceLifecycle(this.#instanceDeleted, existing).catch(
@@ -750,7 +783,24 @@ export class InstanceConfigCoordinator {
             return await this.#reconcileRebuildCleanup(record);
         }
         const failures: unknown[] = [];
-        const descriptor = this.#instanceConfigMapper.map(record.instance);
+        const descriptor =
+            record.operation === "delete"
+                ? (this.#cleanupOnlyDescriptors.get(record.instance.name) ??
+                  this.#instanceConfigMapper.map(record.instance))
+                : this.#instanceConfigMapper.map(record.instance);
+        if (record.operation === "delete") {
+            this.#cleanupOnlyDescriptors.set(record.instance.name, descriptor);
+            try {
+                await this.#detachContextInstance?.(record.instance.name);
+                await this.#reconcileContextInstanceCleanup?.(
+                    record.instance.name,
+                    descriptor,
+                );
+            } catch (error) {
+                failures.push(error);
+                return failures;
+            }
+        }
         await this.#retireGenerationResources(record.instance).catch((error) =>
             failures.push(error),
         );
@@ -786,7 +836,6 @@ export class InstanceConfigCoordinator {
             await descriptor.worker
                 .retireProviderResources()
                 .catch((error) => failures.push(error));
-            await this.#detachContextInstance?.(record.instance.name).catch((error) => failures.push(error));
             await this.#notifyInstanceLifecycle(
                 this.#instanceDeleted,
                 record.instance,
@@ -795,6 +844,13 @@ export class InstanceConfigCoordinator {
         await closeDescriptorResourcesBestEffort(descriptor).catch((error) =>
             failures.push(error),
         );
+        if (record.operation === "delete") {
+            this.#instanceRegistry.retireConnectionReferences(
+                descriptor.name,
+                descriptor.worker,
+            );
+            this.#cleanupOnlyDescriptors.delete(record.instance.name);
+        }
         return failures;
     }
 
