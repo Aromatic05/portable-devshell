@@ -19,6 +19,7 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
@@ -48,6 +49,7 @@ import {
     type SandboxAssetProjectInput,
     type SandboxConfigGetInput,
     type SandboxConfigUpdateInput,
+    type SandboxContextRuntimeListInput,
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
@@ -85,6 +87,7 @@ export interface ExtensionSandboxHostOptions {
     codeDirectory: string;
     config?: ExtensionConfig;
     context: ExtensionSandboxContextData;
+    contextRuntime: ExtensionContextRuntimeCapability;
     delegatedWorker: ExtensionWorkerCapability;
     entryUrl: string;
     externalMemoryLimitMb?: number;
@@ -132,6 +135,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #artifactCapability: ExtensionArtifactCapability;
     readonly #assets: ExtensionAssetCapability;
     readonly #config?: ExtensionConfig;
+    readonly #contextRuntimeCapability: ExtensionContextRuntimeCapability;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
     readonly #healthCheckTimeoutMs: number;
@@ -177,6 +181,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
         this.#config = options.config;
+        this.#contextRuntimeCapability = options.contextRuntime;
         this.#delegatedWorkerCapability = options.delegatedWorker;
         this.#externalMemoryLimitBytes =
             positiveMegabytes(
@@ -582,6 +587,10 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     input as SandboxConfigUpdateInput,
                 );
                 return undefined;
+            case "contextRuntime.list":
+                return await this.#contextRuntimeCapability.list(
+                    input as SandboxContextRuntimeListInput | undefined,
+                );
             case "instances.create":
                 return await this.#instanceCapability.create(
                     (input as SandboxInstanceCreateInput).draft,

@@ -5,6 +5,7 @@ import { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionInstanceCapabilityControl } from "../../control/extension/generation/capability/Instance.js";
+import { ExtensionContextRuntimeCapabilityControl } from "../../control/extension/generation/capability/Context.js";
 import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Execution.js";
 import {
     readBuiltinExtensionSources,
@@ -109,6 +110,12 @@ export class ControlRuntimeFactory {
                             stateDirectory,
                             updateCoreConfig: async (patch) =>
                                 await mcp.configEditor.updateCorePaths(patch),
+                        }),
+                    contextFactory: ({ allowed, extensionId }) =>
+                        new ExtensionContextRuntimeCapabilityControl({
+                            allowed,
+                            extensionId,
+                            listContexts: async () => await mcp.listContexts(),
                         }),
                     instanceFactory: ({ allowed, extensionId }) =>
                         new ExtensionInstanceCapabilityControl({

@@ -1,4 +1,5 @@
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
+import type { ExtensionContextRuntimeCapability } from "./domain/context.js";
 import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
@@ -60,6 +61,7 @@ export type ExtensionActivationPolicy = "eager" | "lazy";
 export type ExtensionCapability =
     | "artifacts"
     | "assets"
+    | "contextRuntime"
     | "delegatedWorkers"
     | "instanceRuntime"
     | "instances"
@@ -247,6 +249,7 @@ export interface ExtensionProcessCapability {
 export interface ExtensionCapabilities {
     readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
+    readonly contextRuntime?: ExtensionContextRuntimeCapability;
     /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
     readonly delegatedWorkers?: ExtensionWorkerCapability;
     readonly instanceRuntime?: ExtensionInstanceRuntimeCapability;

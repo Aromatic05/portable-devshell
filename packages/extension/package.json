@@ -18,6 +18,10 @@
             "types": "./dist/domain/artifact.d.ts",
             "default": "./dist/domain/artifact.js"
         },
+        "./context": {
+            "types": "./dist/domain/context.d.ts",
+            "default": "./dist/domain/context.js"
+        },
         "./instance": {
             "types": "./dist/domain/instance.d.ts",
             "default": "./dist/domain/instance.js"

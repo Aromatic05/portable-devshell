@@ -10,6 +10,7 @@ import type {
     ControlConfig,
     ControlWebAuthConfig,
     JsonValue,
+    McpContextRecord,
 } from "@portable-devshell/shared";
 
 import {
@@ -154,6 +155,10 @@ export class ControlRuntimeMcp {
     async prepare(): Promise<void> {
         await this.#runtimeState.initialize();
         await this.configEditor.reconcileCleanupDebt();
+    }
+
+    async listContexts(): Promise<readonly McpContextRecord[]> {
+        return await this.#runtimeState.contextRegistry.list();
     }
 
     get host(): McpHost | undefined {

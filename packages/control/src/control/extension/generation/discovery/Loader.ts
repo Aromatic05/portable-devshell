@@ -17,6 +17,7 @@ import {
     type ExtensionWorkerCapability,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
+import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
@@ -68,6 +69,11 @@ export interface ExtensionLoaderOptions {
         generation: string;
         stateDirectory: string;
     }) => ExtensionConfigRuntime;
+    contextFactory?: (input: {
+        allowed: boolean;
+        extensionId: string;
+        generation: string;
+    }) => ExtensionContextRuntimeCapability;
     importer?: (url: string) => Promise<unknown>;
     instanceFactory?: (input: {
         allowed: boolean;
@@ -100,6 +106,7 @@ export class ExtensionLoader {
     readonly #artifactFactory?: ExtensionLoaderOptions["artifactFactory"];
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
     readonly #configFactory?: ExtensionLoaderOptions["configFactory"];
+    readonly #contextFactory?: ExtensionLoaderOptions["contextFactory"];
     readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
@@ -122,6 +129,7 @@ export class ExtensionLoader {
         this.#artifactFactory = options.artifactFactory;
         this.#assetsFactory = options.assetsFactory;
         this.#configFactory = options.configFactory;
+        this.#contextFactory = options.contextFactory;
         this.#importer = options.importer;
         this.#hostModuleResolver =
             options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
@@ -200,6 +208,12 @@ export class ExtensionLoader {
                 extensionId: id,
                 generation,
             }) ?? unavailableArtifacts(id);
+        const contextRuntime =
+            this.#contextFactory?.({
+                allowed: manifest.capabilities.includes("contextRuntime"),
+                extensionId: id,
+                generation,
+            }) ?? unavailableContextRuntime(id);
         const instanceManagement =
             this.#instanceFactory?.({
                 allowed: manifest.capabilities.includes("instances"),
@@ -261,6 +275,9 @@ export class ExtensionLoader {
                     ? { artifacts }
                     : {}),
                 ...(manifest.capabilities.includes("assets") ? { assets } : {}),
+                ...(manifest.capabilities.includes("contextRuntime")
+                    ? { contextRuntime }
+                    : {}),
                 ...(manifest.capabilities.includes("delegatedWorkers")
                     ? { delegatedWorkers: delegatedWorker }
                     : {}),
@@ -298,6 +315,7 @@ export class ExtensionLoader {
                 codeDirectory,
                 config,
                 context,
+                contextRuntime,
                 entryPath,
                 generation,
                 id,
@@ -433,6 +451,7 @@ export class ExtensionLoader {
         codeDirectory: string;
         config?: ExtensionConfigRuntime;
         context: ExtensionContext;
+        contextRuntime: ExtensionContextRuntimeCapability;
         entryPath: string;
         generation: string;
         id: string;
@@ -460,6 +479,7 @@ export class ExtensionLoader {
                 paths: input.context.paths,
                 version: input.manifest.version,
             },
+            contextRuntime: input.contextRuntime,
             entryUrl: pathToFileURL(input.entryPath).href,
             hostDependencies: input.manifest.hostDependencies,
             instances: input.instanceManagement,
@@ -591,6 +611,19 @@ function unavailableInstances(
         stop: async () => unavailable(),
         validateCreate: async () => unavailable(),
         watchEvents: async () => unavailable(),
+    });
+}
+
+function unavailableContextRuntime(
+    extensionId: string,
+): ExtensionContextRuntimeCapability {
+    const unavailable = (): never => {
+        throw new Error(
+            `Extension ${extensionId} requested contextRuntime but the host did not configure that capability.`,
+        );
+    };
+    return Object.freeze({
+        list: async () => unavailable(),
     });
 }
 

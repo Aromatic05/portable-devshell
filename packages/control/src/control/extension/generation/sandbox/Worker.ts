@@ -27,6 +27,10 @@ import type {
     ExtensionArtifactTransferInput,
 } from "@portable-devshell/extension/artifact";
 import type {
+    ExtensionContextRuntimeCapability,
+    ExtensionContextRuntimeQuery,
+} from "@portable-devshell/extension/context";
+import type {
     ExtensionInstanceCapability,
     ExtensionInstanceEventWatch,
     ExtensionInstanceLogQuery,
@@ -58,6 +62,7 @@ import {
     type SandboxAssetProjectInput,
     type SandboxConfigGetInput,
     type SandboxConfigUpdateInput,
+    type SandboxContextRuntimeListInput,
     type SandboxInstanceCreateInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
@@ -350,6 +355,9 @@ function createContext(): ExtensionContext {
         ...(data.capabilities.includes("assets")
             ? { assets: createAssets() }
             : {}),
+        ...(data.capabilities.includes("contextRuntime")
+            ? { contextRuntime: createContextRuntimeCapability() }
+            : {}),
         ...(data.capabilities.includes("delegatedWorkers")
             ? { delegatedWorkers: createWorkerCapability("delegatedWorkers") }
             : {}),
@@ -611,6 +619,18 @@ function createInstanceRuntimeCapability(): ExtensionInstanceRuntimeCapability {
                 ...(query === undefined ? {} : { query }),
             } satisfies SandboxInstanceRuntimeReadToolCallsInput)) as Awaited<
                 ReturnType<ExtensionInstanceRuntimeCapability["readToolCalls"]>
+            >,
+    });
+}
+
+function createContextRuntimeCapability(): ExtensionContextRuntimeCapability {
+    return Object.freeze({
+        list: async (query?: ExtensionContextRuntimeQuery) =>
+            (await requestCapability(
+                "contextRuntime.list",
+                query as SandboxContextRuntimeListInput | undefined,
+            )) as Awaited<
+                ReturnType<ExtensionContextRuntimeCapability["list"]>
             >,
     });
 }

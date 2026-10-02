@@ -15,6 +15,7 @@ import type {
     ExtensionArtifactShareInput,
     ExtensionArtifactTransferInput,
 } from "@portable-devshell/extension/artifact";
+import type { ExtensionContextRuntimeQuery } from "@portable-devshell/extension/context";
 import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
 import {
     createError,
@@ -100,6 +101,7 @@ export type ExtensionSandboxCapabilityOperation =
     | "assets.resolveBundle"
     | "config.get"
     | "config.update"
+    | "contextRuntime.list"
     | "instances.create"
     | "instances.createSchema"
     | "instances.delete"
@@ -308,6 +310,7 @@ export interface SandboxConfigGetInput {
 export type SandboxConfigUpdateInput = Readonly<
     Record<string, ExtensionJsonValue>
 >;
+export type SandboxContextRuntimeListInput = ExtensionContextRuntimeQuery;
 export interface SandboxInstanceNameInput {
     name: string;
 }
