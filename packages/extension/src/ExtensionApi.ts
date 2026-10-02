@@ -1,8 +1,9 @@
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
-import type { ExtensionContextRuntimeCapability } from "./domain/context.js";
+import type { ExtensionContextObserveCapability } from "./domain/context.js";
 import type {
-    ExtensionInstanceCapability,
-    ExtensionInstanceRuntimeCapability,
+    ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
 } from "./domain/instance.js";
 import type { ToolCallHistoryCapability } from "./domain/toolcall.js";
 
@@ -62,13 +63,14 @@ export type ExtensionActivationPolicy = "eager" | "lazy";
 export type ExtensionCapability =
     | "artifacts"
     | "assets"
-    | "contextRuntime"
-    | "delegatedWorkers"
-    | "instanceRuntime"
-    | "instances"
+    | "context.observe"
+    | "instance.events.publish"
+    | "instance.manage"
+    | "instance.observe"
     | "processes"
-    | "toolCallHistory"
-    | "workers";
+    | "toolcall.history"
+    | "worker.delegate"
+    | "worker.execute";
 
 export interface ExtensionPointDeclaration {
     readonly id: string;
@@ -251,14 +253,15 @@ export interface ExtensionProcessCapability {
 export interface ExtensionCapabilities {
     readonly artifacts?: ExtensionArtifactCapability;
     readonly assets?: ExtensionAssetCapability;
-    readonly contextRuntime?: ExtensionContextRuntimeCapability;
-    /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
-    readonly delegatedWorkers?: ExtensionWorkerCapability;
-    readonly instanceRuntime?: ExtensionInstanceRuntimeCapability;
-    readonly instances?: ExtensionInstanceCapability;
+    readonly contextObserve?: ExtensionContextObserveCapability;
+    readonly instanceEventPublish?: ExtensionInstanceEventPublishCapability;
+    readonly instanceManage?: ExtensionInstanceManageCapability;
+    readonly instanceObserve?: ExtensionInstanceObserveCapability;
     readonly processes?: ExtensionProcessCapability;
     readonly toolCallHistory?: ToolCallHistoryCapability;
-    readonly workers?: ExtensionWorkerCapability;
+    /** Controlled Worker execution whose tool transcript is owned by the delegating Extension. */
+    readonly workerDelegate?: ExtensionWorkerCapability;
+    readonly workerExecute?: ExtensionWorkerCapability;
 }
 
 declare const extensionPointDeclarationType: unique symbol;

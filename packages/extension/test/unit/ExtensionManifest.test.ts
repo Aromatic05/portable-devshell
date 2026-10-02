@@ -26,10 +26,14 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
             capabilities: [
                 "artifacts",
                 "assets",
-                "delegatedWorkers",
-                "instances",
-                "workers",
+                "context.observe",
+                "instance.events.publish",
+                "instance.manage",
+                "instance.observe",
                 "processes",
+                "toolcall.history",
+                "worker.delegate",
+                "worker.execute",
             ],
             extensions: {
                 "cli.native-commands": [
@@ -48,10 +52,14 @@ test("Extension manifest accepts only the resource capability taxonomy and stati
             capabilities: [
                 "artifacts",
                 "assets",
-                "delegatedWorkers",
-                "instances",
-                "workers",
+                "context.observe",
+                "instance.events.publish",
+                "instance.manage",
+                "instance.observe",
                 "processes",
+                "toolcall.history",
+                "worker.delegate",
+                "worker.execute",
             ],
             extensions: {
                 "cli.native-commands": [
@@ -138,12 +146,34 @@ test("Extension manifest parses owned Config schema and declared Core access", (
     );
 });
 
-test("delegatedWorkers is an independent controlled Worker capability", () => {
+test("worker.delegate and worker.execute are independent controlled Worker capabilities", () => {
     assert.deepEqual(
-        parseExtensionManifest({ ...base, capabilities: ["delegatedWorkers"] })
+        parseExtensionManifest({ ...base, capabilities: ["worker.delegate"] })
             .capabilities,
-        ["delegatedWorkers"],
+        ["worker.delegate"],
     );
+    assert.deepEqual(
+        parseExtensionManifest({ ...base, capabilities: ["worker.execute"] })
+            .capabilities,
+        ["worker.execute"],
+    );
+});
+
+test("Extension manifest rejects the retired v4 capability names", () => {
+    for (const capability of [
+        "contextRuntime",
+        "delegatedWorkers",
+        "instanceRuntime",
+        "instances",
+        "toolCallHistory",
+        "workers",
+    ]) {
+        assert.throws(
+            () =>
+                parseExtensionManifest({ ...base, capabilities: [capability] }),
+            /Unknown Extension capability/u,
+        );
+    }
 });
 
 test("Extension manifest requires activation in schema 1.1+ and defaults schema 1.0 to lazy", () => {
@@ -259,16 +289,16 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
     assert.equal(
         parseExtensionManifest({
             ...base,
-            apiVersion: "4.0.0",
+            apiVersion: "5.0.0",
             schemaVersion: "1.1.0",
         }).apiVersion,
-        "4.0.0",
+        "5.0.0",
     );
     const { activation: _activation, ...legacyBase } = base;
     assert.deepEqual(
         parseExtensionManifest({
             ...legacyBase,
-            apiVersion: 4,
+            apiVersion: 5,
             hostDependencies: ["@modelcontextprotocol/client"],
             schemaVersion: 1,
         }).hostDependencies,
@@ -277,7 +307,7 @@ test("Extension manifest accepts compatible same-major versions and legacy integ
     assert.equal(
         parseExtensionManifest({
             ...legacyBase,
-            apiVersion: 4,
+            apiVersion: 5,
             schemaVersion: 1,
         }).schemaVersion,
         "1.0.0",

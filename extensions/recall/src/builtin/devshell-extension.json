@@ -1,12 +1,12 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.4.0",
+    "apiVersion": "5.0.0",
     "activation": "lazy",
     "id": "recall",
     "name": "portable-devshell Recall",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": ["contextRuntime", "toolCallHistory"],
+    "capabilities": ["context.observe", "toolcall.history"],
     "extensions": {
         "cli.native-commands": [
             {

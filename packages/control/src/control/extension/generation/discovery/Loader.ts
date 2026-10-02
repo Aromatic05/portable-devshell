@@ -17,10 +17,11 @@ import {
     type ExtensionWorkerCapability,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
+import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
-    ExtensionInstanceCapability,
-    ExtensionInstanceRuntimeCapability,
+    ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
 } from "@portable-devshell/extension/instance";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
@@ -35,7 +36,7 @@ import {
 } from "./ModuleResolver.js";
 import { ExtensionPathLayout } from "../../state/Layout.js";
 import {
-    ExtensionInstanceRuntimeCapabilityControl,
+    ExtensionInstanceEventPublishCapabilityControl,
 } from "../capability/Instance.js";
 import {
     ExtensionToolCallHistoryCapabilityControl,
@@ -76,17 +77,21 @@ export interface ExtensionLoaderOptions {
         generation: string;
         stateDirectory: string;
     }) => ExtensionConfigRuntime;
-    contextFactory?: (input: {
+    contextObserveFactory?: (input: {
         allowed: boolean;
         extensionId: string;
         generation: string;
-    }) => ExtensionContextRuntimeCapability;
+    }) => ExtensionContextObserveCapability;
     importer?: (url: string) => Promise<unknown>;
     instanceFactory?: (input: {
-        allowed: boolean;
+        manageAllowed: boolean;
+        observeAllowed: boolean;
         extensionId: string;
         generation: string;
-    }) => ExtensionInstanceCapability;
+    }) => {
+        manage: ExtensionInstanceManageCapability;
+        observe: ExtensionInstanceObserveCapability;
+    };
     instances: InstanceRegistry;
     hostModuleResolver?: ExtensionHostModuleResolver;
     loggerFactory?: (id: string, generation: string) => ExtensionLogger;
@@ -114,7 +119,7 @@ export class ExtensionLoader {
     readonly #artifactFactory?: ExtensionLoaderOptions["artifactFactory"];
     readonly #assetsFactory?: ExtensionLoaderOptions["assetsFactory"];
     readonly #configFactory?: ExtensionLoaderOptions["configFactory"];
-    readonly #contextFactory?: ExtensionLoaderOptions["contextFactory"];
+    readonly #contextObserveFactory?: ExtensionLoaderOptions["contextObserveFactory"];
     readonly #importer?: (url: string) => Promise<unknown>;
     readonly #hostModuleResolver: ExtensionHostModuleResolver;
     readonly #instanceFactory?: ExtensionLoaderOptions["instanceFactory"];
@@ -138,7 +143,7 @@ export class ExtensionLoader {
         this.#artifactFactory = options.artifactFactory;
         this.#assetsFactory = options.assetsFactory;
         this.#configFactory = options.configFactory;
-        this.#contextFactory = options.contextFactory;
+        this.#contextObserveFactory = options.contextObserveFactory;
         this.#importer = options.importer;
         this.#hostModuleResolver =
             options.hostModuleResolver ?? sharedExtensionHostModuleResolver();
@@ -218,51 +223,54 @@ export class ExtensionLoader {
                 extensionId: id,
                 generation,
             }) ?? unavailableArtifacts(id);
-        const contextRuntime =
-            this.#contextFactory?.({
-                allowed: manifest.capabilities.includes("contextRuntime"),
+        const contextObserve =
+            this.#contextObserveFactory?.({
+                allowed: manifest.capabilities.includes("context.observe"),
                 extensionId: id,
                 generation,
-            }) ?? unavailableContextRuntime(id);
-        const instanceManagement =
+            }) ?? unavailableContextObserve(id);
+        const instanceCapabilities =
             this.#instanceFactory?.({
-                allowed: manifest.capabilities.includes("instances"),
+                manageAllowed: manifest.capabilities.includes("instance.manage"),
+                observeAllowed: manifest.capabilities.includes("instance.observe"),
                 extensionId: id,
                 generation,
-            }) ?? unavailableInstances(id);
-        const instanceRuntime: ExtensionInstanceRuntimeCapability =
-            new ExtensionInstanceRuntimeCapabilityControl({
-                allowed: manifest.capabilities.includes("instanceRuntime"),
+            }) ?? {
+                manage: unavailableInstanceManage(id),
+                observe: unavailableInstanceObserve(id),
+            };
+        const instanceEventPublish: ExtensionInstanceEventPublishCapability =
+            new ExtensionInstanceEventPublishCapabilityControl({
+                allowed: manifest.capabilities.includes("instance.events.publish"),
                 extensionId: id,
                 instances: this.#instances,
-                toolCallDecorator: this.#toolCallDecorator,
             });
         const toolCallHistory: ToolCallHistoryCapability =
             new ExtensionToolCallHistoryCapabilityControl({
-                allowed: manifest.capabilities.includes("toolCallHistory"),
+                allowed: manifest.capabilities.includes("toolcall.history"),
                 extensionId: id,
                 instances: this.#instances,
                 toolCallDecorator: this.#toolCallDecorator,
             });
 
-        const worker = manifest.capabilities.includes("workers")
+        const workerExecute = manifest.capabilities.includes("worker.execute")
             ? this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "host",
-              }) ?? unavailableWorkerRuntime(id, this.#instances)
-            : unavailableWorkerRuntime(id, this.#instances);
-        const delegatedWorker = manifest.capabilities.includes(
-            "delegatedWorkers",
+              }) ?? unavailableWorkerRuntime(id, "worker.execute")
+            : unavailableWorkerRuntime(id, "worker.execute");
+        const workerDelegate = manifest.capabilities.includes(
+            "worker.delegate",
         )
             ? this.#workerFactory?.({
                   allowed: true,
                   extensionId: id,
                   generation,
                   recording: "caller",
-              }) ?? unavailableWorkerRuntime(id, this.#instances)
-            : unavailableWorkerRuntime(id, this.#instances);
+              }) ?? unavailableWorkerRuntime(id, "worker.delegate")
+            : unavailableWorkerRuntime(id, "worker.delegate");
         const processes =
             this.#processFactory?.({
                 allowed: manifest.capabilities.includes("processes"),
@@ -293,26 +301,29 @@ export class ExtensionLoader {
                     ? { artifacts }
                     : {}),
                 ...(manifest.capabilities.includes("assets") ? { assets } : {}),
-                ...(manifest.capabilities.includes("contextRuntime")
-                    ? { contextRuntime }
+                ...(manifest.capabilities.includes("context.observe")
+                    ? { contextObserve }
                     : {}),
-                ...(manifest.capabilities.includes("delegatedWorkers")
-                    ? { delegatedWorkers: delegatedWorker }
+                ...(manifest.capabilities.includes("instance.events.publish")
+                    ? { instanceEventPublish }
                     : {}),
-                ...(manifest.capabilities.includes("instances")
-                    ? { instances: instanceManagement }
+                ...(manifest.capabilities.includes("instance.manage")
+                    ? { instanceManage: instanceCapabilities.manage }
                     : {}),
-                ...(manifest.capabilities.includes("instanceRuntime")
-                    ? { instanceRuntime }
+                ...(manifest.capabilities.includes("instance.observe")
+                    ? { instanceObserve: instanceCapabilities.observe }
                     : {}),
                 ...(manifest.capabilities.includes("processes")
                     ? { processes }
                     : {}),
-                ...(manifest.capabilities.includes("toolCallHistory")
+                ...(manifest.capabilities.includes("toolcall.history")
                     ? { toolCallHistory }
                     : {}),
-                ...(manifest.capabilities.includes("workers")
-                    ? { workers: worker }
+                ...(manifest.capabilities.includes("worker.delegate")
+                    ? { workerDelegate }
+                    : {}),
+                ...(manifest.capabilities.includes("worker.execute")
+                    ? { workerExecute }
                     : {}),
             }),
             ...(config === undefined ? {} : { config }),
@@ -336,20 +347,21 @@ export class ExtensionLoader {
                 codeDirectory,
                 config,
                 context,
-                contextRuntime,
+                contextObserve,
                 entryPath,
                 generation,
                 id,
-                instanceManagement,
-                instanceRuntime,
+                instanceEventPublish,
+                instanceManage: instanceCapabilities.manage,
+                instanceObserve: instanceCapabilities.observe,
                 logger,
                 manifest,
                 processes,
                 runtimeRoot,
                 runtimeDirectory,
-                delegatedWorker,
                 toolCallHistory,
-                worker,
+                workerDelegate,
+                workerExecute,
             });
         }
 
@@ -371,8 +383,8 @@ export class ExtensionLoader {
                         module!,
                         config,
                         processes,
-                        delegatedWorker,
-                        worker,
+                        workerDelegate,
+                        workerExecute,
                         runtimeRoot,
                         runtimeDirectory,
                         hostModules.release,
@@ -386,8 +398,8 @@ export class ExtensionLoader {
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         module!.retireInstance?.(instance),
-                        delegatedWorker.retireInstance(instance),
-                        worker.retireInstance(instance),
+                        workerDelegate.retireInstance(instance),
+                        workerExecute.retireInstance(instance),
                     ]);
                 },
             });
@@ -404,10 +416,10 @@ export class ExtensionLoader {
             } catch (cleanupError) {
                 cleanupFailures.push(cleanupError);
             }
-            await delegatedWorker
+            await workerDelegate
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await worker
+            await workerExecute
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
             await cleanupRuntimeDirectory(runtimeRoot, runtimeDirectory).catch(
@@ -473,20 +485,21 @@ export class ExtensionLoader {
         codeDirectory: string;
         config?: ExtensionConfigRuntime;
         context: ExtensionContext;
-        contextRuntime: ExtensionContextRuntimeCapability;
+        contextObserve: ExtensionContextObserveCapability;
         entryPath: string;
         generation: string;
         id: string;
-        instanceManagement: ExtensionInstanceCapability;
-        instanceRuntime: ExtensionInstanceRuntimeCapability;
+        instanceEventPublish: ExtensionInstanceEventPublishCapability;
+        instanceManage: ExtensionInstanceManageCapability;
+        instanceObserve: ExtensionInstanceObserveCapability;
         logger: ExtensionLogger;
         manifest: ExtensionManifest;
         processes: ExtensionProcessRuntime;
         runtimeRoot: string;
         runtimeDirectory: string;
-        delegatedWorker: ExtensionWorkerRuntime;
         toolCallHistory: ToolCallHistoryCapability;
-        worker: ExtensionWorkerRuntime;
+        workerDelegate: ExtensionWorkerRuntime;
+        workerExecute: ExtensionWorkerRuntime;
     }): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
         const sandbox = this.#sandboxFactory({
@@ -502,18 +515,19 @@ export class ExtensionLoader {
                 paths: input.context.paths,
                 version: input.manifest.version,
             },
-            contextRuntime: input.contextRuntime,
+            contextObserve: input.contextObserve,
             entryUrl: pathToFileURL(input.entryPath).href,
             hostDependencies: input.manifest.hostDependencies,
-            instances: input.instanceManagement,
-            instanceRuntime: input.instanceRuntime,
+            instanceEventPublish: input.instanceEventPublish,
+            instanceManage: input.instanceManage,
+            instanceObserve: input.instanceObserve,
             logger: input.logger,
             onFault: (error) => {
                 candidate?.fault(error);
                 input.config?.close();
                 void input.processes.closeAll().catch(() => undefined);
-                void input.delegatedWorker.closeAll().catch(() => undefined);
-                void input.worker.closeAll().catch(() => undefined);
+                void input.workerDelegate.closeAll().catch(() => undefined);
+                void input.workerExecute.closeAll().catch(() => undefined);
             },
             processes: input.processes,
             ...(this.#sandboxResourceLimits === undefined
@@ -521,9 +535,9 @@ export class ExtensionLoader {
                 : {
                       resourceLimits: this.#sandboxResourceLimits,
                   }),
-            delegatedWorker: input.delegatedWorker,
             toolCallHistory: input.toolCallHistory,
-            worker: input.worker,
+            workerDelegate: input.workerDelegate,
+            workerExecute: input.workerExecute,
         });
         try {
             const descriptor = await sandbox.start();
@@ -540,8 +554,8 @@ export class ExtensionLoader {
                         sandbox,
                         input.config,
                         input.processes,
-                        input.delegatedWorker,
-                        input.worker,
+                        input.workerDelegate,
+                        input.workerExecute,
                         input.runtimeRoot,
                         input.runtimeDirectory,
                     ),
@@ -554,8 +568,8 @@ export class ExtensionLoader {
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
                         sandbox.retireInstance(instance),
-                        input.delegatedWorker.retireInstance(instance),
-                        input.worker.retireInstance(instance),
+                        input.workerDelegate.retireInstance(instance),
+                        input.workerExecute.retireInstance(instance),
                     ]);
                 },
             });
@@ -574,10 +588,10 @@ export class ExtensionLoader {
             } catch (cleanupError) {
                 cleanupFailures.push(cleanupError);
             }
-            await input.delegatedWorker
+            await input.workerDelegate
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
-            await input.worker
+            await input.workerExecute
                 .closeAll()
                 .catch((cleanupError) => cleanupFailures.push(cleanupError));
             await cleanupRuntimeDirectory(
@@ -613,12 +627,29 @@ function unavailableArtifacts(
     });
 }
 
-function unavailableInstances(
+function unavailableInstanceObserve(
     extensionId: string,
-): ExtensionInstanceCapability {
+): ExtensionInstanceObserveCapability {
     const unavailable = (): never => {
         throw new Error(
-            `Extension ${extensionId} requested instances but the host did not configure that capability.`,
+            `Extension ${extensionId} requested instance.observe but the host did not configure that capability.`,
+        );
+    };
+    return Object.freeze({
+        list: async () => unavailable(),
+        readLogs: async () => unavailable(),
+        refresh: async () => unavailable(),
+        snapshot: async () => unavailable(),
+        watchEvents: async () => unavailable(),
+    });
+}
+
+function unavailableInstanceManage(
+    extensionId: string,
+): ExtensionInstanceManageCapability {
+    const unavailable = (): never => {
+        throw new Error(
+            `Extension ${extensionId} requested instance.manage but the host did not configure that capability.`,
         );
     };
     return Object.freeze({
@@ -627,23 +658,18 @@ function unavailableInstances(
         delete: async () => unavailable(),
         disable: async () => unavailable(),
         enable: async () => unavailable(),
-        list: async () => unavailable(),
-        readLogs: async () => unavailable(),
-        refresh: async () => unavailable(),
-        snapshot: async () => unavailable(),
         start: async () => unavailable(),
         stop: async () => unavailable(),
         validateCreate: async () => unavailable(),
-        watchEvents: async () => unavailable(),
     });
 }
 
-function unavailableContextRuntime(
+function unavailableContextObserve(
     extensionId: string,
-): ExtensionContextRuntimeCapability {
+): ExtensionContextObserveCapability {
     const unavailable = (): never => {
         throw new Error(
-            `Extension ${extensionId} requested contextRuntime but the host did not configure that capability.`,
+            `Extension ${extensionId} requested context.observe but the host did not configure that capability.`,
         );
     };
     return Object.freeze({
@@ -653,11 +679,11 @@ function unavailableContextRuntime(
 
 function unavailableWorkerRuntime(
     extensionId: string,
-    _instances: InstanceRegistry,
+    capability: "worker.delegate" | "worker.execute",
 ): ExtensionWorkerRuntime {
     const unavailable = (): never => {
         throw new Error(
-            `Extension ${extensionId} requested workers but the host did not configure that capability.`,
+            `Extension ${extensionId} requested ${capability} but the host did not configure that capability.`,
         );
     };
     return Object.freeze({

@@ -12,7 +12,10 @@ import {
     type ControlRouteBinding,
     type ControlRouteScope,
 } from "@portable-devshell/extension/control";
-import type { ExtensionInstanceRuntimeCapability } from "@portable-devshell/extension/instance";
+import type {
+    ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceObserveCapability,
+} from "@portable-devshell/extension/instance";
 import {
     tools as mcpTools,
     type McpToolBinding,
@@ -20,6 +23,8 @@ import {
 import {
     review,
     rewrite,
+    type ToolCallHistoryCapability,
+    type ToolCallHistoryQuery,
     type ToolCallReviewBinding,
     type ToolCallReviewInvocation,
     type ToolCallReviewResult,
@@ -403,13 +408,29 @@ let builtinRuntime: BuiltinCommentRuntime | undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
     if (builtinRuntime !== undefined)
         throw new Error("Comment Extension is already active.");
-    const instanceRuntime = context.capabilities.instanceRuntime;
-    if (instanceRuntime === undefined) {
+    const instanceObserve = context.capabilities.instanceObserve;
+    if (instanceObserve === undefined) {
         throw new Error(
-            "Comment Extension requires the instanceRuntime capability.",
+            "Comment Extension requires the instanceObserve capability.",
         );
     }
-    const source = new BuiltinCommentInstanceSource(instanceRuntime);
+    const instanceEventPublish = context.capabilities.instanceEventPublish;
+    if (instanceEventPublish === undefined) {
+        throw new Error(
+            "Comment Extension requires the instanceEventPublish capability.",
+        );
+    }
+    const toolCallHistory = context.capabilities.toolCallHistory;
+    if (toolCallHistory === undefined) {
+        throw new Error(
+            "Comment Extension requires the toolCallHistory capability.",
+        );
+    }
+    const source = new BuiltinCommentInstanceSource(
+        instanceObserve,
+        instanceEventPublish,
+        toolCallHistory,
+    );
     await source.refresh();
     const comment = new CommentExtension({
         instances: source,
@@ -768,13 +789,21 @@ function invalidTodoReportInput(message: string): ExtensionError {
 }
 
 class BuiltinCommentInstanceSource implements CommentInstanceSource {
-    readonly #instanceRuntime: ExtensionInstanceRuntimeCapability;
+    readonly #instanceObserve: ExtensionInstanceObserveCapability;
+    readonly #instanceEventPublish: ExtensionInstanceEventPublishCapability;
+    readonly #toolCallHistory: ToolCallHistoryCapability;
     readonly #keys = new Map<string, object>();
     readonly #listeners = new Set<() => void>();
     #records: readonly { enabled: boolean; name: string }[] = [];
 
-    constructor(instanceRuntime: ExtensionInstanceRuntimeCapability) {
-        this.#instanceRuntime = instanceRuntime;
+    constructor(
+        instanceObserve: ExtensionInstanceObserveCapability,
+        instanceEventPublish: ExtensionInstanceEventPublishCapability,
+        toolCallHistory: ToolCallHistoryCapability,
+    ) {
+        this.#instanceObserve = instanceObserve;
+        this.#instanceEventPublish = instanceEventPublish;
+        this.#toolCallHistory = toolCallHistory;
     }
 
     list(): readonly CommentExtensionInstance[] {
@@ -788,7 +817,7 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
             );
             return {
                 appendEvent: async (type, data) =>
-                    await this.#instanceRuntime.appendEvent(
+                    await this.#instanceEventPublish.appendEvent(
                         record.name,
                         type,
                         data as unknown as ExtensionJsonValue,
@@ -804,11 +833,11 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
                     "context-messages.json",
                 ),
                 legacyReports: async () =>
-                    (await this.#instanceRuntime.readToolCalls(record.name, {
+                    (await this.#toolCallHistory.read(record.name, {
                         includeInput: true,
                         includeOutput: false,
                         toolName: "todo_report",
-                    })) as unknown as ToolCallRecord[],
+                    } as ToolCallHistoryQuery)) as unknown as ToolCallRecord[],
                 name: record.name,
             };
         });
@@ -824,7 +853,10 @@ class BuiltinCommentInstanceSource implements CommentInstanceSource {
     }
 
     async refresh(renewInstance?: string): Promise<void> {
-        const next = [...(await this.#instanceRuntime.list())];
+        const next = (await this.#instanceObserve.list()).map((record) => ({
+            enabled: record.enabled,
+            name: record.name,
+        }));
         const previousSignature = instanceSignature(this.#records);
         const nextNames = new Set(next.map((record) => record.name));
         for (const name of [...this.#keys.keys()]) {

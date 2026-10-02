@@ -34,10 +34,10 @@ test("Agent Extension manifest declares host-managed capabilities and domain Ext
     );
     assert.equal(manifest.id, "agent");
     assert.equal(manifest.entry, "dist/builtin/index.js");
-    assert.equal(manifest.apiVersion, "4.2.0");
+    assert.equal(manifest.apiVersion, "5.0.0");
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
-        "delegatedWorkers",
+        "worker.delegate",
         "processes",
     ]);
     assert.deepEqual(manifest.extensions, {
@@ -503,7 +503,7 @@ function extensionContext(options: {
                     throw new Error("not used");
                 },
             },
-            delegatedWorkers: {
+            workerDelegate: {
                 async openSession(input) {
                     options.events.push(
                         `worker.open:${input.instance ?? ""}:${input.workspace}:caller`,

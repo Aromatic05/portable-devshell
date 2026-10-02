@@ -15,7 +15,7 @@ import type { CliModelCommandInvocationContext } from "@portable-devshell/extens
 
 import { CliExtensionCommandService } from "../../../src/control/extension/cli/command/Service.ts";
 import { ModelDevshellBroker } from "../../../src/control/extension/cli/command/ModelBroker.ts";
-import { ExtensionInstanceCapabilityControl } from "../../../src/control/extension/generation/capability/Instance.ts";
+import { ExtensionInstanceObserveCapabilityControl } from "../../../src/control/extension/generation/capability/Instance.ts";
 import type { InstanceDescriptor } from "../../../src/control/instance/Descriptor.ts";
 import { InstanceRegistry } from "../../../src/control/instance/registry/Registry.ts";
 import { RuntimeSubscriptionManager } from "../../../src/instance/execution/runtime/Subscription.ts";
@@ -327,30 +327,8 @@ function instanceModelExtensionHost(
     instances: InstanceRegistry,
     instanceName: string,
 ) {
-    const capability = new ExtensionInstanceCapabilityControl({
+    const capability = new ExtensionInstanceObserveCapabilityControl({
         allowed: true,
-        create: {
-            async createInstance() {
-                throw new Error("not used");
-            },
-            getSchema() {
-                return {} as never;
-            },
-            validateDraft() {
-                return {} as never;
-            },
-        },
-        editor: {
-            async deleteInstance() {
-                throw new Error("not used");
-            },
-            async disableInstance() {
-                throw new Error("not used");
-            },
-            async enableInstance() {
-                throw new Error("not used");
-            },
-        },
         extensionId: "instance",
         instances,
         listConfigured: () => [

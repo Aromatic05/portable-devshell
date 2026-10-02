@@ -27,14 +27,15 @@ import type {
     ExtensionArtifactTransferInput,
 } from "@portable-devshell/extension/artifact";
 import type {
-    ExtensionContextRuntimeCapability,
-    ExtensionContextRuntimeQuery,
+    ExtensionContextObserveCapability,
+    ExtensionContextQuery,
 } from "@portable-devshell/extension/context";
 import type {
-    ExtensionInstanceCapability,
+    ExtensionInstanceEventPublishCapability,
     ExtensionInstanceEventWatch,
     ExtensionInstanceLogQuery,
-    ExtensionInstanceRuntimeCapability,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
 } from "@portable-devshell/extension/instance";
 import type {
     ToolCallHistoryCapability,
@@ -66,12 +67,11 @@ import {
     type SandboxAssetProjectInput,
     type SandboxConfigGetInput,
     type SandboxConfigUpdateInput,
-    type SandboxContextRuntimeListInput,
+    type SandboxContextObserveListInput,
     type SandboxInstanceCreateInput,
+    type SandboxInstanceEventPublishInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
-    type SandboxInstanceRuntimeAppendEventInput,
-    type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
     type SandboxToolCallHistoryReadInput,
     type SandboxProcessSendInput,
@@ -360,26 +360,29 @@ function createContext(): ExtensionContext {
         ...(data.capabilities.includes("assets")
             ? { assets: createAssets() }
             : {}),
-        ...(data.capabilities.includes("contextRuntime")
-            ? { contextRuntime: createContextRuntimeCapability() }
+        ...(data.capabilities.includes("context.observe")
+            ? { contextObserve: createContextObserveCapability() }
             : {}),
-        ...(data.capabilities.includes("delegatedWorkers")
-            ? { delegatedWorkers: createWorkerCapability("delegatedWorkers") }
+        ...(data.capabilities.includes("instance.events.publish")
+            ? { instanceEventPublish: createInstanceEventPublishCapability() }
             : {}),
-        ...(data.capabilities.includes("instances")
-            ? { instances: createInstanceCapability() }
+        ...(data.capabilities.includes("instance.manage")
+            ? { instanceManage: createInstanceManageCapability() }
             : {}),
-        ...(data.capabilities.includes("instanceRuntime")
-            ? { instanceRuntime: createInstanceRuntimeCapability() }
+        ...(data.capabilities.includes("instance.observe")
+            ? { instanceObserve: createInstanceObserveCapability() }
             : {}),
         ...(data.capabilities.includes("processes")
             ? { processes: createProcessCapability() }
             : {}),
-        ...(data.capabilities.includes("toolCallHistory")
+        ...(data.capabilities.includes("toolcall.history")
             ? { toolCallHistory: createToolCallHistoryCapability() }
             : {}),
-        ...(data.capabilities.includes("workers")
-            ? { workers: createWorkerCapability("workers") }
+        ...(data.capabilities.includes("worker.delegate")
+            ? { workerDelegate: createWorkerCapability("workerDelegate") }
+            : {}),
+        ...(data.capabilities.includes("worker.execute")
+            ? { workerExecute: createWorkerCapability("workerExecute") }
             : {}),
     });
     const register: ExtensionContext["register"] = (point, id, binding) => {
@@ -493,64 +496,74 @@ function createArtifactCapability(): ExtensionArtifactCapability {
     });
 }
 
-function createInstanceCapability(): ExtensionInstanceCapability {
+function createInstanceManageCapability(): ExtensionInstanceManageCapability {
     const nameInput = (name: string): SandboxInstanceNameInput => ({ name });
     return Object.freeze({
         create: async (draft: ExtensionJsonValue) =>
-            (await requestCapability("instances.create", {
+            (await requestCapability("instanceManage.create", {
                 draft,
             } satisfies SandboxInstanceCreateInput)) as Awaited<
-                ReturnType<ExtensionInstanceCapability["create"]>
+                ReturnType<ExtensionInstanceManageCapability["create"]>
             >,
         createSchema: async () =>
-            (await requestCapability("instances.createSchema")) as Awaited<
-                ReturnType<ExtensionInstanceCapability["createSchema"]>
+            (await requestCapability("instanceManage.createSchema")) as Awaited<
+                ReturnType<ExtensionInstanceManageCapability["createSchema"]>
             >,
         delete: async (name: string) => {
-            await requestCapability("instances.delete", nameInput(name));
+            await requestCapability("instanceManage.delete", nameInput(name));
         },
         disable: async (name: string) => {
-            await requestCapability("instances.disable", nameInput(name));
+            await requestCapability("instanceManage.disable", nameInput(name));
         },
         enable: async (name: string) => {
-            await requestCapability("instances.enable", nameInput(name));
+            await requestCapability("instanceManage.enable", nameInput(name));
         },
+        start: async (name: string) =>
+            (await requestCapability(
+                "instanceManage.start",
+                nameInput(name),
+            )) as Awaited<ReturnType<ExtensionInstanceManageCapability["start"]>>,
+        stop: async (name: string) =>
+            (await requestCapability(
+                "instanceManage.stop",
+                nameInput(name),
+            )) as Awaited<ReturnType<ExtensionInstanceManageCapability["stop"]>>,
+        validateCreate: async (draft: ExtensionJsonValue) =>
+            (await requestCapability("instanceManage.validateCreate", {
+                draft,
+            } satisfies SandboxInstanceCreateInput)) as Awaited<
+                ReturnType<ExtensionInstanceManageCapability["validateCreate"]>
+            >,
+    });
+}
+
+function createInstanceObserveCapability(): ExtensionInstanceObserveCapability {
+    const nameInput = (name: string): SandboxInstanceNameInput => ({ name });
+    return Object.freeze({
         list: async () =>
-            (await requestCapability("instances.list")) as Awaited<
-                ReturnType<ExtensionInstanceCapability["list"]>
+            (await requestCapability("instanceObserve.list")) as Awaited<
+                ReturnType<ExtensionInstanceObserveCapability["list"]>
             >,
         readLogs: async (name: string, query?: ExtensionInstanceLogQuery) =>
-            (await requestCapability("instances.readLogs", {
+            (await requestCapability("instanceObserve.readLogs", {
                 name,
                 ...(query === undefined ? {} : { query: { ...query } }),
             } satisfies SandboxInstanceReadLogsInput)) as Awaited<
-                ReturnType<ExtensionInstanceCapability["readLogs"]>
+                ReturnType<ExtensionInstanceObserveCapability["readLogs"]>
             >,
         refresh: async (name: string) =>
             (await requestCapability(
-                "instances.refresh",
+                "instanceObserve.refresh",
                 nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceCapability["refresh"]>>,
+            )) as Awaited<
+                ReturnType<ExtensionInstanceObserveCapability["refresh"]>
+            >,
         snapshot: async (name: string) =>
             (await requestCapability(
-                "instances.snapshot",
+                "instanceObserve.snapshot",
                 nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceCapability["snapshot"]>>,
-        start: async (name: string) =>
-            (await requestCapability(
-                "instances.start",
-                nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceCapability["start"]>>,
-        stop: async (name: string) =>
-            (await requestCapability(
-                "instances.stop",
-                nameInput(name),
-            )) as Awaited<ReturnType<ExtensionInstanceCapability["stop"]>>,
-        validateCreate: async (draft: ExtensionJsonValue) =>
-            (await requestCapability("instances.validateCreate", {
-                draft,
-            } satisfies SandboxInstanceCreateInput)) as Awaited<
-                ReturnType<ExtensionInstanceCapability["validateCreate"]>
+            )) as Awaited<
+                ReturnType<ExtensionInstanceObserveCapability["snapshot"]>
             >,
         watchEvents: async (
             name: string,
@@ -565,7 +578,7 @@ function createInstanceCapability(): ExtensionInstanceCapability {
             let deliveryFailure: Error | undefined;
             try {
                 await requestCapability(
-                    "instances.watchEvents",
+                    "instanceObserve.watchEvents",
                     {
                         ...(watch.eventTypes === undefined
                             ? {}
@@ -604,41 +617,30 @@ function createInstanceCapability(): ExtensionInstanceCapability {
     });
 }
 
-function createInstanceRuntimeCapability(): ExtensionInstanceRuntimeCapability {
+function createInstanceEventPublishCapability(): ExtensionInstanceEventPublishCapability {
     return Object.freeze({
         appendEvent: async (
             name: string,
             type: string,
             data?: ExtensionJsonValue,
         ) => {
-            await requestCapability("instanceRuntime.appendEvent", {
+            await requestCapability("instanceEventPublish.appendEvent", {
                 ...(data === undefined ? {} : { data }),
                 name,
                 type,
-            } satisfies SandboxInstanceRuntimeAppendEventInput);
+            } satisfies SandboxInstanceEventPublishInput);
         },
-        list: async () =>
-            (await requestCapability("instanceRuntime.list")) as Awaited<
-                ReturnType<ExtensionInstanceRuntimeCapability["list"]>
-            >,
-        readToolCalls: async (name: string, query?: ExtensionJsonValue) =>
-            (await requestCapability("instanceRuntime.readToolCalls", {
-                name,
-                ...(query === undefined ? {} : { query }),
-            } satisfies SandboxInstanceRuntimeReadToolCallsInput)) as Awaited<
-                ReturnType<ExtensionInstanceRuntimeCapability["readToolCalls"]>
-            >,
     });
 }
 
-function createContextRuntimeCapability(): ExtensionContextRuntimeCapability {
+function createContextObserveCapability(): ExtensionContextObserveCapability {
     return Object.freeze({
-        list: async (query?: ExtensionContextRuntimeQuery) =>
+        list: async (query?: ExtensionContextQuery) =>
             (await requestCapability(
-                "contextRuntime.list",
-                query as SandboxContextRuntimeListInput | undefined,
+                "contextObserve.list",
+                query as SandboxContextObserveListInput | undefined,
             )) as Awaited<
-                ReturnType<ExtensionContextRuntimeCapability["list"]>
+                ReturnType<ExtensionContextObserveCapability["list"]>
             >,
     });
 }
@@ -783,7 +785,7 @@ function createProcessCapability(): ExtensionProcessCapability {
 }
 
 function createWorkerCapability(
-    capability: "delegatedWorkers" | "workers",
+    capability: "workerDelegate" | "workerExecute",
 ): ExtensionWorkerCapability {
     return Object.freeze({
         openSession: async (

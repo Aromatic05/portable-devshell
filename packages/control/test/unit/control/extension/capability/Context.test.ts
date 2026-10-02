@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ExtensionContextRuntimeCapabilityControl } from "../../../../../src/control/extension/generation/capability/Context.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../../../src/control/extension/generation/capability/Context.ts";
 
 const contexts = [
     {
@@ -36,12 +36,18 @@ const contexts = [
     },
 ];
 
-test("Context runtime capability exposes a narrow read-only projection with filters", async () => {
-    const capability = new ExtensionContextRuntimeCapabilityControl({
+test("Context observe capability exposes a narrow read-only projection with filters", async () => {
+    const capability = new ExtensionContextObserveCapabilityControl({
         allowed: true,
         extensionId: "recall",
         listContexts: async () => contexts,
     });
+
+    // Observation is read-only: there is no create/update/delete surface to mutate Context.
+    assert.deepEqual(
+        Object.getOwnPropertyNames(Object.getPrototypeOf(capability)).sort(),
+        ["constructor", "list"],
+    );
 
     assert.deepEqual(await capability.list({ workspace: "/repo/b" }), [
         {
@@ -70,14 +76,23 @@ test("Context runtime capability exposes a narrow read-only projection with filt
         ),
         ["ctx-2"],
     );
+
+    // Host-private fields never cross the observation boundary.
+    const [projected] = await capability.list({ status: "active" });
+    assert.ok(projected);
+    assert.equal("principal" in projected, false);
+    assert.equal("temporaryDirectory" in projected, false);
 });
 
-test("Context runtime capability rejects undeclared access", async () => {
-    const capability = new ExtensionContextRuntimeCapabilityControl({
+test("Context observe capability rejects undeclared access", async () => {
+    const capability = new ExtensionContextObserveCapabilityControl({
         allowed: false,
         extensionId: "example",
         listContexts: async () => contexts,
     });
 
-    await assert.rejects(capability.list(), /did not declare the contextRuntime capability/u);
+    await assert.rejects(
+        capability.list(),
+        /did not declare the context\.observe capability/u,
+    );
 });

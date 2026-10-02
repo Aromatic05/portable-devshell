@@ -27,7 +27,7 @@ function invocation(): CliModelCommandInvocationContext {
 function context(calls: string[]): ExtensionContext {
     return {
         capabilities: {
-            workers: {
+            workerExecute: {
                 async openSession(input): Promise<ExtensionWorkerSession> {
                     calls.push(`open:${input.instance}:${input.workspace}`);
                     return session(

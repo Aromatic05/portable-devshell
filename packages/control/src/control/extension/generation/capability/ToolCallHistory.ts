@@ -74,7 +74,7 @@ export class ExtensionToolCallHistoryCapabilityControl
     #assertAllowed(): void {
         if (this.#allowed) return;
         throw new Error(
-            `Extension ${this.#extensionId} did not declare the toolCallHistory capability.`,
+            `Extension ${this.#extensionId} did not declare the toolcall.history capability.`,
         );
     }
 }

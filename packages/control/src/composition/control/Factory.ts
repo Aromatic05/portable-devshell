@@ -4,8 +4,11 @@ import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/Host.js";
 import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
 import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
-import { ExtensionInstanceCapabilityControl } from "../../control/extension/generation/capability/Instance.js";
-import { ExtensionContextRuntimeCapabilityControl } from "../../control/extension/generation/capability/Context.js";
+import {
+    ExtensionInstanceManageCapabilityControl,
+    ExtensionInstanceObserveCapabilityControl,
+} from "../../control/extension/generation/capability/Instance.js";
+import { ExtensionContextObserveCapabilityControl } from "../../control/extension/generation/capability/Context.js";
 import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Execution.js";
 import {
     readBuiltinExtensionSources,
@@ -111,17 +114,26 @@ export class ControlRuntimeFactory {
                             updateCoreConfig: async (patch) =>
                                 await mcp.configEditor.updateCorePaths(patch),
                         }),
-                    contextFactory: ({ allowed, extensionId }) =>
-                        new ExtensionContextRuntimeCapabilityControl({
+                    contextObserveFactory: ({ allowed, extensionId }) =>
+                        new ExtensionContextObserveCapabilityControl({
                             allowed,
                             extensionId,
                             listContexts: async () => await mcp.listContexts(),
                         }),
-                    instanceFactory: ({ allowed, extensionId }) =>
-                        new ExtensionInstanceCapabilityControl({
-                            allowed,
+                    instanceFactory: ({
+                        extensionId,
+                        manageAllowed,
+                        observeAllowed,
+                    }) => ({
+                        manage: new ExtensionInstanceManageCapabilityControl({
+                            allowed: manageAllowed,
                             create: mcp.instanceCreate,
                             editor: mcp.configEditor,
+                            extensionId,
+                            instances: options.state.instances,
+                        }),
+                        observe: new ExtensionInstanceObserveCapabilityControl({
+                            allowed: observeAllowed,
                             extensionId,
                             instances: options.state.instances,
                             listConfigured: () =>
@@ -135,6 +147,7 @@ export class ControlRuntimeFactory {
                                     })),
                             subscriptions: runtimeSubscriptions,
                         }),
+                    }),
                     instances: options.state.instances,
                     paths: extensionPaths,
                     points: extensionPoints,

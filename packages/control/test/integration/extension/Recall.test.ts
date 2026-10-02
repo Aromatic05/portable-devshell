@@ -12,7 +12,7 @@ import {
 
 import { createControlExtensionPointRegistry } from "../../../src/composition/Extension.ts";
 import { CliExtensionCommandService } from "../../../src/control/extension/cli/command/Service.ts";
-import { ExtensionContextRuntimeCapabilityControl } from "../../../src/control/extension/generation/capability/Context.ts";
+import { ExtensionContextObserveCapabilityControl } from "../../../src/control/extension/generation/capability/Context.ts";
 import { ExtensionLoader } from "../../../src/control/extension/generation/discovery/Loader.ts";
 import { ExtensionHost } from "../../../src/control/extension/Host.ts";
 import { ExtensionInstallService } from "../../../src/control/extension/install/Service.ts";
@@ -92,8 +92,8 @@ test("builtin Recall reads real SQLite ToolCall audit with Control provenance th
     });
     const host = new ExtensionHost({
         loader: new ExtensionLoader({
-            contextFactory: ({ allowed, extensionId }) =>
-                new ExtensionContextRuntimeCapabilityControl({
+            contextObserveFactory: ({ allowed, extensionId }) =>
+                new ExtensionContextObserveCapabilityControl({
                     allowed,
                     extensionId,
                     listContexts: async () => [],

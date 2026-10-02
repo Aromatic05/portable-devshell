@@ -47,6 +47,12 @@ test("ToolCall history capability is read-only, typed, bounded, and provenance-d
         },
     });
 
+    // History is read-only: there is no append/mutate surface for audit records.
+    assert.deepEqual(
+        Object.getOwnPropertyNames(Object.getPrototypeOf(capability)).sort(),
+        ["constructor", "listInstances", "read"],
+    );
+
     assert.deepEqual(await capability.listInstances(), ["demo-local"]);
     assert.deepEqual(
         await capability.read("demo-local", {
@@ -92,6 +98,6 @@ test("ToolCall history capability rejects undeclared access", async () => {
 
     await assert.rejects(
         capability.listInstances(),
-        /did not declare the toolCallHistory capability/u,
+        /did not declare the toolcall\.history capability/u,
     );
 });

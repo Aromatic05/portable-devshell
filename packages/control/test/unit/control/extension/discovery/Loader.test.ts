@@ -154,7 +154,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     const harness = await createHarness();
     t.after(harness.cleanup);
     const { id, generation } = await harness.writeGeneration({
-        capabilities: ["workers"],
+        capabilities: ["worker.execute"],
         extensions: {
             "cli.native-commands": [{ id: "example", title: "Example" }],
         },
@@ -192,7 +192,7 @@ test("Extension loader returns a ready invisible candidate with narrow immutable
     assert.equal(seenContext?.config, undefined);
     assert.equal(seenContext?.capabilities.assets, undefined);
     assert.equal(seenContext?.capabilities.processes, undefined);
-    assert.ok(seenContext?.capabilities.workers);
+    assert.ok(seenContext?.capabilities.workerExecute);
     assert.equal(
         seenContext?.paths.codeDirectory,
         harness.paths.generationDirectory(id, generation),
@@ -392,12 +392,14 @@ test("Extension loader rejects manifest identity mismatch", async (t) => {
 test("Extension loader rolls back Worker resources and runtime directory when activate throws", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const target = await harness.writeGeneration({ capabilities: ["workers"] });
+    const target = await harness.writeGeneration({
+        capabilities: ["worker.execute"],
+    });
     const events: string[] = [];
     const loader = new ExtensionLoader({
         importer: async () => ({
             async activate(context: ExtensionContext) {
-                await context.capabilities.workers!.openSession({
+                await context.capabilities.workerExecute!.openSession({
                     workspace: "/repo",
                 });
                 throw new Error("activation failed");
@@ -452,7 +454,9 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
 test("Extension loader retires Extension-owned state with host-managed Worker resources", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const target = await harness.writeGeneration({ capabilities: ["workers"] });
+    const target = await harness.writeGeneration({
+        capabilities: ["worker.execute"],
+    });
     const events: string[] = [];
     const loader = new ExtensionLoader({
         importer: async () => ({
@@ -478,7 +482,9 @@ test("Extension loader retires Extension-owned state with host-managed Worker re
 test("Extension loader retires Extension-owned Context state without touching Worker lifetime", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
-    const target = await harness.writeGeneration({ capabilities: ["workers"] });
+    const target = await harness.writeGeneration({
+        capabilities: ["worker.execute"],
+    });
     const events: string[] = [];
     const loader = new ExtensionLoader({
         importer: async () => ({

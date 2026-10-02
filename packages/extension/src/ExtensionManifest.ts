@@ -6,19 +6,20 @@ import type {
     ExtensionPointDeclaration,
 } from "./ExtensionApi.js";
 
-export const EXTENSION_API_VERSION = "4.4.0";
+export const EXTENSION_API_VERSION = "5.0.0";
 export const EXTENSION_MANIFEST_SCHEMA_VERSION = "1.1.0";
 
 const capabilities = new Set<ExtensionCapability>([
     "artifacts",
     "assets",
-    "contextRuntime",
-    "delegatedWorkers",
-    "instanceRuntime",
-    "instances",
+    "context.observe",
+    "instance.events.publish",
+    "instance.manage",
+    "instance.observe",
     "processes",
-    "toolCallHistory",
-    "workers",
+    "toolcall.history",
+    "worker.delegate",
+    "worker.execute",
 ]);
 
 /**

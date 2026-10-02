@@ -38,10 +38,10 @@ export async function executeSecretModelCommand(
     if (argv[0] !== "scan")
         throw usageError(`Unknown secret command: ${argv[0]}`);
     const parsed = parseArgs(argv.slice(1));
-    const workers = extension.capabilities.workers;
+    const workers = extension.capabilities.workerExecute;
     if (workers === undefined)
         throw new Error(
-            "Secret Extension model commands require the workers capability.",
+            "Secret Extension model commands require the workerExecute capability.",
         );
     const session = await workers.openSession({
         instance: invocation.instance,

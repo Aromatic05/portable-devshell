@@ -17,10 +17,12 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
+import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
-    ExtensionInstanceCapability,
-    ExtensionInstanceRuntimeCapability,
+    ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
+    ExtensionInstanceSnapshot,
 } from "@portable-devshell/extension/instance";
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type {
@@ -98,7 +100,7 @@ export function activate(context) {
             return { kind: "json", value: { bundles: (await context.capabilities.assets.listBundles()).length } };
         }
         if (argv[0] === "tool") {
-            const session = await context.capabilities.workers.openSession({ workspace: "/workspace" });
+            const session = await context.capabilities.workerExecute.openSession({ workspace: "/workspace" });
             const progress = [];
             const result = await session.callTool("echo", { text: "hello" }, {
                 operationId: "sandbox-op",
@@ -114,8 +116,8 @@ export function activate(context) {
 `,
         {
             assets: fakeAssets(),
-            capabilities: ["assets", "workers"],
-            worker: fakeWorker(calls),
+            capabilities: ["assets", "worker.execute"],
+            workerExecute: fakeWorker(calls),
         },
     );
 
@@ -445,17 +447,23 @@ export function activate(context) {
     assert.deepEqual(calls, ["remote-test"]);
 });
 
-test("Extension sandbox bridges declared Artifact and Instance management capabilities", async (t) => {
-    const calls: string[] = [];
+test("Extension sandbox bridges Artifact storage and Instance observe, manage, and event capabilities independently", async (t) => {
+    const artifactCalls: string[] = [];
+    const observeCalls: string[] = [];
+    const manageCalls: string[] = [];
+    const eventCalls: string[] = [];
     const sandbox = await setupSandbox(
         t,
-        "extension-sandbox-management-capabilities",
+        "extension-sandbox-instance-capabilities",
         `
 export function activate(context) {
     context.register({ id: "cli.native-commands" }, "test", async () => {
-        const instances = await context.capabilities.instances.list();
+        const instances = await context.capabilities.instanceObserve.list();
         const shares = await context.capabilities.artifacts.listShares();
-        const snapshot = await context.capabilities.instances.snapshot("local-test");
+        const snapshot = await context.capabilities.instanceObserve.snapshot("local-test");
+        await context.capabilities.instanceManage.enable("local-test");
+        await context.capabilities.instanceManage.start("local-test");
+        await context.capabilities.instanceEventPublish.appendEvent("local-test", "context.message.queued", { ctxId: "ctx-1" });
         return { kind: "json", value: {
             instanceNames: instances.map((value) => value.name),
             shareIds: shares.map((value) => value.shareId),
@@ -465,34 +473,83 @@ export function activate(context) {
 }
 `,
         {
-            artifacts: fakeArtifacts(calls),
-            capabilities: ["artifacts", "instances"],
-            instances: fakeInstances(calls),
+            artifacts: fakeArtifacts(artifactCalls),
+            capabilities: [
+                "artifacts",
+                "instance.events.publish",
+                "instance.manage",
+                "instance.observe",
+            ],
+            instanceEventPublish: fakeInstanceEventPublish(eventCalls),
+            instanceManage: fakeInstanceManage(manageCalls),
+            instanceObserve: fakeInstanceObserve(observeCalls),
         },
     );
 
     await sandbox.start();
-    assert.deepEqual(await cliJson(sandbox, [], "management-capabilities"), {
+    assert.deepEqual(await cliJson(sandbox, [], "instance-capabilities"), {
         instanceNames: ["local-test"],
         shareIds: ["share-1"],
         status: "ready",
     });
-    assert.deepEqual(calls, [
-        "instances.list",
-        "artifacts.listShares",
-        "instances.snapshot:local-test",
+    assert.deepEqual(observeCalls, [
+        "instanceObserve.list",
+        "instanceObserve.snapshot:local-test",
     ]);
+    assert.deepEqual(manageCalls, [
+        "instanceManage.enable:local-test",
+        "instanceManage.start:local-test",
+    ]);
+    assert.deepEqual(eventCalls, [
+        "instanceEventPublish.appendEvent:local-test:context.message.queued",
+    ]);
+    assert.deepEqual(artifactCalls, ["artifacts.listShares"]);
 });
 
-test("Extension sandbox bridges declared Context runtime discovery", async (t) => {
-    const calls: string[] = [];
+test("Extension sandbox does not bridge undeclared Instance capabilities", async (t) => {
+    const observeCalls: string[] = [];
     const sandbox = await setupSandbox(
         t,
-        "extension-sandbox-context-runtime",
+        "extension-sandbox-undeclared-instance-capabilities",
         `
 export function activate(context) {
     context.register({ id: "cli.native-commands" }, "test", async () => {
-        const contexts = await context.capabilities.contextRuntime.list({
+        const records = await context.capabilities.instanceObserve.list();
+        return { kind: "json", value: {
+            hasEventPublish: context.capabilities.instanceEventPublish !== undefined,
+            hasManage: context.capabilities.instanceManage !== undefined,
+            names: records.map((value) => value.name)
+        } };
+    });
+}
+`,
+        {
+            capabilities: ["instance.observe"],
+            instanceObserve: fakeInstanceObserve(observeCalls),
+        },
+    );
+
+    await sandbox.start();
+    assert.deepEqual(
+        await cliJson(sandbox, [], "undeclared-instance-capabilities"),
+        {
+            hasEventPublish: false,
+            hasManage: false,
+            names: ["local-test"],
+        },
+    );
+    assert.deepEqual(observeCalls, ["instanceObserve.list"]);
+});
+
+test("Extension sandbox bridges declared Context observe discovery", async (t) => {
+    const calls: string[] = [];
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-context-observe",
+        `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const contexts = await context.capabilities.contextObserve.list({
             instance: "local-test",
             workspace: "/repo"
         });
@@ -504,17 +561,17 @@ export function activate(context) {
 }
 `,
         {
-            capabilities: ["contextRuntime"],
-            contextRuntime: fakeContextRuntime(calls),
+            capabilities: ["context.observe"],
+            contextObserve: fakeContextObserve(calls),
         },
     );
 
     await sandbox.start();
-    assert.deepEqual(await cliJson(sandbox, [], "context-runtime"), [
+    assert.deepEqual(await cliJson(sandbox, [], "context-observe"), [
         { ctxId: "ctx-test", workspace: "/repo" },
     ]);
     assert.deepEqual(calls, [
-        'contextRuntime.list:{"instance":"local-test","workspace":"/repo"}',
+        'contextObserve.list:{"instance":"local-test","workspace":"/repo"}',
     ]);
 });
 
@@ -539,7 +596,7 @@ export function activate(context) {
 }
 `,
         {
-            capabilities: ["toolCallHistory"],
+            capabilities: ["toolcall.history"],
             toolCallHistory: fakeToolCallHistory(calls),
         },
     );
@@ -858,7 +915,7 @@ test("Extension sandbox reports runtime faults even when Extension code handles 
 export function activate(context) {
     process.on("uncaughtException", () => {});
     context.register({ id: "cli.native-commands" }, "test", async () => {
-        const session = await context.capabilities.workers.openSession({ workspace: "/workspace" });
+        const session = await context.capabilities.workerExecute.openSession({ workspace: "/workspace" });
         await session.callTool("echo", { text: "hello" }, {
             onProgress: () => { throw new Error("runtime fault escaped handler"); }
         });
@@ -867,9 +924,9 @@ export function activate(context) {
 }
 `,
         {
-            capabilities: ["workers"],
+            capabilities: ["worker.execute"],
             onFault: (error) => faults.push(error),
-            worker: fakeWorker([]),
+            workerExecute: fakeWorker([]),
         },
     );
     await sandbox.start();
@@ -940,7 +997,7 @@ test("Extension progress callback failure faults only the sandbox worker", async
 process.on("uncaughtException", () => {});
 export function activate(context) {
     context.register({ id: "cli.native-commands" }, "test", async () => {
-        const session = await context.capabilities.workers.openSession({ workspace: "/workspace" });
+        const session = await context.capabilities.workerExecute.openSession({ workspace: "/workspace" });
         await session.callTool("echo", { text: "hello" }, {
             onProgress: () => { throw new Error("progress exploded"); }
         });
@@ -949,9 +1006,9 @@ export function activate(context) {
 }
 `,
         {
-            capabilities: ["workers"],
+            capabilities: ["worker.execute"],
             onFault: (error) => faults.push(error),
-            worker: fakeWorker([]),
+            workerExecute: fakeWorker([]),
         },
     );
     await sandbox.start();
@@ -1215,15 +1272,15 @@ test("Extension sandbox closes a Worker session that finishes opening after the 
         `
 export function activate(context) {
     context.register({ id: "cli.native-commands" }, "test", async () => {
-        await context.capabilities.workers.openSession({ workspace: "/race" });
+        await context.capabilities.workerExecute.openSession({ workspace: "/race" });
         return { kind: "text", text: "opened" };
     });
 }
 `,
         {
-            capabilities: ["workers"],
+            capabilities: ["worker.execute"],
             invocationAbortGraceMs: 50,
-            worker,
+            workerExecute: worker,
         },
     );
     t.after(() => releaseOpen());
@@ -1441,20 +1498,21 @@ function createSandbox(options: {
     capabilities?: readonly ExtensionCapability[];
     codeDirectory: string;
     config?: ExtensionConfig;
-    contextRuntime?: ExtensionContextRuntimeCapability;
+    contextObserve?: ExtensionContextObserveCapability;
     entryPath: string;
     externalMemoryLimitMb?: number;
     hostCallbackTimeoutMs?: number;
     invocationAbortGraceMs?: number;
-    instances?: ExtensionInstanceCapability;
-    instanceRuntime?: ExtensionInstanceRuntimeCapability;
+    instanceEventPublish?: ExtensionInstanceEventPublishCapability;
+    instanceManage?: ExtensionInstanceManageCapability;
+    instanceObserve?: ExtensionInstanceObserveCapability;
     memoryWatchIntervalMs?: number;
     onFault?: (error: Error) => void;
     processes?: ExtensionProcessCapability;
     resourceLimits?: ExtensionSandboxHostOptions["resourceLimits"];
     toolCallHistory?: ToolCallHistoryCapability;
-    delegatedWorker?: ExtensionWorkerCapability;
-    worker?: ExtensionWorkerCapability;
+    workerDelegate?: ExtensionWorkerCapability;
+    workerExecute?: ExtensionWorkerCapability;
 }): ExtensionSandboxHost {
     const root = join(options.codeDirectory, "..", "runtime");
     return new ExtensionSandboxHost({
@@ -1475,7 +1533,7 @@ function createSandbox(options: {
             },
             version: "1.0.0",
         },
-        contextRuntime: options.contextRuntime ?? fakeContextRuntime([]),
+        contextObserve: options.contextObserve ?? fakeContextObserve([]),
         entryUrl: pathToFileURL(options.entryPath).href,
         ...(options.externalMemoryLimitMb === undefined
             ? {}
@@ -1486,8 +1544,10 @@ function createSandbox(options: {
         ...(options.invocationAbortGraceMs === undefined
             ? {}
             : { invocationAbortGraceMs: options.invocationAbortGraceMs }),
-        instances: options.instances ?? fakeInstances([]),
-        instanceRuntime: options.instanceRuntime ?? fakeInstanceRuntime([]),
+        instanceEventPublish:
+            options.instanceEventPublish ?? fakeInstanceEventPublish([]),
+        instanceManage: options.instanceManage ?? fakeInstanceManage([]),
+        instanceObserve: options.instanceObserve ?? fakeInstanceObserve([]),
         logger: noopLogger,
         ...(options.memoryWatchIntervalMs === undefined
             ? {}
@@ -1497,9 +1557,9 @@ function createSandbox(options: {
         ...(options.resourceLimits === undefined
             ? {}
             : { resourceLimits: options.resourceLimits }),
-        delegatedWorker: options.delegatedWorker ?? fakeWorker([]),
         toolCallHistory: options.toolCallHistory ?? fakeToolCallHistory([]),
-        worker: options.worker ?? fakeWorker([]),
+        workerDelegate: options.workerDelegate ?? fakeWorker([]),
+        workerExecute: options.workerExecute ?? fakeWorker([]),
     });
 }
 
@@ -1552,15 +1612,54 @@ function fakeArtifacts(calls: string[]): ExtensionArtifactCapability {
     };
 }
 
-function fakeInstances(calls: string[]): ExtensionInstanceCapability {
-    const snapshot = {
-        connectionState: "connected" as const,
-        daemonState: "running" as const,
+function fakeInstanceSnapshot(): ExtensionInstanceSnapshot {
+    return {
+        connectionState: "connected",
+        daemonState: "running",
         lastSeq: 4,
         name: "local-test",
         ready: true,
-        status: "ready" as const,
+        status: "ready",
     };
+}
+
+function fakeInstanceObserve(
+    calls: string[],
+): ExtensionInstanceObserveCapability {
+    const snapshot = fakeInstanceSnapshot();
+    return {
+        async list() {
+            calls.push("instanceObserve.list");
+            return [
+                {
+                    enabled: true,
+                    mcpEnabled: true,
+                    name: "local-test",
+                    provider: "local" as const,
+                    snapshot,
+                },
+            ];
+        },
+        async readLogs(name) {
+            calls.push(`instanceObserve.readLogs:${name}`);
+            return [];
+        },
+        async refresh(name) {
+            calls.push(`instanceObserve.refresh:${name}`);
+            return snapshot;
+        },
+        async snapshot(name) {
+            calls.push(`instanceObserve.snapshot:${name}`);
+            return snapshot;
+        },
+        async watchEvents() {},
+    };
+}
+
+function fakeInstanceManage(
+    calls: string[],
+): ExtensionInstanceManageCapability {
+    const snapshot = fakeInstanceSnapshot();
     return {
         async create() {
             throw new Error("unused fake Instance create");
@@ -1569,77 +1668,44 @@ function fakeInstances(calls: string[]): ExtensionInstanceCapability {
             return {};
         },
         async delete(name) {
-            calls.push(`instances.delete:${name}`);
+            calls.push(`instanceManage.delete:${name}`);
         },
         async disable(name) {
-            calls.push(`instances.disable:${name}`);
+            calls.push(`instanceManage.disable:${name}`);
         },
         async enable(name) {
-            calls.push(`instances.enable:${name}`);
-        },
-        async list() {
-            calls.push("instances.list");
-            return [
-                {
-                    enabled: true,
-                    mcpEnabled: true,
-                    name: "local-test",
-                    provider: "local",
-                    snapshot,
-                },
-            ];
-        },
-        async readLogs(name) {
-            calls.push(`instances.readLogs:${name}`);
-            return [];
-        },
-        async refresh(name) {
-            calls.push(`instances.refresh:${name}`);
-            return snapshot;
-        },
-        async snapshot(name) {
-            calls.push(`instances.snapshot:${name}`);
-            return snapshot;
+            calls.push(`instanceManage.enable:${name}`);
         },
         async start(name) {
-            calls.push(`instances.start:${name}`);
+            calls.push(`instanceManage.start:${name}`);
             return snapshot;
         },
         async stop(name) {
-            calls.push(`instances.stop:${name}`);
+            calls.push(`instanceManage.stop:${name}`);
             return snapshot;
         },
         async validateCreate() {
             return {};
         },
-        async watchEvents() {},
     };
 }
 
-function fakeInstanceRuntime(
+function fakeInstanceEventPublish(
     calls: string[],
-): ExtensionInstanceRuntimeCapability {
+): ExtensionInstanceEventPublishCapability {
     return {
         async appendEvent(name, type) {
-            calls.push(`instanceRuntime.appendEvent:${name}:${type}`);
-        },
-        async list() {
-            calls.push("instanceRuntime.list");
-            return [{ enabled: true, name: "local-test" }];
-        },
-        async readToolCalls(name) {
-            calls.push(`instanceRuntime.readToolCalls:${name}`);
-            return [];
+            calls.push(`instanceEventPublish.appendEvent:${name}:${type}`);
         },
     };
 }
 
-function fakeContextRuntime(
+function fakeContextObserve(
     calls: string[],
-): ExtensionContextRuntimeCapability {
+): ExtensionContextObserveCapability {
     return {
         async list(query) {
-            calls.push(`contextRuntime.list:${JSON.stringify(query ?? {})}`);
+            calls.push(`contextObserve.list:${JSON.stringify(query ?? {})}`);
             return [
                 {
                     createdAt: "2026-10-01T00:00:00.000Z",

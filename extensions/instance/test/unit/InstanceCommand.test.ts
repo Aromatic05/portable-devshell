@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionInstanceCapability } from "@portable-devshell/extension/instance";
+import type { ExtensionInstanceObserveCapability } from "@portable-devshell/extension/instance";
 import type {
     CliModelCommandInvocationContext,
     CliModelInstanceReference,
@@ -20,17 +20,8 @@ function snapshot(name: string) {
     };
 }
 
-function fakeCapability(): ExtensionInstanceCapability {
+function fakeCapability(): ExtensionInstanceObserveCapability {
     return {
-        async create() {
-            throw new Error("unused");
-        },
-        async createSchema() {
-            return {};
-        },
-        async delete() {},
-        async disable() {},
-        async enable() {},
         async list() {
             return [
                 {
@@ -83,15 +74,6 @@ function fakeCapability(): ExtensionInstanceCapability {
         },
         async snapshot(name) {
             return snapshot(name);
-        },
-        async start(name) {
-            return snapshot(name);
-        },
-        async stop(name) {
-            return snapshot(name);
-        },
-        async validateCreate() {
-            return {};
         },
         async watchEvents(name, watch) {
             assert.deepEqual(watch.eventTypes, ["log.appended"]);

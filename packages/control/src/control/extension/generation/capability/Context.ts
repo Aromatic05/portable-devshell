@@ -1,13 +1,13 @@
 import type {
-    ExtensionContextRuntimeCapability,
-    ExtensionContextRuntimeQuery,
-    ExtensionContextRuntimeRecord,
-    ExtensionContextRuntimeStatus,
+    ExtensionContextObserveCapability,
+    ExtensionContextQuery,
+    ExtensionContextRecord,
+    ExtensionContextStatus,
 } from "@portable-devshell/extension/context";
 import type { McpContextRecord } from "@portable-devshell/shared";
 
-export class ExtensionContextRuntimeCapabilityControl
-    implements ExtensionContextRuntimeCapability
+export class ExtensionContextObserveCapabilityControl
+    implements ExtensionContextObserveCapability
 {
     readonly #allowed: boolean;
     readonly #extensionId: string;
@@ -24,29 +24,29 @@ export class ExtensionContextRuntimeCapabilityControl
     }
 
     async list(
-        query: ExtensionContextRuntimeQuery = {},
-    ): Promise<readonly ExtensionContextRuntimeRecord[]> {
+        query: ExtensionContextQuery = {},
+    ): Promise<readonly ExtensionContextRecord[]> {
         this.#assertAllowed();
         const normalized = readQuery(query);
         return (await this.#listContexts())
             .filter((record) => matches(record, normalized))
-            .map(toRuntimeRecord);
+            .map(toContextRecord);
     }
 
     #assertAllowed(): void {
         if (this.#allowed) return;
         throw new Error(
-            `Extension ${this.#extensionId} did not declare the contextRuntime capability.`,
+            `Extension ${this.#extensionId} did not declare the context.observe capability.`,
         );
     }
 }
 
 function readQuery(
-    query: ExtensionContextRuntimeQuery,
-): ExtensionContextRuntimeQuery {
+    query: ExtensionContextQuery,
+): ExtensionContextQuery {
     if (typeof query !== "object" || query === null || Array.isArray(query)) {
         throw new TypeError(
-            "Extension contextRuntime list query must be an object.",
+            "Extension context.observe list query must be an object.",
         );
     }
     if (query.instance !== undefined) requireString(query.instance, "instance");
@@ -54,7 +54,7 @@ function readQuery(
         requireString(query.workspace, "workspace");
     if (query.status !== undefined && !isContextStatus(query.status)) {
         throw new TypeError(
-            "Extension contextRuntime list status must be active, expired, or disabled.",
+            "Extension context.observe list status must be active, expired, or disabled.",
         );
     }
     return query;
@@ -63,18 +63,18 @@ function readQuery(
 function requireString(value: string, field: string): void {
     if (typeof value !== "string" || value.trim().length === 0) {
         throw new TypeError(
-            `Extension contextRuntime list ${field} must be a non-empty string.`,
+            `Extension context.observe list ${field} must be a non-empty string.`,
         );
     }
 }
 
-function isContextStatus(value: unknown): value is ExtensionContextRuntimeStatus {
+function isContextStatus(value: unknown): value is ExtensionContextStatus {
     return value === "active" || value === "expired" || value === "disabled";
 }
 
 function matches(
     record: McpContextRecord,
-    query: ExtensionContextRuntimeQuery,
+    query: ExtensionContextQuery,
 ): boolean {
     if (query.status !== undefined && record.status !== query.status) return false;
     if (
@@ -98,9 +98,7 @@ function matches(
     return true;
 }
 
-function toRuntimeRecord(
-    record: McpContextRecord,
-): ExtensionContextRuntimeRecord {
+function toContextRecord(record: McpContextRecord): ExtensionContextRecord {
     return {
         createdAt: record.createdAt,
         ctxId: record.ctxId,

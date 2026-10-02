@@ -15,7 +15,7 @@ import type {
     ExtensionArtifactShareInput,
     ExtensionArtifactTransferInput,
 } from "@portable-devshell/extension/artifact";
-import type { ExtensionContextRuntimeQuery } from "@portable-devshell/extension/context";
+import type { ExtensionContextQuery } from "@portable-devshell/extension/context";
 import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
 import type { ToolCallHistoryQuery } from "@portable-devshell/extension/toolcall";
 import {
@@ -102,34 +102,32 @@ export type ExtensionSandboxCapabilityOperation =
     | "assets.resolveBundle"
     | "config.get"
     | "config.update"
-    | "contextRuntime.list"
-    | "instances.create"
-    | "instances.createSchema"
-    | "instances.delete"
-    | "instances.disable"
-    | "instances.enable"
-    | "instances.list"
-    | "instances.readLogs"
-    | "instances.refresh"
-    | "instances.snapshot"
-    | "instances.start"
-    | "instances.stop"
-    | "instances.validateCreate"
-    | "instances.watchEvents"
-    | "instanceRuntime.appendEvent"
-    | "instanceRuntime.list"
-    | "instanceRuntime.readToolCalls"
+    | "contextObserve.list"
+    | "instanceEventPublish.appendEvent"
+    | "instanceManage.create"
+    | "instanceManage.createSchema"
+    | "instanceManage.delete"
+    | "instanceManage.disable"
+    | "instanceManage.enable"
+    | "instanceManage.start"
+    | "instanceManage.stop"
+    | "instanceManage.validateCreate"
+    | "instanceObserve.list"
+    | "instanceObserve.readLogs"
+    | "instanceObserve.refresh"
+    | "instanceObserve.snapshot"
+    | "instanceObserve.watchEvents"
     | "toolCallHistory.listInstances"
     | "toolCallHistory.read"
     | "processes.send"
     | "processes.start"
     | "processes.terminate"
-    | "delegatedWorkers.callTool"
-    | "delegatedWorkers.closeSession"
-    | "delegatedWorkers.openSession"
-    | "workers.callTool"
-    | "workers.closeSession"
-    | "workers.openSession";
+    | "workerDelegate.callTool"
+    | "workerDelegate.closeSession"
+    | "workerDelegate.openSession"
+    | "workerExecute.callTool"
+    | "workerExecute.closeSession"
+    | "workerExecute.openSession";
 
 export type ExtensionSandboxInterfaceOperation =
     | "secret.environment"
@@ -313,7 +311,7 @@ export interface SandboxConfigGetInput {
 export type SandboxConfigUpdateInput = Readonly<
     Record<string, ExtensionJsonValue>
 >;
-export type SandboxContextRuntimeListInput = ExtensionContextRuntimeQuery;
+export type SandboxContextObserveListInput = ExtensionContextQuery;
 export interface SandboxInstanceNameInput {
     name: string;
 }
@@ -329,14 +327,10 @@ export interface SandboxInstanceWatchInput {
     fromSeq: number;
     name: string;
 }
-export interface SandboxInstanceRuntimeAppendEventInput {
+export interface SandboxInstanceEventPublishInput {
     data?: ExtensionJsonValue;
     name: string;
     type: string;
-}
-export interface SandboxInstanceRuntimeReadToolCallsInput {
-    name: string;
-    query?: ExtensionJsonValue;
 }
 export interface SandboxToolCallHistoryReadInput {
     instance: string;

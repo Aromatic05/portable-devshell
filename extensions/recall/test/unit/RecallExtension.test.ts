@@ -42,8 +42,8 @@ test("Recall Extension declares only read-only Context and ToolCall history capa
     assert.equal(manifest.id, "recall");
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
-        "contextRuntime",
-        "toolCallHistory",
+        "context.observe",
+        "toolcall.history",
     ]);
 });
 
@@ -218,7 +218,7 @@ test("Recall rejects call limits above the host history bound", async () => {
 function fakeContext(queries: HistoryQuery[]): ExtensionContext {
     return {
         capabilities: {
-            contextRuntime: {
+            contextObserve: {
                 async list(query) {
                     assert.equal(query?.workspace, "/repo");
                     return [

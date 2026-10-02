@@ -1,30 +1,30 @@
-export type ExtensionContextRuntimeStatus = "active" | "expired" | "disabled";
+export type ExtensionContextStatus = "active" | "expired" | "disabled";
 
-export interface ExtensionContextRuntimeEnvironment {
+export interface ExtensionContextEnvironment {
     readonly instance: string;
     readonly workspace?: string;
 }
 
-export interface ExtensionContextRuntimeRecord {
+export interface ExtensionContextRecord {
     readonly createdAt: string;
     readonly ctxId: string;
-    readonly environments: readonly ExtensionContextRuntimeEnvironment[];
+    readonly environments: readonly ExtensionContextEnvironment[];
     readonly expiresAt: string;
     readonly instance: string;
     readonly lastAccessedAt: string;
-    readonly status: ExtensionContextRuntimeStatus;
+    readonly status: ExtensionContextStatus;
     readonly workspace: string;
 }
 
-export interface ExtensionContextRuntimeQuery {
+export interface ExtensionContextQuery {
     readonly instance?: string;
-    readonly status?: ExtensionContextRuntimeStatus;
+    readonly status?: ExtensionContextStatus;
     readonly workspace?: string;
 }
 
 /** Read-only access to host-owned Context discovery state. */
-export interface ExtensionContextRuntimeCapability {
+export interface ExtensionContextObserveCapability {
     list(
-        query?: ExtensionContextRuntimeQuery,
-    ): Promise<readonly ExtensionContextRuntimeRecord[]>;
+        query?: ExtensionContextQuery,
+    ): Promise<readonly ExtensionContextRecord[]>;
 }

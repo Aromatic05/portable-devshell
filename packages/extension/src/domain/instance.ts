@@ -77,44 +77,38 @@ export interface ExtensionInstanceEventWatch {
     signal: AbortSignal;
 }
 
-export interface ExtensionInstanceRuntimeRecord {
-    enabled: boolean;
-    name: string;
-}
-
-/** Narrow per-instance runtime I/O without Instance lifecycle mutation authority. */
-export interface ExtensionInstanceRuntimeCapability {
-    appendEvent(
-        name: string,
-        type: string,
-        data?: ExtensionJsonValue,
-    ): Promise<void>;
-    list(): Promise<readonly ExtensionInstanceRuntimeRecord[]>;
-    readToolCalls(
-        name: string,
-        query?: ExtensionJsonValue,
-    ): Promise<readonly ExtensionJsonValue[]>;
-}
-
-/** Host-owned Instance management operations available to an Extension generation. */
-export interface ExtensionInstanceCapability {
-    create(draft: ExtensionJsonValue): Promise<ExtensionInstanceCreateResult>;
-    createSchema(): Promise<ExtensionJsonValue>;
-    delete(name: string): Promise<void>;
-    disable(name: string): Promise<void>;
-    enable(name: string): Promise<void>;
+/** Read-only observation of host-owned Instance state and runtime telemetry. */
+export interface ExtensionInstanceObserveCapability {
     list(): Promise<readonly ExtensionInstanceRecord[]>;
+    snapshot(name: string): Promise<ExtensionInstanceSnapshot>;
+    refresh(name: string): Promise<ExtensionInstanceSnapshot>;
     readLogs(
         name: string,
         query?: ExtensionInstanceLogQuery,
     ): Promise<readonly ExtensionInstanceLogEntry[]>;
-    refresh(name: string): Promise<ExtensionInstanceSnapshot>;
-    snapshot(name: string): Promise<ExtensionInstanceSnapshot>;
-    start(name: string): Promise<ExtensionInstanceSnapshot>;
-    stop(name: string): Promise<ExtensionInstanceSnapshot>;
-    validateCreate(draft: ExtensionJsonValue): Promise<ExtensionJsonValue>;
     watchEvents(
         name: string,
         watch: ExtensionInstanceEventWatch,
+    ): Promise<void>;
+}
+
+/** Host-owned Instance lifecycle operations without observation authority. */
+export interface ExtensionInstanceManageCapability {
+    create(draft: ExtensionJsonValue): Promise<ExtensionInstanceCreateResult>;
+    createSchema(): Promise<ExtensionJsonValue>;
+    validateCreate(draft: ExtensionJsonValue): Promise<ExtensionJsonValue>;
+    delete(name: string): Promise<void>;
+    disable(name: string): Promise<void>;
+    enable(name: string): Promise<void>;
+    start(name: string): Promise<ExtensionInstanceSnapshot>;
+    stop(name: string): Promise<ExtensionInstanceSnapshot>;
+}
+
+/** Publication of host-owned Instance events by an Extension generation. */
+export interface ExtensionInstanceEventPublishCapability {
+    appendEvent(
+        name: string,
+        type: string,
+        data?: ExtensionJsonValue,
     ): Promise<void>;
 }

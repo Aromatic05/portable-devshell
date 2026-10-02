@@ -1,12 +1,12 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.0.0",
+    "apiVersion": "5.0.0",
     "activation": "lazy",
     "id": "instance",
     "name": "portable-devshell Instance",
     "version": "0.1.1",
     "entry": "index.ts",
-    "capabilities": ["instances"],
+    "capabilities": ["instance.observe"],
     "extensions": {
         "cli.model-commands": [
             {

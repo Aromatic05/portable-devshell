@@ -14,10 +14,10 @@ export async function openAgentToolSession(
     context: ExtensionContext,
     target: AgentWorkerTarget,
 ): Promise<AgentToolSession> {
-    const workers = context.capabilities.delegatedWorkers;
+    const workers = context.capabilities.workerDelegate;
     if (workers === undefined)
         throw new Error(
-            "Agent Extension requires the delegatedWorkers capability.",
+            "Agent Extension requires the workerDelegate capability.",
         );
     const worker = await workers.openSession({
         instance: target.instance,

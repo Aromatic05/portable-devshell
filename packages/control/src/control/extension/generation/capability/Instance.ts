@@ -1,12 +1,13 @@
 import type {
-    ExtensionInstanceCapability,
     ExtensionInstanceCreateResult,
     ExtensionInstanceEvent,
+    ExtensionInstanceEventPublishCapability,
     ExtensionInstanceEventWatch,
     ExtensionInstanceLogEntry,
     ExtensionInstanceLogQuery,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
     ExtensionInstanceRecord,
-    ExtensionInstanceRuntimeCapability,
     ExtensionInstanceSnapshot,
 } from "@portable-devshell/extension/instance";
 import type { ExtensionJsonValue } from "@portable-devshell/extension";
@@ -19,9 +20,7 @@ import {
     type InstanceEventType,
     type InstanceLogEntry,
     type JsonValue,
-    type ToolCallQuery,
 } from "@portable-devshell/shared";
-import type { ExtensionToolCallDecorator } from "./ToolCallHistory.js";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 import type { RuntimeSubscriptionManager } from "../../../../instance/execution/runtime/Subscription.js";
@@ -45,34 +44,139 @@ export interface ExtensionConfiguredInstance {
     provider: ExtensionInstanceRecord["provider"];
 }
 
-export interface ExtensionInstanceCapabilityControlOptions {
+export interface ExtensionInstanceObserveCapabilityControlOptions {
     allowed: boolean;
-    create: ExtensionInstanceCreatePort;
-    editor: ExtensionInstanceEditorPort;
     extensionId: string;
     instances: InstanceRegistry;
     listConfigured(): readonly ExtensionConfiguredInstance[];
     subscriptions: RuntimeSubscriptionManager;
 }
 
-/** Public Instance management capability backed by Control's authoritative registry/config coordinators. */
-export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapability {
+/** Read-only Instance observation backed by Control's authoritative registry. */
+export class ExtensionInstanceObserveCapabilityControl
+    implements ExtensionInstanceObserveCapability
+{
     readonly #allowed: boolean;
-    readonly #create: ExtensionInstanceCreatePort;
-    readonly #editor: ExtensionInstanceEditorPort;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
     readonly #listConfigured: () => readonly ExtensionConfiguredInstance[];
     readonly #subscriptions: RuntimeSubscriptionManager;
 
-    constructor(options: ExtensionInstanceCapabilityControlOptions) {
+    constructor(options: ExtensionInstanceObserveCapabilityControlOptions) {
+        this.#allowed = options.allowed;
+        this.#extensionId = options.extensionId;
+        this.#instances = options.instances;
+        this.#listConfigured = options.listConfigured;
+        this.#subscriptions = options.subscriptions;
+    }
+
+    async list(): Promise<readonly ExtensionInstanceRecord[]> {
+        this.#assertAllowed();
+        return this.#listConfigured().map((configured) => {
+            const descriptor = this.#instances.get(configured.name);
+            return {
+                enabled: configured.enabled,
+                mcpEnabled: configured.mcpEnabled,
+                name: configured.name,
+                provider: configured.provider,
+                ...(descriptor === undefined
+                    ? {}
+                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
+            };
+        });
+    }
+
+    async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        return toSnapshot(this.#require(name).worker.snapshot());
+    }
+
+    async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
+        this.#assertAllowed();
+        return toSnapshot(await this.#require(name).worker.refreshStatus());
+    }
+
+    async readLogs(
+        name: string,
+        query?: ExtensionInstanceLogQuery,
+    ): Promise<readonly ExtensionInstanceLogEntry[]> {
+        this.#assertAllowed();
+        return (await this.#require(name).worker.readLogs(query)).map(
+            toLogEntry,
+        );
+    }
+
+    async watchEvents(
+        name: string,
+        watch: ExtensionInstanceEventWatch,
+    ): Promise<void> {
+        this.#assertAllowed();
+        if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 1) {
+            throw new TypeError(
+                "Extension instance.observe watchEvents fromSeq must be a positive safe integer.",
+            );
+        }
+        const eventTypes =
+            watch.eventTypes === undefined
+                ? undefined
+                : new Set(watch.eventTypes.map(requireEventType));
+        const descriptor = this.#require(name);
+        await this.#subscriptions.watch(
+            descriptor.name,
+            descriptor.worker,
+            watch.fromSeq,
+            watch.signal,
+            {
+                ...(eventTypes === undefined
+                    ? {}
+                    : {
+                          eventFilter: (event) => eventTypes.has(event.type),
+                      }),
+                onEvent: async (event) => await watch.onEvent(toEvent(event)),
+                onGap: async (gap) => {
+                    await watch.onGap?.({ ...gap });
+                    return gap.nextSeq;
+                },
+            },
+        );
+    }
+
+    #require(name: string) {
+        return requireInstance(this.#instances, name);
+    }
+
+    #assertAllowed(): void {
+        if (this.#allowed) return;
+        throw new Error(
+            `Extension ${this.#extensionId} did not declare the instance.observe capability.`,
+        );
+    }
+}
+
+export interface ExtensionInstanceManageCapabilityControlOptions {
+    allowed: boolean;
+    create: ExtensionInstanceCreatePort;
+    editor: ExtensionInstanceEditorPort;
+    extensionId: string;
+    instances: InstanceRegistry;
+}
+
+/** Instance lifecycle/configuration authority, intentionally separate from observation. */
+export class ExtensionInstanceManageCapabilityControl
+    implements ExtensionInstanceManageCapability
+{
+    readonly #allowed: boolean;
+    readonly #create: ExtensionInstanceCreatePort;
+    readonly #editor: ExtensionInstanceEditorPort;
+    readonly #extensionId: string;
+    readonly #instances: InstanceRegistry;
+
+    constructor(options: ExtensionInstanceManageCapabilityControlOptions) {
         this.#allowed = options.allowed;
         this.#create = options.create;
         this.#editor = options.editor;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
-        this.#listConfigured = options.listConfigured;
-        this.#subscriptions = options.subscriptions;
     }
 
     async createSchema(): Promise<ExtensionJsonValue> {
@@ -111,32 +215,6 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
         await this.#editor.deleteInstance({ instanceName: requireName(name) });
     }
 
-    async list(): Promise<readonly ExtensionInstanceRecord[]> {
-        this.#assertAllowed();
-        return this.#listConfigured().map((configured) => {
-            const descriptor = this.#instances.get(configured.name);
-            return {
-                enabled: configured.enabled,
-                mcpEnabled: configured.mcpEnabled,
-                name: configured.name,
-                provider: configured.provider,
-                ...(descriptor === undefined
-                    ? {}
-                    : { snapshot: toSnapshot(descriptor.worker.snapshot()) }),
-            };
-        });
-    }
-
-    async snapshot(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        return toSnapshot(this.#require(name).worker.snapshot());
-    }
-
-    async refresh(name: string): Promise<ExtensionInstanceSnapshot> {
-        this.#assertAllowed();
-        return toSnapshot(await this.#require(name).worker.refreshStatus());
-    }
-
     async start(name: string): Promise<ExtensionInstanceSnapshot> {
         this.#assertAllowed();
         const descriptor = this.#require(name);
@@ -162,89 +240,34 @@ export class ExtensionInstanceCapabilityControl implements ExtensionInstanceCapa
         return toSnapshot(snapshot);
     }
 
-    async readLogs(
-        name: string,
-        query?: ExtensionInstanceLogQuery,
-    ): Promise<readonly ExtensionInstanceLogEntry[]> {
-        this.#assertAllowed();
-        return (await this.#require(name).worker.readLogs(query)).map(
-            toLogEntry,
-        );
-    }
-
-    async watchEvents(
-        name: string,
-        watch: ExtensionInstanceEventWatch,
-    ): Promise<void> {
-        this.#assertAllowed();
-        if (!Number.isSafeInteger(watch.fromSeq) || watch.fromSeq < 1) {
-            throw new TypeError(
-                "Extension instances watchEvents fromSeq must be a positive safe integer.",
-            );
-        }
-        const eventTypes =
-            watch.eventTypes === undefined
-                ? undefined
-                : new Set(watch.eventTypes.map(requireEventType));
-        const descriptor = this.#require(name);
-        await this.#subscriptions.watch(
-            descriptor.name,
-            descriptor.worker,
-            watch.fromSeq,
-            watch.signal,
-            {
-                ...(eventTypes === undefined
-                    ? {}
-                    : {
-                          eventFilter: (event) => eventTypes.has(event.type),
-                      }),
-                onEvent: async (event) => await watch.onEvent(toEvent(event)),
-                onGap: async (gap) => {
-                    await watch.onGap?.({ ...gap });
-                    return gap.nextSeq;
-                },
-            },
-        );
-    }
-
     #require(name: string) {
-        const instance = requireName(name);
-        const descriptor = this.#instances.get(instance);
-        if (descriptor !== undefined) return descriptor;
-        throw createError({
-            code: errorCodes.instanceMissing,
-            details: { instance },
-            message: `Instance ${instance} was not found or is disabled.`,
-            retryable: false,
-        });
+        return requireInstance(this.#instances, name);
     }
 
     #assertAllowed(): void {
         if (this.#allowed) return;
         throw new Error(
-            `Extension ${this.#extensionId} did not declare the instances capability.`,
+            `Extension ${this.#extensionId} did not declare the instance.manage capability.`,
         );
     }
 }
 
-export class ExtensionInstanceRuntimeCapabilityControl
-    implements ExtensionInstanceRuntimeCapability
+/** Write-only publication into the host-owned Instance event stream. */
+export class ExtensionInstanceEventPublishCapabilityControl
+    implements ExtensionInstanceEventPublishCapability
 {
     readonly #allowed: boolean;
     readonly #extensionId: string;
     readonly #instances: InstanceRegistry;
-    readonly #toolCallDecorator?: ExtensionToolCallDecorator;
 
     constructor(options: {
         allowed: boolean;
         extensionId: string;
         instances: InstanceRegistry;
-        toolCallDecorator?: ExtensionToolCallDecorator;
     }) {
         this.#allowed = options.allowed;
         this.#extensionId = options.extensionId;
         this.#instances = options.instances;
-        this.#toolCallDecorator = options.toolCallDecorator;
     }
 
     async appendEvent(
@@ -253,65 +276,30 @@ export class ExtensionInstanceRuntimeCapabilityControl
         data?: ExtensionJsonValue,
     ): Promise<void> {
         this.#assertAllowed();
-        await this.#require(name).worker.appendControlEvent(
+        await requireInstance(this.#instances, name).worker.appendControlEvent(
             requireEventType(type) as InstanceEventType,
             data as JsonValue | undefined,
         );
     }
 
-    async list(): Promise<readonly { enabled: boolean; name: string }[]> {
-        this.#assertAllowed();
-        return this.#instances.list().map((instance) => ({
-            enabled: instance.enabled,
-            name: instance.name,
-        }));
-    }
-
-    async readToolCalls(
-        name: string,
-        query: ExtensionJsonValue = {},
-    ): Promise<readonly ExtensionJsonValue[]> {
-        this.#assertAllowed();
-        if (
-            typeof query !== "object" ||
-            query === null ||
-            Array.isArray(query)
-        ) {
-            throw new TypeError(
-                "Extension instanceRuntime readToolCalls query must be an object.",
-            );
-        }
-        const instance = this.#require(name);
-        const records = await instance.worker.readToolCalls(
-            query as ToolCallQuery,
-        );
-        const decorated =
-            this.#toolCallDecorator === undefined
-                ? records
-                : await this.#toolCallDecorator
-                      .decorate(instance.name, records)
-                      .catch(() => records);
-        return decorated.map(toExtensionJson);
-    }
-
-    #require(name: string) {
-        const instance = requireName(name);
-        const descriptor = this.#instances.get(instance);
-        if (descriptor !== undefined) return descriptor;
-        throw createError({
-            code: errorCodes.instanceMissing,
-            details: { instance },
-            message: `Instance ${instance} was not found or is disabled.`,
-            retryable: false,
-        });
-    }
-
     #assertAllowed(): void {
         if (this.#allowed) return;
         throw new Error(
-            `Extension ${this.#extensionId} did not declare the instanceRuntime capability.`,
+            `Extension ${this.#extensionId} did not declare the instance.events.publish capability.`,
         );
     }
+}
+
+function requireInstance(instances: InstanceRegistry, name: string) {
+    const instance = requireName(name);
+    const descriptor = instances.get(instance);
+    if (descriptor !== undefined) return descriptor;
+    throw createError({
+        code: errorCodes.instanceMissing,
+        details: { instance },
+        message: `Instance ${instance} was not found or is disabled.`,
+        retryable: false,
+    });
 }
 
 function toCreateResult(
@@ -397,12 +385,12 @@ function toEvent(value: {
 function requireEventType(value: string): string {
     if (/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+$/u.test(value))
         return value;
-    throw new TypeError(`Extension instances event type is invalid: ${value}.`);
+    throw new TypeError(`Extension instance event type is invalid: ${value}.`);
 }
 
 function requireName(value: string): string {
     if (value.trim().length > 0) return value;
-    throw new TypeError("Extension instances name must be a non-empty string.");
+    throw new TypeError("Extension instance name must be a non-empty string.");
 }
 
 function toExtensionJson(value: unknown): ExtensionJsonValue {

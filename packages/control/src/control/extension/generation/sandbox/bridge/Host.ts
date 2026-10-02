@@ -19,10 +19,11 @@ import type {
     ExtensionWorkerSession,
 } from "@portable-devshell/extension";
 import type { ExtensionArtifactCapability } from "@portable-devshell/extension/artifact";
-import type { ExtensionContextRuntimeCapability } from "@portable-devshell/extension/context";
+import type { ExtensionContextObserveCapability } from "@portable-devshell/extension/context";
 import type {
-    ExtensionInstanceCapability,
-    ExtensionInstanceRuntimeCapability,
+    ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceManageCapability,
+    ExtensionInstanceObserveCapability,
 } from "@portable-devshell/extension/instance";
 import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 
@@ -50,12 +51,11 @@ import {
     type SandboxAssetProjectInput,
     type SandboxConfigGetInput,
     type SandboxConfigUpdateInput,
-    type SandboxContextRuntimeListInput,
+    type SandboxContextObserveListInput,
     type SandboxInstanceCreateInput,
+    type SandboxInstanceEventPublishInput,
     type SandboxInstanceNameInput,
     type SandboxInstanceReadLogsInput,
-    type SandboxInstanceRuntimeAppendEventInput,
-    type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
     type SandboxToolCallHistoryReadInput,
     type SandboxProcessSendInput,
@@ -89,8 +89,7 @@ export interface ExtensionSandboxHostOptions {
     codeDirectory: string;
     config?: ExtensionConfig;
     context: ExtensionSandboxContextData;
-    contextRuntime: ExtensionContextRuntimeCapability;
-    delegatedWorker: ExtensionWorkerCapability;
+    contextObserve: ExtensionContextObserveCapability;
     entryUrl: string;
     externalMemoryLimitMb?: number;
     healthCheckIntervalMs?: number;
@@ -99,15 +98,17 @@ export interface ExtensionSandboxHostOptions {
     hostCallbackTimeoutMs?: number;
     initializationTimeoutMs?: number;
     invocationAbortGraceMs?: number;
-    instances: ExtensionInstanceCapability;
-    instanceRuntime: ExtensionInstanceRuntimeCapability;
+    instanceEventPublish: ExtensionInstanceEventPublishCapability;
+    instanceManage: ExtensionInstanceManageCapability;
+    instanceObserve: ExtensionInstanceObserveCapability;
     logger: ExtensionLogger;
     memoryWatchIntervalMs?: number;
     onFault?(error: Error): void;
     processes: ExtensionProcessCapability;
     resourceLimits?: ResourceLimits;
     toolCallHistory: ToolCallHistoryCapability;
-    worker: ExtensionWorkerCapability;
+    workerDelegate: ExtensionWorkerCapability;
+    workerExecute: ExtensionWorkerCapability;
     workerFactory?: ExtensionSandboxWorkerFactory;
 }
 
@@ -138,14 +139,15 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #artifactCapability: ExtensionArtifactCapability;
     readonly #assets: ExtensionAssetCapability;
     readonly #config?: ExtensionConfig;
-    readonly #contextRuntimeCapability: ExtensionContextRuntimeCapability;
+    readonly #contextObserveCapability: ExtensionContextObserveCapability;
     readonly #externalMemoryLimitBytes: number;
     readonly #healthCheckIntervalMs: number;
     readonly #healthCheckTimeoutMs: number;
     readonly #hostCallbackTimeoutMs: number;
     readonly #initializationTimeoutMs: number;
-    readonly #instanceCapability: ExtensionInstanceCapability;
-    readonly #instanceRuntimeCapability: ExtensionInstanceRuntimeCapability;
+    readonly #instanceEventPublishCapability: ExtensionInstanceEventPublishCapability;
+    readonly #instanceManageCapability: ExtensionInstanceManageCapability;
+    readonly #instanceObserveCapability: ExtensionInstanceObserveCapability;
     readonly #invocationAbortGraceMs: number;
     readonly #invocationInterfaces = new Map<
         string,
@@ -160,11 +162,11 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #processes = new Map<string, SandboxManagedProcess>();
     readonly #toolCallHistoryCapability: ToolCallHistoryCapability;
     readonly #capabilityControllers = new Map<string, AbortController>();
-    readonly #delegatedWorkerCapability: ExtensionWorkerCapability;
+    readonly #workerDelegateCapability: ExtensionWorkerCapability;
     readonly #ready: Promise<ExtensionSandboxReadyDescriptor>;
     readonly #sessions = new Map<string, ExtensionWorkerSession>();
     readonly #worker: Worker;
-    readonly #workerCapability: ExtensionWorkerCapability;
+    readonly #workerExecuteCapability: ExtensionWorkerCapability;
     #closing = false;
     #configUnsubscribe?: () => void;
     #faulted?: Error;
@@ -185,8 +187,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#artifactCapability = options.artifacts;
         this.#assets = options.assets;
         this.#config = options.config;
-        this.#contextRuntimeCapability = options.contextRuntime;
-        this.#delegatedWorkerCapability = options.delegatedWorker;
+        this.#contextObserveCapability = options.contextObserve;
         this.#externalMemoryLimitBytes =
             positiveMegabytes(
                 options.externalMemoryLimitMb ??
@@ -208,8 +209,9 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#initializationTimeoutMs =
             options.initializationTimeoutMs ??
             DEFAULT_INITIALIZATION_TIMEOUT_MS;
-        this.#instanceCapability = options.instances;
-        this.#instanceRuntimeCapability = options.instanceRuntime;
+        this.#instanceEventPublishCapability = options.instanceEventPublish;
+        this.#instanceManageCapability = options.instanceManage;
+        this.#instanceObserveCapability = options.instanceObserve;
         this.#invocationAbortGraceMs =
             options.invocationAbortGraceMs ?? DEFAULT_INVOCATION_ABORT_GRACE_MS;
         this.#logger = options.logger;
@@ -220,7 +222,8 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         this.#onFault = options.onFault;
         this.#processCapability = options.processes;
         this.#toolCallHistoryCapability = options.toolCallHistory;
-        this.#workerCapability = options.worker;
+        this.#workerDelegateCapability = options.workerDelegate;
+        this.#workerExecuteCapability = options.workerExecute;
         const workerData: ExtensionSandboxWorkerData = {
             capabilities: [...options.capabilities],
             codeDirectory: options.codeDirectory,
@@ -592,60 +595,60 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     input as SandboxConfigUpdateInput,
                 );
                 return undefined;
-            case "contextRuntime.list":
-                return await this.#contextRuntimeCapability.list(
-                    input as SandboxContextRuntimeListInput | undefined,
+            case "contextObserve.list":
+                return await this.#contextObserveCapability.list(
+                    input as SandboxContextObserveListInput | undefined,
                 );
-            case "instances.create":
-                return await this.#instanceCapability.create(
+            case "instanceManage.create":
+                return await this.#instanceManageCapability.create(
                     (input as SandboxInstanceCreateInput).draft,
                 );
-            case "instances.createSchema":
-                return await this.#instanceCapability.createSchema();
-            case "instances.delete":
-                return await this.#instanceCapability.delete(
+            case "instanceManage.createSchema":
+                return await this.#instanceManageCapability.createSchema();
+            case "instanceManage.delete":
+                return await this.#instanceManageCapability.delete(
                     (input as SandboxInstanceNameInput).name,
                 );
-            case "instances.disable":
-                return await this.#instanceCapability.disable(
+            case "instanceManage.disable":
+                return await this.#instanceManageCapability.disable(
                     (input as SandboxInstanceNameInput).name,
                 );
-            case "instances.enable":
-                return await this.#instanceCapability.enable(
+            case "instanceManage.enable":
+                return await this.#instanceManageCapability.enable(
                     (input as SandboxInstanceNameInput).name,
                 );
-            case "instances.list":
-                return await this.#instanceCapability.list();
-            case "instances.readLogs": {
+            case "instanceManage.start":
+                return await this.#instanceManageCapability.start(
+                    (input as SandboxInstanceNameInput).name,
+                );
+            case "instanceManage.stop":
+                return await this.#instanceManageCapability.stop(
+                    (input as SandboxInstanceNameInput).name,
+                );
+            case "instanceManage.validateCreate":
+                return await this.#instanceManageCapability.validateCreate(
+                    (input as SandboxInstanceCreateInput).draft,
+                );
+            case "instanceObserve.list":
+                return await this.#instanceObserveCapability.list();
+            case "instanceObserve.readLogs": {
                 const value = input as SandboxInstanceReadLogsInput;
-                return await this.#instanceCapability.readLogs(
+                return await this.#instanceObserveCapability.readLogs(
                     value.name,
                     value.query,
                 );
             }
-            case "instances.refresh":
-                return await this.#instanceCapability.refresh(
+            case "instanceObserve.refresh":
+                return await this.#instanceObserveCapability.refresh(
                     (input as SandboxInstanceNameInput).name,
                 );
-            case "instances.snapshot":
-                return await this.#instanceCapability.snapshot(
+            case "instanceObserve.snapshot":
+                return await this.#instanceObserveCapability.snapshot(
                     (input as SandboxInstanceNameInput).name,
                 );
-            case "instances.start":
-                return await this.#instanceCapability.start(
-                    (input as SandboxInstanceNameInput).name,
-                );
-            case "instances.stop":
-                return await this.#instanceCapability.stop(
-                    (input as SandboxInstanceNameInput).name,
-                );
-            case "instances.validateCreate":
-                return await this.#instanceCapability.validateCreate(
-                    (input as SandboxInstanceCreateInput).draft,
-                );
-            case "instances.watchEvents": {
+            case "instanceObserve.watchEvents": {
                 const value = input as SandboxInstanceWatchInput;
-                await this.#instanceCapability.watchEvents(value.name, {
+                await this.#instanceObserveCapability.watchEvents(value.name, {
                     ...(value.eventTypes === undefined
                         ? {}
                         : { eventTypes: [...value.eventTypes] }),
@@ -672,23 +675,14 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 });
                 return undefined;
             }
-            case "instanceRuntime.appendEvent": {
-                const value = input as SandboxInstanceRuntimeAppendEventInput;
-                await this.#instanceRuntimeCapability.appendEvent(
+            case "instanceEventPublish.appendEvent": {
+                const value = input as SandboxInstanceEventPublishInput;
+                await this.#instanceEventPublishCapability.appendEvent(
                     value.name,
                     value.type,
                     value.data,
                 );
                 return undefined;
-            }
-            case "instanceRuntime.list":
-                return await this.#instanceRuntimeCapability.list();
-            case "instanceRuntime.readToolCalls": {
-                const value = input as SandboxInstanceRuntimeReadToolCallsInput;
-                return await this.#instanceRuntimeCapability.readToolCalls(
-                    value.name,
-                    value.query,
-                );
             }
             case "toolCallHistory.listInstances":
                 return await this.#toolCallHistoryCapability.listInstances();
@@ -757,21 +751,21 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 );
                 return undefined;
             }
-            case "workers.openSession": {
-                const opened = await this.#workerCapability.openSession(
+            case "workerExecute.openSession": {
+                const opened = await this.#workerExecuteCapability.openSession(
                     input as SandboxWorkerOpenInput,
                 );
                 return await this.#registerWorkerSession(opened);
             }
-            case "delegatedWorkers.openSession": {
+            case "workerDelegate.openSession": {
                 const opened =
-                    await this.#delegatedWorkerCapability.openSession(
+                    await this.#workerDelegateCapability.openSession(
                         input as SandboxWorkerOpenInput,
                     );
                 return await this.#registerWorkerSession(opened);
             }
-            case "delegatedWorkers.callTool":
-            case "workers.callTool": {
+            case "workerDelegate.callTool":
+            case "workerExecute.callTool": {
                 const value = input as SandboxWorkerCallInput;
                 const session = this.#requireSession(value.sessionId);
                 return await session.callTool(value.toolName, value.input, {
@@ -787,8 +781,8 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                     signal,
                 });
             }
-            case "delegatedWorkers.closeSession":
-            case "workers.closeSession": {
+            case "workerDelegate.closeSession":
+            case "workerExecute.closeSession": {
                 const value = input as SandboxWorkerCloseInput;
                 const session = this.#sessions.get(value.sessionId);
                 if (session === undefined) return undefined;

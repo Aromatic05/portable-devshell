@@ -1,5 +1,5 @@
 import type {
-    ExtensionInstanceCapability,
+    ExtensionInstanceObserveCapability,
     ExtensionInstanceRecord,
     ExtensionInstanceSnapshot,
 } from "@portable-devshell/extension/instance";
@@ -17,7 +17,7 @@ export const INSTANCE_USAGE = [
 ].join("\n");
 
 export async function executeInstanceCommand(
-    instances: ExtensionInstanceCapability,
+    instances: ExtensionInstanceObserveCapability,
     argv: readonly string[],
     invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
@@ -50,7 +50,7 @@ export async function executeInstanceCommand(
 }
 
 async function list(
-    instances: ExtensionInstanceCapability,
+    instances: ExtensionInstanceObserveCapability,
     invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
     const values = await instances.list();
@@ -72,7 +72,7 @@ async function list(
 }
 
 async function status(
-    instances: ExtensionInstanceCapability,
+    instances: ExtensionInstanceObserveCapability,
     name: string,
     invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
@@ -81,7 +81,7 @@ async function status(
 }
 
 async function logs(
-    instances: ExtensionInstanceCapability,
+    instances: ExtensionInstanceObserveCapability,
     args: readonly string[],
     invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
@@ -168,7 +168,9 @@ async function requireReference(
 }
 
 function renderLogs(
-    entries: Awaited<ReturnType<ExtensionInstanceCapability["readLogs"]>>,
+    entries: Awaited<
+        ReturnType<ExtensionInstanceObserveCapability["readLogs"]>
+    >,
 ): string {
     return entries.length === 0
         ? ""

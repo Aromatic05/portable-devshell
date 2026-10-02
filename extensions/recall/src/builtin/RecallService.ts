@@ -1,8 +1,8 @@
 import type { ExtensionContext } from "@portable-devshell/extension";
 import type {
-    ExtensionContextRuntimeCapability,
-    ExtensionContextRuntimeRecord,
-    ExtensionContextRuntimeStatus,
+    ExtensionContextObserveCapability,
+    ExtensionContextRecord,
+    ExtensionContextStatus,
 } from "@portable-devshell/extension/context";
 import type {
     ToolCallHistoryCapability,
@@ -42,7 +42,7 @@ export interface RecallContextEntry {
     readonly lastAccessedAt?: string;
     readonly lastToolCallAt?: string;
     readonly origin: "context-registry" | "tool-call-history";
-    readonly status: ExtensionContextRuntimeStatus | "history-only";
+    readonly status: ExtensionContextStatus | "history-only";
     readonly toolCalls: number;
 }
 
@@ -66,7 +66,7 @@ interface MutableContextEntry {
     lastAccessedAt?: string;
     lastToolCallAt?: string;
     origin: "context-registry" | "tool-call-history";
-    status: ExtensionContextRuntimeStatus | "history-only";
+    status: ExtensionContextStatus | "history-only";
     toolCalls: number;
 }
 
@@ -77,13 +77,13 @@ interface ReadCallsResult {
 }
 
 export class RecallService {
-    readonly #contexts: ExtensionContextRuntimeCapability;
+    readonly #contexts: ExtensionContextObserveCapability;
     readonly #history: ToolCallHistoryCapability;
 
     constructor(context: ExtensionContext) {
-        const contexts = context.capabilities.contextRuntime;
+        const contexts = context.capabilities.contextObserve;
         if (contexts === undefined)
-            throw new Error("Recall Extension requires contextRuntime.");
+            throw new Error("Recall Extension requires contextObserve.");
         const history = context.capabilities.toolCallHistory;
         if (history === undefined)
             throw new Error("Recall Extension requires toolCallHistory.");
@@ -254,7 +254,7 @@ export class RecallService {
 }
 
 function retainedContext(
-    record: ExtensionContextRuntimeRecord,
+    record: ExtensionContextRecord,
 ): MutableContextEntry {
     return {
         createdAt: record.createdAt,

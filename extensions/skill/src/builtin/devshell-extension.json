@@ -1,12 +1,12 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.0.0",
+    "apiVersion": "5.0.0",
     "activation": "lazy",
     "id": "skill",
     "name": "portable-devshell Skill",
     "version": "0.1.0",
     "entry": "index.ts",
-    "capabilities": ["assets", "workers"],
+    "capabilities": ["assets", "worker.execute"],
     "extensions": {
         "cli.native-commands": [
             {

@@ -12,7 +12,7 @@ import { executeSecretModelCommand } from "../../src/builtin/command/SecretModel
 function context(events: string[]): ExtensionContext {
     return {
         capabilities: {
-            workers: {
+            workerExecute: {
                 async openSession(input): Promise<ExtensionWorkerSession> {
                     events.push(`open:${input.instance}:${input.workspace}`);
                     return session(

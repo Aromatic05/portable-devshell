@@ -34,10 +34,10 @@ export async function executeSkillModelCommand(
     invocation: CliModelCommandInvocationContext,
 ): Promise<CliCommandResult> {
     invocation.signal.throwIfAborted();
-    const workers = extension.capabilities.workers;
+    const workers = extension.capabilities.workerExecute;
     if (workers === undefined)
         throw new Error(
-            "Skill Extension model commands require the workers capability.",
+            "Skill Extension model commands require the workerExecute capability.",
         );
     if (argv.length === 0 || ["help", "--help", "-h"].includes(argv[0] ?? "")) {
         if (argv.length > 1)

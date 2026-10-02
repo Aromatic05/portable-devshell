@@ -6,10 +6,10 @@ import { executeInstanceCommand } from "./InstanceCommand.js";
 export { executeInstanceCommand, INSTANCE_USAGE } from "./InstanceCommand.js";
 
 export function activate(context: ExtensionContext): void {
-    const instances = context.capabilities.instances;
+    const instances = context.capabilities.instanceObserve;
     if (instances === undefined)
         throw new Error(
-            "Instance Extension requires the instances capability.",
+            "Instance Extension requires the instanceObserve capability.",
         );
     context.register(
         modelCommands,

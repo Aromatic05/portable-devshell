@@ -1,13 +1,15 @@
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.0.0",
+    "apiVersion": "5.0.0",
     "activation": "lazy",
     "id": "comment",
     "name": "portable-devshell Comment",
     "version": "0.1.0",
     "entry": "index.ts",
     "capabilities": [
-        "instanceRuntime"
+        "instance.observe",
+        "instance.events.publish",
+        "toolcall.history"
     ],
     "extensions": {
         "control.routes": [
