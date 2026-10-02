@@ -1,17 +1,12 @@
 mod codec;
 mod stream;
 
-use std::collections::HashMap;
-
 #[cfg(test)]
 pub use codec::RESET_CANCELLED;
 pub use codec::{
-    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, RESET_UNSUPPORTED_SERVICE,
-    encode_frame,
+    FRAME_MAX_DATA_SIZE, Frame, FrameDecoder, RESET_UNSUPPORTED_SERVICE, encode_frame,
 };
 use stream::StreamState;
-
-const DEFAULT_MAX_ACTIVE_STREAMS: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameRole {
@@ -46,31 +41,20 @@ type FrameRead = Option<(Vec<u8>, Option<Frame>)>;
 #[derive(Debug)]
 pub struct FrameProtocol {
     role: FrameRole,
-    max_streams: usize,
-    #[cfg(test)]
-    next_stream_id: u64,
-    last_remote_stream_id: u32,
-    streams: HashMap<u32, StreamState>,
+    active_stream_id: Option<u32>,
+    stream: Option<StreamState>,
+    retired_stream_id: Option<u32>,
+    opened: bool,
 }
 
 impl FrameProtocol {
     pub fn new(role: FrameRole) -> Self {
         Self {
             role,
-            max_streams: DEFAULT_MAX_ACTIVE_STREAMS,
-            #[cfg(test)]
-            next_stream_id: 1,
-            last_remote_stream_id: 0,
-            streams: HashMap::new(),
-        }
-    }
-
-    #[cfg(test)]
-    fn with_max_streams(role: FrameRole, max_streams: usize) -> Self {
-        assert!(max_streams > 0);
-        Self {
-            max_streams,
-            ..Self::new(role)
+            active_stream_id: None,
+            stream: None,
+            retired_stream_id: None,
+            opened: false,
         }
     }
 
@@ -87,14 +71,13 @@ impl FrameProtocol {
         if receive_window == 0 {
             return Err("Frame receive window must be positive.".to_string());
         }
-        if self.streams.len() >= self.max_streams {
-            return Err("Frame active stream limit reached.".to_string());
+        if self.opened {
+            return Err("Frame Service stream is already open.".to_string());
         }
-        let stream_id = u32::try_from(self.next_stream_id)
-            .map_err(|_| "Frame stream id space is exhausted.".to_string())?;
-        self.next_stream_id += 1;
-        self.streams
-            .insert(stream_id, StreamState::new(true, 0, receive_window));
+        let stream_id = 1;
+        self.opened = true;
+        self.active_stream_id = Some(stream_id);
+        self.stream = Some(StreamState::new(true, 0, receive_window));
         Ok((
             stream_id,
             Frame::Open {
@@ -107,10 +90,7 @@ impl FrameProtocol {
     }
 
     pub fn accept_open(&mut self, stream_id: u32, receive_window: u32) -> Result<Frame, String> {
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        let stream = self.stream_mut(stream_id)?;
         stream.accept(receive_window)?;
         Ok(Frame::Window {
             stream_id,
@@ -124,9 +104,10 @@ impl FrameProtocol {
         code: u16,
         message: String,
     ) -> Result<Frame, String> {
-        self.streams
-            .remove(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        self.stream_mut(stream_id)?;
+        self.stream = None;
+        self.active_stream_id = None;
+        self.retired_stream_id = Some(stream_id);
         Ok(Frame::Reset {
             stream_id,
             code,
@@ -145,18 +126,12 @@ impl FrameProtocol {
             if self.role != FrameRole::Acceptor {
                 return Err("Frame opener received an OPEN frame.".to_string());
             }
-            if stream_id <= self.last_remote_stream_id {
-                return Err(format!("Frame stream id {stream_id} is not monotonic."));
+            if self.opened {
+                return Err("Frame Service stream is already open.".to_string());
             }
-            if self.streams.contains_key(&stream_id) {
-                return Err(format!("Frame stream {stream_id} is already open."));
-            }
-            if self.streams.len() >= self.max_streams {
-                return Err("Frame active stream limit reached.".to_string());
-            }
-            self.last_remote_stream_id = stream_id;
-            self.streams
-                .insert(stream_id, StreamState::new(false, receive_window, 0));
+            self.opened = true;
+            self.active_stream_id = Some(stream_id);
+            self.stream = Some(StreamState::new(false, receive_window, 0));
             return Ok(Some(FrameEvent::Open {
                 stream_id,
                 service,
@@ -165,28 +140,29 @@ impl FrameProtocol {
         }
 
         let stream_id = frame.stream_id();
-        if !self.streams.contains_key(&stream_id) {
-            if self.is_retired_stream_id(stream_id) {
+        if self.stream.is_none() {
+            if self.retired_stream_id == Some(stream_id) {
                 return Ok(None);
             }
             return Err(format!("Frame references unknown stream {stream_id}."));
         }
-        let accepted = self
-            .streams
-            .get(&stream_id)
-            .expect("stream existence checked above")
-            .accepted;
+        if self.active_stream_id != Some(stream_id) {
+            return Err(format!("Frame references unknown stream {stream_id}."));
+        }
+        let accepted = self.stream.as_ref().expect("stream exists").accepted;
         if !accepted {
             match frame {
                 Frame::Fin { .. } => {
-                    self.streams
-                        .get_mut(&stream_id)
-                        .expect("stream existence checked above")
+                    self.stream
+                        .as_mut()
+                        .expect("stream exists")
                         .mark_remote_fin()?;
                     return Ok(Some(FrameEvent::Fin { stream_id }));
                 }
                 Frame::Reset { code, message, .. } => {
-                    self.streams.remove(&stream_id);
+                    self.stream = None;
+                    self.active_stream_id = None;
+                    self.retired_stream_id = Some(stream_id);
                     return Ok(Some(FrameEvent::Reset {
                         stream_id,
                         code,
@@ -197,10 +173,7 @@ impl FrameProtocol {
             }
             return Err(format!("Frame stream {stream_id} is not accepted yet."));
         }
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .expect("stream existence checked above");
+        let stream = self.stream.as_mut().expect("stream exists");
 
         match frame {
             Frame::Data { data, .. } => {
@@ -218,7 +191,9 @@ impl FrameProtocol {
                 Ok(Some(event))
             }
             Frame::Reset { code, message, .. } => {
-                self.streams.remove(&stream_id);
+                self.stream = None;
+                self.active_stream_id = None;
+                self.retired_stream_id = Some(stream_id);
                 Ok(Some(FrameEvent::Reset {
                     stream_id,
                     code,
@@ -234,10 +209,7 @@ impl FrameProtocol {
         stream_id: u32,
         data: &[u8],
     ) -> Result<Option<(usize, Frame)>, String> {
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        let stream = self.stream_mut(stream_id)?;
         if !stream.accepted {
             return Err("Frame stream is not accepted.".to_string());
         }
@@ -261,10 +233,7 @@ impl FrameProtocol {
     }
 
     pub fn read_data(&mut self, stream_id: u32) -> Result<Option<Vec<u8>>, String> {
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        let stream = self.stream_mut(stream_id)?;
         Ok(stream.pop_data())
     }
 
@@ -272,10 +241,7 @@ impl FrameProtocol {
         if byte_len == 0 {
             return Ok(None);
         }
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        let stream = self.stream_mut(stream_id)?;
         let window = if stream.remote_fin {
             None
         } else {
@@ -302,10 +268,7 @@ impl FrameProtocol {
 
     #[cfg(test)]
     pub fn finish(&mut self, stream_id: u32) -> Result<Frame, String> {
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        let stream = self.stream_mut(stream_id)?;
         if stream.local_fin {
             return Err("Frame stream write side is already closed.".to_string());
         }
@@ -317,9 +280,10 @@ impl FrameProtocol {
 
     #[cfg(test)]
     pub fn reset(&mut self, stream_id: u32, code: u16, message: String) -> Result<Frame, String> {
-        self.streams
-            .remove(&stream_id)
-            .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))?;
+        self.stream_mut(stream_id)?;
+        self.stream = None;
+        self.active_stream_id = None;
+        self.retired_stream_id = Some(stream_id);
         Ok(Frame::Reset {
             stream_id,
             code,
@@ -329,32 +293,33 @@ impl FrameProtocol {
 
     #[cfg(test)]
     pub fn stream_open(&self, stream_id: u32) -> bool {
-        self.streams.contains_key(&stream_id)
+        self.active_stream_id == Some(stream_id) && self.stream.is_some()
     }
 
     #[cfg(test)]
     pub fn remote_finished(&self, stream_id: u32) -> Result<bool, String> {
-        self.streams
-            .get(&stream_id)
-            .map(|stream| stream.remote_fin)
+        if self.active_stream_id != Some(stream_id) {
+            return Err(format!("Frame references unknown stream {stream_id}."));
+        }
+        Ok(self.stream.as_ref().expect("stream exists").remote_fin)
+    }
+
+    fn stream_mut(&mut self, stream_id: u32) -> Result<&mut StreamState, String> {
+        if self.active_stream_id != Some(stream_id) {
+            return Err(format!("Frame references unknown stream {stream_id}."));
+        }
+        self.stream
+            .as_mut()
             .ok_or_else(|| format!("Frame references unknown stream {stream_id}."))
     }
 
-    fn is_retired_stream_id(&self, stream_id: u32) -> bool {
-        match self.role {
-            FrameRole::Acceptor => stream_id <= self.last_remote_stream_id,
-            #[cfg(test)]
-            FrameRole::Opener => u64::from(stream_id) < self.next_stream_id,
-        }
-    }
-
     fn cleanup(&mut self, stream_id: u32) {
-        if self
-            .streams
-            .get(&stream_id)
-            .is_some_and(StreamState::closed)
+        if self.active_stream_id == Some(stream_id)
+            && self.stream.as_ref().is_some_and(StreamState::closed)
         {
-            self.streams.remove(&stream_id);
+            self.stream = None;
+            self.active_stream_id = None;
+            self.retired_stream_id = Some(stream_id);
         }
     }
 }
@@ -554,18 +519,13 @@ mod tests {
         let mut opener = FrameProtocol::new(FrameRole::Opener);
         let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
         let window_size = u32::try_from(FRAME_MAX_DATA_SIZE + 1).unwrap();
-        let (stream_id, open) = opener
-            .open("test".into(), Vec::new(), window_size)
-            .unwrap();
+        let (stream_id, open) = opener.open("test".into(), Vec::new(), window_size).unwrap();
         acceptor.accept_frame(open).unwrap();
         let window = acceptor.accept_open(stream_id, window_size).unwrap();
         opener.accept_frame(window).unwrap();
 
         let data = vec![0_u8; FRAME_MAX_DATA_SIZE + 2];
-        let (used, first) = opener
-            .next_data_frame(stream_id, &data)
-            .unwrap()
-            .unwrap();
+        let (used, first) = opener.next_data_frame(stream_id, &data).unwrap().unwrap();
         assert_eq!(used, FRAME_MAX_DATA_SIZE);
         acceptor.accept_frame(first).unwrap();
         let (used, second) = opener
@@ -574,16 +534,18 @@ mod tests {
             .unwrap();
         assert_eq!(used, 1);
         acceptor.accept_frame(second).unwrap();
-        assert!(opener
-            .next_data_frame(stream_id, &data[FRAME_MAX_DATA_SIZE + 1..])
-            .unwrap()
-            .is_none());
+        assert!(
+            opener
+                .next_data_frame(stream_id, &data[FRAME_MAX_DATA_SIZE + 1..])
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
-    fn active_stream_limit_rejects_new_local_stream_without_corrupting_existing_state() {
-        let mut opener = FrameProtocol::with_max_streams(FrameRole::Opener, 1);
-        let mut acceptor = FrameProtocol::with_max_streams(FrameRole::Acceptor, 1);
+    fn rejects_second_local_stream_without_corrupting_existing_state() {
+        let mut opener = FrameProtocol::new(FrameRole::Opener);
+        let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
         let (stream_id, open) = opener
             .open("service".into(), Vec::new(), 8)
             .expect("open within limit");
@@ -598,8 +560,8 @@ mod tests {
     }
 
     #[test]
-    fn active_stream_limit_rejects_remote_open_flood() {
-        let mut acceptor = FrameProtocol::with_max_streams(FrameRole::Acceptor, 1);
+    fn rejects_second_remote_open() {
+        let mut acceptor = FrameProtocol::new(FrameRole::Acceptor);
         acceptor
             .accept_frame(Frame::Open {
                 stream_id: 1,
