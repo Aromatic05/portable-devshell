@@ -395,7 +395,7 @@ export class ExtensionLoader {
                 instanceGenerationRetired: async (event) => {
                     await module!.instanceGenerationRetired?.(event);
                 },
-                retireInstanceResources: async (instance) => {
+                retireInstanceHostResources: async (instance) => {
                     await Promise.all([
                         workerDelegate.retireInstance(instance),
                         workerExecute.retireInstance(instance),
@@ -567,7 +567,7 @@ export class ExtensionLoader {
                 instanceGenerationRetired: async (event) => {
                     await sandbox.instanceGenerationRetired(event);
                 },
-                retireInstanceResources: async (instance) => {
+                retireInstanceHostResources: async (instance) => {
                     await Promise.all([
                         input.workerDelegate.retireInstance(instance),
                         input.workerExecute.retireInstance(instance),

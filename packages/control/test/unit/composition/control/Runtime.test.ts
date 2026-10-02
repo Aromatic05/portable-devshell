@@ -235,7 +235,7 @@ test("runtime notifies Extensions before retiring host-managed generation resour
             async instanceGenerationRetired(event: { instance: string }) {
                 lifecycle.push(`extension:${event.instance}`);
             },
-            async retireInstanceResources(instance: string) {
+            async retireInstanceHostResources(instance: string) {
                 lifecycle.push(`resources:${instance}`);
             },
         } as never,
@@ -352,7 +352,7 @@ function testExtensionSurface() {
         async contextEnvironmentRetired() {},
         async instanceGenerationRetired() {},
         async reload() {},
-        async retireInstanceResources() {},
+        async retireInstanceHostResources() {},
         async start() {},
         async stop() {},
     };
@@ -920,7 +920,7 @@ test("runtime installs builtin Extensions through the normal installer before op
         async contextEnvironmentRetired() {},
         async instanceGenerationRetired() {},
         async reload() {},
-        async retireInstanceResources() {},
+        async retireInstanceHostResources() {},
         async start() {},
         async stop() {},
         async waitForDrain() {},
@@ -1004,7 +1004,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             async contextEnvironmentRetired() {},
             async instanceGenerationRetired() {},
             async reload() {},
-            async retireInstanceResources() {},
+            async retireInstanceHostResources() {},
             async selectGeneration() {},
             async start() {},
             async stop() {},

@@ -126,7 +126,7 @@ function unregisteredGeneration(
     id: string,
     name: string,
     dispose: () => Promise<void>,
-    retireInstanceResources?: (instance: string) => Promise<void>,
+    retireInstanceHostResources?: (instance: string) => Promise<void>,
     instanceGenerationRetired?: (event: { instance: string }) => Promise<void>,
 ): ExtensionGeneration {
     return new ExtensionGeneration({
@@ -137,9 +137,9 @@ function unregisteredGeneration(
             extensions: {},
         },
         registrations: new ExtensionRegistrationSet([]),
-        ...(retireInstanceResources === undefined
+        ...(retireInstanceHostResources === undefined
             ? {}
-            : { retireInstanceResources }),
+            : { retireInstanceHostResources }),
         ...(instanceGenerationRetired === undefined
             ? {}
             : { instanceGenerationRetired }),
@@ -913,7 +913,7 @@ test("Extension host waits for every instance resource retirement even when anot
 
     let settled = false;
     const retirement = host
-        .retireInstanceResources("local")
+        .retireInstanceHostResources("local")
         .then(
             () => ({ error: undefined }),
             (error: unknown) => ({ error }),

@@ -483,7 +483,7 @@ test("Extension loader separates Instance generation notification from host-mana
     await candidate.instanceGenerationRetired({ instance: "local" });
     assert.deepEqual(events, ["module.retire:local"]);
 
-    await candidate.retireInstanceResources("local");
+    await candidate.retireInstanceHostResources("local");
     assert.deepEqual(events, ["module.retire:local", "worker.retire:local"]);
     await candidate.retire();
 });

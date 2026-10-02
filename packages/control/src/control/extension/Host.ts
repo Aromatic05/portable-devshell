@@ -561,12 +561,12 @@ export class ExtensionHost {
         }
     }
 
-    async retireInstanceResources(instance: string): Promise<void> {
+    async retireInstanceHostResources(instance: string): Promise<void> {
         const failures: unknown[] = [];
         await Promise.all(
             [...this.#active.entries()].map(async ([id, generation]) => {
                 try {
-                    await generation.retireInstanceResources(instance);
+                    await generation.retireInstanceHostResources(instance);
                 } catch (error) {
                     failures.push(
                         new Error(

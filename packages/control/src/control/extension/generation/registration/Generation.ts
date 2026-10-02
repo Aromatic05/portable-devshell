@@ -18,7 +18,7 @@ export interface ExtensionGenerationOptions {
     ) => Promise<void>;
     manifest: ExtensionManifest;
     registrations: ExtensionRegistrationSet;
-    retireInstanceResources?: (instance: string) => Promise<void>;
+    retireInstanceHostResources?: (instance: string) => Promise<void>;
 }
 
 export interface ExtensionGenerationLease {
@@ -35,7 +35,7 @@ export class ExtensionGeneration {
     readonly #contextEnvironmentRetired?: ExtensionGenerationOptions["contextEnvironmentRetired"];
     readonly #dispose: () => Promise<void>;
     readonly #instanceGenerationRetired?: ExtensionGenerationOptions["instanceGenerationRetired"];
-    readonly #retireInstanceResources?: (instance: string) => Promise<void>;
+    readonly #retireInstanceHostResources?: (instance: string) => Promise<void>;
     readonly #retirement: Promise<void>;
     #disposeError?: unknown;
     #faultError?: unknown;
@@ -52,7 +52,7 @@ export class ExtensionGeneration {
         this.#contextEnvironmentRetired = options.contextEnvironmentRetired;
         this.#dispose = options.dispose;
         this.#instanceGenerationRetired = options.instanceGenerationRetired;
-        this.#retireInstanceResources = options.retireInstanceResources;
+        this.#retireInstanceHostResources = options.retireInstanceHostResources;
         this.#retirement = new Promise<void>((resolve, reject) => {
             this.#resolveRetirement = resolve;
             this.#rejectRetirement = reject;
@@ -118,8 +118,8 @@ export class ExtensionGeneration {
         await this.#instanceGenerationRetired?.(event);
     }
 
-    async retireInstanceResources(instance: string): Promise<void> {
-        await this.#retireInstanceResources?.(instance);
+    async retireInstanceHostResources(instance: string): Promise<void> {
+        await this.#retireInstanceHostResources?.(instance);
     }
 
     fault(error: unknown): void {
