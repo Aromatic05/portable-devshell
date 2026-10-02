@@ -9,11 +9,10 @@ import type {
     ToolDefinition,
 } from "@portable-devshell/shared";
 import {
-    McpContextRemoteEnvironment,
-    McpContextRegistry,
-    McpEndpointWorker,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { createTestContextEnvironment, TestMcpEndpointWorker as McpEndpointWorker } from "../../../ContextRuntime.ts";
 import {
     withMcpContextId,
     withMcpInstanceTarget,
@@ -54,9 +53,11 @@ const contextRegistry = new McpContextRegistry({
     idFactory: () => "ctx-instance-test",
 });
 const activeContext = await contextRegistry.create({
-    instance: "main-pc",
+    environments: [{
+        instance: "main-pc",
+        workspace: "/workspace",
+    }],
     principal: "local",
-    workspace: "/workspace",
 });
 const withContext = <T extends Record<string, unknown>>(
     input: T,
@@ -165,9 +166,11 @@ test("environ_remote attach remains callable without a ready owner Worker", asyn
         idFactory: () => "ctx-environ-remote-bootstrap",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     const endpoint = new McpEndpointWorker({
         contextRegistry: registry,
@@ -210,9 +213,11 @@ test("environment tools cross the ToolCall operation boundary before side effect
         now: () => now,
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     const boundaryCalls: string[] = [];
     let connectCalls = 0;
@@ -298,9 +303,11 @@ test("environ_remote bootstraps and irreversibly masks remote routing", async ()
         idFactory: () => "ctx-environ-remote",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     const remoteCalls: string[] = [];
     let cleanupAttempts = 0;
@@ -527,8 +534,9 @@ test("worker calls default to the endpoint instance and route explicit targets t
             return true;
         },
     );
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -536,7 +544,7 @@ test("worker calls default to the endpoint instance and route explicit targets t
         activeContext.ctxId,
         "remote-server",
     );
-    await remote.attach(activeContext.ctxId, handle, "/remote-workspace");
+    await remote.attachRemote(activeContext.ctxId, handle, "/remote-workspace");
     assert.deepEqual(
         await endpoint.callTool(
             "bash_run",
@@ -606,9 +614,11 @@ test("remote environment attach reuses a live workspace attachment and releases 
         idFactory: () => "ctx-connect-idempotent",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let prepareCalls = 0;
     const touchedTemporary: string[] = [];
@@ -635,8 +645,9 @@ test("remote environment attach reuses a live workspace attachment and releases 
             touchedTemporary.push(path);
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -645,7 +656,7 @@ test("remote environment attach reuses a live workspace attachment and releases 
         "remote-server",
     );
     const call = async (workspace: string) =>
-        await remote.attach(created.ctxId, handle, workspace);
+        await remote.attachRemote(created.ctxId, handle, workspace);
 
     await call("/remote-a");
     await call("/remote-a");
@@ -662,9 +673,11 @@ test("remote workspace replacement keeps the committed attachment and retries cl
         idFactory: () => "ctx-connect-cleanup-retry",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let releaseAttempts = 0;
     const gateway = createGateway({
@@ -684,8 +697,9 @@ test("remote workspace replacement keeps the committed attachment and retries cl
                 throw new Error("old alert cleanup failed");
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -694,9 +708,9 @@ test("remote workspace replacement keeps the committed attachment and retries cl
         "remote-server",
     );
 
-    await remote.attach(created.ctxId, handle, "/remote-a");
+    await remote.attachRemote(created.ctxId, handle, "/remote-a");
     await assert.rejects(
-        remote.attach(created.ctxId, handle, "/remote-b"),
+        remote.attachRemote(created.ctxId, handle, "/remote-b"),
     );
     assert.equal(
         (await registry.validateForInstance(created.ctxId, "remote-server"))
@@ -707,7 +721,7 @@ test("remote workspace replacement keeps the committed attachment and retries cl
     );
     assert.equal((await registry.listEnvironmentCleanup()).length, 1);
 
-    await remote.attach(created.ctxId, handle, "/remote-b");
+    await remote.attachRemote(created.ctxId, handle, "/remote-b");
     assert.equal(releaseAttempts, 2);
     assert.deepEqual(await registry.listEnvironmentCleanup(), []);
 });
@@ -717,9 +731,11 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
         idFactory: () => "ctx-mask-cleanup-retry",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let referenceAttempts = 0;
     let alertAttempts = 0;
@@ -736,8 +752,9 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
                 throw new Error("reference cleanup failed");
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -745,10 +762,10 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
         created.ctxId,
         "remote-server",
     );
-    await remote.attach(created.ctxId, handle, "/remote-mask");
+    await remote.attachRemote(created.ctxId, handle, "/remote-mask");
 
     await assert.rejects(
-        remote.mask(created.ctxId, handle),
+        remote.maskRemote(created.ctxId, handle),
     );
     await assert.rejects(
         registry.validateForInstance(created.ctxId, "remote-server"),
@@ -768,7 +785,7 @@ test("remote mask remains durable while failed cleanup is retried", async () => 
         },
     ]);
 
-    await remote.mask(created.ctxId, handle);
+    await remote.maskRemote(created.ctxId, handle);
     assert.equal(referenceAttempts, 2);
     assert.equal(alertAttempts, 1);
     assert.deepEqual(await registry.listEnvironmentCleanup(), []);
@@ -779,9 +796,11 @@ test("remote environment attach cleans an unused alert lease and reference when 
         idFactory: () => "ctx-connect-failure",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     const releasedAlerts: string[] = [];
     const releasedReferences: string[] = [];
@@ -805,8 +824,9 @@ test("remote environment attach cleans an unused alert lease and reference when 
             releasedReferences.push(`${instance}:${reference}`);
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -816,7 +836,7 @@ test("remote environment attach cleans an unused alert lease and reference when 
     );
 
     await assert.rejects(
-        remote.attach(created.ctxId, handle, "/remote-fail"),
+        remote.attachRemote(created.ctxId, handle, "/remote-fail"),
         /alerts failed/u,
     );
     assert.deepEqual(releasedAlerts, ["/remote-fail"]);
@@ -828,9 +848,11 @@ test("remote attach persists cleanup intent before acquiring external resources"
         idFactory: () => "ctx-connect-write-ahead-cleanup",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let referenceIntentVisible = false;
     let alertIntentVisible = false;
@@ -861,8 +883,9 @@ test("remote attach persists cleanup intent before acquiring external resources"
             referenceReleases += 1;
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -871,7 +894,7 @@ test("remote attach persists cleanup intent before acquiring external resources"
         "remote-server",
     );
 
-    await remote.attach(created.ctxId, handle, "/remote-write-ahead");
+    await remote.attachRemote(created.ctxId, handle, "/remote-write-ahead");
 
     assert.equal(referenceIntentVisible, true);
     assert.equal(alertIntentVisible, true);
@@ -885,9 +908,11 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
         idFactory: () => "ctx-connect-cleanup-debt",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let alertReads = 0;
     let alertReleaseAttempts = 0;
@@ -921,8 +946,9 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
                 throw new Error("pre-commit reference cleanup failed");
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -932,7 +958,7 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
     );
 
     await assert.rejects(
-        remote.attach(created.ctxId, handle, "/remote-retry"),
+        remote.attachRemote(created.ctxId, handle, "/remote-retry"),
     );
     const pendingCleanup = await registry.listEnvironmentCleanup();
     assert.equal(pendingCleanup.length, 2);
@@ -956,7 +982,7 @@ test("remote attach persists cleanup debt when pre-commit compensation fails", a
         true,
     );
 
-    await remote.attach(created.ctxId, handle, "/remote-retry");
+    await remote.attachRemote(created.ctxId, handle, "/remote-retry");
     assert.equal(alertReleaseAttempts, 2);
     assert.equal(referenceReleaseAttempts, 2);
     assert.deepEqual(await registry.listEnvironmentCleanup(), []);
@@ -974,9 +1000,11 @@ test("remote attach records reference cleanup debt when the gateway cannot relea
         idFactory: () => "ctx-connect-cleanup-capability",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     const gateway = createGateway({
         async prepareWorkspace(instance, workspace) {
@@ -994,8 +1022,9 @@ test("remote attach records reference cleanup debt when the gateway cannot relea
     });
     delete (gateway as { releaseInstanceReference?: unknown })
         .releaseInstanceReference;
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -1005,7 +1034,7 @@ test("remote attach records reference cleanup debt when the gateway cannot relea
     );
 
     await assert.rejects(
-        remote.attach(created.ctxId, handle, "/remote-missing-release"),
+        remote.attachRemote(created.ctxId, handle, "/remote-missing-release"),
     );
     assert.equal(
         (await registry.listEnvironmentCleanup()).some(
@@ -1022,9 +1051,11 @@ test("remote bash truncation does not advertise the retired artifact_read tool",
         idFactory: () => "ctx-remote-artifact",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     await registry.attachEnvironment(created.ctxId, {
         instance: "remote-server",
@@ -1163,9 +1194,11 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
         idFactory: () => "ctx-cancel-remote",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let resolveStart!: (value: JsonValue) => void;
     let resolveConnectStarted!: () => void;
@@ -1190,8 +1223,9 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
             resolveRelease();
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -1200,7 +1234,7 @@ test("cancelling remote environment attach stops MCP waiting while the gateway o
         "remote-server",
     );
     const controller = new AbortController();
-    const pending = remote.attach(
+    const pending = remote.attachRemote(
         created.ctxId,
         handle,
         undefined,
@@ -1232,9 +1266,11 @@ test("concurrent remote attaches serialize one Context reference transaction", a
         idFactory: () => "ctx-concurrent-remote",
     });
     const created = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     let referenceHeld = false;
     const gateway = createGateway({
@@ -1259,8 +1295,9 @@ test("concurrent remote attaches serialize one Context reference transaction", a
             referenceHeld = false;
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry: registry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -1270,8 +1307,8 @@ test("concurrent remote attaches serialize one Context reference transaction", a
     );
 
     const [first, second] = await Promise.allSettled([
-        remote.attach(created.ctxId, handle, "/first"),
-        remote.attach(created.ctxId, handle, "/second"),
+        remote.attachRemote(created.ctxId, handle, "/first"),
+        remote.attachRemote(created.ctxId, handle, "/second"),
     ]);
 
     assert.equal(first.status, "rejected");
@@ -1296,8 +1333,9 @@ test("remote environment attach service is independent from local Worker readine
             return { instance };
         },
     });
-    const remote = new McpContextRemoteEnvironment({
+    const remote = createTestContextEnvironment({
         contextRegistry,
+        instanceName: "main-pc",
         gateway: () => gateway,
     });
     const handle = await requireRemoteHandle(
@@ -1306,7 +1344,7 @@ test("remote environment attach service is independent from local Worker readine
         "remote-server",
     );
 
-    await remote.attach(activeContext.ctxId, handle);
+    await remote.attachRemote(activeContext.ctxId, handle);
     assert.deepEqual(calls, ["connect:remote-server"]);
 });
 
@@ -1713,9 +1751,11 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
         idFactory: () => "ctx-session-todo",
     });
     const current = await registry.create({
-        instance: "main-pc",
+        environments: [{
+            instance: "main-pc",
+            workspace: "/workspace",
+        }],
         principal: "local",
-        workspace: "/workspace",
     });
     await registry.bindExternal(
         current.ctxId,
@@ -1797,9 +1837,15 @@ test("openai-session binding uses the same Todo contract as explicit ctxId", asy
 async function rewrittenEndpoint(toolName: string, remote: boolean, reject = false) {
     let now = Date.now();
     const registry = new McpContextRegistry({ now: () => now });
-    const original = await registry.create({ instance: "main-pc", principal: "local", workspace: "/original" });
+    const original = await registry.create({
+        environments: [{ instance: "main-pc", workspace: "/original" }],
+        principal: "local",
+    });
     const instance = remote ? "final" : "main-pc";
-    const final = await registry.create({ instance, principal: "local", workspace: "/final" });
+    const final = await registry.create({
+        environments: [{ instance, workspace: "/final" }],
+        principal: "local",
+    });
     now += 1000;
     const changes: Array<[string, ...unknown[]]> = [];
     const inputs: JsonValue[] = [];
@@ -1863,7 +1909,10 @@ for (const remote of [true, false]) {
         const h = await rewrittenEndpoint("file_read", remote);
         await h.endpoint.callTool("bash_run", { ctxId: h.original.ctxId, instance: "unknown", command: "original", purpose: "final target" }, context);
         assert.deepEqual(h.reviews, ["unknown"]);
-        assert.deepEqual(h.changes.filter((change) => change[0] === "ready"), [["ready", h.instance]]);
+        assert.deepEqual(h.changes.filter((change) => change[0] === "ready"), [
+            ["ready", h.instance],
+            ["ready", h.instance],
+        ]);
         assert.deepEqual(h.changes.find((change) => change[0] === "workspace"), ["workspace", h.instance, "/final"]);
         assert.deepEqual(h.changes.find((change) => change[0] === "event"), ["event", h.instance, "file_read", h.values[0]!.context]);
         assert.deepEqual(h.provenance, [{ callId: h.callIds[0], instance: h.instance, purpose: "final target" }]);

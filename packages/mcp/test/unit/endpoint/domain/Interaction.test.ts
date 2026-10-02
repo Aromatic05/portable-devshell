@@ -11,10 +11,10 @@ import type {
     WaitRecord,
 } from "@portable-devshell/shared";
 import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
-import { McpEndpointDispatch } from "../../../../src/endpoint/dispatch/Dispatch.ts";
+import type { McpEndpointDispatch } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { McpContextRemoteEnvironment } from "../../../../src/context/Environment.ts";
-import { McpContextRegistry } from "../../../../src/context/registry/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { createTestContextEnvironment, createTestEndpointDispatch } from "../../../ContextRuntime.ts";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -259,7 +259,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             instanceName: "alpha",
             worker,
         });
-        const dispatch = new McpEndpointDispatch({
+        const dispatch = createTestEndpointDispatch({
             catalog,
             contextRegistry,
             gateway: gateway as never,
@@ -277,10 +277,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             await contextRegistry.referenceInstance(environment.ctxId, "beta")
         )?.handle;
         assert.equal(typeof handle, "string");
-        await new McpContextRemoteEnvironment({
+        await createTestContextEnvironment({
             contextRegistry,
+            instanceName: "alpha",
             gateway: () => gateway as never,
-        }).attach(environment.ctxId, handle!, "/projects/beta");
+        }).attachRemote(environment.ctxId, handle!, "/projects/beta");
 
         const result = await dispatch.callTool(
             "artifact_viewImage",
@@ -311,6 +312,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         );
         assert.equal(consumed.at(-1)?.instance, "beta");
         assert.deepEqual(audited, [
+            { instance: "alpha", toolName: "environ_info" },
             { instance: "beta", toolName: "artifact_viewImage" },
         ]);
         assert.deepEqual(called, [
@@ -429,6 +431,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             async connectInstance(): Promise<JsonValue> {
                 return {};
             },
+            async touchTemporaryDirectory() {},
             async statusInstance(): Promise<JsonValue> {
                 return {};
             },
@@ -447,7 +450,7 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
         });
         return {
             catalog,
-            dispatch: new McpEndpointDispatch({
+            dispatch: createTestEndpointDispatch({
                 catalog,
                 contextRegistry,
                 gateway: gateway as never,
@@ -1107,9 +1110,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             idFactory: () => context.ctxId!,
         });
         const created = await registry.create({
-            instance: "demo",
+            environments: [{
+                instance: "demo",
+                workspace: "/local",
+            }],
             principal: "tester",
-            workspace: "/local",
         });
         assert.equal(created.ctxId, context.ctxId);
         await registry.attachEnvironment(context.ctxId!, {
@@ -1231,9 +1236,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             idFactory: () => context.ctxId!,
         });
         await registry.create({
-            instance: "demo",
+            environments: [{
+                instance: "demo",
+                workspace: "/local",
+            }],
             principal: "tester",
-            workspace: "/local",
         });
         await registry.attachEnvironment(context.ctxId!, {
             instance: "remote",
@@ -2044,9 +2051,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2137,9 +2146,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2231,9 +2242,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2306,9 +2319,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2384,9 +2399,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             Object.assign(registry, {
                 async bindAutomaticReentrySource() {
@@ -2483,9 +2500,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2609,9 +2628,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2719,9 +2740,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -2866,9 +2889,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             Object.assign(registry, {
                 async bindAutomaticReentrySource() {
@@ -2957,9 +2982,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -3107,9 +3134,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             await registry.observeExecutionActivity(context.ctxId!, "demo");
             const fake = createInteractionGateway();
@@ -3164,9 +3193,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             let taskStatus = "in_progress";
@@ -3256,9 +3287,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const now = new Date().toISOString();
@@ -3356,9 +3389,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             const actions: string[] = [];
@@ -3440,9 +3475,11 @@ import { createTestTempDirectory } from "../../../../../../test/TestTempDirector
             });
             await registry.initialize();
             await registry.create({
-                instance: "demo",
+                environments: [{
+                    instance: "demo",
+                    workspace: "/workspace",
+                }],
                 principal: "local",
-                workspace: "/workspace",
             });
             const fake = createInteractionGateway();
             let goalClaimId: string | undefined;

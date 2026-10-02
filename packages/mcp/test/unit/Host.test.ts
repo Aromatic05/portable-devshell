@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    McpHost,
-    McpRuntimeState,
-} from "@portable-devshell/mcp";
-import {
     McpEndpointBinding,
-    McpEndpointWorker,
     McpHostRouteMatcher,
     McpHostRouteRegistry,
     HttpHost,
 } from "@portable-devshell/mcp/testing";
+import { createTestMcpRuntimeState, TestMcpEndpointWorker as McpEndpointWorker, TestMcpHost as McpHost } from "../ContextRuntime.ts";
 import { rm, writeFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
@@ -18,7 +14,7 @@ import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("McpRuntimeState owns state across replaceable listener hosts", () => {
     const storageDir = "/virtual/oauth";
-    const state = new McpRuntimeState({ storageDir });
+    const state = createTestMcpRuntimeState({ storageDir });
     const firstHost = new McpHost(
         {
             instances: [],
@@ -54,7 +50,7 @@ test("McpRuntimeState owns state across replaceable listener hosts", () => {
         false,
     );
 
-    assert.equal(firstHost.contextRegistry, secondHost.contextRegistry);
+    assert.equal(firstHost.contexts.registry, secondHost.contexts.registry);
     assert.equal(firstOAuth, secondOAuth);
 });
 

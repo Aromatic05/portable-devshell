@@ -12,7 +12,6 @@ import {
     type CommentPort,
 } from "@portable-devshell/comment-extension";
 import {
-    McpHost,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
 import {
@@ -26,6 +25,7 @@ import {
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
 import { ToolCallPipeline, ToolCallExecutionTarget } from "../../../../../packages/core/src/toolcall/Pipeline.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
+import { TestMcpHost } from "../../../../mcp/test/ContextRuntime.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
 
@@ -117,8 +117,8 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         resolveTarget: () => target,
     });
     const worker = createWorker(workspace);
-    const gateway = createCommentGateway(execution, worker.handshake);
-    const host = new McpHost({
+    const gateway = createCommentGateway(execution, worker);
+    const host = new TestMcpHost({
         instances: [
             {
                 auth: { enabled: false, provider: "none" },
@@ -378,7 +378,7 @@ function createWorker(workspace: string) {
 
 function createCommentGateway(
     execution: ToolCallPipeline,
-    handshake: ReturnType<typeof createWorker>["handshake"],
+    worker: ReturnType<typeof createWorker>,
 ): McpInstanceGateway {
     return {
         async appendMcpToolCalled() {},
@@ -386,10 +386,13 @@ function createCommentGateway(
         callToolOperation: (...args: Parameters<McpInstanceGateway["callToolOperation"]>) => execution.callOperation(...args),
         callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => execution.call(...args),
         environment() {
-            return handshake as never;
+            return worker.handshake as never;
         },
         async listInstances() {
             return [];
+        },
+        listTools() {
+            return worker.listTools();
         },
         modelCommands() {
             return [];

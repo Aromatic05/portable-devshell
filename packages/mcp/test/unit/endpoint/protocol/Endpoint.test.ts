@@ -14,9 +14,7 @@ import { parseMcpHttpResponse } from "../../../TestMcpHttpResponse.ts";
 import { attachToolCallErrorPayload } from "@portable-devshell/core";
 
 import {
-    McpContextRegistry,
     McpEndpointBinding,
-    McpEndpointWorker,
     McpExtensionRegistry,
     McpNativeToolResult,
     createWorkspaceMcpExtension,
@@ -26,6 +24,11 @@ import {
     workspaceAppStableResourceUri,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import {
+    createTestCallOperationGateway,
+    TestMcpEndpointWorker as McpEndpointWorker,
+} from "../../../ContextRuntime.ts";
 
 const fixturesDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -907,6 +910,7 @@ test("tools/call appends a worker result hint and keeps the flat shape", async (
 test("environment and control-owned tools execute through the endpoint audit path", async () => {
     const harness = createWorkerHarness();
     const gateway = {
+        ...harness.gateway,
         assertReady() {},
         async callTool() {
             return {};

@@ -3,6 +3,8 @@ import { readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import type { ToolCallHookValue } from "@portable-devshell/core";
+import { asInstanceName } from "@portable-devshell/shared";
 
 import {
     requireTcpPort,
@@ -11,7 +13,10 @@ import {
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 import { parseMcpHttpResponse } from "../TestMcpHttpResponse.ts";
 
-import { McpHost } from "@portable-devshell/mcp/testing";
+import {
+    createTestCallOperationGateway,
+    TestMcpHost as McpHost,
+} from "../ContextRuntime.ts";
 import type {
     McpAuthConfig,
     McpHostInstanceConfig,
@@ -285,12 +290,14 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             recovery,
         );
         await first.start();
-        const created = await first.contextRegistry.create({
-            instance: "demo",
+        const created = await first.contexts.registry.create({
+            environments: [{
+                instance: "demo",
+                workspace: "/workspace",
+            }],
             principal: "local",
-            workspace: "/workspace",
         });
-        await first.contextRegistry.attachEnvironment(created.ctxId, {
+        await first.contexts.registry.attachEnvironment(created.ctxId, {
             instance: "beta",
             workspace: "/beta",
         });
@@ -318,7 +325,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             JSON.stringify(opened.result?.structuredContent).includes(token),
             false,
         );
-        const beforeLiveRead = await first.contextRegistry.lookup(
+        const beforeLiveRead = await first.contexts.registry.lookup(
             created.ctxId,
             { principal: "local" },
         );
@@ -333,7 +340,7 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             ((await firstLive.json()) as { ctxId?: unknown }).ctxId,
             created.ctxId,
         );
-        const afterLiveRead = await first.contextRegistry.lookup(
+        const afterLiveRead = await first.contexts.registry.lookup(
             created.ctxId,
             { principal: "local" },
         );
@@ -392,8 +399,8 @@ test("Live Workspace capability survives MCP host restart and drives the direct 
             /token|required|invalid/i,
         );
 
-        await restarted.contextAdmin.detachInstance("demo");
-        await restarted.contextRegistry.attachEnvironment(created.ctxId, {
+        await restarted.contexts.detachInstance("demo");
+        await restarted.contexts.registry.attachEnvironment(created.ctxId, {
             instance: "demo",
             workspace: "/replacement-workspace",
         });
@@ -433,7 +440,10 @@ test("running host replaces and unregisters instance bindings without restart", 
 
         assert.deepEqual(await initializeAndListTools(endpoint), [
             "environ_info",
+            "environ_remote",
             "bash_run",
+            "todo_read",
+            "todo_write",
         ]);
 
         host.registerInstance({
@@ -745,6 +755,29 @@ function createInstance(
 ): McpHostInstanceConfig {
     return {
         auth,
+        gateway: {
+            ...createTestCallOperationGateway(),
+            listTools: () => [{
+                requiredCapabilities: ["execute"],
+                group: "bash",
+                name: "bash_run",
+                description: "Run shell",
+                inputSchema: { type: "object" },
+                outputSchema: { type: "object" },
+            }],
+            async callTool(instance, toolName, input, context, _signal, transformResult, invocationInput) {
+                const callId = "http-test-call";
+                const finalValue: ToolCallHookValue = {
+                    kind: "call",
+                    toolName,
+                    payload: input,
+                    context: { ...context, instance: asInstanceName(instance) },
+                };
+                const prepared = await invocationInput?.(input, callId, finalValue) ?? input;
+                const result = { exitCode: 0, stderr: "", stdout: "ok\n" };
+                return await transformResult?.(result, callId) ?? result;
+            },
+        },
         name,
         worker: {
             async appendMcpSessionClosed(_sessionId: string) {},
@@ -774,6 +807,15 @@ function createInstance(
                 _context: { source: "mcp" },
             ) {
                 return { exitCode: 0, stderr: "", stdout: "ok\n" };
+            },
+            async prepareWorkspace(workspace: string) {
+                return {
+                    projectMemoryAgentFile: `${workspace}/AGENT.md`,
+                    projectMemoryDirectory: workspace,
+                    projectMemoryPresent: false,
+                    temporaryDirectory: `${workspace}/tmp`,
+                    workspace,
+                };
             },
         } as never,
     };

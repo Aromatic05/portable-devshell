@@ -5,19 +5,21 @@ import test from "node:test";
 
 import type { JsonValue, ToolCallContext } from "@portable-devshell/shared";
 import {
-    McpContextRegistry,
-    McpEndpointWorker,
     type McpInstanceGateway,
 } from "@portable-devshell/mcp/testing";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { TestMcpEndpointWorker as McpEndpointWorker } from "../../../ContextRuntime.ts";
 
 const context = { principal: "local", requestId: "artifact-request" } as const;
 const contextRegistry = new McpContextRegistry({
     idFactory: () => "ctx-artifact-test",
 });
 const activeContext = await contextRegistry.create({
-    instance: "main-pc",
+    environments: [{
+        instance: "main-pc",
+        workspace: "/workspace",
+    }],
     principal: "local",
-    workspace: "/workspace",
 });
 const withContext = <T extends Record<string, unknown>>(
     input: T,

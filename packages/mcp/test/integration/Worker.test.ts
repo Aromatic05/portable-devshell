@@ -22,7 +22,10 @@ import {
     WorkerInstanceFactory,
     type WorkerInstance,
 } from "@portable-devshell/core/testing";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import {
+    createTestWorkerGateway,
+    TestMcpHost as McpHost,
+} from "../ContextRuntime.ts";
 import {
     commandAvailable,
     readRelativeMarkerCommand,
@@ -109,6 +112,10 @@ import { tmpdir } from "node:os";
                 instances: [
                     {
                         auth: { enabled: false, provider: "none" },
+                        gateway: createTestWorkerGateway(
+                            () => instance.toolCallTarget(),
+                            () => instance.listTools(),
+                        ),
                         name: instanceName,
                         worker: instance,
                     },
@@ -1058,6 +1065,10 @@ import { tmpdir } from "node:os";
             instances: [
                 {
                     auth: { enabled: false, provider: "none" },
+                    gateway: createTestWorkerGateway(
+                        () => instance.toolCallTarget(),
+                        () => instance.listTools(),
+                    ),
                     name: instanceName,
                     worker: instance,
                 },

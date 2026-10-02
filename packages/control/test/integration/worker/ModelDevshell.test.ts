@@ -8,7 +8,10 @@ import {
     WorkerInstanceFactory,
     WorkerTransportDriverLocal,
 } from "@portable-devshell/core/testing";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import {
+    createTestWorkerGateway,
+    TestMcpHost,
+} from "../../../../mcp/test/ContextRuntime.ts";
 import { asInstanceName, type JsonValue } from "@portable-devshell/shared";
 import { executeInstanceCommand } from "@portable-devshell/instance-extension";
 import type { CliModelCommandInvocationContext } from "@portable-devshell/extension/cli";
@@ -82,10 +85,20 @@ test(
             worker,
         } as unknown as InstanceDescriptor;
         const instances = new InstanceRegistry([descriptor]);
-        const host = new McpHost({
+        const host = new TestMcpHost({
+            contextFile: `${homeDirectory}/contexts.json`,
             instances: [
                 {
                     auth: { enabled: false, provider: "none" },
+                    gateway: {
+                        ...createTestWorkerGateway(
+                            () => worker.toolCallTarget(),
+                            () => worker.listTools(),
+                        ),
+                        environment: () => worker.handshake,
+                        readAlerts: async (_instance, workspace) => await worker.readAlerts(workspace),
+                        releaseAlerts: async (_instance, workspace) => await worker.releaseAlerts(workspace),
+                    },
                     name: instanceName,
                     worker,
                 },
@@ -102,7 +115,7 @@ test(
         const broker = new ModelDevshellBroker({
             access: { allows: ({ extensionId }) => extensionId === "instance" },
             commands,
-            contextAdmin: () => host.contextAdmin,
+            contextAdmin: () => host.contexts,
             instances,
         });
 

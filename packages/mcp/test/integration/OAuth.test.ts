@@ -51,7 +51,10 @@ import {
     WorkerInstanceFactory,
     WorkerTransportDriverLocal,
 } from "@portable-devshell/core/testing";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import {
+    createTestWorkerGateway,
+    TestMcpHost as McpHost,
+} from "../ContextRuntime.ts";
 import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
 
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -114,10 +117,11 @@ test(
     realWorkerTestOptions(workerBinaryPath),
     async () => {
         const { cleanupDirs, host, instance, workspaceMarker, workspacePath } =
-            await startFrozenWorkerHost("real-none", {
-                enabled: false,
-                provider: "none",
-            });
+            await startFrozenWorkerHost(
+                "real-none",
+                { enabled: false, provider: "none" },
+                undefined,
+            );
 
         try {
             const endpoint = endpointFor(host, "real-none");
@@ -200,7 +204,6 @@ test(
             ),
         });
         let sequence = new ToolCallHookSequence({});
-        let target: ReturnType<WorkerInstanceFactory["create"]>;
         const pipeline = new ToolCallPipeline({
             hooks: () => ({ release() {}, sequence }),
             resolveTarget: () => target.toolCallTarget(),
@@ -219,7 +222,7 @@ test(
                 return [];
             },
             listTools() {
-                return [];
+                return target?.listTools() ?? [];
             },
             async prepareWorkspace(_instance: string, workspace: string) {
                 return {
@@ -259,7 +262,7 @@ test(
                 { enabled: false, provider: "none" },
                 gateway,
             );
-        target = instance;
+        const target: ReturnType<WorkerInstanceFactory["create"]> = instance;
         const commentGate = createCommentToolCallGate(comment.comment);
         const commentTodoAccess = createCommentTodoAccess(comment.comment);
         const commentTodoInvalid = createCommentTodoInvalid(comment.comment);
@@ -438,11 +441,11 @@ test(
     async () => {
         const staticToken = "real-token-client-secret-value-0123456789ab";
         const { cleanupDirs, host, instance, workspaceMarker, workspacePath } =
-            await startFrozenWorkerHost("real-token", {
-                enabled: true,
-                provider: "token",
-                token: staticToken,
-            });
+            await startFrozenWorkerHost(
+                "real-token",
+                { enabled: true, provider: "token", token: staticToken },
+                undefined,
+            );
 
         try {
             const endpoint = endpointFor(host, "real-token");
@@ -539,6 +542,10 @@ test(
                         },
                         provider: "oauth2",
                     },
+                    gateway: createTestWorkerGateway(
+                        () => instance.toolCallTarget(),
+                        () => instance.listTools(),
+                    ),
                     name: "real-oauth",
                     worker: instance,
                 },
@@ -825,6 +832,10 @@ test(
                         },
                         provider: "oauth2",
                     },
+                    gateway: createTestWorkerGateway(
+                        () => instance.toolCallTarget(),
+                        () => instance.listTools(),
+                    ),
                     name: "real-oauth-token",
                     worker: instance,
                 },
@@ -1280,7 +1291,10 @@ async function startFrozenWorkerHost(
         instances: [
             {
                 auth,
-                gateway,
+                gateway: gateway ?? createTestWorkerGateway(
+                    () => instance.toolCallTarget(),
+                    () => instance.listTools(),
+                ),
                 name,
                 worker: instance,
             },

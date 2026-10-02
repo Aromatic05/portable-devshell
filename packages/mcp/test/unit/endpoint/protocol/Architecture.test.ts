@@ -12,13 +12,11 @@ import type {
 } from "@portable-devshell/shared";
 
 import { McpEndpointCatalog } from "../../../../src/endpoint/tool/Catalog.ts";
-import {
-    McpEndpointDispatch,
-    mcpTmuxBlockSyncMsForContextMode,
-} from "../../../../src/endpoint/dispatch/Dispatch.ts";
+import { mcpTmuxBlockSyncMsForContextMode } from "../../../../src/endpoint/dispatch/Dispatch.ts";
 import type { McpInstanceGateway } from "../../../../src/endpoint/Port.ts";
 import { McpNativeToolResult } from "../../../../src/endpoint/Endpoint.ts";
-import { McpContextRegistry } from "../../../../src/context/registry/Registry.ts";
+import { ContextRegistry as McpContextRegistry } from "../../../../../control/src/control/context/Registry.ts";
+import { createTestEndpointDispatch } from "../../../ContextRuntime.ts";
 import { createMcpContextSelector } from "../../../../src/context/Selector.ts";
 
 function workerTool(name: string = "bash_run"): ToolDefinition {
@@ -202,13 +200,20 @@ function createWorker(
             return await transformResult?.({ ok: true, toolName }, "call-test") ?? { ok: true, toolName };
         },
         async appendMcpToolCalled() {},
+        approval: {
+            async listApprovals() { return []; },
+            async listPendingApprovals() { return []; },
+            async decideApproval() { throw new Error("unexpected approval decision"); },
+        },
         assertReady() {},
         environment: () => worker.handshake,
         listTools: () => options.tools ?? [workerTool()],
         async listInstances() { return []; },
         async prepareWorkspace(_instance, workspace) { return await worker.prepareWorkspace(workspace); },
         async readAlerts() { return { advice: [] }; },
-        async releaseAlerts() {},
+        async releaseAlerts(_instance: string, workspace: string) {
+            releasedAlerts.push(workspace);
+        },
         async touchAlerts() {},
         async touchTemporaryDirectory() {},
         async connectInstance() { return {}; },
@@ -217,6 +222,12 @@ function createWorker(
         async stopInstance() { return {}; },
         async readTodo() { return {}; },
         async writeTodo() { return {}; },
+        async createWait() { throw new Error("unexpected wait creation"); },
+        async detachWait() { throw new Error("unexpected wait detachment"); },
+        async consumeWait() { throw new Error("unexpected wait consumption"); },
+        async resolveWait() { throw new Error("unexpected wait resolution"); },
+        async waitForWait() { throw new Error("unexpected wait"); },
+        async listWaits() { return []; },
     };
     return { audited, auditResults, calls, events, gateway, releasedAlerts, worker };
 }
@@ -255,9 +266,6 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
     const gateway = {
         ...harness.gateway,
         assertReady() {},
-        async callTool(): Promise<JsonValue> {
-            return { remote: true };
-        },
         async createSshInstance(): Promise<JsonValue> {
             return { created: true };
         },
@@ -323,7 +331,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         async listInstances(): Promise<JsonValue[]> {
             return [{ name: "demo-local" }];
         },
-        listTools: () => [],
+        listTools: () => harness.worker.listTools(),
         async readTodo(): Promise<JsonValue> {
             return { items: [], revision: 0 };
         },
@@ -345,7 +353,7 @@ test("McpEndpointDispatch executes environment, control, and worker domains with
         instanceName: "demo-local",
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry,
         gateway,
@@ -501,7 +509,7 @@ test("cached MCP tool names stay callable without re-exposing stale recipients",
         instanceName: "demo-local",
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         gateway,
         instanceName: "demo-local",
@@ -589,7 +597,7 @@ test("Workspace authorization metadata never enters audit results or MCP events"
         instanceName: "demo-local",
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         gateway,
         instanceName: "demo-local",
@@ -688,7 +696,7 @@ test("OpenAI session resolves Workspace once and the App continues by ctxId with
         instanceName: "demo-local",
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: registry,
         contextSelector,
@@ -760,7 +768,9 @@ test("tmux_run block waits are interruptible before handoff and detach after the
     const harness = createWorker({ tools: [tmuxRunBlockTool()] });
     const worker = {
         ...harness.worker,
-
+        async invokeToolInternal(toolName: string, input: JsonValue, context: ToolCallContext, signal?: AbortSignal) {
+            return await ingress.invokeToolInternal("demo-local", toolName, input, context, signal);
+        },
     };
     const ingress = {
         async invokeToolInternal(
@@ -929,7 +939,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         async listWaits() {
             return waits;
         },
-        listTools: () => [],
+        listTools: () => harness.worker.listTools(),
         async observeTmuxTask(_instance: string, taskId: string) {
             return (
                 terminalResults.get(taskId) ?? {
@@ -1017,7 +1027,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
         worker,
     });
     const contextRegistry = new McpContextRegistry();
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry,
         gateway,
@@ -1138,7 +1148,7 @@ test("tmux_run block waits are interruptible before handoff and detach after the
             return waits;
         },
     } as never;
-    const restartedDispatch = new McpEndpointDispatch({
+    const restartedDispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: new McpContextRegistry(),
         gateway: restartedGateway,
@@ -1275,10 +1285,12 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     let internalReadCalls = 0;
     let logicalReadCalls = 0;
     const goalActivityKinds: GoalActivityKind[] = [];
-    const harness = createWorker({ tools: [tmuxReadBlockTool()] });
+    const harness = createWorker({ cached: true, tools: [tmuxReadBlockTool()] });
     const worker = {
         ...harness.worker,
-
+        async invokeToolInternal(toolName: string, input: JsonValue) {
+            return await ingress.invokeToolInternal("demo-local", toolName, input);
+        },
     };
     const ingress = {
         async invokeToolInternal(
@@ -1422,7 +1434,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
         async listWaits() {
             return waits;
         },
-        listTools: () => [],
+        listTools: () => harness.worker.listTools(),
         async observeTmuxTask(_instance: string, taskId: string) {
             return { task: { id: taskId, status: "running" } };
         },
@@ -1468,7 +1480,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     });
     let executionNow = Date.now();
     const contextRegistry = new McpContextRegistry({ now: () => executionNow });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry,
         gateway,
@@ -1657,7 +1669,7 @@ test("tmux_read long waits detach into durable Workspace state", async () => {
     );
 
     ready = false;
-    const abortDispatch = new McpEndpointDispatch({
+    const abortDispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry,
         gateway,
@@ -1709,9 +1721,11 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const oldContext = await registry.create({
-        instance: "demo-local",
+        environments: [{
+            instance: "demo-local",
+            workspace: "/projects/old",
+        }],
         principal: "tester",
-        workspace: "/projects/old",
     });
     const stoppedGoals: string[] = [];
     const harness = createWorker({ failAuditAfterOperation: true });
@@ -1742,7 +1756,7 @@ test("failed environ_info rolls back only the undisclosed explicit Context", asy
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextSelector,
         contextRegistry: registry,
@@ -1780,9 +1794,11 @@ test("successful environ_info creates a new explicit Context without retiring ol
     const ids = ["ctx-session-old", "ctx-session-new"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const oldContext = await registry.create({
-        instance: "demo-local",
+        environments: [{
+            instance: "demo-local",
+            workspace: "/projects/old",
+        }],
         principal: "tester",
-        workspace: "/projects/old",
     });
     const releasedAlerts: string[] = [];
     const stoppedGoals: string[] = [];
@@ -1817,7 +1833,7 @@ test("successful environ_info creates a new explicit Context without retiring ol
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextSelector,
         contextRegistry: registry,
@@ -1837,7 +1853,11 @@ test("successful environ_info creates a new explicit Context without retiring ol
     const selected = await registry.validateAndTouch(createdCtxId!, {
         principal: "tester",
     });
-    assert.equal(selected.workspace, "/projects/new");
+    assert.equal(
+        selected.environments.find(({ instance }) => instance === "demo-local")
+            ?.workspace,
+        "/projects/new",
+    );
     assert.deepEqual(
         (await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })),
         [
@@ -1854,9 +1874,11 @@ test("environ_info releases the previous workspace alert lease after an explicit
         idFactory: () => "ctx-switch-workspace",
     });
     const context = await registry.create({
-        instance: "demo-local",
+        environments: [{
+            instance: "demo-local",
+            workspace: "/projects/old",
+        }],
         principal: "tester",
-        workspace: "/projects/old",
     });
     const harness = createWorker();
     const catalog = new McpEndpointCatalog({
@@ -1864,7 +1886,7 @@ test("environ_info releases the previous workspace alert lease after an explicit
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -1882,7 +1904,12 @@ test("environ_info releases the previous workspace alert lease after an explicit
         structuredResult<{ ctxId?: string }>(result).ctxId,
         context.ctxId,
     );
-    assert.equal((await registry.list())[0]?.workspace, "/projects/new");
+    assert.equal(
+        (await registry.list())[0]?.environments.find(
+            ({ instance }) => instance === "demo-local",
+        )?.workspace,
+        "/projects/new",
+    );
     assert.deepEqual(harness.releasedAlerts, ["/projects/old"]);
 });
 
@@ -1896,7 +1923,7 @@ test("environ_info rolls back an undisclosed Context when post-create event reco
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -1923,6 +1950,10 @@ test("environ_info keeps failed undisclosed cleanup disabled with durable debt",
     harness.worker.releaseAlerts = async () => {
         throw cleanupFailure;
     };
+    harness.gateway.releaseAlerts = async (instance, workspace) => {
+        assert.equal(instance, "demo-local");
+        await harness.worker.releaseAlerts(workspace);
+    };
     const registry = new McpContextRegistry({
         idFactory: () => "ctx-rollback-cleanup",
     });
@@ -1931,7 +1962,7 @@ test("environ_info keeps failed undisclosed cleanup disabled with durable debt",
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -1968,9 +1999,11 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     const ids = ["ctx-existing", "ctx-rollback"];
     const registry = new McpContextRegistry({ idFactory: () => ids.shift()! });
     const existing = await registry.create({
-        instance: "origin",
+        environments: [{
+            instance: "origin",
+            workspace: "/projects/origin",
+        }],
         principal: "tester",
-        workspace: "/projects/origin",
     });
     await registry.attachEnvironment(existing.ctxId, {
         instance: "demo-local",
@@ -1981,7 +2014,7 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
         gateway: harness.gateway,
         worker: harness.worker,
     });
-    const dispatch = new McpEndpointDispatch({
+    const dispatch = createTestEndpointDispatch({
         catalog,
         contextRegistry: registry,
         instanceName: "demo-local",
@@ -1999,8 +2032,11 @@ test("environ_info rollback keeps alerts leased by another Context attachment", 
     );
 
     assert.deepEqual(
-        (await registry.list()).map(({ ctxId }) => ctxId),
-        [existing.ctxId],
+        (await registry.list()).map(({ ctxId, status }) => ({ ctxId, status })),
+        [
+            { ctxId: existing.ctxId, status: "active" },
+            { ctxId: "ctx-rollback", status: "disabled" },
+        ],
     );
     assert.deepEqual(harness.releasedAlerts, []);
 });
