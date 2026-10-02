@@ -449,10 +449,10 @@ impl ArtifactPayloadStore {
         max_bytes: usize,
     ) -> Result<ArtifactPayloadReader, ToolError> {
         validate_id(payload_id)?;
-        if max_bytes == 0 || max_bytes > MAX_READ_BYTES {
+        if max_bytes == 0 {
             return Err(ToolError::new(
                 "tool.invalidArguments",
-                format!("maxBytes must be between 1 and {MAX_READ_BYTES}"),
+                "maxBytes must be positive",
             ));
         }
         let _guard = self.lock()?;
@@ -1146,6 +1146,7 @@ fn os_sort_key(value: &OsStr) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Read;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1153,7 +1154,7 @@ mod tests {
 
     use super::{
         ArtifactPayloadStore, ArtifactPayloadType, MAX_ACTIVE_PAYLOADS, MAX_PAYLOAD_TTL_MS,
-        validate_expiration,
+        MAX_READ_BYTES, validate_expiration,
     };
     use crate::capability::artifact::store::ArtifactStore;
     use crate::capability::artifact::types::ArtifactStream;
@@ -1260,6 +1261,37 @@ mod tests {
         assert_eq!(STANDARD.decode(chunk.content).unwrap(), b"before");
         assert_eq!(opened.descriptor.payload_type, ArtifactPayloadType::File);
         assert_eq!(opened.descriptor.payload_bytes, 6);
+    }
+
+    #[test]
+    fn streaming_reader_is_not_bounded_by_buffered_read_limit() {
+        let root = crate::testing::temp_dir();
+        let workspace = root.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let bytes = vec![0x5a; MAX_READ_BYTES + 1024];
+        fs::write(workspace.join("large.bin"), &bytes).unwrap();
+        let artifacts = ArtifactStore::new(root.path().join("artifacts")).unwrap();
+        let payloads = ArtifactPayloadStore::new(root.path().join("payloads"), artifacts).unwrap();
+        let opened = payloads
+            .open_path(
+                &workspace,
+                "./large.bin",
+                &DisabledSecurityPolicy,
+                expires_at_ms(),
+            )
+            .unwrap();
+
+        assert!(
+            payloads
+                .read_bytes(&opened.payload_id, 0, MAX_READ_BYTES + 1)
+                .is_err()
+        );
+        let mut reader = payloads
+            .open_reader(&opened.payload_id, 0, MAX_READ_BYTES + 1024)
+            .unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+        assert_eq!(streamed, bytes);
     }
 
     #[test]
