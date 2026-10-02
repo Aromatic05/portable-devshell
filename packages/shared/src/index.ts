@@ -48,6 +48,7 @@ export * from "./protocol/JsonValue.js";
 export * from "./read-model/ControlReadModel.js";
 export * from "./read-model/ControlReadState.js";
 export * from "./read-model/ControlRefreshScheduler.js";
+export * from "./transport/endpoint/Address.js";
 export * from "./transport/endpoint/Endpoint.js";
 export * from "./transport/endpoint/channel/Channel.js";
 export * from "./transport/endpoint/channel/Local.js";

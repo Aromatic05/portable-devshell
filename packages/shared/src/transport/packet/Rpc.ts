@@ -1,5 +1,5 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
-import type { Address } from "../envelope/Codec.js";
+import type { Address } from "../endpoint/Address.js";
 import type { Message } from "./Packet.js";
 
 export interface RpcError {

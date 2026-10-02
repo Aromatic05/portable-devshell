@@ -1,13 +1,6 @@
 import type { Channel } from "../endpoint/channel/Channel.js";
-
-export type Host = string;
-export type PortName = string;
-export type Packet = unknown;
-
-export interface Address {
-    readonly host: Host;
-    readonly port: PortName;
-}
+import type { Address } from "../endpoint/Address.js";
+import type { Packet } from "../packet/Packet.js";
 
 export interface Envelope {
     readonly source: Address;

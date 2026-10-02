@@ -1,6 +1,7 @@
-import { EnvelopeCodec, type Host, type PortName } from "../envelope/Codec.js";
+import { EnvelopeCodec } from "../envelope/Codec.js";
 import { FrameProtocol } from "../frame/Protocol.js";
 import { FrameStreamChannel } from "../frame/Stream.js";
+import type { Host, PortName } from "./Address.js";
 import type { Channel } from "./channel/Channel.js";
 import { Connection, Port, Route } from "./route/Route.js";
 

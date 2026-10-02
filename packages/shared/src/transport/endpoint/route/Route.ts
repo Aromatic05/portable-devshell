@@ -1,11 +1,9 @@
 import type {
-    Address,
     Envelope,
     EnvelopeCodec,
-    Host,
-    Packet,
-    PortName,
 } from "../../envelope/Codec.js";
+import type { Packet } from "../../packet/Packet.js";
+import type { Address, Host, PortName } from "../Address.js";
 
 export type PacketListener = (
     packet: Packet,
