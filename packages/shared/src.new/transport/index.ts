@@ -14,6 +14,7 @@ export * from "./envelope/Codec.js";
 export * from "./frame/Protocol.js";
 
 export * from "./packet/Packet.js";
+export * from "./packet/Event.js";
 export * from "./packet/Rpc.js";
 export * from "./packet/Stream.js";
 

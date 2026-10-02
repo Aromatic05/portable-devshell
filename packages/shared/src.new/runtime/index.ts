@@ -2,6 +2,9 @@
 // instance event stream and subscription engine, approval, task goals/todos/
 // waits, tool calls, and terminals. Runtime never depends on Control.
 
+export * from "./Error.js";
+export * from "./command/Model.js";
+
 export * from "./identity/Model.js";
 
 export * from "./state/Model.js";

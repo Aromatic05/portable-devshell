@@ -4,6 +4,8 @@
 // control-plane instance management (create/list/enable/disable/delete,
 // reverse enrollment, and the shared container vocabulary).
 
+export * from "./Error.js";
+
 export * from "./config/Contract.js";
 export * from "./config/Edit.js";
 export * from "./config/Issue.js";

@@ -1,5 +1,14 @@
 import type { JsonValue } from "./JsonValue.js";
 
+// Generic transport/protocol error codes. These are named constants rather than
+// a domain catalog: they describe transport mechanics, not a bounded context's
+// failure vocabulary.
+export const TRANSPORT_METHOD_NOT_FOUND_CODE = "method_not_found";
+export const TRANSPORT_PROTOCOL_INVALID_FRAME_CODE = "protocol.invalidFrame";
+export const TRANSPORT_PROTOCOL_FRAME_TOO_LARGE_CODE = "protocol.frameTooLarge";
+export const TRANSPORT_PROTOCOL_VERSION_UNSUPPORTED_CODE =
+    "protocol.versionUnsupported";
+
 const unknownErrorCode = "error.unknown";
 
 export interface RemoteErrorBody {
@@ -59,9 +68,7 @@ export function isRemoteErrorBody(value: unknown): value is RemoteErrorBody {
     );
 }
 
-export function toRemoteErrorBody(
-    error: unknown,
-): RemoteErrorBody | undefined {
+export function toRemoteErrorBody(error: unknown): RemoteErrorBody | undefined {
     if (error instanceof RemoteError) return error.toBody();
     if (!(error instanceof Error) && isRemoteErrorBody(error)) return error;
     if (typeof error !== "object" || error === null || Array.isArray(error))

@@ -1,4 +1,5 @@
 import type { Channel } from "../endpoint/channel/Channel.js";
+import { TRANSPORT_PROTOCOL_INVALID_FRAME_CODE } from "../primitive/Error.js";
 import {
     FRAME_MAX_DATA_SIZE,
     FrameBuffer,
@@ -478,7 +479,7 @@ function assertPositiveU32(value: number, label: string): void {
 
 function protocolError(message: string): Error {
     return Object.assign(new Error(message), {
-        code: "protocol.invalidFrame",
+        code: TRANSPORT_PROTOCOL_INVALID_FRAME_CODE,
         retryable: false,
     });
 }

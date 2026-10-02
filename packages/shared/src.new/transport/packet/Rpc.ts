@@ -1,5 +1,6 @@
 import { Connection, Port } from "../endpoint/route/Route.js";
 import type { Address } from "../endpoint/Address.js";
+import { TRANSPORT_METHOD_NOT_FOUND_CODE } from "../primitive/Error.js";
 import type { Message } from "./Packet.js";
 
 export interface RpcError {
@@ -22,7 +23,13 @@ export type RpcHandler = (
 ) => Message | Promise<Message>;
 
 export type RpcPacket =
-    | { protocol: "rpc"; type: "request"; id: string; method: string; message?: Message }
+    | {
+          protocol: "rpc";
+          type: "request";
+          id: string;
+          method: string;
+          message?: Message;
+      }
     | { protocol: "rpc"; type: "reply"; id: string; message?: Message }
     | { protocol: "rpc"; type: "error"; id: string; error: RpcError }
     | { protocol: "rpc"; type: "cancel"; id: string };
@@ -49,9 +56,7 @@ export class Rpc {
             const offPacket = target.onPacket((packet) =>
                 this.#accept(packet, target.remote),
             );
-            const offClose = target.onClose((error) =>
-                this.#disconnect(error),
-            );
+            const offClose = target.onClose((error) => this.#disconnect(error));
             this.#unsubscribe = () => {
                 offPacket();
                 offClose();
@@ -101,15 +106,11 @@ export class Rpc {
                 rejectCancellation!(reason);
                 return;
             }
-            connection
-                .send({ protocol: "rpc", type: "cancel", id })
-                .then(
-                    () => rejectCancellation!(reason),
-                    (error) =>
-                        rejectCancellation!(
-                            connection.connected ? error : reason,
-                        ),
-                );
+            connection.send({ protocol: "rpc", type: "cancel", id }).then(
+                () => rejectCancellation!(reason),
+                (error) =>
+                    rejectCancellation!(connection.connected ? error : reason),
+            );
         };
         signal?.addEventListener("abort", abort, { once: true });
         try {
@@ -144,8 +145,7 @@ export class Rpc {
         const failure = error ?? new Error("RPC connection closed.");
         for (const controller of this.#active.values())
             controller.abort(failure);
-        for (const pending of this.#pending.values())
-            pending.reject(failure);
+        for (const pending of this.#pending.values()) pending.reject(failure);
         this.#active.clear();
         this.#pending.clear();
     }
@@ -189,7 +189,7 @@ export class Rpc {
                     type: "error",
                     id: packet.id,
                     error: {
-                        code: "method_not_found",
+                        code: TRANSPORT_METHOD_NOT_FOUND_CODE,
                         message:
                             "RPC method " + packet.method + " was not found.",
                     },
@@ -225,7 +225,8 @@ export class Rpc {
                 id: packet.id,
                 ...(message === undefined ? {} : { message }),
             } satisfies RpcPacket);
-            for (const action of afterReply) queueMicrotask(() => void action());
+            for (const action of afterReply)
+                queueMicrotask(() => void action());
         } finally {
             this.#active.delete(packet.id);
         }
@@ -244,14 +245,18 @@ function parse(value: unknown): RpcPacket | undefined {
             type: "request",
             id: packet.id,
             method: packet.method,
-            ...(packet.message === undefined ? {} : { message: packet.message }),
+            ...(packet.message === undefined
+                ? {}
+                : { message: packet.message }),
         };
     if (packet.type === "reply")
         return {
             protocol: "rpc",
             type: "reply",
             id: packet.id,
-            ...(packet.message === undefined ? {} : { message: packet.message }),
+            ...(packet.message === undefined
+                ? {}
+                : { message: packet.message }),
         };
     if (packet.type === "cancel")
         return { protocol: "rpc", type: "cancel", id: packet.id };
@@ -281,7 +286,9 @@ function fromError(error: unknown): RpcError {
         message: error.message,
         ...(value.code === undefined ? {} : { code: value.code }),
         ...(value.details === undefined ? {} : { details: value.details }),
-        ...(value.retryable === undefined ? {} : { retryable: value.retryable }),
+        ...(value.retryable === undefined
+            ? {}
+            : { retryable: value.retryable }),
     };
 }
 
@@ -289,6 +296,8 @@ function toError(error: RpcError): Error {
     return Object.assign(new Error(error.message), {
         ...(error.code === undefined ? {} : { code: error.code }),
         ...(error.details === undefined ? {} : { details: error.details }),
-        ...(error.retryable === undefined ? {} : { retryable: error.retryable }),
+        ...(error.retryable === undefined
+            ? {}
+            : { retryable: error.retryable }),
     });
 }

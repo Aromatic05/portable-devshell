@@ -9,6 +9,7 @@
 
 export * from "./context/Model.js";
 export * from "./context/Contract.js";
+export * from "./context/Error.js";
 export * from "./context/Transport.js";
 export * from "./context/ViewModel.js";
 

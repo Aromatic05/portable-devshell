@@ -1,3 +1,8 @@
+import {
+    TRANSPORT_PROTOCOL_FRAME_TOO_LARGE_CODE,
+    TRANSPORT_PROTOCOL_INVALID_FRAME_CODE,
+} from "../primitive/Error.js";
+
 const LENGTH_SIZE = 4;
 const FRAME_HEADER_SIZE = 6;
 const OPEN_FIXED_SIZE = 6;
@@ -310,7 +315,10 @@ function assertFrameSize(size: number): void {
 }
 
 function frameTooLarge(label: string, max: number): Error {
-    return protocolError(`${label} exceeds ${max} bytes.`, "protocol.frameTooLarge");
+    return protocolError(
+        `${label} exceeds ${max} bytes.`,
+        TRANSPORT_PROTOCOL_FRAME_TOO_LARGE_CODE,
+    );
 }
 
 function readU16(bytes: Uint8Array, offset: number): number {
@@ -333,6 +341,9 @@ function view(bytes: Uint8Array): DataView {
     return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
-function protocolError(message: string, code = "protocol.invalidFrame"): Error {
+function protocolError(
+    message: string,
+    code = TRANSPORT_PROTOCOL_INVALID_FRAME_CODE,
+): Error {
     return Object.assign(new Error(message), { code, retryable: false });
 }
