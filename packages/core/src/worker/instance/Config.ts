@@ -1,6 +1,4 @@
 import type {
-    ApprovalPolicy,
-    ApprovalTimeout,
     ControlInstanceAlertsConfig,
     EffectiveSecurityMode,
     InstanceName,
@@ -34,8 +32,6 @@ interface WorkerInstanceConfigCommon {
     eventBufferSize?: number;
     auditStorage?: Partial<AuditStorageLimits>;
     handshake?: Partial<WorkerHandshakeParams>;
-    approvalPolicy?: ApprovalPolicy;
-    approvalTimeout?: ApprovalTimeout;
     toolScheduler?: Partial<WorkerToolSchedulerLimits>;
 }
 

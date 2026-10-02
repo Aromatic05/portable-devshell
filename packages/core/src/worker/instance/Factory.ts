@@ -4,7 +4,6 @@ import {
 } from "@portable-devshell/shared";
 import type { InstanceLogEntry } from "../../storage/log/Store.js";
 
-import { ApprovalManager, ApprovalStore } from "../../approval/Manager.js";
 import { AuditDatabase } from "../../storage/audit/database/Database.js";
 import { InstanceEventBuffer } from "../../instance/EventBuffer.js";
 import { LogStoreInstance } from "../../storage/log/Store.js";
@@ -52,11 +51,6 @@ export class WorkerInstanceFactory {
             sequence: (record) => record.seq,
             timestamp: (record) => record.at,
         });
-        const approvalStore = auditDatabase.approvalStore({
-            legacyFile: paths.legacyApprovalsFile,
-            timestamp: (record) =>
-                record.decision?.decidedAt ?? record.createdAt,
-        });
         const toolCallStore = auditDatabase.toolCallStore({
             legacyFile: paths.legacyToolCallsFile,
             timestamp: (record) => record.completedAt ?? record.startedAt,
@@ -83,12 +77,6 @@ export class WorkerInstanceFactory {
             protocolClient,
             endpoint,
             stateMachine: new InstanceStateMachine(resolved.name),
-            approvalManager: new ApprovalManager({
-                instanceName: resolved.name,
-                policy: resolved.approvalPolicy,
-                store: new ApprovalStore(approvalStore),
-                timeout: resolved.approvalTimeout,
-            }),
             toolCallHistory: new AuditToolCallHistory(
                 resolved.name,
                 toolCallStore,

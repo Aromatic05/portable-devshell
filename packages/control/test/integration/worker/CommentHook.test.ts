@@ -24,7 +24,7 @@ import {
 } from "@portable-devshell/shared";
 
 import { createToolCallScope } from "../../../../../packages/core/src/toolcall/Context.ts";
-import { ToolCallPipeline } from "../../../../../packages/core/src/toolcall/Pipeline.ts";
+import { ToolCallPipeline, ToolCallExecutionTarget } from "../../../../../packages/core/src/toolcall/Pipeline.ts";
 import { ToolCallExtensionBinding } from "../../../src/control/extension/toolcall/Binding.ts";
 import { requireTcpPort } from "../../../../../test/TestHttpSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
@@ -70,7 +70,7 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
         commentReviewRegistrationHost(comment.comment),
     );
     let executions = 0;
-    const execution = new ToolCallPipeline({
+    const target = new ToolCallExecutionTarget({
         assertReady() {},
         audit: {
             createScope(
@@ -93,8 +93,6 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             async failActive() {},
             async nonRunning() {},
         },
-        hooks: async (context, signal, recording) =>
-            await binding.acquire(context, signal, recording),
         instanceName,
         log: { async append() {} },
         toolCallScheduler: {
@@ -114,8 +112,12 @@ test("Comment #stop/#resume/#push gate real MCP tools/call through ToolCall Hook
             },
         },
     } as never);
-    const worker = createWorker(execution, workspace);
-    const gateway = createCommentGateway(comment, worker.handshake);
+    const execution = new ToolCallPipeline({
+        hooks: async (context, signal, recording) => await binding.acquire(context, signal, recording),
+        resolveTarget: () => target,
+    });
+    const worker = createWorker(workspace);
+    const gateway = createCommentGateway(execution, worker.handshake);
     const host = new McpHost({
         instances: [
             {
@@ -318,7 +320,7 @@ function commentReviewRegistrationHost(comment: CommentPort) {
     } as never;
 }
 
-function createWorker(execution: ToolCallPipeline, workspace: string) {
+function createWorker(workspace: string) {
     const handshake = {
         homeDirectory: "/home/comment-boundary",
         instance: instanceName,
@@ -339,51 +341,6 @@ function createWorker(execution: ToolCallPipeline, workspace: string) {
         async appendMcpSessionClosed() {},
         async appendMcpSessionOpened() {},
         async appendMcpToolCalled() {},
-        async callToolOperation<T extends JsonValue>(
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            operation: (callId: string, input: JsonValue) => Promise<T>,
-            signal?: AbortSignal,
-            afterReview?: (callId: string) => Promise<void> | void,
-        ): Promise<T> {
-            return await execution.callOperation(
-                toolName,
-                input,
-                context,
-                operation,
-                signal,
-                afterReview,
-            );
-        },
-        async callTool(
-            toolName: string,
-            input: JsonValue,
-            context: ToolCallContext,
-            signal?: AbortSignal,
-            transformResult?: (
-                result: JsonValue,
-                callId: string,
-            ) => Promise<JsonValue>,
-            invocationInput?: (
-                input: JsonValue,
-            ) => Promise<JsonValue> | JsonValue,
-            onProgress?: (progress: JsonValue) => void,
-            recording: "caller" | "host" = "host",
-            afterReview?: (callId: string) => Promise<void> | void,
-        ): Promise<JsonValue> {
-            return await execution.call(
-                toolName,
-                input,
-                context,
-                signal,
-                transformResult,
-                invocationInput,
-                onProgress,
-                recording,
-                afterReview,
-            );
-        },
         hasToolSchemaCache() {
             return true;
         },
@@ -420,18 +377,14 @@ function createWorker(execution: ToolCallPipeline, workspace: string) {
 }
 
 function createCommentGateway(
-    comment: CommentExtension,
+    execution: ToolCallPipeline,
     handshake: ReturnType<typeof createWorker>["handshake"],
 ): McpInstanceGateway {
     return {
         async appendMcpToolCalled() {},
         assertReady() {},
-        async callToolOperation() {
-            throw new Error("unexpected routed ToolCall operation");
-        },
-        async callTool() {
-            throw new Error("unexpected routed ToolCall");
-        },
+        callToolOperation: (...args: Parameters<McpInstanceGateway["callToolOperation"]>) => execution.callOperation(...args),
+        callTool: (...args: Parameters<McpInstanceGateway["callTool"]>) => execution.call(...args),
         environment() {
             return handshake as never;
         },

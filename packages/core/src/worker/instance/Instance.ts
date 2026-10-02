@@ -1,9 +1,7 @@
 import {
-    type ApprovalDecision,
     type Endpoint,
     type InstanceName,
     type MessageStream,
-    type ApprovalRequest,
     createError,
     errorCodes,
     type JsonValue,
@@ -14,7 +12,6 @@ import {
     type ReverseTransport,
 } from "@portable-devshell/shared";
 
-import type { ApprovalManager } from "../../approval/Manager.js";
 import type { AuditDatabase } from "../../storage/audit/database/Database.js";
 import type {
     InstanceEventInput,
@@ -76,15 +73,9 @@ import type { InstanceEventBuffer } from "../../instance/EventBuffer.js";
 import type { LogStoreInstance } from "../../storage/log/Store.js";
 import type { ResolvedWorkerInstanceConfig } from "./Config.js";
 import { WorkerInstanceTool } from "./tool/Tool.js";
-import type { ToolCallHookProvider } from "../../toolcall/hook/Sequence.js";
 import type {
     ToolCallTarget,
-    ToolCallTargetResolver,
 } from "../../toolcall/Pipeline.js";
-import type {
-    ToolCallReviewInput,
-    ToolCallReviewResult,
-} from "../../toolcall/hook/Review.js";
 import { WorkerInstanceConnection } from "./lifecycle/Connection.js";
 import { WorkerInstanceLifecycle } from "./lifecycle/Lifecycle.js";
 import { WorkerInstanceArtifact } from "./capability/Artifact.js";
@@ -92,7 +83,6 @@ import { WorkerInstanceAudit } from "./capability/Audit.js";
 import { WorkerInstanceState } from "./state/State.js";
 
 interface WorkerInstanceDependencies {
-    approvalManager: ApprovalManager;
     auditDatabase: AuditDatabase;
     catalog: WorkerToolCatalog;
     commandClient?: WorkerCommandClient;
@@ -110,7 +100,6 @@ interface WorkerInstanceDependencies {
 }
 
 export class WorkerInstance {
-    readonly #approvalManager: ApprovalManager;
     readonly #artifact: WorkerInstanceArtifact;
     readonly #audit: WorkerInstanceAudit;
     readonly #catalog: WorkerToolCatalog;
@@ -126,7 +115,6 @@ export class WorkerInstance {
     readonly #toolInvoker: WorkerToolInvoker;
 
     constructor(dependencies: WorkerInstanceDependencies) {
-        this.#approvalManager = dependencies.approvalManager;
         this.#catalog = dependencies.catalog;
         this.#config = dependencies.config;
         this.#protocolClient = dependencies.protocolClient;
@@ -176,7 +164,6 @@ export class WorkerInstance {
             protocolClient: dependencies.protocolClient,
         });
         this.#tool = new WorkerInstanceTool({
-            approvalManager: this.#approvalManager,
             appendEvent: (type, data) => this.#state.appendEvent(type, data),
             assertReady: () => this.#assertReady(),
             instanceName: this.#config.name,
@@ -442,16 +429,6 @@ export class WorkerInstance {
     }
 
     async stop(): Promise<InstanceSnapshot> {
-        if (this.managementMode !== "selfManaged") {
-            for (const approval of await this.#tool.listApprovals()) {
-                if (approval.status === "pending") {
-                    await this.#tool.cancelApproval(
-                        approval.approvalId,
-                        `Instance ${this.snapshot().name} was stopped before approval.`,
-                    );
-                }
-            }
-        }
         return await this.#lifecycle.stop();
     }
 
@@ -459,54 +436,8 @@ export class WorkerInstance {
         return await this.#lifecycle.refreshStatus();
     }
 
-    bindToolCallHooks(
-        hooks: ToolCallHookProvider,
-        resolveTarget: ToolCallTargetResolver,
-    ): void {
-        this.#tool.bindHooks(hooks);
-        this.#tool.bindTargetResolver(resolveTarget);
-    }
-
     toolCallTarget(): ToolCallTarget {
         return this.#tool.target();
-    }
-
-    async reviewToolCallApproval(
-        input: ToolCallReviewInput,
-        signal: AbortSignal,
-        recording: "caller" | "host",
-    ): Promise<ToolCallReviewResult> {
-        return await this.#tool.reviewApproval(input, signal, recording);
-    }
-
-    async callTool(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        signal?: AbortSignal,
-        transformResult?: (
-            result: JsonValue,
-            callId: string,
-        ) => Promise<JsonValue>,
-        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-        onProgress?: (progress: JsonValue) => void,
-        recording: "caller" | "host" = "host",
-        afterReview?: (
-            callId: string,
-            instance: InstanceName,
-        ) => Promise<void> | void,
-    ): Promise<JsonValue> {
-        return await this.#tool.call(
-            toolName,
-            input,
-            context,
-            signal,
-            transformResult,
-            invocationInput,
-            onProgress,
-            recording,
-            afterReview,
-        );
     }
 
     async invokeToolInternal(
@@ -541,59 +472,6 @@ export class WorkerInstance {
         );
     }
 
-    async callToolOperation<T extends JsonValue>(
-        toolName: string,
-        input: JsonValue,
-        context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
-        signal?: AbortSignal,
-        afterReview?: (
-            callId: string,
-            instance: InstanceName,
-        ) => Promise<void> | void,
-    ): Promise<T> {
-        return await this.#tool.callOperation(
-            toolName,
-            input,
-            context,
-            operation,
-            signal,
-            afterReview,
-        );
-    }
-
-    async listApprovals(): Promise<ApprovalRequest[]> {
-        return await this.#tool.listApprovals();
-    }
-
-    async listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]> {
-        return await this.#tool.listPendingApprovals(ctxId);
-    }
-
-    async getApproval(approvalId: string): Promise<ApprovalRequest> {
-        return await this.#tool.getApproval(approvalId);
-    }
-
-    async decideApproval(
-        approvalId: string,
-        input: {
-            decision: ApprovalDecision["decision"];
-            decidedBy: ApprovalDecision["decidedBy"];
-            policyPatch?: JsonValue;
-            reason?: string;
-            remember?: boolean;
-        },
-    ): Promise<ApprovalRequest> {
-        return await this.#tool.decideApproval(approvalId, input);
-    }
-
-    async cancelApproval(
-        approvalId: string,
-        reason?: string,
-    ): Promise<ApprovalRequest> {
-        return await this.#tool.cancelApproval(approvalId, reason);
-    }
-
     async readLogs(query: LogQuery = {}): Promise<InstanceLogEntry[]> {
         return await this.#tool.readLogs(query);
     }
@@ -612,15 +490,12 @@ export class WorkerInstance {
 
     async reconfigure(input: {
         alerts?: ResolvedWorkerInstanceConfig["alerts"];
-        approvalPolicy?: ResolvedWorkerInstanceConfig["approvalPolicy"];
         effectiveSecurityMode: ResolvedWorkerInstanceConfig["effectiveSecurityMode"];
         env?: NodeJS.ProcessEnv;
     }): Promise<void> {
         this.#config.alerts = input.alerts;
-        this.#config.approvalPolicy = input.approvalPolicy;
         this.#config.effectiveSecurityMode = input.effectiveSecurityMode;
         this.#config.env = input.env;
-        this.#approvalManager.setPolicy(input.approvalPolicy);
         if (this.snapshot().ready) {
             await this.#protocolClient.configureAlerts(input.alerts);
         }

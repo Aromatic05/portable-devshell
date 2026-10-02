@@ -68,7 +68,7 @@ function host(options: {
     };
 }
 
-test("ToolCall review pipeline places builtin approval at 510-approval", async () => {
+test("ToolCall review pipeline orders builtin reviews with extension reviews", async () => {
     const calls: string[] = [];
     const binding = new ToolCallExtensionBinding(
         host({
@@ -92,10 +92,14 @@ test("ToolCall review pipeline places builtin approval at 510-approval", async (
             ],
         }) as never,
         undefined,
-        async () => {
-            calls.push("approval");
-            return { decision: "continue" };
-        },
+        [{
+            hook: "510-builtin",
+            id: "middle",
+            review: async () => {
+                calls.push("builtin");
+                return { decision: "continue" };
+            },
+        }],
     );
     const lease = await binding.acquire(
         context,
@@ -111,11 +115,11 @@ test("ToolCall review pipeline places builtin approval at 510-approval", async (
         }),
         { decision: "continue" },
     );
-    assert.deepEqual(calls, ["early", "approval", "late"]);
+    assert.deepEqual(calls, ["early", "builtin", "late"]);
     lease.release();
 });
 
-test("approval rejection short-circuits later reviews", async () => {
+test("builtin review rejection short-circuits later reviews", async () => {
     const calls: string[] = [];
     const binding = new ToolCallExtensionBinding(
         host({
@@ -139,10 +143,14 @@ test("approval rejection short-circuits later reviews", async () => {
             ],
         }) as never,
         undefined,
-        async () => {
-            calls.push("approval");
-            return { decision: "reject", reason: "denied" };
-        },
+        [{
+            hook: "510-builtin",
+            id: "middle",
+            review: async () => {
+                calls.push("builtin");
+                return { decision: "reject", reason: "denied" };
+            },
+        }],
     );
     const lease = await binding.acquire(
         context,
@@ -158,7 +166,7 @@ test("approval rejection short-circuits later reviews", async () => {
         }),
         { decision: "reject", reason: "denied" },
     );
-    assert.deepEqual(calls, ["early", "approval"]);
+    assert.deepEqual(calls, ["early", "builtin"]);
     lease.release();
 });
 

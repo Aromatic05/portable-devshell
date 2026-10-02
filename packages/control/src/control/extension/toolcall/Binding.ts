@@ -24,11 +24,15 @@ import type { JsonValue } from "@portable-devshell/shared";
 import type { ExtensionHost } from "../Host.js";
 import { ToolCallSecretRewrite } from "./interface/index.js";
 
-type ToolCallApprovalReview = (
+export interface ToolCallBuiltinReview {
+    hook: string;
+    id: string;
+    review: (
     input: ToolCallReviewInput,
     signal: AbortSignal,
     recording: "caller" | "host",
-) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
+    ) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
+}
 
 interface ReviewEntry {
     extensionId?: string;
@@ -38,7 +42,7 @@ interface ReviewEntry {
 }
 
 export class ToolCallExtensionBinding {
-    readonly #approval?: ToolCallApprovalReview;
+    readonly #builtinReviews: readonly ToolCallBuiltinReview[];
     readonly #secret: ToolCallSecretRewrite;
     readonly #extensions: Pick<
         ExtensionHost,
@@ -51,11 +55,11 @@ export class ToolCallExtensionBinding {
             "acquireRegistration" | "listDeclarations"
         >,
         secret: ToolCallSecretRewrite = new ToolCallSecretRewrite(),
-        approval?: ToolCallApprovalReview,
+        builtinReviews: readonly ToolCallBuiltinReview[] = [],
     ) {
         this.#secret = secret;
         this.#extensions = extensions;
-        this.#approval = approval;
+        this.#builtinReviews = builtinReviews;
     }
 
     async acquire(
@@ -114,12 +118,12 @@ export class ToolCallExtensionBinding {
                 },
             });
         }
-        if (this.#approval !== undefined) {
+        for (const builtin of this.#builtinReviews) {
             entries.push({
-                hook: "510-approval",
-                id: "approval",
+                hook: builtin.hook,
+                id: builtin.id,
                 review: async (input) =>
-                    await this.#approval!(input, signal, recording),
+                    await builtin.review(input, signal, recording),
             });
         }
         return entries

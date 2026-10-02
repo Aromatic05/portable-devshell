@@ -41,6 +41,7 @@ import {
     resolveTestWorkerBinary,
 } from "../../../../../test/TestPlatformSupport.ts";
 import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.ts";
+import { ToolCallPipeline } from "../../../src/toolcall/Pipeline.ts";
 import { ToolCallHookSequence } from "../../../src/toolcall/hook/Sequence.ts";
 
 const workerBinaryPath = resolveTestWorkerBinary();
@@ -51,24 +52,6 @@ const rsyncAvailable =
 
 const cliToolCallContext = { source: "cli" } as const;
 
-function bindToolCallApproval(instance: WorkerInstance): void {
-    instance.bindToolCallHooks(
-        async (_context, signal, recording) => ({
-            release() {},
-            sequence: new ToolCallHookSequence({
-                reviews: [
-                    async (input) =>
-                        await instance.reviewToolCallApproval(
-                            input,
-                            signal,
-                            recording,
-                        ),
-                ],
-            }),
-        }),
-        () => instance.toolCallTarget(),
-    );
-}
 
 async function readServiceStream(stream: MessageStream): Promise<Buffer> {
     const chunks: Buffer[] = [];
@@ -756,13 +739,19 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
         transport: harness.transport,
     });
 
+    const ingress = new ToolCallPipeline({
+        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence() }),
+        resolveTarget: () => instance.toolCallTarget(),
+    });
+
     try {
         const context = {
             ctxId: "ctx-control-audit",
             requestId: "request-control-audit",
             source: "mcp",
         } as const;
-        const completed = await instance.callToolOperation(
+        const completed = await ingress.callOperation(
+                asInstanceName("control-audit"),
             "todo_read",
             {},
             context,
@@ -771,7 +760,8 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
         assert.deepEqual(completed, { revision: 7 });
 
         await assert.rejects(
-            instance.callToolOperation(
+            ingress.callOperation(
+                asInstanceName("control-audit"),
                 "instance_status",
                 { instance: "missing" },
                 context,
@@ -794,7 +784,8 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
         );
 
         await assert.rejects(
-            instance.callToolOperation(
+            ingress.callOperation(
+                asInstanceName("control-audit"),
                 "artifact_transfer",
                 { operation: "status", transferId: "transfer-1" },
                 context,
@@ -896,7 +887,7 @@ test("WorkerInstance runs control-owned tool operations through ToolCall Hooks w
     }
 });
 
-test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall Hooks", async () => {
+test("WorkerInstance trusted internal tool invocation does not record ingress audit", async () => {
     const homeDirectory = await createTestTempDirectory("internal-boundary");
     const harness = createWorkerInstanceHarness();
     const instance = new WorkerInstanceFactory().create({
@@ -904,27 +895,6 @@ test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall
         name: asInstanceName("internal-boundary"),
         transport: harness.transport,
     });
-    let boundaryAcquires = 0;
-    let reviews = 0;
-    let rewrites = 0;
-
-    instance.bindToolCallHooks(async () => {
-        boundaryAcquires += 1;
-        return {
-            release() {},
-            sequence: new ToolCallHookSequence({
-                reviews: [async () => {
-                    reviews += 1;
-                    return { decision: "continue" };
-                }],
-                rewrites: [async (input) => {
-                    rewrites += 1;
-                    return input.value;
-                }],
-            }),
-        };
-    }, () => instance.toolCallTarget());
-
     try {
         await instance.start();
         const internal = instance.invokeToolInternal(
@@ -943,9 +913,6 @@ test("WorkerInstance trusted internal tool invocation does not re-enter ToolCall
             jsonRecord(await internal)?.stdout,
             "/tmp/workspace\n",
         );
-        assert.equal(boundaryAcquires, 0);
-        assert.equal(reviews, 0);
-        assert.equal(rewrites, 0);
         assert.deepEqual(await instance.readToolCalls(), []);
     } finally {
         await instance.stop();
@@ -964,11 +931,17 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         transport: harness.transport,
     });
 
+    const ingress = new ToolCallPipeline({
+        hooks: () => ({ release() {}, sequence: new ToolCallHookSequence() }),
+        resolveTarget: () => instance.toolCallTarget(),
+    });
+
     try {
         const stdout = "x".repeat(240);
 
         await assert.rejects(
-            instance.callTool(
+            ingress.call(
+                asInstanceName("task-6-harness"),
                 "bash_run",
                 { command: "pwd" },
                 cliToolCallContext,
@@ -985,12 +958,14 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         const started = await instance.start();
         assert.equal(started.ready, true);
 
-        const firstCall = instance.callTool(
+        const firstCall = ingress.call(
+                asInstanceName("task-6-harness"),
             "bash_run",
             { command: "pwd" },
             cliToolCallContext,
         );
-        const secondCall = instance.callTool(
+        const secondCall = ingress.call(
+                asInstanceName("task-6-harness"),
             "bash_run",
             { command: "ls" },
             cliToolCallContext,
@@ -1028,7 +1003,8 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
         const secondResult = await secondCall;
         assert.equal(jsonRecord(secondResult)?.stdout, "ls output\n");
 
-        const invalidCall = instance.callTool(
+        const invalidCall = ingress.call(
+                asInstanceName("task-6-harness"),
             "bash_run",
             { bad: true } as JsonValue,
             cliToolCallContext,
@@ -1177,443 +1153,6 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
     }
 });
 
-test("WorkerInstance waits for approval before invoking tools and records approval decisions", async () => {
-    const homeDirectory = await createTestTempDirectory("instance-approval");
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        homeDirectory,
-        name: asInstanceName("task-6-approval"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-        const beforeInvokeCount = harness.requestedMethods();
-        const callPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            { source: "cli", workspace: homeDirectory },
-        );
-
-        const pendingApproval = await waitForPendingApproval(instance);
-        assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        const approvals = await instance.listApprovals();
-        assert.equal(approvals.length, 1);
-        assert.equal(approvals[0]?.status, "pending");
-        assert.equal(approvals[0]?.source, "cli");
-        assert.equal(approvals[0]?.workspace, homeDirectory);
-
-        const approvalId = pendingApproval.approvalId;
-        assert.notEqual(approvalId, "");
-        assert.equal(
-            (await instance.getApproval(approvalId)).status,
-            "pending",
-        );
-        assert.deepEqual(await instance.readToolCalls(), []);
-
-        const pendingReplay = instance.subscribe(1);
-        assert.equal(pendingReplay.kind, "events");
-        assert.equal(
-            pendingReplay.events.some(
-                (event) => event.type === "approval.requested",
-            ),
-            true,
-        );
-        assert.equal(
-            pendingReplay.events.some(
-                (event) => event.type === "toolCall.running",
-            ),
-            false,
-        );
-
-        await instance.decideApproval(approvalId, {
-            decidedBy: "cli",
-            decision: "approve",
-            reason: "approved in test",
-        });
-        await harness.waitForMethod("bash_run");
-        harness.respond("bash_run", {
-            exitCode: 0,
-            stderr: "",
-            stdout: "/tmp/workspace\n",
-        });
-
-        const result = await callPromise;
-        assert.equal(jsonRecord(result)?.stdout, "/tmp/workspace\n");
-
-        const records = await instance.readToolCalls();
-        assert.equal(records[0]?.status, "completed");
-
-        const approved = await instance.getApproval(approvalId);
-        assert.equal(approved.status, "approved");
-        assert.equal(approved.decision?.decision, "approve");
-        assert.equal(approved.decision?.decidedBy, "cli");
-
-        const replay = instance.subscribe(1);
-        assert.equal(replay.kind, "events");
-        const eventTypes = replay.events.map((event) => event.type);
-        assert.equal(eventTypes.includes("approval.requested"), true);
-        assert.equal(eventTypes.includes("approval.approved"), true);
-        assert.equal(eventTypes.includes("toolCall.running"), true);
-        assert.equal(eventTypes.includes("toolCall.completed"), true);
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
-
-test("caller-recorded Worker calls keep approval enforcement without host tool audit", async () => {
-    const homeDirectory = await createTestTempDirectory(
-        "instance-delegated-approval",
-    );
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        homeDirectory,
-        name: asInstanceName("task-6-delegated-approval"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-        const beforeInvokeCount = harness.requestedMethods();
-        const callPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            {
-                ctxId: "agent-session",
-                extensionId: "agent",
-                source: "extension",
-                workspace: homeDirectory,
-            },
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            "caller",
-        );
-
-        const pendingApproval = await waitForPendingApproval(instance);
-        assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal(
-            (await instance.getApproval(pendingApproval.approvalId)).recording,
-            "caller",
-        );
-        assert.equal(
-            (await instance.getApproval(pendingApproval.approvalId)).status,
-            "pending",
-        );
-        assert.deepEqual(await instance.readToolCalls(), []);
-
-        const pendingReplay = instance.subscribe(1);
-        assert.equal(pendingReplay.kind, "events");
-        assert.equal(
-            pendingReplay.events.some(
-                (event) => event.type === "approval.requested",
-            ),
-            true,
-        );
-        assert.equal(
-            pendingReplay.events.some((event) =>
-                event.type.startsWith("toolCall."),
-            ),
-            false,
-        );
-
-        await instance.decideApproval(pendingApproval.approvalId, {
-            decidedBy: "cli",
-            decision: "approve",
-            reason: "approved delegated Agent call",
-        });
-        await harness.waitForMethod("bash_run");
-        harness.respond("bash_run", {
-            exitCode: 0,
-            stderr: "",
-            stdout: "/tmp/workspace\n",
-        });
-        const result = await callPromise;
-        assert.equal(jsonRecord(result)?.stdout, "/tmp/workspace\n");
-
-        assert.deepEqual(await instance.readToolCalls(), []);
-        assert.deepEqual(await instance.readLogs(), []);
-        const replay = instance.subscribe(1);
-        assert.equal(replay.kind, "events");
-        assert.equal(
-            replay.events.some((event) => event.type === "approval.approved"),
-            true,
-        );
-        assert.equal(
-            replay.events.some((event) => event.type.startsWith("toolCall.")),
-            false,
-        );
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
-
-test("WorkerInstance cancels a pending approval when the caller aborts", async () => {
-    const homeDirectory = await createTestTempDirectory(
-        "instance-approval-cancel",
-    );
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        homeDirectory,
-        name: asInstanceName("task-6-approval-cancel"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-        const beforeInvokeCount = harness.requestedMethods();
-        const controller = new AbortController();
-        const callPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            {
-                requestId: "req-cancel-approval",
-                ctxId: "ctx-cancel",
-                source: "mcp",
-            },
-            controller.signal,
-        );
-
-        const approvalId = (await waitForPendingApproval(instance)).approvalId;
-        assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        controller.abort("client timeout");
-        await assert.rejects(
-            instance.decideApproval(approvalId, {
-                decidedBy: "cli",
-                decision: "approve",
-            }),
-            (error: unknown) => {
-                assert.equal(
-                    (error as { code?: string }).code,
-                    errorCodes.coreApprovalAlreadyDecided,
-                );
-                return true;
-            },
-        );
-
-        await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
-            );
-            return true;
-        });
-        assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal(
-            (await instance.getApproval(approvalId)).status,
-            "cancelled",
-        );
-        assert.deepEqual(
-            (await instance.readToolCalls()).map((record) => record.status),
-            ["denied"],
-        );
-
-        const replay = instance.subscribe(1);
-        assert.equal(replay.kind, "events");
-        const eventTypes = replay.events.map((event) => event.type);
-        assert.equal(eventTypes.includes("approval.cancelled"), true);
-        assert.equal(eventTypes.includes("toolCall.denied"), true);
-        assert.equal(eventTypes.includes("toolCall.running"), false);
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
-
-test("WorkerInstance stop cancels pending approvals before stopping the worker", async () => {
-    const homeDirectory = await createTestTempDirectory(
-        "instance-stop-pending-approval",
-    );
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        homeDirectory,
-        name: asInstanceName("task-6-stop-pending-approval"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-        const callPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            {
-                requestId: "req-stop-pending",
-                ctxId: "ctx-stop-pending",
-                source: "mcp",
-            },
-        );
-        const approvalId = (await waitForPendingApproval(instance)).approvalId;
-
-        const stopped = await instance.stop();
-        assert.equal(stopped.daemonState, "stopped");
-        await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
-            );
-            return true;
-        });
-        assert.equal(
-            (await instance.getApproval(approvalId)).status,
-            "cancelled",
-        );
-        assert.deepEqual(
-            (await instance.readToolCalls()).map((record) => record.status),
-            ["denied"],
-        );
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
-
-test("WorkerInstance cancellation API terminates a pending approval before tool execution", async () => {
-    const homeDirectory = await createTestTempDirectory(
-        "instance-approval-admin-cancel",
-    );
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        homeDirectory,
-        name: asInstanceName("task-6-approval-admin-cancel"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-        const beforeInvokeCount = harness.requestedMethods();
-        const callPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            {
-                requestId: "req-admin-cancel",
-                ctxId: "ctx-disabled",
-                source: "mcp",
-            },
-        );
-        const approvalId = (await waitForPendingApproval(instance)).approvalId;
-
-        const cancelled = await instance.cancelApproval(
-            approvalId,
-            "Context ctx-disabled was disabled.",
-        );
-        assert.equal(cancelled.status, "cancelled");
-        await assert.rejects(callPromise, (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
-            );
-            return true;
-        });
-        assert.equal(harness.requestedMethods(), beforeInvokeCount);
-        assert.equal(
-            (await instance.getApproval(approvalId)).status,
-            "cancelled",
-        );
-        assert.deepEqual(
-            (await instance.readToolCalls()).map((record) => record.status),
-            ["denied"],
-        );
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
-
-test("WorkerInstance denies and expires approval-gated calls without invoking tools", async () => {
-    const homeDirectory = await createTestTempDirectory(
-        "instance-approval-fail",
-    );
-    const harness = createWorkerInstanceHarness();
-    const instance = new WorkerInstanceFactory().create({
-        approvalPolicy: { mode: "ask" },
-        approvalTimeout: { ms: 40 },
-        homeDirectory,
-        name: asInstanceName("task-6-approval-fail"),
-        transport: harness.transport,
-    });
-    bindToolCallApproval(instance);
-
-    try {
-        await instance.start();
-
-        const beforeDeniedInvokeCount = harness.requestedMethods();
-        const deniedPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            { requestId: "req-deny", source: "mcp" },
-        );
-        const deniedApprovalId = (await waitForPendingApproval(instance))
-            .approvalId;
-        assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
-        await instance.decideApproval(deniedApprovalId, {
-            decidedBy: "cli",
-            decision: "deny",
-            reason: "denied in test",
-        });
-        await assert.rejects(deniedPromise, (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
-            );
-            return true;
-        });
-        assert.equal(harness.requestedMethods(), beforeDeniedInvokeCount);
-
-        const afterDenied = await instance.readToolCalls();
-        assert.equal(afterDenied[0]?.status, "denied");
-        assert.equal(afterDenied[0]?.source, "mcp");
-        assert.equal(afterDenied[0]?.decision, undefined);
-
-        const beforeExpiredInvokeCount = harness.requestedMethods();
-        const expiredPromise = instance.callTool(
-            "bash_run",
-            { command: "pwd" },
-            cliToolCallContext,
-        );
-        await assert.rejects(expiredPromise, (error: unknown) => {
-            assert.equal(
-                (error as { code?: string }).code,
-                errorCodes.coreToolCallRejected,
-            );
-            return true;
-        });
-        assert.equal(harness.requestedMethods(), beforeExpiredInvokeCount);
-
-        const records = await instance.readToolCalls();
-        assert.deepEqual(
-            records.map((record) => record.status),
-            ["denied", "denied"],
-        );
-        assert.deepEqual(
-            records.map((record) => record.decision),
-            [undefined, undefined],
-        );
-
-        const replay = instance.subscribe(1);
-        assert.equal(replay.kind, "events");
-        const eventTypes = replay.events.map((event) => event.type);
-        assert.equal(eventTypes.includes("approval.denied"), true);
-        assert.equal(eventTypes.includes("approval.expired"), true);
-        assert.equal(eventTypes.includes("toolCall.denied"), true);
-        assert.equal(eventTypes.includes("toolCall.running"), false);
-    } finally {
-        await instance.close();
-        await rm(homeDirectory, { force: true, recursive: true });
-    }
-});
 
 test("WorkerInstance restores a stopped disconnected snapshot when start fails", async () => {
     const homeDirectory = await createTestTempDirectory(
@@ -2170,20 +1709,4 @@ async function waitFor(predicate: () => boolean): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
     throw new Error("Timed out waiting for condition.");
-}
-
-async function waitForPendingApproval(
-    instance: ReturnType<WorkerInstanceFactory["create"]>,
-): Promise<{ approvalId: string }> {
-    const deadline = Date.now() + 1_000;
-    while (Date.now() < deadline) {
-        const approval = (await instance.listApprovals()).find(
-            (candidate) => candidate.status === "pending",
-        );
-        if (approval !== undefined) {
-            return { approvalId: approval.approvalId };
-        }
-        await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    throw new Error("Timed out waiting for a pending approval.");
 }

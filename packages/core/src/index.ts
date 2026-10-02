@@ -17,13 +17,26 @@ export type {
     ToolCallRewrite,
     ToolCallRewriteInput,
 } from "./toolcall/hook/Rewrite.js";
-export { ToolCallPipeline } from "./toolcall/Pipeline.js";
+export { ToolCallPipeline, ToolCallExecutionTarget } from "./toolcall/Pipeline.js";
 export type {
     ToolCallDispatchRequest,
+    ToolCallPipelineOptions,
+    ToolCallExecutionTargetOptions,
     ToolCallTarget,
     ToolCallTargetResolver,
 } from "./toolcall/Pipeline.js";
 export { InstancePaths } from "./instance/Paths.js";
+export { AuditDatabase } from "./storage/audit/database/Database.js";
+export type {
+    AuditApprovalRecordStore,
+    AuditDatabaseOptions,
+    AuditRecordCollection,
+    AuditStoreOptions,
+} from "./storage/audit/database/Database.js";
+export {
+    resolveAuditStorageLimits,
+    type AuditStorageLimits,
+} from "./storage/audit/database/Limits.js";
 export {
     assertSqliteSchemaVersionSupported,
     readSqlitePragmaNumber,
@@ -77,4 +90,3 @@ export type {
     WorkerTerminalOpenInput,
     WorkerTerminalOutputFrame,
 } from "./worker/protocol/Terminal.js";
-

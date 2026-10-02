@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+    asInstanceName,
     createError,
     errorCodes,
     errorMessage,
@@ -40,19 +41,18 @@ import { snapshotJson } from "./hook/Snapshot.js";
 import { attachToolCallErrorPayload } from "./ErrorPayload.js";
 
 export interface ToolCallDispatchRequest {
-    readonly afterReview?: (
-        callId: string,
-        instance: InstanceName,
-    ) => Promise<void> | void;
     readonly callId: string;
     readonly hooks: ToolCallHookSequence;
     readonly invocationInput?: (
         input: JsonValue,
+        callId: string,
+        finalValue: ToolCallHookValue,
     ) => Promise<JsonValue> | JsonValue;
     readonly onProgress?: (progress: JsonValue) => void;
     readonly operation?: (
         callId: string,
         input: JsonValue,
+        value: ToolCallHookValue,
     ) => Promise<JsonValue>;
     readonly recording: "caller" | "host";
     readonly signal?: AbortSignal;
@@ -71,50 +71,22 @@ export type ToolCallTargetResolver = (
     instance: InstanceName,
 ) => ToolCallTarget;
 
-interface ToolCallPipelineOptions {
-    hooks?: ToolCallHookProvider;
-    assertReady(): void;
-    audit: WorkerInstanceToolAudit;
-    instanceName: InstanceName;
-    log: WorkerInstanceToolLog;
-    toolCallScheduler: WorkerToolCallScheduler;
-    toolInvoker: WorkerToolInvoker;
+export interface ToolCallPipelineOptions {
+    hooks: ToolCallHookProvider;
+    resolveTarget: ToolCallTargetResolver;
 }
 
-export class ToolCallPipeline implements ToolCallTarget {
-    #hooks: ToolCallHookProvider;
-    #hooksBound: boolean;
-    #resolveTarget?: ToolCallTargetResolver;
-    readonly #assertReady: ToolCallPipelineOptions["assertReady"];
-    readonly #audit: WorkerInstanceToolAudit;
-    readonly #instanceName: InstanceName;
-    readonly #log: WorkerInstanceToolLog;
-    readonly #toolCallScheduler: WorkerToolCallScheduler;
-    readonly #toolInvoker: WorkerToolInvoker;
+export class ToolCallPipeline {
+    readonly #hooks: ToolCallHookProvider;
+    readonly #resolveTarget: ToolCallTargetResolver;
 
     constructor(options: ToolCallPipelineOptions) {
-        this.#hooks = options.hooks ?? emptyToolCallHooksProvider;
-        this.#hooksBound = options.hooks !== undefined;
-        this.#assertReady = options.assertReady;
-        this.#audit = options.audit;
-        this.#instanceName = options.instanceName;
-        this.#log = options.log;
-        this.#toolCallScheduler = options.toolCallScheduler;
-        this.#toolInvoker = options.toolInvoker;
-    }
-
-    bindHooks(hooks: ToolCallHookProvider): void {
-        if (this.#hooksBound)
-            throw new Error("ToolCall Hooks is already bound.");
-        this.#hooks = hooks;
-        this.#hooksBound = true;
-    }
-
-    bindTargetResolver(resolveTarget: ToolCallTargetResolver): void {
-        this.#resolveTarget = resolveTarget;
+        this.#hooks = options.hooks;
+        this.#resolveTarget = options.resolveTarget;
     }
 
     async call(
+        instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -123,15 +95,12 @@ export class ToolCallPipeline implements ToolCallTarget {
             result: JsonValue,
             callId: string,
         ) => Promise<JsonValue>,
-        invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
+        invocationInput?: (input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue,
         onProgress?: (progress: JsonValue) => void,
         recording: "caller" | "host" = "host",
-        afterReview?: (
-            callId: string,
-            instance: InstanceName,
-        ) => Promise<void> | void,
     ): Promise<JsonValue> {
         return await this.#route(
+            instance,
             toolName,
             input,
             context,
@@ -140,22 +109,19 @@ export class ToolCallPipeline implements ToolCallTarget {
             invocationInput,
             onProgress,
             recording,
-            afterReview,
         );
     }
 
     async callOperation<T extends JsonValue>(
+        instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
-        operation: (callId: string, input: JsonValue) => Promise<T>,
+        operation: (callId: string, input: JsonValue, value: ToolCallHookValue) => Promise<T>,
         signal?: AbortSignal,
-        afterReview?: (
-            callId: string,
-            instance: InstanceName,
-        ) => Promise<void> | void,
     ): Promise<T> {
         return (await this.#route(
+            instance,
             toolName,
             input,
             context,
@@ -164,12 +130,12 @@ export class ToolCallPipeline implements ToolCallTarget {
             undefined,
             undefined,
             "host",
-            afterReview,
             operation,
         )) as T;
     }
 
     async #route(
+        instance: string,
         toolName: string,
         input: JsonValue,
         context: ToolCallContext,
@@ -178,24 +144,20 @@ export class ToolCallPipeline implements ToolCallTarget {
             | ((result: JsonValue, callId: string) => Promise<JsonValue>)
             | undefined,
         invocationInput:
-            ((input: JsonValue) => Promise<JsonValue> | JsonValue) | undefined,
+            ((input: JsonValue, callId: string, finalValue: ToolCallHookValue) => Promise<JsonValue> | JsonValue) | undefined,
         onProgress: ((progress: JsonValue) => void) | undefined,
         recording: "caller" | "host",
-        afterReview:
-            | ((callId: string, instance: InstanceName) => Promise<void> | void)
-            | undefined,
-        operation?: (callId: string, input: JsonValue) => Promise<JsonValue>,
+        operation?: (callId: string, input: JsonValue, value: ToolCallHookValue) => Promise<JsonValue>,
     ): Promise<JsonValue> {
         throwIfToolCallAborted(signal);
 
         const callId = randomUUID();
         const canonicalInput = snapshotJson(input);
         const canonicalContext = Object.freeze({ ...context });
-        const hostRecorded = recording === "host";
         const hookSignal = signal ?? new AbortController().signal;
         const hookContext: ToolCallHookContext = Object.freeze({
             ...canonicalContext,
-            instance: this.#instanceName,
+            instance: asInstanceName(instance),
         });
         let hookValue: ToolCallHookValue = {
             context: hookContext,
@@ -204,8 +166,7 @@ export class ToolCallPipeline implements ToolCallTarget {
             toolName,
         };
 
-        let hookLease;
-        hookLease = await this.#hooks(hookContext, hookSignal, recording);
+        const hookLease = await this.#hooks(hookContext, hookSignal, recording);
         const hooks = hookLease.sequence;
 
         try {
@@ -244,19 +205,6 @@ export class ToolCallPipeline implements ToolCallTarget {
                     message: rejectionMessage,
                     retryable: false,
                 });
-                if (hostRecorded) {
-                    const scope = this.#audit.createScope(
-                        callId,
-                        hookValue.toolName,
-                        hookValue.payload,
-                        executionContext(hookValue.context),
-                    );
-                    await this.#audit.requested(scope);
-                    await this.#audit.denied(
-                        scope,
-                        errorCodes.coreToolCallRejected,
-                    );
-                }
                 throw error;
             }
 
@@ -266,9 +214,19 @@ export class ToolCallPipeline implements ToolCallTarget {
                 value: hookValue,
             });
 
-            const target = this.#target(hookValue.context.instance);
+            if (hookValue.kind !== "call") {
+                hookValue = await runOutboundPipeline(hooks, {
+                    callId,
+                    direction: "outbound",
+                    value: hookValue,
+                });
+                const interpreted = await interpretTerminalValue(hookValue, onProgress);
+                if (interpreted.error !== undefined) throw interpreted.error;
+                return interpreted.result!;
+            }
+
+            const target = this.#resolveTarget(hookValue.context.instance);
             return await target.dispatch({
-                ...(afterReview === undefined ? {} : { afterReview }),
                 callId,
                 hooks,
                 ...(invocationInput === undefined ? {} : { invocationInput }),
@@ -284,9 +242,36 @@ export class ToolCallPipeline implements ToolCallTarget {
         }
     }
 
+}
+
+export interface ToolCallExecutionTargetOptions {
+    assertReady(): void;
+    audit: WorkerInstanceToolAudit;
+    instanceName: InstanceName;
+    log: WorkerInstanceToolLog;
+    toolCallScheduler: WorkerToolCallScheduler;
+    toolInvoker: WorkerToolInvoker;
+}
+
+export class ToolCallExecutionTarget implements ToolCallTarget {
+    readonly #assertReady: ToolCallExecutionTargetOptions["assertReady"];
+    readonly #audit: WorkerInstanceToolAudit;
+    readonly #instanceName: InstanceName;
+    readonly #log: WorkerInstanceToolLog;
+    readonly #toolCallScheduler: WorkerToolCallScheduler;
+    readonly #toolInvoker: WorkerToolInvoker;
+
+    constructor(options: ToolCallExecutionTargetOptions) {
+        this.#assertReady = options.assertReady;
+        this.#audit = options.audit;
+        this.#instanceName = options.instanceName;
+        this.#log = options.log;
+        this.#toolCallScheduler = options.toolCallScheduler;
+        this.#toolInvoker = options.toolInvoker;
+    }
+
     async dispatch(request: ToolCallDispatchRequest): Promise<JsonValue> {
         const {
-            afterReview,
             callId,
             hooks,
             invocationInput,
@@ -307,8 +292,12 @@ export class ToolCallPipeline implements ToolCallTarget {
 
         if (hostRecorded) await this.#audit.requested(scope);
 
+        let innerInput: JsonValue;
         try {
-            await afterReview?.(callId, hookValue.context.instance);
+            innerInput =
+                invocationInput === undefined
+                    ? hookValue.payload
+                    : await invocationInput(hookValue.payload, callId, hookValue);
             if (operation === undefined) this.#assertReady();
         } catch (error) {
             if (hostRecorded) await this.#audit.failActive(scope, error);
@@ -339,6 +328,8 @@ export class ToolCallPipeline implements ToolCallTarget {
             let failureStage: ToolCallFailureStage | undefined;
             let progressTail = Promise.resolve();
             let progressFailure: unknown;
+            let progressOverride: ToolCallHookValue | undefined;
+            let finalizedTerminal: { value: ToolCallHookValue; error?: Error; result?: JsonValue } | undefined;
             const hookProgress =
                 onProgress === undefined
                     ? undefined
@@ -346,7 +337,7 @@ export class ToolCallPipeline implements ToolCallTarget {
                           progressTail = progressTail.then(async () => {
                               if (progressFailure !== undefined) return;
                               try {
-                                  const outerProgress = await hooks.rewrite({
+                                  const outerProgress = await runOutboundPipeline(hooks, {
                                       callId: callId,
                                       direction: "outbound",
                                       value: {
@@ -356,19 +347,18 @@ export class ToolCallPipeline implements ToolCallTarget {
                                       },
                                   });
                                   hookValue = outerProgress;
-                                  await runOutboundReview(hooks, {
-                                      callId: callId,
-                                      direction: "outbound",
-                                      value: outerProgress,
-                                  });
-                                  try {
-                                      onProgress(outerProgress.payload);
-                                  } catch (error) {
-                                      console.warn(
-                                          error instanceof Error
-                                              ? error
-                                              : new Error(String(error)),
-                                      );
+                                  if (outerProgress.kind === "progress") {
+                                      try {
+                                          onProgress(outerProgress.payload);
+                                      } catch (error) {
+                                          console.warn(
+                                              error instanceof Error
+                                                  ? error
+                                                  : new Error(String(error)),
+                                          );
+                                      }
+                                  } else {
+                                      progressOverride = outerProgress;
                                   }
                               } catch {
                                   failureStage = "outboundHook";
@@ -385,12 +375,8 @@ export class ToolCallPipeline implements ToolCallTarget {
                 const rawResult = await reservation.run(async () => {
                     if (hostRecorded)
                         await this.#audit.running(scope, runningContext);
-                    const innerInput =
-                        invocationInput === undefined
-                            ? hookValue.payload
-                            : await invocationInput(hookValue.payload);
                     if (operation !== undefined)
-                        return await operation(callId, innerInput);
+                        return await operation(callId, innerInput, hookValue);
                     return await this.#toolInvoker.invoke(
                         hookValue.toolName,
                         innerInput,
@@ -420,7 +406,7 @@ export class ToolCallPipeline implements ToolCallTarget {
                     throw error;
                 }
                 try {
-                    hookValue = await hooks.rewrite({
+                    hookValue = progressOverride ?? await runOutboundPipeline(hooks, {
                         callId: callId,
                         direction: "outbound",
                         value: {
@@ -433,7 +419,10 @@ export class ToolCallPipeline implements ToolCallTarget {
                     failureStage = "outboundHook";
                     throw outboundHookFailure();
                 }
-                const result = hookValue.payload;
+                const interpreted = await interpretTerminalValue(hookValue, onProgress);
+                finalizedTerminal = { ...interpreted, value: hookValue };
+                if (interpreted.error !== undefined) throw interpreted.error;
+                const result = interpreted.result!;
                 toolExecutionSucceeded = true;
                 if (hostRecorded) {
                     const bashResult =
@@ -455,14 +444,15 @@ export class ToolCallPipeline implements ToolCallTarget {
                         },
                     );
                 }
-                await runOutboundReview(hooks, {
-                    callId: callId,
-                    direction: "outbound",
-                    value: hookValue,
-                });
                 return result;
             } catch (error) {
                 if (toolExecutionSucceeded) throw error;
+
+                if (finalizedTerminal?.error !== undefined) {
+                    const errorCode = getErrorCode(finalizedTerminal.error, errorCodes.coreProviderFailed);
+                    if (hostRecorded) await this.#audit.failed(scope, runningContext, errorCode, undefined, async () => undefined, { executionCompleted: true });
+                    throw finalizedTerminal.error;
+                }
 
                 await progressTail;
                 const failure = progressFailure ?? error;
@@ -502,6 +492,26 @@ export class ToolCallPipeline implements ToolCallTarget {
                     throw hookError;
                 }
 
+                await runOutboundReview(hooks, { callId, direction: "outbound", value: outerFailure.value });
+
+                if (outerFailure.value.kind !== "error") {
+                    const interpreted = await interpretTerminalValue(
+                        outerFailure.value,
+                        onProgress,
+                    );
+                    if (interpreted.error !== undefined) throw interpreted.error;
+                    if (hostRecorded) {
+                        await this.#audit.completed(
+                            scope,
+                            runningContext,
+                            interpreted.result!,
+                            undefined,
+                            async () => undefined,
+                        );
+                    }
+                    return interpreted.result!;
+                }
+
                 const rawErrorCode = getErrorCode(
                     outerFailure.error,
                     errorCodes.coreProviderFailed,
@@ -522,11 +532,6 @@ export class ToolCallPipeline implements ToolCallTarget {
                             errorCode,
                         );
                     }
-                    await runOutboundReview(hooks, {
-                        callId: callId,
-                        direction: "outbound",
-                        value: outerFailure.value,
-                    });
                     const normalized = normalizeToolSchedulerError(
                         outerFailure.error,
                     );
@@ -555,26 +560,10 @@ export class ToolCallPipeline implements ToolCallTarget {
                         auditFailure(),
                     );
                 }
-                await runOutboundReview(hooks, {
-                    callId: callId,
-                    direction: "outbound",
-                    value: outerFailure.value,
-                });
                 throw outerFailure.error;
         }
     }
 
-    #target(instance: InstanceName): ToolCallTarget {
-        if (this.#resolveTarget !== undefined)
-            return this.#resolveTarget(instance);
-        if (instance === this.#instanceName) return this;
-        throw createError({
-            code: errorCodes.instanceMissing,
-            details: { instance },
-            message: `Instance ${instance} was not found or is disabled.`,
-            retryable: false,
-        });
-    }
 }
 
 async function runOutboundReview(
@@ -586,6 +575,15 @@ async function runOutboundReview(
     } catch (error) {
         console.warn(error instanceof Error ? error : new Error(String(error)));
     }
+}
+
+async function runOutboundPipeline(
+    hooks: ToolCallHookSequence,
+    input: Parameters<ToolCallHookSequence["rewrite"]>[0],
+): Promise<ToolCallHookValue> {
+    const value = await hooks.rewrite(input);
+    await runOutboundReview(hooks, { ...input, value });
+    return value;
 }
 
 interface ToolCallOuterError {
@@ -620,6 +618,13 @@ async function rewriteToolCallError(
         direction: "outbound",
         value: { ...value, kind: "error", payload },
     });
+    if (rewritten.kind !== "error") {
+        return {
+            error: new Error("rewritten terminal value"),
+            payload: rewritten.payload,
+            value: rewritten,
+        };
+    }
     const rewrittenPayload = rewritten.payload;
     const record = rewrittenPayload as Record<string, JsonValue>;
     const rewrittenBody = record.error as unknown as ControlErrorBody;
@@ -667,6 +672,30 @@ function createErrorFromBody(body: ControlErrorBody): Error {
     });
 }
 
+async function interpretTerminalValue(
+    value: ToolCallHookValue,
+    onProgress?: (progress: JsonValue) => void,
+): Promise<{ error?: Error; result?: JsonValue }> {
+    if (value.kind === "error") {
+        const body = (value.payload as Record<string, JsonValue>).error as unknown as ControlErrorBody;
+        return {
+            error: attachToolCallErrorPayload(
+                createErrorFromBody(body),
+                value.payload,
+            ),
+        };
+    }
+    if (value.kind === "progress") {
+        try {
+            onProgress?.(value.payload);
+        } catch (error) {
+            console.warn(error instanceof Error ? error : new Error(String(error)));
+        }
+    }
+    // Terminal progress/call values have no downstream consumer; expose their payload as the result.
+    return { result: value.payload };
+}
+
 function outboundHookFailure(): Error {
     return createError({
         code: errorCodes.coreProviderFailed,
@@ -674,9 +703,3 @@ function outboundHookFailure(): Error {
         retryable: false,
     });
 }
-
-const emptyToolCallHooks = new ToolCallHookSequence();
-const emptyToolCallHooksProvider: ToolCallHookProvider = () => ({
-    release() {},
-    sequence: emptyToolCallHooks,
-});
