@@ -7,8 +7,11 @@ import {
     EXTENSION_MANIFEST_SCHEMA_VERSION,
     parseExtensionManifest,
     type ExtensionContext,
-    type ExtensionJsonValue,
 } from "@portable-devshell/extension";
+import type {
+    ToolCallHistoryQuery,
+    ToolCallHistoryRecord,
+} from "@portable-devshell/extension/toolcall";
 
 import {
     executeRecallModelCommand,
@@ -16,7 +19,12 @@ import {
 } from "../../src/builtin/RecallCommand.ts";
 import { RecallService } from "../../src/builtin/RecallService.ts";
 
-test("Recall Extension manifest declares only read-oriented runtime capabilities", async () => {
+interface HistoryQuery {
+    instance: string;
+    query?: ToolCallHistoryQuery;
+}
+
+test("Recall Extension declares only read-only Context and ToolCall history capabilities", async () => {
     const manifest = parseExtensionManifest(
         JSON.parse(
             await readFile(
@@ -35,55 +43,58 @@ test("Recall Extension manifest declares only read-oriented runtime capabilities
     assert.equal(manifest.activation, "lazy");
     assert.deepEqual(manifest.capabilities, [
         "contextRuntime",
-        "instanceRuntime",
-    ]);
-    assert.deepEqual(Object.keys(manifest.extensions).sort(), [
-        "cli.model-commands",
-        "cli.native-commands",
+        "toolCallHistory",
     ]);
 });
 
-test("Recall contexts merges current Contexts with retained ToolCall workspace history", async () => {
-    const queries: Array<{ instance: string; query?: ExtensionJsonValue }> = [];
+test("Recall contexts merges retained Contexts with bounded ToolCall workspace history and partial failures", async () => {
+    const queries: HistoryQuery[] = [];
     const service = new RecallService(fakeContext(queries));
 
     assert.deepEqual(await service.contexts({ workspace: "/repo" }), {
         contexts: [
             {
-                current: false,
                 ctxId: "ctx-history",
                 instances: ["other"],
                 lastToolCallAt: "2026-10-02T10:00:00.000Z",
+                origin: "tool-call-history",
+                status: "history-only",
                 toolCalls: 1,
             },
             {
                 createdAt: "2026-10-01T00:00:00.000Z",
-                current: true,
                 ctxId: "ctx-current",
                 instances: ["local"],
                 lastAccessedAt: "2026-10-02T09:00:00.000Z",
                 lastToolCallAt: "2026-10-02T09:30:00.000Z",
+                origin: "context-registry",
                 status: "active",
                 toolCalls: 1,
             },
         ],
+        issues: [{ instance: "broken", message: "history unavailable" }],
+        truncatedInstances: [],
         workspace: "/repo",
     });
+
+    const firstPages = queries.filter((entry) => entry.query?.before === undefined);
     assert.deepEqual(
-        queries.map((entry) => entry.instance),
-        ["local", "other"],
+        firstPages.map((entry) => entry.instance),
+        ["local", "other", "broken"],
     );
-    for (const entry of queries) {
+    for (const entry of firstPages.filter((item) => item.instance !== "broken")) {
         assert.deepEqual(entry.query, {
             includeInput: false,
             includeOutput: false,
+            limit: 500,
+            maxBytes: 512 * 1024,
             workspace: "/repo",
         });
     }
 });
 
-test("Recall calls preserves ToolCall provenance and applies a global limit", async () => {
-    const queries: Array<{ instance: string; query?: ExtensionJsonValue }> = [];
+test("Recall calls preserves provenance, applies a global limit, and returns partial results", async () => {
+    const queries: HistoryQuery[] = [];
     const service = new RecallService(fakeContext(queries));
 
     assert.deepEqual(
@@ -93,55 +104,46 @@ test("Recall calls preserves ToolCall provenance and applies a global limit", as
             workspace: "/repo",
         }),
         {
-            calls: [
-                {
-                    callId: "call-history",
-                    ctxId: "ctx-history",
-                    explanation: "Read the implementation before changing it.",
-                    instance: "other",
-                    purpose: "Inspect implementation",
-                    source: "mcp",
-                    startedAt: "2026-10-02T10:00:00.000Z",
-                    status: "completed",
-                    toolName: "file_read",
-                    workspace: "/repo",
-                },
-            ],
+            calls: [historyCall()],
+            issues: [{ instance: "broken", message: "history unavailable" }],
             workspace: "/repo",
         },
     );
-    for (const entry of queries) {
+    const reads = queries.filter((entry) => entry.instance !== "broken");
+    for (const entry of reads) {
         assert.deepEqual(entry.query, {
             includeInput: false,
             includeOutput: false,
             limit: 1,
+            maxBytes: 8 * 1024 * 1024,
             toolName: "file_read",
             workspace: "/repo",
         });
     }
 });
 
-test("Recall model command is scoped to the authoritative Workspace and instance", async () => {
-    const queries: Array<{ instance: string; query?: ExtensionJsonValue }> = [];
+test("Recall model command uses authoritative scope and exposes model-specific help", async () => {
+    const queries: HistoryQuery[] = [];
     const service = new RecallService(fakeContext(queries));
-    const signal = new AbortController().signal;
+    const invocation = {
+        context: {
+            async instanceReference() {
+                return undefined;
+            },
+        },
+        instance: "local",
+        requestId: "req-model",
+        signal: new AbortController().signal,
+        workspace: "/repo",
+    };
 
     const result = await executeRecallModelCommand(
         service,
         ["calls", "--limit", "5"],
-        {
-            context: {
-                async instanceReference() {
-                    return undefined;
-                },
-            },
-            instance: "local",
-            requestId: "req-model",
-            signal,
-            workspace: "/repo",
-        },
+        invocation,
     );
     assert.equal(result.kind, "json");
+    assert.match(result.text ?? "", /TIME\tSTATUS\tTOOL/u);
     assert.deepEqual(queries, [
         {
             instance: "local",
@@ -149,32 +151,25 @@ test("Recall model command is scoped to the authoritative Workspace and instance
                 includeInput: false,
                 includeOutput: false,
                 limit: 5,
+                maxBytes: 8 * 1024 * 1024,
                 workspace: "/repo",
             },
         },
     ]);
+
+    const help = await executeRecallModelCommand(service, ["--help"], invocation);
+    assert.equal(help.kind, "text");
+    assert.doesNotMatch(help.text, /\[workspace\]|--instance/u);
+    assert.match(help.text, /authoritative current Workspace and instance/u);
+
     await assert.rejects(
-        executeRecallModelCommand(
-            service,
-            ["calls", "/other"],
-            {
-                context: {
-                    async instanceReference() {
-                        return undefined;
-                    },
-                },
-                instance: "local",
-                requestId: "req-model-2",
-                signal,
-                workspace: "/repo",
-            },
-        ),
+        executeRecallModelCommand(service, ["calls", "/other"], invocation),
         /cannot select another Workspace/u,
     );
 });
 
-test("Recall native command resolves a relative Workspace from the CLI working directory", async () => {
-    const queries: Array<{ instance: string; query?: ExtensionJsonValue }> = [];
+test("Recall native command resolves relative Workspace and returns structured JSON with text rendering", async () => {
+    const queries: HistoryQuery[] = [];
     const service = new RecallService(fakeContext(queries));
     const result = await executeRecallNativeCommand(
         service,
@@ -188,6 +183,8 @@ test("Recall native command resolves a relative Workspace from the CLI working d
     );
 
     assert.equal(result.kind, "json");
+    assert.match(result.text ?? "", /Workspace: \/repo\/child/u);
+    assert.match(result.text ?? "", /TIME\tSTATUS\tTOOL/u);
     assert.deepEqual(queries, [
         {
             instance: "local",
@@ -195,15 +192,30 @@ test("Recall native command resolves a relative Workspace from the CLI working d
                 includeInput: false,
                 includeOutput: false,
                 limit: 2,
+                maxBytes: 8 * 1024 * 1024,
                 workspace: "/repo/child",
             },
         },
     ]);
 });
 
-function fakeContext(
-    queries: Array<{ instance: string; query?: ExtensionJsonValue }>,
-): ExtensionContext {
+test("Recall rejects call limits above the host history bound", async () => {
+    await assert.rejects(
+        executeRecallNativeCommand(
+            new RecallService(fakeContext([])),
+            ["calls", "--limit", "1001"],
+            {
+                localOwner: true,
+                requestId: "req-limit",
+                signal: new AbortController().signal,
+                workingDirectory: "/repo",
+            },
+        ),
+        /between 1 and 1000/u,
+    );
+});
+
+function fakeContext(queries: HistoryQuery[]): ExtensionContext {
     return {
         capabilities: {
             contextRuntime: {
@@ -225,52 +237,17 @@ function fakeContext(
                     ];
                 },
             },
-            instanceRuntime: {
-                async appendEvent() {},
-                async list() {
-                    return [
-                        { enabled: true, name: "local" },
-                        { enabled: true, name: "other" },
-                    ];
+            toolCallHistory: {
+                async listInstances() {
+                    return ["local", "other", "broken"];
                 },
-                async readToolCalls(instance, query) {
+                async read(instance, query) {
                     queries.push({ instance, query });
-                    if (
-                        typeof query === "object" &&
-                        query !== null &&
-                        !Array.isArray(query) &&
-                        query.workspace === "/repo/child"
-                    ) {
-                        return [];
-                    }
-                    return instance === "local"
-                        ? [
-                              {
-                                  callId: "call-current",
-                                  ctxId: "ctx-current",
-                                  instance: "local",
-                                  source: "mcp",
-                                  startedAt: "2026-10-02T09:30:00.000Z",
-                                  status: "completed",
-                                  toolName: "bash_run",
-                                  workspace: "/repo",
-                              },
-                          ]
-                        : [
-                              {
-                                  callId: "call-history",
-                                  ctxId: "ctx-history",
-                                  explanation:
-                                      "Read the implementation before changing it.",
-                                  instance: "other",
-                                  purpose: "Inspect implementation",
-                                  source: "mcp",
-                                  startedAt: "2026-10-02T10:00:00.000Z",
-                                  status: "completed",
-                                  toolName: "file_read",
-                                  workspace: "/repo",
-                              },
-                          ];
+                    if (instance === "broken")
+                        throw new Error("history unavailable");
+                    if (query?.workspace === "/repo/child") return [];
+                    if (query?.before !== undefined) return [];
+                    return instance === "local" ? [currentCall()] : [historyCall()];
                 },
             },
         },
@@ -290,5 +267,35 @@ function fakeContext(
         },
         register() {},
         version: "0.1.0",
+    };
+}
+
+function currentCall(): ToolCallHistoryRecord {
+    return {
+        callId: "call-current",
+        ctxId: "ctx-current",
+        inputSummary: "{}",
+        instance: "local",
+        source: "mcp",
+        startedAt: "2026-10-02T09:30:00.000Z",
+        status: "completed",
+        toolName: "bash_run",
+        workspace: "/repo",
+    };
+}
+
+function historyCall(): ToolCallHistoryRecord {
+    return {
+        callId: "call-history",
+        ctxId: "ctx-history",
+        explanation: "Read the implementation before changing it.",
+        inputSummary: "{}",
+        instance: "other",
+        purpose: "Inspect implementation",
+        source: "mcp",
+        startedAt: "2026-10-02T10:00:00.000Z",
+        status: "completed",
+        toolName: "file_read",
+        workspace: "/repo",
     };
 }

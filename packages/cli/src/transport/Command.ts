@@ -155,7 +155,11 @@ function readCommandResult(value: JsonValue | undefined): CliCommandWireResult {
     if (result?.kind === "text" && typeof result.text === "string")
         return { kind: "text", text: result.text };
     if (result?.kind === "json" && result.value !== undefined)
-        return { kind: "json", value: result.value };
+        return {
+            kind: "json",
+            ...(typeof result.text === "string" ? { text: result.text } : {}),
+            value: result.value,
+        };
     throw new Error("Invalid CLI command stream result.");
 }
 

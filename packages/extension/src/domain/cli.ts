@@ -12,7 +12,7 @@ export interface CliCommandDeclaration extends ExtensionPointDeclaration {
 }
 
 export type CliCommandResult =
-    | { kind: "json"; value: ExtensionJsonValue }
+    | { kind: "json"; text?: string; value: ExtensionJsonValue }
     | { kind: "text"; text: string };
 
 export interface CliCommandInputOptions {

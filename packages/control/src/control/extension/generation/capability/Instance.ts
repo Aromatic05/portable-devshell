@@ -20,8 +20,8 @@ import {
     type InstanceLogEntry,
     type JsonValue,
     type ToolCallQuery,
-    type ToolCallRecord,
 } from "@portable-devshell/shared";
+import type { ExtensionToolCallDecorator } from "./ToolCallHistory.js";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
 import type { RuntimeSubscriptionManager } from "../../../../instance/execution/runtime/Subscription.js";
@@ -36,13 +36,6 @@ export interface ExtensionInstanceEditorPort {
     deleteInstance(params?: JsonValue): Promise<JsonValue>;
     disableInstance(params?: JsonValue): Promise<JsonValue>;
     enableInstance(params?: JsonValue): Promise<JsonValue>;
-}
-
-export interface ExtensionToolCallDecorator {
-    decorate(
-        instance: string,
-        records: readonly ToolCallRecord[],
-    ): Promise<readonly ToolCallRecord[]>;
 }
 
 export interface ExtensionConfiguredInstance {

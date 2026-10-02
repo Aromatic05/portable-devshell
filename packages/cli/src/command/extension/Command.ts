@@ -153,6 +153,15 @@ export async function executeExtensionCommand(
                     text,
                     text.endsWith("\n") ? text : `${text}\n`,
                 );
+            } else if (
+                context.outputFormat === "text" &&
+                result.text !== undefined
+            ) {
+                context.stdout.write(
+                    result.text.endsWith("\n")
+                        ? result.text
+                        : `${result.text}\n`,
+                );
             } else context.writeJson(result.value ?? null);
             return true;
         }

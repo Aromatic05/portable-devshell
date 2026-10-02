@@ -36,8 +36,12 @@ import {
 import { ExtensionPathLayout } from "../../state/Layout.js";
 import {
     ExtensionInstanceRuntimeCapabilityControl,
-    type ExtensionToolCallDecorator,
 } from "../capability/Instance.js";
+import {
+    ExtensionToolCallHistoryCapabilityControl,
+    type ExtensionToolCallDecorator,
+} from "../capability/ToolCallHistory.js";
+import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import {
     ExtensionSandboxHost,
     type ExtensionSandboxHostOptions,
@@ -233,6 +237,13 @@ export class ExtensionLoader {
                 instances: this.#instances,
                 toolCallDecorator: this.#toolCallDecorator,
             });
+        const toolCallHistory: ToolCallHistoryCapability =
+            new ExtensionToolCallHistoryCapabilityControl({
+                allowed: manifest.capabilities.includes("toolCallHistory"),
+                extensionId: id,
+                instances: this.#instances,
+                toolCallDecorator: this.#toolCallDecorator,
+            });
 
         const worker = manifest.capabilities.includes("workers")
             ? this.#workerFactory?.({
@@ -297,6 +308,9 @@ export class ExtensionLoader {
                 ...(manifest.capabilities.includes("processes")
                     ? { processes }
                     : {}),
+                ...(manifest.capabilities.includes("toolCallHistory")
+                    ? { toolCallHistory }
+                    : {}),
                 ...(manifest.capabilities.includes("workers")
                     ? { workers: worker }
                     : {}),
@@ -334,6 +348,7 @@ export class ExtensionLoader {
                 runtimeRoot,
                 runtimeDirectory,
                 delegatedWorker,
+                toolCallHistory,
                 worker,
             });
         }
@@ -470,6 +485,7 @@ export class ExtensionLoader {
         runtimeRoot: string;
         runtimeDirectory: string;
         delegatedWorker: ExtensionWorkerRuntime;
+        toolCallHistory: ToolCallHistoryCapability;
         worker: ExtensionWorkerRuntime;
     }): Promise<ExtensionGeneration> {
         let candidate: ExtensionGeneration | undefined;
@@ -506,6 +522,7 @@ export class ExtensionLoader {
                       resourceLimits: this.#sandboxResourceLimits,
                   }),
             delegatedWorker: input.delegatedWorker,
+            toolCallHistory: input.toolCallHistory,
             worker: input.worker,
         });
         try {

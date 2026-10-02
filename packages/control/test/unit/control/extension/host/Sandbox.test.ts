@@ -22,6 +22,7 @@ import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
 } from "@portable-devshell/extension/instance";
+import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 import type {
     CliModelCommandInvocationContext,
     CliNativeCommandInvocationContext,
@@ -514,6 +515,43 @@ export function activate(context) {
     ]);
     assert.deepEqual(calls, [
         'contextRuntime.list:{"instance":"local-test","workspace":"/repo"}',
+    ]);
+});
+
+test("Extension sandbox bridges declared ToolCall history reads", async (t) => {
+    const calls: string[] = [];
+    const sandbox = await setupSandbox(
+        t,
+        "extension-sandbox-toolcall-history",
+        `
+export function activate(context) {
+    context.register({ id: "cli.native-commands" }, "test", async () => {
+        const instances = await context.capabilities.toolCallHistory.listInstances();
+        const records = await context.capabilities.toolCallHistory.read("local-test", {
+            limit: 5,
+            workspace: "/repo"
+        });
+        return { kind: "json", value: {
+            instances,
+            callIds: records.map((record) => record.callId)
+        } };
+    });
+}
+`,
+        {
+            capabilities: ["toolCallHistory"],
+            toolCallHistory: fakeToolCallHistory(calls),
+        },
+    );
+
+    await sandbox.start();
+    assert.deepEqual(await cliJson(sandbox, [], "toolcall-history"), {
+        instances: ["local-test"],
+        callIds: ["call-1"],
+    });
+    assert.deepEqual(calls, [
+        "toolCallHistory.listInstances",
+        'toolCallHistory.read:local-test:{"limit":5,"workspace":"/repo"}',
     ]);
 });
 
@@ -1414,6 +1452,7 @@ function createSandbox(options: {
     onFault?: (error: Error) => void;
     processes?: ExtensionProcessCapability;
     resourceLimits?: ExtensionSandboxHostOptions["resourceLimits"];
+    toolCallHistory?: ToolCallHistoryCapability;
     delegatedWorker?: ExtensionWorkerCapability;
     worker?: ExtensionWorkerCapability;
 }): ExtensionSandboxHost {
@@ -1459,6 +1498,7 @@ function createSandbox(options: {
             ? {}
             : { resourceLimits: options.resourceLimits }),
         delegatedWorker: options.delegatedWorker ?? fakeWorker([]),
+        toolCallHistory: options.toolCallHistory ?? fakeToolCallHistory([]),
         worker: options.worker ?? fakeWorker([]),
     });
 }
@@ -1611,6 +1651,32 @@ function fakeContextRuntime(
                     instance: "local-test",
                     lastAccessedAt: "2026-10-02T00:00:00.000Z",
                     status: "active",
+                    workspace: "/repo",
+                },
+            ];
+        },
+    };
+}
+
+function fakeToolCallHistory(calls: string[]): ToolCallHistoryCapability {
+    return {
+        async listInstances() {
+            calls.push("toolCallHistory.listInstances");
+            return ["local-test"];
+        },
+        async read(instance, query) {
+            calls.push(
+                `toolCallHistory.read:${instance}:${JSON.stringify(query ?? {})}`,
+            );
+            return [
+                {
+                    callId: "call-1",
+                    inputSummary: "{}",
+                    instance,
+                    source: "mcp",
+                    startedAt: "2026-10-02T00:00:00.000Z",
+                    status: "completed",
+                    toolName: "file_read",
                     workspace: "/repo",
                 },
             ];

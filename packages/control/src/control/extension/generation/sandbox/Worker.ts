@@ -36,6 +36,10 @@ import type {
     ExtensionInstanceLogQuery,
     ExtensionInstanceRuntimeCapability,
 } from "@portable-devshell/extension/instance";
+import type {
+    ToolCallHistoryCapability,
+    ToolCallHistoryQuery,
+} from "@portable-devshell/extension/toolcall";
 
 import { createControlExtensionSandboxPointRegistry } from "../../../../composition/Sandbox.js";
 import type {
@@ -69,6 +73,7 @@ import {
     type SandboxInstanceRuntimeAppendEventInput,
     type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
+    type SandboxToolCallHistoryReadInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
     type SandboxProcessTerminateInput,
@@ -370,6 +375,9 @@ function createContext(): ExtensionContext {
         ...(data.capabilities.includes("processes")
             ? { processes: createProcessCapability() }
             : {}),
+        ...(data.capabilities.includes("toolCallHistory")
+            ? { toolCallHistory: createToolCallHistoryCapability() }
+            : {}),
         ...(data.capabilities.includes("workers")
             ? { workers: createWorkerCapability("workers") }
             : {}),
@@ -631,6 +639,22 @@ function createContextRuntimeCapability(): ExtensionContextRuntimeCapability {
                 query as SandboxContextRuntimeListInput | undefined,
             )) as Awaited<
                 ReturnType<ExtensionContextRuntimeCapability["list"]>
+            >,
+    });
+}
+
+function createToolCallHistoryCapability(): ToolCallHistoryCapability {
+    return Object.freeze({
+        listInstances: async () =>
+            (await requestCapability(
+                "toolCallHistory.listInstances",
+            )) as readonly string[],
+        read: async (instance: string, query?: ToolCallHistoryQuery) =>
+            (await requestCapability("toolCallHistory.read", {
+                instance,
+                ...(query === undefined ? {} : { query }),
+            } satisfies SandboxToolCallHistoryReadInput)) as Awaited<
+                ReturnType<ToolCallHistoryCapability["read"]>
             >,
     });
 }

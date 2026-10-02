@@ -17,6 +17,10 @@ const workspacePackages = new Map([
         "@portable-devshell/extension/instance",
         new URL("../../../packages/extension/src/domain/instance.ts", import.meta.url).href,
     ],
+    [
+        "@portable-devshell/extension/toolcall",
+        new URL("../../../packages/extension/src/domain/toolcall.ts", import.meta.url).href,
+    ],
 ]);
 
 registerHooks({

@@ -17,6 +17,7 @@ import type {
 } from "@portable-devshell/extension/artifact";
 import type { ExtensionContextRuntimeQuery } from "@portable-devshell/extension/context";
 import type { ExtensionInstanceLogQuery } from "@portable-devshell/extension/instance";
+import type { ToolCallHistoryQuery } from "@portable-devshell/extension/toolcall";
 import {
     createError,
     toControlErrorBody,
@@ -118,6 +119,8 @@ export type ExtensionSandboxCapabilityOperation =
     | "instanceRuntime.appendEvent"
     | "instanceRuntime.list"
     | "instanceRuntime.readToolCalls"
+    | "toolCallHistory.listInstances"
+    | "toolCallHistory.read"
     | "processes.send"
     | "processes.start"
     | "processes.terminate"
@@ -334,6 +337,10 @@ export interface SandboxInstanceRuntimeAppendEventInput {
 export interface SandboxInstanceRuntimeReadToolCallsInput {
     name: string;
     query?: ExtensionJsonValue;
+}
+export interface SandboxToolCallHistoryReadInput {
+    instance: string;
+    query?: ToolCallHistoryQuery;
 }
 export type SandboxWorkerOpenInput = ExtensionWorkerOpenInput;
 

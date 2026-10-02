@@ -4,6 +4,7 @@ import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
 } from "./domain/instance.js";
+import type { ToolCallHistoryCapability } from "./domain/toolcall.js";
 
 export type ExtensionJsonPrimitive = boolean | number | string | null;
 export type ExtensionJsonValue =
@@ -66,6 +67,7 @@ export type ExtensionCapability =
     | "instanceRuntime"
     | "instances"
     | "processes"
+    | "toolCallHistory"
     | "workers";
 
 export interface ExtensionPointDeclaration {
@@ -255,6 +257,7 @@ export interface ExtensionCapabilities {
     readonly instanceRuntime?: ExtensionInstanceRuntimeCapability;
     readonly instances?: ExtensionInstanceCapability;
     readonly processes?: ExtensionProcessCapability;
+    readonly toolCallHistory?: ToolCallHistoryCapability;
     readonly workers?: ExtensionWorkerCapability;
 }
 

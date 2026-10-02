@@ -24,6 +24,7 @@ import type {
     ExtensionInstanceCapability,
     ExtensionInstanceRuntimeCapability,
 } from "@portable-devshell/extension/instance";
+import type { ToolCallHistoryCapability } from "@portable-devshell/extension/toolcall";
 
 import type {
     ExtensionPointSandboxBridge,
@@ -56,6 +57,7 @@ import {
     type SandboxInstanceRuntimeAppendEventInput,
     type SandboxInstanceRuntimeReadToolCallsInput,
     type SandboxInstanceWatchInput,
+    type SandboxToolCallHistoryReadInput,
     type SandboxProcessSendInput,
     type SandboxProcessStartInput,
     type SandboxProcessTerminateInput,
@@ -104,6 +106,7 @@ export interface ExtensionSandboxHostOptions {
     onFault?(error: Error): void;
     processes: ExtensionProcessCapability;
     resourceLimits?: ResourceLimits;
+    toolCallHistory: ToolCallHistoryCapability;
     worker: ExtensionWorkerCapability;
     workerFactory?: ExtensionSandboxWorkerFactory;
 }
@@ -155,6 +158,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
     readonly #port: MessagePort;
     readonly #processCapability: ExtensionProcessCapability;
     readonly #processes = new Map<string, SandboxManagedProcess>();
+    readonly #toolCallHistoryCapability: ToolCallHistoryCapability;
     readonly #capabilityControllers = new Map<string, AbortController>();
     readonly #delegatedWorkerCapability: ExtensionWorkerCapability;
     readonly #ready: Promise<ExtensionSandboxReadyDescriptor>;
@@ -215,6 +219,7 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
         );
         this.#onFault = options.onFault;
         this.#processCapability = options.processes;
+        this.#toolCallHistoryCapability = options.toolCallHistory;
         this.#workerCapability = options.worker;
         const workerData: ExtensionSandboxWorkerData = {
             capabilities: [...options.capabilities],
@@ -682,6 +687,15 @@ export class ExtensionSandboxHost implements ExtensionPointSandboxBridge {
                 const value = input as SandboxInstanceRuntimeReadToolCallsInput;
                 return await this.#instanceRuntimeCapability.readToolCalls(
                     value.name,
+                    value.query,
+                );
+            }
+            case "toolCallHistory.listInstances":
+                return await this.#toolCallHistoryCapability.listInstances();
+            case "toolCallHistory.read": {
+                const value = input as SandboxToolCallHistoryReadInput;
+                return await this.#toolCallHistoryCapability.read(
+                    value.instance,
                     value.query,
                 );
             }

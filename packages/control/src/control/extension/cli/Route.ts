@@ -213,8 +213,17 @@ function assertCommandResult(
         return { kind: "text", text: value.text };
     }
     if (value.kind === "json") {
+        if (value.text !== undefined && typeof value.text !== "string") {
+            throw createError({
+                code: errorCodes.controlCliCommandFailed,
+                details: { commandId },
+                message: `CLI command ${commandId} returned an invalid text rendering.`,
+                retryable: false,
+            });
+        }
         return {
             kind: "json",
+            ...(value.text === undefined ? {} : { text: value.text }),
             value: assertJsonValue(
                 value.value,
                 `CLI command ${commandId} result`,

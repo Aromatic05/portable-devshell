@@ -13,6 +13,16 @@ export type ToolCallDirection = "inbound" | "outbound";
 export type ToolCallKind = "call" | "error" | "progress" | "result";
 export type ToolCallReviewDecision = "continue" | "reject";
 export type ToolCallSource = "cli" | "extension" | "mcp" | "tui" | "web";
+export type ToolCallStatus =
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "denied"
+    | "queueTimeout"
+    | "cancelled";
+export type ToolCallFailureStage = "postExecution" | "outboundHook";
+export type ToolTermination = "exited" | "signaled" | "timeout";
 
 export interface ToolCallContext {
     ctxId?: string;
@@ -28,6 +38,56 @@ export interface ToolCallValue {
     kind: ToolCallKind;
     payload: ExtensionJsonValue;
     toolName: string;
+}
+
+export interface ToolCallHistoryQuery {
+    readonly after?: string;
+    readonly before?: string;
+    readonly callIds?: readonly string[];
+    readonly ctxId?: string;
+    readonly includeInput?: boolean;
+    readonly includeOutput?: boolean;
+    readonly limit?: number;
+    readonly maxBytes?: number;
+    readonly source?: ToolCallSource;
+    readonly status?: ToolCallStatus;
+    readonly toolName?: string;
+    readonly workspace?: string;
+}
+
+export interface ToolCallHistoryRecord {
+    readonly callId: string;
+    readonly completedAt?: string;
+    readonly ctxId?: string;
+    readonly error?: string;
+    readonly executionCompleted?: boolean;
+    readonly exitCode?: number | null;
+    readonly explanation?: string;
+    readonly failureStage?: ToolCallFailureStage;
+    readonly input?: ExtensionJsonValue;
+    readonly inputSummary: string;
+    readonly instance: string;
+    readonly output?: ExtensionJsonValue;
+    readonly purpose?: string;
+    readonly requestId?: string;
+    readonly source: ToolCallSource;
+    readonly startedAt: string;
+    readonly status: ToolCallStatus;
+    readonly stderrBytes?: number;
+    readonly stdoutBytes?: number;
+    readonly termSignal?: number;
+    readonly termination?: ToolTermination;
+    readonly toolName: string;
+    readonly workspace?: string;
+}
+
+/** Read-only access to retained ToolCall history owned by Control/Worker audit. */
+export interface ToolCallHistoryCapability {
+    listInstances(): Promise<readonly string[]>;
+    read(
+        instance: string,
+        query?: ToolCallHistoryQuery,
+    ): Promise<readonly ToolCallHistoryRecord[]>;
 }
 
 export interface ToolCallReviewInvocation {
