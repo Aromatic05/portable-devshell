@@ -137,7 +137,7 @@ test("temporary storage is restored only for its stored workspace", async () => 
     const registry = new ContextRegistry({ idFactory: () => "ctx-temp" });
     await createContext(registry, "local", "/same");
     let prepared = 0;
-    let touched: string[] = [];
+    const touched: string[] = [];
     const localWorker = {
         ...worker(),
         async prepareWorkspace(workspace: string) {
@@ -172,6 +172,21 @@ test("shared workspace alert cleanup waits until the final active Context releas
     assert.equal(releases, 1);
 });
 
+test("successful remote attach settles its own committed alert cleanup intent", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-remote-commit" });
+    await registry.create({ principal: "user-1" });
+    const reference = await registry.referenceInstance("ctx-remote-commit", "remote");
+    const remote = gateway();
+    const { environment } = runtime(registry, remote);
+    await environment.attachRemote("ctx-remote-commit", reference!.handle!, "/projects/gamma");
+    assert.deepEqual(await registry.listEnvironmentCleanup("ctx-remote-commit"), []);
+    assert.deepEqual(await registry.resolveEnvironment("ctx-remote-commit", "remote"), {
+        instance: "remote",
+        temporaryDirectory: "/projects/gamma/tmp",
+        workspace: "/projects/gamma",
+    });
+});
+
 test("cancelled remote attach records and settles its reference cleanup debt", async () => {
     const registry = new ContextRegistry({ idFactory: () => "ctx-cancel" });
     await registry.create({ principal: "user-1" });
@@ -186,6 +201,31 @@ test("cancelled remote attach records and settles its reference cleanup debt", a
     await assert.rejects(environment.attachRemote("ctx-cancel", reference!.handle!, undefined, controller.signal), /cancelled/);
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.deepEqual((await registry.listEnvironmentCleanup("ctx-cancel")).map(({ cleanup }) => cleanup.kind), ["instance_reference"]);
+});
+
+test("cancellation after remote preparation retains alert cleanup debt", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-remote-prepare-cancel" });
+    await registry.create({ principal: "user-1" });
+    const reference = await registry.referenceInstance("ctx-remote-prepare-cancel", "remote");
+    const controller = new AbortController();
+    let observeRelease!: () => void;
+    const releaseAttempted = new Promise<void>((resolve) => { observeRelease = resolve; });
+    const remote = gateway({
+        async prepareWorkspace(_instance: string, workspace: string) {
+            controller.abort(new Error("cancel during workspace preparation"));
+            return { projectMemoryAgentFile: "", projectMemoryDirectory: "", temporaryDirectory: `${workspace}/tmp`, workspace };
+        },
+        async releaseAlerts() {
+            observeRelease();
+            throw new Error("alert release unavailable");
+        },
+    });
+    const { environment } = runtime(registry, remote);
+    await assert.rejects(environment.attachRemote("ctx-remote-prepare-cancel", reference!.handle!, "/work/new", controller.signal), /cancel during workspace preparation/);
+    await releaseAttempted;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual((await registry.listEnvironmentCleanup("ctx-remote-prepare-cancel")).map(({ cleanup }) => cleanup.kind), ["alerts"]);
+    assert.deepEqual((await registry.lookup("ctx-remote-prepare-cancel", { principal: "user-1" })).environments, []);
 });
 
 test("local cancellation after preparation releases alerts without changing the prior binding", async () => {
@@ -244,4 +284,29 @@ test("local cancellation after attach restores the prior workspace and temporary
     });
     await assert.rejects(environment.prepareLocal("ctx-local-after", "local", "/new", { signal: controller.signal }), /cancel after attach/);
     assert.deepEqual(await registry.resolveEnvironment("ctx-local-after", "local"), { instance: "local", temporaryDirectory: "/old/tmp", workspace: "/old" });
+});
+
+test("bootstrap rollback preserves alert debt when preparation and alert release fail", async () => {
+    const registry = new ContextRegistry({ idFactory: () => "ctx-bootstrap-debt" });
+    await registry.create({ principal: "user-1", environments: [{ instance: "local" }] });
+    const cleanup = new ContextCleanupService({ contextRegistry: registry, gateway: () => undefined });
+    const environment = new ContextEnvironmentService({
+        contextRegistry: registry,
+        cleanup,
+        gateway: () => undefined,
+        worker: (instance) => instance === "local" ? worker() : undefined,
+    });
+    await assert.rejects(environment.prepareLocal(
+        "ctx-bootstrap-debt",
+        "local",
+        "/work/bootstrap",
+        { beforeCommit: async () => { throw new Error("readAlerts failed"); } },
+    ));
+    await assert.rejects(environment.rollbackUndisclosed(
+        "ctx-bootstrap-debt",
+        "local",
+    ));
+    const retained = await registry.lookup("ctx-bootstrap-debt", { principal: "user-1" });
+    assert.equal(retained.status, "disabled");
+    assert.deepEqual((await registry.listEnvironmentCleanup("ctx-bootstrap-debt")).map(({ cleanup: debt }) => debt.kind), ["alerts"]);
 });

@@ -126,6 +126,7 @@ export class McpEndpointHandlerEnvironment {
         let resultCtxId = record.ctxId;
         const structuredContent = await callMcpEndpointToolOperation({
             context,
+            gateway: this.#gateway,
             input,
             localInstance: this.#instanceName,
             operation: async () => {
@@ -244,6 +245,7 @@ export class McpEndpointHandlerEnvironment {
         try {
             const structuredContent = await callMcpEndpointToolOperation({
                 context,
+                gateway: this.#gateway,
                 input,
                 localInstance: this.#instanceName,
                 operation: async () => {
@@ -464,9 +466,8 @@ export class McpEndpointHandlerEnvironment {
             bindings: bound.bindings,
             created: true,
             record: await this.#contextRegistry.create({
-                instance: this.#instanceName,
                 principal: requestContext.principal,
-                workspace,
+                environments: [{ instance: this.#instanceName }],
             }),
         };
     }
@@ -584,15 +585,6 @@ function unboundContext(requireExplicitContextId: boolean) {
             ? "No Context is bound to this request. Call environ_info with workspace or provide ctxId."
             : "No Context is bound to this request. Call environ_info with workspace.",
         retryable: false,
-    });
-}
-
-function workspacePreparationUnavailable(instance: string) {
-    return createError({
-        code: errorCodes.coreWorkerHandshakeFailed,
-        details: { instance },
-        message: `Workspace preparation is unavailable for ${instance}.`,
-        retryable: true,
     });
 }
 

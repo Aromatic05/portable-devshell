@@ -30,7 +30,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     } = {}): Promise<PreparedEnvironmentFacts> {
         const { external, beforeCommit, signal } = options;
         signal?.throwIfAborted();
-        return await this.#run(ctxId, instance, async () => {
+        return await this.#run(ctxId, async () => {
             await this.#cleanup.reconcile(ctxId);
             const previous = await this.#environment(ctxId, instance);
             const worker = this.#worker(instance);
@@ -64,14 +64,21 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     }
 
     async ensurePrepared(ctxId: string, instance: string, workspace?: string): Promise<McpContextEnvironment> {
-        return await this.#run(ctxId, instance, async () => {
+        return await this.#run(ctxId, async () => {
             const stored = await this.#environment(ctxId, instance);
             if (workspace !== undefined && stored?.workspace !== undefined && stored.workspace !== workspace) {
                 await this.#assertWorkspaceSwitchAvailable(ctxId, instance, stored.workspace);
                 throw new Error(`Workspace ${stored.workspace} is attached to ${ctxId}; switch workspace through environ_info first.`);
             }
             const selected = workspace ?? stored?.workspace;
-            if (selected === undefined) throw new Error(`No workspace is attached to ${instance} for ${ctxId}.`);
+            if (selected === undefined) {
+                throw createError({
+                    code: errorCodes.mcpContextWorkspaceRequired,
+                    details: { ctxId, instance },
+                    message: `No workspace is attached to ${instance} for the current Context. Obtain its handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.`,
+                    retryable: false,
+                });
+            }
             if (stored?.temporaryDirectory !== undefined) {
                 try {
                     const gateway = this.#gateway(instance);
@@ -92,7 +99,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     async attachRemote(ctxId: string, handle: string, workspace?: string, signal?: AbortSignal): Promise<JsonValue> {
         signal?.throwIfAborted();
         const instance = await this.#registry.resolveRemoteInstanceHandle(ctxId, handle);
-        const operation = this.#run(ctxId, instance, async () => {
+        const operation = this.#run(ctxId, async () => {
             await this.#cleanup.reconcile(ctxId);
             const gateway = this.#requireGateway(instance);
             const previous = await this.#environment(ctxId, instance);
@@ -119,8 +126,8 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
                     } catch (error) { if (!isRecoverableTemporaryError(error)) throw error; }
                 }
                 const prepared = await gateway.prepareWorkspace(instance, workspace);
-                signal?.throwIfAborted();
                 await this.#registry.recordEnvironmentCleanup(ctxId, { instance, kind: "alerts", workspace: prepared.workspace });
+                signal?.throwIfAborted();
                 if (previous?.workspace !== undefined && previous.workspace !== prepared.workspace) {
                     await this.#assertWorkspaceSwitchAvailable(ctxId, instance, previous.workspace);
                 }
@@ -145,8 +152,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
     }
 
     async maskRemote(ctxId: string, handle: string): Promise<{ instance: string; masked: true }> {
-        const instance = await this.#registry.resolveRemoteInstanceHandle(ctxId, handle);
-        return await this.#run(ctxId, instance, async () => {
+        return await this.#run(ctxId, async () => {
             const masked = await this.#registry.maskRemoteInstance(ctxId, handle);
             await this.#cleanup.reconcile(ctxId);
             return { instance: masked.instance, masked: true };
@@ -155,20 +161,24 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
 
     async rollbackUndisclosed(ctxId: string, instance: string, workspace?: string): Promise<void> {
         if (workspace === undefined) {
-            await this.#registry.discard(ctxId);
+            const pending = await this.#registry.listEnvironmentCleanup(ctxId);
+            if (pending.length === 0) {
+                await this.#registry.discard(ctxId);
+                return;
+            }
+            await this.#registry.disable(ctxId);
+            await this.#cleanup.reconcile(ctxId);
+            if ((await this.#registry.listEnvironmentCleanup(ctxId)).length === 0) {
+                await this.#registry.discard(ctxId);
+            }
             return;
         }
-        const inUse = (await this.#registry.list()).some((context) =>
-            context.ctxId !== ctxId && context.status === "active" &&
-            Date.parse(context.expiresAt) > Date.now() &&
-            context.environments.some((environment) => environment.instance === instance && environment.workspace === workspace),
-        );
         await this.#registry.disable(ctxId);
-        if (!inUse) {
-            await this.#registry.recordEnvironmentCleanup(ctxId, { instance, kind: "alerts", workspace });
-            await this.#cleanup.reconcile(ctxId);
+        await this.#registry.recordEnvironmentCleanup(ctxId, { instance, kind: "alerts", workspace });
+        await this.#cleanup.reconcile(ctxId);
+        if ((await this.#registry.listEnvironmentCleanup(ctxId)).length === 0) {
+            await this.#registry.discard(ctxId);
         }
-        await this.#registry.discard(ctxId);
     }
 
     async #assertWorkspaceSwitchAvailable(ctxId: string, instance: string, previousWorkspace?: string): Promise<void> {
@@ -207,7 +217,7 @@ export class ContextEnvironmentService implements ContextEnvironmentPort {
         throw createError({ code: errorCodes.coreToolSchemaUnavailable, details: { instance }, message: `Remote environment attachment is not available for ${instance}.`, retryable: false });
     }
 
-    #run<T>(ctxId: string, instance: string, operation: () => Promise<T>): Promise<T> {
+    #run<T>(ctxId: string, operation: () => Promise<T>): Promise<T> {
         const key = ctxId;
         const previous = this.#transactions.get(key) ?? Promise.resolve();
         const run = previous.then(operation, operation);

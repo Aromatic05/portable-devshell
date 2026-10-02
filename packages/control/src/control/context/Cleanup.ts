@@ -46,6 +46,12 @@ export class ContextCleanupService {
             await gateway.releaseInstanceReference(cleanup.instance, ctxId);
             return true;
         }
+        const ownsActiveScope = contexts.some((context) =>
+            context.ctxId === ctxId && context.status === "active" &&
+            Date.parse(context.expiresAt) > now &&
+            context.environments.some((environment) => environment.instance === cleanup.instance && environment.workspace === cleanup.workspace),
+        );
+        if (ownsActiveScope) return true;
         if (contexts.some((context) => context.status === "active" && Date.parse(context.expiresAt) > now && context.environments.some((environment) => environment.instance === cleanup.instance && environment.workspace === cleanup.workspace))) return false;
         if (cleanup.workspace === undefined) throw new Error("Alert cleanup requires a workspace.");
         if (gateway !== undefined) { await gateway.releaseAlerts(cleanup.instance, cleanup.workspace); return true; }

@@ -1,6 +1,5 @@
 import type { ToolCallHookValue } from "@portable-devshell/core";
 import {
-    createError,
     errorCodes,
     toControlErrorBody,
     type GoalActivityKind,
@@ -1832,17 +1831,6 @@ function readWorkspaceWaitId(input: JsonValue): string | undefined {
         : undefined;
 }
 
-function isRecoverableContextTemporaryError(error: unknown): boolean {
-    if (typeof error !== "object" || error === null || !("code" in error)) {
-        return false;
-    }
-    const code = (error as { code?: unknown }).code;
-    return (
-        code === "workspace.temporaryUnavailable" ||
-        code === "workspace.temporaryInvalid"
-    );
-}
-
 function hasToolProvenance(provenance: ToolCallProvenance): boolean {
     return (
         provenance.purpose !== undefined || provenance.explanation !== undefined
@@ -1892,15 +1880,6 @@ function appendStructuredComments(
         ...value,
         comment: [...new Set([...existing, ...comments])],
     };
-}
-
-function contextWorkspaceRequired(ctxId: string, instance: string) {
-    return createError({
-        code: errorCodes.mcpContextWorkspaceRequired,
-        details: { ctxId, instance },
-        message: `No workspace is attached to ${instance} for the current Context. Obtain its handle with devshell instance list/status, then use environ_remote command='attach' with an absolute workspace.`,
-        retryable: false,
-    });
 }
 
 function isRecord(
