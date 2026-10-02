@@ -18,6 +18,10 @@
             "types": "./dist/domain/artifact.d.ts",
             "default": "./dist/domain/artifact.js"
         },
+        "./asset": {
+            "types": "./dist/domain/asset.d.ts",
+            "default": "./dist/domain/asset.js"
+        },
         "./context": {
             "types": "./dist/domain/context.d.ts",
             "default": "./dist/domain/context.js"
@@ -30,6 +34,10 @@
             "types": "./dist/domain/mcp.d.ts",
             "default": "./dist/domain/mcp.js"
         },
+        "./process": {
+            "types": "./dist/domain/process.d.ts",
+            "default": "./dist/domain/process.js"
+        },
         "./toolcall": {
             "types": "./dist/domain/toolcall.d.ts",
             "default": "./dist/domain/toolcall.js"
@@ -41,6 +49,10 @@
         "./web": {
             "types": "./dist/domain/web.d.ts",
             "default": "./dist/domain/web.js"
+        },
+        "./worker": {
+            "types": "./dist/domain/worker.d.ts",
+            "default": "./dist/domain/worker.js"
         },
         "./control": {
             "types": "./dist/domain/control.d.ts",

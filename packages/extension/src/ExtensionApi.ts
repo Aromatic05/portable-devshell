@@ -1,4 +1,5 @@
 import type { ExtensionArtifactCapability } from "./domain/artifact.js";
+import type { ExtensionAssetCapability } from "./domain/asset.js";
 import type { ExtensionContextObserveCapability } from "./domain/context.js";
 import type {
     ExtensionInstanceEventPublishCapability,
@@ -6,6 +7,8 @@ import type {
     ExtensionInstanceObserveCapability,
 } from "./domain/instance.js";
 import type { ToolCallHistoryCapability } from "./domain/toolcall.js";
+import type { ExtensionProcessCapability } from "./domain/process.js";
+import type { ExtensionWorkerCapability } from "./domain/worker.js";
 
 export type ExtensionJsonPrimitive = boolean | number | string | null;
 export type ExtensionJsonValue =
@@ -109,144 +112,6 @@ export interface ExtensionLogger {
     error(message: string, details?: ExtensionJsonValue): void;
     info(message: string, details?: ExtensionJsonValue): void;
     warn(message: string, details?: ExtensionJsonValue): void;
-}
-
-/**
- * One immutable, content-addressed Extension asset bundle.
- *
- * generation is opaque to Extensions. directory is valid while the bundle is
- * installed; callers must not derive sibling paths or depend on Control's
- * physical storage layout.
- */
-export interface ExtensionAssetBundle {
-    readonly directory: string;
-    readonly generation: string;
-}
-
-export interface ExtensionAssetProjectionResult {
-    readonly transferredBytes: number;
-}
-
-export interface ExtensionAssetProjectionTarget {
-    /** Logical resource collection owned by the Extension on the target Worker. */
-    collection: string;
-    /** Managed Worker instance receiving the resource. */
-    instance: string;
-    /** One logical entry name inside the collection; never a filesystem path. */
-    key: string;
-}
-
-export interface ExtensionAssetProjectionInput {
-    generation: string;
-    overwrite?: boolean;
-    signal?: AbortSignal;
-    target: ExtensionAssetProjectionTarget;
-}
-
-/** Control-owned storage and transfer for Extension assets. */
-export interface ExtensionAssetCapability {
-    installBundle(sourcePath: string): Promise<ExtensionAssetBundle>;
-    installDirectory(sourcePath: string): Promise<ExtensionAssetBundle>;
-    listBundles(): Promise<readonly ExtensionAssetBundle[]>;
-    projectBundle(
-        input: ExtensionAssetProjectionInput,
-    ): Promise<ExtensionAssetProjectionResult>;
-    removeBundle(generation: string): Promise<void>;
-    resolveBundle(
-        generation: string,
-    ): Promise<ExtensionAssetBundle | undefined>;
-}
-
-export interface ExtensionWorkerToolDefinition {
-    description: string;
-    inputSchema: ExtensionJsonValue;
-    name: string;
-}
-
-export interface ExtensionWorkerShellRuntime {
-    executable: string;
-    kind: string;
-    version: string;
-}
-
-export interface ExtensionWorkerDistribution {
-    id: string;
-    name: string;
-    version?: string;
-}
-
-export interface ExtensionWorkerPlatform {
-    arch: string;
-    distribution?: ExtensionWorkerDistribution;
-    os: string;
-    packageManager?: string;
-    shell?: ExtensionWorkerShellRuntime;
-}
-
-/** Stable target metadata derived from the Worker handshake. */
-export interface ExtensionWorkerEnvironment {
-    homeDirectory: string;
-    platform: ExtensionWorkerPlatform;
-}
-
-export interface ExtensionWorkerOpenInput {
-    instance?: string;
-    workspace: string;
-}
-
-export interface ExtensionWorkerCallOptions {
-    onProgress?(progress: ExtensionJsonValue): void;
-    operationId?: string;
-    signal?: AbortSignal;
-}
-
-export interface ExtensionWorkerSession {
-    /** Settles whenever this host-managed session ceases to be usable. */
-    readonly closed: Promise<void>;
-    readonly environment: ExtensionWorkerEnvironment;
-    readonly instance: string;
-    readonly workspace: string;
-    callTool(
-        toolName: string,
-        input: ExtensionJsonValue,
-        options?: ExtensionWorkerCallOptions,
-    ): Promise<ExtensionJsonValue>;
-    close(): Promise<void>;
-    listTools(): readonly ExtensionWorkerToolDefinition[];
-}
-
-export interface ExtensionWorkerCapability {
-    openSession(
-        input: ExtensionWorkerOpenInput,
-    ): Promise<ExtensionWorkerSession>;
-}
-
-export interface ExtensionProcessExit {
-    readonly code?: number;
-    readonly signal?: string;
-}
-
-/** Input for a Control-owned process. The process remains generation-owned. */
-export interface ExtensionProcessStartInput {
-    readonly args?: readonly string[];
-    readonly command: string;
-    readonly cwd?: string;
-    readonly environment?: Readonly<Record<string, string>>;
-    /** Request a structured JSON message channel in addition to process lifetime management. */
-    readonly messages?: boolean;
-}
-
-export interface ExtensionManagedProcess {
-    readonly closed: Promise<ExtensionProcessExit>;
-    onMessage(listener: (message: ExtensionJsonValue) => void): () => void;
-    onStderr(listener: (chunk: string) => void): () => void;
-    onStdout(listener: (chunk: string) => void): () => void;
-    send(message: ExtensionJsonValue): Promise<void>;
-    terminate(signal?: string): Promise<void>;
-}
-
-export interface ExtensionProcessCapability {
-    start(input: ExtensionProcessStartInput): Promise<ExtensionManagedProcess>;
 }
 
 /** Capabilities supplied by Control to an activated Extension generation. */
