@@ -9,7 +9,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
     errorCodes,
     asInstanceName,
-    type ApprovalRequest,
     type InstanceEvent,
     type ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -394,63 +393,207 @@ test("AuditDatabase append does not run retention or file maintenance on the req
     }
 });
 
-test("AuditDatabase approval store reads only the latest state for each approval", async () => {
-    const root = await createTestTempDirectory("sqlite-latest-approvals");
-    const instance = asInstanceName("sqlite-latest-approvals");
-
+test("StateStore supports namespaced durable put, get, upsert, list and delete", async () => {
+    const root = await createTestTempDirectory("sqlite-state");
+    const file = join(root, "audit.sqlite3");
+    const options = { maxBytes: 16 * MIB, retentionDays: 30 };
+    const database = new AuditDatabase(file, options);
     try {
-        const database = new AuditDatabase(join(root, "audit.sqlite3"), {
-            maxBytes: 16 * MIB,
-            retentionDays: 30,
-        });
-        const store = database.approvalStore({
-            timestamp: (record) =>
-                record.decision?.decidedAt ?? record.createdAt,
-        });
-        const first: ApprovalRequest = {
-            approvalId: "approval-1",
-            callId: "call-1",
-            createdAt: "2026-09-01T12:00:00.000Z",
-            expiresAt: "2026-09-01T12:05:00.000Z",
-            inputSummary: "{}",
-            instance,
-            reason: "test",
-            riskLevel: "medium",
-            source: "cli",
-            status: "pending",
-            toolName: "bash_run",
-        };
-        const second: ApprovalRequest = {
-            ...first,
-            approvalId: "approval-2",
-            callId: "call-2",
-            createdAt: "2026-09-01T12:00:05.000Z",
-        };
-        const approved: ApprovalRequest = {
-            ...first,
-            decision: {
-                approvalId: first.approvalId,
-                decidedAt: "2026-09-01T12:00:10.000Z",
-                decidedBy: "cli",
-                decision: "approve",
-            },
-            status: "approved",
-        };
-
-        await store.append(first);
-        await store.append(second);
-        await store.append(approved);
-
-        assert.deepEqual(
-            (await store.readLatest()).map((record) => record.status),
-            ["approved", "pending"],
+        assert.throws(
+            () => database.stateStore(""),
+            /State namespace must be a non-empty string/u,
         );
-        assert.deepEqual(await store.readLatest(first.approvalId), [approved]);
+        const store = database.stateStore<{ value: string }>("settings");
+        const other = database.stateStore<{ value: string }>("other");
+        await assert.rejects(
+            store.put("", { value: "invalid" }),
+            /State key must be a non-empty string/u,
+        );
+        await assert.rejects(
+            database.stateStore<undefined>("invalid").put("item", undefined),
+            /not JSON-serializable/u,
+        );
+        assert.equal(await store.get("missing"), undefined);
+        await store.put("b", { value: "old" });
+        await store.put("a", { value: "first" });
+        await store.put("b", { value: "latest" });
+        await other.put("a", { value: "isolated" });
+        assert.deepEqual(await store.get("b"), { value: "latest" });
+        assert.deepEqual(await store.list(), [{ value: "first" }, { value: "latest" }]);
+        await store.delete("a");
+        await store.delete("missing");
+        assert.equal(await store.get("a"), undefined);
+        assert.deepEqual(await other.list(), [{ value: "isolated" }]);
+        assert.equal(database.stats().payloadBytes, 0);
         database.close();
+        const reopened = new AuditDatabase(file, options);
+        try {
+            assert.deepEqual(await reopened.stateStore("settings").list(), [{ value: "latest" }]);
+            assert.deepEqual(await reopened.stateStore("other").get("a"), { value: "isolated" });
+        } finally {
+            reopened.close();
+        }
+        await assert.rejects(store.get("b"), /closed/u);
+        await assert.rejects(store.put("b", { value: "closed" }), /closed/u);
+        await assert.rejects(store.list(), /closed/u);
+        await assert.rejects(store.delete("b"), /closed/u);
     } finally {
+        database.close();
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test("StateStore survives audit retention cleanup and max-record trimming", async () => {
+    const root = await createTestTempDirectory("sqlite-state-retention");
+    const file = join(root, "audit.sqlite3");
+    const database = new AuditDatabase(file, {
+        maxBytes: 16 * MIB,
+        now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+        retentionDays: 1,
+    });
+    try {
+        const store = database.stateStore<{ at: string; value: string }>("current");
+        const current = { at: "2020-01-01T00:00:00.000Z", value: "durable" };
+        await store.put("item", current);
+        const audit = database.store<typeof current>("events", {
+            timestamp: (record) => record.at,
+            maxRecords: 1,
+        });
+        await audit.append({ ...current, value: "trimmed" });
+        await audit.append({ ...current, value: "expired" });
+        assert.equal(readAuditRecordCount(file), 1);
+        database.cleanup();
+        assert.equal(readAuditRecordCount(file), 0);
+        assert.deepEqual(await store.get("item"), current);
+        assert.equal(database.stats().payloadBytes, 0);
+    } finally {
+        database.close();
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("StateStore preserves state when file pressure cannot meet maxBytes", async () => {
+    const root = await createTestTempDirectory("sqlite-state-pressure");
+    const database = new AuditDatabase(join(root, "audit.sqlite3"), {
+        maxBytes: MIB,
+        retentionDays: 30,
+    });
+    try {
+        const store = database.stateStore<string>("large");
+        const value = "x".repeat(2 * MIB);
+        await store.put("item", value);
+        const audit = database.store<{ at: number; value: string }>("events", {
+            timestamp: (record) => record.at,
+        });
+        await audit.append({ at: Date.now(), value: "audit".repeat(MIB) });
+        assert.throws(() => database.cleanup(), /cannot fit within maxBytes/u);
+        assert.equal(await store.get("item"), value);
+        assert.deepEqual(await audit.readAll(), []);
+    } finally {
+        database.close();
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("StateStore migrates JSONL before expired audit snapshots and is idempotent", async () => {
+    const root = await createTestTempDirectory("sqlite-state-migration");
+    const file = join(root, "audit.sqlite3");
+    const legacyFile = join(root, "state.jsonl");
+    const options = {
+        maxBytes: 16 * MIB,
+        now: () => Date.parse("2026-07-15T00:00:00.000Z"),
+        retentionDays: 1,
+    };
+    const snapshots = [
+        { id: "b", value: "old", at: 1 },
+        { id: "a", value: "audit", at: 2 },
+        { id: "b", value: "latest", at: 0 },
+    ];
+    const seed = new AuditDatabase(file, options);
+    try {
+        const audit = seed.store<typeof snapshots[number]>("events", { timestamp: (record) => record.at });
+        for (const record of snapshots) await audit.append(record);
+    } finally {
+        seed.close();
+    }
+    renameLegacyAuditCollection(file);
+    await writeFile(legacyFile, [
+        { id: "a", value: "file", at: 0 },
+        { id: "c", value: "file-old", at: 0 },
+        { id: "c", value: "file-latest", at: 0 },
+    ].map((record) => JSON.stringify(record)).join("\n") + "\n");
+    const migration = {
+        legacyCollection: "legacy-state",
+        legacyFile,
+        key: (record: typeof snapshots[number]) => record.id,
+    };
+    const database = new AuditDatabase(file, options);
+    try {
+        const store = database.stateStore("current", migration);
+        assert.deepEqual(await store.list(), [snapshots[1], snapshots[2], { id: "c", value: "file-latest", at: 0 }]);
+        assert.equal(readAuditRecordCount(file), 0);
+        assert.equal(readAuditMetadataValue(file, "payloadBytes:v1"), "0");
+        assert.equal(readAuditMetadataValue(file, "migration:state-v1:current"), "complete");
+        await assert.rejects(access(legacyFile), { code: "ENOENT" });
+        database.cleanup();
+        assert.deepEqual(await store.get("b"), snapshots[2]);
+        await store.put("a", { id: "a", value: "current", at: 3 });
+        await store.delete("c");
+        database.close();
+        await writeFile(legacyFile, JSON.stringify({ id: "a", value: "stale", at: 0 }) + "\n");
+        const reopened = new AuditDatabase(file, options);
+        try {
+            const migrated = reopened.stateStore("current", migration);
+            assert.deepEqual(await migrated.list(), [{ id: "a", value: "current", at: 3 }, snapshots[2]]);
+            await assert.rejects(access(legacyFile), { code: "ENOENT" });
+        } finally {
+            reopened.close();
+        }
+    } finally {
+        database.close();
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("StateStore rolls back a failed migration and retries without losing legacy data", async () => {
+    const root = await createTestTempDirectory("sqlite-state-rollback");
+    const file = join(root, "audit.sqlite3");
+    const legacyFile = join(root, "state.jsonl");
+    const database = new AuditDatabase(file, { maxBytes: 16 * MIB, retentionDays: 30 });
+    try {
+        const store = database.stateStore<{ id: string }>("current");
+        await store.put("keep", { id: "keep" });
+        await writeFile(legacyFile, '{"id":"first"}\n{"id":null}\n');
+        assert.throws(() => database.stateStore("current", {
+            legacyFile,
+            key: (record: { id: string }) => record.id.toUpperCase(),
+        }), TypeError);
+        assert.deepEqual(await store.list(), [{ id: "keep" }]);
+        assert.equal(readAuditMetadataValue(file, "migration:state-v1:current"), undefined);
+        await access(legacyFile);
+        await writeFile(legacyFile, '{"id":"first"}\n{"id":"second"}\n');
+        const migrated = database.stateStore("current", {
+            legacyFile,
+            key: (record: { id: string }) => record.id,
+        });
+        assert.deepEqual(await migrated.list(), [{ id: "first" }, { id: "keep" }, { id: "second" }]);
+        await assert.rejects(access(legacyFile), { code: "ENOENT" });
+    } finally {
+        database.close();
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+function renameLegacyAuditCollection(file: string): void {
+    const require = createRequire(import.meta.url);
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    const database = new DatabaseSync(file);
+    try {
+        database.exec("UPDATE audit_records SET collection = 'legacy-state' WHERE collection = 'events'");
+    } finally {
+        database.close();
+    }
+}
 
 test("AuditToolCallHistory uses bounded storage reads for unfiltered limited history", async () => {
     const instanceName = asInstanceName("bounded-history");

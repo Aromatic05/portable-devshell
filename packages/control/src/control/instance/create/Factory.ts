@@ -3,7 +3,6 @@ import {
     WorkerInstanceFactory,
     WorkerTransportConnection,
     WorkerTransportFactory,
-    resolveAuditStorageLimits,
     resolveWorkerHomeDirectory,
     type WorkerInstance,
     type WorkerInstanceConfig,
@@ -68,10 +67,6 @@ export class InstanceFactory {
         const approvalStore = new InstanceApprovalStore(
             paths.auditDatabaseFile,
             paths.legacyApprovalsFile,
-            resolveAuditStorageLimits({
-                maxBytes: instance.logs?.maxBytes,
-                retentionDays: instance.logs?.retentionDays,
-            }),
         );
         const approval = new ApprovalService({
             instanceName: name,

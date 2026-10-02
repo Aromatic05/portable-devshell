@@ -10,7 +10,6 @@ import {
 } from "node:zlib";
 
 import type {
-    ApprovalRequest,
     ToolCallQuery,
     ToolCallRecord,
 } from "@portable-devshell/shared";
@@ -28,7 +27,7 @@ import {
 } from "../../SqliteSchema.js";
 
 export type AuditRecordCollection =
-    "approvals" | "events" | "logs" | "toolCalls";
+    "events" | "logs" | "toolCalls";
 
 export interface AuditDatabaseOptions {
     maxBytes: number;
@@ -63,8 +62,17 @@ export interface AuditToolCallRecordStore extends AuditRecordStore<ToolCallRecor
     readQuery(query: ToolCallQuery): Promise<ToolCallRecord[]>;
 }
 
-export interface AuditApprovalRecordStore extends AuditRecordStore<ApprovalRequest> {
-    readLatest(approvalId?: string): Promise<ApprovalRequest[]>;
+export interface StateStore<TValue> {
+    put(key: string, value: TValue): Promise<void>;
+    get(key: string): Promise<TValue | undefined>;
+    list(): Promise<TValue[]>;
+    delete(key: string): Promise<void>;
+}
+
+export interface StateStoreOptions<TValue> {
+    legacyCollection?: string;
+    legacyFile?: string;
+    key: (value: TValue) => string;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -75,7 +83,7 @@ const LOG_BODY_SAMPLE_MAX_RATIO = 0.7;
 const LOG_BODY_ASYNC_COMPRESSION_THRESHOLD_BYTES = 256 * 1024;
 const PAYLOAD_BYTES_METADATA_KEY = "payloadBytes:v1";
 const ROUTINE_INCREMENTAL_VACUUM_PAGES = 64;
-export const AUDIT_DATABASE_SCHEMA_VERSION = 2;
+export const AUDIT_DATABASE_SCHEMA_VERSION = 3;
 const WAL_AUTOCHECKPOINT_PAGES = 0;
 const WAL_CHECKPOINT_THRESHOLD_BYTES = 4 * 1024 * 1024;
 const WAL_MINIMUM_WRITE_BYTES = 16 * 1024;
@@ -120,11 +128,105 @@ export class AuditDatabase {
         return new AuditRecordStoreSqlite(this, collection, options);
     }
 
-    approvalStore(
-        options: AuditStoreOptions<ApprovalRequest>,
-    ): AuditApprovalRecordStore {
+    stateStore<TValue>(
+        namespace: string,
+        options?: StateStoreOptions<TValue>,
+    ): StateStore<TValue> {
         this.#assertOpen();
-        return new AuditApprovalRecordStoreSqlite(this, options);
+        validateStateIdentifier("namespace", namespace);
+        if (options !== undefined) this.#migrateState(namespace, options);
+        return {
+            put: async (key, value) => {
+                this.#assertOpen();
+                this.#putState(namespace, key, value);
+                this.#scheduleWalCheckpoint();
+            },
+            get: async (key) => {
+                validateStateIdentifier("key", key);
+                const row = this.#database
+                    .prepare("SELECT payload FROM state_records WHERE namespace = ? AND key = ?")
+                    .get(namespace, key) as { payload: string } | undefined;
+                return row === undefined ? undefined : JSON.parse(row.payload) as TValue;
+            },
+            list: async () => {
+                const rows = this.#database
+                    .prepare("SELECT payload FROM state_records WHERE namespace = ? ORDER BY key ASC")
+                    .all(namespace) as Array<{ payload: string }>;
+                return rows.map((row) => JSON.parse(row.payload) as TValue);
+            },
+            delete: async (key) => {
+                validateStateIdentifier("key", key);
+                const removed = this.#database
+                    .prepare("DELETE FROM state_records WHERE namespace = ? AND key = ?")
+                    .run(namespace, key);
+                if (removed.changes > 0) {
+                    this.#walPendingBytes += WAL_MINIMUM_WRITE_BYTES;
+                    this.#scheduleWalCheckpoint();
+                }
+            },
+        };
+    }
+
+    #putState<TValue>(namespace: string, key: string, value: TValue): void {
+        validateStateIdentifier("key", key);
+        const payload = JSON.stringify(value);
+        if (payload === undefined) {
+            throw new TypeError(
+                `State value for namespace ${namespace} and key ${key} is not JSON-serializable.`,
+            );
+        }
+        const payloadBytes = Buffer.byteLength(payload, "utf8");
+        this.#database
+            .prepare(
+                "INSERT INTO state_records(namespace, key, payload, payload_bytes) VALUES (?, ?, ?, ?) ON CONFLICT(namespace, key) DO UPDATE SET payload = excluded.payload, payload_bytes = excluded.payload_bytes",
+            )
+            .run(namespace, key, payload, payloadBytes);
+        this.#walPendingBytes += Math.max(payloadBytes, WAL_MINIMUM_WRITE_BYTES);
+    }
+
+    #migrateState<TValue>(namespace: string, options: StateStoreOptions<TValue>): void {
+        if (options.legacyCollection === undefined && options.legacyFile === undefined) return;
+        const migrationKey = `migration:state-v1:${namespace}`;
+        if (this.#readMetadata(migrationKey) !== "complete") {
+            const records = readLegacyRecords<TValue>(options.legacyFile);
+            this.#cancelPayloadBackfill();
+            const payloadBytesBefore = this.#payloadBytes;
+            const walBytesBefore = this.#walPendingBytes;
+            this.#database.exec("BEGIN IMMEDIATE");
+            try {
+                for (const record of records) {
+                    this.#putState(namespace, options.key(record), record);
+                }
+                if (options.legacyCollection !== undefined) {
+                    const rows = this.#database
+                        .prepare("SELECT payload, body, body_codec AS bodyCodec FROM audit_records WHERE collection = ? ORDER BY id ASC")
+                        .all(options.legacyCollection) as unknown as AuditStoredRow[];
+                    for (const row of rows) {
+                        const record = decodeStoredRecord<TValue>(options.legacyCollection, row);
+                        this.#putState(namespace, options.key(record), record);
+                    }
+                    this.#database.prepare("DELETE FROM audit_records WHERE collection = ?")
+                        .run(options.legacyCollection);
+                    if (this.#payloadBytes !== undefined) this.#setPayloadBytes(this.#readPayloadBytes());
+                }
+                this.#writeMetadata(migrationKey, "complete");
+                this.#database.exec("COMMIT");
+            } catch (error) {
+                this.#database.exec("ROLLBACK");
+                this.#payloadBytes = payloadBytesBefore;
+                this.#walPendingBytes = walBytesBefore;
+                throw error;
+            }
+            this.#walPendingBytes += WAL_MINIMUM_WRITE_BYTES;
+            this.#scheduleWalCheckpoint();
+        }
+        if (options.legacyFile !== undefined) {
+            try {
+                unlinkSync(options.legacyFile);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
+        }
     }
 
     toolCallStore(
@@ -380,37 +482,6 @@ export class AuditDatabase {
         return records;
     }
 
-    readLatestApprovalRecords(approvalId?: string): ApprovalRequest[] {
-        this.#assertOpen();
-        const approvalFilter =
-            approvalId === undefined
-                ? ""
-                : " AND json_extract(payload, '$.approvalId') = ?";
-        const parameters: Array<number | string> = [this.#retentionCutoff()];
-        if (approvalId !== undefined) parameters.push(approvalId);
-        const rows = this.#database
-            .prepare(
-                `
-            WITH latest AS (
-                SELECT MAX(id) AS id
-                FROM audit_records
-                WHERE collection = 'approvals' AND occurred_at_ms >= ?${approvalFilter}
-                GROUP BY json_extract(payload, '$.approvalId')
-            )
-            SELECT record.payload, record.body, record.body_codec AS bodyCodec
-            FROM audit_records AS record
-            INNER JOIN latest ON latest.id = record.id
-            ORDER BY record.id ASC
-        `,
-            )
-            .all(...parameters) as unknown as AuditStoredRow[];
-        return rows
-            .map((row) => decodeStoredRecord<ApprovalRequest>("approvals", row))
-            .sort((left, right) =>
-                left.createdAt.localeCompare(right.createdAt),
-            );
-    }
-
     hasToolCallRecord(callId: string): boolean {
         this.#assertOpen();
         return this.#readToolCallId(callId) !== undefined;
@@ -573,6 +644,13 @@ export class AuditDatabase {
             CREATE INDEX IF NOT EXISTS audit_records_event_sequence
                 ON audit_records(json_extract(payload, '$.seq'), id)
                 WHERE collection = 'events';
+            CREATE TABLE IF NOT EXISTS state_records (
+                namespace TEXT NOT NULL,
+                key TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                PRIMARY KEY(namespace, key)
+            ) STRICT;
             CREATE TABLE IF NOT EXISTS audit_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -1135,49 +1213,6 @@ class AuditToolCallRecordStoreSqlite implements AuditToolCallRecordStore {
     }
 }
 
-class AuditApprovalRecordStoreSqlite implements AuditApprovalRecordStore {
-    readonly #database: AuditDatabase;
-    readonly #options: AuditStoreOptions<ApprovalRequest>;
-    #migrated = false;
-
-    constructor(
-        database: AuditDatabase,
-        options: AuditStoreOptions<ApprovalRequest>,
-    ) {
-        this.#database = database;
-        this.#options = options;
-    }
-
-    async append(record: ApprovalRequest): Promise<void> {
-        this.#ensureMigrated();
-        await this.#database.appendRecord("approvals", record, this.#options);
-    }
-
-    async readAll(): Promise<ApprovalRequest[]> {
-        this.#ensureMigrated();
-        return this.#database.readRecords<ApprovalRequest>("approvals");
-    }
-
-    async readLatest(approvalId?: string): Promise<ApprovalRequest[]> {
-        this.#ensureMigrated();
-        return this.#database.readLatestApprovalRecords(approvalId);
-    }
-
-    async readTail(limit: number): Promise<ApprovalRequest[]> {
-        this.#ensureMigrated();
-        return this.#database.readTailRecords<ApprovalRequest>(
-            "approvals",
-            limit,
-        );
-    }
-
-    #ensureMigrated(): void {
-        if (this.#migrated) return;
-        this.#database.migrateLegacy("approvals", this.#options);
-        this.#migrated = true;
-    }
-}
-
 function readLegacyRecords<TRecord>(filePath: string | undefined): TRecord[] {
     if (filePath === undefined) {
         return [];
@@ -1338,7 +1373,7 @@ function inlineStoredRecord(
 }
 
 function decodeStoredRecord<TRecord>(
-    collection: AuditRecordCollection,
+    collection: string,
     row: AuditStoredRow,
 ): TRecord {
     const payload = JSON.parse(row.payload) as unknown;
@@ -1386,8 +1421,6 @@ function decodedLogMessageBytes(record: unknown): number {
 
 function auditCollectionSql(collection: AuditRecordCollection): string {
     switch (collection) {
-        case "approvals":
-            return "'approvals'";
         case "events":
             return "'events'";
         case "logs":
@@ -1424,6 +1457,12 @@ function validateStoreOptions<TRecord>(
         throw new TypeError(
             "maxRecords must be a positive safe integer when provided.",
         );
+    }
+}
+
+function validateStateIdentifier(kind: "key" | "namespace", value: string): void {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new TypeError(`State ${kind} must be a non-empty string.`);
     }
 }
 

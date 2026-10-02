@@ -28,7 +28,8 @@ export type {
 export { InstancePaths } from "./instance/Paths.js";
 export { AuditDatabase } from "./storage/audit/database/Database.js";
 export type {
-    AuditApprovalRecordStore,
+    StateStore,
+    StateStoreOptions,
     AuditDatabaseOptions,
     AuditRecordCollection,
     AuditStoreOptions,
