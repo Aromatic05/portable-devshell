@@ -42,7 +42,7 @@ import {
     asInstanceName,
     type ContextMessageRecord,
     type JsonValue,
-    type PrefixRouteContext,
+    type ControlPortContext,
     type ToolCallContext,
 } from "@portable-devshell/shared";
 import {
@@ -56,14 +56,10 @@ import type { McpAuthConfig, McpInstanceGateway } from "@portable-devshell/mcp";
 const workerBinaryPath = resolveTestWorkerBinary();
 const clientInfo = { name: "portable-devshell-real-client", version: "0.0.0" };
 
-const commentRouteContext: PrefixRouteContext = {
+const commentRouteContext: ControlPortContext = {
     afterReply() {},
     connectionId: "mcp-comment-test",
-    destination: asInstanceName("real-comment"),
-    module: "contextMessage",
-    async openStream() {
-        throw new Error("unused");
-    },
+    host: asInstanceName("real-comment"),
     peer: "cli",
     requestId: "mcp-comment-test",
     signal: new AbortController().signal,

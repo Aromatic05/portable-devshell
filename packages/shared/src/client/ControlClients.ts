@@ -101,6 +101,7 @@ import { Rpc } from "../transport/packet/Rpc.js";
 import { Stream, type MessageStream } from "../transport/packet/Stream.js";
 import type { ControlStreamMessage } from "../protocol/control/Port.js";
 import { InstanceEventStream } from "./connection/InstanceEventStream.js";
+import { attachRequestCanceller } from "./connection/RequestTimeout.js";
 
 export interface ControlServiceStatus {
     instanceCount: number;
@@ -404,7 +405,7 @@ function instanceModule(endpoint: Endpoint, port: string): InstanceModulePort {
     };
 }
 
-async function request<T>(
+function request<T>(
     endpoint: Endpoint,
     host: string,
     port: string,
@@ -412,12 +413,31 @@ async function request<T>(
     payload?: unknown,
     signal?: AbortSignal,
 ): Promise<T> {
-    const rpc = new Rpc(await endpoint.connect(host, port));
-    try {
-        return await rpc.request<T>(operation, payload, signal);
-    } finally {
-        rpc.close();
-    }
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    if (signal?.aborted === true) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const result = (async () => {
+        try {
+            const rpc = new Rpc(
+                await endpoint.connect(host, port, controller.signal),
+            );
+            try {
+                return await rpc.request<T>(
+                    operation,
+                    payload,
+                    controller.signal,
+                );
+            } finally {
+                rpc.close();
+            }
+        } finally {
+            signal?.removeEventListener("abort", abort);
+        }
+    })();
+    return attachRequestCanceller(result, (reason) =>
+        controller.abort(reason),
+    );
 }
 
 async function open(

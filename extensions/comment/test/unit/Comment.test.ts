@@ -5,7 +5,7 @@ import test from "node:test";
 import {
     errorCodes,
     type JsonValue,
-    type PrefixRouteContext,
+    type ControlPortContext,
 } from "@portable-devshell/shared";
 
 import {
@@ -17,10 +17,13 @@ import { ConversationStore } from "../../src/conversation/store/ConversationStor
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 const routeContext = {
+    afterReply() {},
     connectionId: "conn-comment",
+    host: "alpha",
     peer: "cli",
     requestId: "request-comment",
-} as PrefixRouteContext;
+    signal: new AbortController().signal,
+} as ControlPortContext;
 
 
 class TestCommentInstances implements CommentInstanceSource {

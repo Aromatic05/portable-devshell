@@ -18,31 +18,23 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 import {
+    Endpoint,
+    Rpc,
     asInstanceName,
     errorCodes,
     StreamChannel,
     toolCallOutput,
     type JsonValue,
+    type MessageStream,
 } from "@portable-devshell/shared";
-import {
-    encodePacket,
-    FRAME_PROTOCOL_VERSION,
-    FrameProtocol,
-    frameResetCodes,
-    PacketBuffer,
-    type FrameStream,
-} from "@portable-devshell/shared/transport/frame";
 import {
     WorkerTransportDriverLocal,
     WorkerBinary,
     WorkerInstanceFactory,
     type WorkerInstance,
     WORKER_PROTOCOL_VERSION,
-    decodeWorkerRpcMessage,
-    encodeWorkerRpcMessage,
     type WorkerCommandResult,
     type WorkerTransport,
-    type WorkerRpcResponseEnvelope,
 } from "@portable-devshell/core/testing";
 import {
     realWorkerTestOptions,
@@ -78,7 +70,7 @@ function bindToolCallApproval(instance: WorkerInstance): void {
     );
 }
 
-async function readServiceStream(stream: FrameStream): Promise<Buffer> {
+async function readServiceStream(stream: MessageStream): Promise<Buffer> {
     const chunks: Buffer[] = [];
     while (true) {
         const chunk = await stream.read();
@@ -135,7 +127,7 @@ async function bridgeRsyncRemoteShell(
     socket: Socket,
     cwd: string,
 ): Promise<void> {
-    let stream: FrameStream | undefined;
+    let stream: MessageStream | undefined;
     try {
         const handshake = await readSocketLine(socket);
         const parsed = JSON.parse(handshake.line) as {
@@ -177,12 +169,11 @@ async function bridgeRsyncRemoteShell(
         })();
         await Promise.all([upload, download]);
     } catch (error) {
-        if (stream !== undefined && !stream.closed) {
+        if (stream !== undefined) {
             await stream
-                .reset(
-                    frameResetCodes.cancelled,
-                    error instanceof Error ? error.message : String(error),
-                )
+                .cancel({
+                    message: error instanceof Error ? error.message : String(error),
+                })
                 .catch(() => undefined);
         }
         socket.destroy(error instanceof Error ? error : new Error(String(error)));
@@ -259,7 +250,7 @@ test(
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "worker.rpcConnected",
+                "worker.transportConnected",
                 "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
@@ -1095,7 +1086,7 @@ test("WorkerInstance rejects not-ready and records concurrent tool-call history"
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "worker.rpcConnected",
+                "worker.transportConnected",
                 "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
@@ -1765,7 +1756,7 @@ test("WorkerInstance refreshStatus updates snapshot from worker status without a
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "worker.rpcConnected",
+                "worker.transportConnected",
                 "worker.schemaRefreshed",
                 "instance.connectionChanged",
                 "instance.readyChanged",
@@ -1869,16 +1860,16 @@ test("WorkerInstance reconnectRpc refreshes schema after an rpc disconnect", asy
             [
                 "instance.statusChanged",
                 "instance.connectionChanged",
-                "worker.rpcConnected",
+                "worker.transportConnected",
                 "worker.schemaRefreshed",
                 "instance.started",
                 "instance.statusChanged",
                 "instance.connectionChanged",
                 "instance.readyChanged",
-                "worker.rpcDisconnected",
+                "worker.transportDisconnected",
                 "instance.connectionChanged",
                 "instance.readyChanged",
-                "worker.rpcConnected",
+                "worker.transportConnected",
                 "worker.schemaRefreshed",
                 "instance.connectionChanged",
                 "instance.readyChanged",
@@ -1938,7 +1929,11 @@ function createWorkerInstanceHarness(): {
     waitForMethod: (method: string) => Promise<void>;
     waitForMethodCount: (method: string, count: number) => Promise<void>;
 } {
-    const pending = new Map<string, string[]>();
+    type PendingCall = {
+        reject(error: Error): void;
+        resolve(value: JsonValue): void;
+    };
+    const pending = new Map<string, PendingCall[]>();
     const requestMethods: string[] = [];
     const methodWaiters = new Map<string, Array<() => void>>();
     let commandStatus: "running" | "stale" | "stopped" = "stopped";
@@ -1955,13 +1950,40 @@ function createWorkerInstanceHarness(): {
     ];
     let activeConnection:
         | {
-              protocol: FrameProtocol;
-              stream?: FrameStream;
+              channel: StreamChannel;
+              endpoint: Endpoint;
+              protocols: Rpc[];
           }
         | undefined;
 
+    const observe = (method: string) => {
+        requestMethods.push(method);
+        methodWaiters
+            .get(method)
+            ?.splice(0)
+            .forEach((resolve) => resolve());
+    };
+    const pendingHandler = (method: string) => {
+        return async (): Promise<JsonValue> => {
+            observe(method);
+            return await new Promise<JsonValue>((resolve, reject) => {
+                const calls = pending.get(method) ?? [];
+                calls.push({ reject, resolve });
+                pending.set(method, calls);
+            });
+        };
+    };
+    const closeActive = (error?: Error) => {
+        const active = activeConnection;
+        if (active === undefined) return;
+        activeConnection = undefined;
+        active.channel.close(error);
+        for (const protocol of active.protocols) protocol.close();
+        active.endpoint.close();
+    };
+
     const transport: WorkerTransport = {
-        async connectWorkerChannel() {
+        async connectWorkerChannel(options) {
             if (rpcConnectFailures > 0) {
                 rpcConnectFailures -= 1;
                 throw new Error("transient rpc connection failure");
@@ -1987,17 +2009,41 @@ function createWorkerInstanceHarness(): {
             });
             pair.client = client;
             pair.server = server;
-            const protocol = new FrameProtocol(server, { role: "acceptor" });
-            const connection = { protocol } as {
-                protocol: FrameProtocol;
-                stream?: FrameStream;
-            };
-            activeConnection = connection;
-            void serveRpcHarness(connection).catch((error: unknown) => {
-                protocol.close(
-                    error instanceof Error ? error : new Error(String(error)),
-                );
+
+            const endpoint = new Endpoint({
+                host: `${options.instanceName}-worker`,
             });
+            const core = new Rpc(endpoint.bind("core"), {
+                "worker.ping": () => {
+                    observe("worker.ping");
+                    return { pong: true };
+                },
+                "worker.handshake": () => {
+                    observe("worker.handshake");
+                    return {
+                        platform: { arch: "x64", os: "linux" },
+                        protocolVersion: WORKER_PROTOCOL_VERSION,
+                        workerSha256: null,
+                        workerVersion: "0.1.0",
+                    };
+                },
+            });
+            const tool = new Rpc(endpoint.bind("tool"), {
+                "tools.list": () => {
+                    observe("tools.list");
+                    return { tools };
+                },
+                bash_run: pendingHandler("bash_run"),
+            });
+            const protocols = [core, tool];
+            activeConnection = { channel: server, endpoint, protocols };
+            server.onClose(() => {
+                if (activeConnection?.channel !== server) return;
+                activeConnection = undefined;
+                for (const protocol of protocols) protocol.close();
+                endpoint.close();
+            });
+            void endpoint.accept(server).catch(() => undefined);
             return client;
         },
         async runWorkerCommand(command): Promise<WorkerCommandResult> {
@@ -2018,7 +2064,6 @@ function createWorkerInstanceHarness(): {
                     }),
                 };
             }
-
             return {
                 exitCode: 0,
                 stderr: "",
@@ -2034,100 +2079,25 @@ function createWorkerInstanceHarness(): {
         async installWorker(): Promise<void> {},
     };
 
-    async function serveRpcHarness(connection: {
-        protocol: FrameProtocol;
-        stream?: FrameStream;
-    }): Promise<void> {
-        let open = await connection.protocol.nextOpen();
-        if (open?.service === "frame.negotiate") {
-            const negotiation = await open.accept();
-            await negotiation.write(Buffer.from(FRAME_PROTOCOL_VERSION));
-            await negotiation.finish();
-            open = await connection.protocol.nextOpen();
-        }
-        assert.notEqual(open, undefined);
-        assert.equal(open!.service, "worker.rpc");
-        assert.equal(open!.metadata.byteLength, 0);
-        const stream = await open!.accept();
-        connection.stream = stream;
-        const reader = new PacketBuffer();
-
-        while (true) {
-            const chunk = await stream.read();
-            if (chunk === undefined) return;
-            for (const payload of reader.push(chunk)) {
-                const frame = decodeWorkerRpcMessage(payload);
-                if (!isRequestFrame(frame)) continue;
-
-                const pendingIds = pending.get(frame.method) ?? [];
-                pendingIds.push(frame.id);
-                pending.set(frame.method, pendingIds);
-                requestMethods.push(frame.method);
-                methodWaiters
-                    .get(frame.method)
-                    ?.splice(0)
-                    .forEach((resolve) => resolve());
-
-                if (
-                    frame.method === "worker.ping" ||
-                    frame.method === "worker.handshake" ||
-                    frame.method === "tools.list"
-                ) {
-                    await stream.write(
-                        encodePacket(
-                            encodeWorkerRpcMessage(
-                                createLifecycleResponse(
-                                    frame.method,
-                                    frame.id,
-                                    tools,
-                                ) as unknown as JsonValue,
-                            ),
-                        ),
-                    );
-                }
-            }
-        }
-    }
-
-    function writeToActiveStream(value: JsonValue): void {
-        const stream = activeConnection?.stream;
-        if (stream === undefined) {
-            throw new Error("worker.rpc lifecycle harness stream is not connected.");
-        }
-        void stream
-            .write(encodePacket(encodeWorkerRpcMessage(value)))
-            .catch(() => undefined);
-    }
+    const takePending = (method: string): PendingCall => {
+        const calls = pending.get(method);
+        const call = calls?.shift();
+        if (call === undefined) throw new Error(`No pending request for ${method}.`);
+        if (calls?.length === 0) pending.delete(method);
+        return call;
+    };
 
     return {
         disconnect() {
-            activeConnection?.protocol.close(
-                new Error("injected rpc transport disconnect"),
-            );
-            activeConnection = undefined;
+            closeActive(new Error("injected rpc transport disconnect"));
         },
         fail(method, code) {
-            const requestIds = pending.get(method);
-            if (requestIds === undefined) {
-                throw new Error(`No pending request for ${method}.`);
-            }
-            const requestId = requestIds.shift();
-            if (requestId === undefined) {
-                throw new Error(`No pending request for ${method}.`);
-            }
-            if (requestIds.length === 0) {
-                pending.delete(method);
-            }
-            writeToActiveStream({
-                error: {
+            takePending(method).reject(
+                Object.assign(new Error(`worker rejected ${method}`), {
                     code,
-                    message: `worker rejected ${method}`,
                     retryable: false,
-                },
-                id: requestId,
-                ok: false,
-                type: "response",
-            } as unknown as JsonValue);
+                }),
+            );
         },
         failNextRpcConnections(count = 1) {
             rpcConnectFailures = count;
@@ -2140,34 +2110,13 @@ function createWorkerInstanceHarness(): {
             return requestMethods.length;
         },
         respond(method, result) {
-            const requestIds = pending.get(method);
-            if (requestIds === undefined) {
-                throw new Error(`No pending request for ${method}.`);
-            }
-            const requestId = requestIds.shift();
-            if (requestId === undefined) {
-                throw new Error(`No pending request for ${method}.`);
-            }
-
-            if (requestIds.length === 0) {
-                pending.delete(method);
-            }
-
-            writeToActiveStream({
-                id: requestId,
-                ok: true,
-                result,
-                type: "response",
-            } as unknown as JsonValue);
+            takePending(method).resolve(result);
         },
         setStatus(status) {
             commandStatus = status;
         },
         waitForMethod(method) {
-            if (requestMethods.includes(method)) {
-                return Promise.resolve();
-            }
-
+            if (requestMethods.includes(method)) return Promise.resolve();
             return new Promise<void>((resolve) => {
                 const waiters = methodWaiters.get(method) ?? [];
                 waiters.push(resolve);
@@ -2175,29 +2124,22 @@ function createWorkerInstanceHarness(): {
             });
         },
         waitForMethodCount(method, count) {
-            if (
-                requestMethods.filter((value) => value === method).length >=
-                count
-            ) {
+            if (requestMethods.filter((value) => value === method).length >= count)
                 return Promise.resolve();
-            }
-
             return new Promise<void>((resolve) => {
-                const observe = () => {
+                const observeCount = () => {
                     if (
-                        requestMethods.filter((value) => value === method)
-                            .length >= count
+                        requestMethods.filter((value) => value === method).length >=
+                        count
                     ) {
                         resolve();
                         return;
                     }
-
                     const waiters = methodWaiters.get(method) ?? [];
-                    waiters.push(observe);
+                    waiters.push(observeCount);
                     methodWaiters.set(method, waiters);
                 };
-
-                observe();
+                observeCount();
             });
         },
     };
@@ -2209,61 +2151,6 @@ function jsonRecord(
     return typeof value === "object" && value !== null && !Array.isArray(value)
         ? value
         : undefined;
-}
-
-function isRequestFrame(
-    value: unknown,
-): value is { id: string; method: string } {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        return false;
-    }
-
-    const candidate = value as Record<string, unknown>;
-    return (
-        candidate.type === "request" &&
-        typeof candidate.id === "string" &&
-        typeof candidate.method === "string"
-    );
-}
-
-function createLifecycleResponse(
-    method: string,
-    id: string,
-    tools: HarnessTool[],
-): WorkerRpcResponseEnvelope {
-    if (method === "worker.ping") {
-        return {
-            id,
-            ok: true,
-            result: { pong: true },
-            type: "response",
-        };
-    }
-
-    if (method === "worker.handshake") {
-        return {
-            id,
-            ok: true,
-            result: {
-                capabilities: { cancel: true, streaming: false, tools: true },
-                instance: "task-6-harness",
-                platform: { arch: "x64", os: "linux" },
-                protocolVersion: WORKER_PROTOCOL_VERSION,
-                workerVersion: "0.1.0",
-                workspace: "/tmp/workspace",
-            },
-            type: "response",
-        };
-    }
-
-    return {
-        id,
-        ok: true,
-        result: {
-            tools,
-        },
-        type: "response",
-    };
 }
 
 function toolSchemaFor(field: string): JsonValue {

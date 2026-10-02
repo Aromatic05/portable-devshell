@@ -14,7 +14,6 @@ import {
 import { rm, writeFile, mkdir } from "node:fs/promises";
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
-import { TRANSPORT_MAX_FRAME_SIZE } from "@portable-devshell/shared/transport/frame";
 import { createTestTempDirectory } from "../../../../test/TestTempDirectory.ts";
 
 test("McpRuntimeState owns state across replaceable listener hosts", () => {
@@ -138,7 +137,7 @@ test("McpRuntimeState owns state across replaceable listener hosts", () => {
             const response = await requestHttp(address.port, "/demo/mcp", {
                 body,
                 headers: {
-                    "content-length": String(TRANSPORT_MAX_FRAME_SIZE + 1),
+                    "content-length": String(16 * 1024 * 1024 + 1),
                     "content-type": "application/json",
                 },
                 method: "POST",

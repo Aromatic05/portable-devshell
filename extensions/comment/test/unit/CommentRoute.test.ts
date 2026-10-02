@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { PrefixRouteContext } from "@portable-devshell/shared";
+import type { ControlPortContext } from "@portable-devshell/shared";
 
 import { createCommentRouteModule } from "../../src/comment/CommentService.ts";
 
@@ -30,10 +30,13 @@ test("contextMessage.queue persists independently of Context lifecycle authority
     if (queue === undefined)
         throw new Error("contextMessage.queue operation is missing");
     const routeContext = {
+        afterReply() {},
         connectionId: "conn",
+        host: "alpha",
         peer: "cli",
         requestId: "req",
-    } as PrefixRouteContext;
+        signal: new AbortController().signal,
+    } as ControlPortContext;
 
     const disabled = await queue.handle(
         {

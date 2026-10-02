@@ -14,7 +14,10 @@ import type { OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
 import type { ApprovalRequest } from "../protocol/tool/Approval.js";
 import type { ToolCallRecord } from "../protocol/tool/Call.js";
 import type { ControlClients } from "../client/ControlClients.js";
-import { withRequestTimeout } from "../client/connection/RequestTimeout.js";
+import {
+    getRequestCanceller,
+    withRequestTimeout,
+} from "../client/connection/RequestTimeout.js";
 import type {
     InstanceEventStreamPort,
     InstanceStreamMessage,
@@ -80,6 +83,7 @@ export class ControlReadModel {
     readonly #stableAfterMs: number;
     readonly #versions = new Map<string, number>();
     readonly #refreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    readonly #requests = new Set<Promise<unknown>>();
     readonly #pendingKeys = new Map<string, Set<ControlInstanceReadKey>>();
     readonly #materializedKeys = new Map<string, Set<ControlInstanceReadKey>>();
     readonly #authoritativeSnapshots = new Map<string, InstanceSnapshot>();
@@ -399,13 +403,16 @@ export class ControlReadModel {
     async refreshArtifacts(epoch = this.#epoch): Promise<void> {
         const version = this.#nextVersion("artifacts");
         try {
-            const [shares, transfers] = await this.#request(
-                Promise.all([
+            const [shares, transfers] = await Promise.all([
+                this.#request(
                     this.#clients.artifact.listShares(),
+                    "artifact.listShares",
+                ),
+                this.#request(
                     this.#clients.artifact.listTransfers(),
-                ]),
-                "artifact.list",
-            );
+                    "artifact.listTransfers",
+                ),
+            ]);
             if (!this.#valid("artifacts", version, epoch)) return;
             this.#state.artifactShares = [...shares].sort(
                 (left, right) => right.expiresAtMs - left.expiresAtMs,
@@ -574,6 +581,10 @@ export class ControlReadModel {
 
     reset(): void {
         this.#epoch += 1;
+        const reset = new Error("Control read model reset.");
+        for (const request of this.#requests)
+            getRequestCanceller(request)?.(reset);
+        this.#requests.clear();
         for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
         this.#refreshTimers.clear();
         this.#pendingKeys.clear();
@@ -721,74 +732,16 @@ export class ControlReadModel {
                     maxBytes: 512 * 1024,
                 });
             case "comments": {
-                try {
-                    const conversationEntries =
-                        await this.#clients.conversation.list(instance, {
-                            limit: 400,
-                            maxBytes: 1024 * 1024,
-                        });
-                    const contextMessages = conversationEntries.flatMap(
-                        (entry) =>
-                            entry.kind === "comment" &&
-                            entry.status !== undefined
-                                ? [
-                                      contextMessageFromConversationEntry(
-                                          instance,
-                                          entry,
-                                      ),
-                                  ]
-                                : [],
-                    );
-                    const callIds = [
-                        ...new Set(
-                            contextMessages.flatMap((message) =>
-                                message.status === "delivered" &&
-                                message.callId !== undefined
-                                    ? [message.callId]
-                                    : [],
-                            ),
-                        ),
-                    ];
-                    return {
-                        commentCalls:
-                            callIds.length === 0
-                                ? []
-                                : await this.#clients.tool.listCalls(instance, {
-                                      callIds,
-                                      includeInput: false,
-                                      includeOutput: true,
-                                      limit: 1_000,
-                                      maxBytes: 512 * 1024,
-                                  }),
-                        conversationEntries,
-                        contextMessages,
-                        reportCalls: [],
-                    };
-                } catch (error) {
-                    if (!methodNotFound(error)) throw error;
-                }
-                /**
-                 * @compat conversation-read-model-fallback
-                 * @removeAt 0.7.10
-                 */
-                const [contextMessages, reportCalls] = await Promise.all([
-                    this.#clients.contextMessage
-                        .list(instance, {
-                            limit: 200,
-                            maxBytes: 256 * 1024,
-                        })
-                        .catch((error) => {
-                            if (methodNotFound(error)) return [];
-                            throw error;
-                        }),
-                    this.#clients.tool.listCalls(instance, {
-                        includeInput: true,
-                        includeOutput: false,
-                        limit: 200,
+                const conversationEntries =
+                    await this.#clients.conversation.list(instance, {
+                        limit: 400,
                         maxBytes: 1024 * 1024,
-                        toolName: "todo_report",
-                    }),
-                ]);
+                    });
+                const contextMessages = conversationEntries.flatMap((entry) =>
+                    entry.kind === "comment" && entry.status !== undefined
+                        ? [contextMessageFromConversationEntry(instance, entry)]
+                        : [],
+                );
                 const callIds = [
                     ...new Set(
                         contextMessages.flatMap((message) =>
@@ -810,12 +763,9 @@ export class ControlReadModel {
                                   limit: 1_000,
                                   maxBytes: 512 * 1024,
                               }),
-                    conversationEntries: legacyConversationEntries(
-                        contextMessages,
-                        reportCalls,
-                    ),
+                    conversationEntries,
                     contextMessages,
-                    reportCalls,
+                    reportCalls: [],
                 };
             }
         }
@@ -1299,7 +1249,16 @@ export class ControlReadModel {
     }
 
     async #request<T>(request: Promise<T>, label: string): Promise<T> {
-        return await withRequestTimeout(request, this.#requestTimeoutMs, label);
+        this.#requests.add(request);
+        try {
+            return await withRequestTimeout(
+                request,
+                this.#requestTimeoutMs,
+                label,
+            );
+        } finally {
+            this.#requests.delete(request);
+        }
     }
 
     #emit(): void {
@@ -1442,55 +1401,6 @@ function contextMessageFromConversationEntry(
         status: entry.status,
         text: entry.text,
     };
-}
-
-function legacyConversationEntries(
-    messages: readonly ContextMessageRecord[],
-    reportCalls: readonly ToolCallRecord[],
-): ConversationEntry[] {
-    const comments = messages.map((message): ConversationEntry => ({
-        ...(message.callId === undefined ? {} : { callId: message.callId }),
-        createdAt: message.createdAt,
-        ctxId: message.ctxId,
-        ...(message.deliveredAt === undefined
-            ? {}
-            : { deliveredAt: message.deliveredAt }),
-        ...(message.error === undefined ? {} : { error: message.error }),
-        ...(message.failedAt === undefined
-            ? {}
-            : { failedAt: message.failedAt }),
-        id: message.id,
-        kind: "comment",
-        status: message.status,
-        text: message.text,
-    }));
-    const reports = reportCalls.flatMap((call): ConversationEntry[] => {
-        if (
-            call.status !== "completed" ||
-            call.ctxId === undefined ||
-            typeof call.input !== "object" ||
-            call.input === null ||
-            Array.isArray(call.input)
-        )
-            return [];
-        const message = call.input.message;
-        if (typeof message !== "string" || message.length === 0) return [];
-        return [
-            {
-                callId: call.callId,
-                createdAt: call.completedAt ?? call.startedAt,
-                ctxId: call.ctxId,
-                id: call.callId,
-                kind: "report",
-                text: message,
-            },
-        ];
-    });
-    return [...comments, ...reports].sort(
-        (left, right) =>
-            left.createdAt.localeCompare(right.createdAt) ||
-            left.id.localeCompare(right.id),
-    );
 }
 
 function statusRank(status: ContextMessageRecord["status"]): number {
