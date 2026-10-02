@@ -2,7 +2,7 @@
 
 portable-devshell 的 Extension 运行在 **Control**。Worker 不加载 Extension，也不存在 native Worker plugin ABI。
 
-当前 public Extension API version 为 `4.2.0`，manifest schema version 为 `1.1.0`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
+当前 public Extension API version 为 `5.0.0`，manifest schema version 为 `1.1.0`。Builtin Extension 与独立安装的 Extension 使用同一套 ABI；builtin 身份不绕过 capability、registration、sandbox 或 generation ownership。
 
 ## 核心模型
 
@@ -25,19 +25,19 @@ Capability 不是 contribution，Extension Point 也不是 permission。Transpor
 
 ## Manifest
 
-Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion` 使用 `x.y.z`；Host 接受同一 major 内不高于自身版本的 Extension。旧整数 `4` / `1` 作为迁移兼容分别解释为 `4.0.0` / `1.0.0`：
+Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion` 使用 `x.y.z`；Host 接受同一 major 内不高于自身版本的 Extension。旧整数 `5` / `1` 作为迁移兼容分别解释为 `5.0.0` / `1.0.0`：
 
 ```json
 {
     "schemaVersion": "1.1.0",
-    "apiVersion": "4.2.0",
+    "apiVersion": "5.0.0",
     "activation": "lazy",
     "id": "example",
     "name": "Example",
     "version": "1.0.0",
     "entry": "index.js",
     "hostDependencies": [],
-    "capabilities": ["assets", "workers"],
+    "capabilities": ["assets", "worker.execute"],
     "config": {
         "default": { "enabled": false },
         "schema": {
@@ -57,13 +57,17 @@ Manifest 在 activation 前描述静态事实。`apiVersion` 与 `schemaVersion`
 ```text
 artifacts
 assets
-delegatedWorkers
-instances
+context.observe
+instance.events.publish
+instance.manage
+instance.observe
 processes
-workers
+toolcall.history
+worker.delegate
+worker.execute
 ```
 
-`artifacts` 与 `instances` 是 Control-owned management resources：前者提供受控的 share/transfer 管理，后者提供 instance 配置、状态、日志、事件与生命周期操作。它们不暴露 Control 内部 service/registry，也不是 generic RPC capability。
+`instance.observe`、`instance.manage` 与 `instance.events.publish` 刻意拆开 observation、mutation 与 event publication authority；`context.observe` 与 `toolcall.history` 也是只读 observation capability。`worker.execute` 与 `worker.delegate` 都提供受控 Worker execution，但 transcript ownership 不同。所有 capability 都只暴露对应 domain 的 public contract，不暴露 Control 内部 service/registry，也不是 generic RPC capability。
 
 `extensions` 按稳定的 domain-owned Extension Point id 保存静态 declaration。它不授予任何资源权限。
 
@@ -119,6 +123,12 @@ Extension module 的公共生命周期保持最小：
 export interface ExtensionModule {
     activate(context: ExtensionContext): Promise<void> | void;
     deactivate?(): Promise<void> | void;
+    contextEnvironmentRetired?(
+        event: ExtensionContextEnvironmentRetiredEvent,
+    ): Promise<void> | void;
+    instanceGenerationRetired?(
+        event: ExtensionInstanceGenerationRetiredEvent,
+    ): Promise<void> | void;
 }
 ```
 
@@ -147,6 +157,8 @@ export function activate(context: ExtensionContext): void {
 ```
 
 `deactivate()` 只负责 Extension 自己拥有的 graceful cleanup。Control-owned Worker sessions、managed processes、registrations 等不能依赖 `deactivate()` 才能回收；sandbox fault 时 Host 仍必须能够强制清理它们。
+
+`contextEnvironmentRetired(event)` 只通知某一个 `Context × Instance` attachment 已经进入终态；它不是“整个 Context 生命周期”广播。`instanceGenerationRetired(event)` 则在某个 Instance 当前 runtime generation 因 disable、delete 或 rebuild 被回收前通知 Extension，让 Extension 释放自己持有的 per-instance state。两者都只处理 **Extension-owned state**；随后 Host 仍会独立强制回收该 generation 创建的 Worker sessions、managed processes 等 host-managed resources。
 
 ### Paths
 
@@ -193,9 +205,9 @@ instance + collection + key
 
 `projectBundle()` 会等宿主管理的投影传输完成后再返回 `ExtensionAssetProjectionResult`。Public result 只包含对 Extension 有意义的 projection outcome（当前为 `transferredBytes`）；内部 Artifact `transferId` 只用于 Control 自己的 wait/cancel/diagnostics，不进入 Extension ABI。
 
-### workers
+### worker.execute
 
-`context.capabilities.workers.openSession()` 是 Extension 的受控 Worker execution 入口：
+`context.capabilities.workerExecute.openSession()` 是 Extension 的受控 Worker execution 入口：
 
 ```ts
 openSession({
@@ -216,19 +228,44 @@ callTool
 close
 ```
 
-`listTools()` 返回 `ExtensionWorkerToolDefinition`。这个类型只描述当前 Worker session 可调用的远端工具目录，是 `workers` capability 的 DTO；它不代表 Extension core 拥有 Tool contribution taxonomy，也不是未来 Tool-domain Extension Point 的 declaration contract。
+`listTools()` 返回 `ExtensionWorkerToolDefinition`。这个类型只描述当前 Worker session 可调用的远端工具目录，是 `worker.execute` capability 的 DTO；它不代表 Extension core 拥有 Tool contribution taxonomy，也不是未来 Tool-domain Extension Point 的 declaration contract。
 
 `closed` 是 host-owned lifecycle signal。instance disabled/deleted、connection loss、generation cleanup 或 caller close 都会最终使 session 不再可用；依赖 Worker 的 Extension 应观察 session closure，而不是要求 generic lifecycle broadcast。
 
 工具调用仍经过正常 approval、scheduler 和 host-owned audit pipeline，并以 Extension 归因。Public ABI 不暴露 `WorkerInstance`、provider transport、Worker protocol client 或 raw Worker RPC。
 
-### delegatedWorkers
+### worker.delegate
 
-`context.capabilities.delegatedWorkers` 也是 Host-managed Worker execution，但用于“另一个 runtime 自己拥有完整 tool transcript”的委托执行，例如 Agent provider 内的 Pi session。它和 `workers` 是独立 grant；Extension 不能在 `openSession()` 参数中自行切换 recording ownership。
+`context.capabilities.workerDelegate` 也是 Host-managed Worker execution，但用于“另一个 runtime 自己拥有完整 tool transcript”的委托执行，例如 Agent provider 内的 Pi session。它和 `worker.execute` 是独立 grant；Extension 不能在 `openSession()` 参数中自行切换 recording ownership。
 
 委托调用仍经过相同的 Worker readiness、scheduler、approval 和 execution policy。区别只在记录 ownership：DevShell 不再把内部 subagent `file_* / bash_run / tmux_* / ...` 调用写入 `AuditToolCallHistory`、`toolCall.*` activity 或重复的 command log；provider 自己负责保存 prompt、tool call 与 tool result。Approval request/decision 仍属于 DevShell 的安全边界，因此 `approval.*` lifecycle 继续由 Host 保存和展示。
 
 Agent provider 自己也使用 immutable generation。`devshell agent provider update <absolute-bundle-path>` 是已安装 provider 的显式更新入口，与 provider install 复用同一个 candidate validation / selected-generation 切换事务；已经运行的 Agent 继续持有启动时的 provider handle，新 generation 只影响后续 Agent start。
+
+### context.observe
+
+`context.capabilities.contextObserve.list()` 只提供 Context discovery projection，可以按 instance、workspace、status 查询；它不提供 Context mutation、续期或 runtime ownership。
+
+### instance.observe / instance.manage / instance.events.publish
+
+Instance authority 被拆成三个独立 capability：
+
+```text
+instanceObserve
+    list / snapshot / refresh / readLogs / watchEvents
+
+instanceManage
+    create / validateCreate / enable / disable / start / stop / delete
+
+instanceEventPublish
+    appendEvent
+```
+
+读取状态、改变生命周期和发布 host-owned event 因此不能通过一个“大而全”的 instances capability 相互越权。
+
+### toolcall.history
+
+`context.capabilities.toolCallHistory` 提供只读 ToolCall history 查询，用于 Recall 一类观察型 Extension；它不授予 ToolCall 执行、approval 或 audit mutation authority。
 
 ### processes
 
@@ -368,10 +405,10 @@ Generation 是 runtime ownership root。正常 retirement 的顺序概念上是�
 stop accepting new invocations
 -> drain active invocation leases
 -> revoke registrations
+-> run Extension deactivate() graceful cleanup when possible
 -> close Worker sessions
 -> terminate managed processes
 -> release other host-managed resources
--> run Extension deactivate() when possible
 -> terminate sandbox
 -> remove runtime directory
 ```
@@ -390,7 +427,7 @@ extension.call
 ExtensionActivation contribution object
 ```
 
-不属于 API 4.x。
+不属于当前 API 5.x。
 
 ## Host dependencies 与 sandbox
 
@@ -408,7 +445,7 @@ ExtensionActivation contribution object
 
 ```text
 Agent
-    capabilities: assets, delegatedWorkers, processes
+    capabilities: worker.delegate, processes
     extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
 
 Access

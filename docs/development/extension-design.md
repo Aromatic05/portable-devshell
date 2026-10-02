@@ -2,7 +2,7 @@
 
 > 状态：核心元模型、static catalog、lazy activation 与 CLI/Web/TUI domain discovery 已实现；后续章节继续约束未来 Extension Point 演进。
 >
-> API 4.2.0 已落地 `artifacts / assets / delegatedWorkers / instances / processes / workers` capabilities、`cli.native-commands / cli.model-commands / web.applications / web.pages / tui.pages` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` module 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
+> API 5.0.0 已落地 `artifacts / assets / context.observe / instance.observe / instance.manage / instance.events.publish / processes / toolcall.history / worker.execute / worker.delegate` capabilities、`cli.native-commands / cli.model-commands / web.applications / web.pages / tui.pages` Extension Points、generation-owned registrations、`lazy / eager` activation policy，以及最小 `activate / deactivate` 与两个精确 terminal notification 生命周期。`docs/concepts/extensions.md` 描述当前运行时契约；本文保留设计推导、后续候选项和 public ABI 审查门禁。
 
 ## 1. 设计目标
 
@@ -150,6 +150,8 @@ lifecycle: {
 
 如果一个对象依赖另一个资源的生命周期，应通过 ownership / session closure 表达，而不是全局 lifecycle broadcast。
 
+当前 `contextEnvironmentRetired` 与 `instanceGenerationRetired` 是两个窄化的 terminal notification：前者只描述一个 `Context × Instance` attachment 终态，后者只描述一个 Instance runtime generation 即将被回收。它们用于 Extension-owned state cleanup，不拥有 Worker session、managed process 等 Host-managed resource reclamation。
+
 ### 2.6 不为未发布 ABI 保留兼容层
 
 当前 Extension ABI 尚未正式 release，因此迁移到本文模型时应直接删除错误设计，不保留 v2/v3 双轨、旧 capability alias 或旧 activation contribution 兼容逻辑。
@@ -182,8 +184,9 @@ lifecycle: {
 │ Capabilities         │   │ Extension Points       │
 │                      │   │                        │
 │ assets               │   │ CLI-owned points       │
-│ workers              │   │ Web-owned points       │
-│ processes            │   │ future domain points   │
+│ worker.*             │   │ Web-owned points       │
+│ instance.* / observe │   │ future domain points   │
+│ processes / history  │   │                        │
 └──────────────────────┘   └────────────────────────┘
 ```
 
@@ -196,10 +199,10 @@ generation close
     -> stop accepting new invocations
     -> drain active invocations
     -> revoke registrations
+    -> run Extension-owned deactivate cleanup when possible
     -> close Worker sessions
     -> close managed processes
     -> release other generation resources
-    -> run Extension-owned deactivation cleanup
     -> terminate sandbox
     -> remove runtime directory
 ```
@@ -246,7 +249,7 @@ privileges
 
 ```json
 {
-    "capabilities": ["assets", "workers", "processes"],
+    "capabilities": ["assets", "worker.execute", "processes"],
     "extensions": {
         "cli.native-commands": [{ "id": "agent", "title": "Agent" }],
         "web.applications": [{ "id": "agent", "title": "Agent" }]
@@ -328,15 +331,19 @@ Capability 是：
 
 因此 capability 名称必须是同一层级的资源类别名词。
 
-当前 API 4.2.0 capability 集合：
+当前 API 5.0.0 capability 集合：
 
 ```text
 artifacts
 assets
-delegatedWorkers
-instances
+context.observe
+instance.events.publish
+instance.manage
+instance.observe
 processes
-workers
+toolcall.history
+worker.delegate
+worker.execute
 ```
 
 这些 capability 都是：
@@ -351,9 +358,11 @@ workers
 
 同理，Worker projection 即使内部复用 Artifact transfer，也只应向 Extension 返回 projection outcome。Artifact `transferId` 如果没有对应的 Extension-facing query/cancel 语义，就只是 transport implementation identity，不能冻结进 public Asset result；当前 `ExtensionAssetProjectionResult` 只保留 `transferredBytes`。
 
-### 5.3 `workers`
+### 5.3 `worker.execute` / `worker.delegate`
 
-`workers` 允许 Extension 打开受 Control 管理的 Worker sessions，并调用正常 Tool pipeline。
+`worker.execute` 允许 Extension 打开受 Control 管理的 Worker sessions，并调用正常 Tool pipeline。
+
+`worker.delegate` 使用同一类受控 Worker session，但 transcript ownership 属于委托 runtime，例如 Agent provider 的内部 subagent。两者是独立 grant，不能通过 `openSession()` 参数临时切换 recording ownership；DevShell 仍保留 approval 等安全边界，但不会把 delegated runtime 自己拥有的内部 tool transcript 重复写入普通 ToolCall history。
 
 Worker session 是 **consumer-neutral capability view**：Control 只提供 canonical Worker tool catalog、routing、authorization、lifecycle 与 invocation，不把某个 consumer 的交互字段或展示策略冻结进该 catalog。具体 consumer 必须在 Control 边界之外自行 projection。例如 Agent Extension 决定哪些 Worker tools 暴露给模型、如何裁剪 model-facing schema 与 result；MCP consumer 则自行增加并剥离 `purpose` / `explanation` / `instance` 等 MCP invocation metadata。两者不得复用彼此 projection 后的 schema。
 
@@ -404,11 +413,11 @@ Sandbox 本身仍应拒绝裸 `child_process`，否则 Extension worker 被 term
 
 它不授予任意文件访问，也不暴露 Artifact service/store。Model command 是否能跨 instance/workspace 操作 Artifact 仍由对应 Extension 的 domain grammar 与 authoritative invocation Context 决定，而不是由 capability grant 自动放行。
 
-### 5.6 `instances`
+### 5.6 Instance authority
 
-`instances` 允许 Extension 使用 Control-owned Instance 管理资源：创建 schema/validation、配置生命周期、snapshot/logs，以及带取消语义的 runtime event watch。
+`instance.observe`、`instance.manage` 与 `instance.events.publish` 分别拥有只读观察、生命周期 mutation 与 event publication authority。创建 schema/validation、enable/disable/start/stop/delete 只属于 `instance.manage`；snapshot/logs/watchEvents 只属于 `instance.observe`；Extension 发布 host-owned instance event 只通过 `instance.events.publish`。
 
-它不暴露 `InstanceRegistry`、Worker transport 或 Control editor service；event watch 复用 Control 的 authoritative runtime subscription owner，而不是让 Extension 自己轮询内部状态。
+它们都不暴露 `InstanceRegistry`、Worker transport 或 Control editor service；event watch 复用 Control 的 authoritative runtime subscription owner，而不是让 Extension 自己轮询内部状态。
 
 ### 5.7 Runtime context
 
@@ -428,10 +437,14 @@ ExtensionContext
 ```text
 context.capabilities.artifacts
 context.capabilities.assets
-context.capabilities.delegatedWorkers
-context.capabilities.instances
+context.capabilities.contextObserve
+context.capabilities.instanceEventPublish
+context.capabilities.instanceManage
+context.capabilities.instanceObserve
 context.capabilities.processes
-context.capabilities.workers
+context.capabilities.toolCallHistory
+context.capabilities.workerDelegate
+context.capabilities.workerExecute
 ```
 
 必须和 manifest grant 一一对应。
@@ -901,7 +914,7 @@ Extension application 不得要求访问 portable-devshell 主 Web DOM。
 
 ### 9.7 `web.pages`
 
-> 实现状态：4.2.0 已落地第一版。
+> 实现状态：4.2.0 首次落地；当前 API 5.0.0 沿用这一 point contract。
 
 `web.pages` 用于向 portable-devshell 主 Web shell 注入由 Host 渲染的管理页面。它与 `web.applications` 分离：前者返回 Web-domain 的 table / row / cell / action snapshot，后者仍拥有完整 browser application content source。
 
@@ -998,7 +1011,7 @@ Tool
 
 MCP 只是 Tool catalog 的一个投影和调用入口。
 
-当前 root ABI 中 `workers` capability 的 `listTools()` 只返回 `ExtensionWorkerToolDefinition`，用于描述一个已打开 Worker session 暴露的远端工具。这里刻意使用 `Worker` 前缀，避免把 Worker-access DTO 误解成 Extension core 已经定义了 Tool-domain contribution contract。
+当前 root ABI 中 `worker.execute` / `worker.delegate` capability 的 `listTools()` 只返回 `ExtensionWorkerToolDefinition`，用于描述一个已打开 Worker session 暴露的远端工具。这里刻意使用 `Worker` 前缀，避免把 Worker-access DTO 误解成 Extension core 已经定义了 Tool-domain contribution contract。
 
 因此未来应该考虑一个 Tool-domain contribution point，而不是把它设计成 MCP-owned Extension Point。
 
@@ -1039,7 +1052,7 @@ protocol-specific metadata
 
 ## 13. TUI Domain
 
-> 实现状态：4.2.0 已落地 `tui.pages` 第一版。
+> 实现状态：4.2.0 首次落地 `tui.pages`；当前 API 5.0.0 沿用这一 point contract。
 
 TUI 不复用 `web.pages`，也不调用 CLI argv contract。`tui.pages` 返回 terminal-specific item / line / action snapshot，由 Host 接入已有 route stack、Box、focus、scroll 与 confirmation 交互；Extension 不依赖 Ink component tree 或 portable-devshell 内部 React state。
 
@@ -1296,6 +1309,7 @@ tui.pages
 remove command/rpc/web/lifecycle/dispose contribution object
 remove generic extension.call public abstraction
 replace onInstanceRetire with Worker session closure ownership
+retain only precise Context-environment / Instance-generation terminal notifications for Extension-owned state
 make registrations generation-owned
 make processes Control-owned
 ```
@@ -1304,7 +1318,7 @@ make processes Control-owned
 
 ```text
 Agent
-    capabilities: assets, delegatedWorkers, processes
+    capabilities: worker.delegate, processes
     extensions: cli.native-commands, cli.model-commands, web.applications, web.pages, tui.pages
 
 Access
