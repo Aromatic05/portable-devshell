@@ -25,8 +25,8 @@ import type {
 } from "@portable-devshell/extension/instance";
 
 import type { InstanceRegistry } from "../../../instance/registry/Registry.js";
-import { ExtensionAssetCapabilityControl } from "../capability/Resource.js";
-import { ExtensionProcessCapabilityControl } from "../capability/Execution.js";
+import { ExtensionAssetCapabilityControl } from "../capability/Asset.js";
+import { ExtensionProcessCapabilityControl } from "../capability/Process.js";
 import { ExtensionGeneration } from "../registration/Generation.js";
 import { ExtensionPointRegistry } from "../registration/PointRegistry.js";
 import { ExtensionRegistrationBuilder } from "../registration/Registration.js";

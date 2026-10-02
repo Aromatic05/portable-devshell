@@ -2,14 +2,14 @@ import { homedir } from "node:os";
 
 import { ControlPathHome } from "@portable-devshell/shared";
 import { ExtensionHost } from "../../control/extension/Host.js";
-import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
-import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Resource.js";
+import { ExtensionArtifactCapabilityControl } from "../../control/extension/generation/capability/Artifact.js";
+import { ExtensionAssetCapabilityControl } from "../../control/extension/generation/capability/Asset.js";
 import {
     ExtensionInstanceManageCapabilityControl,
     ExtensionInstanceObserveCapabilityControl,
 } from "../../control/extension/generation/capability/Instance.js";
 import { ExtensionContextObserveCapabilityControl } from "../../control/extension/generation/capability/Context.js";
-import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Execution.js";
+import { ExtensionWorkerCapabilityControl } from "../../control/extension/generation/capability/Worker.js";
 import {
     readBuiltinExtensionSources,
     type BuiltinExtensionSource,
