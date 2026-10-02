@@ -1,11 +1,10 @@
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 
 use crate::host::home::devshell_home;
-use crate::instance::storage::{ensure_dir, ensure_file_mode};
+use crate::instance::storage::ensure_dir;
 
 #[derive(Debug)]
 pub struct WorkspaceError {
@@ -57,27 +56,21 @@ pub fn prepare(workspace: &Path) -> Result<WorkspacePrepareResult, WorkspaceErro
         ));
     }
 
-    let hash = project_memory_key(&workspace);
+    let project_memory_directory = workspace.join("var").join("agent-work");
+    let project_memory_agent_file = project_memory_directory.join("INDEX.md");
+    let project_memory_present = match project_memory_agent_file.metadata() {
+        Ok(metadata) => metadata.is_file() && metadata.len() > 0,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(WorkspaceError::new(
+                "workspace.storageUnavailable",
+                error.to_string(),
+            ));
+        }
+    };
+
     let home = devshell_home()
         .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error))?;
-    let project_memory_directory = home.join("project-memory").join(hash);
-    ensure_dir(&project_memory_directory, 0o700)
-        .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error))?;
-    let project_memory_agent_file = project_memory_directory.join("AGENT.md");
-    OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&project_memory_agent_file)
-        .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error.to_string()))?;
-    ensure_file_mode(&project_memory_agent_file, 0o600)
-        .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error))?;
-    let project_memory_present = project_memory_agent_file
-        .metadata()
-        .map_err(|error| WorkspaceError::new("workspace.storageUnavailable", error.to_string()))?
-        .len()
-        > 0;
-
     let context_temp_root = ensure_context_temp_root(&home)?;
     gc_stale_context_temp(&context_temp_root, CONTEXT_TEMP_TTL);
 
@@ -396,11 +389,14 @@ mod tests {
             second.project_memory_directory
         );
         assert_ne!(first.temporary_directory, second.temporary_directory);
-        assert!(std::path::Path::new(&first.project_memory_agent_file).is_file());
         assert!(!first.project_memory_present);
 
-        std::fs::write(&first.project_memory_agent_file, "# Durable memory\n").unwrap();
+        let memory = workspace.path().join("var").join("agent-work");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("INDEX.md"), "# Agent work index\n").unwrap();
         let third = prepare(workspace.path()).unwrap();
+        assert_eq!(third.project_memory_directory, memory);
+        assert_eq!(third.project_memory_agent_file, memory.join("INDEX.md"));
         assert!(third.project_memory_present);
     }
 
