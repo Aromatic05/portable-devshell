@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::process::{ChildStdin, ChildStdout};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -11,6 +12,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::capability::artifact::payload::{ArtifactPayloadReader, ArtifactPayloadStore};
+use crate::capability::artifact::receive::ArtifactReceiveStore;
 use crate::capability::rpc::error::RpcError as WorkerRpcError;
 use crate::capability::rpc::request::{RpcRequest, RpcRequestContext};
 use crate::capability::rpc::response::RpcResponse;
@@ -34,13 +37,22 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Clone)]
 pub struct EndpointContext {
     host: String,
+    payloads: Arc<ArtifactPayloadStore>,
+    receives: Arc<ArtifactReceiveStore>,
     router: Arc<RpcRouter>,
 }
 
 impl EndpointContext {
-    pub fn new(instance: &str, router: Arc<RpcRouter>) -> Self {
+    pub fn new(
+        instance: &str,
+        router: Arc<RpcRouter>,
+        payloads: Arc<ArtifactPayloadStore>,
+        receives: Arc<ArtifactReceiveStore>,
+    ) -> Self {
         Self {
             host: format!("{instance}-worker"),
+            payloads,
+            receives,
             router,
         }
     }
@@ -64,6 +76,13 @@ enum StreamInputCommand {
 enum StreamInput {
     Tcp(TcpStream),
     Exec(Option<ChildStdin>),
+    PayloadRead,
+    ReceiveWrite {
+        finished: Arc<AtomicBool>,
+        offset_bytes: u64,
+        receive_id: String,
+        receives: Arc<ArtifactReceiveStore>,
+    },
 }
 
 impl StreamInput {
@@ -77,6 +96,19 @@ impl StreamInput {
                 .ok_or_else(|| "process.exec stdin is closed.".to_string())?
                 .write_all(data)
                 .map_err(|error| format!("process.exec stdin write failed: {error}")),
+            Self::PayloadRead => Err("artifact.payload.read does not accept input.".to_string()),
+            Self::ReceiveWrite {
+                offset_bytes,
+                receive_id,
+                receives,
+                ..
+            } => {
+                let result = receives
+                    .write_bytes(receive_id, *offset_bytes, data)
+                    .map_err(|error| error.message)?;
+                *offset_bytes = result.next_offset_bytes;
+                Ok(())
+            }
         }
     }
 
@@ -89,6 +121,11 @@ impl StreamInput {
                 stdin.take();
                 Ok(())
             }
+            Self::PayloadRead => Ok(()),
+            Self::ReceiveWrite { finished, .. } => {
+                finished.store(true, Ordering::SeqCst);
+                Ok(())
+            }
         }
     }
 }
@@ -96,6 +133,8 @@ impl StreamInput {
 enum StreamOutput {
     Tcp(TcpStream),
     Exec(ChildStdout),
+    PayloadRead(ArtifactPayloadReader),
+    ReceiveWrite,
 }
 
 impl StreamOutput {
@@ -107,6 +146,10 @@ impl StreamOutput {
             Self::Exec(stdout) => stdout
                 .read(buffer)
                 .map_err(|error| format!("process.exec stdout read failed: {error}")),
+            Self::PayloadRead(reader) => reader
+                .read(buffer)
+                .map_err(|error| format!("artifact.payload.read failed: {error}")),
+            Self::ReceiveWrite => Ok(0),
         }
     }
 }
@@ -114,15 +157,64 @@ impl StreamOutput {
 enum ByteService {
     Tcp(TcpService),
     Exec(ExecService),
+    PayloadRead(Option<ArtifactPayloadReader>),
+    ReceiveWrite {
+        finished: Arc<AtomicBool>,
+        offset_bytes: u64,
+        receive_id: String,
+        receives: Arc<ArtifactReceiveStore>,
+    },
 }
 
 impl ByteService {
-    fn open(port: &str, name: &str, message: Option<Value>) -> Result<Self, String> {
-        let metadata = serde_json::to_vec(&message.unwrap_or(Value::Null))
-            .map_err(|error| error.to_string())?;
+    fn open(
+        port: &str,
+        name: &str,
+        message: Option<Value>,
+        context: &EndpointContext,
+    ) -> Result<Self, String> {
+        let message = message.unwrap_or(Value::Null);
         match (port, name) {
-            ("network", "tcp") => TcpService::open(&metadata).map(Self::Tcp),
-            ("process", "exec") => ExecService::open(&metadata).map(Self::Exec),
+            ("network", "tcp") => TcpService::open(
+                &serde_json::to_vec(&message).map_err(|error| error.to_string())?,
+            )
+            .map(Self::Tcp),
+            ("process", "exec") => ExecService::open(
+                &serde_json::to_vec(&message).map_err(|error| error.to_string())?,
+            )
+            .map(Self::Exec),
+            ("artifact", "payload.read") => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Input {
+                    max_bytes: usize,
+                    offset_bytes: u64,
+                    payload_id: String,
+                }
+                let input: Input =
+                    serde_json::from_value(message).map_err(|error| error.to_string())?;
+                context
+                    .payloads
+                    .open_reader(&input.payload_id, input.offset_bytes, input.max_bytes)
+                    .map(|reader| Self::PayloadRead(Some(reader)))
+                    .map_err(|error| error.message)
+            }
+            ("artifact", "receive.write") => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Input {
+                    offset_bytes: u64,
+                    receive_id: String,
+                }
+                let input: Input =
+                    serde_json::from_value(message).map_err(|error| error.to_string())?;
+                Ok(Self::ReceiveWrite {
+                    finished: Arc::new(AtomicBool::new(false)),
+                    offset_bytes: input.offset_bytes,
+                    receive_id: input.receive_id,
+                    receives: Arc::clone(&context.receives),
+                })
+            }
             _ => Err(format!("Unsupported Stream {port}:{name}.")),
         }
     }
@@ -131,6 +223,18 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.clone_stream().map(StreamInput::Tcp),
             Self::Exec(service) => service.take_stdin().map(|value| StreamInput::Exec(Some(value))),
+            Self::PayloadRead(_) => Ok(StreamInput::PayloadRead),
+            Self::ReceiveWrite {
+                finished,
+                offset_bytes,
+                receive_id,
+                receives,
+            } => Ok(StreamInput::ReceiveWrite {
+                finished: Arc::clone(finished),
+                offset_bytes: *offset_bytes,
+                receive_id: receive_id.clone(),
+                receives: Arc::clone(receives),
+            }),
         }
     }
 
@@ -138,6 +242,11 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.clone_stream().map(StreamOutput::Tcp),
             Self::Exec(service) => service.take_stdout().map(StreamOutput::Exec),
+            Self::PayloadRead(reader) => reader
+                .take()
+                .map(StreamOutput::PayloadRead)
+                .ok_or_else(|| "artifact payload reader is already taken.".to_string()),
+            Self::ReceiveWrite { .. } => Ok(StreamOutput::ReceiveWrite),
         }
     }
 
@@ -145,6 +254,8 @@ impl ByteService {
         match self {
             Self::Tcp(_) => Ok(true),
             Self::Exec(service) => service.poll_status(),
+            Self::PayloadRead(_) => Ok(true),
+            Self::ReceiveWrite { finished, .. } => Ok(finished.load(Ordering::SeqCst)),
         }
     }
 
@@ -152,6 +263,7 @@ impl ByteService {
         match self {
             Self::Tcp(service) => service.reset(),
             Self::Exec(service) => service.reset(),
+            Self::PayloadRead(_) | Self::ReceiveWrite { .. } => {}
         }
     }
 }
@@ -374,7 +486,9 @@ fn dispatch_envelope(
     match packet {
         Packet::Rpc(packet) => dispatch_rpc(source, dest, packet, events, context),
         Packet::Event(_) => Ok(()),
-        Packet::Stream(packet) => dispatch_stream(source, dest, packet, streams, events),
+        Packet::Stream(packet) => {
+            dispatch_stream(source, dest, packet, streams, events, context)
+        }
     }
 }
 
@@ -497,6 +611,7 @@ fn dispatch_stream(
     packet: StreamPacket,
     streams: &mut HashMap<String, ActiveStream>,
     events: &Sender<EndpointEvent>,
+    context: &EndpointContext,
 ) -> Result<(), String> {
     match packet {
         StreamPacket::Open {
@@ -504,7 +619,7 @@ fn dispatch_stream(
             name,
             message,
         } => {
-            let service = match ByteService::open(&dest.port, &name, message) {
+            let service = match ByteService::open(&dest.port, &name, message, context) {
                 Ok(service) => service,
                 Err(error) => {
                     events

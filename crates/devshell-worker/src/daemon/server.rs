@@ -103,13 +103,15 @@ pub fn serve(instance: InstanceName) -> Result<(), String> {
         config.clone(),
         runtime,
         tools,
-        payloads,
-        receives,
+        Arc::clone(&payloads),
+        Arc::clone(&receives),
         resources,
     ));
     let endpoint_context = crate::transport::endpoint::EndpointContext::new(
         &config.instance,
         Arc::clone(&router),
+        payloads,
+        receives,
     );
     payload_maintenance.schedule_maintenance();
     let _reverse_connector = config.reverse.clone().map(|reverse| {
