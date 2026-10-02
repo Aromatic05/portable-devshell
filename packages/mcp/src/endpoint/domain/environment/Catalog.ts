@@ -83,13 +83,13 @@ export class McpToolCatalogEnvironment {
                 },
                 projectMemoryAgentFile: {
                     description:
-                        "Durable project memory to read before working. Omitted when a current worker confirms no memory exists yet.",
+                        "Workspace task-memory index to read before resuming existing work. Omitted when no var/agent-work memory exists yet.",
                     minLength: 1,
                     type: "string",
                 },
                 projectMemoryDirectory: {
                     description:
-                        "Directory for durable project memory. Omitted together with projectMemoryAgentFile when no memory exists yet.",
+                        "Workspace var/agent-work directory for durable task memory. Omitted together with projectMemoryAgentFile when no memory exists yet.",
                     minLength: 1,
                     type: "string",
                 },

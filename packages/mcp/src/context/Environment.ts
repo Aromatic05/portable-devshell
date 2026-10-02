@@ -319,11 +319,12 @@ export class McpContextRemoteEnvironment {
                 comment: [
                     ...(prepared.projectMemoryPresent !== false
                         ? [
-                              `Read ${prepared.projectMemoryAgentFile} before working.`,
-                              `Use ${prepared.projectMemoryDirectory} for durable project memory; keep it useful for future sessions.`,
+                              `Read ${prepared.projectMemoryAgentFile} before resuming existing work; for a selected task, treat its state.json as authoritative.`,
                           ]
                         : []),
-                    `Use ${prepared.temporaryDirectory} for all temporary files.`,
+                    `Use ${prepared.workspace}/var/agent-work/ for durable task memory; keep INDEX.md as the task index and each task's state.json as authoritative current state.`,
+                    `Use ${prepared.temporaryDirectory} only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.`,
+                    `Put large working data and anything that must persist in ${prepared.workspace}/var/.`,
                     ...alerts.advice.map((advice) => advice.text),
                 ],
                 instance,

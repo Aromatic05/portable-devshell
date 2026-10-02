@@ -2260,7 +2260,9 @@ test("McpEndpointWorker exposes Context tools while explicit mode still requires
         "/tmp/demo-local-123456",
     );
     assert.deepEqual(environmentRecord.comment, [
-        "Use /tmp/demo-local-123456 for all temporary files.",
+        "Use /projects/alpha/var/agent-work/ for durable task memory; keep INDEX.md as the task index and each task's state.json as authoritative current state.",
+        "Use /tmp/demo-local-123456 only for small disposable temporary files; temporary storage is limited to 2 GiB per workspace.",
+        "Put large working data and anything that must persist in /projects/alpha/var/.",
         "Worker memory is high.",
     ]);
     assert.deepEqual(environmentRecord.platform, {
