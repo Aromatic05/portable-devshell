@@ -5,6 +5,13 @@ export interface ExtensionContextEnvironment {
     readonly workspace?: string;
 }
 
+/** One Context attachment reached a terminal state for a specific Instance. */
+export interface ExtensionContextEnvironmentRetiredEvent {
+    readonly ctxId: string;
+    readonly instance: string;
+    readonly reason: "disabled" | "expired";
+}
+
 export interface ExtensionContextRecord {
     readonly createdAt: string;
     readonly ctxId: string;

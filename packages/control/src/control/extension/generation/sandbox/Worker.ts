@@ -323,16 +323,18 @@ async function invoke(
                 hostModulesLease.release();
                 hostModules.dispose();
                 break;
-            case "retireContext":
-                await extensionModule.retireContext?.({
+            case "contextEnvironmentRetired":
+                await extensionModule.contextEnvironmentRetired?.({
                     ctxId: operation.ctxId,
                     instance: operation.instance,
                     reason: operation.reason,
                 });
                 value = undefined;
                 break;
-            case "retireInstance":
-                await extensionModule.retireInstance?.(operation.instance);
+            case "instanceGenerationRetired":
+                await extensionModule.instanceGenerationRetired?.({
+                    instance: operation.instance,
+                });
                 value = undefined;
                 break;
         }
@@ -1116,21 +1118,21 @@ function readExtensionModule(value: unknown): ExtensionModule {
         );
     }
     if (
-        value.retireContext !== undefined &&
-        typeof value.retireContext !== "function"
+        value.contextEnvironmentRetired !== undefined &&
+        typeof value.contextEnvironmentRetired !== "function"
     ) {
         throw new TypeError(
             "Extension " +
                 data.context.id +
-                " retireContext export must be a function.",
+                " contextEnvironmentRetired export must be a function.",
         );
     }
     if (
-        value.retireInstance !== undefined &&
-        typeof value.retireInstance !== "function"
+        value.instanceGenerationRetired !== undefined &&
+        typeof value.instanceGenerationRetired !== "function"
     ) {
         throw new TypeError(
-            `Extension ${data.context.id} retireInstance export must be a function.`,
+            `Extension ${data.context.id} instanceGenerationRetired export must be a function.`,
         );
     }
     return {
@@ -1142,19 +1144,21 @@ function readExtensionModule(value: unknown): ExtensionModule {
                       ExtensionModule["deactivate"]
                   >,
               }),
-        ...(value.retireContext === undefined
+        ...(value.contextEnvironmentRetired === undefined
             ? {}
             : {
-                  retireContext: value.retireContext as NonNullable<
-                      ExtensionModule["retireContext"]
-                  >,
+                  contextEnvironmentRetired:
+                      value.contextEnvironmentRetired as NonNullable<
+                          ExtensionModule["contextEnvironmentRetired"]
+                      >,
               }),
-        ...(value.retireInstance === undefined
+        ...(value.instanceGenerationRetired === undefined
             ? {}
             : {
-                  retireInstance: value.retireInstance as NonNullable<
-                      ExtensionModule["retireInstance"]
-                  >,
+                  instanceGenerationRetired:
+                      value.instanceGenerationRetired as NonNullable<
+                          ExtensionModule["instanceGenerationRetired"]
+                      >,
               }),
     };
 }

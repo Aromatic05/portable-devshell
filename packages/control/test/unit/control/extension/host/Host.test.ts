@@ -127,6 +127,7 @@ function unregisteredGeneration(
     name: string,
     dispose: () => Promise<void>,
     retireInstanceResources?: (instance: string) => Promise<void>,
+    instanceGenerationRetired?: (event: { instance: string }) => Promise<void>,
 ): ExtensionGeneration {
     return new ExtensionGeneration({
         dispose,
@@ -139,6 +140,9 @@ function unregisteredGeneration(
         ...(retireInstanceResources === undefined
             ? {}
             : { retireInstanceResources }),
+        ...(instanceGenerationRetired === undefined
+            ? {}
+            : { instanceGenerationRetired }),
     });
 }
 
@@ -929,11 +933,46 @@ test("Extension host waits for every instance resource retirement even when anot
         result.error.errors.some(
             (error) =>
                 error instanceof Error &&
-                /failed to retire resources/u.test(error.message) &&
+                /failed to retire host-managed resources/u.test(error.message) &&
                 error.cause instanceof Error &&
                 /resource retirement failed/u.test(error.cause.message),
         ),
     );
+    await host.stop();
+});
+
+test("Extension host broadcasts Instance generation retirement separately from host-managed cleanup", async () => {
+    const registry = new MemoryRegistry({
+        extensions: {
+            one: { enabled: true, selectedGeneration: "a" },
+            two: { enabled: true, selectedGeneration: "a" },
+        },
+        schemaVersion: 1,
+    });
+    const events: string[] = [];
+    const host = new ExtensionHost({
+        loader: createLoader(
+            async (id, name) =>
+                unregisteredGeneration(
+                    id,
+                    name,
+                    async () => undefined,
+                    undefined,
+                    async (event) => {
+                        events.push(`${id}:${event.instance}`);
+                    },
+                ),
+            async (id, name) => unregisteredManifest(id, name),
+        ),
+        registry,
+    });
+    await host.start();
+    await host.reload("one");
+    await host.reload("two");
+
+    await host.instanceGenerationRetired({ instance: "local" });
+
+    assert.deepEqual(events.sort(), ["one:local", "two:local"]);
     await host.stop();
 });
 

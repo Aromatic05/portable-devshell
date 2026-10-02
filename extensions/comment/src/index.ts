@@ -12,8 +12,10 @@ import {
     type ControlRouteBinding,
     type ControlRouteScope,
 } from "@portable-devshell/extension/control";
+import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
 import type {
     ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceGenerationRetiredEvent,
     ExtensionInstanceObserveCapability,
 } from "@portable-devshell/extension/instance";
 import {
@@ -472,21 +474,21 @@ export async function activate(context: ExtensionContext): Promise<void> {
     builtinRuntime = { comment, source };
 }
 
-export async function retireInstance(instance: string): Promise<void> {
+export async function instanceGenerationRetired(
+    event: ExtensionInstanceGenerationRetiredEvent,
+): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
     await runtime.comment.retireInstance(
-        instance,
-        `Instance ${instance} was retired before Comment delivery.`,
+        event.instance,
+        `Instance ${event.instance} runtime generation was retired before Comment delivery.`,
     );
-    await runtime.source.refresh(instance);
+    await runtime.source.refresh(event.instance);
 }
 
-export async function retireContext(input: {
-    ctxId: string;
-    instance: string;
-    reason: "disabled" | "expired";
-}): Promise<void> {
+export async function contextEnvironmentRetired(
+    input: ExtensionContextEnvironmentRetiredEvent,
+): Promise<void> {
     const runtime = builtinRuntime;
     if (runtime === undefined) return;
     await runtime.source.refresh();

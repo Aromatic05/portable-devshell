@@ -501,16 +501,18 @@ export class ExtensionHost {
         });
     }
 
-    async retireInstanceResources(instance: string): Promise<void> {
+    async instanceGenerationRetired(event: {
+        instance: string;
+    }): Promise<void> {
         const failures: unknown[] = [];
         await Promise.all(
             [...this.#active.entries()].map(async ([id, generation]) => {
                 try {
-                    await generation.retireInstanceResources(instance);
+                    await generation.instanceGenerationRetired(event);
                 } catch (error) {
                     failures.push(
                         new Error(
-                            `Extension ${id} failed to retire resources for instance ${instance}.`,
+                            `Extension ${id} failed to handle Instance generation retirement for ${event.instance}.`,
                             { cause: error },
                         ),
                     );
@@ -520,12 +522,12 @@ export class ExtensionHost {
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,
-                `Extensions failed to retire resources for instance ${instance}.`,
+                `Extensions failed to handle Instance generation retirement for ${event.instance}.`,
             );
         }
     }
 
-    async retireContextResources(input: {
+    async contextEnvironmentRetired(input: {
         ctxId: string;
         instance: string;
         reason: "disabled" | "expired";
@@ -534,13 +536,13 @@ export class ExtensionHost {
         await Promise.all(
             [...this.#active.entries()].map(async ([id, generation]) => {
                 try {
-                    await generation.retireContextResources(input);
+                    await generation.contextEnvironmentRetired(input);
                 } catch (error) {
                     failures.push(
                         new Error(
                             "Extension " +
                                 id +
-                                " failed to retire resources for Context " +
+                                " failed to handle retired Context environment " +
                                 input.ctxId +
                                 ".",
                             { cause: error },
@@ -552,9 +554,33 @@ export class ExtensionHost {
         if (failures.length > 0) {
             throw new AggregateError(
                 failures,
-                "Extensions failed to retire resources for Context " +
+                "Extensions failed to handle retired Context environment " +
                     input.ctxId +
                     ".",
+            );
+        }
+    }
+
+    async retireInstanceResources(instance: string): Promise<void> {
+        const failures: unknown[] = [];
+        await Promise.all(
+            [...this.#active.entries()].map(async ([id, generation]) => {
+                try {
+                    await generation.retireInstanceResources(instance);
+                } catch (error) {
+                    failures.push(
+                        new Error(
+                            `Extension ${id} failed to retire host-managed resources for instance ${instance}.`,
+                            { cause: error },
+                        ),
+                    );
+                }
+            }),
+        );
+        if (failures.length > 0) {
+            throw new AggregateError(
+                failures,
+                `Extensions failed to retire host-managed resources for instance ${instance}.`,
             );
         }
     }

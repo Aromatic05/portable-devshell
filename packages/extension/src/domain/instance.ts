@@ -30,6 +30,11 @@ export interface ExtensionInstanceRecord {
     snapshot?: ExtensionInstanceSnapshot;
 }
 
+/** The current host-owned runtime generation for an Instance is being retired. */
+export interface ExtensionInstanceGenerationRetiredEvent {
+    readonly instance: string;
+}
+
 export interface ExtensionInstanceCreateResult {
     enabled: boolean;
     mcpPath?: string;

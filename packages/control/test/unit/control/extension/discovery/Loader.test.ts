@@ -451,7 +451,7 @@ test("Extension loader deactivates a module before rejecting an undeclared runti
     assert.deepEqual(events, ["module.deactivate"]);
 });
 
-test("Extension loader retires Extension-owned state with host-managed Worker resources", async (t) => {
+test("Extension loader separates Instance generation notification from host-managed Worker cleanup", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const target = await harness.writeGeneration({
@@ -461,8 +461,8 @@ test("Extension loader retires Extension-owned state with host-managed Worker re
     const loader = new ExtensionLoader({
         importer: async () => ({
             activate() {},
-            retireInstance(instance: string) {
-                events.push(`module.retire:${instance}`);
+            instanceGenerationRetired(event: { instance: string }) {
+                events.push(`module.retire:${event.instance}`);
             },
         }),
         instances: { list: () => [] } as never,
@@ -473,13 +473,15 @@ test("Extension loader retires Extension-owned state with host-managed Worker re
     const candidate = await loader.load(target.id, target.generation);
     candidate.activate();
 
-    await candidate.retireInstanceResources("local");
+    await candidate.instanceGenerationRetired({ instance: "local" });
+    assert.deepEqual(events, ["module.retire:local"]);
 
+    await candidate.retireInstanceResources("local");
     assert.deepEqual(events, ["module.retire:local", "worker.retire:local"]);
     await candidate.retire();
 });
 
-test("Extension loader retires Extension-owned Context state without touching Worker lifetime", async (t) => {
+test("Extension loader notifies retired Context environments without touching Worker lifetime", async (t) => {
     const harness = await createHarness();
     t.after(harness.cleanup);
     const target = await harness.writeGeneration({
@@ -489,7 +491,7 @@ test("Extension loader retires Extension-owned Context state without touching Wo
     const loader = new ExtensionLoader({
         importer: async () => ({
             activate() {},
-            retireContext(input: {
+            contextEnvironmentRetired(input: {
                 ctxId: string;
                 instance: string;
                 reason: "disabled" | "expired";
@@ -512,7 +514,7 @@ test("Extension loader retires Extension-owned Context state without touching Wo
     const candidate = await loader.load(target.id, target.generation);
     candidate.activate();
 
-    await candidate.retireContextResources({
+    await candidate.contextEnvironmentRetired({
         ctxId: "ctx-one",
         instance: "local",
         reason: "disabled",

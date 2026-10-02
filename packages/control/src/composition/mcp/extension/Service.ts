@@ -13,13 +13,13 @@ import type { ExtensionHost } from "../../../control/extension/Host.js";
 export class McpExtensionService {
     readonly #extensions: Pick<
         ExtensionHost,
-        "acquireRegistration" | "listDeclarations" | "retireContextResources"
+        "acquireRegistration" | "contextEnvironmentRetired" | "listDeclarations"
     >;
 
     constructor(
         extensions: Pick<
             ExtensionHost,
-            "acquireRegistration" | "listDeclarations" | "retireContextResources"
+            "acquireRegistration" | "contextEnvironmentRetired" | "listDeclarations"
         >,
     ) {
         this.#extensions = extensions;
@@ -69,7 +69,7 @@ export class McpExtensionService {
         ctxId: string,
         reason: "disabled" | "expired",
     ): Promise<void> {
-        await this.#extensions.retireContextResources({
+        await this.#extensions.contextEnvironmentRetired({
             ctxId,
             instance,
             reason,

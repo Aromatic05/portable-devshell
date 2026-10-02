@@ -147,7 +147,7 @@ export function activate(context) {
     ]);
 });
 
-test("Extension sandbox delivers instance retirement to Extension-owned state", async (t) => {
+test("Extension sandbox delivers Instance generation retirement to Extension-owned state", async (t) => {
     const sandbox = await setupSandbox(
         t,
         "extension-sandbox-retire-instance",
@@ -159,21 +159,21 @@ export function activate(context) {
         value: { retired: [...retired] }
     }));
 }
-export function retireInstance(instance) {
-    retired.push(instance);
+export function instanceGenerationRetired(event) {
+    retired.push(event.instance);
 }
 `,
     );
 
     await sandbox.start();
-    await sandbox.retireInstance("local");
+    await sandbox.instanceGenerationRetired({ instance: "local" });
 
     assert.deepEqual(await cliJson(sandbox, [], "retirement"), {
         retired: ["local"],
     });
 });
 
-test("Extension sandbox delivers Context retirement to Extension-owned state", async (t) => {
+test("Extension sandbox delivers Context environment retirement to Extension-owned state", async (t) => {
     const sandbox = await setupSandbox(
         t,
         "extension-sandbox-retire-context",
@@ -185,14 +185,14 @@ export function activate(context) {
         value: { retired: [...retired] }
     }));
 }
-export function retireContext(input) {
+export function contextEnvironmentRetired(input) {
     retired.push(input);
 }
 `,
     );
 
     await sandbox.start();
-    await sandbox.retireContext({
+    await sandbox.contextEnvironmentRetired({
         ctxId: "ctx-one",
         instance: "local",
         reason: "expired",

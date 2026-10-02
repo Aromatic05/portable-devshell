@@ -80,10 +80,10 @@ export type ExtensionSandboxInvokeOperation =
     | {
           ctxId: string;
           instance: string;
-          kind: "retireContext";
+          kind: "contextEnvironmentRetired";
           reason: "disabled" | "expired";
       }
-    | { instance: string; kind: "retireInstance" };
+    | { instance: string; kind: "instanceGenerationRetired" };
 
 export type ExtensionSandboxCapabilityOperation =
     | "artifacts.cancelTransfer"

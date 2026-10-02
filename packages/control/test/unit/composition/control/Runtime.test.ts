@@ -217,10 +217,10 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
     assert.deepEqual(calls, ["web", "mcp"]);
 });
 
-test("runtime retires Extension resources through generation lifecycle", async (t) => {
+test("runtime notifies Extensions before retiring host-managed generation resources", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-extension-lifecycle");
     const socketPath = createTestIpcPath("control-runtime-extension", runtimeDir);
-    const retired: string[] = [];
+    const lifecycle: string[] = [];
     let disableRetirements = 0;
     let deleteRetirements = 0;
     const generationRetirements: Array<
@@ -232,8 +232,11 @@ test("runtime retires Extension resources through generation lifecycle", async (
         extensionPaths: testExtensionPaths(),
         extensions: {
             ...testExtensionSurface(),
+            async instanceGenerationRetired(event: { instance: string }) {
+                lifecycle.push(`extension:${event.instance}`);
+            },
             async retireInstanceResources(instance: string) {
-                retired.push(instance);
+                lifecycle.push(`resources:${instance}`);
             },
         } as never,
         instances: {
@@ -279,11 +282,11 @@ test("runtime retires Extension resources through generation lifecycle", async (
 
     assert.equal(disableRetirements, 0);
     assert.equal(deleteRetirements, 0);
-    assert.equal(generationRetirements.length, 3);
+    assert.equal(generationRetirements.length, 4);
     for (const retire of generationRetirements) {
         await retire({ name: "alpha" });
     }
-    assert.deepEqual(retired, ["alpha"]);
+    assert.deepEqual(lifecycle, ["extension:alpha", "resources:alpha"]);
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -346,6 +349,8 @@ function testExtensionSurface() {
         onChange() {
             return () => undefined;
         },
+        async contextEnvironmentRetired() {},
+        async instanceGenerationRetired() {},
         async reload() {},
         async retireInstanceResources() {},
         async start() {},
@@ -912,6 +917,8 @@ test("runtime installs builtin Extensions through the normal installer before op
         onChange() {
             return () => undefined;
         },
+        async contextEnvironmentRetired() {},
+        async instanceGenerationRetired() {},
         async reload() {},
         async retireInstanceResources() {},
         async start() {},
@@ -994,6 +1001,8 @@ test("runtime keeps the Control channel closed when builtin Extension installati
             onChange() {
                 return () => undefined;
             },
+            async contextEnvironmentRetired() {},
+            async instanceGenerationRetired() {},
             async reload() {},
             async retireInstanceResources() {},
             async selectGeneration() {},

@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ExtensionCapabilities } from "../../src/index.ts";
-import type { ExtensionContextObserveCapability } from "../../src/domain/context.ts";
+import type {
+    ExtensionCapabilities,
+    ExtensionModule,
+} from "../../src/index.ts";
+import type {
+    ExtensionContextEnvironmentRetiredEvent,
+    ExtensionContextObserveCapability,
+} from "../../src/domain/context.ts";
 import type {
     ExtensionInstanceEventPublishCapability,
+    ExtensionInstanceGenerationRetiredEvent,
     ExtensionInstanceManageCapability,
     ExtensionInstanceObserveCapability,
     ExtensionInstanceSnapshot,
@@ -50,6 +57,43 @@ test("Runtime ExtensionCapabilities expose the v5 capability taxonomy", () => {
         "workerDelegate",
         "workerExecute",
     ]);
+});
+
+test("Extension module lifecycle distinguishes domain notifications from host resource cleanup", async () => {
+    const lifecycleKeys: readonly (keyof ExtensionModule)[] = [
+        "activate",
+        "contextEnvironmentRetired",
+        "deactivate",
+        "instanceGenerationRetired",
+    ];
+    const uncovered: Record<
+        Exclude<keyof ExtensionModule, (typeof lifecycleKeys)[number]>,
+        never
+    > = {};
+    const events: string[] = [];
+    const module = {
+        activate() {},
+        async contextEnvironmentRetired(
+            event: ExtensionContextEnvironmentRetiredEvent,
+        ) {
+            events.push(`context:${event.instance}:${event.ctxId}`);
+        },
+        async instanceGenerationRetired(
+            event: ExtensionInstanceGenerationRetiredEvent,
+        ) {
+            events.push(`instance:${event.instance}`);
+        },
+    } satisfies ExtensionModule;
+
+    await module.contextEnvironmentRetired({
+        ctxId: "ctx-one",
+        instance: "local",
+        reason: "expired",
+    });
+    await module.instanceGenerationRetired({ instance: "local" });
+
+    assert.deepEqual(uncovered, {});
+    assert.deepEqual(events, ["context:local:ctx-one", "instance:local"]);
 });
 
 test("Context observation exposes read-only discovery without runtime mutation", () => {

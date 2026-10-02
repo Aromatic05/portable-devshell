@@ -1,4 +1,6 @@
 import type { ExtensionManifest } from "@portable-devshell/extension";
+import type { ExtensionContextEnvironmentRetiredEvent } from "@portable-devshell/extension/context";
+import type { ExtensionInstanceGenerationRetiredEvent } from "@portable-devshell/extension/instance";
 
 import type { ExtensionRegistrationSet } from "./Registration.js";
 
@@ -6,15 +8,16 @@ export type ExtensionGenerationState =
     "active" | "disposed" | "dispose-failed" | "draining" | "faulted" | "ready";
 
 export interface ExtensionGenerationOptions {
+    contextEnvironmentRetired?: (
+        event: ExtensionContextEnvironmentRetiredEvent,
+    ) => Promise<void>;
     dispose: () => Promise<void>;
     generation: string;
+    instanceGenerationRetired?: (
+        event: ExtensionInstanceGenerationRetiredEvent,
+    ) => Promise<void>;
     manifest: ExtensionManifest;
     registrations: ExtensionRegistrationSet;
-    retireContextResources?: (input: {
-        ctxId: string;
-        instance: string;
-        reason: "disabled" | "expired";
-    }) => Promise<void>;
     retireInstanceResources?: (instance: string) => Promise<void>;
 }
 
@@ -29,8 +32,9 @@ export class ExtensionGeneration {
     readonly generation: string;
     readonly manifest: ExtensionManifest;
     readonly registrations: ExtensionRegistrationSet;
+    readonly #contextEnvironmentRetired?: ExtensionGenerationOptions["contextEnvironmentRetired"];
     readonly #dispose: () => Promise<void>;
-    readonly #retireContextResources?: ExtensionGenerationOptions["retireContextResources"];
+    readonly #instanceGenerationRetired?: ExtensionGenerationOptions["instanceGenerationRetired"];
     readonly #retireInstanceResources?: (instance: string) => Promise<void>;
     readonly #retirement: Promise<void>;
     #disposeError?: unknown;
@@ -45,8 +49,9 @@ export class ExtensionGeneration {
         this.generation = options.generation;
         this.manifest = options.manifest;
         this.registrations = options.registrations;
+        this.#contextEnvironmentRetired = options.contextEnvironmentRetired;
         this.#dispose = options.dispose;
-        this.#retireContextResources = options.retireContextResources;
+        this.#instanceGenerationRetired = options.instanceGenerationRetired;
         this.#retireInstanceResources = options.retireInstanceResources;
         this.#retirement = new Promise<void>((resolve, reject) => {
             this.#resolveRetirement = resolve;
@@ -101,16 +106,20 @@ export class ExtensionGeneration {
         };
     }
 
-    async retireInstanceResources(instance: string): Promise<void> {
-        await this.#retireInstanceResources?.(instance);
+    async contextEnvironmentRetired(
+        event: ExtensionContextEnvironmentRetiredEvent,
+    ): Promise<void> {
+        await this.#contextEnvironmentRetired?.(event);
     }
 
-    async retireContextResources(input: {
-        ctxId: string;
-        instance: string;
-        reason: "disabled" | "expired";
-    }): Promise<void> {
-        await this.#retireContextResources?.(input);
+    async instanceGenerationRetired(
+        event: ExtensionInstanceGenerationRetiredEvent,
+    ): Promise<void> {
+        await this.#instanceGenerationRetired?.(event);
+    }
+
+    async retireInstanceResources(instance: string): Promise<void> {
+        await this.#retireInstanceResources?.(instance);
     }
 
     fault(error: unknown): void {

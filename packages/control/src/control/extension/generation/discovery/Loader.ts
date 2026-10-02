@@ -392,12 +392,14 @@ export class ExtensionLoader {
                 generation,
                 manifest,
                 registrations: bindings,
-                retireContextResources: async (input) => {
-                    await module!.retireContext?.(input);
+                contextEnvironmentRetired: async (event) => {
+                    await module!.contextEnvironmentRetired?.(event);
+                },
+                instanceGenerationRetired: async (event) => {
+                    await module!.instanceGenerationRetired?.(event);
                 },
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
-                        module!.retireInstance?.(instance),
                         workerDelegate.retireInstance(instance),
                         workerExecute.retireInstance(instance),
                     ]);
@@ -562,12 +564,14 @@ export class ExtensionLoader {
                 generation: input.generation,
                 manifest: input.manifest,
                 registrations: bindings,
-                retireContextResources: async (context) => {
-                    await sandbox.retireContext(context);
+                contextEnvironmentRetired: async (event) => {
+                    await sandbox.contextEnvironmentRetired(event);
+                },
+                instanceGenerationRetired: async (event) => {
+                    await sandbox.instanceGenerationRetired(event);
                 },
                 retireInstanceResources: async (instance) => {
                     await Promise.all([
-                        sandbox.retireInstance(instance),
                         input.workerDelegate.retireInstance(instance),
                         input.workerExecute.retireInstance(instance),
                     ]);
@@ -740,19 +744,21 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
         );
     }
     if (
-        value.retireContext !== undefined &&
-        typeof value.retireContext !== "function"
+        value.contextEnvironmentRetired !== undefined &&
+        typeof value.contextEnvironmentRetired !== "function"
     ) {
         throw new TypeError(
-            "Extension " + id + " retireContext export must be a function.",
+            "Extension " +
+                id +
+                " contextEnvironmentRetired export must be a function.",
         );
     }
     if (
-        value.retireInstance !== undefined &&
-        typeof value.retireInstance !== "function"
+        value.instanceGenerationRetired !== undefined &&
+        typeof value.instanceGenerationRetired !== "function"
     ) {
         throw new TypeError(
-            `Extension ${id} retireInstance export must be a function.`,
+            `Extension ${id} instanceGenerationRetired export must be a function.`,
         );
     }
     return {
@@ -764,19 +770,21 @@ function readExtensionModule(value: unknown, id: string): ExtensionModule {
                       ExtensionModule["deactivate"]
                   >,
               }),
-        ...(value.retireContext === undefined
+        ...(value.contextEnvironmentRetired === undefined
             ? {}
             : {
-                  retireContext: value.retireContext as NonNullable<
-                      ExtensionModule["retireContext"]
-                  >,
+                  contextEnvironmentRetired:
+                      value.contextEnvironmentRetired as NonNullable<
+                          ExtensionModule["contextEnvironmentRetired"]
+                      >,
               }),
-        ...(value.retireInstance === undefined
+        ...(value.instanceGenerationRetired === undefined
             ? {}
             : {
-                  retireInstance: value.retireInstance as NonNullable<
-                      ExtensionModule["retireInstance"]
-                  >,
+                  instanceGenerationRetired:
+                      value.instanceGenerationRetired as NonNullable<
+                          ExtensionModule["instanceGenerationRetired"]
+                      >,
               }),
     };
 }
