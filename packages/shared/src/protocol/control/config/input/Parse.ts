@@ -3,7 +3,7 @@ import type {
     ApprovalPolicyDecision,
     ApprovalPolicyMode,
     ApprovalPolicySourceScope,
-} from "../../../tool/Approval.js";
+} from "../../../approval/Approval.js";
 import { configInputError, type ConfigPathSegment } from "../ConfigIssue.js";
 import type {
     ConfigBatchUpdateRequest,

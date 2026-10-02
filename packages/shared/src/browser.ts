@@ -125,7 +125,7 @@ export type {
     ApprovalDecisionValue,
     ApprovalPolicyRule,
     ApprovalRequest,
-} from "./protocol/tool/Approval.js";
+} from "./protocol/approval/Approval.js";
 export type { ArtifactStoredImageResult } from "./protocol/artifact/Image.js";
 export type {
     ToolCallQuery,

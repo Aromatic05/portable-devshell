@@ -451,16 +451,9 @@ export class InstanceConfigCoordinator {
         const reason = `Instance ${descriptor.name} was deleted.`;
         const failures: unknown[] = [];
 
-        try {
-            for (const approval of await descriptor.worker.listApprovals()) {
-                if (approval.status !== "pending") continue;
-                await descriptor.worker
-                    .cancelApproval(approval.approvalId, reason)
-                    .catch((error) => failures.push(error));
-            }
-        } catch (error) {
-            failures.push(error);
-        }
+        await descriptor.approval.retire(reason).catch((error) =>
+            failures.push(error),
+        );
 
         if (descriptor.wait !== undefined) {
             try {
@@ -567,19 +560,9 @@ export class InstanceConfigCoordinator {
                 for (const retire of [...this.#instanceDisableRetirements]) {
                     await retire(existing).catch((error) => failures.push(error));
                 }
-                try {
-                    for (const approval of await descriptor.worker.listApprovals()) {
-                        if (approval.status !== "pending") continue;
-                        await descriptor.worker
-                            .cancelApproval(
-                                approval.approvalId,
-                                `Instance ${descriptor.name} was disabled before approval.`,
-                            )
-                            .catch((error) => failures.push(error));
-                    }
-                } catch (error) {
-                    failures.push(error);
-                }
+                await descriptor.approval
+                    .retire(`Instance ${descriptor.name} was disabled before approval.`)
+                    .catch((error) => failures.push(error));
                 if (descriptor.wait !== undefined) {
                     try {
                         for (const wait of await descriptor.wait.list()) {
@@ -1010,6 +993,7 @@ export class InstanceConfigCoordinator {
                 await descriptor.worker.reconfigure(
                     toWorkerReconfigureInput(existing),
                 );
+                descriptor.approval.setPolicy(existing.approvalPolicy);
                 descriptor.mcpContextMode = existing.mcp.contextMode;
                 descriptor.enabled = existing.enabled;
                 descriptor.mcpEnabled = existing.mcp.enabled;
@@ -1080,6 +1064,7 @@ export class InstanceConfigCoordinator {
             return;
         }
         await descriptor.worker.reconfigure(toWorkerReconfigureInput(instance));
+        descriptor.approval.setPolicy(instance.approvalPolicy);
         descriptor.mcpContextMode = instance.mcp.contextMode;
         descriptor.enabled = true;
         descriptor.mcpEnabled = instance.mcp.enabled;
@@ -1212,6 +1197,12 @@ async function closeDescriptorResourcesBestEffort(
     descriptor: ReturnType<InstanceFactory["map"]>,
 ): Promise<void> {
     const failures: unknown[] = [];
+    await descriptor.approval.retire().catch((error) => failures.push(error));
+    try {
+        descriptor.approval.close();
+    } catch (error) {
+        failures.push(error);
+    }
     const close = (descriptor.worker as { close?: () => Promise<void> }).close;
     if (close !== undefined) {
         await close

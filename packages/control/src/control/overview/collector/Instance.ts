@@ -55,7 +55,7 @@ export class OperationalOverviewInstanceCollector {
 
         const [approvalsResult, callsResult, failureResult] =
             await Promise.allSettled([
-                descriptor.worker.listPendingApprovals(),
+                descriptor.approval.listPendingApprovals(),
                 descriptor.worker.readToolCalls({
                     includeInput: false,
                     includeOutput: false,

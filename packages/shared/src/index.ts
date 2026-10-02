@@ -39,7 +39,7 @@ export * from "./protocol/interaction/context/ContextRecord.js";
 export * from "./protocol/interaction/context/Conversation.js";
 export * from "./protocol/interaction/OAuth.js";
 export * from "./protocol/interaction/Terminal.js";
-export * from "./protocol/tool/Approval.js";
+export * from "./protocol/approval/Approval.js";
 export * from "./protocol/tool/Call.js";
 export * from "./protocol/tool/Definition.js";
 export * from "./protocol/CommandResult.js";

@@ -3,6 +3,7 @@ import {
     WorkerInstanceFactory,
     WorkerTransportConnection,
     WorkerTransportFactory,
+    resolveAuditStorageLimits,
     resolveWorkerHomeDirectory,
     type WorkerInstance,
     type WorkerInstanceConfig,
@@ -18,6 +19,9 @@ import { GoalService } from "../../../instance/workflow/goal/Service.js";
 import { TodoService } from "../../../instance/workflow/todo/Service.js";
 import { WaitService } from "../../../instance/workflow/wait/Service.js";
 import { WorkerTerminalBackend } from "../../../instance/execution/terminal/Backend.js";
+import { ApprovalService } from "../../approval/Service.js";
+import { InstanceApprovalStore } from "../../approval/Store.js";
+import { ApprovalToolCallReview } from "../../approval/ToolCallReview.js";
 
 export class InstanceFactory {
     readonly #workerInstanceFactory: WorkerInstanceFactory;
@@ -61,9 +65,32 @@ export class InstanceFactory {
             this.#toWorkerConfig(instance, reverseConnection, homeDirectory),
         );
         workerHolder.value = worker;
+        const approvalStore = new InstanceApprovalStore(
+            paths.auditDatabaseFile,
+            paths.legacyApprovalsFile,
+            resolveAuditStorageLimits({
+                maxBytes: instance.logs?.maxBytes,
+                retentionDays: instance.logs?.retentionDays,
+            }),
+        );
+        const approval = new ApprovalService({
+            instanceName: name,
+            policy: instance.approvalPolicy,
+            store: approvalStore,
+        });
+        const approvalReview = new ApprovalToolCallReview({
+            service: approval,
+            events: {
+                append: async (type, data) => {
+                    await worker.appendControlEvent(type, data);
+                },
+            },
+        });
         const terminal = new WorkerTerminalBackend({ worker });
 
         return {
+            approval,
+            approvalReview: approvalReview.review,
             goal,
             mcpContextMode: instance.mcp.contextMode,
             enabled: instance.enabled,
@@ -99,7 +126,6 @@ export class InstanceFactory {
                 maxBytes: instance.logs?.maxBytes,
                 retentionDays: instance.logs?.retentionDays,
             },
-            approvalPolicy: instance.approvalPolicy,
             toolScheduler: instance.tools?.scheduler,
             effectiveSecurityMode,
             homeDirectory,

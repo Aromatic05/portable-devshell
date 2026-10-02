@@ -8,7 +8,7 @@ import type {
     ControlProviderKind,
     ControlSecurityMode,
 } from "../control/config/model/ControlConfig.js";
-import type { ApprovalPolicy } from "../tool/Approval.js";
+import type { ApprovalPolicy } from "../approval/Approval.js";
 import type { InstanceSnapshot } from "./activity/State.js";
 
 export type InstanceContainerMode =

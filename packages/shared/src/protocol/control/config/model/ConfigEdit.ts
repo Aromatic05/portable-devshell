@@ -1,4 +1,4 @@
-import type { ApprovalPolicy } from "../../../tool/Approval.js";
+import type { ApprovalPolicy } from "../../../approval/Approval.js";
 import type { InstanceContainerMountConfig } from "../../../instance/Create.js";
 import type { JsonValue } from "../../../JsonValue.js";
 import type {

@@ -1,5 +1,4 @@
 import {
-    type ApprovalPolicy,
     type ControlConfig,
     type ControlInstanceAlertsConfig,
     type ControlInstanceConfig,
@@ -111,7 +110,6 @@ function listenerId(host: string, port: number): string {
 
 export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
     alerts?: ControlInstanceAlertsConfig;
-    approvalPolicy?: ApprovalPolicy;
     effectiveSecurityMode: "disabled" | "workspace";
     env?: NodeJS.ProcessEnv;
 } {
@@ -128,7 +126,6 @@ export function toWorkerReconfigureInput(instance: ControlInstanceConfig): {
                           command: [...script.command],
                       })),
                   },
-        approvalPolicy: instance.approvalPolicy,
         effectiveSecurityMode,
         env: {
             ...instance.env,

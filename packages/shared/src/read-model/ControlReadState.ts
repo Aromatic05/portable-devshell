@@ -15,7 +15,7 @@ import type { OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
 import type { ContextMessageRecord } from "../protocol/interaction/context/ContextMessage.js";
 import type { ConversationEntry } from "../protocol/interaction/context/Conversation.js";
 import type { McpContextRecord } from "../protocol/interaction/context/ContextRecord.js";
-import type { ApprovalRequest } from "../protocol/tool/Approval.js";
+import type { ApprovalRequest } from "../protocol/approval/Approval.js";
 import type { ToolCallRecord } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 import type {

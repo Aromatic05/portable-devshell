@@ -1,4 +1,4 @@
-import type { ApprovalPolicy } from "../../../tool/Approval.js";
+import type { ApprovalPolicy } from "../../../approval/Approval.js";
 import type { InstanceContainerConfig } from "../../../instance/Create.js";
 import { configInputError } from "../ConfigIssue.js";
 import type {

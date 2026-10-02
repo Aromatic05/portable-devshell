@@ -1,10 +1,15 @@
 import type {
+    ToolCallReviewInput,
+    ToolCallReviewResult,
     WorkerInstance,
     WorkerTransportConnection,
 } from "@portable-devshell/core";
 import type { TerminalBackend } from "../../instance/execution/terminal/Backend.js";
 import type {
     ActiveTodoSummary,
+    ApprovalDecisionBy,
+    ApprovalPolicy,
+    ApprovalRequest,
     ControlMcpContextMode,
     GoalActivityKind,
     GoalContinuationInput,
@@ -79,7 +84,35 @@ export interface InstanceWaitPort {
     waitForResolution(waitId: string): Promise<WaitRecord>;
 }
 
+export interface InstanceApprovalPort {
+    cancel(approvalId: string, reason?: string): Promise<ApprovalRequest>;
+    close(): void;
+    decideApproval(
+        approvalId: string,
+        input: {
+            decision: "approve" | "deny";
+            decidedBy: ApprovalDecisionBy;
+            policyPatch?: JsonValue;
+            reason?: string;
+            remember?: boolean;
+        },
+    ): Promise<ApprovalRequest>;
+    getApproval(approvalId: string): Promise<ApprovalRequest>;
+    listApprovals(): Promise<ApprovalRequest[]>;
+    listPendingApprovals(ctxId?: string): Promise<ApprovalRequest[]>;
+    retire(reason?: string): Promise<void>;
+    setPolicy(policy: ApprovalPolicy | undefined): void;
+}
+
+export type InstanceApprovalReview = (
+    input: ToolCallReviewInput,
+    signal: AbortSignal,
+    recording: "caller" | "host",
+) => Promise<ToolCallReviewResult> | ToolCallReviewResult;
+
 export interface InstanceDescriptor {
+    approval: InstanceApprovalPort;
+    approvalReview: InstanceApprovalReview;
     enabled: boolean;
     goal: InstanceGoalPort;
     mcpContextMode?: ControlMcpContextMode;
