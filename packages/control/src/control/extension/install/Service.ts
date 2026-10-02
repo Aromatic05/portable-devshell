@@ -38,6 +38,7 @@ export const BUILTIN_EXTENSION_IDS = new Set([
     "comment",
     "instance",
     "mcp",
+    "recall",
     "secret",
     "skill",
     "storage",
