@@ -9,7 +9,7 @@ import type {
 import {
     createContextRouteModule,
     type ContextAdminPort,
-} from "../../../../src/composition/mcp/route/Context.ts";
+} from "../../../../src/control/context/Route.ts";
 
 function record(ctxId: string): McpContextRecord {
     return {
@@ -17,11 +17,9 @@ function record(ctxId: string): McpContextRecord {
         ctxId,
         environments: [{ instance: "demo-local", workspace: "/workspace" }],
         expiresAt: "2026-08-11T00:00:00.000Z",
-        instance: "demo-local",
         lastAccessedAt: "2026-08-10T00:00:00.000Z",
         principal: "local",
         status: "active",
-        workspace: "/workspace",
     };
 }
 

@@ -8,7 +8,7 @@ import {
     McpOAuthProtectedResource,
     type McpOAuthApprovalService,
 } from "@portable-devshell/mcp";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import { TestMcpHost } from "../../../../../mcp/test/ContextRuntime.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     Endpoint,
@@ -281,7 +281,7 @@ test("web oauth2 shares one provider with MCP on a shared listener without route
     const proxy = await startLoopbackHttpProxy();
     const publicBaseUrl = proxy.origin;
     const storage = await createTestTempDirectory("web-oauth-shared");
-    const host = new McpHost({
+    const host = new TestMcpHost({
         instances: [
             {
                 auth: {

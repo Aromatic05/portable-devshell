@@ -24,6 +24,7 @@ import {
 import { ControlRuntime } from "../../../../src/testing.ts";
 import { ExtensionPathLayout } from "../../../../src/control/extension/state/Layout.ts";
 import { ControlRuntimeMcp } from "../../../../src/composition/control/subsystem/Mcp.ts";
+import { ControlRuntimeContext } from "../../../../src/composition/control/subsystem/Context.ts";
 import { ControlRuntimeState } from "../../../../src/composition/control/State.ts";
 import {
     createTestIpcPath,
@@ -45,6 +46,7 @@ test("runtime stop does not settle until owned cleanup completes", async (t) => 
     });
     let artifactStopping = false;
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -104,6 +106,7 @@ test("runtime startup preserves cleanup failures from rollback", async (t) => {
     const socketPath = createTestIpcPath("control-runtime-start", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         artifact: { service: undefined, async stop() {} } as never,
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
@@ -174,6 +177,7 @@ test("MCP runtime stop attempts both independent listener hosts", async (t) => {
     });
     await state.load();
     const mcp = new ControlRuntimeMcp({
+        contexts: new ControlRuntimeContext({ contextFile: new ControlPathHome(homeDirectory).contextsFile, instances: state.instances }),
         artifact: {
             installHttpRoute() {},
             service: undefined,
@@ -223,6 +227,7 @@ test("runtime retires Extension resources through generation lifecycle", async (
         (instance: { name: string }) => Promise<void>
     > = [];
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         artifact: { service: undefined, async stop() {} } as never,
         extensionPaths: testExtensionPaths(),
         extensions: {
@@ -310,6 +315,13 @@ function testConfigEditor() {
     };
 }
 
+function testContexts(contextFile: string) {
+    return new ControlRuntimeContext({
+        contextFile,
+        instances: { get: () => undefined } as never,
+    });
+}
+
 function testInstanceGateway() {
     return {
         bindToolCalls() {},
@@ -357,6 +369,7 @@ test("runtime stop attempts every cleanup step after failures", async (t) => {
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const calls: string[] = [];
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -450,6 +463,7 @@ test("MCP hot replacement preserves the original failure when runtime rollback a
         async stop() {},
     };
     new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -519,6 +533,7 @@ test("Web hot replacement preserves the original failure when host rollback also
         async stop() {},
     };
     new ControlRuntime({
+        contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -587,6 +602,7 @@ test("runtime mounts web session and RPC routes on the MCP HTTP host", async (t)
         },
     };
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: {
@@ -650,6 +666,7 @@ test("runtime does not mount WebUI routes when web.enabled is false", async (t) 
     const runtimeDir = await createTestTempDirectory("runtime-no-web");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(runtimeDir, "contexts.json")),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact: { service: undefined, async stop() {} } as never,
@@ -732,11 +749,13 @@ test("failed OAuth Web hot replacement restores the previous listener and OAuth 
         async stop() {},
     } as never;
     const mcp = new ControlRuntimeMcp({
+        contexts: new ControlRuntimeContext({ contextFile: controlPaths.contextsFile, instances: state.instances }),
         artifact,
         controlPaths,
         state,
     });
     const runtime = new ControlRuntime({
+        contexts: new ControlRuntimeContext({ contextFile: controlPaths.contextsFile, instances: state.instances }),
         extensionPaths: testExtensionPaths(),
         extensions: testExtensions(),
         artifact,
@@ -900,6 +919,7 @@ test("runtime installs builtin Extensions through the normal installer before op
         async waitForDrain() {},
     } as never;
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(root, "contexts.json")),
         artifact: {
             service: undefined,
             async stop() {},
@@ -950,6 +970,7 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     const source = join(root, "invalid-builtin");
     await mkdir(source, { recursive: true });
     const runtime = new ControlRuntime({
+        contexts: testContexts(join(root, "contexts.json")),
         artifact: { service: undefined, async stop() {} } as never,
         builtinExtensionSources: [{ id: "skill", path: source }],
         extensionPaths: new ExtensionPathLayout({
@@ -1092,6 +1113,7 @@ test("runtime host ingress rewrites unknown instances and leases final generatio
         async stopOwned() {},
     };
     const runtime = new ControlRuntime({
+        contexts: testContexts(join("/tmp", `runtime-context-${Date.now()}.json`)),
         extensionPaths: testExtensionPaths(),
         extensions: extensions as never,
         artifact: { service: undefined, async stop() {} } as never,

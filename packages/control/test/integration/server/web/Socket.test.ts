@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { HttpHost } from "@portable-devshell/mcp";
-import { McpHost } from "@portable-devshell/mcp/testing";
+import { TestMcpHost } from "../../../../../mcp/test/ContextRuntime.ts";
 import {
     CONTROL_PROTOCOL_RANGE,
     CONTROL_PROTOCOL_VERSION,
@@ -151,7 +151,7 @@ test("web session cookie authenticates the shared control RPC over WebSocket", a
 
 test("Web none auth stays independent when its shared MCP listener requires OAuth2", async (t) => {
     const storage = await createTestTempDirectory("web-mcp-oauth");
-    const host = new McpHost({
+    const host = new TestMcpHost({
         instances: [
             {
                 auth: {
