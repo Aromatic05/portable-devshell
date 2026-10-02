@@ -11,7 +11,7 @@ import type {
     TodoReadResult,
 } from "../protocol/instance/task/Todo.js";
 import type { OAuthApprovalRequest } from "../protocol/interaction/OAuth.js";
-import type { ApprovalRequest } from "../protocol/tool/Approval.js";
+import type { ApprovalRequest } from "../protocol/approval/Approval.js";
 import type { ToolCallRecord } from "../protocol/tool/Call.js";
 import type { ControlClients } from "../client/ControlClients.js";
 import {
@@ -717,7 +717,7 @@ export class ControlReadModel {
                     })
                 ).slice(-100);
             case "approvals":
-                return await this.#clients.tool.listApprovals(instance, {
+                return await this.#clients.approval.list(instance, {
                     pendingOnly: true,
                 });
             case "goals":

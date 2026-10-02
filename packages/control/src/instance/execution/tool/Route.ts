@@ -1,5 +1,6 @@
 import {
     readToolCallErrorPayload,
+    type ToolCallPipeline,
     type WorkerInstance,
 } from "@portable-devshell/core";
 import {
@@ -14,9 +15,6 @@ import { routeModule } from "../../../server/Route.js";
 import type { ToolCallProvenanceStore } from "./Provenance.js";
 import {
     limitToolCallResponse,
-    readToolApprovalDecision,
-    readToolApprovalId,
-    readToolApprovalListOptions,
     readToolCall,
     readToolCallQuery,
     readToolSessionOpen,
@@ -26,11 +24,6 @@ export interface ToolRouteInstancePort {
     name?: string;
     worker: Pick<
         WorkerInstance,
-        | "callTool"
-        | "decideApproval"
-        | "getApproval"
-        | "listApprovals"
-        | "listPendingApprovals"
         | "listTools"
         | "prepareWorkspace"
         | "readToolCalls"
@@ -38,17 +31,19 @@ export interface ToolRouteInstancePort {
     >;
 }
 
-export function createToolRouteModule(
-    instance: ToolRouteInstancePort,
-    provenance?: ToolCallProvenanceStore,
+export type ToolCallIngressPort = Pick<ToolCallPipeline, "call">;
+
+export function createControlToolRouteModule(
+    ingress: ToolCallIngressPort,
 ): ControlPortDefinition {
     return routeModule("tool", {
         call: async (request, context) => {
-            const { input, recording, toolName, workspace } = readToolCall(
+            const { instance, input, recording, toolName, workspace } = readToolCall(
                 request.payload,
             );
             try {
-                const result = await instance.worker.callTool(
+                const result = await ingress.call(
+                    instance,
                     toolName,
                     input,
                     {
@@ -87,56 +82,9 @@ export function createToolRouteModule(
                 } as unknown as JsonValue;
             }
         },
-        openSession: async (request) => {
-            const prepared = await instance.worker.prepareWorkspace(
-                readToolSessionOpen(request.payload).workspace,
-            );
-            return {
-                tools: instance.worker.listTools(),
-                workspace: prepared.workspace,
-            } as unknown as JsonValue;
-        },
-        closeSession: async (_request, context) => {
-            await instance.worker.releaseToolSession(context.connectionId);
-            return {};
-        },
-        listCalls: async (request) => {
-            const query = readToolCallQuery(request.payload);
-            const records = await instance.worker.readToolCalls(query);
-            const decorated =
-                provenance === undefined || instance.name === undefined
-                    ? records
-                    : await provenance
-                          .decorate(instance.name, records)
-                          .catch(() => records);
-            return limitToolCallResponse(
-                decorated,
-                query,
-            ) as unknown as JsonValue;
-        },
-        listApprovals: async (request) => {
-            const { pendingOnly } = readToolApprovalListOptions(
-                request.payload,
-            );
-            return (await (pendingOnly
-                ? instance.worker.listPendingApprovals()
-                : instance.worker.listApprovals())) as unknown as JsonValue;
-        },
-        getApproval: async (request) =>
-            (await instance.worker.getApproval(
-                readToolApprovalId(request.payload, "tool.getApproval"),
-            )) as unknown as JsonValue,
-        decideApproval: async (request, context) =>
-            (await instance.worker.decideApproval(
-                readToolApprovalId(request.payload, "tool.decideApproval"),
-                {
-                    ...readToolApprovalDecision(request.payload),
-                    decidedBy: context.peer,
-                },
-            )) as unknown as JsonValue,
     }, {
         callStream: async (stream, request, context) => {
-            const { input, operationId, recording, toolName, workspace } =
+            const { instance, input, operationId, recording, toolName, workspace } =
                 readToolCall(request.payload);
             let sendTail = Promise.resolve();
             const emitProgress = (progress: JsonValue) => {
@@ -146,7 +94,8 @@ export function createToolRouteModule(
             };
             let result: JsonValue;
             try {
-                result = await instance.worker.callTool(
+                result = await ingress.call(
+                    instance,
                     toolName,
                     input,
                     {
@@ -186,6 +135,41 @@ export function createToolRouteModule(
             }
             await sendTail;
             await stream.close(result);
+        },
+    });
+}
+
+export function createToolRouteModule(
+    instance: ToolRouteInstancePort,
+    provenance?: ToolCallProvenanceStore,
+): ControlPortDefinition {
+    return routeModule("tool", {
+        openSession: async (request) => {
+            const prepared = await instance.worker.prepareWorkspace(
+                readToolSessionOpen(request.payload).workspace,
+            );
+            return {
+                tools: instance.worker.listTools(),
+                workspace: prepared.workspace,
+            } as unknown as JsonValue;
+        },
+        closeSession: async (_request, context) => {
+            await instance.worker.releaseToolSession(context.connectionId);
+            return {};
+        },
+        listCalls: async (request) => {
+            const query = readToolCallQuery(request.payload);
+            const records = await instance.worker.readToolCalls(query);
+            const decorated =
+                provenance === undefined || instance.name === undefined
+                    ? records
+                    : await provenance
+                          .decorate(instance.name, records)
+                          .catch(() => records);
+            return limitToolCallResponse(
+                decorated,
+                query,
+            ) as unknown as JsonValue;
         },
     });
 }

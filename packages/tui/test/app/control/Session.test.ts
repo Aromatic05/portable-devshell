@@ -604,9 +604,9 @@ import { createTestTempDirectory } from "../../../../../test/TestTempDirectory.t
         assert.deepEqual(relayOutput, ["starting alpha\n"]);
         assert.deepEqual(await clients.runtime.stop("alpha"), started);
 
-        const approval = await clients.tool.getApproval("alpha", "approval-1");
+        const approval = await clients.approval.get("alpha", "approval-1");
         assert.equal(approval.status, "pending");
-        await clients.tool.decideApproval("alpha", "approval-1", "approve");
+        await clients.approval.decide("alpha", "approval-1", "approve");
         assert.equal(worker.decisions[0]?.decision, "approve");
 
         const result = await clients.tool.call(

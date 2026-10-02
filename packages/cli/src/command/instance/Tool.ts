@@ -221,12 +221,12 @@ export async function executeToolCommand(
     switch (command.kind) {
         case "approval.list":
             context.writeJson(
-                await context.clients.tool.listApprovals(command.instance),
+                await context.clients.approval.list(command.instance),
             );
             return true;
         case "approval.show":
             context.writeJson(
-                await context.clients.tool.getApproval(
+                await context.clients.approval.get(
                     command.instance,
                     command.approvalId,
                 ),
@@ -241,7 +241,7 @@ export async function executeToolCommand(
                           "approval policy patch",
                       );
             context.writeJson(
-                await context.clients.tool.decideApproval(
+                await context.clients.approval.decide(
                     command.instance,
                     command.approvalId,
                     command.decision,

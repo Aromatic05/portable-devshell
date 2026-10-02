@@ -92,7 +92,7 @@ import type {
 import type {
     ApprovalDecision,
     ApprovalRequest,
-} from "../protocol/tool/Approval.js";
+} from "../protocol/approval/Approval.js";
 import type { ToolCallQuery, ToolCallRecord } from "../protocol/tool/Call.js";
 import type { JsonValue } from "../protocol/JsonValue.js";
 import { asInstanceName } from "../protocol/instance/Identity.js";
@@ -127,6 +127,24 @@ export interface RuntimeStartOptions {
 }
 
 export interface ControlClients {
+    /** Approval domain API carried by instance/approval. */
+    approval: {
+        decide(
+            instance: string,
+            approvalId: string,
+            decision: ApprovalDecision["decision"],
+            options?: {
+                policyPatch?: JsonValue;
+                reason?: string;
+                remember?: boolean;
+            },
+        ): Promise<ApprovalRequest>;
+        get(instance: string, approvalId: string): Promise<ApprovalRequest>;
+        list(
+            instance: string,
+            options?: { pendingOnly?: boolean },
+        ): Promise<ApprovalRequest[]>;
+    };
     artifact: {
         cancelTransfer(transferId: string): Promise<ArtifactTransferResult>;
         createShare(
@@ -326,24 +344,6 @@ export interface ControlClients {
             },
         ): Promise<JsonValue>;
         closeSession(instance: string): Promise<Record<string, never>>;
-        decideApproval(
-            instance: string,
-            approvalId: string,
-            decision: ApprovalDecision["decision"],
-            options?: {
-                policyPatch?: JsonValue;
-                reason?: string;
-                remember?: boolean;
-            },
-        ): Promise<ApprovalRequest>;
-        getApproval(
-            instance: string,
-            approvalId: string,
-        ): Promise<ApprovalRequest>;
-        listApprovals(
-            instance: string,
-            options?: { pendingOnly?: boolean },
-        ): Promise<ApprovalRequest[]>;
         listCalls(
             instance: string,
             query?: ToolCallQuery,
@@ -474,16 +474,31 @@ export function createControlClients(
     const conversation = instanceModule(endpoint, "conversation");
     const conversationControl = controlModule(endpoint, "conversation");
     const goal = instanceModule(endpoint, "goal");
+    const approvalModule = instanceModule(endpoint, "approval");
     const runtime = instanceModule(endpoint, "runtime");
     const terminal = instanceModule(endpoint, "terminal");
     const todo = instanceModule(endpoint, "todo");
     const tool = instanceModule(endpoint, "tool");
+    const toolCalls = controlModule(endpoint, "tool");
     const tui = controlModule(endpoint, "tui");
     const web = controlModule(endpoint, "web");
+    const approval: ControlClients["approval"] = {
+        decide: (name, approvalId, decision, decisionOptions = {}) =>
+            approvalModule.request(name, "decide", {
+                approvalId,
+                decision,
+                ...decisionOptions,
+            }),
+        get: (name, approvalId) =>
+            approvalModule.request(name, "get", { approvalId }),
+        list: (name, options) =>
+            approvalModule.request(name, "list", options),
+    };
     const openRuntimeStart = (name: string): Promise<MessageStream> =>
         runtime.open(name, "start");
 
     return {
+        approval,
         artifact: {
             cancelTransfer: (transferId) =>
                 artifact.request("cancelTransfer", { transferId }),
@@ -655,7 +670,7 @@ export function createControlClients(
         },
         tool: {
             call: (name, toolName, input, workspace) =>
-                tool.request(name, "call", { input, toolName, workspace }),
+                toolCalls.request("call", { instance: name, input, toolName, workspace }),
             callStreaming: async (
                 name,
                 toolName,
@@ -665,7 +680,8 @@ export function createControlClients(
             ) =>
                 await streamToolCall(
                     async () =>
-                        await tool.open(name, "callStream", {
+                        await toolCalls.open("callStream", {
+                            instance: name,
                             input,
                             ...(callOptions.operationId === undefined
                                 ? {}
@@ -679,21 +695,6 @@ export function createControlClients(
                     callOptions,
                 ),
             closeSession: (name) => tool.request(name, "closeSession", {}),
-            decideApproval: (
-                name,
-                approvalId,
-                decision,
-                decisionOptions = {},
-            ) =>
-                tool.request(name, "decideApproval", {
-                    approvalId,
-                    decision,
-                    ...decisionOptions,
-                }),
-            getApproval: (name, approvalId) =>
-                tool.request(name, "getApproval", { approvalId }),
-            listApprovals: (name, options) =>
-                tool.request(name, "listApprovals", options),
             listCalls: (name, query) => tool.request(name, "listCalls", query),
             openSession: (name, workspace) =>
                 tool.request(name, "openSession", { workspace }),

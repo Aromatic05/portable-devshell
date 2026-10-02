@@ -11,6 +11,9 @@ import {
 
 import {
     ControlPathHome,
+    createPersistentControlClients,
+    LocalChannel,
+    type JsonValue,
     CONTROL_WEB_RPC_PATH,
     CONTROL_WEB_SESSION_PATH,
     createDefaultControlConfig,
@@ -309,6 +312,7 @@ function testConfigEditor() {
 
 function testInstanceGateway() {
     return {
+        bindToolCalls() {},
         setExtensionService() {},
         setModelCommandCatalog() {},
     };
@@ -1002,29 +1006,32 @@ test("runtime keeps the Control channel closed when builtin Extension installati
     assert.equal(await ipcEndpointAcceptsConnections(socketPath), false);
 });
 
-test("runtime binds dynamic ToolCall Hooks and target resolution to existing and newly added Workers", async (t) => {
+test("runtime host ingress rewrites unknown instances and leases final generations through dispatch", async (t) => {
     const runtimeDir = await createTestTempDirectory("runtime-toolcall-hooks");
     const socketPath = createTestIpcPath("control-runtime", runtimeDir);
     const listeners = new Set<() => void>();
-    const descriptors: Array<{ name: string; worker: unknown }> = [];
-    const providers = new Map<string, (...args: never[]) => unknown>();
-    const resolvers = new Map<string, (instance: string) => unknown>();
+    const descriptors: Array<{
+        approvalReview: () => Promise<{ decision: "continue" }>;
+        name: string;
+        worker: unknown;
+    }> = [];
+    const events: string[] = [];
     let reviewDecision: "continue" | "reject" = "continue";
-
+    let targetInstance = "existing";
+    let dispatchFailure = false;
     const worker = (name: string) => ({
-        bindToolCallHooks(
-            provider: (...args: never[]) => unknown,
-            resolveTarget: (instance: string) => unknown,
-        ) {
-            assert.equal(providers.has(name), false);
-            providers.set(name, provider);
-            resolvers.set(name, resolveTarget);
-        },
-        async reviewToolCallApproval() {
-            return { decision: "continue" as const };
-        },
         toolCallTarget() {
-            return { name };
+            events.push(`target:${name}`);
+            return {
+                async dispatch(request: { value: { context: { instance: string } } }) {
+                    assert.equal(request.value.context.instance, name);
+                    events.push(`dispatch:${name}`);
+                    await Promise.resolve();
+                    assert.equal(events.at(-1), `dispatch:${name}`);
+                    if (dispatchFailure) throw new Error("dispatch failed");
+                    return { instance: name };
+                },
+            };
         },
         onCommandSessionClose() {
             return () => undefined;
@@ -1033,34 +1040,47 @@ test("runtime binds dynamic ToolCall Hooks and target resolution to existing and
             return () => undefined;
         },
     });
-    descriptors.push({ name: "existing", worker: worker("existing") });
+    descriptors.push({
+        approvalReview: async () => ({ decision: "continue" as const }),
+        name: "existing",
+        worker: worker("existing"),
+    });
 
     const extensions = {
         ...testExtensionSurface(),
         listDeclarations(pointId: string) {
-            if (pointId === "toolcall.review")
-                return [
-                    {
-                        declaration: { hook: "500-guard", id: "guard" },
-                        id: "guard",
-                    },
-                ];
-            return [];
+            return [{
+                declaration: { hook: "500-guard", id: "guard" },
+                id: pointId === "toolcall.review" ? "guard" : "rewrite",
+            }];
         },
-        async acquireRegistration(pointId: string, id: string) {
-            assert.equal(pointId, "toolcall.review");
-            assert.equal(id, "guard");
+        async acquireRegistration(pointId: string) {
             return {
+                extensionId: "test",
                 lease: { release() {} },
                 registration: {
-                    binding: async () => ({ decision: reviewDecision }),
+                    binding: async (input: { value: { context: { instance: string } }; direction: string }) => {
+                        if (pointId === "toolcall.review") {
+                            events.push(`review:${input.value.context.instance}`);
+                            return { decision: reviewDecision };
+                        }
+                        events.push(`rewrite:${input.value.context.instance}`);
+                        return { ...input.value, context: { ...input.value.context, instance: targetInstance } };
+                    },
                 },
             };
         },
     };
     const instances = {
         get(name: string) {
+            assert.equal(name, "nonexistent");
             return descriptors.find((descriptor) => descriptor.name === name);
+        },
+        acquireGeneration(name: string) {
+            events.push(`acquire:${name}`);
+            const descriptor = descriptors.find((entry) => entry.name === name);
+            assert.ok(descriptor);
+            return { descriptor, release() { events.push(`release:${name}`); } };
         },
         list() {
             return descriptors;
@@ -1097,61 +1117,39 @@ test("runtime binds dynamic ToolCall Hooks and target resolution to existing and
         await rm(runtimeDir, { force: true, recursive: true });
     });
 
-    assert.equal(providers.has("existing"), true);
-    const existingProvider = providers.get("existing")!;
-    const firstLease = await existingProvider(
-        { instance: "existing", source: "mcp" },
-        new AbortController().signal,
-        "host",
-    ) as {
-        release(): void;
-        sequence: { review(input: unknown): Promise<{ decision: string }> };
-    };
-    assert.equal(
-        (
-            await firstLease.sequence.review({
-                callId: "call-1",
-                direction: "inbound",
-                value: {
-                    context: { instance: "existing", source: "mcp" },
-                    kind: "call",
-                    payload: {},
-                    toolName: "bash_run",
-                },
-            })
-        ).decision,
-        "continue",
-    );
-    firstLease.release();
+    await runtime.start();
+    const clients = createPersistentControlClients({
+        clientKind: "cli",
+        connectChannel: (signal) => LocalChannel.connect(socketPath, { signal }),
+    });
+    t.after(() => clients.close());
+    await clients.service.hello();
+    assert.deepEqual(await clients.tool.call("nonexistent", "file_read", {}, "/workspace"), { instance: "existing" });
+    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:existing", "target:existing", "dispatch:existing", "release:existing"]);
 
+    events.length = 0;
     reviewDecision = "reject";
-    const secondLease = await existingProvider(
-        { instance: "existing", source: "mcp" },
-        new AbortController().signal,
-        "host",
-    ) as {
-        release(): void;
-        sequence: { review(input: unknown): Promise<{ decision: string }> };
-    };
-    assert.equal(
-        (
-            await secondLease.sequence.review({
-                callId: "call-2",
-                direction: "inbound",
-                value: {
-                    context: { instance: "existing", source: "mcp" },
-                    kind: "call",
-                    payload: {},
-                    toolName: "bash_run",
-                },
-            })
-        ).decision,
-        "reject",
-    );
-    secondLease.release();
+    const rejected = await clients.tool.call("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    assert.equal(rejected.result, null);
+    assert.deepEqual(events, ["review:nonexistent"]);
 
-    descriptors.push({ name: "added", worker: worker("added") });
+    reviewDecision = "continue";
+    descriptors.push({
+        approvalReview: async () => ({ decision: "continue" as const }),
+        name: "added",
+        worker: worker("added"),
+    });
     for (const listener of [...listeners]) listener();
-    assert.equal(providers.has("added"), true);
-    assert.deepEqual(resolvers.get("existing")?.("added"), { name: "added" });
+    targetInstance = "added";
+    events.length = 0;
+    assert.deepEqual(await clients.tool.call("nonexistent", "file_read", {}, "/workspace"), { instance: "added" });
+    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
+
+    dispatchFailure = true;
+    events.length = 0;
+    const failed = await clients.tool.callStreaming("nonexistent", "file_read", {}, "/workspace") as Record<string, JsonValue>;
+    assert.equal(failed.result, null);
+    assert.equal((failed.error as Record<string, JsonValue>).message, "dispatch failed");
+    assert.deepEqual(events, ["review:nonexistent", "rewrite:nonexistent", "acquire:added", "target:added", "dispatch:added", "release:added"]);
+    clients.close();
 });

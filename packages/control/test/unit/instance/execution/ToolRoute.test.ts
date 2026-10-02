@@ -5,10 +5,11 @@ import { attachToolCallErrorPayload } from "@portable-devshell/core";
 import {
     createError,
     type JsonValue,
+    type ToolCallContext,
     type ControlPortContext,
 } from "@portable-devshell/shared";
 
-import { createToolRouteModule } from "../../../../src/instance/execution/tool/Route.ts";
+import { createControlToolRouteModule, createToolRouteModule } from "../../../../src/instance/execution/tool/Route.ts";
 
 function routeContext(connectionId: string): ControlPortContext {
     return {
@@ -25,46 +26,12 @@ function callHandler(
     callTool: (toolName: string, input: JsonValue) => Promise<JsonValue>,
     comments: readonly string[] = [],
 ) {
-    const module = createToolRouteModule({
-        worker: {
-            async callTool(
-                toolName: string,
-                input: JsonValue,
-            ) {
-                try {
-                    const result = await callTool(toolName, input);
-                    if (comments.length === 0) return result;
-                    if (typeof result !== "object" || result === null || Array.isArray(result))
-                        return result;
-                    return { ...result, comment: [...comments] };
-                } catch (error) {
-                    if (comments.length > 0 && error instanceof Error)
-                        throw attachToolCallErrorPayload(error, { comment: [...comments] });
-                    throw error;
-                }
-            },
-            async decideApproval() {
-                throw new Error("unused");
-            },
-            async getApproval() {
-                throw new Error("unused");
-            },
-            async listApprovals() {
-                throw new Error("unused");
-            },
-            async listPendingApprovals() {
-                throw new Error("unused");
-            },
-            listTools() {
-                return [];
-            },
-            async prepareWorkspace(workspace: string) {
-                return { workspace } as never;
-            },
-            async readToolCalls() {
-                throw new Error("unused");
-            },
-            async releaseToolSession() {},
+    const module = createControlToolRouteModule({
+        async call(_instance, toolName, input) {
+            const result = await callTool(toolName, input).catch((error) => {
+                throw attachToolCallErrorPayload(error, { comment: [...comments] });
+            });
+            return { ...(result as Record<string, JsonValue>), comment: [...comments] };
         },
     });
     const operation = module.operations.find((entry) => entry.name === "call");
@@ -90,6 +57,7 @@ test("control tool route appends the worker result hint", async () => {
             id: "1",
             name: "call",
             payload: {
+                instance: "demo",
                 input: { command: "pwd" },
                 toolName: "bash_run",
                 workspace: "/workspace",
@@ -126,6 +94,7 @@ test("control tool route turns a thrown error into a structured hint instead of 
             id: "1",
             name: "call",
             payload: {
+                instance: "demo",
                 input: {},
                 toolName: "file_edit",
                 workspace: "/workspace",
@@ -149,61 +118,40 @@ test("control tool route turns a thrown error into a structured hint instead of 
 test("control tool stream forwards progress before completing the unchanged final result", async () => {
     const emitted: Array<{ name: string; payload?: JsonValue }> = [];
     let completed: JsonValue | undefined;
-    let workerContext: Record<string, unknown> | undefined;
+    let workerContext: ToolCallContext | undefined;
     let workerRecording: "caller" | "host" | undefined;
-    const module = createToolRouteModule({
-        worker: {
-            async callTool(
-                _toolName: string,
-                _input: JsonValue,
-                context: Record<string, unknown>,
-                _signal?: AbortSignal,
-                _transformResult?: unknown,
-                _invocationInput?: (input: JsonValue) => Promise<JsonValue> | JsonValue,
-                onProgress?: (progress: JsonValue) => void,
-                recording?: "caller" | "host",
-            ) {
-                workerContext = context;
-                workerRecording = recording;
-                onProgress?.({ stdout: "one" });
-                onProgress?.({ stdout: "one\ntwo" });
-                return {
-                    exitCode: 0,
-                    stdout: "one\ntwo",
-                    stderr: "",
-                    termination: "exited",
-                };
-            },
-            async decideApproval() {
-                throw new Error("unused");
-            },
-            async getApproval() {
-                throw new Error("unused");
-            },
-            async listApprovals() {
-                return [];
-            },
-            async listPendingApprovals() {
-                return [];
-            },
-            listTools() {
-                return [];
-            },
-            async prepareWorkspace(workspace: string) {
-                return { workspace } as never;
-            },
-            async readToolCalls() {
-                return [];
-            },
-            async releaseToolSession() {},
-        } as never,
+    const module = createControlToolRouteModule({
+        async call(
+            instance,
+            _toolName,
+            _input,
+            context,
+            signal,
+            _transformResult,
+            _invocationInput,
+            onProgress,
+            recording,
+        ) {
+            assert.equal(instance, "demo");
+            assert.equal(signal, streamContext.signal);
+            workerContext = context;
+            workerRecording = recording;
+            onProgress?.({ stdout: "one" });
+            onProgress?.({ stdout: "one\ntwo" });
+            return {
+                exitCode: 0,
+                stdout: "one\ntwo",
+                stderr: "",
+                termination: "exited",
+            };
+        },
     });
     const operation = module.streams?.find(
         (entry) => entry.name === "callStream",
     );
     if (operation === undefined)
         throw new Error("tool.callStream stream is missing");
-    const context = routeContext("pi-stream");
+    const streamContext = routeContext("pi-stream");
     const stream = {
         async close(payload?: JsonValue) {
             completed = payload;
@@ -220,14 +168,15 @@ test("control tool stream forwards progress before completing the unchanged fina
                 id: "stream-request",
                 name: "callStream",
                 payload: {
-                    input: { command: "printf one; printf two" },
+                    instance: "demo",
+                input: { command: "printf one; printf two" },
                     operationId: "pi-call-1",
                     recording: "caller",
                     toolName: "bash_run",
                     workspace: "/workspace",
                 },
             },
-            context,
+            streamContext,
         ),
         undefined,
     );
@@ -247,69 +196,19 @@ test("control tool stream forwards progress before completing the unchanged fina
     assert.equal(workerRecording, "caller");
 });
 
-test("control tool route serves pending approval reads without scanning approval history", async () => {
-    const module = createToolRouteModule({
-        worker: {
-            async callTool() {
-                throw new Error("unused");
-            },
-            async decideApproval() {
-                throw new Error("unused");
-            },
-            async getApproval() {
-                throw new Error("unused");
-            },
-            async listApprovals() {
-                throw new Error("approval history must not be read");
-            },
-            async listPendingApprovals() {
-                return [{ approvalId: "approval-pending" } as never];
-            },
-            listTools() {
-                return [];
-            },
-            async prepareWorkspace(workspace: string) {
-                return { workspace } as never;
-            },
-            async readToolCalls() {
-                throw new Error("unused");
-            },
-            async releaseToolSession() {},
-        },
-    });
-    const operation = module.operations.find(
-        (entry) => entry.name === "listApprovals",
+test("control tool route does not expose approval operations", () => {
+    const module = createToolRouteModule({ worker: {} as never });
+    assert.deepEqual(
+        module.operations.map((operation) => operation.name),
+        ["openSession", "closeSession", "listCalls"],
     );
-    if (operation === undefined)
-        throw new Error("tool.listApprovals operation is missing");
-
-    const result = (await operation.handle(
-        { id: "1", name: "listApprovals", payload: { pendingOnly: true } },
-        routeContext("conn-3"),
-    )) as Array<{ approvalId: string }>;
-
-    assert.deepEqual(result, [{ approvalId: "approval-pending" }]);
+    assert.equal(module.streams, undefined);
 });
 
 test("control tool session exposes canonical workspace and releases the connection-owned session", async () => {
     const released: string[] = [];
     const module = createToolRouteModule({
         worker: {
-            async callTool() {
-                throw new Error("unused");
-            },
-            async decideApproval() {
-                throw new Error("unused");
-            },
-            async getApproval() {
-                throw new Error("unused");
-            },
-            async listApprovals() {
-                return [];
-            },
-            async listPendingApprovals() {
-                return [];
-            },
             listTools() {
                 return [
                     {

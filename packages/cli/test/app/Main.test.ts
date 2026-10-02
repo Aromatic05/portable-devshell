@@ -1946,6 +1946,11 @@ function testClients(client: Record<string, unknown>) {
             startTransfer: (...args: unknown[]) =>
                 invoke("startTransfer", args),
         },
+        approval: {
+            decide: (...args: unknown[]) => invoke("decideToolApproval", args),
+            get: (...args: unknown[]) => invoke("getToolApproval", args),
+            list: (...args: unknown[]) => invoke("listToolApprovals", args),
+        },
         cli: {
             command: (...args: unknown[]) => invoke("cliCommand", args),
             commands: (...args: unknown[]) =>
@@ -2030,12 +2035,6 @@ function testClients(client: Record<string, unknown>) {
         },
         tool: {
             call: (...args: unknown[]) => invoke("callTool", args),
-            decideApproval: (...args: unknown[]) =>
-                invoke("decideToolApproval", args),
-            getApproval: (...args: unknown[]) =>
-                invoke("getToolApproval", args),
-            listApprovals: (...args: unknown[]) =>
-                invoke("listToolApprovals", args),
             listCalls: (...args: unknown[]) => invoke("listToolCalls", args),
         },
     } as never;

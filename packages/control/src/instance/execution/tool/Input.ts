@@ -1,7 +1,8 @@
 import {
+    asInstanceName,
     createError,
     errorCodes,
-    type ApprovalDecision,
+    type InstanceName,
     type JsonValue,
     type ToolCallQuery,
     type ToolCallRecord,
@@ -14,6 +15,7 @@ const MAX_TOOL_CALL_READ_LIMIT = 1_000;
 const MAX_TOOL_CALL_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export function readToolCall(payload?: JsonValue): {
+    instance: InstanceName;
     input: JsonValue;
     operationId?: string;
     recording?: "caller" | "host";
@@ -26,6 +28,12 @@ export function readToolCall(payload?: JsonValue): {
         payload.toolName.length === 0
     ) {
         throw invalid("tool.call requires toolName.");
+    }
+    if (
+        typeof payload.instance !== "string" ||
+        payload.instance.length === 0
+    ) {
+        throw invalid("tool.call requires instance.");
     }
     if (
         typeof payload.workspace !== "string" ||
@@ -48,6 +56,7 @@ export function readToolCall(payload?: JsonValue): {
         throw invalid("tool.call recording must be caller or host.");
     }
     return {
+        instance: asInstanceName(payload.instance),
         input: payload.input ?? null,
         ...(payload.operationId === undefined
             ? {}
@@ -177,69 +186,6 @@ export function limitToolCallResponse(
         responseBytes += separatorBytes + recordBytes;
     }
     return accepted;
-}
-
-export function readToolApprovalId(
-    payload: JsonValue | undefined,
-    operation: string,
-): string {
-    if (
-        !isRecord(payload) ||
-        typeof payload.approvalId !== "string" ||
-        payload.approvalId.length === 0
-    ) {
-        throw invalid(`${operation} requires approvalId.`);
-    }
-    return payload.approvalId;
-}
-
-export function readToolApprovalListOptions(payload?: JsonValue): {
-    pendingOnly: boolean;
-} {
-    if (payload === undefined) return { pendingOnly: false };
-    if (
-        !isRecord(payload) ||
-        (payload.pendingOnly !== undefined &&
-            typeof payload.pendingOnly !== "boolean")
-    ) {
-        throw invalid("tool.listApprovals requires boolean pendingOnly.");
-    }
-    return { pendingOnly: payload.pendingOnly === true };
-}
-
-export function readToolApprovalDecision(payload?: JsonValue): {
-    decision: ApprovalDecision["decision"];
-    policyPatch?: JsonValue;
-    reason?: string;
-    remember?: boolean;
-} {
-    if (
-        !isRecord(payload) ||
-        (payload.decision !== "approve" && payload.decision !== "deny")
-    ) {
-        throw invalid(
-            "tool.decideApproval requires decision to be approve or deny.",
-        );
-    }
-    if (payload.reason !== undefined && typeof payload.reason !== "string") {
-        throw invalid("tool.decideApproval requires string reason.");
-    }
-    if (
-        payload.remember !== undefined &&
-        typeof payload.remember !== "boolean"
-    ) {
-        throw invalid("tool.decideApproval requires boolean remember.");
-    }
-    return {
-        decision: payload.decision,
-        ...(payload.policyPatch === undefined
-            ? {}
-            : { policyPatch: payload.policyPatch }),
-        ...(payload.reason === undefined ? {} : { reason: payload.reason }),
-        ...(payload.remember === undefined
-            ? {}
-            : { remember: payload.remember }),
-    };
 }
 
 function readSource(value: JsonValue): ToolCallSource {

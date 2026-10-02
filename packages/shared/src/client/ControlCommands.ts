@@ -8,7 +8,7 @@ import type {
 import type {
     ApprovalDecision,
     ApprovalRequest,
-} from "../protocol/tool/Approval.js";
+} from "../protocol/approval/Approval.js";
 import type { ControlReadModel } from "../read-model/ControlReadModel.js";
 import type { ControlClients, RuntimeStartOptions } from "./ControlClients.js";
 import { withRequestTimeout } from "./connection/RequestTimeout.js";
@@ -78,7 +78,7 @@ export class ControlCommands {
     ): Promise<ApprovalRequest> {
         const epoch = this.#epoch;
         const decided = await this.#request(
-            this.#clients.tool.decideApproval(instance, approvalId, decision),
+            this.#clients.approval.decide(instance, approvalId, decision),
             `approval.${decision}:${approvalId}`,
         );
         if (this.#current(epoch)) {

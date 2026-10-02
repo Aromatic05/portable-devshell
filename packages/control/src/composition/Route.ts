@@ -43,6 +43,7 @@ import { OperationalOverviewService } from "../control/overview/Service.js";
 import type { ReverseCredentialService } from "../control/reverse/credential/Service.js";
 import { createReverseRouteModule } from "../control/reverse/Route.js";
 import type { ToolCallProvenanceStore } from "../instance/execution/tool/Provenance.js";
+import { createApprovalRouteModule } from "../control/approval/Route.js";
 import { createGoalRouteModule } from "../instance/workflow/goal/Route.js";
 import { createRuntimeRouteModule } from "../instance/execution/runtime/Route.js";
 import { RuntimeSubscriptionManager } from "../instance/execution/runtime/Subscription.js";
@@ -50,7 +51,11 @@ import { createServiceRouteModule } from "../server/endpoint/Channel.js";
 import { createTodoRouteModule } from "../instance/workflow/todo/Route.js";
 import { createTerminalRouteModule } from "../instance/execution/terminal/Route.js";
 import { TerminalSessionService } from "../instance/execution/terminal/Service.js";
-import { createToolRouteModule } from "../instance/execution/tool/Route.js";
+import {
+    createControlToolRouteModule,
+    createToolRouteModule,
+    type ToolCallIngressPort,
+} from "../instance/execution/tool/Route.js";
 import {
     createWebApplicationRouteModule,
     type WebApplicationCatalogPort,
@@ -81,6 +86,7 @@ export interface ControlRouteCompositionOptions {
     runtimeSubscriptions?: RuntimeSubscriptionManager;
     shutdown(): Promise<void> | void;
     terminalMaxUnackedBytes?: number;
+    toolCalls?: ToolCallIngressPort;
     toolProvenance?: ToolCallProvenanceStore;
     tuiPages?: TuiPagePort;
     webApplications?: WebApplicationCatalogPort;
@@ -191,6 +197,9 @@ export class ControlRouteComposition {
                             })),
                     }),
                     createContextRouteModule(this.#options.contextAdmin),
+                    ...(this.#options.toolCalls === undefined
+                        ? []
+                        : [createControlToolRouteModule(this.#options.toolCalls)]),
                     ...(this.#options.extensionRoutes?.modules("control") ?? []),
                     createOperationalOverviewRouteModule(this.#overview),
                     createInstanceRouteModule({
@@ -221,6 +230,7 @@ export class ControlRouteComposition {
                 ...(this.#options.extensionRoutes?.modules("instance") ?? []),
                 createGoalRouteModule(descriptor),
                 createTodoRouteModule(descriptor, this.#subscriptions),
+                createApprovalRouteModule(descriptor),
                 createToolRouteModule(
                     descriptor,
                     this.#options.toolProvenance,

@@ -256,13 +256,13 @@ describe("WebStore", () => {
 
     it("keeps Instance refresh snapshot-only and does not materialize logs", async () => {
         const clients = fakeClients();
-        clients.tool.listApprovals = vi.fn(async () => []);
+        clients.approval.list = vi.fn(async () => []);
         clients.runtime.readLogs = vi.fn(async () => []);
         const store = new WebStore(clients, { overviewRefreshIntervalMs: 0 });
 
         await store.load();
 
-        expect(clients.tool.listApprovals).toHaveBeenCalledWith("demo", {
+        expect(clients.approval.list).toHaveBeenCalledWith("demo", {
             pendingOnly: true,
         });
         expect(clients.runtime.readLogs).not.toHaveBeenCalled();

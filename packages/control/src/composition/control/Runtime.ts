@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { ToolCallPipeline } from "@portable-devshell/core";
+
 
 import {
     controlRemoteRpcPath,
@@ -82,8 +84,7 @@ export class ControlRuntime {
     readonly #routes: ControlRouteComposition;
     readonly #socketListener: ControlSocketListener;
     readonly #toolCallBinding: ToolCallExtensionBinding;
-    readonly #toolCallBoundWorkers = new WeakSet<object>();
-    readonly #toolCallInstanceUnsubscribe: () => void;
+    readonly #toolCalls: ToolCallPipeline;
     #webListener?: ControlWebSocketListener;
     #webFlow?: ControlWebOAuthFlow;
     #webFlowUninstall?: () => void;
@@ -106,26 +107,45 @@ export class ControlRuntime {
         this.#toolCallBinding = new ToolCallExtensionBinding(
             this.#extensions,
             new ToolCallSecretRewrite(options.config),
-            async (input, signal, recording) => {
-                const descriptor = this.#instances.get(
-                    input.value.context.instance,
-                );
-                if (descriptor === undefined)
-                    throw new Error(
-                        `Instance ${input.value.context.instance} was not found.`,
-                    );
-                return await descriptor.worker.reviewToolCallApproval(
-                    input,
-                    signal,
-                    recording,
-                );
+            [
+                {
+                    hook: "510-approval",
+                    id: "approval",
+                    review: async (input, signal, recording) => {
+                        const descriptor = this.#instances.get(
+                            input.value.context.instance,
+                        );
+                        if (descriptor === undefined)
+                            return { decision: "continue" };
+                        return await descriptor.approvalReview(
+                            input,
+                            signal,
+                            recording,
+                        );
+                    },
+                },
+            ],
+        );
+        this.#toolCalls = new ToolCallPipeline({
+            hooks: (context, signal, recording) =>
+                this.#toolCallBinding.acquire(context, signal, recording),
+            resolveTarget: (instance) => {
+                const lease = this.#instances.acquireGeneration(instance);
+                return {
+                    dispatch: async (request) => {
+                        try {
+                            return await lease.descriptor.worker
+                                .toolCallTarget()
+                                .dispatch(request);
+                        } finally {
+                            lease.release();
+                        }
+                    },
+                };
             },
-        );
-        this.#bindToolCallHooks();
-        this.#toolCallInstanceUnsubscribe = this.#instances.onChange(() =>
-            this.#bindToolCallHooks(),
-        );
+        });
         this.#mcp = options.mcp;
+        this.#mcp.instanceGateway.bindToolCalls(this.#toolCalls);
         this.#mcp.instanceGateway.setExtensionService(
             new McpExtensionService(this.#extensions),
         );
@@ -183,6 +203,7 @@ export class ControlRuntime {
             reverse: options.reverse.service,
             runtimeSubscriptions,
             shutdown: options.shutdown,
+            toolCalls: this.#toolCalls,
             toolProvenance: options.mcp.toolProvenance,
             tuiPages: new TuiExtensionPageService(this.#extensions),
             webApplications: new WebApplicationCatalog(this.#extensions),
@@ -287,7 +308,6 @@ export class ControlRuntime {
     async stop(): Promise<void> {
         const failures: unknown[] = [];
         this.#modelDevshell.dispose();
-        this.#toolCallInstanceUnsubscribe();
         await this.#channels.close().catch((error) => failures.push(error));
         await this.#mcp.stop().catch((error) => failures.push(error));
         await this.#extensions.stop().catch((error) => failures.push(error));
@@ -317,23 +337,6 @@ export class ControlRuntime {
                 failures,
                 "Control runtime failed to stop cleanly.",
             );
-        }
-    }
-
-    #bindToolCallHooks(): void {
-        for (const descriptor of this.#instances.list()) {
-            if (this.#toolCallBoundWorkers.has(descriptor.worker)) continue;
-            descriptor.worker.bindToolCallHooks(
-                (context, signal, recording) =>
-                    this.#toolCallBinding.acquire(context, signal, recording),
-                (instance) => {
-                    const target = this.#instances.get(instance);
-                    if (target === undefined)
-                        throw new Error(`Instance ${instance} was not found.`);
-                    return target.worker.toolCallTarget();
-                },
-            );
-            this.#toolCallBoundWorkers.add(descriptor.worker);
         }
     }
 

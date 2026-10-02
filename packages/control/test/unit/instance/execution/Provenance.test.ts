@@ -174,15 +174,6 @@ test("tool.listCalls merges Control provenance without changing Worker records",
                     async callTool() {
                         throw new Error("unused");
                     },
-                    async decideApproval() {
-                        throw new Error("unused");
-                    },
-                    async getApproval() {
-                        throw new Error("unused");
-                    },
-                    async listApprovals() {
-                        return [];
-                    },
                     async readToolCalls() {
                         return [workerRecord];
                     },

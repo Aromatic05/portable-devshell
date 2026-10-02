@@ -83,3 +83,32 @@ function createContext(host: string): ControlPortContext {
         signal: new AbortController().signal,
     };
 }
+
+test("native control tool.call admits a nonexistent original instance to host ingress", async () => {
+    const calls: string[] = [];
+    const routes = new ControlRouteComposition({
+        instances: new InstanceRegistry([]),
+        shutdown() {},
+        toolCalls: {
+            async call(instance, toolName, input, context) {
+                calls.push(instance);
+                assert.equal(toolName, "file_read");
+                assert.deepEqual(input, { path: "file.txt" });
+                assert.equal(context.workspace, "/workspace");
+                return { content: "read" };
+            },
+        },
+    });
+    const control = routes.hosts().find((host) => host.host === "@control")!;
+    const tool = control.ports.filter((port) => port.name === "tool");
+    assert.equal(tool.length, 1);
+    assert.deepEqual(tool[0]!.operations.map((entry) => entry.name), ["call"]);
+    assert.deepEqual(tool[0]!.streams!.map((entry) => entry.name), ["callStream"]);
+    assert.deepEqual(await tool[0]!.operations[0]!.handle({
+        id: "call-unknown",
+        name: "call",
+        payload: { instance: "nonexistent", toolName: "file_read", input: { path: "file.txt" }, workspace: "/workspace" },
+    }, createContext("@control")), { content: "read" });
+    assert.deepEqual(calls, ["nonexistent"]);
+    routes.dispose();
+});
